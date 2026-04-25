@@ -1,0 +1,191 @@
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                                                                           ║
+# ║   🜄 Four Divine Agents Workflow - fuxi-four-gods 🜄                       ║
+# ║                                                                           ║
+# ║   This YAML defines the standard workflow orchestration for the           ║
+# ║   Four Divine Agents system.                                              ║
+# ║                                                                           ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+name: fuxi-four-gods
+version: 1.0.0
+
+description: |
+  Four Divine Agents workflow following the Eight Trigrams design methodology.
+  Agents: Fuxi (Architect), QiaoChui (Mechanist), LuBan (Engineer), GaoYao (Judge)
+
+# =============================================================================
+# Workflow Phases
+# =============================================================================
+
+phases:
+  - name: design
+    agent: fuxi
+    description: Fuxi creates architectural design using Eight Trigrams
+    outputs:
+      - .plan/{name}.draft.md
+    transitions:
+      - to: review
+        condition: draft_complete
+
+  - name: review
+    agent: qiaochui
+    description: QiaoChui reviews design for feasibility
+    inputs:
+      - .plan/{name}.draft.md
+    outputs:
+      - .plan/{name}.plan.md
+      - .plan/{name}.execution.yaml
+    transitions:
+      - to: design
+        condition: verdict_revise
+        action: user_revise_design
+      - to: approve
+        condition: verdict_approved
+        action: user_approve
+      - to: end
+        condition: verdict_rejected
+        action: user_reject
+
+  - name: approve
+    description: User decision point
+    transitions:
+      - to: execute
+        condition: user_approves
+      - to: end
+        condition: user_rejects
+
+  - name: execute
+    agent: luban
+    description: LuBan executes tasks with TDD methodology
+    inputs:
+      - .plan/{name}.plan.md
+      - .plan/{name}.execution.yaml
+    parallelism: parallel
+    max_workers: 3
+    error_strategy: fail_fast
+    transitions:
+      - to: audit
+        condition: all_tasks_complete
+      - to: execute
+        condition: task_failed && retry_available
+      - to: end
+        condition: task_failed && no_retries
+
+  - name: audit
+    agent: gaoyao
+    description: GaoYao performs final quality audit
+    inputs:
+      - .plan/{name}.plan.md
+    review_mode: full
+    transitions:
+      - to: execute
+        condition: verdict_needs_changes
+        action: fix_issues
+      - to: complete
+        condition: verdict_pass
+      - to: end
+        condition: verdict_rejected
+
+  - name: complete
+    description: Workflow completed successfully
+
+  - name: end
+    description: Workflow terminated
+
+# =============================================================================
+# Agent Definitions
+# =============================================================================
+
+agents:
+  fuxi:
+    name: Fuxi (伏羲)
+    role: Architect
+    trigram: ☰ Qian (Heaven)
+    tools:
+      - fuxi_create_draft
+      - fuxi_get_draft
+    characteristics:
+      - Designs with Eight Trigrams structure
+      - Focuses on core intent and success paths
+      - Defines boundaries and constraints
+
+  qiaochui:
+    name: QiaoChui (巧倕)
+    role: Divine Mechanist
+    trigram: ☳ Zhen (Thunder)
+    tools:
+      - qiaochui_review
+      - qiaochui_decompose
+    characteristics:
+      - Reviews design feasibility
+      - Decomposes into executable tasks
+      - Defines execution orchestration
+
+  luban:
+    name: LuBan (鲁班)
+    role: Master Craftsman
+    trigram: ☴ Xun (Wind)
+    tools:
+      - luban_execute_task
+      - luban_get_status
+      - luban_release_locks
+    characteristics:
+      - Implements with TDD methodology
+      - Uses file locking for conflict prevention
+      - Commits after each task
+
+  gaoyao:
+    name: GaoYao (皋陶)
+    role: Supreme Judge
+    trigram: ☲ Li (Fire)
+    tools:
+      - gaoyao_review
+      - gaoyao_check_security
+    characteristics:
+      - Distinguishes quick vs full review
+      - Checks quality, security, coverage
+      - Enables parallel execution safety
+
+# =============================================================================
+# Error Recovery Strategies
+# =============================================================================
+
+error_recovery:
+  fail_fast:
+    enabled: true
+    max_retries: 3
+    retry_delay_ms: 1000
+
+  fail_continue:
+    enabled: false
+    max_consecutive_failures: 5
+
+  file_conflict:
+    resolution: user_decision
+    timeout_ms: 30000
+
+# =============================================================================
+# File Lock Configuration
+# =============================================================================
+
+file_locks:
+  enabled: true
+  ttl_ms: 1800000  # 30 minutes
+  auto_release_on_complete: true
+  conflict_notification: immediate
+
+# =============================================================================
+# Session Lifecycle
+# =============================================================================
+
+session:
+  compaction_prevention:
+    enabled: true
+    checkpoint_interval_ms: 300000  # 5 minutes
+    state_persistence: file
+    max_session_age_ms: 86400000  # 24 hours
+
+  cleanup:
+    stale_session_threshold_ms: 604800000  # 7 days
+    auto_cleanup_on_start: true
