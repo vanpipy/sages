@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = __dirname;
+const PROJECT_ROOT = join(__dirname, '..');
 
 const AGENTS_SRC = join(PROJECT_ROOT, "src", "agents");
 const AGENTS_DEST = join(process.env.HOME!, ".config", "opencode", "agent");
