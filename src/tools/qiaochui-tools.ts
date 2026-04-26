@@ -31,10 +31,10 @@ Verdict options:
 If APPROVED, also returns:
 - Task count
 - Estimated time (minutes)
-- Task decomposition (.plan/{name}.plan.md)
-- Execution orchestration (.plan/{name}.execution.yaml)`,
+- Task decomposition (.sages/plans/{name}.plan.md)
+- Execution orchestration (.sages/plans/{name}.execution.yaml)`,
   args: {
-    draft_path: z.string().describe("Path to the draft file (.plan/{name}.draft.md)"),
+    draft_path: z.string().describe("Path to the draft file (.sages/plans/{name}.draft.md)"),
   },
   execute: async (args, ctx) => {
     const { draft_path } = args;
@@ -80,8 +80,8 @@ export const qiaochui_decompose = tool({
   description: `QiaoChui decomposes the approved design into executable tasks.
 
 Outputs:
-- .plan/{name}.plan.md - Task list with descriptions
-- .plan/{name}.execution.yaml - Orchestration plan for parallel execution`,
+- .sages/plans/{name}.plan.md - Task list with descriptions
+- .sages/plans/{name}.execution.yaml - Orchestration plan for parallel execution`,
   args: {
     draft_path: z.string().describe("Path to the approved draft"),
     max_tasks: z.number().optional().describe("Max tasks to generate (default: 10)"),

@@ -90,9 +90,10 @@ export const sages_get_workflow_state = tool({
 
     try {
       if (plan_name) {
-        const planPath = join(projectDir, ".plan", `${plan_name}.plan.md`);
-        const draftPath = join(projectDir, ".plan", `${plan_name}.draft.md`);
-        const executionPath = join(projectDir, ".plan", `${plan_name}.execution.yaml`);
+        const planDir = ensurePlanDir(projectDir);
+        const planPath = join(planDir, `${plan_name}.plan.md`);
+        const draftPath = join(planDir, `${plan_name}.draft.md`);
+        const executionPath = join(planDir, `${plan_name}.execution.yaml`);
 
         const hasDraft = existsSync(draftPath);
         const hasPlan = existsSync(planPath);

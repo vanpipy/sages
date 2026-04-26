@@ -5,13 +5,13 @@
  * by loading last known state, manages session lifecycle (create, resume, delete),
  * and implements atomic writes to prevent corruption.
  *
- * Session Path Structure:
- * .sages-session.json          # Main session manifest
- * .sages-session.d/           # Session data directory
- *   {workflowId}/
- *     state.json              # WorkflowExecutionState
- *     locks.json              # Active file locks
- *     circuit.json            # Circuit breaker state
+ * .sages/ Directory Structure:
+ * .sages/sessions/sessions.json    # Session manifest
+ * .sages/locks/                    # File locks
+ * .sages/plans/{name}/             # Plan files per workflow
+ *   draft.md                       # Design draft
+ *   plan.md                        # Execution plan
+ *   execution.yaml                 # Task execution orchestration
  */
 
 import { promises as fs, constants } from "fs";

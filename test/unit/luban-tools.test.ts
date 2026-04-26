@@ -190,7 +190,7 @@ describe("LuBan Tools - Task Execution", () => {
         "state-test.execution.yaml",
       ];
       for (const file of testFiles) {
-        const filePath = path.join(process.cwd(), ".plan", file);
+        const filePath = path.join(process.cwd(), ".sages/plans", file);
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
         }
@@ -203,13 +203,13 @@ describe("LuBan Tools - Task Execution", () => {
       expect(lubanTools.luban_execute_workflow).toBeDefined();
     });
 
-    it("should parse execution YAML from .plan/{name}.execution.yaml", async () => {
+    it("should parse execution YAML from .sages/plans/{name}.execution.yaml", async () => {
       const fs = require("node:fs");
       const path = require("node:path");
       const projectDir = process.cwd();
-      const planDir = path.join(projectDir, ".plan");
+      const planDir = path.join(projectDir, ".sages/plans");
 
-      // Ensure .plan directory exists
+      // Ensure .sages/plans directory exists
       if (!fs.existsSync(planDir)) {
         fs.mkdirSync(planDir, { recursive: true });
       }
@@ -252,7 +252,7 @@ tasks: []`;
       const fs = require("node:fs");
       const path = require("node:path");
       const projectDir = process.cwd();
-      const planDir = path.join(projectDir, ".plan");
+      const planDir = path.join(projectDir, ".sages/plans");
 
       // Note: The parser requires phases to be defined BEFORE tasks in the YAML
       // because the "tasks:" key in phases section conflicts with top-level "tasks:"
@@ -310,7 +310,7 @@ tasks: []`;
       const fs = require("node:fs");
       const path = require("node:path");
       const projectDir = process.cwd();
-      const planDir = path.join(projectDir, ".plan");
+      const planDir = path.join(projectDir, ".sages/plans");
 
       const yaml = `name: state-test
 timestamp: "2025-01-01T00:00:00Z"

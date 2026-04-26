@@ -9,7 +9,7 @@ import { parseExecutionYaml } from "../../src/utils/execution.js";
 import type { ExecutionPlan, WorkflowState } from "../../src/types.js";
 
 describe("fuxi_orchestrate - Orchestration Logic", () => {
-  const testPlanDir = join(process.cwd(), ".plan", "test-orchestrate");
+  const testPlanDir = join(process.cwd(), ".sages/plans", "test-orchestrate");
   const planFilePath = join(testPlanDir, "test-orchestrate.plan.md");
   const executionFilePath = join(testPlanDir, "test-orchestrate.execution.yaml");
   const stateFilePath = join(testPlanDir, "state.json");
@@ -249,7 +249,7 @@ tasks:
 });
 
 describe("fuxi_orchestrate - Plan File Reading", () => {
-  const testDir = join(process.cwd(), ".plan", "orchestrate-read-test");
+  const testDir = join(process.cwd(), ".sages/plans", "orchestrate-read-test");
   const planFilePath = join(testDir, "read-test.plan.md");
   const executionFilePath = join(testDir, "read-test.execution.yaml");
 

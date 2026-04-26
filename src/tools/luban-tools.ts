@@ -138,15 +138,16 @@ NOTE: Uses file locking to prevent conflicts with parallel tasks.`,
 export const luban_get_status = tool({
   description: "Get the current execution status of a plan",
   args: {
-    plan_name: z.string().describe("Plan name (used in .plan/{name}.plan.md)"),
+    plan_name: z.string().describe("Plan name (used in .sages/plans/{name}.plan.md)"),
   },
   execute: async (args, ctx) => {
     const { plan_name } = args;
     const projectDir = ctx.agent || process.cwd();
 
     try {
-      const planPath = join(projectDir, ".plan", `${plan_name}.plan.md`);
-      const executionPath = join(projectDir, ".plan", `${plan_name}.execution.yaml`);
+      const planDir = ensurePlanDir(projectDir);
+      const planPath = join(planDir, `${plan_name}.plan.md`);
+      const executionPath = join(planDir, `${plan_name}.execution.yaml`);
 
       let status: TaskStatus = "pending";
       let completedTasks = 0;
@@ -223,15 +224,16 @@ export const luban_execute_workflow = tool({
   Parses the execution YAML, dispatches tasks in proper order respecting dependencies,
   handles retries on failure, and reports progress.`,
   args: {
-    name: z.string().describe("Plan name (matches .plan/{name}.execution.yaml)"),
+    name: z.string().describe("Plan name (matches .sages/plans/{name}.execution.yaml)"),
   },
   execute: async (args, ctx) => {
     const { name } = args;
     const projectDir = ctx.agent || process.cwd();
 
     try {
-      // Step 1: Read execution YAML from .plan/{name}.execution.yaml
-      const executionPath = join(projectDir, ".plan", `${name}.execution.yaml`);
+      // Step 1: Read execution YAML from .sages/plans/{name}.execution.yaml
+      const planDir = ensurePlanDir(projectDir);
+      const executionPath = join(planDir, `${name}.execution.yaml`);
 
       if (!existsSync(executionPath)) {
         return JSON.stringify({

@@ -31,8 +31,13 @@ export { join, dirname, basename, extname } from "node:path";
 
 const LOG_DIR = join(homedir(), ".config", "sages", "logs");
 const COMPACTION_LOG = join(LOG_DIR, "compaction.log");
-const SESSION_FILE = ".sages-session.json";
-const FILELOCK_DIR = ".sages-filelocks";
+
+// .sages/ directory structure in project root
+const SAGES_DIR = ".sages";
+const SESSIONS_DIR = join(SAGES_DIR, "sessions");
+const SESSION_FILE = join(SESSIONS_DIR, "sessions.json");
+const LOCKS_DIR = join(SAGES_DIR, "locks");
+const PLANS_DIR = join(SAGES_DIR, "plans");
 
 // =============================================================================
 // Log Directory Management
@@ -168,6 +173,7 @@ export function logSages(
 // =============================================================================
 
 export function loadSessions(projectDir: string): SessionPersistence {
+  ensureSagesDir(projectDir);
   const sessionPath = join(projectDir, SESSION_FILE);
   if (existsSync(sessionPath)) {
     try {
@@ -180,6 +186,7 @@ export function loadSessions(projectDir: string): SessionPersistence {
 }
 
 export function saveSessions(projectDir: string, persistence: SessionPersistence): void {
+  ensureSagesDir(projectDir);
   const sessionPath = join(projectDir, SESSION_FILE);
   writeFileSync(sessionPath, JSON.stringify(persistence, null, 2));
 }
@@ -214,8 +221,9 @@ export function clearSession(projectDir: string, sessionId: string): void {
 // File Lock Management (Lu Ban Conflict Prevention)
 // =============================================================================
 
-function ensureFileLockDir(projectDir: string): void {
-  const lockDir = join(projectDir, FILELOCK_DIR);
+function ensureLocksDir(projectDir: string): void {
+  ensureSagesDir(projectDir);
+  const lockDir = join(projectDir, LOCKS_DIR);
   if (!existsSync(lockDir)) {
     mkdirSync(lockDir, { recursive: true });
   }
@@ -227,7 +235,7 @@ function getLockKey(taskId: string, filePath: string): string {
 
 function getLockFilePath(projectDir: string, taskId: string, filePath: string): string {
   const sanitized = filePath.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return join(projectDir, FILELOCK_DIR, `${taskId}-${sanitized}.lock`);
+  return join(projectDir, LOCKS_DIR, `${taskId}-${sanitized}.lock`);
 }
 
 export function acquireFileLock(
@@ -236,7 +244,7 @@ export function acquireFileLock(
   filePath: string,
   ttlMs?: number,
 ): { success: boolean; conflict?: { taskId: string; lockedBy: string; lockedAt: string } } {
-  ensureFileLockDir(projectDir);
+  ensureLocksDir(projectDir);
   const lockFile = getLockFilePath(projectDir, taskId, filePath);
   const lockKey = getLockKey(taskId, filePath);
 
@@ -320,7 +328,7 @@ export function releaseAllTaskLocks(projectDir: string, taskId: string): void {
 }
 
 export function loadFileLockRegistry(projectDir: string): FileLockRegistry {
-  const lockDir = join(projectDir, FILELOCK_DIR);
+  const lockDir = join(projectDir, LOCKS_DIR);
   const registryFile = join(lockDir, "registry.json");
 
   if (existsSync(registryFile)) {
@@ -334,9 +342,20 @@ export function loadFileLockRegistry(projectDir: string): FileLockRegistry {
 }
 
 function saveFileLockRegistry(projectDir: string, registry: FileLockRegistry): void {
-  ensureFileLockDir(projectDir);
-  const registryFile = join(projectDir, FILELOCK_DIR, "registry.json");
+  ensureLocksDir(projectDir);
+  const registryFile = join(projectDir, LOCKS_DIR, "registry.json");
   writeFileSync(registryFile, JSON.stringify(registry, null, 2));
+}
+
+// =============================================================================
+// .sages Directory Helpers
+// =============================================================================
+
+function ensureSagesDir(projectDir: string): void {
+  const sagesDir = join(projectDir, SAGES_DIR);
+  if (!existsSync(sagesDir)) {
+    mkdirSync(sagesDir, { recursive: true });
+  }
 }
 
 // =============================================================================
@@ -344,7 +363,8 @@ function saveFileLockRegistry(projectDir: string, registry: FileLockRegistry): v
 // =============================================================================
 
 export function ensurePlanDir(projectDir: string): string {
-  const planDir = join(projectDir, ".plan");
+  ensureSagesDir(projectDir);
+  const planDir = join(projectDir, PLANS_DIR);
   if (!existsSync(planDir)) {
     mkdirSync(planDir, { recursive: true });
   }

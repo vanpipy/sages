@@ -7,7 +7,7 @@
  * ║   Creates design drafts following the八卦 structure                       ║
  * ║                                                                           ║
  * ║   INTEGRATED WITH WORKFLOW-TOOLS:                                          ║
- * ║   - fuxi_orchestrate uses WorkflowEngine to execute .plan/*.execution.yaml║
+ * ║   - fuxi_orchestrate uses WorkflowEngine to execute .sages/plans/*.execution.yaml║
  * ║   - fuxi_get_status queries StateManager for execution progress           ║
  * ║   - Unified state: file existence + execution state                      ║
  * ║                                                                           ║
@@ -51,9 +51,9 @@ Eight Trigrams (八卦) mapping:
 - ☶ Gen (Mountain) - Boundary Constraints: What the system must NOT do
 - ☱ Dui (Lake) - Success Path: The happy path from start to end
 
-Output: .plan/{name}.draft.md`,
+Output: .sages/plans/{name}.draft.md`,
   args: {
-    name: z.string().describe("Project/task name (used for .plan/{name}.draft.md)"),
+    name: z.string().describe("Project/task name (used for .sages/plans/{name}.draft.md)"),
     request: z.string().describe("User's request to analyze"),
   },
   execute: async (args, ctx) => {
@@ -80,7 +80,7 @@ Output: .plan/{name}.draft.md`,
 });
 
 export const fuxi_get_draft = tool({
-  description: "Read an existing design draft from .plan/{name}.draft.md",
+  description: "Read an existing design draft from .sages/plans/{name}.draft.md",
   args: {
     name: z.string().describe("Project/task name"),
   },
@@ -109,7 +109,7 @@ export const fuxi_orchestrate = tool({
   description: `Fuxi orchestrates the execution of an approved plan.
 
    This tool INTEGRATES with workflow-tools by:
-   1. Reading .plan/{name}.execution.yaml (created by qiaochui_decompose)
+   1. Reading .sages/plans/{name}.execution.yaml (created by qiaochui_decompose)
    2. Using WorkflowEngine to execute the plan
    3. Managing state via StateManager
 
@@ -117,7 +117,7 @@ export const fuxi_orchestrate = tool({
    - Uses StateManager (.sages-session.json) for execution state
    - Phase transitions handled by WorkflowEngine automatically`,
   args: {
-    name: z.string().describe("Plan name (matches .plan/{name}.execution.yaml)"),
+    name: z.string().describe("Plan name (matches .sages/plans/{name}.execution.yaml)"),
     checkpoint_interval: z.number().optional().describe("Override checkpoint interval in seconds"),
   },
   execute: async (args, ctx) => {
