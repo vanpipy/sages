@@ -1,19 +1,15 @@
 {
   "name": "opencode-sages",
   "version": "1.0.0",
-  "description": "OpenCode plugin for Four Divine Agents (Fuxi, QiaoChui, LuBan, GaoYao)",
+  "description": "OpenCode plugin for Four Sages Agents (Fuxi, QiaoChui, LuBan, GaoYao)",
   "type": "module",
   "scripts": {
-    "build:plugin": "bun build src/index.ts --outfile=plugin/sages.js --target=bun --format=esm --external:@opencode-ai/plugin --external:@opencode-ai/sdk --sourcemap=inline",
-    "build:plugin:watch": "bun --watch run build:plugin",
-    "build:plugin:minify": "bun build src/index.ts --outfile=plugin/sages.js --target=bun --format=esm --external:@opencode-ai/plugin --external:@opencode-ai/sdk --minify",
-    "clean": "rm -rf dist",
+    "build:tools": "bun run scripts/build-self-contained-tools.ts",
+    "clean": "rm -rf tool",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:unit": "bun test test/unit",
-    "test:integration": "bun test test/integration",
-    "test:e2e": "bash test/e2e/test-workflow.sh",
-    "test:all": "bun run test:unit && bun run test:integration && bun run test:e2e"
+    "test:integration": "bun test test/integration"
   },
   "keywords": [
     "opencode",
@@ -23,13 +19,18 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "deepagents": "^1.9.0",
-    "langchain": "^1.3.4",
-    "zod": "^4.3.6"
+    "zod": "4.1.8"
   },
   "devDependencies": {
-    "@langchain/anthropic": "^1.3.27",
     "@opencode-ai/plugin": "^1.14.25",
-    "@opencode-ai/sdk": "^1.14.25"
-  }
+    "@types/node": "^20.10.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3"
+  },
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "author": "vanpipy@gmail.com"
 }

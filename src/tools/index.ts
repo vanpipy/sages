@@ -3,7 +3,7 @@
  * ║                                                                           ║
  * ║   🜄 Sages Tools - Barrel Export 🜄                                        ║
  * ║                                                                           ║
- * ║   Re-exports all tools from the Four Divine Agents                        ║
+ * ║   Re-exports all tools from the Four Sages Agents                        ║
  * ║   Fuxi, QiaoChui, LuBan, GaoYao, and Workflow tools                      ║
  * ║                                                                           ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
@@ -50,4 +50,6 @@ export {
   sages_confirm_approval,
   sages_get_session,
   sages_end_session,
+  sages_execute_workflow,
+  sages_resume,
 } from "./workflow-tools.js";

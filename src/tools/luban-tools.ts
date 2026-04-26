@@ -10,6 +10,7 @@
  */
 
 import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
 import type { PluginContext, TaskStatus, ReviewMode } from "../types.js";
 import {
   ensurePlanDir,
@@ -56,10 +57,10 @@ Each task is independent and should be committed separately.
 
 NOTE: Uses file locking to prevent conflicts with parallel tasks.`,
   args: {
-    task_id: tool.schema.string().describe("Task ID from the plan"),
-    task_description: tool.schema.string().describe("What this task does"),
-    files: tool.schema.array(tool.schema.string()).describe("Files to work on"),
-    test_command: tool.schema.string().optional().describe("Command to run tests"),
+    task_id: z.string().describe("Task ID from the plan"),
+    task_description: z.string().describe("What this task does"),
+    files: z.array(z.string()).describe("Files to work on"),
+    test_command: z.string().optional().describe("Command to run tests"),
   },
   execute: async (args, ctx) => {
     const { task_id, task_description, files, test_command } = args;
@@ -137,7 +138,7 @@ NOTE: Uses file locking to prevent conflicts with parallel tasks.`,
 export const luban_get_status = tool({
   description: "Get the current execution status of a plan",
   args: {
-    plan_name: tool.schema.string().describe("Plan name (used in .plan/{name}.plan.md)"),
+    plan_name: z.string().describe("Plan name (used in .plan/{name}.plan.md)"),
   },
   execute: async (args, ctx) => {
     const { plan_name } = args;
@@ -196,7 +197,7 @@ export const luban_get_status = tool({
 export const luban_release_locks = tool({
   description: "Release all file locks held by a task",
   args: {
-    task_id: tool.schema.string().describe("Task ID to release locks for"),
+    task_id: z.string().describe("Task ID to release locks for"),
   },
   execute: async (args, ctx) => {
     const { task_id } = args;
@@ -222,7 +223,7 @@ export const luban_execute_workflow = tool({
   Parses the execution YAML, dispatches tasks in proper order respecting dependencies,
   handles retries on failure, and reports progress.`,
   args: {
-    name: tool.schema.string().describe("Plan name (matches .plan/{name}.execution.yaml)"),
+    name: z.string().describe("Plan name (matches .plan/{name}.execution.yaml)"),
   },
   execute: async (args, ctx) => {
     const { name } = args;

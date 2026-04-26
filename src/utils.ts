@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type {
   ToolResult,
+  ToolSuccess,
+  ToolError,
   SessionPersistence,
   SessionState,
   FileLockRegistry,
@@ -383,28 +385,3 @@ export function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-// =============================================================================
-// Platform Detection
-// =============================================================================
-
-export function isWindows(): boolean {
-  // Lazy import to avoid issues
-  try {
-    const { platform } = require("node:os");
-    return platform() === "win32";
-  } catch {
-    return false;
-  }
-}
-
-// =============================================================================
-// CLI Binary Names
-// =============================================================================
-
-export function getSagesCLI(): string {
-  return isWindows() ? "sages.cmd" : "sages";
-}
-
-export function getOpencodeCLI(): string {
-  return isWindows() ? "opencode.cmd" : "opencode";
-}

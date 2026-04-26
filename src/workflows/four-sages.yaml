@@ -1,9 +1,9 @@
 # ╔═══════════════════════════════════════════════════════════════════════════╗
 # ║                                                                           ║
-# ║   🜄 Four Divine Agents Workflow - fuxi-four-gods 🜄                       ║
+# ║   🜄 Four Sages Agents Workflow - fuxi-four-gods 🜄                       ║
 # ║                                                                           ║
 # ║   This YAML defines the standard workflow orchestration for the           ║
-# ║   Four Divine Agents system.                                              ║
+# ║   Four Sages Agents system.                                              ║
 # ║                                                                           ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 
@@ -11,7 +11,7 @@ name: fuxi-four-gods
 version: 1.0.0
 
 description: |
-  Four Divine Agents workflow following the Eight Trigrams design methodology.
+  Four Sages Agents workflow following the Eight Trigrams design methodology.
   Agents: Fuxi (Architect), QiaoChui (Mechanist), LuBan (Engineer), GaoYao (Judge)
 
 # =============================================================================

@@ -6,21 +6,33 @@
  * ║   Tools for Fuxi (伏羲) - Architect using Eight Trigrams                 ║
  * ║   Creates design drafts following the八卦 structure                       ║
  * ║                                                                           ║
+ * ║   INTEGRATED WITH WORKFLOW-TOOLS:                                          ║
+ * ║   - fuxi_orchestrate uses WorkflowEngine to execute .plan/*.execution.yaml║
+ * ║   - fuxi_get_status queries StateManager for execution progress           ║
+ * ║   - Unified state: file existence + execution state                      ║
+ * ║                                                                           ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
 
 import { tool } from "@opencode-ai/plugin";
-import type { PluginContext, ToolResult, WorkflowState } from "../types.js";
-import { execTool } from "../hooks/tool-execute.js";
-import { ensurePlanDir, success, extractPlanName } from "../utils.js";
+import { z } from "zod";
+import type { PluginContext, WorkflowState } from "../types.js";
+import { ensurePlanDir, success, existsSync, readFileSync, writeFileSync } from "../utils.js";
 import { logSages } from "../utils/logging.js";
-import { writeFileSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { loadWorkflowState, saveWorkflowState, transitionPhase } from "../utils/state.js";
-import { parseExecutionYaml } from "../utils/execution.js";
+import { join } from "path";
 
-// Import shared draft utilities
-import { parseDraft, isDraftComplete, type ParsedDraft } from "../utils/parseDraft.js";
+// Import engine components for actual execution
+import {
+  StateManager,
+  FileLockManager,
+  CircuitBreaker,
+  TaskDispatcher,
+  WorkflowEngine,
+} from "../engine/index.js";
+import type { WorkflowDefinition, WorkflowExecutionState } from "../engine/types.js";
+
+// Import shared YAML parser from workflow-tools
+import { parseWorkflowYaml } from "./workflow-tools.js";
 
 // =============================================================================
 // Tool Definitions
@@ -41,12 +53,12 @@ Eight Trigrams (八卦) mapping:
 
 Output: .plan/{name}.draft.md`,
   args: {
-    name: tool.schema.string().describe("Project/task name (used for .plan/{name}.draft.md)"),
-    request: tool.schema.string().describe("User's request to analyze"),
+    name: z.string().describe("Project/task name (used for .plan/{name}.draft.md)"),
+    request: z.string().describe("User's request to analyze"),
   },
   execute: async (args, ctx) => {
     const { name, request } = args;
-    const projectDir = ctx.agent; // Will be set by plugin
+    const projectDir = ctx.agent;
 
     try {
       const planDir = ensurePlanDir(projectDir);
@@ -70,7 +82,7 @@ Output: .plan/{name}.draft.md`,
 export const fuxi_get_draft = tool({
   description: "Read an existing design draft from .plan/{name}.draft.md",
   args: {
-    name: tool.schema.string().describe("Project/task name"),
+    name: z.string().describe("Project/task name"),
   },
   execute: async (args, ctx) => {
     const { name } = args;
@@ -96,90 +108,143 @@ export const fuxi_get_draft = tool({
 export const fuxi_orchestrate = tool({
   description: `Fuxi orchestrates the execution of an approved plan.
 
-  Reads the plan and execution files, initializes workflow state, and begins
-  orchestrating task execution by invoking LuBan.
+   This tool INTEGRATES with workflow-tools by:
+   1. Reading .plan/{name}.execution.yaml (created by qiaochui_decompose)
+   2. Using WorkflowEngine to execute the plan
+   3. Managing state via StateManager
 
-  This is the main entry point for the execution phase.`,
+   State Management:
+   - Uses StateManager (.sages-session.json) for execution state
+   - Phase transitions handled by WorkflowEngine automatically`,
   args: {
-    name: tool.schema.string().describe("Plan name (matches .plan/{name}.plan.md)"),
+    name: z.string().describe("Plan name (matches .plan/{name}.execution.yaml)"),
+    checkpoint_interval: z.number().optional().describe("Override checkpoint interval in seconds"),
   },
   execute: async (args, ctx) => {
-    const { name } = args;
+    const { name, checkpoint_interval } = args;
     const projectDir = ctx.agent;
+    const startTime = Date.now();
 
     try {
       const planDir = ensurePlanDir(projectDir);
-
-      // Step 1: Read the plan file
-      const planPath = join(planDir, `${name}.plan.md`);
-      if (!existsSync(planPath)) {
-        return JSON.stringify({
-          success: false,
-          error: { message: `Plan not found: ${planPath}` },
-        });
-      }
-      const planContent = readFileSync(planPath, "utf-8");
-
-      // Step 2: Read and parse the execution file
       const executionPath = join(planDir, `${name}.execution.yaml`);
+
+      // Step 1: Validate execution file exists
       if (!existsSync(executionPath)) {
         return JSON.stringify({
           success: false,
-          error: { message: `Execution file not found: ${executionPath}` },
+          error: { message: `Execution file not found: ${executionPath}. Use qiaochui_decompose first.` },
         });
       }
-      const executionContent = readFileSync(executionPath, "utf-8");
-      const executionPlan = parseExecutionYaml(executionContent);
 
-      // Step 3: Create workflow state directory and file
-      const stateDir = join(planDir, name);
-      const stateFile = join(stateDir, "state.json");
+      // Step 2: Read and parse the execution file
+      let workflowDefinition: WorkflowDefinition;
+      try {
+        const yamlContent = readFileSync(executionPath, "utf-8");
+        workflowDefinition = parseWorkflowYaml(yamlContent);
+      } catch (parseErr) {
+        return JSON.stringify({
+          success: false,
+          error: { message: `Failed to parse execution file: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}` },
+        });
+      }
 
-      // Step 4: Set initial state
-      const initialState: WorkflowState = {
-        planName: executionPlan.name || name,
-        status: "execution",
-        hasDraft: true,
-        hasPlan: true,
-        hasExecution: true,
-        currentPhase: executionPlan.phases[0]?.name || "",
-        completedTasks: 0,
-        totalTasks: executionPlan.tasks.length,
-        nextTask: executionPlan.tasks[0]?.id,
-      };
+      // Validate the workflow definition
+      if (!workflowDefinition.name) {
+        workflowDefinition.name = name;
+      }
+      if (!workflowDefinition.phases || workflowDefinition.phases.length === 0) {
+        return JSON.stringify({
+          success: false,
+          error: { message: "Execution file has no phases defined" },
+        });
+      }
 
-      // Step 5: Save the initial state
-      saveWorkflowState(initialState, stateFile);
+      // Override checkpoint interval if provided
+      if (checkpoint_interval !== undefined) {
+        workflowDefinition.settings.checkpointInterval = checkpoint_interval;
+      }
 
-      // Step 6: Log orchestration start
-      logSages("fuxi_orchestration_started", {
-        name,
-        planPath,
-        executionPath,
-        stateFile,
-        totalTasks: initialState.totalTasks,
-        firstPhase: initialState.currentPhase,
-        firstTask: initialState.nextTask,
+      // Step 3: Create engine components
+      const stateManager = new StateManager();
+      const lockBaseDir = join(projectDir, ".sages-filelocks");
+      const fileLockManager = new FileLockManager(lockBaseDir);
+      const circuitBreaker = new CircuitBreaker(workflowDefinition.settings.maxFailure);
+      const taskDispatcher = new TaskDispatcher(
+        workflowDefinition.settings.maxParallel,
+        fileLockManager
+      );
+
+      // Step 4: Create and execute workflow engine
+      const engine = new WorkflowEngine(workflowDefinition, {
+        stateManager,
+        circuitBreaker,
+        taskDispatcher,
+        lockBaseDir,
       });
 
-      // Step 7: Return success with state summary
-      return JSON.stringify(
-        success({
-          message: `Orchestration started for plan: ${name}`,
-          state: {
-            planName: initialState.planName,
-            status: initialState.status,
-            totalTasks: initialState.totalTasks,
-            currentPhase: initialState.currentPhase,
-            nextTask: initialState.nextTask,
-          },
-          files: {
-            planPath,
-            executionPath,
-            stateFile,
-          },
-        }),
+      logSages("fuxi_orchestration_started", {
+        name,
+        executionPath,
+        totalPhases: workflowDefinition.phases.length,
+        totalTasks: workflowDefinition.phases.reduce((sum, p) => sum + p.tasks.length, 0),
+      });
+
+      // Execute the workflow
+      let finalState: WorkflowExecutionState;
+      try {
+        finalState = await engine.execute((state) => {
+          // Log progress updates
+          logSages("workflow_progress", {
+            workflow_id: state.workflowId,
+            status: state.status,
+            current_phase: state.currentPhase,
+            current_task: state.currentTaskIndex,
+          });
+        }, executionPath);
+      } catch (execErr) {
+        return JSON.stringify({
+          success: false,
+          workflow_id: "",
+          status: "failed",
+          phases_completed: 0,
+          tasks_completed: 0,
+          duration_ms: Date.now() - startTime,
+          error: `Workflow execution error: ${execErr instanceof Error ? execErr.message : String(execErr)}`,
+        });
+      }
+
+      // Calculate completion stats
+      const phasesCompleted = finalState.phases.filter(
+        (p) => p.status === "completed" || p.status === "skipped"
+      ).length;
+      const tasksCompleted = finalState.phases.reduce(
+        (acc, phase) => acc + phase.tasks.filter((t) => t.status === "completed").length,
+        0
       );
+
+      logSages("fuxi_orchestration_completed", {
+        name,
+        status: finalState.status,
+        phases_completed: phasesCompleted,
+        tasks_completed: tasksCompleted,
+        duration_ms: Date.now() - startTime,
+      });
+
+      // Return execution result
+      return JSON.stringify({
+        success: finalState.status === "completed",
+        workflow_id: finalState.workflowId,
+        status: finalState.status,
+        plan_name: name,
+        execution_file: executionPath,
+        phases_completed: phasesCompleted,
+        total_phases: workflowDefinition.phases.length,
+        tasks_completed: tasksCompleted,
+        total_tasks: workflowDefinition.phases.reduce((sum, p) => sum + p.tasks.length, 0),
+        duration_ms: Date.now() - startTime,
+        error: finalState.error,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logSages("fuxi_orchestration_failed", { name, error: msg });
@@ -189,15 +254,23 @@ export const fuxi_orchestrate = tool({
 });
 
 export const fuxi_get_status = tool({
-  description: `Fuxi gets the current status of an executing workflow.
+  description: `Fuxi gets the current status of a workflow.
 
-  Reads the workflow state file and returns:
-  - Current phase
-  - Completed tasks vs total tasks
-  - Next task to execute
-  - Overall status`,
+   INTEGRATED with workflow-tools:
+   - Checks file existence (draft/plan/execution)
+   - Queries StateManager for execution progress
+   - Returns unified status
+
+   Status values:
+   - idle: No files found
+   - draft: .draft.md exists, no .plan.md
+   - plan: .plan.md exists, no .execution.yaml
+   - execution: .execution.yaml exists (checks StateManager for progress)
+   - running: Workflow is actively executing
+   - completed: Workflow finished successfully
+   - failed: Workflow encountered errors`,
   args: {
-    name: tool.schema.string().describe("Plan name"),
+    name: z.string().describe("Plan name"),
   },
   execute: async (args, ctx) => {
     const { name } = args;
@@ -205,27 +278,85 @@ export const fuxi_get_status = tool({
 
     try {
       const planDir = ensurePlanDir(projectDir);
-      const stateFile = join(planDir, name, "state.json");
+      const draftPath = join(planDir, `${name}.draft.md`);
+      const planPath = join(planDir, `${name}.plan.md`);
+      const executionPath = join(planDir, `${name}.execution.yaml`);
 
-      // Check if state file exists
-      if (!existsSync(stateFile)) {
-        return JSON.stringify({
-          success: false,
-          error: { message: `State file not found: ${stateFile}` },
-        });
+      const hasDraft = existsSync(draftPath);
+      const hasPlan = existsSync(planPath);
+      const hasExecution = existsSync(executionPath);
+
+      let status: WorkflowState["status"] = "idle";
+      let nextStep = "";
+      let executionProgress = null;
+
+      // First check file existence
+      if (hasDraft && !hasPlan) {
+        status = "draft";
+        nextStep = "Use qiaochui_decompose to create plan";
+      } else if (hasPlan && !hasExecution) {
+        status = "plan";
+        nextStep = "Use qiaochui_decompose to create execution file";
+      } else if (hasExecution) {
+        status = "execution";
+
+        // Check StateManager for actual execution progress
+        const stateManager = new StateManager();
+        const savedState = await stateManager.loadState();
+
+        if (savedState && savedState.workflowId) {
+          // Workflow has been started - get actual progress
+          const phasesCompleted = savedState.phases.filter(
+            (p) => p.status === "completed" || p.status === "skipped"
+          ).length;
+          const tasksCompleted = savedState.phases.reduce(
+            (acc: number, phase) => acc + phase.tasks.filter((t) => t.status === "completed").length,
+            0
+          );
+          const totalTasks = savedState.phases.reduce(
+            (acc: number, phase) => acc + phase.tasks.length,
+            0
+          );
+
+          executionProgress = {
+            workflow_id: savedState.workflowId,
+            status: savedState.status,
+            current_phase: savedState.currentPhase,
+            phases_completed: phasesCompleted,
+            total_phases: savedState.phases.length,
+            tasks_completed: tasksCompleted,
+            total_tasks: totalTasks,
+            started_at: savedState.startedAt,
+            last_checkpoint: savedState.updatedAt,
+          };
+
+          // Override status based on execution state
+          // Map execution statuses to WorkflowStatus values
+          if (savedState.status === "completed") {
+            status = "completed";
+            nextStep = "Workflow completed. Use fuxi_generate_report for summary.";
+          } else if (savedState.status === "failed") {
+            status = "failed";
+            nextStep = "Workflow failed. Use fuxi_resume to retry.";
+          } else if (savedState.status === "running" || savedState.status === "paused") {
+            // running/paused map to "execution" in WorkflowStatus
+            status = "execution";
+            nextStep = `Workflow ${savedState.status}. Use fuxi_resume to continue.`;
+          }
+        } else {
+          nextStep = "Use fuxi_orchestrate to start execution";
+        }
       }
-
-      // Load the workflow state
-      const state = loadWorkflowState(stateFile);
 
       return JSON.stringify(
         success({
-          currentPhase: state.currentPhase,
-          completedTasks: state.completedTasks,
-          totalTasks: state.totalTasks,
-          nextTask: state.nextTask,
-          status: state.status,
-          planName: state.planName,
+          plan_name: name,
+          status,
+          has_draft: hasDraft,
+          has_plan: hasPlan,
+          has_execution: hasExecution,
+          next_step: nextStep,
+          execution_progress: executionProgress,
         }),
       );
     } catch (err) {
@@ -237,83 +368,145 @@ export const fuxi_get_status = tool({
 });
 
 export const fuxi_resume = tool({
-  description: `Fuxi resumes an interrupted workflow from the last incomplete task.
-  
-  Loads the workflow state and continues execution from where it left off.`,
+  description: `Fuxi resumes an interrupted workflow from the last checkpoint.
+
+   INTEGRATED with workflow-tools:
+   - Validates execution file exists
+   - Uses StateManager to load saved state
+   - Uses WorkflowEngine.resume() to continue`,
   args: {
-    name: tool.schema.string().describe("Plan name to resume"),
+    name: z.string().describe("Plan name to resume"),
   },
   execute: async (args, ctx) => {
     const { name } = args;
     const projectDir = ctx.agent;
+    const startTime = Date.now();
 
     try {
       const planDir = ensurePlanDir(projectDir);
-      const stateFile = join(planDir, name, "state.json");
+      const executionPath = join(planDir, `${name}.execution.yaml`);
 
-      // Check if state file exists
-      if (!existsSync(stateFile)) {
+      // Validate execution file exists
+      if (!existsSync(executionPath)) {
         return JSON.stringify({
           success: false,
-          error: { message: `State file not found: ${stateFile}` },
+          error: { message: `Execution file not found: ${executionPath}` },
         });
       }
 
-      // Load the workflow state
-      const state = loadWorkflowState(stateFile);
+      // Load saved state
+      const stateManager = new StateManager();
+      const savedState = await stateManager.loadState();
 
-      // Check if workflow already completed
-      if (state.status === "completed") {
+      if (!savedState) {
         return JSON.stringify({
           success: false,
-          error: { message: `Workflow already completed: ${name}` },
+          error: { message: "No saved workflow state found. Use fuxi_orchestrate to start fresh." },
         });
       }
 
-      // Check if workflow failed
-      if (state.status === "failed") {
+      // Validate state is resumable
+      if (savedState.status === "completed") {
         return JSON.stringify({
           success: false,
-          error: { message: `Workflow failed: ${name}. Cannot resume.` },
+          error: { message: "Workflow already completed. Use fuxi_generate_report for summary." },
         });
       }
 
-      // Find the next incomplete task
-      const nextTask = state.nextTask;
-      if (!nextTask) {
+      if (savedState.status === "failed" && !savedState.error) {
         return JSON.stringify({
           success: false,
-          error: { message: `No incomplete task found for workflow: ${name}` },
+          error: { message: "Workflow failed without recovery data. Use fuxi_orchestrate to restart." },
         });
       }
 
-      // Update state to mark resumption
-      const updatedState = {
-        ...state,
-        lastResumedAt: new Date().toISOString(),
-      };
-      saveWorkflowState(updatedState, stateFile);
+      // Re-parse the execution file
+      let workflowDefinition: WorkflowDefinition;
+      try {
+        const yamlContent = readFileSync(executionPath, "utf-8");
+        workflowDefinition = parseWorkflowYaml(yamlContent);
+      } catch (parseErr) {
+        return JSON.stringify({
+          success: false,
+          error: { message: `Failed to parse execution file: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}` },
+        });
+      }
 
-      // Log resumption
-      logSages("fuxi_workflow_resumed", {
-        name,
-        resumedFromTask: nextTask,
-        completedTasks: state.completedTasks,
-        totalTasks: state.totalTasks,
+      // Create engine components
+      const lockBaseDir = join(projectDir, ".sages-filelocks");
+      const fileLockManager = new FileLockManager(lockBaseDir);
+      const circuitBreaker = new CircuitBreaker(workflowDefinition.settings.maxFailure);
+      const taskDispatcher = new TaskDispatcher(
+        workflowDefinition.settings.maxParallel,
+        fileLockManager
+      );
+
+      // Create workflow engine
+      const engine = new WorkflowEngine(workflowDefinition, {
+        stateManager,
+        circuitBreaker,
+        taskDispatcher,
+        lockBaseDir,
       });
 
-      // Return resumption information
-      return JSON.stringify(
-        success({
-          message: `Resumed workflow: ${name}`,
-          planName: state.planName,
-          resumedFromTask: nextTask,
-          currentPhase: state.currentPhase,
-          completedTasks: state.completedTasks,
-          totalTasks: state.totalTasks,
-          status: state.status,
-        }),
+      logSages("fuxi_resume_started", {
+        name,
+        workflow_id: savedState.workflowId,
+        last_phase: savedState.currentPhase,
+      });
+
+      // Resume execution
+      let finalState: WorkflowExecutionState;
+      try {
+        finalState = await engine.resume(savedState, (state) => {
+          logSages("workflow_progress", {
+            workflow_id: state.workflowId,
+            status: state.status,
+            current_phase: state.currentPhase,
+            current_task: state.currentTaskIndex,
+          });
+        });
+      } catch (execErr) {
+        return JSON.stringify({
+          success: false,
+          workflow_id: savedState.workflowId,
+          status: "failed",
+          phases_completed: 0,
+          tasks_completed: 0,
+          duration_ms: Date.now() - startTime,
+          error: `Workflow resume error: ${execErr instanceof Error ? execErr.message : String(execErr)}`,
+        });
+      }
+
+      // Calculate completion stats
+      const phasesCompleted = finalState.phases.filter(
+        (p) => p.status === "completed" || p.status === "skipped"
+      ).length;
+      const tasksCompleted = finalState.phases.reduce(
+        (acc, phase) => acc + phase.tasks.filter((t) => t.status === "completed").length,
+        0
       );
+
+      logSages("fuxi_resume_completed", {
+        name,
+        status: finalState.status,
+        phases_completed: phasesCompleted,
+        tasks_completed: tasksCompleted,
+        duration_ms: Date.now() - startTime,
+      });
+
+      return JSON.stringify({
+        success: finalState.status === "completed",
+        workflow_id: finalState.workflowId,
+        status: finalState.status,
+        plan_name: name,
+        phases_completed: phasesCompleted,
+        total_phases: finalState.phases.length,
+        tasks_completed: tasksCompleted,
+        total_tasks: finalState.phases.reduce((sum, p) => sum + p.tasks.length, 0),
+        duration_ms: Date.now() - startTime,
+        error: finalState.error,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logSages("fuxi_resume_failed", { name, error: msg });
@@ -323,15 +516,14 @@ export const fuxi_resume = tool({
 });
 
 export const fuxi_generate_report = tool({
-  description: `Fuxi generates a summary report of workflow execution.
+  description: `Fuxi generates a summary report of a workflow.
 
-  Generates a report including:
-  - Overall status
-  - Task completion rate
-  - Errors encountered
-  - Recommendations for next steps`,
+   INTEGRATED with workflow-tools:
+   - Analyzes file existence status
+   - Queries StateManager for execution statistics
+   - Provides comprehensive report with recommendations`,
   args: {
-    name: tool.schema.string().describe("Plan name"),
+    name: z.string().describe("Plan name"),
   },
   execute: async (args, ctx) => {
     const { name } = args;
@@ -339,133 +531,72 @@ export const fuxi_generate_report = tool({
 
     try {
       const planDir = ensurePlanDir(projectDir);
-      const stateFile = join(planDir, name, "state.json");
+      const draftPath = join(planDir, `${name}.draft.md`);
+      const planPath = join(planDir, `${name}.plan.md`);
+      const executionPath = join(planDir, `${name}.execution.yaml`);
 
-      // Check if state file exists
-      if (!existsSync(stateFile)) {
-        return JSON.stringify({
-          success: false,
-          error: { message: `State file not found: ${stateFile}` },
-        });
+      const hasDraft = existsSync(draftPath);
+      const hasPlan = existsSync(planPath);
+      const hasExecution = existsSync(executionPath);
+
+      // Get task count from plan file
+      let taskCount = 0;
+      if (existsSync(planPath)) {
+        const planContent = readFileSync(planPath, "utf-8");
+        const matches = planContent.match(/### T\d+:/g);
+        if (matches) taskCount = matches.length;
       }
 
-      // Load the workflow state
-      const state = loadWorkflowState(stateFile);
+      // Check execution state from StateManager
+      let executionStats: ReportExecutionStats | null = null;
+      const stateManager = new StateManager();
+      const savedState = await stateManager.loadState();
 
-      // Calculate completion rate
-      const completionRate =
-        state.totalTasks > 0
-          ? `${Math.round((state.completedTasks / state.totalTasks) * 100)}%`
-          : "0%";
+      if (savedState && savedState.workflowId) {
+        const phasesCompleted = savedState.phases.filter(
+          (p) => p.status === "completed" || p.status === "skipped"
+        ).length;
+        const tasksCompleted = savedState.phases.reduce(
+          (acc: number, phase) => acc + phase.tasks.filter((t) => t.status === "completed").length,
+          0
+        );
+        const totalTasks = savedState.phases.reduce(
+          (acc: number, phase) => acc + phase.tasks.length,
+          0
+        );
 
-      // Identify any errors from the state (failed status)
-      const errorsEncountered = state.status === "failed" ? ["Workflow failed"] : undefined;
+        executionStats = {
+          workflow_id: savedState.workflowId,
+          status: savedState.status,
+          phases_completed: phasesCompleted,
+          total_phases: savedState.phases.length,
+          tasks_completed: tasksCompleted,
+          total_tasks: totalTasks,
+          completion_rate: totalTasks > 0 ? `${Math.round((tasksCompleted / totalTasks) * 100)}%` : "0%",
+          started_at: savedState.startedAt,
+          last_checkpoint: savedState.updatedAt,
+          error: savedState.error,
+        };
+      }
 
-      // Generate summary report
       const report = {
-        planName: state.planName,
-        overallStatus: state.status,
-        currentPhase: state.currentPhase,
-        completionRate,
-        completedTasks: state.completedTasks,
-        totalTasks: state.totalTasks,
-        errorsEncountered,
-        recommendations:
-          state.status === "completed"
-            ? ["Workflow completed successfully"]
-            : state.status === "failed"
-              ? ["Investigate and fix the failed workflow"]
-              : ["Continue execution to complete remaining tasks"],
+        plan_name: name,
+        file_status: {
+          has_draft: hasDraft,
+          has_plan: hasPlan,
+          has_execution: hasExecution,
+        },
+        estimated_tasks: taskCount,
+        execution: executionStats,
+        recommendations: generateRecommendations(hasDraft, hasPlan, hasExecution, executionStats),
       };
 
-      logSages("fuxi_report_generated", {
-        name,
-        status: state.status,
-        completionRate,
-        completedTasks: state.completedTasks,
-        totalTasks: state.totalTasks,
-      });
+      logSages("fuxi_report_generated", { name, executionStats });
 
       return JSON.stringify(success(report));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logSages("fuxi_generate_report_failed", { name, error: msg });
-      return JSON.stringify({ success: false, error: { message: msg } });
-    }
-  },
-});
-
-export const fuxi_transition_phase = tool({
-  description: `Fuxi transitions the workflow to a new phase.
-
-  Validates the phase transition is valid, updates the state, and logs the event.`,
-  args: {
-    name: tool.schema.string().describe("Plan name"),
-    new_phase: tool.schema.string().describe("New phase name"),
-  },
-  execute: async (args, ctx) => {
-    const { name, new_phase } = args;
-    const projectDir = ctx.agent;
-
-    try {
-      const planDir = ensurePlanDir(projectDir);
-      const stateFile = join(planDir, name, "state.json");
-
-      // Check if state file exists
-      if (!existsSync(stateFile)) {
-        return JSON.stringify({
-          success: false,
-          error: { message: `State file not found: ${stateFile}` },
-        });
-      }
-
-      // Load the workflow state
-      const state = loadWorkflowState(stateFile);
-
-      // Validate new_phase is not empty
-      if (!new_phase || new_phase.trim() === "") {
-        return JSON.stringify({
-          success: false,
-          error: { message: "new_phase cannot be empty" },
-        });
-      }
-
-      // Validate workflow is in execution state
-      if (state.status !== "execution") {
-        return JSON.stringify({
-          success: false,
-          error: { message: `Workflow ${name} is not in execution state (current: ${state.status})` },
-        });
-      }
-
-      // Store previous phase for logging
-      const previousPhase = state.currentPhase || "none";
-
-      // Create new phase object and transition
-      const newPhaseObj = { name: new_phase };
-      const updatedState = transitionPhase(state, newPhaseObj);
-
-      // Save the updated state
-      saveWorkflowState(updatedState, stateFile);
-
-      // Log the transition event
-      logSages("fuxi_phase_transitioned", {
-        name,
-        previousPhase,
-        newPhase: new_phase,
-      });
-
-      // Return success with transition details
-      return JSON.stringify(
-        success({
-          previousPhase,
-          newPhase: new_phase,
-          planName: name,
-        }),
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logSages("fuxi_transition_phase_failed", { name, new_phase, error: msg });
       return JSON.stringify({ success: false, error: { message: msg } });
     }
   },
@@ -524,3 +655,60 @@ ${request}
 `;
 }
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Report execution statistics - used for fuxi_generate_report
+ */
+interface ReportExecutionStats {
+  workflow_id: string;
+  status: string;
+  phases_completed: number;
+  total_phases: number;
+  tasks_completed: number;
+  total_tasks: number;
+  completion_rate: string;
+  started_at?: string;
+  last_checkpoint?: string;
+  error?: string;
+}
+
+function generateRecommendations(
+  hasDraft: boolean,
+  hasPlan: boolean,
+  hasExecution: boolean,
+  executionStats: ReportExecutionStats | null,
+): string[] {
+  // If workflow has execution stats, provide status-based recommendations
+  if (executionStats) {
+    if (executionStats.status === "completed") {
+      return ["Workflow completed successfully"];
+    }
+    if (executionStats.status === "failed") {
+      return ["Workflow failed", "Use fuxi_resume to retry from last checkpoint"];
+    }
+    if (executionStats.status === "running") {
+      return [`Workflow running: ${executionStats.tasks_completed}/${executionStats.total_tasks} tasks completed`];
+    }
+    if (executionStats.status === "paused") {
+      return ["Workflow paused", "Use fuxi_resume to continue"];
+    }
+  }
+
+  // Otherwise, provide file-based recommendations
+  if (!hasDraft) {
+    return ["No draft found. Use fuxi_create_draft to start."];
+  }
+  if (hasDraft && !hasPlan) {
+    return ["Draft created. Use qiaochui_decompose to create plan."];
+  }
+  if (hasPlan && !hasExecution) {
+    return ["Plan created. Use qiaochui_decompose to create execution file."];
+  }
+  if (hasExecution) {
+    return ["Execution file ready. Use fuxi_orchestrate to start execution."];
+  }
+  return [];
+}

@@ -32,3 +32,6 @@ Thumbs.db
 
 # Plan files (generated)
 .plan/
+
+# Worktrees (isolated development)
+.worktrees/

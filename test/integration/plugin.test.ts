@@ -1,10 +1,10 @@
 /**
- * Integration Tests for Four Divine Agents Plugin
+ * Integration Tests for Four Sages Agents Plugin
  * Tests plugin registration and OpenCode integration
  */
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 
-describe("Four Divine Agents Plugin Integration", () => {
+describe("Four Sages Agents Plugin Integration", () => {
   describe("Plugin Tool Registration", () => {
     const expectedTools = [
       "fuxi_create_draft",
@@ -61,7 +61,7 @@ describe("Four Divine Agents Plugin Integration", () => {
     const expectedCommands: CommandConfig[] = [
       {
         name: "fuxi",
-        description: "Start Fuxi's Four Divine Agents workflow - design, review, implement, audit",
+        description: "Start Fuxi's Four Sages Agents workflow - design, review, implement, audit",
         handler: async () => "",
       },
     ];
@@ -72,7 +72,7 @@ describe("Four Divine Agents Plugin Integration", () => {
     });
 
     it("should have correct command description", () => {
-      expect(expectedCommands[0].description).toContain("Four Divine Agents");
+      expect(expectedCommands[0].description).toContain("Four Sages Agents");
       expect(expectedCommands[0].description).toContain("design, review, implement, audit");
     });
   });

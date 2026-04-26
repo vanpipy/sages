@@ -10,6 +10,7 @@
  */
 
 import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
 import type { PluginContext, GaoYaoReviewResult, GaoYaoVerdict, ReviewMode } from "../types.js";
 import { success, logSages } from "../utils.js";
 import { existsSync, readFileSync } from "node:fs";
@@ -65,9 +66,9 @@ Checks:
 
 Returns verdict: PASS, NEEDS_CHANGES, or REJECTED with issues list`,
   args: {
-    plan_name: tool.schema.string().describe("Plan name to audit"),
-    commit_hash: tool.schema.string().optional().describe("Specific commit to review"),
-    review_mode: tool.schema.string().optional().describe("quick or full (default: full)"),
+    plan_name: z.string().describe("Plan name to audit"),
+    commit_hash: z.string().optional().describe("Specific commit to review"),
+    review_mode: z.string().optional().describe("quick or full (default: full)"),
   },
   execute: async (args, ctx) => {
     const { plan_name, commit_hash, review_mode = "full" } = args;
@@ -96,7 +97,7 @@ Returns verdict: PASS, NEEDS_CHANGES, or REJECTED with issues list`,
 export const gaoyao_check_security = tool({
   description: "Run security scan on modified files",
   args: {
-    files: tool.schema.array(tool.schema.string()).describe("Files to scan"),
+    files: z.array(z.string()).describe("Files to scan"),
   },
   execute: async (args, ctx) => {
     const { files } = args;

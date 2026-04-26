@@ -2,7 +2,7 @@
  * Execution utilities for Sages
  * Provides parsing of execution orchestration YAML and Promise-based sleep
  */
-import type { ExecutionPlan, Task, Phase, ExecutionStrategy } from "../types.js";
+import type { ExecutionPlan, Task, Phase, ExecutionStrategy, TaskResult } from "../types.js";
 
 /**
  * Creates a default/empty ExecutionPlan
@@ -166,7 +166,7 @@ export function parseExecutionYaml(yaml: string): ExecutionPlan {
           } else if (line.startsWith("result:")) {
             inTaskResult = true;
             currentResult = {};
-            currentTask.result = currentResult;
+            currentTask.result = currentResult as TaskResult;
           } else if (inTaskResult && currentResult) {
             if (line.startsWith("status:")) {
               const match = line.match(/status:\s*(.+)/);
@@ -228,7 +228,7 @@ export function parseExecutionYaml(yaml: string): ExecutionPlan {
             // This is a task item in the phase's tasks array
             // Only add if it looks like a simple task ID (no colon)
             const content = line.replace(/^-/, "").trim();
-            if (!content.includes(":")) {
+            if (!content.includes(":") && currentPhase.tasks) {
               currentPhase.tasks.push(content);
             } else {
               // This is likely a top-level task entry, not a phase task

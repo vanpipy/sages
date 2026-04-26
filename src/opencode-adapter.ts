@@ -1,16 +1,42 @@
-import type { Tool } from "deepagents";
-import { fuxiAgent } from "./deepagents/fuxi-agent.js";
+import * as fuxiTools from "./tools/fuxi-tools.js";
+import * as qiaochuiTools from "./tools/qiaochui-tools.js";
+import * as lubanTools from "./tools/luban-tools.js";
+import * as gaoyaoTools from "./tools/gaoyao-tools.js";
+import * as workflowTools from "./tools/workflow-tools.js";
 
 /**
  * OpenCode Adapter
  *
- * Thin layer that exposes deepagents tools to the OpenCode plugin system.
- * This is the only file that knows about both OpenCode and deepagents.
+ * Thin layer that exposes Sages tools to the OpenCode plugin system.
  */
 
+// Tool type matching the opencode plugin system
+interface Tool {
+  name: string;
+  description: string;
+  execute(args: Record<string, unknown>, context: Record<string, unknown>): Promise<string>;
+}
+
+function extractTools(module: Record<string, unknown>): Tool[] {
+  return Object.values(module).filter(
+    (obj): obj is Tool => typeof obj === "object" && obj !== null && "name" in obj && "execute" in obj
+  );
+}
+
 export async function getSagesTools(): Promise<Tool[]> {
-  // deepagents agent exposes its tools via .tools property
-  return fuxiAgent.tools;
+  const fuxiAgentTools = extractTools(fuxiTools);
+  const qiaochuiAgentTools = extractTools(qiaochuiTools);
+  const lubanAgentTools = extractTools(lubanTools);
+  const gaoyaoAgentTools = extractTools(gaoyaoTools);
+  const workflowAgentTools = extractTools(workflowTools);
+
+  return [
+    ...fuxiAgentTools,
+    ...qiaochuiAgentTools,
+    ...lubanAgentTools,
+    ...gaoyaoAgentTools,
+    ...workflowAgentTools,
+  ];
 }
 
 export async function invokeTool(
@@ -18,9 +44,7 @@ export async function invokeTool(
   args: Record<string, unknown>,
   context: { sessionId: string; messageId: string; agent: string }
 ): Promise<string> {
-  // Delegate to deepagents agent's tool execution
-  const result = await fuxiAgent.invokeTool(toolName, args, context);
-  return JSON.stringify(result);
+  return JSON.stringify({ error: "Tool invocation not implemented" });
 }
 
-export { fuxiAgent };
+

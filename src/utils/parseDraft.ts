@@ -26,7 +26,7 @@ export function parseDraft(content: string): ParsedDraft | null {
     let timestamp = "";
     let status = "";
     const sections: ParsedDraft["sections"] = {};
-    let currentSection = "";
+    let currentSection: keyof ParsedDraft["sections"] | "notes" | "" = "";
     let notes = "";
 
     for (const line of lines) {

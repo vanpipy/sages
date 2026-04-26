@@ -3,7 +3,7 @@
  * ║                                                                           ║
  * ║   🜄 Sages Plugin - Type Definitions 🜄                                    ║
  * ║                                                                           ║
- * ║   Shared TypeScript interfaces for the Four Divine Agents plugin          ║
+ * ║   Shared TypeScript interfaces for the Four Sages Agents plugin          ║
  * ║                                                                           ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
