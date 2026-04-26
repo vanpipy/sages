@@ -15,16 +15,25 @@ Sages is an OpenCode plugin that implements a multi-agent workflow system based 
 
 ```bash
 bun install
+bun run install
 ```
+
+Or run directly:
+
+```bash
+bun scripts/install.ts
+```
+
+This will:
+1. Build self-contained tools with esbuild
+2. Copy `src/agents/*` to `~/.config/opencode/agent/`
+3. Copy bundled tools to `~/.config/opencode/tool/`
 
 ## Development
 
 ```bash
-# Build the plugin
-bun run build:plugin
-
-# Watch mode for development
-bun run build:plugin:watch
+# Build self-contained tools (output: tool/)
+bun run build:tools
 
 # Clean build artifacts
 bun run clean
@@ -34,16 +43,13 @@ bun run clean
 
 ```bash
 # All tests
-bun run test:all
+bun run test
 
 # Unit tests only
 bun run test:unit
 
 # Integration tests
 bun run test:integration
-
-# E2E tests
-bun run test:e2e
 ```
 
 ## Workflow
@@ -61,11 +67,12 @@ The plugin consists of:
 
 | Directory | Purpose |
 |-----------|---------|
+| `scripts/` | Build and install scripts |
 | `src/agents/` | Agent persona definitions (markdown) |
 | `src/engine/` | Workflow engine, file-lock, state-manager, circuit-breaker |
 | `src/tools/` | Per-agent tool definitions |
 | `src/workflows/` | YAML workflow orchestration |
-| `tool/` | Bundled self-contained tools (deploy to ~/.config/opencode/tool/sages/) |
+| `tool/` | Bundled self-contained tools (deploy to ~/.config/opencode/tool/) |
 
 ## Dependencies
 

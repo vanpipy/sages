@@ -68,18 +68,16 @@ initialized → draft_created → plan_approved → execution_in_progress → re
 ## Directory Structure
 
 ```
+scripts/
+├── build-self-contained-tools.ts  # Bundles tools with esbuild
+└── install.ts                     # Installs plugin to ~/.config/opencode/
+
 src/
 ├── agents/           # Agent persona definitions
 │   ├── fuxi.md
 │   ├── qiaochui.md
 │   ├── luban.md
 │   └── gaoyao.md
-├── deepagents/       # Agent runtime implementations
-│   ├── fuxi-agent.ts
-│   ├── qiaochui-subagent.ts
-│   ├── luban-subagent.ts
-│   └── tools/
-│       └── gaoyao-tool.ts
 ├── engine/           # Core engine components
 │   ├── workflow-engine.ts
 │   ├── file-lock.ts
@@ -95,6 +93,8 @@ src/
 │   └── sages-registry.ts
 └── workflows/        # YAML orchestration
     └── four-sages.yaml
+
+tool/                  # Bundled self-contained tools (output)
 ```
 
 ## Design Draft Format (Eight Trigrams)
