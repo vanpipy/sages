@@ -58,7 +58,12 @@ Output: .sages/plans/{name}.draft.md`,
   },
   execute: async (args, ctx) => {
     const { name, request } = args;
-    const projectDir = ctx.agent;
+    // Resolve project directory - ctx.agent may be agent name (e.g., "fuxi") when called via @fuxi
+    // Only absolute paths (/...) or explicit relative paths (./..., ../...) are valid project paths
+    // Agent names are simple strings without path indicators
+    const isAbsolutePath = ctx.agent?.startsWith('/');
+    const isExplicitRelativePath = ctx.agent?.startsWith('./') || ctx.agent?.startsWith('../');
+    const projectDir = (isAbsolutePath || isExplicitRelativePath) ? ctx.agent : process.cwd();
 
     try {
       const planDir = ensurePlanDir(projectDir);
