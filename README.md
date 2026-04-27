@@ -13,6 +13,16 @@ Sages is an OpenCode plugin that implements a multi-agent workflow system based 
 
 ## Installation
 
+### Quick Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/scripts/install.sh | bash
+```
+
+This clones the repo, runs the install script, and cleans up automatically.
+
+### Manual Install
+
 ```bash
 bun install
 bun run install
@@ -24,7 +34,7 @@ Or run directly:
 bun scripts/install.ts
 ```
 
-This will:
+**What it does:**
 1. Build self-contained tools with esbuild
 2. Copy `src/agents/*` to `~/.config/opencode/agent/`
 3. Copy bundled tools to `~/.config/opencode/tool/`
