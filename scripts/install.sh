@@ -8,14 +8,18 @@ echo "Installing Four Sages Agents..."
 echo ""
 
 # 1. Clone to /tmp
-echo "1/3: Cloning repository..."
+echo "1/4: Cloning repository..."
 git clone --depth 1 "$REPO" "$TMP_DIR"
 
-# 2. Run install script
+# 2. Install dependencies
 echo ""
-echo "2/3: Running installation..."
+echo "2/4: Installing dependencies..."
 cd "$TMP_DIR"
+bun install
 
+# 3. Run install script
+echo ""
+echo "3/4: Running installation..."
 # Prefer bun, fallback to npx
 if command -v bun &> /dev/null; then
     echo "   Using: bun"
@@ -30,9 +34,9 @@ else
     exit 1
 fi
 
-# 3. Cleanup
+# 4. Cleanup
 echo ""
-echo "3/3: Cleaning up..."
+echo "4/4: Cleaning up..."
 rm -rf "$TMP_DIR"
 
 echo ""
