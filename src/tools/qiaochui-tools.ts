@@ -12,7 +12,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 import type { PluginContext, QiaoChuiReviewResult, ExecutionPlan, Phase } from "../types.js";
-import { ensurePlanDir, success, readFileSync, existsSync, writeFileSync, join } from "../utils.js";
+import { ensurePlanDir, success, readFileSync, existsSync, writeFileSync, join, dirname } from "../utils.js";
 import { logSages } from "../utils/logging.js";
 import { parseDraft, isDraftComplete } from "../utils/parseDraft.js";
 
@@ -88,7 +88,6 @@ Outputs:
   },
   execute: async (args, ctx) => {
     const { draft_path, max_tasks = 10 } = args;
-
     try {
       if (!existsSync(draft_path)) {
         return JSON.stringify({
@@ -98,7 +97,8 @@ Outputs:
       }
 
       const baseName = draft_path.split("/").pop()?.replace(".draft.md", "") || "unnamed";
-      const planDir = ensurePlanDir(draft_path.replace(".draft.md", ""));
+      // Get parent directory using dirname (correct path computation)
+      const planDir = dirname(draft_path);
       const planPath = join(planDir, `${baseName}.plan.md`);
       const executionPath = join(planDir, `${baseName}.execution.yaml`);
 

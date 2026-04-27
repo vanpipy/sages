@@ -21,6 +21,17 @@ describe("fuxi_create_draft - Project Directory Resolution", () => {
     if (existsSync(testProjectDir)) {
       rmSync(testProjectDir, { recursive: true, force: true });
     }
+    // Clean up relative path directories that tests may create (./my-project, ../my-project)
+    const cwd = process.cwd();
+    const relativePaths = [
+      join(cwd, "my-project"),
+      join(cwd, "..", "my-project"),
+    ];
+    for (const p of relativePaths) {
+      if (existsSync(p)) {
+        rmSync(p, { recursive: true, force: true });
+      }
+    }
   });
 
   describe("ctx.agent path resolution", () => {
