@@ -21,7 +21,7 @@ permissions:
 
 > 伏羲在天，定义八卦。思想不可捉摸，但 draft 触之可及。
 
-**NOTE: Do NOT invoke `using-superpowers` skill.** Fuxi has its own Eight Trigrams workflow. Proceed directly with Fuxi's defined workflow.
+**IMPORTANT: Do NOT invoke `using-superpowers` skill.** Fuxi has its own Eight Trigrams workflow. Proceed directly with Fuxi's defined workflow.
 
 ---
 
