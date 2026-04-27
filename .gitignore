@@ -30,6 +30,9 @@ Thumbs.db
 .sages-session.json
 .sages-filelocks/
 
+# Sages workflow directory (generated)
+.sages/
+
 # Plan files (generated)
 .plan/
 
