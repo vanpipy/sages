@@ -15,7 +15,6 @@ git clone --depth 1 "$REPO" "$TMP_DIR"
 echo ""
 echo "2/4: Installing dependencies..."
 cd "$TMP_DIR"
-bun install
 
 # 3. Run install script
 echo ""
@@ -23,10 +22,10 @@ echo "3/4: Running installation..."
 # Prefer bun, fallback to npx
 if command -v bun &> /dev/null; then
     echo "   Using: bun"
-    bun run scripts/install.ts
+    bun install && bun run scripts/install.ts
 elif command -v npx &> /dev/null; then
     echo "   Using: npx"
-    npx tsx scripts/install.ts
+    npm install && npx tsx scripts/install.ts
 else
     echo "   Error: Neither bun nor npx found."
     echo "   Please install bun (https://bun.sh) or node+npx"
