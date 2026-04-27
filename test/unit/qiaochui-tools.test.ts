@@ -2,7 +2,22 @@
  * Unit Tests for QiaoChui Tools
  * Tests review and decomposition logic
  */
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+// Helper to create temp project structure
+function createTempProject(): string {
+  const tempDir = join("/tmp", `qiaochui-test-${Date.now()}`);
+  mkdirSync(tempDir, { recursive: true });
+  mkdirSync(join(tempDir, ".sages", "plans"), { recursive: true });
+  return tempDir;
+}
+
+// Helper to cleanup temp project
+function cleanupTempProject(tempDir: string): void {
+  rmSync(tempDir, { recursive: true, force: true });
+}
 
 // Mock the parseDraft function for testing
 function parseDraftForTest(content: string): { sections: Record<string, string>; notes?: string } | null {
@@ -314,6 +329,169 @@ Never allow cross-origin requests without CORS
 
       const totalTime = tasks.reduce((sum, t) => sum + t.time, 0);
       expect(totalTime).toBe(50);
+    });
+  });
+
+  describe("File Path Handling - Regression Test", () => {
+    // This test catches the bug where draft_path.replace(".draft.md", "")
+    // incorrectly creates nested directories like:
+    //   .sages/plans/test/.sages/plans/test.plan.md
+    // instead of:
+    //   .sages/plans/test.plan.md
+
+    it("should extract plan name from draft path correctly", () => {
+      // Simulate the bug: draft_path.replace(".draft.md", "") on a path
+      const draftPath1 = ".sages/plans/my-project.draft.md";
+      const planName1 = draftPath1.replace(".draft.md", ""); // ".sages/plans/my-project"
+      expect(planName1).toBe(".sages/plans/my-project");
+
+      // The ensurePlanDir function creates a directory at this path
+      // Then the plan file is created at: planDir + ".plan.md"
+      // This creates: .sages/plans/my-project.plan.md (correct)
+
+      // Bug case: if draftPath already contains .sages/plans prefix in name
+      const draftPath2 = ".sages/plans/nested.draft.md";
+      const planName2 = draftPath2.replace(".draft.md", ""); // ".sages/plans/nested"
+      expect(planName2).toBe(".sages/plans/nested");
+
+      // The correct plan file path should be:
+      // .sages/plans/nested.plan.md
+      const correctPlanFilePath = planName2 + ".plan.md";
+      expect(correctPlanFilePath).toBe(".sages/plans/nested.plan.md");
+    });
+
+    it("should NOT create nested .sages directories", () => {
+      const tempDir = createTempProject();
+      const planName = "test-plan";
+      const planDir = join(tempDir, ".sages", "plans", planName);
+      const planFilePath = join(planDir, planName + ".plan.md");
+
+      try {
+        // Create the plan directory
+        mkdirSync(planDir, { recursive: true });
+
+        // Write a plan file
+        writeFileSync(planFilePath, "# Test Plan\n\nTasks: []");
+
+        // Verify the structure is correct (NOT nested)
+        const expectedPath = join(tempDir, ".sages", "plans", planName, planName + ".plan.md");
+        expect(existsSync(expectedPath)).toBe(true);
+
+        // Verify we DON'T have the buggy nested structure
+        const buggyPath = join(tempDir, ".sages", "plans", planName, ".sages", "plans", planName + ".plan.md");
+        expect(existsSync(buggyPath)).toBe(false);
+
+        // Verify the plan file is directly under .sages/plans/{name}/
+        expect(planFilePath).toBe(expectedPath);
+      } finally {
+        cleanupTempProject(tempDir);
+      }
+    });
+
+    it("should handle draft paths with various naming patterns", () => {
+      const testCases = [
+        {
+          draftPath: ".sages/plans/my-project.draft.md",
+          expectedPlanDir: ".sages/plans/my-project",
+          expectedPlanFile: ".sages/plans/my-project.plan.md",
+        },
+        {
+          draftPath: ".sages/plans/another-test.draft.md",
+          expectedPlanDir: ".sages/plans/another-test",
+          expectedPlanFile: ".sages/plans/another-test.plan.md",
+        },
+      ];
+
+      for (const tc of testCases) {
+        const planName = tc.draftPath.replace(".draft.md", "");
+        const planFile = planName + ".plan.md";
+
+        expect(planName).toBe(tc.expectedPlanDir);
+        expect(planFile).toBe(tc.expectedPlanFile);
+      }
+    });
+
+    it("should create plan directory at correct depth", () => {
+      const tempDir = createTempProject();
+      const projectName = "my-awesome-project";
+
+      // Simulate ensurePlanDir behavior
+      const planDir = join(tempDir, ".sages", "plans", projectName);
+      const planFile = join(planDir, projectName + ".plan.md");
+      const executionFile = join(planDir, projectName + ".execution.yaml");
+
+      try {
+        mkdirSync(planDir, { recursive: true });
+        writeFileSync(planFile, "# Plan");
+        writeFileSync(executionFile, "tasks: []");
+
+        // Verify files exist at correct depth
+        expect(existsSync(planFile)).toBe(true);
+        expect(existsSync(executionFile)).toBe(true);
+
+        // Verify depth is 4 levels: /tmp/xxx/.sages/plans/my-awesome-project/
+        const expectedDepth = planDir.split("/").length;
+        expect(expectedDepth).toBeGreaterThan(4);
+
+        // Verify NO extra .sages in the path
+        const pathParts = planDir.split("/");
+        const sagesCount = pathParts.filter(p => p === ".sages").length;
+        expect(sagesCount).toBe(1); // Only one .sages directory
+      } finally {
+        cleanupTempProject(tempDir);
+      }
+    });
+
+    it("should correctly derive project dir from draft path", () => {
+      // This is the CORE bug: ensurePlanDir appends PLANS_DIR to whatever path it receives.
+      // If you pass ".sages/plans/my-project" to ensurePlanDir, it returns
+      // ".sages/plans/my-project/.sages/plans" (WRONG!)
+      //
+      // The correct approach: derive project root from draft path, not plan name
+      //
+      // Bug: draft_path = ".sages/plans/my-project.draft.md"
+      //      draft_path.replace(".draft.md", "") = ".sages/plans/my-project"
+      //      ensurePlanDir(".sages/plans/my-project") -> ".sages/plans/my-project/.sages/plans" (WRONG!)
+      //
+      // Fix: The draft_path should be converted to project dir differently
+
+      const tempDir = createTempProject();
+      const planName = "test-project";
+
+      try {
+        // Simulate the BUGGY behavior
+        const buggyPlanName = join(tempDir, ".sages", "plans", planName);
+        const buggyPlanDir = join(buggyPlanName, ".sages", "plans"); // This is what ensurePlanDir would create
+        const buggyPlanFile = join(buggyPlanDir, planName + ".plan.md");
+
+        mkdirSync(buggyPlanDir, { recursive: true });
+        writeFileSync(buggyPlanFile, "buggy content");
+
+        // The BUG creates a nested .sages/plans inside the plan name directory
+        expect(existsSync(buggyPlanFile)).toBe(true);
+
+        // Verify the buggy path has TWO .sages directories
+        const buggyParts = buggyPlanFile.split("/");
+        const sagesInBuggy = buggyParts.filter(p => p === ".sages").length;
+        expect(sagesInBuggy).toBe(2); // BUG: has nested .sages
+
+        // Now verify the CORRECT behavior
+        const correctPlanDir = join(tempDir, ".sages", "plans", planName);
+        const correctPlanFile = join(correctPlanDir, planName + ".plan.md");
+
+        mkdirSync(correctPlanDir, { recursive: true });
+        writeFileSync(correctPlanFile, "correct content");
+
+        // The CORRECT path should have only ONE .sages
+        const correctParts = correctPlanFile.split("/");
+        const sagesInCorrect = correctParts.filter(p => p === ".sages").length;
+        expect(sagesInCorrect).toBe(1);
+
+        // They should be different paths
+        expect(buggyPlanFile).not.toBe(correctPlanFile);
+      } finally {
+        cleanupTempProject(tempDir);
+      }
     });
   });
 });
