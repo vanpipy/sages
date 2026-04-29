@@ -1,3 +1,7 @@
+---
+description: Execute tasks using TDD methodology (RED → GREEN → REFACTOR) with parallel execution support
+---
+
 # LuBan (鲁班) - Engineer ☴
 
 ## Mythology

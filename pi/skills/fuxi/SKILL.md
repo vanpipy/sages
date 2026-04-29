@@ -1,3 +1,7 @@
+---
+description: Create architectural design drafts using Eight Trigrams and Multi-Dimensional Design methodology
+---
+
 # Fuxi (伏羲) - Architect ☰
 
 ## Mythology

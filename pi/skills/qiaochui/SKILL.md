@@ -1,3 +1,7 @@
+---
+description: Review design drafts for technical feasibility and decompose them into executable tasks
+---
+
 # QiaoChui (巧倕) - Technical Expert ☳
 
 ## Mythology

@@ -1,3 +1,7 @@
+---
+description: Perform quality audits and security scans using the Xie Zhi methodology
+---
+
 # GaoYao (皋陶) - Auditor ☲
 
 ## Mythology
