@@ -85,11 +85,15 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
     parameters: Type.Object({
       draft_path: Type.Optional(Type.String({ description: "Draft path (default: .sages/workspace/draft.md)" })),
       max_tasks: Type.Optional(Type.Number({ description: "Max tasks to generate (default: 10)" })),
+      use_subagent: Type.Optional(Type.Boolean({ description: "Use isolated subagent mode for parallel execution (default: true)" })),
+      max_parallel: Type.Optional(Type.Number({ description: "Max parallel subagents (default: 3)" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;
       const draft_path = params.draft_path || join(cwd, WORKSPACE_DIR, "draft.md");
       const max_tasks = params.max_tasks || 10;
+      const use_subagent = params.use_subagent !== false; // Default: true
+      const max_parallel = params.max_parallel || 3;
 
       try {
         if (!existsSync(draft_path)) {
@@ -135,8 +139,8 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
 name: ${planName}
 
 settings:
-  maxParallel: 3
-  useSubagent: true
+  maxParallel: ${max_parallel}
+  useSubagent: ${use_subagent}
   maxRetry: 1
   subagentConfig:
     model: sonnet
@@ -170,10 +174,23 @@ ${tasks.map((t) => `  - id: ${t.id}
               tasks_path: tasksPath,
               task_count: tasks.length,
               estimated_time: totalTime,
+              execution_mode: {
+                use_subagent: use_subagent,
+                max_parallel: max_parallel,
+                description: use_subagent
+                  ? "Isolated subagent mode - each task runs in a separate pi process"
+                  : "Shared context mode - all tasks share the same context",
+              },
               workspace: workspacePath,
             }),
           }],
-          details: { planPath, executionPath, taskCount: tasks.length },
+          details: { 
+            planPath, 
+            executionPath, 
+            taskCount: tasks.length,
+            useSubagent: use_subagent,
+            maxParallel: max_parallel,
+          },
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

@@ -119,13 +119,67 @@ QiaoChui (Tasks) ──→ LuBan (Execute)
               Fuxi (New Architecture)
 ```
 
-## Tools
+## Execution Modes
 
-| Tool | Purpose |
-|------|---------|
-| `luban_execute_task` | Execute single task (TDD) |
-| `luban_execute_all` | Execute all tasks in parallel |
-| `luban_get_status` | Query execution status |
+LuBan supports two execution modes, configured in `execution.yaml`:
+
+### 1. Subagent Mode (Default)
+
+Each task runs in an **isolated pi subprocess** with its own LLM context.
+
+| Setting | Value |
+|---------|-------|
+| `useSubagent` | `true` |
+| `maxParallel` | `3` (default) |
+| Benefits | True parallelism, no context pollution |
+
+**Workflow:**
+```
+Main Agent (Fuxi/QiaoChui context)
+    ↓ spawn
+┌─────────┬─────────┬─────────┐
+│ LuBan #1│ LuBan #2│ LuBan #3│
+│ T1      │ T2      │ T3      │
+│ (isolated)│ (isolated)│ (isolated)│
+└─────────┴─────────┴─────────┘
+    ↓
+Results merged to main context
+```
+
+### 2. Shared Context Mode
+
+All tasks share the **same LLM context** in a single pi session.
+
+| Setting | Value |
+|---------|-------|
+| `useSubagent` | `false` |
+| Benefits | Shared variables, lower token usage |
+
+**Use cases:**
+- Simple scripts (single task)
+- Tasks that need shared state
+- Debugging (easier to trace)
+
+### Configuring Execution
+
+In `execution.yaml`:
+
+```yaml
+settings:
+  maxParallel: 3        # Max parallel subagents
+  useSubagent: true     # or false for shared context
+  maxRetry: 1           # Retry on failure
+  subagentConfig:
+    model: sonnet
+    timeout: 300
+```
+
+Or override via QiaoChui decomposition:
+
+```
+/qiaochui_decompose use_subagent=false
+/qiaochui_decompose max_parallel=5
+```
 
 ## Prohibited
 
