@@ -10,6 +10,7 @@ export interface DraftConfig {
   triggers?: string[];
   dataFlow?: string[];
   errorHandling?: string[];
+  observability?: string[];
   boundaries?: string[];
   successPath?: string[];
   notes?: string;
@@ -81,16 +82,179 @@ export function generateDraft(config: DraftConfig): string {
 }
 
 export function generateMinimalDraft(name: string, request: string): string {
+  // Perform basic analysis of the request
+  const analysis = analyzeRequest(request);
+  
   return generateDraft({
     name,
     request,
     intent: request,
-    dataModels: ["- Define core entities based on request"],
-    triggers: ["- Identify key user interactions"],
-    dataFlow: ["- Map data transformations"],
-    errorHandling: ["- Handle edge cases gracefully"],
-    boundaries: ["- Scope limited to core functionality"],
-    successPath: ["- User completes primary workflow"],
-    notes: "- Ready for QiaoChui review",
+    dataModels: analysis.dataModels,
+    triggers: analysis.triggers,
+    dataFlow: analysis.dataFlow,
+    errorHandling: analysis.errorHandling,
+    observability: ["- Console logging for debugging", "- Status indicators for run states", "- ctx.ui.notify() for user feedback"],
+    boundaries: analysis.boundaries,
+    successPath: analysis.successPath,
+    notes: "- Apply relevant MDD planes only (not all 7 may apply)\n- Focus on high-impact areas first\n- Ready for QiaoChui review",
   });
+}
+
+/**
+ * Basic analysis of the request to generate meaningful MDD content
+ */
+function analyzeRequest(request: string): {
+  dataModels: string[];
+  triggers: string[];
+  dataFlow: string[];
+  errorHandling: string[];
+  boundaries: string[];
+  successPath: string[];
+} {
+  const lowerRequest = request.toLowerCase();
+  
+  // Detect request type and generate relevant content
+  if (lowerRequest.includes("refactor")) {
+    return {
+      dataModels: [
+        "- Current code structure analysis",
+        "- Target module/entity breakdown",
+        "- Dependency mapping",
+        "- State management patterns"
+      ],
+      triggers: [
+        "- Manual trigger: developer command",
+        "- CI/CD pipeline integration",
+        "- Pre-commit hook option"
+      ],
+      dataFlow: [
+        "- Input: existing code/files",
+        "- Transformation: refactoring operations",
+        "- Output: refactored code",
+        "- Validation: tests pass"
+      ],
+      errorHandling: [
+        "- Syntax error detection",
+        "- Type safety preservation",
+        "- Test failure rollback"
+      ],
+      boundaries: [
+        "- Scope: specific module or component",
+        "- Preserve: public API contracts",
+        "- Avoid: breaking changes"
+      ],
+      successPath: [
+        "- Code compiles without errors",
+        "- All tests pass",
+        "- No behavioral changes"
+      ]
+    };
+  }
+  
+  if (lowerRequest.includes("api") || lowerRequest.includes("endpoint") || lowerRequest.includes("rest")) {
+    return {
+      dataModels: [
+        "- Request/Response DTOs",
+        "- Entity models",
+        "- Validation schemas",
+        "- Error response types"
+      ],
+      triggers: [
+        "- HTTP methods: GET, POST, PUT, DELETE",
+        "- Authentication headers",
+        "- Query parameters"
+      ],
+      dataFlow: [
+        "- Client → Router → Handler → Service → Repository",
+        "- Response serialization",
+        "- Error middleware"
+      ],
+      errorHandling: [
+        "- 4xx client errors",
+        "- 5xx server errors",
+        "- Timeout handling"
+      ],
+      boundaries: [
+        "- API versioning strategy",
+        "- Rate limiting",
+        "- CORS policy"
+      ],
+      successPath: [
+        "- Endpoint returns correct status",
+        "- Response matches schema",
+        "- Performance within SLA"
+      ]
+    };
+  }
+  
+  if (lowerRequest.includes("test")) {
+    return {
+      dataModels: [
+        "- Test fixtures",
+        "- Mock/stub definitions",
+        "- Assertion helpers",
+        "- Coverage metrics"
+      ],
+      triggers: [
+        "- Unit test execution",
+        "- Integration test run",
+        "- CI pipeline"
+      ],
+      dataFlow: [
+        "- Arrange: setup inputs",
+        "- Act: call function",
+        "- Assert: verify output"
+      ],
+      errorHandling: [
+        "- Test timeout handling",
+        "- Flaky test retry",
+        "- Error snapshot updates"
+      ],
+      boundaries: [
+        "- Test isolation",
+        "- Shared state cleanup",
+        "- Resource cleanup"
+      ],
+      successPath: [
+        "- All assertions pass",
+        "- Coverage threshold met",
+        "- No regressions"
+      ]
+    };
+  }
+  
+  // Default analysis for general requests
+  return {
+    dataModels: [
+      "- Core domain entities",
+      "- Value objects",
+      "- Aggregate roots",
+      "- Repository interfaces"
+    ],
+    triggers: [
+      "- User interactions",
+      "- System events",
+      "- External API calls"
+    ],
+    dataFlow: [
+      "- Input processing",
+      "- Business logic execution",
+      "- Output generation"
+    ],
+    errorHandling: [
+      "- Input validation",
+      "- Exception handling",
+      "- Graceful degradation"
+    ],
+    boundaries: [
+      "- Module/Component scope",
+      "- API contracts",
+      "- Performance constraints"
+    ],
+    successPath: [
+      "- Core functionality works",
+      "- User goal achieved",
+      "- Performance acceptable"
+    ]
+  };
 }
