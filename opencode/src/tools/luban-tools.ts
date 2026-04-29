@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { PluginContext, TaskStatus, ReviewMode } from "../types.js";
 import {
   ensurePlanDir,
+  resolveProjectDir,
   success,
   acquireFileLock,
   releaseFileLock,
@@ -64,7 +65,7 @@ NOTE: Uses file locking to prevent conflicts with parallel tasks.`,
   },
   execute: async (args, ctx) => {
     const { task_id, task_description, files, test_command } = args;
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       // Acquire file locks for all files
@@ -142,7 +143,7 @@ export const luban_get_status = tool({
   },
   execute: async (args, ctx) => {
     const { plan_name } = args;
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       const planDir = ensurePlanDir(projectDir);
@@ -202,7 +203,7 @@ export const luban_release_locks = tool({
   },
   execute: async (args, ctx) => {
     const { task_id } = args;
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       releaseAllTaskLocks(projectDir, task_id);
@@ -228,7 +229,7 @@ export const luban_execute_workflow = tool({
   },
   execute: async (args, ctx) => {
     const { name } = args;
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       // Step 1: Read execution YAML from .sages/plans/{name}.execution.yaml

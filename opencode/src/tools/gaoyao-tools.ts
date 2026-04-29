@@ -12,7 +12,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 import type { PluginContext, GaoYaoReviewResult, GaoYaoVerdict, ReviewMode } from "../types.js";
-import { success, logSages } from "../utils.js";
+import { success, logSages, resolveProjectDir } from "../utils.js";
 import { existsSync, readFileSync } from "node:fs";
 
 // =============================================================================
@@ -72,7 +72,7 @@ Returns verdict: PASS, NEEDS_CHANGES, or REJECTED with issues list`,
   },
   execute: async (args, ctx) => {
     const { plan_name, commit_hash, review_mode = "full" } = args;
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       const mode: ReviewMode = review_mode === "quick" ? "quick" : "full";

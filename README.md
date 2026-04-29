@@ -1,92 +1,174 @@
 # OpenCode Sages
 
-OpenCode plugin for Four Sages Agents (Fuxi, QiaoChui, LuBan, GaoYao)
+A multi-agent workflow system for [OpenCode](https://github.com/opencode-ai/opencode) and [pi](https://pi.dev), inspired by Chinese mythology.
 
 ## Overview
 
-Sages is an OpenCode plugin that implements a multi-agent workflow system based on the Four Sages Agents mythology. Each agent has a specialized role in the software development lifecycle:
+Sages implements a Four Sages workflow where each agent has a specialized role:
 
-- **Fuxi** - Creates architectural designs using Eight Trigrams methodology
-- **QiaoChui** - Reviews designs and decomposes into executable tasks
-- **LuBan** - Executes tasks with TDD and file locking for conflict prevention
-- **GaoYao** - Performs quality audits including security and coverage checks
+| Agent | Role | Trigram |
+|-------|------|---------|
+| **Fuxi (伏羲)** | Architect - Creates designs using Eight Trigrams | ☰ Qian |
+| **QiaoChui (巧倕)** | Mechanist - Reviews designs, decomposes into tasks | ☳ Zhen |
+| **LuBan (鲁班)** | Craftsman - Implements with TDD methodology | ☴ Xun |
+| **GaoYao (皋陶)** | Judge - Quality audits and security checks | ☲ Li |
 
 ## Installation
 
-### Quick Install (Recommended)
+### OpenCode
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/scripts/install.sh | bash
+# Quick Install (Recommended)
+curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/opencode/install.sh | bash
+
+# Manual Install
+cd opencode && bun install && bun run install
 ```
 
-This clones the repo, runs the install script, and cleans up automatically.
-
-### Manual Install
+### pi
 
 ```bash
-bun install
-bun run install
+pi install npm:@sages/pi-four-sages
 ```
 
-Or run directly:
+## Usage
+
+### OpenCode
 
 ```bash
-bun scripts/install.ts
+# Start workflow
+/fuxi "add dark mode to the app"
+
+# Approve to proceed
+/fuxi-approve
 ```
 
-**What it does:**
-1. Build self-contained tools with esbuild
-2. Copy `src/agents/*` to `~/.config/opencode/agent/`
-3. Copy bundled tools to `~/.config/opencode/tool/`
+### pi
+
+```bash
+# Start workflow
+/fuxi
+
+# Or use skills directly
+/skill:fuxi
+/skill:qiaochui
+/skill:luban
+/skill:gaoyao
+```
+
+## Available Tools
+
+### Fuxi (Design)
+| Tool | Description |
+|------|-------------|
+| `fuxi_create_draft` | Create architectural design using Eight Trigrams |
+| `fuxi_get_draft` | Read existing draft |
+| `fuxi_get_status` | Check workflow status |
+
+### QiaoChui (Review)
+| Tool | Description |
+|------|-------------|
+| `qiaochui_review` | Review design for feasibility |
+| `qiaochui_decompose` | Create execution plan |
+
+### LuBan (Implementation)
+| Tool | Description |
+|------|-------------|
+| `luban_execute_task` | Execute task with TDD |
+| `luban_get_status` | Check execution progress |
+
+### GaoYao (Audit)
+| Tool | Description |
+|------|-------------|
+| `gaoyao_review` | Quality audit |
+| `gaoyao_check_security` | Security scan |
+
+## Workflow
+
+```
+Request → Fuxi Design → QiaoChui Review → User Decision
+                                         ↓
+                    LuBan Execute ←── APPROVE
+                         ↓
+                    GaoYao Audit
+                         ↓
+                    Complete
+```
+
+**Phase Details:**
+1. **Design Phase**: Fuxi creates architectural draft
+2. **Review Phase**: QiaoChui reviews and creates execution plan
+3. **Approval Phase**: User approves or requests revisions
+4. **Execution Phase**: LuBan executes tasks (parallel execution)
+5. **Audit Phase**: GaoYao performs quality check
+6. **Completion**: Workflow complete after passing audit
+
+## Eight Trigrams Design
+
+Each design draft follows the Eight Trigrams structure:
+
+| Trigram | Section | Purpose |
+|---------|---------|---------|
+| ☰ Qian | Core Intent | What & Why |
+| ☷ Kun | Data Structures | Entities & Models |
+| ☳ Zhen | Triggers | Events |
+| ☴ Xun | Data Flow | Transformations |
+| ☵ Kan | Error Handling | Fallbacks |
+| ☲ Li | Observability | Metrics |
+| ☶ Gen | Boundaries | Constraints |
+| ☱ Dui | Success Path | Happy path |
+
+## Project Structure
+
+```
+sages/
+├── opencode/              # OpenCode plugin
+│   ├── src/
+│   │   ├── agents/        # Agent personas (markdown)
+│   │   ├── engine/        # Workflow engine, file-lock, state-manager
+│   │   ├── hooks/         # Session hooks
+│   │   ├── tools/         # Tool definitions
+│   │   ├── utils/         # Utilities
+│   │   ├── workflows/     # YAML orchestration
+│   │   ├── index.ts
+│   │   ├── opencode-adapter.ts
+│   │   └── types.ts
+│   ├── scripts/           # Build scripts
+│   ├── test/              # Tests
+│   ├── tool/               # Bundled tools
+│   ├── build-self-contained-tools.ts
+│   ├── install.ts
+│   ├── install.sh
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── pi/                    # pi plugin
+│   ├── extensions/        # pi extension with tools
+│   ├── skills/            # Skill definitions (fuxi, qiaochui, luban, gaoyao)
+│   ├── prompts/           # Workflow templates
+│   └── package.json
+│
+├── .sages/                 # Workflow state & plans
+├── AGENTS.md               # Architecture documentation
+└── README.md               # This file
+```
 
 ## Development
 
 ```bash
-# Build self-contained tools (output: tool/)
-bun run build:tools
+# Install all dependencies
+bun install
 
-# Clean build artifacts
-bun run clean
-```
+# Build OpenCode tools
+bun run build:opencode
 
-## Testing
-
-```bash
-# All tests
+# Run tests
 bun run test
-
-# Unit tests only
-bun run test:unit
-
-# Integration tests
-bun run test:integration
 ```
-
-## Workflow
-
-1. **Design Phase**: Fuxi creates architectural draft in `.plan/{name}.draft.md`
-2. **Review Phase**: QiaoChui reviews and creates execution plan
-3. **Approval Phase**: User approves or requests revisions
-4. **Execution Phase**: LuBan executes tasks (parallel, up to 3 workers)
-5. **Audit Phase**: GaoYao performs final quality check
-6. **Completion**: Workflow complete after passing audit
-
-## Architecture
-
-The plugin consists of:
-
-| Directory | Purpose |
-|-----------|---------|
-| `scripts/` | Build and install scripts |
-| `src/agents/` | Agent persona definitions (markdown) |
-| `src/engine/` | Workflow engine, file-lock, state-manager, circuit-breaker |
-| `src/tools/` | Per-agent tool definitions |
-| `src/workflows/` | YAML workflow orchestration |
-| `tool/` | Bundled self-contained tools (deploy to ~/.config/opencode/tool/) |
 
 ## Dependencies
 
-- [zod](https://github.com/colinhacks/zod) ^4.1.8
+- [zod](https://github.com/colinhacks/zod) ^3.22.0
 - [@opencode-ai/plugin](https://github.com/opencode-ai/opencode) ^1.14.25
 
 ## License

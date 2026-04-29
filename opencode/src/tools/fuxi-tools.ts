@@ -17,7 +17,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 import type { PluginContext, WorkflowState } from "../types.js";
-import { ensurePlanDir, success, existsSync, readFileSync, writeFileSync } from "../utils.js";
+import { ensurePlanDir, resolveProjectDir, success, existsSync, readFileSync, writeFileSync, resolveProjectDir } from "../utils.js";
 import { logSages } from "../utils/logging.js";
 import { join } from "path";
 
@@ -58,12 +58,7 @@ Output: .sages/plans/{name}.draft.md`,
   },
   execute: async (args, ctx) => {
     const { name, request } = args;
-    // Resolve project directory - ctx.agent may be agent name (e.g., "fuxi") when called via @fuxi
-    // Only absolute paths (/...) or explicit relative paths (./..., ../...) are valid project paths
-    // Agent names are simple strings without path indicators
-    const isAbsolutePath = ctx.agent?.startsWith('/');
-    const isExplicitRelativePath = ctx.agent?.startsWith('./') || ctx.agent?.startsWith('../');
-    const projectDir = (isAbsolutePath || isExplicitRelativePath) ? ctx.agent : process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       const planDir = ensurePlanDir(projectDir);
@@ -91,7 +86,7 @@ export const fuxi_get_draft = tool({
   },
   execute: async (args, ctx) => {
     const { name } = args;
-    const projectDir = ctx.agent;
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       const planDir = ensurePlanDir(projectDir);
@@ -127,7 +122,7 @@ export const fuxi_orchestrate = tool({
   },
   execute: async (args, ctx) => {
     const { name, checkpoint_interval } = args;
-    const projectDir = ctx.agent;
+    const projectDir = resolveProjectDir(ctx.agent);
     const startTime = Date.now();
 
     try {
@@ -279,7 +274,7 @@ export const fuxi_get_status = tool({
   },
   execute: async (args, ctx) => {
     const { name } = args;
-    const projectDir = ctx.agent;
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       const planDir = ensurePlanDir(projectDir);
@@ -384,7 +379,7 @@ export const fuxi_resume = tool({
   },
   execute: async (args, ctx) => {
     const { name } = args;
-    const projectDir = ctx.agent;
+    const projectDir = resolveProjectDir(ctx.agent);
     const startTime = Date.now();
 
     try {
@@ -532,7 +527,7 @@ export const fuxi_generate_report = tool({
   },
   execute: async (args, ctx) => {
     const { name } = args;
-    const projectDir = ctx.agent;
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       const planDir = ensurePlanDir(projectDir);

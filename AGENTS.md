@@ -1,13 +1,13 @@
 # OpenCode Sages - Four Sages Agents
 
-A multi-agent workflow system for [OpenCode](https://github.com/opencode-ai/opencode), inspired by Chinese mythology.
+A multi-agent workflow system for [OpenCode](https://github.com/opencode-ai/opencode) and [pi](https://pi.dev), inspired by Chinese mythology.
 
 ## Architecture Overview
 
 The system implements four specialized agents that collaborate through a structured workflow:
 
 ```
-design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → audit (GaoYao)
+design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → audit (GaoYao) → archive
 ```
 
 ## The Four Sages Agents
@@ -30,8 +30,8 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 
 - **Role**: Task execution with TDD methodology
 - **Trigram**: ☴ Xun (Wind)
-- **Tools**: `luban_execute_task`, `luban_get_status`, `luban_release_locks`
-- **Focus**: Implementation, file locking for conflict prevention, per-task commits
+- **Tools**: `luban_execute_task`, `luban_execute_all`, `luban_get_status`
+- **Focus**: Implementation with RED → GREEN → REFACTOR, parallel execution
 
 ### GaoYao (皋陶) - The Supreme Judge ☲
 
@@ -40,24 +40,79 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 - **Tools**: `gaoyao_review`, `gaoyao_check_security`
 - **Focus**: Code quality, security, test coverage, performance
 
-## Workflow States
+## Workflow Phases
 
 ```
-initialized → draft_created → plan_approved → execution_in_progress → review_pending → completed
+☰ Design → /fuxi-approve → ☳ Review (auto-proceed) → /fuxi-approve → 
+☴ Execute → /fuxi-approve → ☲ Audit → ✅ Complete → /fuxi-archive
 ```
 
-## Session Compaction Prevention
+### Phase 1: Design (Fuxi) ☰
+- Creates architectural draft using Eight Trigrams
+- Output: `.sages/workspace/draft.md`
+- **Requires**: User approval (`/fuxi-approve`)
 
-- Checkpoint interval: 5 minutes
-- Max session age: 24 hours
-- State persistence: file-based
+### Phase 2: Review (QiaoChui) ☳
+- Validates draft completeness and feasibility
+- **Auto-proceeds** if draft is valid
+- Creates execution plan
+- Output: `.sages/workspace/plan.md`, `execution.yaml`, `tasks.json`
+- **Requires**: User approval (`/fuxi-approve`)
 
-## File Locking
+### Phase 3: Execute (LuBan) ☴
+- Executes tasks with real TDD (RED → GREEN → REFACTOR)
+- Parallel execution (up to 3 tasks)
+- Output: Implementation files
+
+### Phase 4: Audit (GaoYao) ☲
+- Quality audit and security scan
+- Output: `.sages/workspace/audit.md`
+- **Requires**: User approval (`/fuxi-approve`)
+
+### Phase 5: Archive
+- Saves complete workflow snapshot
+- Output: `.sages/archive/{plan}/{timestamp}/`
+
+## Workspace & Archive Structure
+
+### Active Workflow (`.sages/workspace/`)
+
+```
+.sages/workspace/
+├── draft.md          # Fuxi's design (Eight Trigrams)
+├── plan.md           # Task plan (QiaoChui)
+├── execution.yaml    # Execution configuration
+├── tasks.json        # Task definitions with dependencies
+├── state.json        # Workflow state
+└── audit.md          # Audit report (GaoYao)
+```
+
+### Archived Workflows (`.sages/archive/`)
+
+```
+.sages/archive/
+└── {plan-name}/
+    └── {timestamp}/      # ISO timestamp
+        ├── draft.md
+        ├── plan.md
+        ├── execution.yaml
+        ├── tasks.json
+        ├── state.json
+        ├── audit.md
+        └── summary.md    # Auto-generated overview
+```
+
+## State Management
+
+- **Persistence**: File-based in `.sages/sessions/`
+- **Checkpoints**: Auto-save on phase transitions
+- **Recovery**: Restore from session or workspace files
+
+## File Locking (LuBan)
 
 - TTL: 30 minutes
 - Auto-release on task complete
 - Conflict notification: immediate
-- Resolution: user decision
 
 ## Error Recovery
 
@@ -65,36 +120,36 @@ initialized → draft_created → plan_approved → execution_in_progress → re
 - Retry delay: 1000ms
 - Max consecutive failures threshold: 5
 
-## Directory Structure
+## Project Structure
 
 ```
-scripts/
-├── build-self-contained-tools.ts  # Bundles tools with esbuild
-└── install.ts                     # Installs plugin to ~/.config/opencode/
-
-src/
-├── agents/           # Agent persona definitions
-│   ├── fuxi.md
-│   ├── qiaochui.md
-│   ├── luban.md
-│   └── gaoyao.md
-├── engine/           # Core engine components
-│   ├── workflow-engine.ts
-│   ├── file-lock.ts
-│   ├── state-manager.ts
-│   ├── circuit-breaker.ts
-│   └── task-dispatcher.ts
-├── tools/            # OpenCode tool definitions
-│   ├── fuxi-tools.ts
-│   ├── qiaochui-tools.ts
-│   ├── luban-tools.ts
-│   ├── gaoyao-tools.ts
-│   ├── workflow-tools.ts
-│   └── sages-registry.ts
-└── workflows/        # YAML orchestration
-    └── four-sages.yaml
-
-tool/                  # Bundled self-contained tools (output)
+sages/
+├── opencode/                    # OpenCode plugin
+│   ├── src/
+│   │   ├── agents/              # Agent personas
+│   │   ├── engine/              # Core engine
+│   │   ├── hooks/               # Session hooks
+│   │   ├── tools/               # Tool definitions
+│   │   ├── utils/               # Utilities
+│   │   └── workflows/           # YAML orchestration
+│   ├── test/                    # Tests
+│   └── tool/                    # Bundled tools
+│
+├── pi/                          # pi plugin
+│   ├── src/
+│   │   ├── tools/               # Modular tools (fuxi, qiaochui, luban, gaoyao)
+│   │   ├── state/               # StateManager, WorkspaceManager
+│   │   ├── executor/            # TDDRunner, TaskExecutor
+│   │   ├── orchestrator/        # WorkflowOrchestrator
+│   │   └── utils/               # Draft parser/generator
+│   ├── extensions/             # pi extension entry
+│   ├── skills/                  # Skill definitions
+│   └── prompts/                 # Workflow templates
+│
+└── .sages/                      # Runtime workspace & archives
+    ├── workspace/               # Current workflow
+    ├── sessions/                # State persistence
+    └── archive/                  # Completed workflows
 ```
 
 ## Design Draft Format (Eight Trigrams)

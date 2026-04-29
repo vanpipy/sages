@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { fuxi_create_draft } from "../../src/tools/fuxi-tools";
 
 describe("fuxi_create_draft - Project Directory Resolution", () => {
@@ -149,6 +149,12 @@ describe("fuxi_create_draft - Project Directory Resolution", () => {
     });
 
     it("should use ctx.agent when it is an explicit relative path (./foo)", async () => {
+      // Create the directory relative to cwd since agent is "./my-project"
+      // which resolves to cwd/my-project
+      const cwd = process.cwd();
+      const relPath = join(cwd, "my-project");
+      mkdirSync(relPath, { recursive: true });
+      
       const mockCtx = {
         sessionID: "test-session",
         messageID: "test-message",
@@ -162,14 +168,21 @@ describe("fuxi_create_draft - Project Directory Resolution", () => {
 
       const parsed = JSON.parse(result);
       expect(parsed.success).toBe(true);
-      expect(parsed.data.draft_path).toContain("my-project"); // ./ is normalized by path.join
+      expect(parsed.data.draft_path).toContain("my-project");
     });
 
     it("should use ctx.agent when it is an explicit relative path (../foo)", async () => {
+      // Create the directory relative to cwd (process.cwd())
+      // Since agent is "../my-project" from cwd, it resolves to cwd's parent/my-project
+      const cwd = process.cwd();
+      const parentOfCwd = dirname(cwd);
+      const relPath = join(parentOfCwd, "my-project");
+      mkdirSync(relPath, { recursive: true });
+      
       const mockCtx = {
         sessionID: "test-session",
         messageID: "test-message",
-        agent: "../my-project", // Explicit relative path with ../
+        agent: "../my-project", // Explicit relative path with ../ from cwd
       };
 
       const result = await fuxi_create_draft.execute(

@@ -405,3 +405,56 @@ export function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+// =============================================================================
+// Project Directory Resolution (ctx.agent validation)
+// =============================================================================
+
+/**
+ * Resolves the project directory from ctx.agent.
+ * 
+ * ctx.agent can be:
+ * - An absolute path (/home/user/project)
+ * - A relative path (./project, ../project)
+ * - An agent name (fuxi, qiaochui, etc.) - NOT a valid directory
+ * - undefined or empty
+ * 
+ * @param agent - The ctx.agent value from the tool context
+ * @param cwd - Current working directory to use as fallback (default: process.cwd())
+ * @returns A valid absolute path to a directory
+ */
+export function resolveProjectDir(agent: string | undefined, cwd: string = process.cwd()): string {
+  // If agent is undefined or empty, use cwd
+  if (!agent) {
+    return cwd;
+  }
+
+  // If it's an absolute path, validate it exists
+  if (agent.startsWith('/')) {
+    return existsSync(agent) ? agent : cwd;
+  }
+
+  // If it's an explicit relative path (./ or ../), resolve it
+  if (agent.startsWith('./') || agent.startsWith('../')) {
+    const resolved = join(cwd, agent);
+    return existsSync(resolved) ? resolved : cwd;
+  }
+
+  // If it's just a name (like "fuxi"), it's not a valid directory
+  // This could be a misconfigured context where agent name leaked in
+  return cwd;
+}
+
+/**
+ * Validates if a string is a valid directory path.
+ * @param path - Path to validate
+ * @returns true if path is a valid, existing directory
+ */
+export function isValidDirPath(path: string | undefined | null): boolean {
+  if (!path) return false;
+  try {
+    return existsSync(path) && statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+

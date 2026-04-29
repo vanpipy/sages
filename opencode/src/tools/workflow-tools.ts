@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { PluginContext, WorkflowState, SessionState } from "../types.js";
 import {
   ensurePlanDir,
+  resolveProjectDir,
   success,
   existsSync,
   join,
@@ -86,7 +87,7 @@ export const sages_get_workflow_state = tool({
   },
   execute: async (args, ctx) => {
     const { plan_name } = args;
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       if (plan_name) {
@@ -138,7 +139,7 @@ Returns execution confirmation status`,
   },
   execute: async (args, ctx) => {
     const { plan_name, confirmed } = args;
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       if (confirmed) {
@@ -185,7 +186,7 @@ export const sages_get_session = tool({
   description: "Get current session information",
   args: {},
   execute: async (args, ctx) => {
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       const result = getSession(projectDir);
@@ -201,7 +202,7 @@ export const sages_end_session = tool({
   description: "End the current workflow session",
   args: {},
   execute: async (args, ctx) => {
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     try {
       const result = endSession(projectDir);
@@ -216,6 +217,13 @@ export const sages_end_session = tool({
 /**
  * Simple YAML parser for workflow definition files.
  * Parses a basic YAML structure into WorkflowDefinition.
+ * 
+ * Supports two YAML formats:
+ * 1. Execution YAML (from qiaochui_decompose) - has phases with tasks
+ * 2. High-level Workflow YAML (four-sages.yaml) - may have phases without tasks
+ * 
+ * Phases without tasks are skipped (they're agent workflow phases, not execution phases).
+ * Settings are merged with defaults if not specified.
  */
 export function parseWorkflowYaml(yamlContent: string): WorkflowDefinition {
   const lines = yamlContent.split("\n");
@@ -223,6 +231,7 @@ export function parseWorkflowYaml(yamlContent: string): WorkflowDefinition {
   let currentPhaseIndex = -1;
   let currentTaskIndex = -1;
   let inTasks = false;
+  let settingsFromYaml = false;
 
   const result: WorkflowDefinition = {
     name: "",
@@ -259,9 +268,18 @@ export function parseWorkflowYaml(yamlContent: string): WorkflowDefinition {
       continue;
     }
 
+    // Skip unknown top-level sections (agents, error_recovery, file_locks, session, etc.)
+    if (line.endsWith(":") && !["settings:", "phases:"].includes(line)) {
+      // Check if we're transitioning to phases (which might start with - name:)
+      if (line !== "phases:") {
+        continue;
+      }
+    }
+
     // Settings section
     if (line === "settings:") {
       currentSection = "settings";
+      settingsFromYaml = true;
       continue;
     }
 
@@ -312,6 +330,13 @@ export function parseWorkflowYaml(yamlContent: string): WorkflowDefinition {
 
       // New phase starts
       if (line.startsWith("- name:")) {
+        // Check if previous phase had no tasks - if so, remove it
+        // (it's an agent workflow phase without execution tasks)
+        if (currentPhase && currentPhase.tasks.length === 0) {
+          result.phases.pop();
+          currentPhaseIndex--;
+        }
+
         const match = line.match(/- name:\s*(.+)/);
         if (match) {
           currentPhaseIndex++;
@@ -326,6 +351,18 @@ export function parseWorkflowYaml(yamlContent: string): WorkflowDefinition {
           inTasks = false;
         }
         continue;
+      }
+
+      // Skip phase metadata fields (agent, description, inputs, outputs, transitions, etc.)
+      // These are not task execution fields
+      if (currentPhase && currentPhase.tasks.length === 0) {
+        if (line.startsWith("agent:") || line.startsWith("description:") ||
+            line.startsWith("inputs:") || line.startsWith("outputs:") ||
+            line.startsWith("transitions:") || line.startsWith("parallelism:") ||
+            line.startsWith("max_workers:") || line.startsWith("error_strategy:") ||
+            line.startsWith("review_mode:")) {
+          continue;
+        }
       }
 
       if (currentPhase) {
@@ -376,6 +413,11 @@ export function parseWorkflowYaml(yamlContent: string): WorkflowDefinition {
     }
   }
 
+  // Final cleanup: remove phases without tasks (agent workflow phases)
+  if (currentPhase && currentPhase.tasks.length === 0) {
+    result.phases.pop();
+  }
+
   return result;
 }
 
@@ -387,7 +429,7 @@ export const sages_execute_workflow = tool({
   },
   execute: async (args, ctx) => {
     const { workflow, checkpoint_interval } = args;
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
 
     // Default to fuxi-four-gods workflow
     const workflowName = workflow || "four-sages";
@@ -544,7 +586,7 @@ export const sages_resume = tool({
   },
   execute: async (args, ctx) => {
     const { workflow_id, checkpoint_interval, workflow_file } = args;
-    const projectDir = ctx.agent || process.cwd();
+    const projectDir = resolveProjectDir(ctx.agent);
     const startTime = Date.now();
 
     try {

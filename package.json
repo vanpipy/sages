@@ -1,36 +1,26 @@
 {
-  "name": "opencode-sages",
+  "name": "@sages/sages",
   "version": "1.0.0",
-  "description": "OpenCode plugin for Four Sages Agents (Fuxi, QiaoChui, LuBan, GaoYao)",
-  "type": "module",
+  "description": "Four Sages Agents - Multi-agent workflow for OpenCode and pi",
+  "private": true,
+  "workspaces": [
+    "opencode",
+    "pi"
+  ],
   "scripts": {
-    "build:tools": "bun run scripts/build-self-contained-tools.ts",
-    "clean": "rm -rf tool",
-    "test": "bun test",
-    "test:watch": "bun test --watch",
-    "test:unit": "bun test test/unit",
-    "test:integration": "bun test test/integration"
+    "build": "bun run build:opencode",
+    "build:opencode": "cd opencode && bun run build:tools",
+    "test": "cd opencode && bun run test",
+    "install:all": "cd opencode && bun install && cd ../pi && bun install"
   },
   "keywords": [
     "opencode",
-    "plugin",
+    "pi",
     "agents",
-    "sages"
+    "sages",
+    "four-sages",
+    "workflow"
   ],
   "license": "MIT",
-  "dependencies": {
-    "zod": "4.1.8"
-  },
-  "devDependencies": {
-    "@opencode-ai/plugin": "^1.14.25",
-    "@types/node": "^20.10.0",
-    "esbuild": "^0.28.0",
-    "typescript": "^6.0.3"
-  },
-  "main": "index.js",
-  "directories": {
-    "doc": "docs",
-    "test": "test"
-  },
   "author": "vanpipy@gmail.com"
 }
