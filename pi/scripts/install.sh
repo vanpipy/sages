@@ -35,8 +35,7 @@ DRY_RUN=false
 UNINSTALL=false
 VERSION="main"
 REPO_URL="https://github.com/vanpipy/sages.git"
-PI_DIR_PATH=""
-TEMP_DIR=""
+PKG_DIR="$PI_DIR_PATH/packages/sages"
 
 # Functions
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
@@ -129,7 +128,7 @@ parse_args() {
 }
 
 check_installation() {
-  local pkg_dir="$PI_DIR_PATH/agent/npm/@sages"
+  local pkg_dir="$PKG_DIR"
 
   if [[ -d "$pkg_dir" ]]; then
     if [[ "$FORCE" == true ]]; then
@@ -147,6 +146,12 @@ cleanup() {
   if [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]]; then
     rm -rf "$TEMP_DIR"
   fi
+}
+
+disable_cleanup() {
+  # Disable cleanup trap so temp dir persists (for manual inspection)
+  trap - EXIT
+  info "Temp directory kept at: $TEMP_DIR"
 }
 
 create_temp_dir() {
@@ -198,16 +203,29 @@ build_package() {
 
 install_package() {
   local pi_dir="$TEMP_DIR/sages/pi"
+  local pkg_dest="$PKG_DIR"
 
   if [[ "$DRY_RUN" == true ]]; then
     info "Installing package..."
-    echo "  pi install $pi_dir"
+    echo "  rm -rf $pkg_dest"
+    echo "  cp -r $pi_dir $pkg_dest"
     return
   fi
 
   info "Installing package..."
-  pi install "$pi_dir"
-  success "Package installed"
+  
+  # Remove old installation
+  if [[ -d "$pkg_dest" ]]; then
+    rm -rf "$pkg_dest"
+  fi
+  
+  # Copy to persistent location
+  cp -r "$pi_dir" "$pkg_dest"
+  
+  # Disable cleanup so temp dir persists
+  disable_cleanup
+  
+  success "Package installed to: $pkg_dest"
 }
 
 show_installation_info() {
@@ -217,7 +235,7 @@ show_installation_info() {
   echo "========================================"
   echo ""
   echo "Package: @sages/pi-four-sages"
-  echo "Location: $PI_DIR_PATH/agent/npm/@sages"
+  echo "Location: $PKG_DIR"
   echo ""
   echo "Commands available:"
   echo "  /fuxi <request>       Start workflow"
@@ -244,6 +262,7 @@ uninstall_package() {
   info "Uninstalling Four Sages..."
 
   local pkg_paths=(
+    "$PKG_DIR"
     "$PI_DIR_PATH/agent/npm/@sages"
     "$PI_DIR_PATH/agent/npm/sages"
   )
