@@ -90,7 +90,7 @@ After installation, restart pi and use these commands:
 | `luban` | Four Sages workflow agent for implementation |
 | `gaoyao` | Four Sages workflow agent for audit |
 
-## Workflow
+## Complete Workflow
 
 ```
                     ┌─────────────┐
@@ -110,7 +110,7 @@ After installation, restart pi and use these commands:
                     ┌──────▼──────┐
                     │ ☳ QiaoChui  │
                     │ Review      │
-                    │ Decompose   │
+                    │ Decompose   │ ← Configure execution mode
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
@@ -165,6 +165,128 @@ Factor (因子) → Element (要素) → Plane (平面) → System (系统)
 - **Plane**: Two elements spanning observation space
 - **System**: Multiple planes forming a whole
 
+## Execution Modes
+
+LuBan supports two execution modes for task implementation:
+
+### 1. Subagent Mode (Default)
+
+Each task runs in an **isolated pi subprocess** with its own LLM context.
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Main Agent (Fuxi/QiaoChui context)                  │
+│                                                     │
+│   /qiaochui_decompose use_subagent=true            │
+│                      ↓                              │
+│   .sages/workspace/execution.yaml                   │
+│                      ↓                              │
+│ ┌─────────┬─────────┬─────────┐                   │
+│ │ LuBan #1│ LuBan #2│ LuBan #3│  ← maxParallel: 3│
+│ │   T1    │   T2    │   T3    │                   │
+│ │(isolated)│(isolated)│(isolated)│                  │
+│ └─────────┴─────────┴─────────┘                   │
+│                      ↓                            │
+│              Results merged                         │
+└─────────────────────────────────────────────────────┘
+```
+
+**Benefits:**
+- True parallelism (independent processes)
+- No LLM context pollution
+- Independent error handling
+- Better scalability
+
+### 2. Shared Context Mode
+
+All tasks share the **same LLM context** in a single pi session.
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Main Agent (Fuxi/QiaoChui context)                  │
+│                                                     │
+│   /qiaochui_decompose use_subagent=false          │
+│                      ↓                              │
+│ ┌─────────────────────────────────────────────┐   │
+│ │     Single LuBan (shared context)            │   │
+│ │     T1 → T2 → T3 (sequential)               │   │
+│ │     Shared variables and state               │   │
+│ └─────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────┘
+```
+
+**Use cases:**
+- Simple scripts (single task)
+- Tasks that need shared state
+- Debugging (easier to trace)
+
+## Execution Plan Configuration
+
+The execution plan is saved to `.sages/workspace/execution.yaml`:
+
+```yaml
+# Execution Plan
+name: user-management-api
+
+settings:
+  maxParallel: 3        # Max parallel subagents
+  useSubagent: true     # true = isolated, false = shared
+  maxRetry: 1           # Retry on failure
+  subagentConfig:
+    model: sonnet
+    skills:
+      - luban
+    maxContext: 4000
+    timeout: 300
+
+tasks:
+  - id: T1
+    description: "Setup database schema"
+    priority: 1
+    dependsOn: []
+
+  - id: T2
+    description: "Create user model"
+    priority: 1
+    dependsOn: [T1]
+
+  - id: T3
+    description: "Create user routes"
+    priority: 1
+    dependsOn: [T1]
+
+  - id: T4
+    description: "Write user tests"
+    priority: 2
+    dependsOn: [T2]
+```
+
+### Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `maxParallel` | 3 | Maximum parallel subagents |
+| `useSubagent` | true | Execution mode |
+| `maxRetry` | 1 | Retry count on failure |
+| `subagentConfig.model` | sonnet | LLM model for subagents |
+| `subagentConfig.timeout` | 300 | Timeout in seconds |
+
+### Overriding via Command
+
+```bash
+# Use subagent mode (default)
+/qiaochui_decompose
+
+# Use shared context mode
+/qiaochui_decompose use_subagent=false
+
+# Custom parallelism
+/qiaochui_decompose max_parallel=5
+
+# Combine options
+/qiaochui_decompose use_subagent=false max_parallel=1
+```
+
 ## TDD Implementation
 
 LuBan implements tasks using **Test-Driven Development**:
@@ -189,6 +311,13 @@ RED → GREEN → REFACTOR
 │   └── prompts/             # Workflow templates
 │
 └── extensions/             # User extensions
+
+.sages/workspace/           # Current workflow
+├── draft.md               # MDD Design (Fuxi)
+├── plan.md                # Task plan
+├── execution.yaml         # Execution config
+├── tasks.json            # Task list
+└── state.json            # Workflow state
 ```
 
 ## Updating
@@ -213,28 +342,38 @@ pi remove npm:@sages/pi-four-sages
 
 ## Examples
 
-### Basic Workflow
+### Full Workflow Example
 
 ```
 You: /fuxi Create a REST API for user management
 
 pi: [Fuxi] I'll design this using MDD Seven Planes...
-
 pi: Design draft created. Use /fuxi-approve to proceed.
 
 You: /fuxi-approve
 
 pi: [QiaoChui] Reviewing technical feasibility...
 pi: [QiaoChui] Decomposing into tasks...
-pi: Tasks created. Use /fuxi-approve to proceed.
+pi: Tasks created with subagent mode (maxParallel: 3)
+pi: Use /fuxi-approve to proceed.
 
 You: /fuxi-approve
 
-pi: [LuBan] Executing tasks with TDD...
-pi: [LuBan] RED phase - writing tests...
-pi: [LuBan] GREEN phase - implementing...
-pi: [LuBan] REFACTOR phase - improving...
-pi: All tasks complete. Use /fuxi-approve to proceed.
+pi: [LuBan] Starting execution with 4 tasks...
+pi: [LuBan] Spawning subagents...
+pi: [LuBan #1] Task T1: Setup database - RED phase
+pi: [LuBan #2] Task T2: Wait for T1...
+pi: [LuBan #3] Task T3: Wait for T1...
+pi: [LuBan #4] Task T4: Wait for T2...
+pi: [LuBan #1] T1 complete ✓
+pi: [LuBan #2] Task T2: Creating model - RED phase
+pi: [LuBan #3] Task T3: Creating routes - RED phase
+pi: [LuBan #2] T2 complete ✓
+pi: [LuBan #4] Task T4: Writing tests - RED phase
+pi: [LuBan #3] T3 complete ✓
+pi: [LuBan #4] T4 complete ✓
+pi: All tasks complete! (4/4)
+pi: Use /fuxi-approve to proceed.
 
 You: /fuxi-approve
 
@@ -242,6 +381,7 @@ pi: [GaoYao] Running quality audit...
 pi: [GaoYao] Running security scan...
 pi: [GaoYao] Verdict: PASS
 pi: Workflow complete!
+pi: Use /fuxi-archive to save
 ```
 
 ## Documentation
