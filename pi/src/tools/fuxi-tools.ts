@@ -10,11 +10,16 @@ import { join } from "node:path";
 import { generateMinimalDraft } from "../utils/draft-generator.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
+const SESSIONS_DIR = ".sages/sessions";
 
-function ensureWorkspaceDir(cwd: string): string {
+function ensureWorkspaceDirs(cwd: string): string {
   const workspacePath = join(cwd, WORKSPACE_DIR);
+  const sessionsPath = join(cwd, SESSIONS_DIR);
   if (!existsSync(workspacePath)) {
     mkdirSync(workspacePath, { recursive: true });
+  }
+  if (!existsSync(sessionsPath)) {
+    mkdirSync(sessionsPath, { recursive: true });
   }
   return workspacePath;
 }
@@ -33,7 +38,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
       const { request, name } = params;
 
       try {
-        const workspacePath = ensureWorkspaceDir(cwd);
+        const workspacePath = ensureWorkspaceDirs(cwd);
         const draftPath = join(workspacePath, "draft.md");
 
         const draft = generateMinimalDraft(name || "workflow", request);
