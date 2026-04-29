@@ -75,7 +75,7 @@ export function generateDraft(config: DraftConfig): string {
     .replace("{triggers}", formatList(config.triggers))
     .replace("{dataFlow}", formatList(config.dataFlow))
     .replace("{errorHandling}", formatList(config.errorHandling))
-    .replace("{observability}", "- Logging for key operations\n- Metrics collection\n- Error tracking")
+    .replace("{observability}", formatList(config.observability))
     .replace("{boundaries}", formatList(config.boundaries))
     .replace("{successPath}", formatList(config.successPath))
     .replace("{notes}", config.notes || "- Add implementation notes here");
