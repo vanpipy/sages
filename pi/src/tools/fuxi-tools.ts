@@ -98,7 +98,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "fuxi_get_status",
     label: "Get Status",
-    description: "Get the current MDD workflow status",
+    description: "Query MDD design status and workflow progress",
     parameters: Type.Object({
       plan_name: Type.Optional(Type.String({ description: "Plan name (optional)" })),
     }),

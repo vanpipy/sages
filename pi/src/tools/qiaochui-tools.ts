@@ -179,6 +179,7 @@ settings:
   maxParallel: ${max_parallel}
   useSubagent: ${use_subagent}
   maxRetry: 1
+  autoCommit: true
   subagentConfig:
     model: sonnet
     skills:
@@ -323,7 +324,7 @@ function extractPlanName(content: string): string | null {
 }
 
 /**
- * Generate tasks with MDD plane classification
+ * Generate tasks with MDD plane classification and inferred files
  */
 interface MDDTask {
   id: string;
@@ -331,7 +332,62 @@ interface MDDTask {
   plane: MDDPlane;
   priority: "high" | "medium" | "low";
   dependsOn: string[];
-  files?: string[];
+  files: string[];
+}
+
+/**
+ * Infer source files from task description
+ */
+function inferFiles(desc: string, plane: MDDPlane): string[] {
+  const words = desc.toLowerCase().split(/[\s,]+/);
+  const keywords = words.filter(w => 
+    w.length > 3 && 
+    !["implement", "setup", "create", "add", "write", "the", "and", "for", "core", "strategy"].includes(w)
+  );
+
+  const files: string[] = [];
+
+  // Map plane to source directories
+  const planePaths: Record<MDDPlane, string> = {
+    Business: "src/business",
+    Data: "src/data",
+    Control: "src/control",
+    Foundation: "src/foundation",
+    Observation: "src/observation",
+    Security: "src/security",
+    Evolution: "src/evolution",
+  };
+
+  const basePath = planePaths[plane] || "src";
+
+  // Generate file paths based on keywords
+  if (keywords.length > 0) {
+    files.push(`${basePath}/${keywords[0]}.ts`);
+    files.push(`${basePath}/${keywords[0]}.test.ts`);
+  } else {
+    // Fallback to generic paths
+    files.push(`${basePath}/index.ts`);
+    files.push(`${basePath}/index.test.ts`);
+  }
+
+  // Add specific files based on description keywords
+  if (desc.toLowerCase().includes("auth")) {
+    files.push("src/security/auth.ts");
+    files.push("src/security/auth.test.ts");
+  }
+  if (desc.toLowerCase().includes("api") || desc.toLowerCase().includes("endpoint")) {
+    files.push("src/api/routes.ts");
+    files.push("src/api/routes.test.ts");
+  }
+  if (desc.toLowerCase().includes("model") || desc.toLowerCase().includes("schema")) {
+    files.push("src/data/models.ts");
+    files.push("src/data/models.test.ts");
+  }
+  if (desc.toLowerCase().includes("test")) {
+    files.push("test/integration.test.ts");
+  }
+
+  return [...new Set(files)]; // Remove duplicates
 }
 
 function generateMDDTasks(content: string, maxTasks: number): MDDTask[] {
@@ -397,6 +453,7 @@ function generateMDDTasks(content: string, maxTasks: number): MDDTask[] {
         plane: template.plane,
         priority: template.priority,
         dependsOn: [],
+        files: inferFiles(template.desc, template.plane),
       });
       usedPlanes.add(template.plane);
       continue;
@@ -423,6 +480,7 @@ function generateMDDTasks(content: string, maxTasks: number): MDDTask[] {
         plane: template.plane,
         priority: template.priority,
         dependsOn,
+        files: inferFiles(template.desc, template.plane),
       });
       usedPlanes.add(template.plane);
     }
@@ -439,7 +497,7 @@ function generateMDDTasks(content: string, maxTasks: number): MDDTask[] {
     for (const def of defaults) {
       if (tasks.length >= maxTasks) break;
       const id = `T${++taskIndex}`;
-      tasks.push({ id, ...def });
+      tasks.push({ id, ...def, files: inferFiles(def.desc, def.plane) });
     }
   }
 
