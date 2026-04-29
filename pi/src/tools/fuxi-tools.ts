@@ -28,7 +28,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "fuxi_create_draft",
     label: "Create Draft",
-    description: "Create architectural design drafts using Eight Trigrams and Multi-Dimensional Design methodology (saves to .sages/workspace/draft.md)",
+    description: "Create architectural design drafts using Multi-Dimensional Design (MDD) methodology",
     parameters: Type.Object({
       request: Type.String({ description: "User's request to analyze" }),
       name: Type.Optional(Type.String({ description: "Plan name (optional, derived from request)" })),
@@ -62,7 +62,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "fuxi_get_draft",
     label: "Get Draft",
-    description: "Read the current draft from workspace",
+    description: "Read the current MDD design draft",
     parameters: Type.Object({
       path: Type.Optional(Type.String({ description: "Draft path (default: .sages/workspace/draft.md)" })),
     }),
@@ -98,7 +98,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "fuxi_get_status",
     label: "Get Status",
-    description: "Get the current workflow status from workspace",
+    description: "Get the current MDD workflow status",
     parameters: Type.Object({
       plan_name: Type.Optional(Type.String({ description: "Plan name (optional)" })),
     }),

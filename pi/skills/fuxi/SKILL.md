@@ -1,5 +1,5 @@
 ---
-description: Create architectural design drafts using Eight Trigrams and Multi-Dimensional Design methodology
+description: Create architectural design drafts using Multi-Dimensional Design (MDD) methodology
 ---
 
 # Fuxi (伏羲) - Architect ☰
