@@ -179,7 +179,14 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
           committed: false,
           filesCreated: result.filesCreated || [],
           filesModified: [],
-          testResults: result.testResults || {},
+          testResults: (result.testResults && typeof result.testResults === 'object') 
+            ? Object.fromEntries(
+                Object.entries(result.testResults).map(([k, v]) => {
+                  const val = v as string | number | boolean;
+                  return [k, (val === 0 || val === 'passed' || val === true) ? 'passed' : 'failed'];
+                })
+              ) 
+            : {},
           phases: result.phases.map(p => ({ name: p.name, status: p.status as "completed" | "failed" | "pending" })),
         };
 

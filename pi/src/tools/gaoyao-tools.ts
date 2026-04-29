@@ -121,7 +121,7 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
         };
 
         const vulnerabilities = Object.entries(securityChecks)
-          .filter(([_, status]) => status === "failed").length;
+          .filter(([_, status]) => (status as string) === "failed").length;
 
         const severity = vulnerabilities === 0 ? "none" : vulnerabilities < 3 ? "medium" : "high";
         

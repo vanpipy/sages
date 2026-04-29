@@ -67,7 +67,11 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
 
         // Perform MDD-aligned plane review
         const planeAssessments = performMDDReview(content);
-        const taskCount = generateTasksFromDraft(parseDraft(content, "workflow") || {}).length;
+        const taskCount = generateTasksFromDraft(
+          Object.keys(parseDraft(content, "workflow") || {}).length > 0 
+            ? parseDraft(content, "workflow") as any 
+            : null
+        ).length;
 
         // Generate feasibility report
         const feasibilityReport = generateFeasibilityReport(planeAssessments);
@@ -497,7 +501,7 @@ function generateMDDTasks(content: string, maxTasks: number): MDDTask[] {
     for (const def of defaults) {
       if (tasks.length >= maxTasks) break;
       const id = `T${++taskIndex}`;
-      tasks.push({ id, ...def, files: inferFiles(def.desc, def.plane) });
+      tasks.push({ id, description: def.desc, plane: def.plane, priority: def.priority, dependsOn: def.dependsOn, files: inferFiles(def.desc, def.plane) });
     }
   }
 
