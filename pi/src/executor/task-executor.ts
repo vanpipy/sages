@@ -24,6 +24,7 @@ export interface ExecutionResult {
   success: boolean;
   duration: number;
   error?: string;
+  output?: string;
 }
 
 export class TaskExecutor {

@@ -1,15 +1,110 @@
 /**
- * LuBan Tools - Real TDD execution
+ * LuBan Tools - Real TDD execution with Subagent support
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { TDDRunner, TaskExecutor } from "../executor/index.js";
-import type { Task } from "../executor/index.js";
+import { TDDRunner, TaskExecutor, SubagentExecutor } from "../executor/index.js";
+import type { Task, ExecutionResult } from "../executor/index.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
+
+/**
+ * Simple YAML parser for execution.yaml
+ */
+function parseSimpleYaml(content: string): { tasks: Task[]; settings: any } | null {
+  const tasks: Task[] = [];
+  const settings: any = {
+    name: "workflow",
+    maxParallel: 3,
+    useSubagent: true,
+    maxRetry: 1,
+    subagentConfig: {
+      model: "sonnet",
+      skills: ["luban"],
+      maxContext: 4000,
+      timeout: 300,
+    },
+  };
+
+  const lines = content.split("\n");
+  let currentTask: Partial<Task> | null = null;
+  let inSettings = false;
+  let inSubagentConfig = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Parse settings
+    if (trimmed === "settings:") {
+      inSettings = true;
+      continue;
+    }
+    if (inSettings && trimmed.startsWith("tasks:")) {
+      inSettings = false;
+    }
+    if (inSettings && trimmed.startsWith("subagentConfig:")) {
+      inSubagentConfig = true;
+      continue;
+    }
+    if (inSubagentConfig && trimmed.startsWith("maxContext:")) {
+      settings.subagentConfig.maxContext = parseInt(trimmed.split(":")[1].trim());
+    }
+    if (inSubagentConfig && trimmed.startsWith("timeout:")) {
+      settings.subagentConfig.timeout = parseInt(trimmed.split(":")[1].trim());
+    }
+    if (inSubagentConfig && trimmed.startsWith("model:")) {
+      settings.subagentConfig.model = trimmed.split(":")[1].trim();
+    }
+    if (trimmed.startsWith("maxParallel:")) {
+      settings.maxParallel = parseInt(trimmed.split(":")[1].trim());
+    }
+    if (trimmed.startsWith("useSubagent:")) {
+      settings.useSubagent = trimmed.includes("true");
+    }
+    if (trimmed.startsWith("maxRetry:")) {
+      settings.maxRetry = parseInt(trimmed.split(":")[1].trim());
+    }
+
+    // Parse tasks
+    if (trimmed.startsWith("- id:")) {
+      if (currentTask) {
+        tasks.push(currentTask as Task);
+      }
+      currentTask = {
+        id: trimmed.split(":")[1].trim(),
+        description: "",
+        status: "pending",
+        priority: "medium",
+        dependsOn: [],
+        files: [],
+      };
+    }
+    if (currentTask && trimmed.startsWith("description:")) {
+      currentTask.description = trimmed.split('"')[1] || trimmed.split(":").slice(1).join(":").trim();
+    }
+    if (currentTask && trimmed.startsWith("priority:")) {
+      const p = parseInt(trimmed.split(":")[1].trim());
+      currentTask.priority = p === 1 ? "high" : p === 2 ? "medium" : "low";
+    }
+    if (currentTask && trimmed.startsWith("dependsOn:")) {
+      const deps = trimmed.split("[")[1]?.split("]")[0] || "";
+      currentTask.dependsOn = deps.split(",").map(d => d.trim().replace(/"/g, "")).filter(Boolean);
+    }
+    if (currentTask && trimmed.startsWith("files:")) {
+      const files = trimmed.split("[")[1]?.split("]")[0] || "";
+      currentTask.files = files.split(",").map(f => f.trim().replace(/"/g, "")).filter(Boolean);
+    }
+  }
+
+  if (currentTask) {
+    tasks.push(currentTask as Task);
+  }
+
+  return tasks.length > 0 ? { tasks, settings } : null;
+}
 
 export function registerLuBanTools(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -73,52 +168,118 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "luban_execute_all",
     label: "Execute All Tasks",
-    description: "Execute all tasks from the plan with parallel execution and dependency management",
+    description: "Execute all tasks using isolated LuBan subagents (reads from execution.yaml or inline tasks)",
     parameters: Type.Object({
-      tasks: Type.Array(Type.Object({
+      tasks: Type.Optional(Type.Array(Type.Object({
         id: Type.String(),
         description: Type.String(),
         priority: Type.Optional(Type.String()),
         depends_on: Type.Optional(Type.Array(Type.String())),
         files: Type.Optional(Type.Array(Type.String())),
-      })),
-      max_parallel: Type.Optional(Type.Number({ description: "Max parallel tasks (default: 3)" })),
-      test_command: Type.Optional(Type.String({ description: "Test command" })),
+      }))),
+      execution_yaml: Type.Optional(Type.String({ description: "Path to execution.yaml (default: .sages/workspace/execution.yaml)" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const { tasks, max_parallel = 3, test_command } = params;
       const cwd = ctx.cwd;
+      const execution_yaml = params.execution_yaml || join(cwd, WORKSPACE_DIR, "execution.yaml");
 
       try {
-        const taskList: Task[] = tasks.map((t: { id: string; description: string; priority?: string; depends_on?: string[]; files?: string[] }) => ({
-          id: t.id,
-          description: t.description,
-          status: "pending" as const,
-          priority: (t.priority as Task["priority"]) || "medium",
-          dependsOn: t.depends_on || [],
-          files: t.files || [],
-          testCommand: test_command,
-        }));
-
-        const executor = new TaskExecutor(taskList, max_parallel, cwd);
-        const results = await executor.executeAll();
-
-        const successCount = Array.from(results.values()).filter(r => r.success).length;
-        const progress = executor.getProgress();
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: successCount === tasks.length,
-              total_tasks: tasks.length,
-              successful: successCount,
-              failed: tasks.length - successCount,
-              progress: `${progress.completed}/${progress.total}`,
-            }),
-          }],
-          details: { total: tasks.length, success: successCount },
+        let tasks: Task[] = [];
+        let settings = {
+          name: "workflow",
+          maxParallel: 3,
+          useSubagent: true,
+          maxRetry: 1,
+          subagentConfig: {
+            model: "sonnet",
+            skills: ["luban"],
+            maxContext: 4000,
+            timeout: 300,
+          },
         };
+
+        // Load from execution.yaml if exists
+        if (existsSync(execution_yaml)) {
+          const content = readFileSync(execution_yaml, "utf-8");
+          const parsed = parseSimpleYaml(content);
+          if (parsed) {
+            tasks = parsed.tasks;
+            settings = { ...settings, ...parsed.settings };
+          }
+        } else if (params.tasks) {
+          // Use inline tasks
+          tasks = params.tasks.map((t: { id: string; description: string; priority?: string; depends_on?: string[]; files?: string[] }) => ({
+            id: t.id,
+            description: t.description,
+            status: "pending" as const,
+            priority: (t.priority as Task["priority"]) || "medium",
+            dependsOn: t.depends_on || [],
+            files: t.files || [],
+          }));
+        } else {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: "No tasks provided and execution.yaml not found" } }) }],
+            isError: true,
+            details: { error: "missing_tasks" },
+          };
+        }
+
+        if (settings.useSubagent) {
+          // Use SubagentExecutor for isolated parallel execution
+          const executor = new SubagentExecutor(tasks, settings, cwd);
+          const results = await executor.executeAll();
+
+          const successCount = Array.from(results.values()).filter(r => r.success).length;
+          const progress = executor.getProgress();
+
+          // Generate summary table
+          let summary = `## Execution Complete\n\n`;
+          summary += `| Task | Status | Duration |\n`;
+          summary += `|------|--------|----------|\n`;
+          for (const task of tasks) {
+            const result = results.get(task.id);
+            const status = result?.success ? "✅" : "❌";
+            const duration = result?.duration ? `${Math.round(result.duration / 1000)}s` : "-";
+            summary += `| ${task.id} | ${status} | ${duration} |\n`;
+          }
+          summary += `\n**Total:** ${progress.completed}/${progress.total} completed, ${progress.failed} failed`;
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: progress.failed === 0,
+                total_tasks: tasks.length,
+                completed: progress.completed,
+                failed: progress.failed,
+                results: Object.fromEntries(results),
+                summary,
+              }),
+            }],
+            details: { total: tasks.length, completed: progress.completed, failed: progress.failed },
+          };
+        } else {
+          // Use TaskExecutor for shared-context execution
+          const executor = new TaskExecutor(tasks, settings.maxParallel, cwd);
+          const results = await executor.executeAll();
+
+          const successCount = Array.from(results.values()).filter(r => r.success).length;
+          const progress = executor.getProgress();
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: successCount === tasks.length,
+                total_tasks: tasks.length,
+                successful: successCount,
+                failed: tasks.length - successCount,
+                progress: `${progress.completed}/${progress.total}`,
+              }),
+            }],
+            details: { total: tasks.length, success: successCount },
+          };
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
