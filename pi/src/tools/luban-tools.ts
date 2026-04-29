@@ -110,7 +110,7 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "luban_execute_task",
     label: "Execute Task (TDD)",
-    description: "LuBan executes a single task using TDD methodology (RED → GREEN → REFACTOR)",
+    description: "Execute a single task using TDD methodology (RED → GREEN → REFACTOR)",
     parameters: Type.Object({
       task_id: Type.String({ description: "Task ID from the plan (e.g., T1, T2)" }),
       task_description: Type.String({ description: "What this task does" }),
@@ -168,7 +168,7 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "luban_execute_all",
     label: "Execute All Tasks",
-    description: "Execute all tasks using isolated LuBan subagents (reads from execution.yaml or inline tasks)",
+    description: "Execute all tasks using TDD methodology with parallel execution support (reads from execution.yaml)",
     parameters: Type.Object({
       tasks: Type.Optional(Type.Array(Type.Object({
         id: Type.String(),

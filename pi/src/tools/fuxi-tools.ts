@@ -28,7 +28,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "fuxi_create_draft",
     label: "Create Draft",
-    description: "Fuxi creates an architectural design draft following the Eight Trigrams structure (saves to .sages/workspace/draft.md)",
+    description: "Create architectural design drafts using Eight Trigrams and Multi-Dimensional Design methodology (saves to .sages/workspace/draft.md)",
     parameters: Type.Object({
       request: Type.String({ description: "User's request to analyze" }),
       name: Type.Optional(Type.String({ description: "Plan name (optional, derived from request)" })),

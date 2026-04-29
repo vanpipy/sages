@@ -14,7 +14,7 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "gaoyao_review",
     label: "Quality Review",
-    description: "GaoYao performs final quality audit (saves report to .sages/workspace/audit.md)",
+    description: "Perform quality audits using the Xie Zhi methodology (saves report to .sages/workspace/audit.md)",
     parameters: Type.Object({
       plan_name: Type.Optional(Type.String({ description: "Plan name to audit" })),
       review_mode: Type.Optional(Type.String({ description: "quick or full (default: full)" })),
@@ -72,7 +72,7 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "gaoyao_check_security",
     label: "Security Scan",
-    description: "Run security scan on modified files",
+    description: "Run Xie Zhi security scan on modified files (SQL injection, XSS, auth, data exposure)",
     parameters: Type.Object({
       files: Type.Array(Type.String(), { description: "Files to scan" }),
     }),

@@ -15,7 +15,7 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "qiaochui_review",
     label: "Review Draft",
-    description: "QiaoChui reviews Fuxi's design draft for feasibility",
+    description: "Review design drafts for technical feasibility (MDD-aligned plane review)",
     parameters: Type.Object({
       draft_path: Type.String({ description: "Path to the draft file (default: .sages/workspace/draft.md)" }),
     }),
@@ -81,7 +81,7 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "qiaochui_decompose",
     label: "Decompose",
-    description: "QiaoChui decomposes the approved design into executable tasks (saves to .sages/workspace/)",
+    description: "Decompose approved design into executable tasks with dependencies (saves to .sages/workspace/)",
     parameters: Type.Object({
       draft_path: Type.Optional(Type.String({ description: "Draft path (default: .sages/workspace/draft.md)" })),
       max_tasks: Type.Optional(Type.Number({ description: "Max tasks to generate (default: 10)" })),
