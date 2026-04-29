@@ -6,12 +6,12 @@ A multi-agent workflow system for [OpenCode](https://github.com/opencode-ai/open
 
 Sages implements a Four Sages workflow where each agent has a specialized role:
 
-| Agent | Role | Trigram |
-|-------|------|---------|
-| **Fuxi (伏羲)** | Architect - Creates designs using Eight Trigrams | ☰ Qian |
-| **QiaoChui (巧倕)** | Mechanist - Reviews designs, decomposes into tasks | ☳ Zhen |
-| **LuBan (鲁班)** | Craftsman - Implements with TDD methodology | ☴ Xun |
-| **GaoYao (皋陶)** | Judge - Quality audits and security checks | ☲ Li |
+| Agent | Role | Focus |
+|-------|------|-------|
+| **Fuxi (伏羲)** | Architect | MDD System Design |
+| **QiaoChui (巧倕)** | Expert | Technical Review & Decomposition |
+| **LuBan (鲁班)** | Craftsman | TDD Implementation |
+| **GaoYao (皋陶)** | Auditor | Quality Audit & Security |
 
 ## Installation
 
@@ -28,7 +28,16 @@ cd opencode && bun install && bun run install
 ### pi
 
 ```bash
-pi install npm:@sages/pi-four-sages
+# Quick Install (Recommended)
+curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | sh
+
+# Manual Install
+./pi/scripts/install.sh
+
+# Or use pi install with local path (after cloning)
+git clone https://github.com/vanpipy/sages.git
+cd sages
+./pi/scripts/install.sh
 ```
 
 ## Usage
@@ -103,20 +112,19 @@ Request → Fuxi Design → QiaoChui Review → User Decision
 5. **Audit Phase**: GaoYao performs quality check
 6. **Completion**: Workflow complete after passing audit
 
-## Eight Trigrams Design
+## MDD Design
 
-Each design draft follows the Eight Trigrams structure:
+Each design draft follows the **Multi-Dimensional Design (MDD)** framework:
 
-| Trigram | Section | Purpose |
-|---------|---------|---------|
-| ☰ Qian | Core Intent | What & Why |
-| ☷ Kun | Data Structures | Entities & Models |
-| ☳ Zhen | Triggers | Events |
-| ☴ Xun | Data Flow | Transformations |
-| ☵ Kan | Error Handling | Fallbacks |
-| ☲ Li | Observability | Metrics |
-| ☶ Gen | Boundaries | Constraints |
-| ☱ Dui | Success Path | Happy path |
+| Plane | Elements | Focus |
+|-------|----------|-------|
+| ☰ Business | Process × Rules | Business value delivery |
+| ☷ Data | Logic × State | Data processing |
+| ☳ Control | Strategy × Distribution | Decision execution |
+| ☴ Foundation | Resource × Abstraction | Infrastructure |
+| ☵ Observation | Data × Analysis | Monitoring |
+| ☶ Security | Identity × Permissions | Access control |
+| ☱ Evolution | Time × Change | Versioning & migration |
 
 ## Project Structure
 
@@ -146,7 +154,10 @@ sages/
 │   ├── extensions/        # pi extension with tools
 │   ├── skills/            # Skill definitions (fuxi, qiaochui, luban, gaoyao)
 │   ├── prompts/           # Workflow templates
-│   └── package.json
+│   ├── scripts/           # Installation scripts
+│   ├── src/               # TypeScript source
+│   ├── package.json
+│   └── README.md
 │
 ├── .sages/                 # Workflow state & plans
 ├── AGENTS.md               # Architecture documentation
