@@ -35,6 +35,7 @@ DRY_RUN=false
 UNINSTALL=false
 VERSION="main"
 REPO_URL="https://github.com/vanpipy/sages.git"
+PI_DIR_PATH=""
 PKG_DIR="$PI_DIR_PATH/packages/sages"
 
 # Functions
@@ -125,6 +126,7 @@ parse_args() {
 
   PI_DIR_PATH="$(eval echo "$PREFIX")"
   PI_DIR_PATH="$(cd "$PI_DIR_PATH" 2>/dev/null && pwd)" || true
+  PKG_DIR="$PI_DIR_PATH/packages/sages"
 }
 
 check_installation() {
