@@ -18,7 +18,7 @@ Named after four sage figures from Chinese mythology, representing the complete 
 ### Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | bash
 ```
 
 ### Manual Install
