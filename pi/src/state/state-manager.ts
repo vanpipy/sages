@@ -53,11 +53,18 @@ export class StateManager {
   }
 
   private ensureDirs(): void {
-    if (!existsSync(this.workspacePath)) {
-      mkdirSync(this.workspacePath, { recursive: true });
-    }
-    if (!existsSync(join(this.cwd, SESSIONS_DIR))) {
-      mkdirSync(join(this.cwd, SESSIONS_DIR), { recursive: true });
+    try {
+      if (!existsSync(this.workspacePath)) {
+        mkdirSync(this.workspacePath, { recursive: true });
+      }
+      if (!existsSync(join(this.cwd, SESSIONS_DIR))) {
+        mkdirSync(join(this.cwd, SESSIONS_DIR), { recursive: true });
+      }
+      if (!existsSync(this.archivePath)) {
+        mkdirSync(this.archivePath, { recursive: true });
+      }
+    } catch {
+      // Ignore errors - dirs may already exist or permissions issue
     }
   }
 
@@ -70,6 +77,8 @@ export class StateManager {
   // ===========================================================================
 
   save(state: WorkflowState): void {
+    // Ensure dirs exist before saving
+    this.ensureDirs();
     state.updatedAt = new Date().toISOString();
     const path = this.getStatePath(state.id);
     writeFileSync(path, JSON.stringify(state, null, 2));
@@ -78,6 +87,9 @@ export class StateManager {
   }
 
   load(id: string): WorkflowState | null {
+    // Ensure dirs exist (in case they were accidentally deleted)
+    this.ensureDirs();
+    
     const path = this.getStatePath(id);
     if (!existsSync(path)) return null;
     
