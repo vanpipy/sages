@@ -90,6 +90,27 @@ After installation, restart pi and use these commands:
 | `luban` | Four Sages workflow agent for implementation |
 | `gaoyao` | Four Sages workflow agent for audit |
 
+## Workflow Flow
+
+### Approval Points (Manual)
+
+Only two phases require manual approval:
+
+| Phase | Command | Description |
+|-------|---------|-------------|
+| ☰ **Design** | `/fuxi-approve` | Approve MDD design before review |
+| ☳ **Review** | `/fuxi-approve` | Approve tasks before execution |
+| 📁 **Archive** | `/fuxi-archive` | Manually archive completed workflow |
+
+### Auto-Proceed Phases (Automatic)
+
+After approval, these phases run automatically:
+
+| Phase | Behavior |
+|-------|----------|
+| ☴ **Execute (LuBan)** | Auto-proceed to task execution |
+| ☲ **Audit (GaoYao)** | Auto-proceed to quality audit after execution |
+
 ## Complete Workflow
 
 ```
@@ -98,45 +119,55 @@ After installation, restart pi and use these commands:
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
-                    │ ☰ Fuxi      │
+                    │ ☰ Fuxi      │  Design (Manual)
                     │ MDD Design  │
                     │ 7 Planes    │
                     └──────┬──────┘
                            │
-                    ┌──────▼──────┐
-                    │/fuxi-approve│
+                    ┌──────▼──────┐     ← Manual Approval
+                    │/fuxi-approve│     Required
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
-                    │ ☳ QiaoChui  │
+                    │ ☳ QiaoChui  │  Review (Manual)
                     │ Review      │
-                    │ Decompose   │ ← Configure execution mode
+                    │ Decompose   │  Configure execution mode
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐     ← Manual Approval
+                    │/fuxi-approve│     Required
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
-                    │/fuxi-approve│
+                    │ ☴ LuBan     │  Execute (Auto!)
+                    │ TDD         │  ← Auto-proceed
+                    └──────┬──────┘     No approval needed
+                           │
+                           │  (Auto)
+                    ┌──────▼──────┐
+                    │ ☲ GaoYao    │  Audit (Auto!)
+                    │ Audit       │  ← Auto-proceed
+                    │ Security    │  No approval needed
                     └──────┬──────┘
                            │
-                    ┌──────▼──────┐
-                    │ ☴ LuBan     │
-                    │ Execute     │
-                    │ TDD        │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │/fuxi-approve│
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │ ☲ GaoYao    │
-                    │ Audit       │
-                    │ Security    │
+                    ┌──────▼──────┐     ← Manual Action
+                    │/fuxi-archive│     Required
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
                     │   🎉 Complete│
                     └─────────────┘
 ```
+
+### Phase Summary
+
+| # | Phase | Type | Confirmation |
+|---|-------|------|-------------|
+| 1 | ☰ Fuxi (Design) | Manual | `/fuxi-approve` |
+| 2 | ☳ QiaoChui (Review) | Manual | `/fuxi-approve` |
+| 3 | ☴ LuBan (Execute) | **Auto** | None |
+| 4 | ☲ GaoYao (Audit) | **Auto** | None |
+| 5 | 📁 Archive | Manual | `/fuxi-archive` |
 
 ## MDD Design Method
 
