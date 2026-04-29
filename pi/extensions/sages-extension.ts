@@ -10,10 +10,10 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { registerFuxiTools, registerQiaoChuiTools, registerLuBanTools, registerGaoYaoTools } from "./src/tools/index.js";
-import { StateManager, type WorkflowState, type Task } from "./src/state/state-manager.js";
-import { WorkflowOrchestrator } from "./src/orchestrator/index.js";
-import { TaskExecutor } from "./src/executor/index.js";
+import { registerFuxiTools, registerQiaoChuiTools, registerLuBanTools, registerGaoYaoTools } from "../dist/tools/index.js";
+import { StateManager, type WorkflowState, type Task } from "../dist/state/state-manager.js";
+import { WorkflowOrchestrator } from "../dist/orchestrator/index.js";
+import { TaskExecutor } from "../dist/executor/index.js";
 
 // =============================================================================
 // Extension State

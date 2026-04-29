@@ -3,7 +3,7 @@
  * Files live in .sages/workspace/ during active workflow
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, readdirSync, unlinkSync, rmdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 
 export interface WorkspaceFiles {
@@ -264,7 +264,6 @@ export class WorkspaceManager {
     const archiveDir = join(this.cwd, ARCHIVE_DIR, planName);
     if (!existsSync(archiveDir)) return [];
 
-    const { readdirSync } = require("node:fs");
     try {
       return readdirSync(archiveDir, { withFileTypes: true })
         .filter((entry: { isDirectory: () => boolean }) => entry.isDirectory())
@@ -285,7 +284,6 @@ export class WorkspaceManager {
     const archiveDir = join(this.cwd, ARCHIVE_DIR);
     if (!existsSync(archiveDir)) return [];
 
-    const { readdirSync } = require("node:fs");
     try {
       return readdirSync(archiveDir, { withFileTypes: true })
         .filter((entry: { isDirectory: () => boolean }) => entry.isDirectory())
@@ -325,7 +323,6 @@ export class WorkspaceManager {
    * Clear workspace for new workflow
    */
   clear(): void {
-    const { readdirSync, unlinkSync, rmdirSync } = require("node:fs");
     
     try {
       const files = readdirSync(this.workspacePath);

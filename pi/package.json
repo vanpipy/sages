@@ -10,7 +10,7 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./extension": "./extensions/sages-extension.js"
+    "./extension": "./extensions/sages-extension.ts"
   },
   "scripts": {
     "build": "tsc",

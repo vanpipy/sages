@@ -3,7 +3,7 @@
  * Implements: RED → GREEN → REFACTOR
  */
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -217,7 +217,6 @@ export function ${className.toLowerCase()}() {
   }
 
   private ensureDir(dir: string): void {
-    const { mkdirSync } = require("node:fs");
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }

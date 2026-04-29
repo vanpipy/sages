@@ -3,7 +3,7 @@
  * Handles persistence, recovery, and workspace management
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 export interface WorkflowState {
@@ -289,7 +289,6 @@ export class StateManager {
    * Clear workspace for new workflow
    */
   clearWorkspace(): void {
-    const { readdirSync, unlinkSync } = require("node:fs");
     try {
       const files = readdirSync(this.workspacePath);
       for (const file of files) {
@@ -308,7 +307,6 @@ export class StateManager {
     if (!existsSync(archiveDir)) return [];
 
     try {
-      const { readdirSync } = require("node:fs");
       return readdirSync(archiveDir, { withFileTypes: true })
         .filter((entry: { isDirectory: () => boolean }) => entry.isDirectory())
         .map((entry: { name: string }) => ({
@@ -328,7 +326,6 @@ export class StateManager {
     if (!existsSync(this.archivePath)) return [];
 
     try {
-      const { readdirSync } = require("node:fs");
       return readdirSync(this.archivePath, { withFileTypes: true })
         .filter((entry: { isDirectory: () => boolean }) => entry.isDirectory())
         .map((entry: { name: string }) => entry.name);
