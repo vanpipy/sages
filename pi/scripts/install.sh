@@ -36,7 +36,7 @@ UNINSTALL=false
 VERSION="main"
 REPO_URL="https://github.com/vanpipy/sages.git"
 PI_DIR_PATH=""
-PKG_DIR=""
+SAGES_PKG_DIR=""
 
 # Functions
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
@@ -126,11 +126,11 @@ parse_args() {
 
   PI_DIR_PATH="$(eval echo "$PREFIX")"
   PI_DIR_PATH="$(cd "$PI_DIR_PATH" 2>/dev/null && pwd)" || true
-  PKG_DIR="${PI_DIR_PATH}/packages/sages"
+  SAGES_PKG_DIR="${PI_DIR_PATH}/packages/sages"
 }
 
 check_installation() {
-  local pkg_dir="$PKG_DIR"
+  local pkg_dir="$SAGES_PKG_DIR"
 
   if [[ -d "$pkg_dir" ]]; then
     if [[ "$FORCE" == true ]]; then
@@ -205,10 +205,11 @@ build_package() {
 
 install_package() {
   local pi_dir="$TEMP_DIR/sages/pi"
-  local pkg_dest="$PKG_DIR"
+  local pkg_dest="$SAGES_PKG_DIR"
 
   if [[ "$DRY_RUN" == true ]]; then
     info "Installing package..."
+    echo "  mkdir -p $(dirname "$pkg_dest")"
     echo "  rm -rf $pkg_dest"
     echo "  cp -r $pi_dir $pkg_dest"
     return
@@ -216,10 +217,11 @@ install_package() {
 
   info "Installing package..."
   
+  # Ensure parent directory exists (idempotent)
+  mkdir -p "$(dirname "$pkg_dest")"
+  
   # Remove old installation
-  if [[ -d "$pkg_dest" ]]; then
-    rm -rf "$pkg_dest"
-  fi
+  rm -rf "$pkg_dest"
   
   # Copy to persistent location
   cp -r "$pi_dir" "$pkg_dest"
@@ -237,7 +239,7 @@ show_installation_info() {
   echo "========================================"
   echo ""
   echo "Package: @sages/pi-four-sages"
-  echo "Location: $PKG_DIR"
+  echo "Location: $SAGES_PKG_DIR"
   echo ""
   echo "Commands available:"
   echo "  /fuxi <request>       Start workflow"
@@ -264,7 +266,7 @@ uninstall_package() {
   info "Uninstalling Four Sages..."
 
   local pkg_paths=(
-    "$PKG_DIR"
+    "$SAGES_PKG_DIR"
     "$PI_DIR_PATH/agent/npm/@sages"
     "$PI_DIR_PATH/agent/npm/sages"
   )
