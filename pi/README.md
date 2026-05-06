@@ -111,6 +111,40 @@ After approval, these phases run automatically:
 | ☴ **Execute (LuBan)** | Auto-proceed to task execution |
 | ☲ **Audit (GaoYao)** | Auto-proceed to quality audit after execution |
 
+## Workflow Recovery
+
+Four Sages supports resuming interrupted workflows:
+
+### Recovery Scenarios
+
+| Scenario | Detection | Recovery Action |
+|----------|----------|----------------|
+| `draft.md` exists + `state.json` exists | Phase detected from `state.json` | `/fuxi-approve` continues from stored phase |
+| `draft.md` missing + `state.json` exists | Workflow detected but draft lost | `fuxi_create_draft` regenerates with original request |
+| New request same workspace | Existing workflow detected | Draft updated, phase preserved |
+
+### State File
+
+Workflow state is stored in `.sages/workspace/state.json`:
+
+```json
+{
+  "id": "sages-1234567890",
+  "phase": "design",
+  "planName": "user-management",
+  "request": "Create REST API for user management",
+  "createdAt": "2024-01-01T00:00:00.000Z",
+  "updatedAt": "2024-01-01T00:00:00.000Z"
+}
+```
+
+### Phase Progression
+
+```
+idle → design → review → plan → execute → audit → complete
+```
+
+
 ## Complete Workflow
 
 ```

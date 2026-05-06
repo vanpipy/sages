@@ -112,6 +112,22 @@ Request → Fuxi Design → QiaoChui Review → User Decision
 5. **Audit Phase**: GaoYao performs quality check
 6. **Completion**: Workflow complete after passing audit
 
+## Workflow Recovery
+
+Four Sages supports resuming interrupted workflows:
+
+| Scenario | Detection | Recovery Action |
+|----------|----------|----------------|
+| `draft.md` exists + `state.json` exists | Phase detected from `state.json` | Continue from stored phase |
+| `draft.md` missing + `state.json` exists | Workflow detected | `fuxi_create_draft` regenerates |
+| New request same workspace | Existing workflow | Draft updated, phase preserved |
+
+State is stored in `.sages/workspace/state.json` with phase progression:
+
+```
+idle → design → review → plan → execute → audit → complete
+```
+
 ## MDD Design
 
 Each design draft follows the **Multi-Dimensional Design (MDD)** framework:
