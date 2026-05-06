@@ -12,6 +12,15 @@ import { generateMinimalDraft } from "../utils/draft-generator.js";
 const WORKSPACE_DIR = ".sages/workspace";
 const SESSIONS_DIR = ".sages/sessions";
 
+interface WorkflowState {
+  id: string;
+  phase: "idle" | "design" | "review" | "plan" | "execute" | "audit" | "complete";
+  planName: string;
+  request: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 function ensureWorkspaceDirs(cwd: string): string {
   const workspacePath = join(cwd, WORKSPACE_DIR);
   const sessionsPath = join(cwd, SESSIONS_DIR);
@@ -22,6 +31,35 @@ function ensureWorkspaceDirs(cwd: string): string {
     mkdirSync(sessionsPath, { recursive: true });
   }
   return workspacePath;
+}
+
+/**
+ * Extract plan name from request text
+ */
+function extractPlanName(content: string): string {
+  const words = content.trim().split(/\s+/).slice(0, 4);
+  return words.map((w, i) => i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w.toLowerCase()).join("-");
+}
+
+/**
+ * Check if there's an existing workflow that can be recovered
+ */
+function getExistingWorkflow(cwd: string): { hasDraft: boolean; hasState: boolean; state: WorkflowState | null } {
+  const workspacePath = join(cwd, WORKSPACE_DIR);
+  const draftPath = join(workspacePath, "draft.md");
+  const statePath = join(workspacePath, "state.json");
+
+  const hasDraft = existsSync(draftPath);
+  const hasState = existsSync(statePath);
+  let state: WorkflowState | null = null;
+
+  if (hasState) {
+    try {
+      state = JSON.parse(readFileSync(statePath, "utf-8")) as WorkflowState;
+    } catch { /* ignore */ }
+  }
+
+  return { hasDraft, hasState, state };
 }
 
 export function registerFuxiTools(pi: ExtensionAPI): void {
@@ -41,12 +79,58 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         const workspacePath = ensureWorkspaceDirs(cwd);
         const draftPath = join(workspacePath, "draft.md");
 
-        const draft = generateMinimalDraft(name || "workflow", request);
+        // Check for existing workflow that can be recovered
+        const existing = getExistingWorkflow(cwd);
+
+        // If there's an existing draft with state, detect the phase
+        let recoveryInfo: { planName?: string; phase?: string; request?: string } | null = null;
+        if (existing.hasDraft && existing.hasState && existing.state) {
+          recoveryInfo = {
+            planName: existing.state.planName,
+            phase: existing.state.phase,
+            request: existing.state.request,
+          };
+        }
+
+        // Generate plan name from request if not provided
+        const planName = name || extractPlanName(request);
+
+        const draft = generateMinimalDraft(planName, request);
         writeFileSync(draftPath, draft);
 
+        // Update state.json if it exists, otherwise create it
+        const statePath = join(workspacePath, "state.json");
+        const now = new Date().toISOString();
+        const state: WorkflowState = existing.state ? {
+          ...existing.state,
+          planName,
+          request,
+          phase: existing.state.phase === "idle" ? "design" : existing.state.phase,
+          updatedAt: now,
+        } : {
+          id: `sages-${Date.now()}`,
+          phase: "design",
+          planName,
+          request,
+          createdAt: now,
+          updatedAt: now,
+        };
+        writeFileSync(statePath, JSON.stringify(state, null, 2));
+
         return {
-          content: [{ type: "text", text: JSON.stringify({ success: true, draft_path: draftPath, timestamp: new Date().toISOString() }) }],
-          details: { draftPath, workspacePath },
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            draft_path: draftPath,
+            timestamp: now,
+            plan_name: planName,
+            recovery: recoveryInfo ? {
+              available: true,
+              planName: recoveryInfo.planName,
+              phase: recoveryInfo.phase,
+              note: "Existing workflow detected. Draft updated with new request."
+            } : { available: false }
+          }) }],
+          details: { draftPath, workspacePath, planName, recovery: recoveryInfo },
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -68,10 +152,30 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;
-      const draftPath = params.path || join(cwd, WORKSPACE_DIR, "draft.md");
+      const workspacePath = join(cwd, WORKSPACE_DIR);
+      const draftPath = params.path || join(workspacePath, "draft.md");
 
       try {
         if (!existsSync(draftPath)) {
+          // Check for recovery scenario - state exists but draft is missing
+          const existing = getExistingWorkflow(cwd);
+          if (existing.hasState && existing.state) {
+            return {
+              content: [{ type: "text", text: JSON.stringify({
+                success: false,
+                error: { message: "Draft not found, but existing workflow detected" },
+                recovery: {
+                  available: true,
+                  planName: existing.state.planName,
+                  phase: existing.state.phase,
+                  request: existing.state.request,
+                  hint: "Use fuxi_create_draft to regenerate the draft for this workflow"
+                }
+              }) }],
+              isError: true,
+              details: { draftPath, recovery: existing.state },
+            };
+          }
           return {
             content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: `Draft not found: ${draftPath}` } }) }],
             isError: true,
@@ -110,15 +214,49 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         const draftPath = join(workspacePath, "draft.md");
         const planPath = join(workspacePath, "plan.md");
         const executionPath = join(workspacePath, "execution.yaml");
-
+        const statePath = join(workspacePath, "state.json");
         const hasDraft = existsSync(draftPath);
         const hasPlan = existsSync(planPath);
         const hasExecution = existsSync(executionPath);
+        const hasState = existsSync(statePath);
 
+        // Load state for accurate phase detection
+        let storedState: WorkflowState | null = null;
+        if (hasState) {
+          try {
+            storedState = JSON.parse(readFileSync(statePath, "utf-8")) as WorkflowState;
+          } catch { /* ignore */ }
+        }
+
+        // Determine status based on state.json first, then file existence
         let status = "idle";
         let nextStep = "";
+        const planName = storedState?.planName || (hasDraft ? extractPlanName(readFileSync(draftPath, "utf-8").slice(0, 200)) : null);
 
-        if (hasDraft && !hasPlan) {
+        // Use stored phase if available, otherwise infer from files
+        if (storedState && storedState.phase !== "idle") {
+          status = storedState.phase;
+          switch (storedState.phase) {
+            case "design":
+              nextStep = storedState.request ? "Review with qiaochui then decompose" : "Use qiaochui_review and qiaochui_decompose";
+              break;
+            case "review":
+              nextStep = "Decompose with qiaochui_decompose";
+              break;
+            case "plan":
+              nextStep = "Ready for execution (awaiting /fuxi-approve)";
+              break;
+            case "execute":
+              nextStep = "Execute tasks with luban_execute_all";
+              break;
+            case "audit":
+              nextStep = "Run audit with gaoyao_review";
+              break;
+            case "complete":
+              nextStep = "Workflow complete - use /fuxi-archive to save";
+              break;
+          }
+        } else if (hasDraft && !hasPlan) {
           status = "design";
           nextStep = "Use qiaochui_review then qiaochui_decompose";
         } else if (hasPlan && !hasExecution) {
@@ -145,14 +283,17 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
               success: true,
               status,
               workspace: workspacePath,
+              plan_name: planName,
               has_draft: hasDraft,
               has_plan: hasPlan,
               has_execution: hasExecution,
+              has_state: hasState,
               task_count: taskCount,
               next_step: nextStep,
+              stored_phase: storedState?.phase,
             }),
           }],
-          details: { status, hasDraft, hasPlan, hasExecution, taskCount },
+          details: { status, hasDraft, hasPlan, hasExecution, taskCount, storedState },
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
