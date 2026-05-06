@@ -394,22 +394,13 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
       try {
         const planPath = join(workspacePath, "plan.md");
         const executionPath = join(workspacePath, "execution.yaml");
-        const tasksPath = join(workspacePath, "tasks.json");
+        // tasks.json is deprecated - use execution.yaml as single source of truth
 
         let totalTasks = 0;
         let taskDetails: Array<{ id: string; plane?: string; status: string }> = [];
 
-        if (existsSync(tasksPath)) {
-          const tasks = JSON.parse(readFileSync(tasksPath, "utf-8"));
-          if (Array.isArray(tasks)) {
-            totalTasks = tasks.length;
-            taskDetails = tasks.map((t: any) => ({
-              id: t.id,
-              plane: t.plane,
-              status: t.status || "pending",
-            }));
-          }
-        } else if (existsSync(executionPath)) {
+        // Try execution.yaml first (single source of truth)
+        if (existsSync(executionPath)) {
           const content = readFileSync(executionPath, "utf-8");
           const taskMatches = content.match(/- id: (T\d+)/g) || [];
           totalTasks = taskMatches.length;

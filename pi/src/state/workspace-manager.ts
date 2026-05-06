@@ -11,7 +11,6 @@ export interface WorkspaceFiles {
   plan?: string;
   execution?: string;
   state?: string;
-  tasks?: string;
   audit?: string;
 }
 
@@ -125,13 +124,9 @@ export class WorkspaceManager {
   }
 
   readTasks(): unknown | null {
-    const path = join(this.workspacePath, "tasks.json");
-    if (!existsSync(path)) return null;
-    try {
-      return JSON.parse(readFileSync(path, "utf-8"));
-    } catch {
-      return null;
-    }
+    // Tasks are now stored in execution.yaml, not tasks.json
+    // Parse from execution.yaml if needed, or return null for backward compat
+    return null;
   }
 
   readState(): unknown | null {
@@ -166,7 +161,9 @@ export class WorkspaceManager {
   }
 
   hasTasks(): boolean {
-    return existsSync(join(this.workspacePath, "tasks.json"));
+    // Tasks are now stored in execution.yaml
+    // For backward compatibility, check both
+    return existsSync(join(this.workspacePath, "execution.yaml"));
   }
 
   hasAudit(): boolean {
@@ -201,7 +198,6 @@ export class WorkspaceManager {
       draft: this.readDraft() ?? undefined,
       plan: this.readPlan() ?? undefined,
       execution: this.readExecution() ?? undefined,
-      tasks: this.readTasks() ? JSON.stringify(this.readTasks(), null, 2) : undefined,
       state: this.readState() ? JSON.stringify(this.readState(), null, 2) : undefined,
       audit: this.readAudit() ?? undefined,
     };
@@ -210,7 +206,6 @@ export class WorkspaceManager {
     if (files.draft) writeFileSync(join(archivePath, "draft.md"), files.draft);
     if (files.plan) writeFileSync(join(archivePath, "plan.md"), files.plan);
     if (files.execution) writeFileSync(join(archivePath, "execution.yaml"), files.execution);
-    if (files.tasks) writeFileSync(join(archivePath, "tasks.json"), files.tasks);
     if (files.state) writeFileSync(join(archivePath, "state.json"), files.state);
     if (files.audit) writeFileSync(join(archivePath, "audit.md"), files.audit);
 
@@ -241,7 +236,6 @@ export class WorkspaceManager {
     if (this.hasDraft()) summary += "- ✅ draft.md (Fuxi's design)\n";
     if (this.hasPlan()) summary += "- ✅ plan.md (Task plan)\n";
     if (this.hasExecution()) summary += "- ✅ execution.yaml (Execution config)\n";
-    if (this.hasTasks()) summary += "- ✅ tasks.json (Task definitions)\n";
     if (this.hasAudit()) summary += "- ✅ audit.md (Audit report)\n";
 
     if (tasks && tasks.length > 0) {
@@ -304,7 +298,7 @@ export class WorkspaceManager {
     this.clear();
 
     // Copy files from archive to workspace
-    const files = ["draft.md", "plan.md", "execution.yaml", "tasks.json", "state.json", "audit.md"];
+    const files = ["draft.md", "plan.md", "execution.yaml", "state.json", "audit.md"];
     for (const file of files) {
       const src = join(archivePath, file);
       if (existsSync(src)) {

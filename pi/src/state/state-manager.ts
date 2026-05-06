@@ -233,7 +233,6 @@ export class StateManager {
       { src: join(this.workspacePath, "draft.md"), dest: "draft.md" },
       { src: join(this.workspacePath, "plan.md"), dest: "plan.md" },
       { src: join(this.workspacePath, "execution.yaml"), dest: "execution.yaml" },
-      { src: join(this.workspacePath, "tasks.json"), dest: "tasks.json" },
       { src: join(this.workspacePath, "state.json"), dest: "state.json" },
       { src: join(this.workspacePath, "audit.md"), dest: "audit.md" },
     ];
@@ -280,7 +279,6 @@ export class StateManager {
 - ${existsSync(join(this.workspacePath, "draft.md")) ? "✅" : "❌"} draft.md (Fuxi's design)
 - ${existsSync(join(this.workspacePath, "plan.md")) ? "✅" : "❌"} plan.md (Task plan)
 - ${existsSync(join(this.workspacePath, "execution.yaml")) ? "✅" : "❌"} execution.yaml
-- ${existsSync(join(this.workspacePath, "tasks.json")) ? "✅" : "❌"} tasks.json
 - ${existsSync(join(this.workspacePath, "audit.md")) ? "✅" : "❌"} audit.md
 
 `;
@@ -357,7 +355,7 @@ export class StateManager {
     this.clearWorkspace();
 
     // Copy files from archive
-    const files = ["draft.md", "plan.md", "execution.yaml", "tasks.json", "state.json", "audit.md"];
+    const files = ["draft.md", "plan.md", "execution.yaml", "state.json", "audit.md"];
     for (const file of files) {
       const src = join(archiveDir, file);
       if (existsSync(src)) {
@@ -374,13 +372,12 @@ export class StateManager {
   /**
    * Get workspace file paths
    */
-  getWorkspaceFiles(): { draft?: string; plan?: string; execution?: string; tasks?: string; audit?: string } {
+  getWorkspaceFiles(): { draft?: string; plan?: string; execution?: string; audit?: string } {
     const files: Record<string, string | undefined> = {};
     const fileMap: Record<string, string> = {
       draft: "draft.md",
       plan: "plan.md",
       execution: "execution.yaml",
-      tasks: "tasks.json",
       audit: "audit.md",
     };
 
