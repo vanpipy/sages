@@ -380,8 +380,7 @@ RED → GREEN → REFACTOR
 .sages/workspace/           # Current workflow
 ├── draft.md               # MDD Design (Fuxi)
 ├── plan.md                # Task plan
-├── execution.yaml         # Execution config
-├── tasks.json            # Task list
+├── execution.yaml         # Execution config (single source of truth)
 └── state.json            # Workflow state
 ```
 

@@ -143,12 +143,28 @@ GaoYao ──→ Creates quality assurance
 **Output**:
 - `plan.md` - Task plan
 - `execution.yaml` - Execution config
-- `tasks.json` - Task list
+- (no longer uses `tasks.json`)
+
+**Deep Review Analysis**:
+| Metric | Description |
+|--------|-------------|
+| Content Depth | 0-100 score per plane |
+| Risks | Identified per plane |
+| Questions | Unanswered review questions |
+| Complexity | Low/Medium/High/Very-High |
+| Est. Hours | Time estimation |
+| Blockers | Critical issues |
+
+**Review Verdict**:
+- `APPROVED` → Proceed to decomposition
+- `REVISE` → Expand incomplete planes
+- `REJECTED` → Redesign required
 
 **Auto Behavior**:
-- Review design feasibility
-- Generate dependency graph
-- Create execution plan
+- Analyze content depth per plane
+- Identify risks and blockers
+- Detect cross-plane dependencies
+- Estimate implementation complexity
 
 ### Phase 3: Execute (LuBan) ☴
 
@@ -218,17 +234,16 @@ RED → GREEN → REFACTOR
 ├── workspace/           # Current workflow
 │   ├── draft.md        # MDD Design (Fuxi)
 │   ├── plan.md         # Task plan (QiaoChui)
-│   ├── execution.yaml # Execution config
-│   ├── tasks.json      # Task list
+│   ├── execution.yaml # Execution config (single source of truth)
 │   ├── audit.md        # Audit report (GaoYao)
-│   └── state.json      # State
+│   └── state.json      # Workflow state
 │
 └── archive/            # Archived workflows
     └── {plan}/
         └── {timestamp}/
             ├── draft.md
             ├── plan.md
-            ├── tasks.json
+            ├── execution.yaml
             ├── audit.md
             ├── state.json
             └── summary.md

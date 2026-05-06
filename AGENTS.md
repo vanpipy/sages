@@ -56,7 +56,7 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 - Validates draft completeness and feasibility
 - **Auto-proceeds** if draft is valid
 - Creates execution plan
-- Output: `.sages/workspace/plan.md`, `execution.yaml`, `tasks.json`
+- Output: `.sages/workspace/plan.md`, `execution.yaml` (tasks stored here)
 - **Requires**: User approval (`/fuxi-approve`)
 
 ### Phase 3: Execute (LuBan) ☴
@@ -81,8 +81,7 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 .sages/workspace/
 ├── draft.md          # Fuxi's design (Eight Trigrams)
 ├── plan.md           # Task plan (QiaoChui)
-├── execution.yaml    # Execution configuration
-├── tasks.json        # Task definitions with dependencies
+├── execution.yaml    # Execution configuration (single source of truth)
 ├── state.json        # Workflow state
 └── audit.md          # Audit report (GaoYao)
 ```
@@ -96,7 +95,7 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
         ├── draft.md
         ├── plan.md
         ├── execution.yaml
-        ├── tasks.json
+        ├── execution.yaml
         ├── state.json
         ├── audit.md
         └── summary.md    # Auto-generated overview
