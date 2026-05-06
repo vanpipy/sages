@@ -110,12 +110,10 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         const draftPath = join(workspacePath, "draft.md");
         const planPath = join(workspacePath, "plan.md");
         const executionPath = join(workspacePath, "execution.yaml");
-        const tasksPath = join(workspacePath, "tasks.json");
 
         const hasDraft = existsSync(draftPath);
         const hasPlan = existsSync(planPath);
         const hasExecution = existsSync(executionPath);
-        const hasTasks = existsSync(tasksPath);
 
         let status = "idle";
         let nextStep = "";
@@ -132,10 +130,11 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         }
 
         let taskCount = 0;
-        if (hasTasks) {
+        if (hasExecution) {
           try {
-            const tasks = JSON.parse(readFileSync(tasksPath, "utf-8"));
-            taskCount = Array.isArray(tasks) ? tasks.length : 0;
+            const yamlContent = readFileSync(executionPath, "utf-8");
+            const taskMatches = yamlContent.match(/^\s*-\s*id:\s*([A-Z][0-9]+)/gm);
+            taskCount = taskMatches ? taskMatches.length : 0;
           } catch { /* ignore */ }
         }
 

@@ -202,11 +202,10 @@ ${tasks.map((t) => `  - id: ${t.id}
 
         const planPath = join(workspacePath, "plan.md");
         const executionPath = join(workspacePath, "execution.yaml");
-        const tasksPath = join(workspacePath, "tasks.json");
 
         writeFileSync(planPath, planMarkdown);
         writeFileSync(executionPath, executionYaml);
-        writeFileSync(tasksPath, JSON.stringify(tasks, null, 2));
+        // Do NOT write tasks.json - use execution.yaml only
 
         return {
           content: [{
@@ -216,7 +215,6 @@ ${tasks.map((t) => `  - id: ${t.id}
               plan_name: planName,
               plan_path: planPath,
               execution_path: executionPath,
-              tasks_path: tasksPath,
               task_count: tasks.length,
               estimated_time: totalTime,
               planes: [...new Set(tasks.map(t => t.plane))],
@@ -228,6 +226,7 @@ ${tasks.map((t) => `  - id: ${t.id}
                   : "Shared context mode - all tasks share the same context",
               },
               workspace: workspacePath,
+              note: "Tasks stored in execution.yaml (not tasks.json)",
             }),
           }],
           details: { planName, planPath, executionPath, taskCount: tasks.length, useSubagent: use_subagent, maxParallel: max_parallel },
@@ -328,7 +327,7 @@ function extractPlanName(content: string): string | null {
 }
 
 /**
- * Generate tasks with MDD plane classification and inferred files
+ * Generate tasks with MDD plane classification
  */
 interface MDDTask {
   id: string;
@@ -340,170 +339,134 @@ interface MDDTask {
 }
 
 /**
- * Infer source files from task description
+ * Extract tasks from draft content - parses tables and YAML lists
  */
-function inferFiles(desc: string, plane: MDDPlane): string[] {
-  const words = desc.toLowerCase().split(/[\s,]+/);
-  const keywords = words.filter(w => 
-    w.length > 3 && 
-    !["implement", "setup", "create", "add", "write", "the", "and", "for", "core", "strategy"].includes(w)
-  );
-
-  const files: string[] = [];
-
-  // Map plane to source directories
-  const planePaths: Record<MDDPlane, string> = {
-    Business: "src/business",
-    Data: "src/data",
-    Control: "src/control",
-    Foundation: "src/foundation",
-    Observation: "src/observation",
-    Security: "src/security",
-    Evolution: "src/evolution",
-  };
-
-  const basePath = planePaths[plane] || "src";
-
-  // Generate file paths based on keywords
-  if (keywords.length > 0) {
-    files.push(`${basePath}/${keywords[0]}.ts`);
-    files.push(`${basePath}/${keywords[0]}.test.ts`);
-  } else {
-    // Fallback to generic paths
-    files.push(`${basePath}/index.ts`);
-    files.push(`${basePath}/index.test.ts`);
+function extractTasksFromDraft(content: string): MDDTask[] {
+  const tasks: MDDTask[] = [];
+  
+  // Pattern 1: Table rows like "| T1 | Fix TS1205 | src/tui/base/index.ts | High |"
+  const tableRowRegex = /^\|\s*([A-Z][0-9]+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*(\w+)/gm;
+  let match;
+  while ((match = tableRowRegex.exec(content)) !== null && tasks.length < 15) {
+    const id = match[1];
+    const desc = match[2].trim();
+    const files = match[3].trim();
+    const priority = match[4].toLowerCase().includes("high") ? "high" : "medium";
+    
+    tasks.push({
+      id,
+      description: desc,
+      plane: inferPlaneFromDescription(desc),
+      priority,
+      dependsOn: [],
+      files: files.split(",").map((f: string) => f.trim()).filter((f: string) => f.length > 0),
+    });
   }
-
-  // Add specific files based on description keywords
-  if (desc.toLowerCase().includes("auth")) {
-    files.push("src/security/auth.ts");
-    files.push("src/security/auth.test.ts");
+  
+  // Pattern 2: YAML list format "- id: T1" followed by description
+  if (tasks.length === 0) {
+    const yamlBlockRegex = /^\s*-\s*id:\s*([A-Z][0-9]+)\s*\n\s*description:\s*"?([^"\n]+)"?\s*\n\s*(?:plane:\s*(\w+)\s*\n)?\s*(?:files:\s*\[([^\]]+)\]\s*\n)?/gm;
+    while ((match = yamlBlockRegex.exec(content)) !== null && tasks.length < 15) {
+      const id = match[1];
+      const desc = match[2].trim();
+      const planeStr = match[3];
+      const filesStr = match[4] || "";
+      
+      tasks.push({
+        id,
+        description: desc,
+        plane: planeStr ? (planeStr as MDDPlane) : inferPlaneFromDescription(desc),
+        priority: "high" as const,
+        dependsOn: [],
+        files: filesStr.split(",").map((f: string) => f.trim().replace(/["']/g, "")).filter((f: string) => f.length > 0),
+      });
+    }
   }
-  if (desc.toLowerCase().includes("api") || desc.toLowerCase().includes("endpoint")) {
-    files.push("src/api/routes.ts");
-    files.push("src/api/routes.test.ts");
+  
+  // Pattern 3: Simple numbered list "1. T1: Fix..."
+  if (tasks.length === 0) {
+    const simpleListRegex = /^\d+[\.\)]\s*([A-Z][0-9]+):\s*([^\n]+)/gm;
+    while ((match = simpleListRegex.exec(content)) !== null && tasks.length < 15) {
+      const id = match[1];
+      const desc = match[2].trim();
+      
+      tasks.push({
+        id,
+        description: desc,
+        plane: inferPlaneFromDescription(desc),
+        priority: "high" as const,
+        dependsOn: [],
+        files: inferFilesFromDescription(desc),
+      });
+    }
   }
-  if (desc.toLowerCase().includes("model") || desc.toLowerCase().includes("schema")) {
-    files.push("src/data/models.ts");
-    files.push("src/data/models.test.ts");
-  }
-  if (desc.toLowerCase().includes("test")) {
-    files.push("test/integration.test.ts");
-  }
-
-  return [...new Set(files)]; // Remove duplicates
+  
+  return tasks;
 }
 
+/**
+ * Infer MDD plane from task description
+ */
+function inferPlaneFromDescription(desc: string): MDDPlane {
+  const lowerDesc = desc.toLowerCase();
+  
+  if (lowerDesc.includes("export") || lowerDesc.includes("import") || lowerDesc.includes("index.ts")) {
+    return "Foundation";
+  }
+  if (lowerDesc.includes("type") || lowerDesc.includes("interface") || lowerDesc.includes("colors")) {
+    return "Data";
+  }
+  if (lowerDesc.includes("handler") || lowerDesc.includes("command") || lowerDesc.includes("return type")) {
+    return "Control";
+  }
+  if (lowerDesc.includes("unused") || lowerDesc.includes("remove")) {
+    return "Business";
+  }
+  if (lowerDesc.includes("test")) {
+    return "Observation";
+  }
+  
+  return "Foundation";
+}
+
+/**
+ * Infer files from task description
+ */
+function inferFilesFromDescription(desc: string): string[] {
+  const lowerDesc = desc.toLowerCase();
+  const files: string[] = [];
+  
+  if (lowerDesc.includes("base/index")) files.push("src/tui/base/index.ts");
+  else if (lowerDesc.includes("websocket/index")) files.push("src/tui/websocket/index.ts");
+  else if (lowerDesc.includes("modal/index")) files.push("src/tui/modal/index.ts");
+  else if (lowerDesc.includes("editor/index")) files.push("src/tui/editor/index.ts");
+  else if (lowerDesc.includes("utils/index") || lowerDesc.includes("box export")) files.push("src/tui/utils/index.ts");
+  else if (lowerDesc.includes("index.ts")) files.push("src/tui/index.ts");
+  
+  if (lowerDesc.includes("colors")) files.push("src/tui/utils/colors.ts");
+  if (lowerDesc.includes("component")) files.push("src/tui/base/component.ts");
+  if (lowerDesc.includes("node-block")) files.push("src/tui/node-block-list.ts");
+  if (lowerDesc.includes("box")) files.push("src/tui/box-drawing.ts");
+  if (lowerDesc.includes("command")) files.push("src/tui/editor/editor-commands.ts");
+  if (lowerDesc.includes("kanban-editor")) files.push("src/tui/editor/kanban-editor.ts");
+  
+  return files.length > 0 ? files : ["src/"];
+}
+
+/**
+ * Generate MDD tasks - tries to extract from draft first
+ */
 function generateMDDTasks(content: string, maxTasks: number): MDDTask[] {
-  const tasks: MDDTask[] = [];
-  const lowerContent = content.toLowerCase();
-
-  // Task type to plane mapping based on SKILL.md task types
-  const taskTemplates: { desc: string; plane: MDDPlane; priority: "high" | "medium" | "low"; dependsOn: string[] }[] = [
-    // Foundation tasks (High priority, no dependencies)
-    { desc: "Setup infrastructure and foundation", plane: "Foundation", priority: "high", dependsOn: [] },
-    { desc: "Configure build system and dependencies", plane: "Foundation", priority: "high", dependsOn: [] },
-    
-    // Data tasks (High priority, depends on Foundation)
-    { desc: "Design and implement data models", plane: "Data", priority: "high", dependsOn: [] },
-    { desc: "Create database schema and migrations", plane: "Data", priority: "high", dependsOn: [] },
-    
-    // Business tasks (High priority)
-    { desc: "Implement core business logic", plane: "Business", priority: "high", dependsOn: [] },
-    { desc: "Implement business rules and validation", plane: "Business", priority: "high", dependsOn: [] },
-    
-    // Control tasks (Medium priority)
-    { desc: "Implement control flow and strategy patterns", plane: "Control", priority: "medium", dependsOn: [] },
-    { desc: "Implement distribution and routing logic", plane: "Control", priority: "medium", dependsOn: [] },
-    
-    // API/Foundation tasks (Medium priority)
-    { desc: "Create API layer and endpoints", plane: "Foundation", priority: "medium", dependsOn: [] },
-    { desc: "Implement API contracts and schemas", plane: "Foundation", priority: "medium", dependsOn: [] },
-    
-    // Security tasks (Medium priority)
-    { desc: "Implement authentication mechanism", plane: "Security", priority: "medium", dependsOn: [] },
-    { desc: "Implement authorization and permissions", plane: "Security", priority: "medium", dependsOn: [] },
-    
-    // Testing tasks (Medium priority)
-    { desc: "Write unit tests for core logic", plane: "Business", priority: "medium", dependsOn: [] },
-    { desc: "Write integration tests", plane: "Foundation", priority: "medium", dependsOn: [] },
-    
-    // Observation tasks (Low priority)
-    { desc: "Add logging and metrics collection", plane: "Observation", priority: "low", dependsOn: [] },
-    { desc: "Setup monitoring and alerting", plane: "Observation", priority: "low", dependsOn: [] },
-    
-    // Evolution tasks (Low priority)
-    { desc: "Create migration strategy documentation", plane: "Evolution", priority: "low", dependsOn: [] },
-    { desc: "Setup versioning strategy", plane: "Evolution", priority: "low", dependsOn: [] },
-  ];
-
-  // Select tasks based on what's mentioned in the content
-  let taskIndex = 0;
-  const usedPlanes = new Set<MDDPlane>();
-
-  for (const template of taskTemplates) {
-    if (tasks.length >= maxTasks) break;
-    
-    const planeKey = template.plane.toLowerCase();
-    const isRelevant = lowerContent.includes(planeKey) || 
-                       lowerContent.includes(template.desc.toLowerCase().split(" ")[0]);
-
-    // Always include foundation and data tasks at the start
-    if (tasks.length < 2 && template.plane === "Foundation") {
-      const id = `T${++taskIndex}`;
-      tasks.push({
-        id,
-        description: template.desc,
-        plane: template.plane,
-        priority: template.priority,
-        dependsOn: [],
-        files: inferFiles(template.desc, template.plane),
-      });
-      usedPlanes.add(template.plane);
-      continue;
-    }
-
-    if (isRelevant || usedPlanes.size < 4) {
-      // Determine dependencies based on plane order
-      let dependsOn: string[] = [];
-      
-      if (template.plane === "Data" || template.plane === "Business" || template.plane === "Control") {
-        const foundationTask = tasks.find(t => t.plane === "Foundation");
-        if (foundationTask) dependsOn.push(foundationTask.id);
-      }
-      
-      if (template.plane === "Security" || template.plane === "Observation" || template.plane === "Evolution") {
-        const businessTask = tasks.find(t => t.plane === "Business");
-        if (businessTask) dependsOn.push(businessTask.id);
-      }
-
-      const id = `T${++taskIndex}`;
-      tasks.push({
-        id,
-        description: template.desc,
-        plane: template.plane,
-        priority: template.priority,
-        dependsOn,
-        files: inferFiles(template.desc, template.plane),
-      });
-      usedPlanes.add(template.plane);
-    }
+  // First, try to extract actual tasks from the draft content
+  const extractedTasks = extractTasksFromDraft(content);
+  if (extractedTasks.length > 0) {
+    return extractedTasks.slice(0, maxTasks);
   }
 
-  // If we don't have enough tasks, add defaults
-  if (tasks.length < 3) {
-    const defaults = [
-      { desc: "Analyze requirements and understand scope", plane: "Business" as MDDPlane, priority: "high" as const, dependsOn: [] },
-      { desc: "Implement core functionality", plane: "Business" as MDDPlane, priority: "high" as const, dependsOn: [] },
-      { desc: "Add tests and validation", plane: "Observation" as MDDPlane, priority: "medium" as const, dependsOn: [] },
-    ];
-    
-    for (const def of defaults) {
-      if (tasks.length >= maxTasks) break;
-      const id = `T${++taskIndex}`;
-      tasks.push({ id, description: def.desc, plane: def.plane, priority: def.priority, dependsOn: def.dependsOn, files: inferFiles(def.desc, def.plane) });
-    }
-  }
-
-  return tasks.slice(0, maxTasks);
+  // Fallback: minimal generic tasks only if extraction fails
+  return [
+    { id: "T1", description: "Analyze requirements and understand scope", plane: "Business" as MDDPlane, priority: "high" as const, dependsOn: [], files: [] },
+    { id: "T2", description: "Implement fix based on design", plane: "Business" as MDDPlane, priority: "high" as const, dependsOn: [], files: [] },
+    { id: "T3", description: "Test and validate implementation", plane: "Observation" as MDDPlane, priority: "medium" as const, dependsOn: [], files: [] },
+  ].slice(0, maxTasks);
 }
