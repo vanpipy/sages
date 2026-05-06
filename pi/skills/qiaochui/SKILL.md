@@ -111,6 +111,55 @@ Each plane from Fuxi's design requires specific technical review:
 - [ ] What's the rollback strategy?
 - [ ] Blue-green or canary deployment?
 
+## Deep Review Analysis
+
+QiaoChui performs quantitative analysis of each plane:
+
+### Content Depth Scoring (0-100)
+
+Each plane is scored based on:
+- **Line count** (max 30 pts): More detailed analysis = higher score
+- **Key elements** (max 40 pts): Presence of plane-specific keywords
+- **Decision density** (max 20 pts): Action items, decisions, implementations
+- **Specific details** (max 10 pts): Named components, estimates, schemas
+
+| Score | Interpretation |
+|-------|----------------|
+| 80-100 | Excellent detail |
+| 50-79 | Good analysis |
+| 30-49 | Needs expansion |
+| 0-29 | Critical gap |
+
+### Risk Identification
+
+Each plane is checked for:
+- Missing detailed analysis
+- Placeholder content (`[TODO]`, `TBD`, `FIXME`)
+- Vague statements ("maybe", "as needed")
+- Plane-specific gaps (schema, auth, API, etc.)
+
+### Implementation Complexity
+
+Estimated based on:
+- Content depth variance across planes
+- Technical complexity indicators (real-time, microservices, ML)
+- Task count
+
+| Complexity | Base Hours | Indicators |
+|------------|------------|------------|
+| Low | 8h | Simple CRUD, basic API |
+| Medium | 24h | Standard web app |
+| High | 48h | Real-time, multi-service |
+| Very High | 120h+ | ML/AI, distributed systems |
+
+### Cross-Plane Dependencies
+
+Detects relationships like:
+- Business → Data (data models needed)
+- Data → Foundation (storage layer)
+- Foundation → Security (API auth)
+- All → Observation (logging/metrics)
+
 ## Review Checklist
 
 ### Technical Feasibility
@@ -175,30 +224,42 @@ T7: Add Observability (Observation)
 
 ## Output Templates
 
-### Feasibility Report
+### Deep Feasibility Report
 
 ```markdown
 # Technical Feasibility Report
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Overall Status | ✅ APPROVED / ⚠️ REVISE / ❌ REJECTED |
+| Design Score | 0-100 |
+| Complexity | LOW / MEDIUM / HIGH / VERY-HIGH |
+| Est. Hours | Xh |
+| Blockers | N |
 
 ## Plane-by-Plane Assessment
 
 ### Business Plane
 - Status: ✅ Feasible / ⚠️ Needs Review / ❌ Not Feasible
-- Notes: [observations]
-
-### Data Plane
-- Status: ...
-- Notes: ...
+- Depth: 85%
+- Risks: [identified risks]
+- Questions: [unanswered questions]
 
 ... (all 7 planes)
 
-## Risks
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
+## Cross-Plane Dependencies
+- Business → Data: Flows data/decisions
+- Foundation → Security: API auth required
 
-## Recommendations
-1. [recommendation]
-2. [recommendation]
+## Risks
+| Risk | Impact | Planes |
+|------|--------|--------|
+| Missing schema | Medium | Data |
+
+## Blockers
+- ❌ Data Plane missing schema definition
 ```
 
 ### Execution Plan
