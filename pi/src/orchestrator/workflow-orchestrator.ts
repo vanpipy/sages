@@ -50,6 +50,36 @@ Create the architectural design for: "${request}"
   }
 
   /**
+   * Generate steer message for workflow recovery
+   */
+  generateRecoveryMessage(state: { phase: string; planName: string; request: string; tasks?: unknown[] }): string {
+    const phaseEmoji: Record<string, string> = {
+      design: "☰",
+      review: "☳",
+      plan: "📋",
+      execute: "☴",
+      audit: "☲",
+      complete: "✅",
+    };
+
+    const emoji = phaseEmoji[state.phase] || "⏸️";
+    const taskCount = state.tasks?.length || 0;
+
+    let message = `**Workflow Recovered** ♻️\n\n`;
+    message += `**Plan:** ${state.planName}\n`;
+    message += `**Request:** ${state.request}\n`;
+    message += `**Resuming at:** ${emoji} ${state.phase}`;
+    
+    if (taskCount > 0) {
+      message += `\n**Tasks:** ${taskCount} task(s) in plan`;
+    }
+
+    message += `\n\nUse \`/fuxi-approve\` to continue from this phase.`;
+
+    return message;
+  }
+
+  /**
    * Generate steer message for Review phase (auto-proceed if valid)
    */
   generateReviewPhaseMessage(draftPath: string): string {

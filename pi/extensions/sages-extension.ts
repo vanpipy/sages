@@ -73,19 +73,40 @@ export default function (pi: ExtensionAPI) {
 
       // Initialize state
       const stateManager = getStateManager(pi);
-      stateManager.clearWorkspace(); // Clear for new workflow
-      stateManager.create(planName, request);
+      const existingState = stateManager.loadFromWorkspace();
 
-      // Initialize orchestrator
-      currentOrchestrator = new WorkflowOrchestrator(pi, stateManager);
-      currentTaskExecutor = null;
+      // Check for existing workflow
+      if (existingState) {
+        // Recover from existing workflow
+        if (args) {
+          existingState.request = args;
+          stateManager.save(existingState);
+        }
+        
+        currentOrchestrator = new WorkflowOrchestrator(pi, stateManager);
+        currentTaskExecutor = null;
 
-      ctx.ui.notify(`🚀 Starting Four Sages: ${planName}`, "info");
-      ctx.ui.setStatus("sages", "☰ Designing...");
+        ctx.ui.notify(`♻️ Recovering Four Sages: ${existingState.planName}`, "info");
+        ctx.ui.setStatus("sages", `${existingState.phase} (recovered)`);
 
-      pi.sendUserMessage(currentOrchestrator.generateDesignPhaseMessage(request, planName), {
-        deliverAs: "steer",
-      });
+        pi.sendUserMessage(currentOrchestrator.generateRecoveryMessage(existingState), {
+          deliverAs: "steer",
+        });
+      } else {
+        // No existing workflow - create new
+        stateManager.create(planName, request);
+
+        // Initialize orchestrator
+        currentOrchestrator = new WorkflowOrchestrator(pi, stateManager);
+        currentTaskExecutor = null;
+
+        ctx.ui.notify(`🚀 Starting Four Sages: ${planName}`, "info");
+        ctx.ui.setStatus("sages", "☰ Designing...");
+
+        pi.sendUserMessage(currentOrchestrator.generateDesignPhaseMessage(request, planName), {
+          deliverAs: "steer",
+        });
+      }
     },
   });
 
