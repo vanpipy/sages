@@ -580,4 +580,102 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
       }
     },
   });
+
+  /**
+   * fuxi_archive - Archive completed workflow to .sages/archive/
+   */
+  pi.registerTool({
+    name: "fuxi_archive",
+    label: "Archive Workflow",
+    description: "Archive the completed workflow to .sages/archive/ for future reference",
+    parameters: Type.Object({}),
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const cwd = ctx.cwd;
+      const workspacePath = join(cwd, ".sages/workspace");
+      const archivePath = join(cwd, ".sages/archive");
+      const statePath = join(workspacePath, "state.json");
+
+      try {
+        // Ensure archive directory exists
+        if (!existsSync(archivePath)) {
+          mkdirSync(archivePath, { recursive: true });
+        }
+
+        // Load state
+        let state: WorkflowState | null = null;
+        if (existsSync(statePath)) {
+          try {
+            state = JSON.parse(readFileSync(statePath, "utf-8")) as WorkflowState;
+          } catch { /* ignore */ }
+        }
+
+        if (!state) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({
+              success: false,
+              error: { message: "No workflow state found" }
+            }) }],
+            isError: true,
+            details: { error: "No state.json found" },
+          };
+        }
+
+        // Create archive directory for this workflow
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const workflowArchivePath = join(archivePath, state.planName, timestamp);
+        mkdirSync(workflowArchivePath, { recursive: true });
+
+        // Copy workspace files to archive
+        const files = ["draft.md", "plan.md", "execution.yaml", "state.json", "audit.md"];
+        const archivedFiles: string[] = [];
+
+        for (const file of files) {
+          const srcPath = join(workspacePath, file);
+          if (existsSync(srcPath)) {
+            const destPath = join(workflowArchivePath, file);
+            // Read content instead of copy to avoid permission issues
+            const content = readFileSync(srcPath, "utf-8");
+            writeFileSync(destPath, content);
+            archivedFiles.push(file);
+          }
+        }
+
+        // Create summary.md
+        const summary = `# Workflow Archive: ${state.planName}
+
+## Workflow Details
+- **ID**: ${state.id}
+- **Plan Name**: ${state.planName}
+- **Request**: ${state.request}
+- **Phase**: ${state.phase}
+- **Created**: ${state.createdAt}
+- **Completed**: ${state.updatedAt}
+
+## Archived Files
+${archivedFiles.map(f => `- ${f}`).join("\n")}
+
+---
+*Archived by Four Sages Agents on ${new Date().toISOString()}*
+`;
+        writeFileSync(join(workflowArchivePath, "summary.md"), summary);
+
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            archive_path: workflowArchivePath,
+            archived_files: archivedFiles,
+            message: `Workflow "${state.planName}" archived to ${workflowArchivePath}`,
+          }) }],
+          details: { archivePath: workflowArchivePath, files: archivedFiles },
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: msg } }) }],
+          isError: true,
+          details: { error: msg },
+        };
+      }
+    },
+  });
 }
