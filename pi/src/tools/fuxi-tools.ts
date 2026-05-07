@@ -62,7 +62,296 @@ function getExistingWorkflow(cwd: string): { hasDraft: boolean; hasState: boolea
   return { hasDraft, hasState, state };
 }
 
+/**
+ * Get actionable next steps based on workspace state
+ */
+function getNextSteps(workspace: { hasDraft: boolean; hasPlan: boolean; hasExecution: boolean; state: WorkflowState | null }): { action: string; command: string; description: string } {
+  const { hasDraft, hasPlan, hasExecution, state } = workspace;
+  const phase = state?.phase || "idle";
+
+  // If no state, nothing to recover
+  if (!state) {
+    return {
+      action: "new",
+      command: "fuxi_create_draft",
+      description: "No existing workflow found. Create a new draft."
+    };
+  }
+
+  // Based on current phase, determine what to do next
+  switch (phase) {
+    case "idle":
+    case "design":
+      if (hasDraft && !hasPlan) {
+        return {
+          action: "review",
+          command: "qiaochui_review",
+          description: "Draft exists. Review it with QiaoChui."
+        };
+      }
+      return {
+        action: "create_draft",
+        command: "fuxi_create_draft",
+        description: "Draft may be missing. Create or regenerate the draft."
+      };
+
+    case "review":
+      if (hasDraft && !hasPlan) {
+        return {
+          action: "review",
+          command: "qiaochui_review",
+          description: "Continue reviewing with QiaoChui."
+        };
+      }
+      return {
+        action: "decompose",
+        command: "qiaochui_decompose",
+        description: "Draft reviewed. Decompose into tasks."
+      };
+
+    case "plan":
+      if (hasPlan && !hasExecution) {
+        return {
+          action: "approve_plan",
+          command: "fuxi_advance_phase execute",
+          description: "Plan ready. Advance to execute phase."
+        };
+      }
+      return {
+        action: "decompose",
+        command: "qiaochui_decompose",
+        description: "Create execution plan from draft."
+      };
+
+    case "execute":
+      if (hasExecution) {
+        return {
+          action: "execute",
+          command: "luban_execute_all",
+          description: "Execute remaining tasks with LuBan."
+        };
+      }
+      return {
+        action: "decompose",
+        command: "qiaochui_decompose",
+        description: "Create execution plan first."
+      };
+
+    case "audit":
+      return {
+        action: "audit",
+        command: "gaoyao_review",
+        description: "Run final audit with GaoYao."
+      };
+
+    case "complete":
+      return {
+        action: "complete",
+        command: "none",
+        description: "Workflow already complete. Use /fuxi-archive to save."
+      };
+
+    default:
+      return {
+        action: "unknown",
+        command: "fuxi_restart",
+        description: `Unknown phase: ${phase}. Try restarting.`
+      };
+  }
+}
+
 export function registerFuxiTools(pi: ExtensionAPI): void {
+
+  /**
+   * fuxi_restart - Check workspace state and provide next steps to recover workflow
+   */
+  pi.registerTool({
+    name: "fuxi_restart",
+    label: "Restart Workflow",
+    description: "Check workspace state and provide next steps to recover an interrupted workflow",
+    parameters: Type.Object({}),
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const cwd = ctx.cwd;
+      const workspacePath = join(cwd, ".sages/workspace");
+
+      try {
+        // Ensure workspace directory exists
+        if (!existsSync(workspacePath)) {
+          mkdirSync(workspacePath, { recursive: true });
+        }
+
+        // Check workspace files
+        const draftPath = join(workspacePath, "draft.md");
+        const planPath = join(workspacePath, "plan.md");
+        const executionPath = join(workspacePath, "execution.yaml");
+        const statePath = join(workspacePath, "state.json");
+
+        const hasDraft = existsSync(draftPath);
+        const hasPlan = existsSync(planPath);
+        const hasExecution = existsSync(executionPath);
+        const hasState = existsSync(statePath);
+
+        // Load state
+        let state: WorkflowState | null = null;
+        if (hasState) {
+          try {
+            state = JSON.parse(readFileSync(statePath, "utf-8")) as WorkflowState;
+          } catch { /* ignore */ }
+        }
+
+        // Get next steps
+        const nextSteps = getNextSteps({ hasDraft, hasPlan, hasExecution, state });
+
+        // Build response
+        const workspace = {
+          path: workspacePath,
+          has_draft: hasDraft,
+          has_plan: hasPlan,
+          has_execution: hasExecution,
+          has_state: hasState,
+        };
+
+        const result = {
+          success: true,
+          workspace,
+          state: state ? {
+            id: state.id,
+            phase: state.phase,
+            plan_name: state.planName,
+            request: state.request,
+            created_at: state.createdAt,
+            updated_at: state.updatedAt,
+          } : null,
+          next_steps: nextSteps,
+          available_actions: {
+            create_draft: !hasDraft || state?.phase === "idle" || state?.phase === "design",
+            review: hasDraft && (!hasPlan || state?.phase === "review"),
+            decompose: hasDraft && (!hasPlan || state?.phase === "review"),
+            advance_to_execute: hasPlan && !hasExecution && state?.phase === "plan",
+            execute: hasExecution && (state?.phase === "execute" || state?.phase === "plan"),
+            audit: hasExecution && state?.phase === "audit",
+            archive: state?.phase === "complete",
+          },
+          message: state 
+            ? `Workflow recovered: ${state.planName} (phase: ${state.phase}). ${nextSteps.description}`
+            : "No existing workflow found. Use fuxi_create_draft to create a new one.",
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          details: result,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: msg } }) }],
+          isError: true,
+          details: { error: msg },
+        };
+      }
+    },
+  });
+
+  /**
+   * fuxi_advance_phase - Manually advance workflow to a specific phase
+   */
+  pi.registerTool({
+    name: "fuxi_advance_phase",
+    label: "Advance Phase",
+    description: "Manually advance workflow to a specific phase (use for recovery when /fuxi-approve doesn't work)",
+    parameters: Type.Object({
+      phase: Type.String({
+        description: "Phase to advance to: design, review, plan, execute, audit, complete"
+      }),
+    }),
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const cwd = ctx.cwd;
+      const workspacePath = join(cwd, WORKSPACE_DIR);
+      const statePath = join(workspacePath, "state.json");
+
+      const validPhases = ["idle", "design", "review", "plan", "execute", "audit", "complete"];
+      const targetPhase = params.phase.toLowerCase();
+
+      if (!validPhases.includes(targetPhase)) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: false,
+            error: { message: `Invalid phase: ${params.phase}. Valid phases: ${validPhases.join(", ")}` }
+          }) }],
+          isError: true,
+          details: { error: `Invalid phase: ${params.phase}` },
+        };
+      }
+
+      try {
+        // Ensure workspace exists
+        ensureWorkspaceDirs(cwd);
+
+        // Load existing state or create new
+        const now = new Date().toISOString();
+        let state: WorkflowState;
+
+        if (existsSync(statePath)) {
+          try {
+            state = JSON.parse(readFileSync(statePath, "utf-8")) as WorkflowState;
+            state.phase = targetPhase as WorkflowState["phase"];
+            state.updatedAt = now;
+          } catch {
+            state = {
+              id: `sages-${Date.now()}`,
+              phase: targetPhase as WorkflowState["phase"],
+              planName: "unknown",
+              request: "unknown",
+              createdAt: now,
+              updatedAt: now,
+            };
+          }
+        } else {
+          state = {
+            id: `sages-${Date.now()}`,
+            phase: targetPhase as WorkflowState["phase"],
+            planName: "unknown",
+            request: "unknown",
+            createdAt: now,
+            updatedAt: now,
+          };
+        }
+
+        writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+        // Get next steps based on new phase
+        const nextSteps = getNextSteps({
+          hasDraft: existsSync(join(workspacePath, "draft.md")),
+          hasPlan: existsSync(join(workspacePath, "plan.md")),
+          hasExecution: existsSync(join(workspacePath, "execution.yaml")),
+          state,
+        });
+
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            previous_phase: state.phase,
+            new_phase: targetPhase,
+            state_path: statePath,
+            next_steps: nextSteps,
+            message: `Workflow advanced to phase: ${targetPhase}. ${nextSteps.description}`,
+          }) }],
+          details: { phase: targetPhase, state },
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: msg } }) }],
+          isError: true,
+          details: { error: msg },
+        };
+      }
+    },
+  });
+
+  /**
+   * fuxi_create_draft - Create MDD architectural design draft
+   */
   pi.registerTool({
     name: "fuxi_create_draft",
     label: "Create Draft",
@@ -143,6 +432,9 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
     },
   });
 
+  /**
+   * fuxi_get_draft - Read the current MDD design draft
+   */
   pi.registerTool({
     name: "fuxi_get_draft",
     label: "Get Draft",
@@ -199,6 +491,9 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
     },
   });
 
+  /**
+   * fuxi_get_status - Query MDD design status and workflow progress
+   */
   pi.registerTool({
     name: "fuxi_get_status",
     label: "Get Status",
@@ -228,43 +523,22 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
           } catch { /* ignore */ }
         }
 
+        // Get next steps
+        const nextSteps = getNextSteps({ hasDraft, hasPlan, hasExecution, state: storedState });
+
         // Determine status based on state.json first, then file existence
         let status = "idle";
-        let nextStep = "";
         const planName = storedState?.planName || (hasDraft ? extractPlanName(readFileSync(draftPath, "utf-8").slice(0, 200)) : null);
 
         // Use stored phase if available, otherwise infer from files
         if (storedState && storedState.phase !== "idle") {
           status = storedState.phase;
-          switch (storedState.phase) {
-            case "design":
-              nextStep = storedState.request ? "Review with qiaochui then decompose" : "Use qiaochui_review and qiaochui_decompose";
-              break;
-            case "review":
-              nextStep = "Decompose with qiaochui_decompose";
-              break;
-            case "plan":
-              nextStep = "Ready for execution (awaiting /fuxi-approve)";
-              break;
-            case "execute":
-              nextStep = "Execute tasks with luban_execute_all";
-              break;
-            case "audit":
-              nextStep = "Run audit with gaoyao_review";
-              break;
-            case "complete":
-              nextStep = "Workflow complete - use /fuxi-archive to save";
-              break;
-          }
         } else if (hasDraft && !hasPlan) {
           status = "design";
-          nextStep = "Use qiaochui_review then qiaochui_decompose";
         } else if (hasPlan && !hasExecution) {
           status = "plan";
-          nextStep = "Ready for execution (awaiting approval)";
         } else if (hasExecution) {
-          status = "ready";
-          nextStep = "Use /fuxi-execute to run tasks";
+          status = "execute";
         }
 
         let taskCount = 0;
@@ -289,11 +563,12 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
               has_execution: hasExecution,
               has_state: hasState,
               task_count: taskCount,
-              next_step: nextStep,
+              next_step: nextSteps.description,
+              next_action: nextSteps.action,
               stored_phase: storedState?.phase,
             }),
           }],
-          details: { status, hasDraft, hasPlan, hasExecution, taskCount, storedState },
+          details: { status, hasDraft, hasPlan, hasExecution, taskCount, storedState, nextSteps },
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
