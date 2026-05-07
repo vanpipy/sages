@@ -22,11 +22,85 @@ Technical Feasibility Assessment
 Execution Plan (Tasks)
 ```
 
+## Preliminary Review (Gatekeeper Checks)
+
+Before diving into MDD-plane analysis, perform these three foundational checks. **If any check fails, the review stops here** - no point analyzing details of an invalid workflow.
+
+### 1. Validity & Robustness Check
+
+Verify the draft is **well-formed and resilient**:
+
+| Check | Pass Criteria |
+|-------|---------------|
+| **Structural** | All 8 trigrams present with non-empty content |
+| **Completeness** | No `[TODO]`, `[TBD]`, `[FIXME]` placeholders in core sections |
+| **Coherence** | Core Intent aligns with Success Path and Boundaries |
+| **Feasibility** | No impossible requirements (e.g., real-time + offline-only) |
+| **Robustness** | Error Handling (Kan) covers failure modes, not just happy path |
+
+**Decision:**
+- ✅ **PASS** → Proceed to Workflow Check
+- ⚠️ **REVISION NEEDED** → Stop, return specific issues
+- ❌ **FAILED** → Stop, draft is fundamentally broken
+
+### 2. Workflow Coherence Check
+
+Verify the **end-to-end workflow is logically sound**:
+
+| Check | Pass Criteria |
+|-------|---------------|
+| **Flow** | Fuxi's design → QiaoChui review → LuBan execute → GaoYao audit flows make sense |
+| **Dependencies** | Task dependencies form a valid DAG (no cycles, all prerequisites met) |
+| **Completeness** | All phases have outputs defined (draft.md, plan.md, execution.yaml, audit.md) |
+| **Boundaries** | Gen (Boundaries) defines what IS and ISN'T in scope |
+| **Transition** | Phase transitions have clear entry/exit criteria |
+
+**Decision:**
+- ✅ **PASS** → Proceed to Consistency Check
+- ⚠️ **REVISION NEEDED** → Stop, workflow design has gaps
+- ❌ **FAILED** → Stop, workflow is structurally invalid
+
+### 3. Consistency Check
+
+Verify **no contradictions or misalignments** across the draft:
+
+| Check | Pass Criteria |
+|-------|---------------|
+| **Terminology** | Same terms used consistently (no "user" vs "client" vs "actor" for same entity) |
+| **Scopes** | Data Flow doesn't promise capabilities outside Core Intent |
+| **Trigram Alignment** | Each trigram section delivers what its mythology promises |
+| **Decision Consistency** | Cross-plane decisions don't contradict (e.g., sync API + async state) |
+| **Priority Alignment** | Task priorities in plan match complexity in design |
+
+**Decision:**
+- ✅ **PASS** → **GATE OPEN** → Proceed to MDD-Plane Deep Review
+- ⚠️ **REVISION NEEDED** → Stop, inconsistencies need resolution
+- ❌ **FAILED** → Stop, draft has critical contradictions
+
+### Gatekeeper Flow
+
+```
+┌─────────────────────┐
+│ 1. Validity Check   │ → PASS → ┌─────────────────────┐
+│   (valid & robust)  │          │ 2. Workflow Check   │ → PASS → ┌─────────────────────┐
+└─────────────────────┘          │   (workflow is ok)  │          │ 3. Consistency Check│
+                                 └─────────────────────┘          │   (no inconsistency) │
+                                                                    └─────────────────────┘
+                                                                              │
+                                                                              ▼
+                                                                     ┌─────────────────────┐
+                                                                     │ MDD-Plane Deep      │
+                                                                     │ Review (continue)   │
+                                                                     └─────────────────────┘
+```
+
+---
+
 ## MDD-Aligned Review
 
 Each plane from Fuxi's design requires specific technical review:
 
-### 1. Business Plane Review: Process × Rules
+### 4. Business Plane Review: Process × Rules
 
 | Element | Review Focus |
 |--------|-------------|
@@ -38,7 +112,7 @@ Each plane from Fuxi's design requires specific technical review:
 - [ ] Are rule engines needed or can rules be coded?
 - [ ] What's the transaction boundary?
 
-### 2. Data Plane Review: Logic × State
+### 5. Data Plane Review: Logic × State
 
 | Element | Review Focus |
 |--------|-------------|
@@ -51,7 +125,7 @@ Each plane from Fuxi's design requires specific technical review:
 - [ ] What's the state persistence strategy?
 - [ ] Do we need event sourcing or CRUD?
 
-### 3. Control Plane Review: Strategy × Distribution
+### 6. Control Plane Review: Strategy × Distribution
 
 | Element | Review Focus |
 |--------|-------------|
@@ -63,7 +137,7 @@ Each plane from Fuxi's design requires specific technical review:
 - [ ] Is synchronous or asynchronous distribution needed?
 - [ ] What message broker or event bus is appropriate?
 
-### 4. Foundation Plane Review: Resource × Abstraction
+### 7. Foundation Plane Review: Resource × Abstraction
 
 | Element | Review Focus |
 |--------|-------------|
@@ -75,7 +149,7 @@ Each plane from Fuxi's design requires specific technical review:
 - [ ] REST, GraphQL, or gRPC for APIs?
 - [ ] What's the API versioning strategy?
 
-### 5. Observation Plane Review: Data × Analysis
+### 8. Observation Plane Review: Data × Analysis
 
 | Element | Review Focus |
 |--------|-------------|
@@ -87,7 +161,7 @@ Each plane from Fuxi's design requires specific technical review:
 - [ ] Can we use existing APM solutions?
 - [ ] What's the alerting strategy?
 
-### 6. Security Plane Review: Identity × Permissions
+### 9. Security Plane Review: Identity × Permissions
 
 | Element | Review Focus |
 |--------|-------------|
@@ -99,7 +173,7 @@ Each plane from Fuxi's design requires specific technical review:
 - [ ] RBAC, ABAC, or custom permission model?
 - [ ] Can we use existing IAM solutions?
 
-### 7. Evolution Plane Review: Time × Change
+### 10. Evolution Plane Review: Time × Change
 
 | Element | Review Focus |
 |--------|-------------|
