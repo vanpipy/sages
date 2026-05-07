@@ -1,5 +1,4 @@
-"""
-pi_evaluator.comparator - Session comparison for trend analysis
+"""pi_evaluator.comparator - Session comparison for trend analysis.
 
 Compares two evaluation results to identify improvements or regressions.
 """
@@ -7,38 +6,33 @@ Compares two evaluation results to identify improvements or regressions.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
 
 from pi_evaluator.config import Config
 from pi_evaluator.parser import Parser
-from pi_evaluator.reporter import Reporter
 from pi_evaluator.types import ComparisonResult, EvaluationResult
 
 
 class Comparator:
-    """
-    Comparator for analyzing differences between session evaluations.
-    """
+    """Comparator for analyzing differences between session evaluations."""
 
     def __init__(self, config: Config):
-        """
-        Initialize comparator.
+        """Initialize comparator.
 
         Args:
             config: Configuration object
+
         """
         self.config = config
         self.parser = Parser()
 
     def compare(
         self,
-        entries1: List,
-        entries2: List,
+        entries1: list,
+        entries2: list,
         session1_id: str = "session1",
         session2_id: str = "session2",
     ) -> ComparisonResult:
-        """
-        Compare two session evaluations.
+        """Compare two session evaluations.
 
         Args:
             entries1: First session entries
@@ -48,6 +42,7 @@ class Comparator:
 
         Returns:
             ComparisonResult with differences
+
         """
         # Evaluate both sessions
         evaluator = self._create_evaluator()
@@ -59,8 +54,7 @@ class Comparator:
     def compare_results(
         self, result1: EvaluationResult, result2: EvaluationResult
     ) -> ComparisonResult:
-        """
-        Compare two evaluation results.
+        """Compare two evaluation results.
 
         Args:
             result1: First evaluation result
@@ -68,6 +62,7 @@ class Comparator:
 
         Returns:
             ComparisonResult
+
         """
         # Calculate score difference
         score_diff = result2.overall.overall_score - result1.overall.overall_score
@@ -112,11 +107,8 @@ class Comparator:
             recommendations=recommendations,
         )
 
-    def compare_files(
-        self, path1: Path, path2: Path
-    ) -> ComparisonResult:
-        """
-        Compare two session files.
+    def compare_files(self, path1: Path, path2: Path) -> ComparisonResult:
+        """Compare two session files.
 
         Args:
             path1: Path to first session.jsonl
@@ -124,6 +116,7 @@ class Comparator:
 
         Returns:
             ComparisonResult
+
         """
         entries1 = self.parser.parse(path1)
         entries2 = self.parser.parse(path2)
@@ -138,4 +131,5 @@ class Comparator:
     def _create_evaluator(self):
         """Create evaluator instance."""
         from pi_evaluator.evaluator import Evaluator
+
         return Evaluator(self.config)

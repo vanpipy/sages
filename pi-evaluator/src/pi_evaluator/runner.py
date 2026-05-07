@@ -1,5 +1,4 @@
-"""
-pi_evaluator.runner - Workflow execution with auto-approve
+"""pi_evaluator.runner - Workflow execution with auto-approve.
 
 Spawns pi subprocess, monitors phase transitions, and injects auto-approve commands.
 """
@@ -9,12 +8,10 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from pi_evaluator.config import Config
 
@@ -26,8 +23,7 @@ class RunnerError(Exception):
 
 
 class Runner:
-    """
-    Runner for executing Four Sages workflows with auto-approve.
+    """Runner for executing Four Sages workflows with auto-approve.
 
     Orchestrates:
     1. Environment validation
@@ -57,16 +53,16 @@ class Runner:
     ]
 
     def __init__(self, config: Config):
-        """
-        Initialize runner.
+        """Initialize runner.
 
         Args:
             config: Configuration object
+
         """
         self.config = config
         self.session_id = ""
-        self.process: Optional[subprocess.Popen] = None
-        self.output_thread: Optional[threading.Thread] = None
+        self.process: subprocess.Popen | None = None
+        self.output_thread: threading.Thread | None = None
         self.should_approve = threading.Event()
         self.is_complete = threading.Event()
         self.output_buffer: list[str] = []
@@ -79,11 +75,10 @@ class Runner:
     def run_workflow(
         self,
         request: str,
-        auto_approve: Optional[bool] = None,
-        timeout: Optional[int] = None,
+        auto_approve: bool | None = None,
+        timeout: int | None = None,
     ) -> Path:
-        """
-        Run a Four Sages workflow with auto-approve.
+        """Run a Four Sages workflow with auto-approve.
 
         Args:
             request: Workflow request string
@@ -95,6 +90,7 @@ class Runner:
 
         Raises:
             RunnerError: If workflow execution fails
+
         """
         # Generate session ID
         self.session_id = self.generate_session_id()
@@ -163,12 +159,12 @@ class Runner:
 
         except subprocess.TimeoutExpired:
             self._terminate()
-            raise RunnerError(f"Workflow timed out after {timeout}s")
+            raise RunnerError(f"Workflow timed out after {timeout}s") from None
         except OSError as e:
-            raise RunnerError(f"Failed to spawn pi subprocess: {e}")
+            raise RunnerError(f"Failed to spawn pi subprocess: {e}") from e
         except Exception as e:
             self._terminate()
-            raise RunnerError(f"Workflow execution failed: {e}")
+            raise RunnerError(f"Workflow execution failed: {e}") from e
 
     def _monitor_output(self, session_path: Path) -> None:
         """Monitor stdout and capture session logs."""
@@ -185,7 +181,7 @@ class Runner:
                     self.output_buffer.append(line.rstrip())
 
                     # Check for phase completion
-                    for pattern, action in self.PHASE_PATTERNS:
+                    for pattern, _action in self.PHASE_PATTERNS:
                         if pattern.search(line):
                             self.should_approve.set()
                             break

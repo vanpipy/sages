@@ -1,13 +1,11 @@
 """Tests for pi_evaluator.types module."""
 
-import pytest
 from pi_evaluator.types import (
     ContentBlock,
     EvaluationResult,
     Message,
     Phase,
     PhaseMetrics,
-    SessionLogEntry,
 )
 
 
@@ -103,7 +101,7 @@ class TestEvaluationResult:
 
     def test_to_dict(self):
         """Test EvaluationResult serialization."""
-        from pi_evaluator.types import OverallResult, PhaseResult
+        from pi_evaluator.types import OverallResult
 
         result = EvaluationResult(
             session_id="test123",

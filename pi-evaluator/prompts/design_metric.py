@@ -1,15 +1,11 @@
-"""
-Design phase metrics (Fuxi) for HuggingFace evaluate framework.
-"""
+"""Design phase metrics (Fuxi) for HuggingFace evaluate framework."""
 
-from typing import Any, Dict, List
 
 from pi_evaluator.types import PhaseMetrics, SessionLogEntry
 
 
-def compute_design_metrics(entries: List[SessionLogEntry]) -> PhaseMetrics:
-    """
-    Compute metrics for Design phase (Fuxi).
+def compute_design_metrics(entries: list[SessionLogEntry]) -> PhaseMetrics:
+    """Compute metrics for Design phase (Fuxi).
 
     Metrics:
     - plane_coverage: % of MDD planes with content
@@ -22,6 +18,7 @@ def compute_design_metrics(entries: List[SessionLogEntry]) -> PhaseMetrics:
 
     Returns:
         PhaseMetrics with design-specific metrics
+
     """
     metrics = PhaseMetrics()
 
@@ -38,7 +35,9 @@ def compute_design_metrics(entries: List[SessionLogEntry]) -> PhaseMetrics:
     metrics.content_depth = min(100, (total_lines / len(planes)) * 2)
 
     # Cross references
-    metrics.cross_references = content.lower().count("see also") + content.lower().count("related to")
+    metrics.cross_references = content.lower().count("see also") + content.lower().count(
+        "related to"
+    )
 
     # Key decisions
     metrics.decisions = content.count("Decision:") + content.count("## Key Design Decisions")
@@ -46,7 +45,7 @@ def compute_design_metrics(entries: List[SessionLogEntry]) -> PhaseMetrics:
     return metrics
 
 
-def _get_text_content(entries: List[SessionLogEntry]) -> str:
+def _get_text_content(entries: list[SessionLogEntry]) -> str:
     """Extract text content from entries."""
     parts = []
     for entry in entries:

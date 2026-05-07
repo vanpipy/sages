@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-pi-evaluator CLI - Auto-run and evaluate Four Sages Agents workflow sessions
+"""pi-evaluator CLI - Auto-run and evaluate Four Sages Agents workflow sessions.
 
 Usage:
     pi-evaluator --check-env
@@ -21,6 +20,7 @@ from pi_evaluator import (
     Config,
     Evaluator,
     Parser,
+    Reporter,
     Runner,
     ValidationResult,
     load_config,
@@ -45,18 +45,21 @@ Examples:
 
     # Global options
     parser.add_argument(
-        "--output-dir", "-o",
+        "--output-dir",
+        "-o",
         type=Path,
         help="Output directory (default: ./evaluations)",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="count",
         default=0,
         help="Increase verbosity (can stack: -v, -vv, -vvv)",
     )
     parser.add_argument(
-        "--config", "-c",
+        "--config",
+        "-c",
         type=Path,
         help="Config file path",
     )
@@ -138,7 +141,9 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
 
         # Save results
         reporter = Reporter(config.output_dir)
-        json_path, md_path = reporter.save_evaluation(result, config.get_evaluation_dir(runner.session_id))
+        json_path, md_path = reporter.save_evaluation(
+            result, config.get_evaluation_dir(runner.session_id)
+        )
 
         if config.verbose:
             print(f"Evaluation saved to: {json_path}")

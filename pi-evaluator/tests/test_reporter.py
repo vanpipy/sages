@@ -1,7 +1,6 @@
 """Tests for pi_evaluator.reporter module."""
 
 import json
-from pathlib import Path
 
 import pytest
 

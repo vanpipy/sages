@@ -1,5 +1,4 @@
-"""
-pi_evaluator.types - Data type definitions for pi-evaluator
+"""pi_evaluator.types - Data type definitions for pi-evaluator.
 
 This module contains all dataclass definitions for:
 - Session parsing (SessionLogEntry, Message, ContentBlock)
@@ -11,9 +10,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 
 class Phase(Enum):
@@ -28,7 +26,7 @@ class Phase(Enum):
 
 
 # Phase tool patterns for detection
-PHASE_TOOL_PATTERNS: Dict[Phase, List[str]] = {
+PHASE_TOOL_PATTERNS: dict[Phase, list[str]] = {
     Phase.DESIGN: ["fuxi_create_draft", "fuxi_get_draft", "fuxi_get_status"],
     Phase.REVIEW: ["qiaochui_review", "qiaochui_decompose"],
     Phase.EXECUTE: ["luban_execute_task", "luban_execute_all", "luban_get_status"],
@@ -36,7 +34,7 @@ PHASE_TOOL_PATTERNS: Dict[Phase, List[str]] = {
 }
 
 
-def detect_phase(tool_name: str) -> Optional[Phase]:
+def detect_phase(tool_name: str) -> Phase | None:
     """Detect phase from tool name."""
     for phase, tools in PHASE_TOOL_PATTERNS.items():
         if tool_name in tools:
@@ -46,8 +44,7 @@ def detect_phase(tool_name: str) -> Optional[Phase]:
 
 @dataclass
 class ContentBlock:
-    """
-    Content block within a message.
+    """Content block within a message.
 
     Types:
     - toolCall: Tool invocation with name and arguments
@@ -57,12 +54,12 @@ class ContentBlock:
     """
 
     type: Literal["toolCall", "toolResult", "text", "thinking"]
-    name: Optional[str] = None  # Tool name for toolCall
-    arguments: Optional[Dict[str, Any]] = None  # Tool args for toolCall
-    content: Optional[Any] = None  # Content varies by type
-    is_error: Optional[bool] = None  # Error flag for toolResult
+    name: str | None = None  # Tool name for toolCall
+    arguments: dict[str, Any] | None = None  # Tool args for toolCall
+    content: Any | None = None  # Content varies by type
+    is_error: bool | None = None  # Error flag for toolResult
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON output."""
         return {
             "type": self.type,
@@ -73,7 +70,7 @@ class ContentBlock:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ContentBlock:
+    def from_dict(cls, data: dict[str, Any]) -> ContentBlock:
         """Deserialize from dictionary."""
         return cls(
             type=data["type"],
@@ -86,25 +83,24 @@ class ContentBlock:
 
 @dataclass
 class Message:
-    """
-    A message in the session log.
+    """A message in the session log.
 
     Represents either a user message, assistant response, or system event.
     """
 
     role: Literal["user", "assistant", "system"]
-    content: List[ContentBlock] = field(default_factory=list)
-    usage: Optional[Dict[str, int]] = None  # {"prompt_tokens": N, "completion_tokens": M}
+    content: list[ContentBlock] = field(default_factory=list)
+    usage: dict[str, int] | None = None  # {"prompt_tokens": N, "completion_tokens": M}
 
-    def get_tool_calls(self) -> List[ContentBlock]:
+    def get_tool_calls(self) -> list[ContentBlock]:
         """Extract all tool calls from message content."""
         return [b for b in self.content if b.type == "toolCall"]
 
-    def get_errors(self) -> List[ContentBlock]:
+    def get_errors(self) -> list[ContentBlock]:
         """Extract all error tool results from message content."""
         return [b for b in self.content if b.type == "toolResult" and b.is_error]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "role": self.role,
             "content": [b.to_dict() for b in self.content],
@@ -112,7 +108,7 @@ class Message:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> Message:
+    def from_dict(cls, data: dict[str, Any]) -> Message:
         """Deserialize from dictionary."""
         content = [ContentBlock.from_dict(b) for b in data.get("content", [])]
         return cls(
@@ -124,8 +120,7 @@ class Message:
 
 @dataclass
 class SessionLogEntry:
-    """
-    A single entry in the session JSONL file.
+    """A single entry in the session JSONL file.
 
     JSONL format: one JSON object per line
     Example:
@@ -135,7 +130,7 @@ class SessionLogEntry:
 
     type: Literal["message", "session_start", "session_end"]
     timestamp: str  # ISO 8601 format
-    message: Optional[Message] = None
+    message: Message | None = None
 
     @classmethod
     def from_jsonl_line(cls, line: str) -> SessionLogEntry:
@@ -150,7 +145,7 @@ class SessionLogEntry:
             message=message,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.type,
             "timestamp": self.timestamp,
@@ -184,7 +179,7 @@ class PhaseMetrics:
     security_pass_rate: float = 0.0  # % of security checks passed
     test_coverage: float = 0.0  # % of code covered by tests
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
 
 
@@ -196,12 +191,12 @@ class PhaseResult:
     duration_seconds: float
     tool_calls: int
     errors: int
-    outputs: List[str] = field(default_factory=list)  # Files created/modified
+    outputs: list[str] = field(default_factory=list)  # Files created/modified
     score: float = 0.0  # 0-100
     metrics: PhaseMetrics = field(default_factory=PhaseMetrics)
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "phase": self.phase.value,
             "duration_seconds": self.duration_seconds,
@@ -226,7 +221,7 @@ class OverallResult:
     output_tokens: int = 0
     overall_score: float = 0.0  # Weighted average of phase scores
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "total_duration_seconds": self.total_duration_seconds,
             "total_tool_calls": self.total_tool_calls,
@@ -240,8 +235,7 @@ class OverallResult:
 
 @dataclass
 class EvaluationResult:
-    """
-    Complete evaluation result for a workflow session.
+    """Complete evaluation result for a workflow session.
 
     This is the primary output of the evaluation process.
     """
@@ -249,13 +243,13 @@ class EvaluationResult:
     session_id: str
     request: str
     timestamp: str  # Evaluation timestamp
-    phases: Dict[str, PhaseResult]  # Per-phase results keyed by phase name
+    phases: dict[str, PhaseResult]  # Per-phase results keyed by phase name
     overall: OverallResult
     verdict: Literal["EXCELLENT", "GOOD", "FAIR", "POOR"]
-    recommendations: List[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
 
     # Verdict thresholds
-    VERDICT_THRESHOLDS: Dict[str, int] = field(
+    VERDICT_THRESHOLDS: dict[str, int] = field(
         default_factory=lambda: {
             "EXCELLENT": 90,
             "GOOD": 75,
@@ -273,7 +267,7 @@ class EvaluationResult:
                 return verdict
         return "POOR"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "request": self.request,
@@ -292,11 +286,11 @@ class ComparisonResult:
     session1_id: str
     session2_id: str
     score_diff: float
-    phase_diffs: Dict[str, float]
+    phase_diffs: dict[str, float]
     trend: Literal["IMPROVED", "REGRESSION", "STABLE"]
-    recommendations: List[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session1_id": self.session1_id,
             "session2_id": self.session2_id,

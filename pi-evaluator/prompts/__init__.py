@@ -1,6 +1,4 @@
-"""
-HuggingFace evaluate metric definitions for Four Sages workflow evaluation.
-"""
+"""HuggingFace evaluate metric definitions for Four Sages workflow evaluation."""
 
 from pi_evaluator.prompts.audit_metric import compute_audit_metrics
 from pi_evaluator.prompts.design_metric import compute_design_metrics

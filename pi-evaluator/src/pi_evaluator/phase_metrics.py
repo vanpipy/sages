@@ -1,6 +1,4 @@
-"""
-Review phase metrics (QiaoChui) for pi-evaluator.
-"""
+"""Review phase metrics (QiaoChui) for pi-evaluator."""
 
 from pi_evaluator.types import PhaseMetrics
 
@@ -20,6 +18,7 @@ def compute_review_metrics(entries, content: str) -> PhaseMetrics:
 
     # Task count
     import re
+
     metrics.task_count = len(re.findall(r"\bT\d+\b", content))
 
     return metrics

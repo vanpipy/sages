@@ -1,5 +1,4 @@
-"""
-pi_evaluator.reporter - Output formatters for evaluation results
+"""pi_evaluator.reporter - Output formatters for evaluation results.
 
 Generates JSON and Markdown reports from EvaluationResult.
 """
@@ -7,7 +6,6 @@ Generates JSON and Markdown reports from EvaluationResult.
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,18 +14,17 @@ if TYPE_CHECKING:
 
 
 class Reporter:
-    """
-    Reporter for generating evaluation output.
+    """Reporter for generating evaluation output.
 
     Supports JSON and Markdown formats.
     """
 
     def __init__(self, output_dir: Path | None = None):
-        """
-        Initialize reporter.
+        """Initialize reporter.
 
         Args:
             output_dir: Base output directory (optional)
+
         """
         self.output_dir = output_dir
 
@@ -36,8 +33,7 @@ class Reporter:
         result: EvaluationResult,
         output_dir: Path | None = None,
     ) -> tuple[Path, Path]:
-        """
-        Save evaluation result to JSON and Markdown files.
+        """Save evaluation result to JSON and Markdown files.
 
         Args:
             result: EvaluationResult to save
@@ -45,6 +41,7 @@ class Reporter:
 
         Returns:
             Tuple of (json_path, md_path)
+
         """
         if output_dir is None:
             output_dir = self.output_dir or Path(".")
@@ -65,26 +62,26 @@ class Reporter:
         return json_path, md_path
 
     def generate_json(self, result: EvaluationResult) -> str:
-        """
-        Generate JSON string from evaluation result.
+        """Generate JSON string from evaluation result.
 
         Args:
             result: EvaluationResult
 
         Returns:
             JSON string
+
         """
         return json.dumps(result.to_dict(), indent=2)
 
     def generate_markdown(self, result: EvaluationResult) -> str:
-        """
-        Generate Markdown report from evaluation result.
+        """Generate Markdown report from evaluation result.
 
         Args:
             result: EvaluationResult
 
         Returns:
             Markdown string
+
         """
         verdict_emoji = {
             "EXCELLENT": "🟢",
@@ -97,7 +94,8 @@ class Reporter:
             f"# Evaluation Report: {result.session_id}",
             "",
             f"**Request**: {result.request}",
-            f"**Verdict**: {verdict_emoji} {result.verdict} ({result.overall.overall_score:.1f}/100)",
+            f"**Verdict**: {verdict_emoji} {result.verdict} "
+            f"({result.overall.overall_score:.1f}/100)",
             f"**Date**: {result.timestamp}",
             "",
             "## Summary",
@@ -153,7 +151,11 @@ class Reporter:
             if non_zero:
                 lines.append("- **Metrics**:")
                 for key, value in non_zero.items():
-                    lines.append(f"  - {key}: {value:.1f}" if isinstance(value, float) else f"  - {key}: {value}")
+                    lines.append(
+                        f"  - {key}: {value:.1f}"
+                        if isinstance(value, float)
+                        else f"  - {key}: {value}"
+                    )
 
             lines.append("")
 
@@ -171,17 +173,15 @@ class Reporter:
 
         return "\n".join(lines)
 
-    def generate_comparison_markdown(
-        self, comparison: ComparisonResult
-    ) -> str:
-        """
-        Generate Markdown comparison report.
+    def generate_comparison_markdown(self, comparison: ComparisonResult) -> str:
+        """Generate Markdown comparison report.
 
         Args:
             comparison: ComparisonResult
 
         Returns:
             Markdown string
+
         """
         trend_emoji = {
             "IMPROVED": "📈",

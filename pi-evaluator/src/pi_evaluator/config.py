@@ -1,5 +1,4 @@
-"""
-pi_evaluator.config - Configuration management for pi-evaluator
+"""pi_evaluator.config - Configuration management for pi-evaluator.
 
 Supports configuration from:
 1. CLI arguments (highest priority)
@@ -13,8 +12,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
-
+from typing import Any
 
 # Environment variable prefix
 ENV_PREFIX = "PI_EVALUATOR_"
@@ -39,8 +37,7 @@ class ConfigError(Exception):
 
 @dataclass
 class Config:
-    """
-    Configuration for pi-evaluator.
+    """Configuration for pi-evaluator.
 
     Attributes:
         output_dir: Base output directory
@@ -51,6 +48,7 @@ class Config:
         timeout: Workflow timeout in seconds
         phase_weights: Weights for each phase in overall score
         verbose: Enable verbose output
+
     """
 
     output_dir: Path = field(default_factory=lambda: Path(DEFAULTS["output_dir"]))
@@ -59,7 +57,9 @@ class Config:
     pi_path: str = DEFAULTS["pi_path"]
     auto_approve: bool = DEFAULTS["auto_approve"]
     timeout: int = DEFAULTS["timeout"]
-    phase_weights: Dict[str, float] = field(default_factory=lambda: DEFAULTS["phase_weights"].copy())
+    phase_weights: dict[str, float] = field(
+        default_factory=lambda: DEFAULTS["phase_weights"].copy()
+    )
     verbose: bool = False
 
     def __post_init__(self):
@@ -81,9 +81,7 @@ class Config:
     def from_env(cls) -> Config:
         """Create Config from environment variables."""
         return cls(
-            output_dir=os.environ.get(
-                f"{ENV_PREFIX}OUTPUT_DIR", DEFAULTS["output_dir"]
-            ),
+            output_dir=os.environ.get(f"{ENV_PREFIX}OUTPUT_DIR", DEFAULTS["output_dir"]),
             session_subdir=os.environ.get(
                 f"{ENV_PREFIX}SESSION_SUBDIR", DEFAULTS["session_subdir"]
             ),
@@ -95,11 +93,8 @@ class Config:
                 f"{ENV_PREFIX}AUTO_APPROVE", str(DEFAULTS["auto_approve"])
             ).lower()
             in ("true", "1", "yes"),
-            timeout=int(
-                os.environ.get(f"{ENV_PREFIX}TIMEOUT", str(DEFAULTS["timeout"]))
-            ),
-            verbose=os.environ.get(f"{ENV_PREFIX}VERBOSE", "false").lower()
-            in ("true", "1", "yes"),
+            timeout=int(os.environ.get(f"{ENV_PREFIX}TIMEOUT", str(DEFAULTS["timeout"]))),
+            verbose=os.environ.get(f"{ENV_PREFIX}VERBOSE", "false").lower() in ("true", "1", "yes"),
         )
 
     @classmethod
@@ -107,8 +102,8 @@ class Config:
         """Create Config from YAML file."""
         try:
             import yaml
-        except ImportError:
-            raise ConfigError("PyYAML required for config file parsing")
+        except ImportError as e:
+            raise ConfigError("PyYAML required for config file parsing") from e
 
         if not path.exists():
             raise ConfigError(f"Config file not found: {path}")
@@ -143,7 +138,7 @@ class Config:
         self.get_session_dir(session_id).mkdir(parents=True, exist_ok=True)
         self.get_evaluation_dir(session_id).mkdir(parents=True, exist_ok=True)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "output_dir": str(self.output_dir),
@@ -158,17 +153,16 @@ class Config:
 
 
 def load_config(
-    output_dir: Optional[Path] = None,
+    output_dir: Path | None = None,
     verbose: bool = False,
-    config_file: Optional[Path] = None,
+    config_file: Path | None = None,
 ) -> Config:
-    """
-    Load configuration from multiple sources.
+    """Load configuration from multiple sources.
 
     Priority: CLI args > env vars > config file > defaults
     """
     # Start with defaults
-    config_dict: Dict[str, Any] = {}
+    config_dict: dict[str, Any] = {}
 
     # Load from config file if provided
     if config_file and config_file.exists():

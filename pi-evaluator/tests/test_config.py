@@ -1,15 +1,13 @@
 """Tests for pi_evaluator.config module."""
 
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from pi_evaluator.config import (
+    DEFAULTS,
     Config,
     ConfigError,
-    DEFAULTS,
     load_config,
 )
 

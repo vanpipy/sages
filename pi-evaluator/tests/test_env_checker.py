@@ -1,14 +1,11 @@
 """Tests for pi_evaluator.env_checker module."""
 
-import sys
 
-import pytest
 
 from pi_evaluator.env_checker import (
     ValidationResult,
     check_datasets_library,
     check_evaluate_library,
-    check_four_sages_extension,
     check_pi_binary,
     check_python_version,
     validate_all,

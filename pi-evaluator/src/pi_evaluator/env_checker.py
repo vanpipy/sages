@@ -1,5 +1,4 @@
-"""
-pi_evaluator.env_checker - Environment validation for pi-evaluator
+"""pi_evaluator.env_checker - Environment validation for pi-evaluator.
 
 Performs pre-flight checks to ensure all requirements are met:
 - Python version
@@ -14,7 +13,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 
 @dataclass
@@ -22,9 +21,9 @@ class ValidationResult:
     """Result of environment validation."""
 
     valid: bool
-    checks: Dict[str, bool] = field(default_factory=dict)
-    errors: List[str] = field(default_factory=list)
-    info: Dict[str, Any] = field(default_factory=dict)
+    checks: dict[str, bool] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    info: dict[str, Any] = field(default_factory=dict)
 
     def add_check(self, name: str, passed: bool, message: str = "") -> None:
         """Add a validation check result."""
@@ -38,7 +37,7 @@ class ValidationResult:
         """Add informational data."""
         self.info[name] = value
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "valid": self.valid,
             "checks": self.checks,
@@ -146,14 +145,14 @@ def check_four_sages_extension(pi_path: str = "pi") -> tuple[bool, str]:
 
 
 def validate_all(pi_path: str = "pi") -> ValidationResult:
-    """
-    Perform all environment validation checks.
+    """Perform all environment validation checks.
 
     Args:
         pi_path: Path to pi binary (default: "pi")
 
     Returns:
         ValidationResult with all check results
+
     """
     result = ValidationResult(valid=True)
 
@@ -188,14 +187,14 @@ def validate_all(pi_path: str = "pi") -> ValidationResult:
 
 
 def validate_or_exit(pi_path: str = "pi") -> ValidationResult:
-    """
-    Validate environment and exit with error code if invalid.
+    """Validate environment and exit with error code if invalid.
 
     Args:
         pi_path: Path to pi binary
 
     Returns:
         ValidationResult (exits on failure)
+
     """
     result = validate_all(pi_path)
 

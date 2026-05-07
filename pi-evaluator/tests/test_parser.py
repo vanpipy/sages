@@ -1,13 +1,12 @@
 """Tests for pi_evaluator.parser module."""
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from pi_evaluator.parser import Parser, ParserError
-from pi_evaluator.types import ContentBlock, Message, Phase, SessionLogEntry
+from pi_evaluator.types import Phase
 
 
 class TestParser:

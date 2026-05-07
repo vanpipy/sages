@@ -1,5 +1,4 @@
-"""
-pi_evaluator.parser - JSONL parsing for pi session logs
+"""pi_evaluator.parser - JSONL parsing for pi session logs.
 
 Parses session log files in JSONL format into structured SessionLogEntry objects.
 """
@@ -7,10 +6,11 @@ Parses session log files in JSONL format into structured SessionLogEntry objects
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
-from pi_evaluator.types import ContentBlock, Message, Phase, SessionLogEntry
+from pi_evaluator.types import ContentBlock, Phase, SessionLogEntry
 
 
 class ParserError(Exception):
@@ -20,8 +20,7 @@ class ParserError(Exception):
 
 
 class Parser:
-    """
-    Parser for pi session JSONL files.
+    """Parser for pi session JSONL files.
 
     Parses session logs with format:
         {"type": "message", "timestamp": "...", "message": {...}}
@@ -29,19 +28,18 @@ class Parser:
     """
 
     def __init__(self, strict: bool = False):
-        """
-        Initialize parser.
+        """Initialize parser.
 
         Args:
             strict: If True, raise on malformed lines; if False, skip them
+
         """
         self.strict = strict
         self.line_count = 0
         self.error_count = 0
 
-    def parse(self, path: Path) -> List[SessionLogEntry]:
-        """
-        Parse a JSONL file into a list of SessionLogEntry objects.
+    def parse(self, path: Path) -> list[SessionLogEntry]:
+        """Parse a JSONL file into a list of SessionLogEntry objects.
 
         Args:
             path: Path to session.jsonl file
@@ -51,9 +49,10 @@ class Parser:
 
         Raises:
             ParserError: If file cannot be read
+
         """
         if not path.exists():
-            raise ParserError(f"Session file not found: {path}")
+            raise ParserError(f"Session file not found: {path}") from None
 
         entries = []
         self.line_count = 0
@@ -73,26 +72,26 @@ class Parser:
                     except (json.JSONDecodeError, KeyError, ValueError) as e:
                         self.error_count += 1
                         if self.strict:
-                            raise ParserError(f"Line {line_num}: {e}")
+                            raise ParserError(f"Line {line_num}: {e}") from e
                         # Non-strict mode: skip malformed lines
 
         except OSError as e:
-            raise ParserError(f"Failed to read file: {e}")
+            raise ParserError(f"Failed to read file: {e}") from e
 
         return entries
 
     def parse_iter(self, path: Path) -> Iterator[SessionLogEntry]:
-        """
-        Parse a JSONL file iteratively (memory-efficient for large files).
+        """Parse a JSONL file iteratively (memory-efficient for large files).
 
         Args:
             path: Path to session.jsonl file
 
         Yields:
             SessionLogEntry objects
+
         """
         if not path.exists():
-            raise ParserError(f"Session file not found: {path}")
+            raise ParserError(f"Session file not found: {path}") from None
 
         self.line_count = 0
         self.error_count = 0
@@ -111,30 +110,28 @@ class Parser:
                     except (json.JSONDecodeError, KeyError, ValueError) as e:
                         self.error_count += 1
                         if self.strict:
-                            raise ParserError(f"Line {line_num}: {e}")
+                            raise ParserError(f"Line {line_num}: {e}") from e
         except OSError as e:
-            raise ParserError(f"Failed to read file: {e}")
+            raise ParserError(f"Failed to read file: {e}") from e
 
     def get_entries_by_type(
-        self, entries: List[SessionLogEntry], entry_type: str
-    ) -> List[SessionLogEntry]:
+        self, entries: list[SessionLogEntry], entry_type: str
+    ) -> list[SessionLogEntry]:
         """Filter entries by type."""
         return [e for e in entries if e.type == entry_type]
 
-    def get_message_entries(
-        self, entries: List[SessionLogEntry]
-    ) -> List[SessionLogEntry]:
+    def get_message_entries(self, entries: list[SessionLogEntry]) -> list[SessionLogEntry]:
         """Get only message-type entries."""
         return self.get_entries_by_type(entries, "message")
 
     def get_tool_calls(
-        self, entries: List[SessionLogEntry]
-    ) -> List[tuple[SessionLogEntry, ContentBlock]]:
-        """
-        Extract all tool calls from entries.
+        self, entries: list[SessionLogEntry]
+    ) -> list[tuple[SessionLogEntry, ContentBlock]]:
+        """Extract all tool calls from entries.
 
         Returns:
             List of (entry, tool_call) tuples
+
         """
         calls = []
         for entry in entries:
@@ -144,14 +141,12 @@ class Parser:
                         calls.append((entry, block))
         return calls
 
-    def get_session_duration(
-        self, entries: List[SessionLogEntry]
-    ) -> Optional[float]:
-        """
-        Calculate session duration in seconds.
+    def get_session_duration(self, entries: list[SessionLogEntry]) -> float | None:
+        """Calculate session duration in seconds.
 
         Returns:
             Duration in seconds, or None if insufficient data
+
         """
         from datetime import datetime
 
@@ -170,25 +165,23 @@ class Parser:
         delta = timestamps[-1] - timestamps[0]
         return delta.total_seconds()
 
-    def detect_phases(
-        self, entries: List[SessionLogEntry]
-    ) -> Dict[Phase, List[SessionLogEntry]]:
-        """
-        Detect and categorize entries by workflow phase.
+    def detect_phases(self, entries: list[SessionLogEntry]) -> dict[Phase, list[SessionLogEntry]]:
+        """Detect and categorize entries by workflow phase.
 
         Returns:
             Dictionary mapping Phase to list of entries
+
         """
         from pi_evaluator.types import detect_phase
 
-        phases: Dict[Phase, List[SessionLogEntry]] = {
+        phases: dict[Phase, list[SessionLogEntry]] = {
             Phase.DESIGN: [],
             Phase.REVIEW: [],
             Phase.EXECUTE: [],
             Phase.AUDIT: [],
         }
 
-        current_phase: Optional[Phase] = None
+        current_phase: Phase | None = None
 
         for entry in entries:
             if entry.type == "session_start":
@@ -210,12 +203,12 @@ class Parser:
 
         return phases
 
-    def get_statistics(self, entries: List[SessionLogEntry]) -> Dict[str, Any]:
-        """
-        Get parsing statistics.
+    def get_statistics(self, entries: list[SessionLogEntry]) -> dict[str, Any]:
+        """Get parsing statistics.
 
         Returns:
             Dictionary with parsing statistics
+
         """
         return {
             "total_lines": self.line_count,

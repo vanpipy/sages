@@ -1,5 +1,4 @@
-"""
-pi-evaluator: Auto-run and evaluate Four Sages Agents workflow sessions
+"""pi-evaluator: Auto-run and evaluate Four Sages Agents workflow sessions.
 
 Example usage:
     from pi_evaluator import Runner, Parser, Evaluator, Config

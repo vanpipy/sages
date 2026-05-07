@@ -1,5 +1,4 @@
-"""
-pi_evaluator.evaluator - Metric computation for workflow evaluation
+"""pi_evaluator.evaluator - Metric computation for workflow evaluation.
 
 Computes per-phase metrics using HuggingFace evaluate framework.
 """
@@ -8,7 +7,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from pi_evaluator.config import Config
 from pi_evaluator.parser import Parser
@@ -30,18 +28,17 @@ class EvaluatorError(Exception):
 
 
 class Evaluator:
-    """
-    Evaluator for computing workflow quality metrics.
+    """Evaluator for computing workflow quality metrics.
 
     Computes metrics for each phase based on session log analysis.
     """
 
     def __init__(self, config: Config):
-        """
-        Initialize evaluator.
+        """Initialize evaluator.
 
         Args:
             config: Configuration object
+
         """
         self.config = config
         self.parser = Parser()
@@ -49,12 +46,11 @@ class Evaluator:
 
     def evaluate(
         self,
-        entries: List[SessionLogEntry],
-        request: Optional[str] = None,
-        session_id: Optional[str] = None,
+        entries: list[SessionLogEntry],
+        request: str | None = None,
+        session_id: str | None = None,
     ) -> EvaluationResult:
-        """
-        Evaluate a workflow session.
+        """Evaluate a workflow session.
 
         Args:
             entries: List of session log entries
@@ -63,6 +59,7 @@ class Evaluator:
 
         Returns:
             EvaluationResult with per-phase and overall scores
+
         """
         if not entries:
             raise EvaluatorError("No entries to evaluate")
@@ -78,7 +75,7 @@ class Evaluator:
         errors = [tc for _, tc in tool_calls if tc.is_error]
 
         # Compute per-phase results
-        phase_results: Dict[str, PhaseResult] = {}
+        phase_results: dict[str, PhaseResult] = {}
         for phase, phase_entries in phases.items():
             metrics = self._compute_phase_metrics(phase, phase_entries, tool_calls)
             score = self.scorer.compute_phase_score(phase, metrics)
@@ -135,11 +132,10 @@ class Evaluator:
     def evaluate_file(
         self,
         session_path: Path,
-        request: Optional[str] = None,
-        session_id: Optional[str] = None,
+        request: str | None = None,
+        session_id: str | None = None,
     ) -> EvaluationResult:
-        """
-        Evaluate a session file.
+        """Evaluate a session file.
 
         Args:
             session_path: Path to session.jsonl file
@@ -148,6 +144,7 @@ class Evaluator:
 
         Returns:
             EvaluationResult
+
         """
         entries = self.parser.parse(session_path)
         if session_id is None:
@@ -157,15 +154,18 @@ class Evaluator:
     def _compute_phase_metrics(
         self,
         phase: Phase,
-        entries: List[SessionLogEntry],
-        all_tool_calls: List[tuple],
+        entries: list[SessionLogEntry],
+        all_tool_calls: list[tuple],
     ) -> PhaseMetrics:
         """Compute metrics for a specific phase."""
         metrics = PhaseMetrics()
 
         # Filter tool calls for this phase
-        phase_tool_calls = [
-            tc for e, tc in all_tool_calls if any(a.type == phase.value for a in e.message.content) if e.message
+        [
+            tc
+            for e, tc in all_tool_calls
+            if any(a.type == phase.value for a in e.message.content)
+            if e.message
         ]
 
         if phase == Phase.DESIGN:
@@ -196,51 +196,60 @@ class Evaluator:
 
         return metrics
 
-    def _calculate_plane_coverage(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_plane_coverage(self, entries: list[SessionLogEntry]) -> float:
         """Calculate MDD plane coverage (0-100)."""
-        planes = ["Business", "Data", "Control", "Foundation", "Observation", "Security", "Evolution"]
+        planes = [
+            "Business",
+            "Data",
+            "Control",
+            "Foundation",
+            "Observation",
+            "Security",
+            "Evolution",
+        ]
         content = " ".join(self._get_text_content(entries)).lower()
         found = sum(1 for p in planes if p.lower() in content)
         return (found / len(planes)) * 100
 
-    def _calculate_content_depth(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_content_depth(self, entries: list[SessionLogEntry]) -> float:
         """Calculate average content depth (0-100)."""
         content = self._get_text_content(entries)
         total_lines = sum(len(c.split("\n")) for c in content)
         # Rough heuristic: 50 lines per plane = 100%
         return min(100, (total_lines / 7) * 2)
 
-    def _count_cross_references(self, entries: List[SessionLogEntry]) -> int:
+    def _count_cross_references(self, entries: list[SessionLogEntry]) -> int:
         """Count cross-plane references."""
         content = " ".join(self._get_text_content(entries))
         return content.lower().count("see also") + content.lower().count("related to")
 
-    def _count_decisions(self, entries: List[SessionLogEntry]) -> int:
+    def _count_decisions(self, entries: list[SessionLogEntry]) -> int:
         """Count key design decisions."""
         content = " ".join(self._get_text_content(entries))
         return content.count("Decision:") + content.lower().count("## Key Design Decisions")
 
-    def _calculate_plan_completeness(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_plan_completeness(self, entries: list[SessionLogEntry]) -> float:
         """Calculate plan completeness (0-100)."""
         required = ["Overview", "Tasks", "Dependencies"]
         content = " ".join(self._get_text_content(entries)).lower()
         found = sum(1 for r in required if r.lower() in content)
         return (found / len(required)) * 100
 
-    def _calculate_feasibility_score(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_feasibility_score(self, entries: list[SessionLogEntry]) -> float:
         """Calculate feasibility score based on blockers."""
         content = " ".join(self._get_text_content(entries))
         blockers = content.count("⚠️") + content.count("❌") + content.count("BLOCKER")
         return max(0, 100 - blockers * 20)
 
-    def _count_tasks(self, entries: List[SessionLogEntry]) -> int:
+    def _count_tasks(self, entries: list[SessionLogEntry]) -> int:
         """Count number of tasks."""
         content = " ".join(self._get_text_content(entries))
         # Count T1, T2, etc. patterns
         import re
+
         return len(re.findall(r"\bT\d+\b", content))
 
-    def _calculate_task_completion(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_task_completion(self, entries: list[SessionLogEntry]) -> float:
         """Calculate task completion rate (0-100)."""
         content = " ".join(self._get_text_content(entries))
         # Simplified: check for completion indicators
@@ -248,7 +257,7 @@ class Evaluator:
             return 100.0
         return 50.0  # Unknown
 
-    def _calculate_tdd_compliance(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_tdd_compliance(self, entries: list[SessionLogEntry]) -> float:
         """Calculate TDD compliance (0-100)."""
         content = " ".join(self._get_text_content(entries)).lower()
         has_test = "test" in content or "red" in content
@@ -257,31 +266,31 @@ class Evaluator:
             return 80.0  # Simplified
         return 50.0
 
-    def _calculate_error_recovery(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_error_recovery(self, entries: list[SessionLogEntry]) -> float:
         """Calculate error recovery rate (0-100)."""
         # Check for retry patterns
         return 100.0  # Simplified
 
-    def _calculate_parallel_efficiency(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_parallel_efficiency(self, entries: list[SessionLogEntry]) -> float:
         """Calculate parallel execution efficiency (0-100)."""
         return 75.0  # Simplified
 
-    def _calculate_quality_score(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_quality_score(self, entries: list[SessionLogEntry]) -> float:
         """Calculate quality score (0-100)."""
         return 90.0  # Simplified
 
-    def _calculate_security_score(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_security_score(self, entries: list[SessionLogEntry]) -> float:
         """Calculate security pass rate (0-100)."""
         content = " ".join(self._get_text_content(entries)).lower()
         if "security" in content and "pass" in content:
             return 100.0
         return 80.0
 
-    def _calculate_test_coverage(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_test_coverage(self, entries: list[SessionLogEntry]) -> float:
         """Calculate test coverage (0-100)."""
         return 80.0  # Simplified
 
-    def _get_text_content(self, entries: List[SessionLogEntry]) -> List[str]:
+    def _get_text_content(self, entries: list[SessionLogEntry]) -> list[str]:
         """Extract text content from entries."""
         content = []
         for entry in entries:
@@ -291,7 +300,7 @@ class Evaluator:
                         content.append(str(block.content))
         return content
 
-    def _calculate_phase_duration(self, entries: List[SessionLogEntry]) -> float:
+    def _calculate_phase_duration(self, entries: list[SessionLogEntry]) -> float:
         """Calculate duration of phase entries."""
         from datetime import datetime
 
@@ -322,7 +331,7 @@ class Evaluator:
             return any(b.is_error for b in entry.message.content if b.type == "toolResult")
         return False
 
-    def _extract_outputs(self, entries: List[SessionLogEntry]) -> List[str]:
+    def _extract_outputs(self, entries: list[SessionLogEntry]) -> list[str]:
         """Extract output files from entries."""
         outputs = []
         for entry in entries:
@@ -332,21 +341,19 @@ class Evaluator:
                         content = str(block.content)
                         # Look for file paths
                         import re
+
                         files = re.findall(r"[\w\-./]+\.(py|ts|js|md|yaml|json)", content)
                         outputs.extend(files)
         return list(set(outputs))
 
-    def _generate_recommendations(
-        self, phase_results: Dict[str, PhaseResult]
-    ) -> List[str]:
+    def _generate_recommendations(self, phase_results: dict[str, PhaseResult]) -> list[str]:
         """Generate recommendations based on phase scores."""
         recommendations = []
 
         for phase_name, result in phase_results.items():
             if result.score < 70:
-                recommendations.append(
-                    f"{phase_name.capitalize()}: Score {result.score:.0f} is below threshold. Consider improvements."
-                )
+                msg = f"{phase_name.capitalize()}: Score {result.score:.0f} is below threshold."
+                recommendations.append(msg)
 
         if not recommendations:
             recommendations.append("Overall workflow quality is good.")

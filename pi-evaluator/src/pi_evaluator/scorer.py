@@ -1,20 +1,16 @@
-"""
-pi_evaluator.scorer - Score aggregation for evaluation results
+"""pi_evaluator.scorer - Score aggregation for evaluation results.
 
 Computes weighted scores for each phase and overall.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict
-
 from pi_evaluator.config import Config
 from pi_evaluator.types import Phase, PhaseMetrics
 
 
 class Scorer:
-    """
-    Score aggregator for workflow evaluation.
+    """Score aggregator for workflow evaluation.
 
     Computes weighted scores based on phase weights and metric values.
     """
@@ -46,18 +42,17 @@ class Scorer:
     }
 
     def __init__(self, config: Config):
-        """
-        Initialize scorer.
+        """Initialize scorer.
 
         Args:
             config: Configuration object with phase weights
+
         """
         self.config = config
         self.phase_weights = config.phase_weights
 
     def compute_phase_score(self, phase: Phase, metrics: PhaseMetrics) -> float:
-        """
-        Compute weighted score for a phase.
+        """Compute weighted score for a phase.
 
         Args:
             phase: The phase being scored
@@ -65,6 +60,7 @@ class Scorer:
 
         Returns:
             Score between 0-100
+
         """
         weights = self.DEFAULT_WEIGHTS.get(phase, {})
         if not weights:
@@ -85,15 +81,15 @@ class Scorer:
 
         return min(100, max(0, weighted_sum))
 
-    def compute_overall_score(self, phase_scores: Dict[str, float]) -> float:
-        """
-        Compute weighted overall score from phase scores.
+    def compute_overall_score(self, phase_scores: dict[str, float]) -> float:
+        """Compute weighted overall score from phase scores.
 
         Args:
             phase_scores: Dictionary mapping phase name to score
 
         Returns:
             Overall score between 0-100
+
         """
         total_weight = sum(self.phase_weights.values())
 
@@ -108,11 +104,8 @@ class Scorer:
 
         return min(100, max(0, weighted_sum))
 
-    def get_phase_contribution(
-        self, phase: str, score: float, overall: float
-    ) -> float:
-        """
-        Calculate how much a phase contributes to overall score.
+    def get_phase_contribution(self, phase: str, score: float, overall: float) -> float:
+        """Calculate how much a phase contributes to overall score.
 
         Args:
             phase: Phase name
@@ -121,6 +114,7 @@ class Scorer:
 
         Returns:
             Contribution percentage
+
         """
         weight = self.phase_weights.get(phase, 0)
         if overall == 0:

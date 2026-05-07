@@ -1,8 +1,5 @@
 """Tests for pi_evaluator.evaluator module."""
 
-import json
-from datetime import datetime
-from pathlib import Path
 
 import pytest
 
@@ -12,7 +9,6 @@ from pi_evaluator.types import (
     ContentBlock,
     EvaluationResult,
     Message,
-    Phase,
     SessionLogEntry,
 )
 
@@ -149,7 +145,10 @@ class TestEvaluatorMetrics:
                     content=[
                         ContentBlock(
                             type="text",
-                            content="Business Data Control Foundation Observation Security Evolution",
+                            content=(
+                                "Business Data Control Foundation "
+                                "Observation Security Evolution"
+                            ),
                         )
                     ],
                 ),
