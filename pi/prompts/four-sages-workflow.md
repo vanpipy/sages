@@ -1,287 +1,145 @@
 # Four Sages Workflow
 
-## Philosophy
+## Phases
 
-Named after four sage figures from Chinese mythology, representing the complete software engineering lifecycle from **Multi-Dimensional Design** to **quality assurance**.
+| Phase | Mode | Allowed Files |
+|-------|------|---------------|
+| Design | read-only | `draft.md` |
+| Review | read-only | `draft.md` (read) |
+| Plan | read-only | `plan.md`, `execution.yaml` |
+| Implement | writeable | all files |
+| Review | read-only | `report-{time}.md` |
 
-## The Four Sages
+## Mode Indicators
 
-| Sage | Title | Responsibility | Output |
-|------|-------|---------------|--------|
-| **Fuxi (伏羲)** | Architect ☰ | MDD System Design (7 Planes) | Design Document |
-| **QiaoChui (巧倕)** | Expert ☳ | Technical review & decomposition | SPEC + Execution Plan |
-| **LuBan (鲁班)** | Engineer ☴ | TDD implementation | Source code + Tests |
-| **GaoYao (皋陶)** | Auditor ☲ | Quality audit & security | Audit Report + Verdict |
-
-## MDD Seven Planes (Fuxi's Framework)
-
-| Plane | Elements | Focus |
-|-------|----------|-------|
-| **Business** | Process × Rules | Business value delivery |
-| **Data** | Logic × State | Data processing |
-| **Control** | Strategy × Distribution | Decision execution |
-| **Foundation** | Resource × Abstraction | Infrastructure |
-| **Observation** | Data × Analysis | Monitoring |
-| **Security** | Identity × Permissions | Access control |
-| **Evolution** | Time × Change | Versioning & migration |
-
-## Mythology Flow
+Always show mode in system prompt:
 
 ```
-Fuxi ──→ Creates systematic observation (MDD)
-  ↓
-QiaoChui ──→ Creates technical specifications
-  ↓
-LuBan ──→ Creates working implementation
-  ↓
-GaoYao ──→ Creates quality assurance
+**Design Mode** (Read-Only)
+- Only modify: draft.md
+- Read-only for all other files
+- Use /fuxi-request to create draft
 ```
 
-## Workflow Diagram
-
 ```
-                    ┌─────────────┐
-                    │ User Request│
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │ ☰ Fuxi      │
-                    │ MDD Design  │
-                    │ 7 Planes    │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │/fuxi-approve│
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │ ☳ QiaoChui  │
-                    │ Review      │
-                    │ Decompose   │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │/fuxi-approve│
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │ ☴ LuBan     │
-                    │ Execute     │
-                    │ TDD        │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │/fuxi-approve│
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │ ☲ GaoYao    │
-                    │ Audit       │
-                    │ Security    │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │/fuxi-archive│
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │   🎉 Complete│
-                    └─────────────┘
+**Plan Mode** (Read-Only)
+- Only modify: plan.md, execution.yaml
+- Read-only for all other files
+- Use /fuxi-plan to proceed (score > 80)
 ```
 
-## Phase Details
-
-### Phase 1: Design (Fuxi) ☰
-
-**Framework**: Multi-Dimensional Design (MDD)
-
-**Output**:
-- `draft.md` - MDD Design Document
-
-**Content**:
-```markdown
-# System Design: {Name}
-
-## Overview
-- Core Intent: {purpose}
-- System Boundary: {scope}
-
-## Plane Analysis
-### Business Plane (Process × Rules)
-### Data Plane (Logic × State)
-### Control Plane (Strategy × Distribution)
-### Foundation Plane (Resource × Abstraction)
-### Observation Plane (Data × Analysis)
-### Security Plane (Identity × Permissions)
-### Evolution Plane (Time × Change)
-
-## Cross-Plane Dependencies
-## Key Decisions
-## Open Questions
+```
+**Implement Mode** (Writeable)
+- All files allowed
+- Follow TDD: RED → GREEN → REFACTOR
+- Use /luban-execute to run tasks
 ```
 
-### When to Use Each Plane
+```
+**Review Mode** (Read-Only)
+- Only modify: report-{time}.md
+- Use /gaoyao-review for audit
+```
 
-| Request Type | Key Planes |
-|-------------|-----------|
-| Business App | Business, Data, Control |
-| Data Platform | Data, Observation, Evolution |
-| Security App | Security, Control, Foundation |
-| Microservices | All planes important |
+## Workflow Flow
 
-### Plane Flexibility
+```
+fuxi-start
+    ↓
+Design Phase (Fuxi)
+    ↓ /fuxi-request
+draft.md created
+    ↓
+Review Phase (QiaoChui)
+    ↓ qiaochui-review (sets score)
+score > 80?
+    ↓ yes
+Plan Phase (QiaoChui)
+    ↓ qiaochui-decompose
+plan.md + execution.yaml created
+    ↓ /fuxi-plan
+Implement Phase (LuBan)
+    ↓ /luban-execute
+Tasks executed (TDD)
+    ↓
+Audit Phase (GaoYao)
+    ↓ gaoyao-review
+report-{time}.md created
+    ↓ verdict = PASS
+fuxi-end → Archive
+```
 
-> Not every system needs all 7 planes. Use the planes relevant to your system:
-> - **Required**: Business, Data, Foundation
-> - **Often Needed**: Control, Security
-> - **Situational**: Observation, Evolution
+## Commands
 
-### Phase 2: Review (QiaoChui) ☳
+| Command | Phase | Description |
+|---------|-------|-------------|
+| `/fuxi-start` | - | Start workflow, set design phase |
+| `/fuxi-request` | design | Create draft.md |
+| `/fuxi-plan <score>` | plan | Transition to plan (only if score > 80) |
+| `/fuxi-recover` | - | Recover from state.json |
+| `/fuxi-end` | - | End workflow, archive |
+| `/fuxi-get-status` | - | View current status |
+| `qiaochui-review` | review | Review draft, set score |
+| `qiaochui-decompose` | plan | Create plan.md and execution.yaml |
+| `luban-execute` | implement | Execute tasks with TDD |
+| `gaoyao-review` | audit | Quality audit |
 
-**Responsibility**: Technical feasibility, task decomposition
+## MDD Seven Planes
 
-**Output**:
-- `plan.md` - Task plan
-- `execution.yaml` - Execution config
-- (no longer uses `tasks.json`)
+For design phase, analyze using 7 planes:
 
-**Deep Review Analysis**:
-| Metric | Description |
-|--------|-------------|
-| Content Depth | 0-100 score per plane |
-| Risks | Identified per plane |
-| Questions | Unanswered review questions |
-| Complexity | Low/Medium/High/Very-High |
-| Est. Hours | Time estimation |
-| Blockers | Critical issues |
+1. **Business** - Process × Rules
+2. **Data** - Logic × State
+3. **Control** - Strategy × Distribution
+4. **Foundation** - Resource × Abstraction
+5. **Observation** - Data × Analysis
+6. **Security** - Identity × Permissions
+7. **Evolution** - Time × Change
 
-**Review Verdict**:
-- `APPROVED` → Proceed to decomposition
-- `REVISE` → Expand incomplete planes
-- `REJECTED` → Redesign required
+## TDD Cycle
 
-**Auto Behavior**:
-- Analyze content depth per plane
-- Identify risks and blockers
-- Detect cross-plane dependencies
-- Estimate implementation complexity
-
-### Phase 3: Execute (LuBan) ☴
-
-**Responsibility**: TDD implementation, craftsmanship
-
-**TDD Iron Law**:
 ```
 RED → GREEN → REFACTOR
 ```
 
-**Output**:
-- Source code files
-- Test code
-- Commit records
-
-**Features**:
-- Parallel execution (max 3 tasks)
-- File locks to prevent conflicts
-- Per-task commits
-
-### Phase 4: Audit (GaoYao) ☲
-
-**Responsibility**: Quality audit, security scan
-
-**Audit Types**:
-| Type | Checks |
-|------|--------|
-| Code Quality | Complexity, readability |
-| Security | Injection, auth, authz |
-| Test | Coverage, edge cases |
-| Performance | Algorithm complexity |
-| Documentation | README, comments |
-
-**Verdicts**:
-- PASS → Archive & deploy
-- NEEDS_CHANGES → Return for fixes
-- REJECTED → Redesign from architecture
-
-### Phase 5: Archive
-
-**Output**:
-- `.sages/archive/{plan}/{timestamp}/`
-
-**Archived Content**:
-- All phase outputs
-- State snapshots
-- Audit reports
-- Execution summary
-
-## Fuxi Commands
-
-Start new workflow:
-- `/fuxi <request>` - Start workflow with MDD design
-
-Design phase:
-- `/fuxi-create-draft <request>` - Create MDD design draft
-- `/fuxi-get-draft` - View current draft
-- `/fuxi-approve` - Approve draft → review
-
-Review phase:
-- `/qiaochui-review` - Review draft feasibility
-- `/qiaochui-decompose` - Create task plan
-- `/fuxi-approve` - Approve plan → execute
-
-Execute phase:
-- `/luban-execute-task <task-id>` - Execute single task
-- `/luban-execute-all` - Execute all tasks
-- `/luban-get-status` - View progress
-- `/fuxi-approve` - Approve execution → audit
-
-Audit phase:
-- `/gaoyao-review` - Run quality audit
-- `/gaoyao-check-security` - Scan for vulnerabilities
-- `/fuxi-approve` - Approve audit → archive
-
-Archive:
-- `/fuxi-archive` - Archive completed workflow
-
-Recovery:
-- `/fuxi-restart` - Check state and recover
-- `/fuxi-advance-phase <phase>` - Move to: design, review, plan, execute, audit, complete
-
-View:
-- `/fuxi-status` - View current workflow status
+- **RED**: Write failing test first
+- **GREEN**: Write minimal code to pass
+- **REFACTOR**: Improve code structure
 
 ## File Structure
 
 ```
 .sages/
-├── workspace/           # Current workflow
+├── workspace/
 │   ├── draft.md        # MDD Design (Fuxi)
 │   ├── plan.md         # Task plan (QiaoChui)
-│   ├── execution.yaml # Execution config (single source of truth)
-│   ├── audit.md        # Audit report (GaoYao)
+│   ├── execution.yaml  # Task config
+│   ├── report-{time}.md # Audit report (GaoYao)
 │   └── state.json      # Workflow state
-│
-└── archive/            # Archived workflows
+└── archive/
     └── {plan}/
         └── {timestamp}/
-            ├── draft.md
-            ├── plan.md
-            ├── execution.yaml
-            ├── audit.md
-            ├── state.json
-            └── summary.md
+            └── ... (archived files)
 ```
 
-## Four Sages Spirit
+## State Management
 
-> **Fuxi**: Creating symbols to observe systems from multiple dimensions
-> 
-> **QiaoChui**: Measuring with precision, crafting with standards
-> 
-> **LuBan**: Building with care, testing with discipline
-> 
-> **GaoYao**: Judging with facts, guarding with standards
+state.json contains:
+```json
+{
+  "phase": "design",
+  "planName": "...",
+  "request": "...",
+  "score": 85,
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
 
----
+## Prohibited
 
-*Four Sages working together, none can be lacking; creating excellent software through systematic design*
+- ❌ Modify files outside allowed list for current phase
+- ❌ Skip TDD cycle in implement phase
+- ❌ Decompose without review
+- ❌ Plan if score ≤ 80
+- ❌ Write code in read-only phases
