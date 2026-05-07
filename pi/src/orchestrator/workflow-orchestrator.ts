@@ -62,8 +62,18 @@ Create the architectural design for: "${request}"
       complete: "✅",
     };
 
+    const phaseCommands: Record<string, string[]> = {
+      design: ["/fuxi-approve - approve draft", "/fuxi-restart - check state"],
+      review: ["/qiaochui-review - review draft", "/qiaochui-decompose - decompose"],
+      plan: ["/fuxi-approve - approve plan", "/fuxi-restart - check state"],
+      execute: ["/luban-execute-all - run tasks", "/luban-get-status - view progress"],
+      audit: ["/gaoyao-review - audit quality", "/gaoyao-check-security - scan security"],
+      complete: ["/fuxi-archive - archive workflow"],
+    };
+
     const emoji = phaseEmoji[state.phase] || "⏸️";
     const taskCount = state.tasks?.length || 0;
+    const validCommands = phaseCommands[state.phase] || [];
 
     let message = `**Workflow Recovered** ♻️\n\n`;
     message += `**Plan:** ${state.planName}\n`;
@@ -74,7 +84,9 @@ Create the architectural design for: "${request}"
       message += `\n**Tasks:** ${taskCount} task(s) in plan`;
     }
 
-    message += `\n\nUse \`/fuxi-approve\` to continue from this phase.`;
+    if (validCommands.length > 0) {
+      message += `\n\n**Available:** ${validCommands.join(" | ")}`;
+    }
 
     return message;
   }

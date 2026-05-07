@@ -550,6 +550,36 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
           } catch { /* ignore */ }
         }
 
+        // Valid commands per phase
+        const phaseCommands: Record<string, { action: string; command: string; description: string }[]> = {
+          idle: [],
+          design: [
+            { action: "approve", command: "/fuxi-approve", description: "approve draft → review" },
+            { action: "recover", command: "/fuxi-restart", description: "check workspace state" },
+          ],
+          review: [
+            { action: "review", command: "/qiaochui-review", description: "review draft feasibility" },
+            { action: "decompose", command: "/qiaochui-decompose", description: "create task plan" },
+          ],
+          plan: [
+            { action: "approve", command: "/fuxi-approve", description: "approve plan → execute" },
+            { action: "recover", command: "/fuxi-restart", description: "check workspace state" },
+          ],
+          execute: [
+            { action: "execute", command: "/luban-execute-all", description: "run all tasks" },
+            { action: "status", command: "/luban-get-status", description: "view task progress" },
+            { action: "approve", command: "/fuxi-approve", description: "approve execution → audit" },
+          ],
+          audit: [
+            { action: "audit", command: "/gaoyao-review", description: "run quality audit" },
+            { action: "security", command: "/gaoyao-check-security", description: "scan vulnerabilities" },
+            { action: "approve", command: "/fuxi-approve", description: "approve audit → archive" },
+          ],
+          complete: [
+            { action: "archive", command: "/fuxi-archive", description: "archive workflow" },
+          ],
+        };
+
         return {
           content: [{
             type: "text",
@@ -566,6 +596,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
               next_step: nextSteps.description,
               next_action: nextSteps.action,
               stored_phase: storedState?.phase,
+              valid_commands: phaseCommands[status] || [],
             }),
           }],
           details: { status, hasDraft, hasPlan, hasExecution, taskCount, storedState, nextSteps },

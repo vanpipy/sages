@@ -214,18 +214,41 @@ RED → GREEN → REFACTOR
 - Audit reports
 - Execution summary
 
-## Command Reference
+## Fuxi Commands
 
-| Command | Description |
-|---------|-------------|
-| `/fuxi <request>` | Start workflow with MDD design |
-| `/fuxi-approve` | Approve current phase |
-| `/fuxi-reject` | Reject and stop |
-| `/fuxi-status` | View status |
-| `/fuxi-execute` | Execute tasks |
-| `/fuxi-archive` | Archive completed workflow |
-| `/fuxi-archives` | List archives |
-| `/fuxi-restore` | Restore an archive |
+Start new workflow:
+- `/fuxi <request>` - Start workflow with MDD design
+
+Design phase:
+- `/fuxi-create-draft <request>` - Create MDD design draft
+- `/fuxi-get-draft` - View current draft
+- `/fuxi-approve` - Approve draft → review
+
+Review phase:
+- `/qiaochui-review` - Review draft feasibility
+- `/qiaochui-decompose` - Create task plan
+- `/fuxi-approve` - Approve plan → execute
+
+Execute phase:
+- `/luban-execute-task <task-id>` - Execute single task
+- `/luban-execute-all` - Execute all tasks
+- `/luban-get-status` - View progress
+- `/fuxi-approve` - Approve execution → audit
+
+Audit phase:
+- `/gaoyao-review` - Run quality audit
+- `/gaoyao-check-security` - Scan for vulnerabilities
+- `/fuxi-approve` - Approve audit → archive
+
+Archive:
+- `/fuxi-archive` - Archive completed workflow
+
+Recovery:
+- `/fuxi-restart` - Check state and recover
+- `/fuxi-advance-phase <phase>` - Move to: design, review, plan, execute, audit, complete
+
+View:
+- `/fuxi-status` - View current workflow status
 
 ## File Structure
 
