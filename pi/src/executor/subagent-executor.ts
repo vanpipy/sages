@@ -183,8 +183,8 @@ export class SubagentExecutor {
       const model = config.model || "sonnet";
       const timeout = (config.timeout || 300) * 1000;
 
-      // Spawn pi process with the task prompt as input
-      const child = spawn("pi", ["--model", model, "--no-gui"], {
+      // Spawn pi process in non-interactive mode (-p) with the task prompt
+      const child = spawn("pi", ["--model", model, "-p"], {
         cwd: this.cwd,
         timeout,
         stdio: ["pipe", "pipe", "pipe"],
