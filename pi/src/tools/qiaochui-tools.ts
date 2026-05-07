@@ -372,9 +372,26 @@ function analyzePlaneContent(plane: MDDPlane, content: string): PlaneAssessment 
  * Extract plane section from draft content
  */
 function extractPlaneSection(plane: MDDPlane, content: string): string {
+  // Map plane names to their numbers for numbered format
+  const planeNumbers: Record<string, string> = {
+    "Business": "1",
+    "Data": "2",
+    "Control": "3",
+    "Foundation": "4",
+    "Observation": "5",
+    "Security": "6",
+    "Evolution": "7",
+  };
+  const num = planeNumbers[plane];
+  
   const patterns = [
+    // Pattern 1: Numbered format "### 1. Business Plane"
+    new RegExp(`###\\s*${num}\\.\\s*${plane}\\s*Plane[\\s\\S]*?(?=###\\s*[0-9]+\\.\\s*|###\\s*[A-Z]|##\\s|\\Z)`, 'i'),
+    // Pattern 2: "## Business Plane"
     new RegExp(`##\\s*${plane}\\s*Plane[\\s\\S]*?(?=##|\\Z)`, 'i'),
-    new RegExp(`###\\s*${plane}[\\s\\S]*?(?=###|##|\\Z)`, 'i'),
+    // Pattern 3: "### Business Plane" without number
+    new RegExp(`###\\s*${plane}\\s*Plane[\\s\\S]*?(?=###|##|\\Z)`, 'i'),
+    // Pattern 4: "## Business" (shorthand)
     new RegExp(`##\\s*${plane}[\\s\\S]*?(?=##|\\Z)`, 'i'),
   ];
   
