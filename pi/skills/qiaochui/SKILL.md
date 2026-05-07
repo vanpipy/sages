@@ -32,7 +32,7 @@ Verify the draft is **well-formed and resilient**:
 
 | Check | Pass Criteria |
 |-------|---------------|
-| **Structural** | All 8 trigrams present with non-empty content |
+| **Structural** | All 7 planes present with non-empty content |
 | **Completeness** | No `[TODO]`, `[TBD]`, `[FIXME]` placeholders in core sections |
 | **Coherence** | Core Intent aligns with Success Path and Boundaries |
 | **Feasibility** | No impossible requirements (e.g., real-time + offline-only) |
@@ -68,7 +68,7 @@ Verify **no contradictions or misalignments** across the draft:
 |-------|---------------|
 | **Terminology** | Same terms used consistently (no "user" vs "client" vs "actor" for same entity) |
 | **Scopes** | Data Flow doesn't promise capabilities outside Core Intent |
-| **Trigram Alignment** | Each trigram section delivers what its mythology promises |
+| **Plane Alignment** | Each plane section delivers what its elements promise |
 | **Decision Consistency** | Cross-plane decisions don't contradict (e.g., sync API + async state) |
 | **Priority Alignment** | Task priorities in plan match complexity in design |
 

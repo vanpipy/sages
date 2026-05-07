@@ -2,7 +2,7 @@
 
 ## Philosophy
 
-Named after four sage figures from Chinese mythology, representing the complete software engineering lifecycle from **multi-dimensional system design** to **quality assurance**.
+Named after four sage figures from Chinese mythology, representing the complete software engineering lifecycle from **Multi-Dimensional Design** to **quality assurance**.
 
 ## The Four Sages
 
@@ -16,7 +16,7 @@ Named after four sage figures from Chinese mythology, representing the complete 
 ## MDD Seven Planes (Fuxi's Framework)
 
 | Plane | Elements | Focus |
-|-------|----------|--------|
+|-------|----------|-------|
 | **Business** | Process × Rules | Business value delivery |
 | **Data** | Logic × State | Data processing |
 | **Control** | Strategy × Distribution | Decision execution |
