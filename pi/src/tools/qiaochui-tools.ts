@@ -382,24 +382,59 @@ function extractPlaneSection(plane: MDDPlane, content: string): string {
     "Security": "6",
     "Evolution": "7",
   };
-  const num = planeNumbers[plane];
   
-  const patterns = [
-    // Pattern 1: Numbered format "### 1. Business Plane"
-    new RegExp(`###\\s*${num}\\.\\s*${plane}\\s*Plane[\\s\\S]*?(?=###\\s*[0-9]+\\.\\s*|###\\s*[A-Z]|##\\s|\\Z)`, 'i'),
-    // Pattern 2: "## Business Plane"
-    new RegExp(`##\\s*${plane}\\s*Plane[\\s\\S]*?(?=##|\\Z)`, 'i'),
-    // Pattern 3: "### Business Plane" without number
-    new RegExp(`###\\s*${plane}\\s*Plane[\\s\\S]*?(?=###|##|\\Z)`, 'i'),
-    // Pattern 4: "## Business" (shorthand)
-    new RegExp(`##\\s*${plane}[\\s\\S]*?(?=##|\\Z)`, 'i'),
+  // Find plane header patterns
+  const num = planeNumbers[plane];
+  const allPlanes = Object.keys(planeNumbers);
+  const currentIdx = allPlanes.indexOf(plane);
+  
+  // Try multiple header patterns
+  const headerPatterns = [
+    new RegExp(`###\\s*${num}\\.\\s*${plane}\\s*Plane`, 'i'),
+    new RegExp(`##\\s*${plane}\\s*Plane`, 'i'),
+    new RegExp(`###\\s*${plane}\\s*Plane`, 'i'),
+    new RegExp(`##\\s*${plane}(?!\\s*Plane)`, 'i'),
   ];
   
-  for (const pattern of patterns) {
+  let start = -1;
+  for (const pattern of headerPatterns) {
     const match = content.match(pattern);
-    if (match) return match[0];
+    if (match) {
+      start = content.indexOf(match[0]);
+      break;
+    }
   }
-  return "";
+  
+  if (start === -1) return "";
+  
+  // Find end of section (next plane header or end of content)
+  let end = content.length;
+  
+  // Check for next numbered plane
+  for (let i = currentIdx + 1; i < allPlanes.length; i++) {
+    const nextNum = planeNumbers[allPlanes[i]];
+    const nextPattern = new RegExp(`###\\s*${nextNum}\\.\\s*${allPlanes[i]}\\s*Plane`, 'i');
+    const nextMatch = content.match(nextPattern);
+    if (nextMatch) {
+      const nextStart = content.indexOf(nextMatch[0]);
+      if (nextStart > start && nextStart < end) {
+        end = nextStart;
+      }
+      break;
+    }
+  }
+  
+  // Also check for ## Key Design Decisions etc
+  const afterPlanes = content.slice(start + 100);
+  const keySectionMatch = afterPlanes.match(/^## [^\n]+/m);
+  if (keySectionMatch) {
+    const keyPos = start + 100 + afterPlanes.indexOf(keySectionMatch[0]);
+    if (keyPos > start && keyPos < end && !keySectionMatch[0].includes('Plane')) {
+      end = keyPos;
+    }
+  }
+  
+  return content.slice(start, end);
 }
 
 /**
@@ -493,7 +528,7 @@ function identifyPlaneRisks(plane: MDDPlane, section: string, lines: string[]): 
   // Plane-specific risk checks
   switch (plane) {
     case "Data":
-      if (!section.includes("schema") && !section.includes("model")) {
+      if (!/schema|model/i.test(section)) {
         risks.push("Data: No schema or data model defined");
       }
       break;
@@ -503,7 +538,7 @@ function identifyPlaneRisks(plane: MDDPlane, section: string, lines: string[]): 
       }
       break;
     case "Foundation":
-      if (!section.includes("api") && !section.includes("endpoint")) {
+      if (!/api|endpoint|interface/i.test(section)) {
         risks.push("Foundation: No API/interface defined");
       }
       break;
