@@ -9,7 +9,7 @@
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
 
-// Fuxi Tools - Eight Trigrams Design
+// Fuxi Tools - MDD Seven Planes Design
 export {
   fuxi_create_draft,
   fuxi_get_draft,

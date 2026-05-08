@@ -151,7 +151,7 @@ function performReview(input: ReviewInput): QiaoChuiReviewResult {
     return {
       verdict: "REVISE",
       issues: ["Failed to parse draft - draft content is invalid"],
-      recommendations: ["Ensure the draft has proper Eight Trigrams structure"],
+      recommendations: ["Ensure the draft has proper MDD Seven Planes structure"],
     };
   }
 
@@ -161,7 +161,7 @@ function performReview(input: ReviewInput): QiaoChuiReviewResult {
       verdict: "REVISE",
       issues: [
         "Draft is incomplete - several sections need more detail",
-        "Please fill in at least 5 of the 8 Eight Trigrams sections",
+        "Please fill in at least 5 of the 8 MDD Seven Planes sections",
       ],
       recommendations: [
         "Add more detail to Qian (Core Intent)",
@@ -227,7 +227,7 @@ function generatePlan(
 ): PlanResult {
   const tasks = [
     { id: "T1", description: "Analyze requirements and understand the codebase", priority: "high", time: 5, depends: [] },
-    { id: "T2", description: "Design component structure based on the Eight Trigrams draft", priority: "high", time: 10, depends: ["T1"] },
+    { id: "T2", description: "Design component structure based on the MDD Seven Planes draft", priority: "high", time: 10, depends: ["T1"] },
     { id: "T3", description: "Implement core functionality following Gen (boundaries) and Kan (error handling)", priority: "high", time: 15, depends: ["T1", "T2"] },
     { id: "T4", description: "Add comprehensive tests for all features", priority: "medium", time: 10, depends: ["T3"] },
     { id: "T5", description: "Run final review and verify success path (Dui section)", priority: "medium", time: 5, depends: ["T4"] },

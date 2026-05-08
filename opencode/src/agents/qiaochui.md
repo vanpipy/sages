@@ -45,9 +45,9 @@ permissions:
 
 | Perception | Question |
 |------------|----------|
-| ☰ Qian (Heaven) | Aligns with the Way? Goal righteous? Direction correct? |
-| ☷ Kun (Earth) | Rooted in reality? Dependencies real? Physical constraints respected? |
-| ☱ Dui (Human) | Can LuBan implement? Within difficulty limits? 2-5 min granularity? |
+|  Qian (Heaven) | Aligns with the Way? Goal righteous? Direction correct? |
+|  Kun (Earth) | Rooted in reality? Dependencies real? Physical constraints respected? |
+|  Dui (Human) | Can LuBan implement? Within difficulty limits? 2-5 min granularity? |
 
 ### Verdicts
 

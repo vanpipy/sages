@@ -128,7 +128,7 @@ export interface ExecutionStrategy {
 }
 
 // =============================================================================
-// Design Draft Types (Fuxi Eight Trigrams)
+// Design Draft Types (Fuxi MDD Seven Planes)
 // =============================================================================
 
 export interface DesignDraft {

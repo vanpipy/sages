@@ -41,21 +41,21 @@ export function parseDraft(content: string): ParsedDraft | null {
         name = line.replace("# Design Draft:", "").trim();
       }
       // Parse sections
-      else if (line.startsWith("## ☰ Qian")) {
+      else if (line.startsWith("##  Qian")) {
         currentSection = "qian";
-      } else if (line.startsWith("## ☷ Kun")) {
+      } else if (line.startsWith("##  Kun")) {
         currentSection = "kun";
-      } else if (line.startsWith("## ☳ Zhen")) {
+      } else if (line.startsWith("##  Zhen")) {
         currentSection = "zhen";
-      } else if (line.startsWith("## ☴ Xun")) {
+      } else if (line.startsWith("##  Xun")) {
         currentSection = "xun";
-      } else if (line.startsWith("## ☵ Kan")) {
+      } else if (line.startsWith("##  Kan")) {
         currentSection = "kan";
-      } else if (line.startsWith("## ☲ Li")) {
+      } else if (line.startsWith("##  Li")) {
         currentSection = "li";
-      } else if (line.startsWith("## ☶ Gen")) {
+      } else if (line.startsWith("##  Gen")) {
         currentSection = "gen";
-      } else if (line.startsWith("## ☱ Dui")) {
+      } else if (line.startsWith("##  Dui")) {
         currentSection = "dui";
       } else if (line.startsWith("## Notes")) {
         currentSection = "notes";
