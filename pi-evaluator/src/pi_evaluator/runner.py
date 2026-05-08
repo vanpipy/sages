@@ -1,16 +1,13 @@
 """pi_evaluator.runner - Workflow execution for Four Sages.
 
-Spawns pi subprocess, monitors phase transitions, and keeps workflow running.
-Auto-proceeds: detects phase completion and sends next command automatically.
+Runs Four Sages workflows using pi --print mode with comprehensive requests.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
-import threading
 import time
 import uuid
 from pathlib import Path
@@ -24,37 +21,18 @@ class RunnerError(Exception):
     pass
 
 
+class APIKeyMissingError(RunnerError):
+    """No API keys configured for pi."""
+
+    pass
+
+
 class Runner:
     """Runner for executing Four Sages workflows.
 
-    Orchestrates:
-    1. Environment validation
-    2. Session directory creation
-    3. pi subprocess spawning
-    4. Phase monitoring and auto-proceed
-    5. Session log capture
+    Uses pi --print mode with a comprehensive request that guides
+    the agent through all workflow phases automatically.
     """
-
-    # Patterns for phase/tool completion detection
-    COMPLETION_PATTERNS = [
-        # Tool success patterns
-        re.compile(r'"success":\s*true', re.I),
-        re.compile(r'draft.*created', re.I),
-        re.compile(r'score:\s*\d+', re.I),
-        re.compile(r'(?:task|phase).*(?:complete|done|finished)', re.I),
-        re.compile(r'verdict.*(?:APPROVED|PASS)', re.I),
-        re.compile(r'✅|✓', re.I),
-        # Workflow completion
-        re.compile(r'workflow.*(?:complete|ended|archived)', re.I),
-        re.compile(r'phase.*complete', re.I),
-    ]
-
-    # Patterns for workflow end
-    WORKFLOW_END_PATTERNS = [
-        re.compile(r'workflow.*archived', re.I),
-        re.compile(r'phase.*complete', re.I),
-        re.compile(r'\$'),  # pi prompt marker
-    ]
 
     def __init__(self, config: Config):
         """Initialize runner.
@@ -65,12 +43,7 @@ class Runner:
         """
         self.config = config
         self.session_id = ""
-        self.process: subprocess.Popen | None = None
-        self.output_thread: threading.Thread | None = None
-        self.should_continue = threading.Event()
-        self.is_complete = threading.Event()
         self.output_buffer: list[str] = []
-        self._lock = threading.Lock()
         self._sent_commands: list[str] = []
 
     def generate_session_id(self) -> str:
@@ -86,8 +59,8 @@ class Runner:
         """Run a Four Sages workflow.
 
         Args:
-            request: Workflow request string
-            auto_approve: Enable auto-proceed (default: from config)
+            request: Workflow request string (initial command or full workflow)
+            auto_approve: Enable auto-proceed (not used - always enabled in --print mode)
             timeout: Override timeout (default: from config)
 
         Returns:
@@ -100,10 +73,9 @@ class Runner:
         # Generate session ID
         self.session_id = self.generate_session_id()
         self._sent_commands = []
+        self.output_buffer = []
 
         # Get settings
-        if auto_approve is None:
-            auto_approve = self.config.auto_approve
         if timeout is None:
             timeout = self.config.timeout
 
@@ -114,240 +86,153 @@ class Runner:
         if self.config.verbose:
             print(f"Starting workflow: session_id={self.session_id}")
             print(f"Session path: {session_path}")
-            print(f"Auto-proceed: {auto_approve}")
 
-        # Spawn pi subprocess
-        self._spawn_subprocess(request, session_path, auto_approve, timeout)
+        # Check for API keys first
+        if not self._has_api_keys():
+            raise APIKeyMissingError(
+                "No API keys configured for pi. "
+                "Please set at least one API key environment variable."
+            )
+
+        # Build comprehensive request
+        full_request = self._build_full_request(request)
+
+        # Run pi in --print mode
+        self._run_print_mode(full_request, session_path, timeout)
 
         return session_path
 
-    def _spawn_subprocess(
-        self, request: str, session_path: Path, auto_proceed: bool, timeout: int
+    def _has_api_keys(self) -> bool:
+        """Check if any API keys are configured."""
+        api_key_vars = [
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GOOGLE_API_KEY",
+            "GEMINI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "AZURE_OPENAI_API_KEY",
+            "GROQ_API_KEY",
+        ]
+        return any(os.environ.get(var) for var in api_key_vars)
+
+    def _build_full_request(self, request: str) -> str:
+        """Build a comprehensive request that runs the full workflow."""
+        # Check if request is already a full workflow command
+        if "qiaochui-review" in request or "luban-execute" in request:
+            return request
+
+        # Build a request that guides through all phases
+        return f"""{request}
+
+Please execute the complete Four Sages workflow:
+1. Start with fuxi-start to initialize the workflow
+2. Create MDD design draft with fuxi-request
+3. Review the draft with qiaochui-review (aim for score > 80)
+4. Decompose into tasks with qiaochui-decompose
+5. Execute tasks with luban-execute-all (follow TDD: RED → GREEN → REFACTOR)
+6. Audit quality with gaoyao-review
+7. Archive with fuxi-end
+
+Show progress and summary at the end. Be concise but complete all phases."""
+
+    def _run_print_mode(
+        self, request: str, session_path: Path, timeout: int
     ) -> None:
-        """Spawn pi subprocess with monitoring."""
+        """Run pi in --print mode with the given request."""
         try:
+            # Build command
+            cmd = [self.config.pi_path, "--print"]
+            
+            if os.environ.get("DEEPSEEK_API_KEY"):
+                cmd.extend(["--model", "deepseek/deepseek-v4-flash"])
+            elif os.environ.get("ANTHROPIC_API_KEY"):
+                cmd.extend(["--model", "claude-sonnet-4-20250514"])
+            elif os.environ.get("OPENAI_API_KEY"):
+                cmd.extend(["--model", "gpt-4o-mini"])
+
+            if self.config.verbose:
+                print(f"Running: {' '.join(cmd[:4])}...")
+
             # Set up environment
             env = os.environ.copy()
             env["PI_SESSION_LOG"] = str(session_path)
 
             # Spawn process
-            self.process = subprocess.Popen(
-                [self.config.pi_path, "--print"],
+            process = subprocess.Popen(
+                cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1,
                 env=env,
             )
 
-            # Start output monitor thread
-            self.output_thread = threading.Thread(
-                target=self._monitor_output,
-                args=(session_path,),
-                daemon=True,
-            )
-            self.output_thread.start()
+            # Send request
+            process.stdin.write(request + "\n")
+            process.stdin.flush()
+            process.stdin.close()
 
-            # Send initial request
+            # Wait for completion
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                raise RunnerError(f"Workflow timed out after {timeout}s") from None
+
+            # Capture output
+            self.output_buffer = stdout.splitlines()
+
+            # Write session entries
+            self._write_session_entries(session_path, stdout)
+
             if self.config.verbose:
-                print(f"Sending request: {request[:50]}...")
+                print(f"Completed. Output: {len(self.output_buffer)} lines")
+                if stderr:
+                    print(f"Stderr: {stderr[:200]}")
 
-            self.process.stdin.write(request + "\n")
-            self.process.stdin.flush()
-
-            # Monitor for phases and keep workflow running
-            if auto_proceed:
-                self._auto_proceed_loop(timeout)
-            else:
-                # Just wait for completion or timeout
-                self.process.wait(timeout=timeout)
-
-        except subprocess.TimeoutExpired:
-            self._terminate()
-            raise RunnerError(f"Workflow timed out after {timeout}s") from None
         except OSError as e:
             raise RunnerError(f"Failed to spawn pi subprocess: {e}") from e
         except Exception as e:
-            self._terminate()
             raise RunnerError(f"Workflow execution failed: {e}") from e
 
-    def _monitor_output(self, session_path: Path) -> None:
-        """Monitor stdout and capture session logs."""
-        if not self.process or not self.process.stdout:
-            return
-
+    def _write_session_entries(self, session_path: Path, output: str) -> None:
+        """Write session entries to JSONL file."""
+        from datetime import datetime
+        
+        # Split output into logical chunks (by line groups or blank lines)
+        lines = output.split("\n")
+        
         try:
-            for line in iter(self.process.stdout.readline, ""):
-                if not line:
-                    break
-
-                # Add to buffer
-                with self._lock:
-                    self.output_buffer.append(line.rstrip())
-
-                    # Check for completion patterns
-                    for pattern in self.COMPLETION_PATTERNS:
-                        if pattern.search(line):
-                            self.should_continue.set()
-                            break
-
-                    # Check for workflow end
-                    for pattern in self.WORKFLOW_END_PATTERNS:
-                        if pattern.search(line):
-                            self.is_complete.set()
-                            break
-
-                    # Detect session log path
-                    if "session" in line.lower() and ".jsonl" in line:
-                        # Could extract path here if needed
-                        pass
-
-        except Exception:
-            pass  # Process may have ended
-
-    def _auto_proceed_loop(self, timeout: int) -> None:
-        """Auto-proceed: detect phase completion and send next command.
-
-        The workflow auto-proceeds based on tool completion.
-        We just keep it running and detect completion patterns.
-        """
-        start_time = time.time()
-        last_activity = start_time
-        activity_count = 0
-        max_activity = 20  # Safety limit for command injections
-
-        while activity_count < max_activity:
-            # Check timeout
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                self._terminate()
-                raise RunnerError(f"Workflow timed out after {timeout}s") from None
-
-            # Check if workflow is complete
-            if self._is_workflow_complete():
-                break
-
-            # Wait for activity (completion signal)
-            if self.should_continue.wait(timeout=3):
-                self.should_continue.clear()
-                last_activity = time.time()
-                activity_count += 1
-
-                # Wait for output stabilization
-                time.sleep(0.3)
-
-                # Determine next command based on current activity
-                next_cmd = self._get_next_command()
-                if next_cmd:
-                    self._send_command(next_cmd)
-                    if self.config.verbose:
-                        print(f"Auto-proceed: sent '/{next_cmd}' (#{activity_count})")
-
-            # Check if no activity for extended time (workflow might be idle/waiting)
-            idle_time = time.time() - last_activity
-            if idle_time > 10 and activity_count < max_activity:
-                # Check if workflow is still running
-                if self.process and self.process.poll() is None:
-                    last_activity = time.time()
-                    # Try to detect if we need to send a command
-
-            # Check if process ended
-            if self.process and self.process.poll() is not None:
-                break
-
-        # Wait for final output
-        time.sleep(1)
-
-        # Wait for process to finish
-        if self.process:
-            try:
-                self.process.wait(timeout=60)
-            except subprocess.TimeoutExpired:
-                self._terminate()
-
-    def _is_workflow_complete(self) -> bool:
-        """Check if workflow has completed."""
-        if self.is_complete.is_set():
-            return True
-
-        # Check output buffer for completion patterns
-        with self._lock:
-            for line in self.output_buffer:
-                if "workflow" in line.lower() and "complete" in line.lower():
-                    return True
-                if "archived" in line.lower():
-                    return True
-
-        return False
-
-    def _get_next_command(self) -> str | None:
-        """Get next command based on current state.
-
-        Note: The actual workflow logic is handled by pi/agent.
-        This just provides hints for continuation if needed.
-        """
-        # Check state.json to determine current phase
-        state = self._read_state()
-        if not state:
-            return None
-
-        phase = state.get("phase", "")
-
-        # Map phase to next logical command
-        phase_to_next = {
-            "design": "qiaochui-review",
-            "plan": "luban-execute-all",
-            "implement": "gaoyao-review",
-            "review": "fuxi-end",
-        }
-
-        return phase_to_next.get(phase)
-
-    def _read_state(self) -> dict | None:
-        """Read current workflow state from state.json."""
-        # Try to find state.json in common locations
-        possible_paths = [
-            ".sages/workspace/state.json",
-            Path.cwd() / ".sages" / "workspace" / "state.json",
-        ]
-
-        for path in possible_paths:
-            full_path = Path(path)
-            if full_path.exists():
-                try:
-                    with open(full_path) as f:
-                        return json.load(f)
-                except Exception:
-                    pass
-
-        return None
-
-    def _send_command(self, command: str) -> None:
-        """Send command to pi process."""
-        if self.process and self.process.stdin:
-            try:
-                self.process.stdin.write(f"/{command}\n")
-                self.process.stdin.flush()
-                self._sent_commands.append(command)
-            except OSError:
-                pass
-
-    def _terminate(self) -> None:
-        """Terminate the subprocess."""
-        if self.process:
-            try:
-                self.process.terminate()
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-            except OSError:
-                pass
+            with open(session_path, "w") as f:
+                current_entry = ""
+                for line in lines:
+                    if line.strip() == "" and current_entry:
+                        # Write accumulated entry
+                        entry = {
+                            "type": "message",
+                            "timestamp": datetime.utcnow().isoformat() + "Z",
+                            "content": current_entry.strip(),
+                        }
+                        f.write(json.dumps(entry) + "\n")
+                        current_entry = ""
+                    else:
+                        current_entry += line + "\n"
+                
+                # Write final entry if any
+                if current_entry.strip():
+                    entry = {
+                        "type": "message",
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "content": current_entry.strip(),
+                    }
+                    f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            if self.config.verbose:
+                print(f"Warning: Failed to write session file: {e}")
 
     def get_output(self) -> list[str]:
         """Get captured output lines."""
-        with self._lock:
-            return self.output_buffer.copy()
+        return self.output_buffer.copy()
 
     def get_session_id(self) -> str:
         """Get current session ID."""

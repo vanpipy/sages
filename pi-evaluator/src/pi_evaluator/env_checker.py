@@ -2,13 +2,15 @@
 
 Performs pre-flight checks to ensure all requirements are met:
 - Python version
-- Required dependencies (evaluate, datasets)
+- Required dependencies (evaluate, datasets - optional)
 - pi binary availability
+- API keys configured
 - Four Sages extension installation
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -78,33 +80,33 @@ def check_python_version() -> tuple[bool, str]:
 
 
 def check_evaluate_library() -> tuple[bool, str]:
-    """Check if HuggingFace evaluate library is installed."""
+    """Check if HuggingFace evaluate library is installed (optional)."""
     try:
         import evaluate
 
         version = getattr(evaluate, "__version__", "unknown")
         return True, f"evaluate {version}"
     except ImportError:
-        return False, "evaluate library not installed (pip install evaluate)"
+        return True, "evaluate library not installed (optional)"
 
 
 def check_datasets_library() -> tuple[bool, str]:
-    """Check if datasets library is installed."""
+    """Check if datasets library is installed (optional)."""
     try:
         import datasets
 
         version = getattr(datasets, "__version__", "unknown")
         return True, f"datasets {version}"
     except ImportError:
-        return False, "datasets library not installed (pip install datasets)"
+        return True, "datasets library not installed (optional)"
 
 
 def check_pi_binary(pi_path: str = "pi") -> tuple[bool, str]:
     """Check if pi binary is accessible."""
     # First try shutil.which
     pi_executable = shutil.which(pi_path)
-    if pi_executable:
-        return True, pi_executable
+    if not pi_executable:
+        return False, f"pi binary not found in PATH (tried: {pi_path})"
 
     # Try direct execution
     try:
@@ -121,6 +123,23 @@ def check_pi_binary(pi_path: str = "pi") -> tuple[bool, str]:
         pass
 
     return False, f"pi binary not found in PATH (tried: {pi_path})"
+
+
+def check_api_keys() -> tuple[bool, str]:
+    """Check if any API keys are configured for pi."""
+    api_key_vars = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "GROQ_API_KEY",
+    ]
+    configured = [var for var in api_key_vars if os.environ.get(var)]
+    if configured:
+        return True, f"API keys configured: {', '.join(configured)}"
+    return False, "No API keys configured (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)"
 
 
 def check_four_sages_extension(pi_path: str = "pi") -> tuple[bool, str]:
@@ -161,7 +180,7 @@ def validate_all(pi_path: str = "pi") -> ValidationResult:
     result.add_check("Python >= 3.10", passed, message if not passed else "")
     result.add_info("python_version", message)
 
-    # Dependencies
+    # Dependencies (optional)
     passed, message = check_evaluate_library()
     result.add_check("HuggingFace evaluate", passed, message if not passed else "")
     if passed:
@@ -177,6 +196,12 @@ def validate_all(pi_path: str = "pi") -> ValidationResult:
     result.add_check("pi binary", passed, message if not passed else "")
     if passed:
         result.add_info("pi_path", message)
+
+    # API keys
+    passed, message = check_api_keys()
+    result.add_check("API keys", passed, message if not passed else "")
+    if passed:
+        result.add_info("api_keys", message)
 
     # Four Sages extension
     passed, message = check_four_sages_extension(pi_path)

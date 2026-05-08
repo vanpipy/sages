@@ -19,8 +19,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "evaluate>=4.0",
-    "datasets>=2.0",
+    # Optional: for validation checks (can be installed separately)
+    # "evaluate>=4.0",
+    # "datasets>=2.0",
 ]
 
 [project.optional-dependencies]

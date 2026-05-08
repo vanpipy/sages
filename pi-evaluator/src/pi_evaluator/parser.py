@@ -25,6 +25,9 @@ class Parser:
     Parses session logs with format:
         {"type": "message", "timestamp": "...", "message": {...}}
         {"type": "message", "timestamp": "...", "message": {...}}
+    
+    Also supports simple text format:
+        {"type": "message", "timestamp": "...", "content": "..."}
     """
 
     def __init__(self, strict: bool = False):
@@ -168,6 +171,10 @@ class Parser:
     def detect_phases(self, entries: list[SessionLogEntry]) -> dict[Phase, list[SessionLogEntry]]:
         """Detect and categorize entries by workflow phase.
 
+        Supports detection from:
+        1. Structured tool call names (pi session format)
+        2. Plain text content with phase indicators (markdown output)
+
         Returns:
             Dictionary mapping Phase to list of entries
 
@@ -182,23 +189,79 @@ class Parser:
         }
 
         current_phase: Phase | None = None
+        phase_indicators = {
+            "design": Phase.DESIGN,
+            "fuxi": Phase.DESIGN,
+            "review": Phase.REVIEW,
+            "qiaochui": Phase.REVIEW,
+            "execute": Phase.EXECUTE,
+            "luban": Phase.EXECUTE,
+            "tdd": Phase.EXECUTE,
+            "audit": Phase.AUDIT,
+            "gaoyao": Phase.AUDIT,
+        }
 
         for entry in entries:
+            # Skip session markers
             if entry.type == "session_start":
                 continue
             if entry.type == "session_end":
                 break
 
-            if entry.message:
+            content_text = ""
+            if entry.message and entry.message.content:
+                # Extract text content for phase detection
                 for block in entry.message.content:
-                    if block.type == "toolCall" and block.name:
-                        phase = detect_phase(block.name)
-                        if phase and phase in phases:
-                            current_phase = phase
-                            phases[phase].append(entry)
+                    if block.type == "text" and block.content:
+                        content_text += str(block.content).lower()
+                    # Also check tool call names
+                    elif block.type == "toolCall" and block.name:
+                        detected = detect_phase(block.name)
+                        if detected and detected in phases:
+                            current_phase = detected
 
-            # Assign entries to current phase
-            if current_phase and entry.type == "message":
+            # Detect phase from content text (case-insensitive)
+            if content_text:
+                content_lower = content_text.lower()
+                
+                # Find ALL phase indicators and use the LAST one (most advanced)
+                # This handles summary tables where all phases are listed
+                found_phases = []
+                for indicator, phase in phase_indicators.items():
+                    if indicator in content_lower:
+                        found_phases.append((indicator, phase))
+                
+                # Use the last found phase (phases typically listed in order)
+                if found_phases:
+                    current_phase = found_phases[-1][1]
+                else:
+                    # Fallback to agent name checks
+                    if "fuxi" in content_lower:
+                        current_phase = Phase.DESIGN
+                    elif "qiaochui" in content_lower or "review" in content_lower:
+                        current_phase = Phase.REVIEW
+                    elif "luban" in content_lower or "execute" in content_lower:
+                        current_phase = Phase.EXECUTE
+                    elif "gaoyao" in content_lower or "audit" in content_lower:
+                        current_phase = Phase.AUDIT
+                
+                # Also check for score indicators
+                if "score" in content_lower and "/100" in content_lower:
+                    if current_phase is None:
+                        current_phase = Phase.REVIEW
+                
+                # Check for test pass indicators
+                if "test" in content_lower and "pass" in content_lower:
+                    if current_phase is None:
+                        current_phase = Phase.EXECUTE
+                
+                # Check for completion
+                if "complete" in content_lower or "archived" in content_lower:
+                    if current_phase is None:
+                        current_phase = Phase.COMPLETE
+
+            # Assign entry to current phase
+            if current_phase and current_phase in phases:
                 phases[current_phase].append(entry)
 
         return phases

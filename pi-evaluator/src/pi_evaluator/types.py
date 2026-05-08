@@ -137,8 +137,18 @@ class SessionLogEntry:
         """Parse a single line from JSONL file."""
         data = json.loads(line.strip())
         message = None
+        
+        # Support both formats:
+        # 1. With "message" field: {"type": "message", "timestamp": "...", "message": {...}}
+        # 2. With "content" field: {"type": "message", "timestamp": "...", "content": "..."}
         if data.get("message"):
             message = Message.from_dict(data["message"])
+        elif data.get("content"):
+            # Simple text content - create a mock message structure
+            message = Message(role="user", content=[
+                ContentBlock(type="text", content=data["content"])
+            ])
+        
         return cls(
             type=data["type"],
             timestamp=data["timestamp"],
