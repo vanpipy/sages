@@ -79,10 +79,13 @@ check_dependencies() {
     error "Missing required commands: ${missing[*]}"
   fi
 
-  if ! command -v pi &> /dev/null; then
-    warn "pi command not found in PATH"
-    warn "Please ensure pi coding agent is installed first"
-    warn "See: https://pi.dev"
+  if ! command -v pi &> /dev/null || [[ ! -d "$HOME/.pi" ]]; then
+    error "pi coding agent is not installed."
+    echo ""
+    echo "Please install pi first:"
+    echo "  curl -fsSL https://pi.dev/install.sh | sh"
+    echo ""
+    echo "Then run this installation script again."
   fi
 
   success "Dependencies OK"
@@ -253,6 +256,68 @@ install_package() {
   success "Package installed to: $pkg_dest"
 }
 
+register_package_in_settings() {
+  local pkg_dest="$SAGES_PKG_DIR"
+  local settings_file="${PI_DIR_PATH}/agent/settings.json"
+  
+  if [[ ! -f "$settings_file" ]]; then
+    warn "Settings file not found at $settings_file, skipping package registration"
+    return
+  fi
+
+  info "Registering package in settings.json..."
+  
+  # Use Python for reliable JSON manipulation
+  if ! command -v python3 &> /dev/null; then
+    error "python3 not found. Cannot modify settings.json"
+  fi
+  
+  python3 - "$pkg_dest" "$settings_file" << 'PYTHON_EOF'
+import sys
+import json
+import os
+
+package_ref = sys.argv[1]
+settings_file = sys.argv[2]
+
+try:
+    with open(settings_file, 'r') as f:
+        settings = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
+    print("ERROR: Failed to read/parse settings.json")
+    sys.exit(1)
+
+# Initialize packages array if it doesn't exist
+if 'packages' not in settings:
+    settings['packages'] = []
+
+# Normalize path for comparison (handle ~ expansion)
+home_dir = os.path.expanduser('~')
+package_ref_normalized = package_ref.replace('~', home_dir)
+
+# Check if package already exists
+needs_adding = True
+for pkg in settings['packages']:
+    pkg_normalized = pkg.replace('~', home_dir)
+    if pkg_normalized == package_ref_normalized:
+        needs_adding = False
+        break
+
+if needs_adding:
+    settings['packages'].append(package_ref)
+    with open(settings_file, 'w') as f:
+        json.dump(settings, f, indent=2)
+        f.write('\n')
+    print("Package registered in settings.json")
+else:
+    print("Package already registered in settings.json")
+PYTHON_EOF
+  
+  if [[ $? -eq 0 ]]; then
+    success "Package registration complete"
+  fi
+}
+
 show_installation_info() {
   echo ""
   echo "========================================"
@@ -299,6 +364,60 @@ show_installation_info() {
   echo ""
 }
 
+unregister_package_from_settings() {
+  local pkg_dest="$SAGES_PKG_DIR"
+  local settings_file="${PI_DIR_PATH}/agent/settings.json"
+  
+  if [[ ! -f "$settings_file" ]]; then
+    return
+  fi
+
+  info "Unregistering package from settings.json..."
+  
+  if ! command -v python3 &> /dev/null; then
+    warn "python3 not found. Cannot modify settings.json"
+    return
+  fi
+  
+  python3 - "$pkg_dest" "$settings_file" << 'PYTHON_EOF'
+import sys
+import json
+import os
+
+package_ref = sys.argv[1]
+settings_file = sys.argv[2]
+
+try:
+    with open(settings_file, 'r') as f:
+        settings = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
+    print("ERROR: Failed to read/parse settings.json")
+    sys.exit(1)
+
+if 'packages' not in settings:
+    print("No packages to unregister")
+    sys.exit(0)
+
+home_dir = os.path.expanduser('~')
+package_ref_normalized = package_ref.replace('~', home_dir)
+
+# Filter out the package
+original_count = len(settings['packages'])
+settings['packages'] = [
+    pkg for pkg in settings['packages']
+    if pkg.replace('~', home_dir) != package_ref_normalized
+]
+
+if len(settings['packages']) < original_count:
+    with open(settings_file, 'w') as f:
+        json.dump(settings, f, indent=2)
+        f.write('\n')
+    print("Package unregistered from settings.json")
+else:
+    print("Package not found in settings.json")
+PYTHON_EOF
+}
+
 uninstall_package() {
   info "Uninstalling Four Sages..."
 
@@ -319,6 +438,9 @@ uninstall_package() {
       success "Removed: $path"
     fi
   done
+
+  # Unregister from settings.json
+  unregister_package_from_settings
 
   success "Uninstallation complete"
 }
@@ -353,6 +475,7 @@ main() {
   clone_repo
   build_package
   install_package
+  register_package_in_settings
 
   if [[ "$DRY_RUN" == false ]]; then
     show_installation_info
