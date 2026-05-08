@@ -67,6 +67,22 @@ Show current mode in system prompt:
 - `plan.md` - Task descriptions
 - `execution.yaml` - Task config with dependencies
 
+### Task Scope
+
+Each task in execution.yaml must include `files` field specifying exact files affected:
+
+```yaml
+tasks:
+  - id: T1
+    description: "Create user model"
+    files:
+      - "src/models/user.ts"
+      - "src/models/index.ts"
+    dependsOn: []
+```
+
+This ensures clear scope for LuBan's TDD execution.
+
 ## Plan Mode Indicator
 
 After decompose:

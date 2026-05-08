@@ -52,6 +52,7 @@ Create `draft.md` with:
 - Cross-plane dependencies
 - Key decisions
 - Open questions
+- Directory and files structure
 
 ## State
 
