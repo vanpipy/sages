@@ -1,10 +1,12 @@
-"""pi_evaluator.runner - Workflow execution with auto-approve.
+"""pi_evaluator.runner - Workflow execution for Four Sages.
 
-Spawns pi subprocess, monitors phase transitions, and injects auto-approve commands.
+Spawns pi subprocess, monitors phase transitions, and keeps workflow running.
+Auto-proceeds: detects phase completion and sends next command automatically.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -23,33 +25,35 @@ class RunnerError(Exception):
 
 
 class Runner:
-    """Runner for executing Four Sages workflows with auto-approve.
+    """Runner for executing Four Sages workflows.
 
     Orchestrates:
     1. Environment validation
     2. Session directory creation
     3. pi subprocess spawning
-    4. Phase monitoring and auto-approve injection
+    4. Phase monitoring and auto-proceed
     5. Session log capture
     """
 
-    # Patterns for phase completion detection
-    PHASE_PATTERNS = [
-        # QiaoChui review output
-        (re.compile(r"verdict.*(?:APPROVED|REVISE|REJECT)", re.I), "approve"),
-        # LuBan status output
-        (re.compile(r"(?:task|phase).*(?:complete|done|finished)", re.I), "approve"),
-        # GaoYao audit output
-        (re.compile(r"(?:quality|audit).*review.*complete", re.I), "approve"),
-        # General completion markers
-        (re.compile(r"✅|✓|complete|done|finished", re.I), "approve"),
+    # Patterns for phase/tool completion detection
+    COMPLETION_PATTERNS = [
+        # Tool success patterns
+        re.compile(r'"success":\s*true', re.I),
+        re.compile(r'draft.*created', re.I),
+        re.compile(r'score:\s*\d+', re.I),
+        re.compile(r'(?:task|phase).*(?:complete|done|finished)', re.I),
+        re.compile(r'verdict.*(?:APPROVED|PASS)', re.I),
+        re.compile(r'✅|✓', re.I),
+        # Workflow completion
+        re.compile(r'workflow.*(?:complete|ended|archived)', re.I),
+        re.compile(r'phase.*complete', re.I),
     ]
 
-    # Patterns for workflow completion
-    WORKFLOW_COMPLETE_PATTERNS = [
-        re.compile(r"workflow.*complete", re.I),
-        re.compile(r"all phases.*finished", re.I),
-        re.compile(r"\[DONE\]", re.I),
+    # Patterns for workflow end
+    WORKFLOW_END_PATTERNS = [
+        re.compile(r'workflow.*archived', re.I),
+        re.compile(r'phase.*complete', re.I),
+        re.compile(r'\$'),  # pi prompt marker
     ]
 
     def __init__(self, config: Config):
@@ -63,10 +67,11 @@ class Runner:
         self.session_id = ""
         self.process: subprocess.Popen | None = None
         self.output_thread: threading.Thread | None = None
-        self.should_approve = threading.Event()
+        self.should_continue = threading.Event()
         self.is_complete = threading.Event()
         self.output_buffer: list[str] = []
         self._lock = threading.Lock()
+        self._sent_commands: list[str] = []
 
     def generate_session_id(self) -> str:
         """Generate unique session ID from UUID4."""
@@ -78,11 +83,11 @@ class Runner:
         auto_approve: bool | None = None,
         timeout: int | None = None,
     ) -> Path:
-        """Run a Four Sages workflow with auto-approve.
+        """Run a Four Sages workflow.
 
         Args:
             request: Workflow request string
-            auto_approve: Override auto-approve setting (default: from config)
+            auto_approve: Enable auto-proceed (default: from config)
             timeout: Override timeout (default: from config)
 
         Returns:
@@ -94,6 +99,7 @@ class Runner:
         """
         # Generate session ID
         self.session_id = self.generate_session_id()
+        self._sent_commands = []
 
         # Get settings
         if auto_approve is None:
@@ -108,7 +114,7 @@ class Runner:
         if self.config.verbose:
             print(f"Starting workflow: session_id={self.session_id}")
             print(f"Session path: {session_path}")
-            print(f"Auto-approve: {auto_approve}")
+            print(f"Auto-proceed: {auto_approve}")
 
         # Spawn pi subprocess
         self._spawn_subprocess(request, session_path, auto_approve, timeout)
@@ -116,7 +122,7 @@ class Runner:
         return session_path
 
     def _spawn_subprocess(
-        self, request: str, session_path: Path, auto_approve: bool, timeout: int
+        self, request: str, session_path: Path, auto_proceed: bool, timeout: int
     ) -> None:
         """Spawn pi subprocess with monitoring."""
         try:
@@ -143,16 +149,16 @@ class Runner:
             )
             self.output_thread.start()
 
-            # Send request
+            # Send initial request
             if self.config.verbose:
                 print(f"Sending request: {request[:50]}...")
 
             self.process.stdin.write(request + "\n")
             self.process.stdin.flush()
 
-            # Monitor for phases and inject auto-approve
-            if auto_approve:
-                self._auto_approve_loop(timeout)
+            # Monitor for phases and keep workflow running
+            if auto_proceed:
+                self._auto_proceed_loop(timeout)
             else:
                 # Just wait for completion or timeout
                 self.process.wait(timeout=timeout)
@@ -180,14 +186,14 @@ class Runner:
                 with self._lock:
                     self.output_buffer.append(line.rstrip())
 
-                    # Check for phase completion
-                    for pattern, _action in self.PHASE_PATTERNS:
+                    # Check for completion patterns
+                    for pattern in self.COMPLETION_PATTERNS:
                         if pattern.search(line):
-                            self.should_approve.set()
+                            self.should_continue.set()
                             break
 
-                    # Check for workflow completion
-                    for pattern in self.WORKFLOW_COMPLETE_PATTERNS:
+                    # Check for workflow end
+                    for pattern in self.WORKFLOW_END_PATTERNS:
                         if pattern.search(line):
                             self.is_complete.set()
                             break
@@ -200,46 +206,58 @@ class Runner:
         except Exception:
             pass  # Process may have ended
 
-    def _auto_approve_loop(self, timeout: int) -> None:
-        """Loop to detect phases and inject auto-approve."""
-        start_time = time.time()
-        approve_count = 0
-        max_approves = 10  # Safety limit
+    def _auto_proceed_loop(self, timeout: int) -> None:
+        """Auto-proceed: detect phase completion and send next command.
 
-        while approve_count < max_approves:
+        The workflow auto-proceeds based on tool completion.
+        We just keep it running and detect completion patterns.
+        """
+        start_time = time.time()
+        last_activity = start_time
+        activity_count = 0
+        max_activity = 20  # Safety limit for command injections
+
+        while activity_count < max_activity:
             # Check timeout
             elapsed = time.time() - start_time
             if elapsed > timeout:
                 self._terminate()
-                raise RunnerError(f"Workflow timed out after {timeout}s")
+                raise RunnerError(f"Workflow timed out after {timeout}s") from None
 
-            # Check if complete
-            if self.is_complete.is_set():
+            # Check if workflow is complete
+            if self._is_workflow_complete():
                 break
 
-            # Wait for approval signal
-            if self.should_approve.wait(timeout=2):
-                self.should_approve.clear()
+            # Wait for activity (completion signal)
+            if self.should_continue.wait(timeout=3):
+                self.should_continue.clear()
+                last_activity = time.time()
+                activity_count += 1
 
                 # Wait for output stabilization
-                time.sleep(0.5)
+                time.sleep(0.3)
 
-                # Inject approve
-                if self.process and self.process.stdin:
-                    try:
-                        self.process.stdin.write("/fuxi-approve\n")
-                        self.process.stdin.flush()
-                        approve_count += 1
+                # Determine next command based on current activity
+                next_cmd = self._get_next_command()
+                if next_cmd:
+                    self._send_command(next_cmd)
+                    if self.config.verbose:
+                        print(f"Auto-proceed: sent '/{next_cmd}' (#{activity_count})")
 
-                        if self.config.verbose:
-                            print(f"Auto-approved phase #{approve_count}")
-
-                    except OSError:
-                        break
+            # Check if no activity for extended time (workflow might be idle/waiting)
+            idle_time = time.time() - last_activity
+            if idle_time > 10 and activity_count < max_activity:
+                # Check if workflow is still running
+                if self.process and self.process.poll() is None:
+                    last_activity = time.time()
+                    # Try to detect if we need to send a command
 
             # Check if process ended
             if self.process and self.process.poll() is not None:
                 break
+
+        # Wait for final output
+        time.sleep(1)
 
         # Wait for process to finish
         if self.process:
@@ -247,6 +265,73 @@ class Runner:
                 self.process.wait(timeout=60)
             except subprocess.TimeoutExpired:
                 self._terminate()
+
+    def _is_workflow_complete(self) -> bool:
+        """Check if workflow has completed."""
+        if self.is_complete.is_set():
+            return True
+
+        # Check output buffer for completion patterns
+        with self._lock:
+            for line in self.output_buffer:
+                if "workflow" in line.lower() and "complete" in line.lower():
+                    return True
+                if "archived" in line.lower():
+                    return True
+
+        return False
+
+    def _get_next_command(self) -> str | None:
+        """Get next command based on current state.
+
+        Note: The actual workflow logic is handled by pi/agent.
+        This just provides hints for continuation if needed.
+        """
+        # Check state.json to determine current phase
+        state = self._read_state()
+        if not state:
+            return None
+
+        phase = state.get("phase", "")
+
+        # Map phase to next logical command
+        phase_to_next = {
+            "design": "qiaochui-review",
+            "plan": "luban-execute-all",
+            "implement": "gaoyao-review",
+            "review": "fuxi-end",
+        }
+
+        return phase_to_next.get(phase)
+
+    def _read_state(self) -> dict | None:
+        """Read current workflow state from state.json."""
+        # Try to find state.json in common locations
+        possible_paths = [
+            ".sages/workspace/state.json",
+            Path.cwd() / ".sages" / "workspace" / "state.json",
+        ]
+
+        for path in possible_paths:
+            full_path = Path(path)
+            if full_path.exists():
+                try:
+                    with open(full_path) as f:
+                        return json.load(f)
+                except Exception:
+                    pass
+
+        return None
+
+    def _send_command(self, command: str) -> None:
+        """Send command to pi process."""
+        if self.process and self.process.stdin:
+            try:
+                self.process.stdin.write(f"/{command}\n")
+                self.process.stdin.flush()
+                self._sent_commands.append(command)
+            except OSError:
+                pass
 
     def _terminate(self) -> None:
         """Terminate the subprocess."""
@@ -267,3 +352,7 @@ class Runner:
     def get_session_id(self) -> str:
         """Get current session ID."""
         return self.session_id
+
+    def get_sent_commands(self) -> list[str]:
+        """Get list of auto-sent commands."""
+        return self._sent_commands.copy()
