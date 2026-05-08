@@ -15,49 +15,44 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 ### Fuxi (伏羲) - The Architect 
 
 - **Role**: Architectural design using MDD Seven Planes methodology
-
-- **Tools**: `fuxi_create_draft`, `fuxi_get_draft`
+- **Tools**: `fuxi-start`, `fuxi-request`, `fuxi-plan`, `fuxi-recover`, `fuxi-end`, `fuxi-get-status`, `fuxi-update-score`
 - **Focus**: Core intent, success paths, boundaries, constraints
 
 ### QiaoChui (巧倕) - The Sages Mechanist 
 
 - **Role**: Design review and task decomposition
-
-- **Tools**: `qiaochui_review`, `qiaochui_decompose`
+- **Tools**: `qiaochui-review`, `qiaochui-decompose`
 - **Focus**: Feasibility, executable task breakdown, execution orchestration
 
 ### LuBan (鲁班) - The Master Craftsman 
 
 - **Role**: Task execution with TDD methodology
-
-- **Tools**: `luban_execute_task`, `luban_execute_all`, `luban_get_status`
+- **Tools**: `luban-execute-task`, `luban-execute-all`, `luban-get-status`
 - **Focus**: Implementation with RED → GREEN → REFACTOR, parallel execution
 
 ### GaoYao (皋陶) - The Supreme Judge 
 
 - **Role**: Quality audit and security review
-
-- **Tools**: `gaoyao_review`, `gaoyao_check_security`
+- **Tools**: `gaoyao-review`, `gaoyao-check-security`
 - **Focus**: Code quality, security, test coverage, performance
 
 ## Workflow Phases
 
 ```
- Design → /fuxi-approve →  Review (auto-proceed) → /fuxi-approve → 
- Execute → /fuxi-approve →  Audit → ✅ Complete → /fuxi-archive
+ Design → fuxi-plan → Review (auto-proceed) → fuxi-plan → 
+ Execute → fuxi-approve → Audit → Complete → fuxi-end
 ```
 
 ### Phase 1: Design (Fuxi) 
 - Creates architectural draft using MDD Seven Planes
 - Output: `.sages/workspace/draft.md`
-- **Requires**: User approval (`/fuxi-approve`)
+- **Requires**: User approval (`fuxi-plan`)
 
 ### Phase 2: Review (QiaoChui) 
 - Validates draft completeness and feasibility
-- **Auto-proceeds** if draft is valid
+- **Auto-proceeds** if draft is valid (score > 80)
 - Creates execution plan
-- Output: `.sages/workspace/plan.md`, `execution.yaml` (tasks stored here)
-- **Requires**: User approval (`/fuxi-approve`)
+- Output: `.sages/workspace/plan.md`, `execution.yaml`
 
 ### Phase 3: Execute (LuBan) 
 - Executes tasks with real TDD (RED → GREEN → REFACTOR)
@@ -67,7 +62,7 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 ### Phase 4: Audit (GaoYao) 
 - Quality audit and security scan
 - Output: `.sages/workspace/audit.md`
-- **Requires**: User approval (`/fuxi-approve`)
+- **Requires**: User approval (`fuxi-plan`)
 
 ### Phase 5: Archive
 - Saves complete workflow snapshot
@@ -95,7 +90,6 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
         ├── draft.md
         ├── plan.md
         ├── execution.yaml
-        ├── execution.yaml
         ├── state.json
         ├── audit.md
         └── summary.md    # Auto-generated overview
@@ -103,21 +97,9 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 
 ## State Management
 
-- **Persistence**: File-based in `.sages/sessions/`
+- **Persistence**: File-based in `.sages/workspace/`
 - **Checkpoints**: Auto-save on phase transitions
 - **Recovery**: Restore from session or workspace files
-
-## File Locking (LuBan)
-
-- TTL: 30 minutes
-- Auto-release on task complete
-- Conflict notification: immediate
-
-## Error Recovery
-
-- Fail-fast with 3 retries
-- Retry delay: 1000ms
-- Max consecutive failures threshold: 5
 
 ## Project Structure
 
@@ -147,7 +129,6 @@ sages/
 │
 └── .sages/                      # Runtime workspace & archives
     ├── workspace/               # Current workflow
-    ├── sessions/                # State persistence
     └── archive/                  # Completed workflows
 ```
 
@@ -165,3 +146,39 @@ Each design draft follows the MDD Seven Planes structure:
 |  Li | Observability | Metrics and logging |
 |  Gen | Boundaries | Constraints and limits |
 |  Dui | Success Path | Happy path scenarios |
+
+## pi Package Architecture
+
+The pi package exports modular components:
+
+```typescript
+// Tools
+export { registerFuxiTools } from "./tools/fuxi-tools.js";
+export { registerQiaoChuiTools } from "./tools/qiaochui-tools.js";
+export { registerLuBanTools } from "./tools/luban-tools.js";
+export { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
+
+// State
+export { StateManager, WorkspaceManager } from "./state/index.js";
+export type { WorkflowState, Task, AuditResult } from "./state/index.js";
+
+// Executor
+export { TDDRunner, TaskExecutor } from "./executor/index.js";
+export type { TDDResult, TDDPhase, Task as ExecutorTask, ExecutionResult } from "./executor/index.js";
+
+// Orchestrator
+export { WorkflowOrchestrator } from "./orchestrator/index.js";
+export type { Phase, OrchestratorConfig } from "./orchestrator/index.js";
+```
+
+## File Locking (LuBan)
+
+- TTL: 30 minutes
+- Auto-release on task complete
+- Conflict notification: immediate
+
+## Error Recovery
+
+- Fail-fast with 3 retries
+- Retry delay: 1000ms
+- Max consecutive failures threshold: 5
