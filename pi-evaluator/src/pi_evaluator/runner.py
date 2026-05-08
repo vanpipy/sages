@@ -156,9 +156,14 @@ Show progress and summary at the end. Be concise but complete all phases."""
             if self.config.verbose:
                 print(f"Running: {' '.join(cmd[:4])}...")
 
-            # Set up environment - run from codes_dir
+            # Ensure directories exist
+            codes_dir.mkdir(parents=True, exist_ok=True)
+            sessions_dir = self.config.get_sessions_dir(self.session_id)
+            sessions_dir.mkdir(parents=True, exist_ok=True)
+
+            # Set up environment
             env = os.environ.copy()
-            session_log = codes_dir / "session.jsonl"
+            session_log = sessions_dir / "session.jsonl"
             env["PI_SESSION_LOG"] = str(session_log)
 
             # Spawn process in codes_dir
@@ -196,7 +201,7 @@ Show progress and summary at the end. Be concise but complete all phases."""
                     print(f"Stderr: {stderr[:200]}")
                 print(f"Generated files in: {codes_dir}")
                 for f in codes_dir.rglob("*"):
-                    if f.is_file() and f.name not in ["session.jsonl"]:
+                    if f.is_file() and f.name not in ["session.jsonl"] and ".sages" not in f.parts:
                         print(f"  - {f.relative_to(codes_dir)}")
 
         except OSError as e:

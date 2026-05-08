@@ -41,8 +41,6 @@ class Config:
 
     Attributes:
         output_dir: Base output directory
-        session_subdir: Subdirectory for session logs
-        evaluation_subdir: Subdirectory for evaluation reports
         pi_path: Path to pi binary
         auto_approve: Enable auto-approve for workflow phases
         timeout: Workflow timeout in seconds
@@ -52,8 +50,6 @@ class Config:
     """
 
     output_dir: Path = field(default_factory=lambda: Path(DEFAULTS["output_dir"]))
-    session_subdir: str = DEFAULTS["session_subdir"]
-    evaluation_subdir: str = DEFAULTS["evaluation_subdir"]
     pi_path: str = DEFAULTS["pi_path"]
     auto_approve: bool = DEFAULTS["auto_approve"]
     timeout: int = DEFAULTS["timeout"]
@@ -82,12 +78,6 @@ class Config:
         """Create Config from environment variables."""
         return cls(
             output_dir=os.environ.get(f"{ENV_PREFIX}OUTPUT_DIR", DEFAULTS["output_dir"]),
-            session_subdir=os.environ.get(
-                f"{ENV_PREFIX}SESSION_SUBDIR", DEFAULTS["session_subdir"]
-            ),
-            evaluation_subdir=os.environ.get(
-                f"{ENV_PREFIX}EVALUATION_SUBDIR", DEFAULTS["evaluation_subdir"]
-            ),
             pi_path=os.environ.get(f"{ENV_PREFIX}PI_PATH", DEFAULTS["pi_path"]),
             auto_approve=os.environ.get(
                 f"{ENV_PREFIX}AUTO_APPROVE", str(DEFAULTS["auto_approve"])
@@ -117,38 +107,40 @@ class Config:
         """Get directory for session logs."""
         return self.output_dir / self.session_subdir / session_id
 
-    def get_evaluation_dir(self, session_id: str) -> Path:
-        """Get directory for evaluation reports."""
-        return self.output_dir / self.evaluation_subdir / session_id
-
     def get_session_path(self, session_id: str) -> Path:
         """Get path to session.jsonl file."""
-        return self.get_session_dir(session_id) / "session.jsonl"
-
-    def get_evaluation_path(self, session_id: str) -> Path:
-        """Get path to evaluation.json file."""
-        return self.get_evaluation_dir(session_id) / "evaluation.json"
-
-    def get_report_path(self, session_id: str) -> Path:
-        """Get path to report.md file."""
-        return self.get_evaluation_dir(session_id) / "report.md"
+        return self.get_sessions_dir(session_id) / "session.jsonl"
 
     def get_codes_dir(self, session_id: str) -> Path:
         """Get directory for generated code files."""
-        return self.output_dir / "codes" / session_id
+        return self.output_dir / session_id / "codes"
+
+    def get_sessions_dir(self, session_id: str) -> Path:
+        """Get directory for session logs."""
+        return self.output_dir / session_id / "sessions"
+
+    def get_report_dir(self, session_id: str) -> Path:
+        """Get directory for report files."""
+        return self.output_dir / session_id / "report"
+
+    def get_evaluation_path(self, session_id: str) -> Path:
+        """Get path to evaluation.json file."""
+        return self.get_report_dir(session_id) / "evaluation.json"
+
+    def get_report_md_path(self, session_id: str) -> Path:
+        """Get path to report.md file."""
+        return self.get_report_dir(session_id) / "report.md"
 
     def ensure_dirs(self, session_id: str) -> None:
         """Create necessary directories for a session."""
         self.get_codes_dir(session_id).mkdir(parents=True, exist_ok=True)
-        self.get_session_dir(session_id).mkdir(parents=True, exist_ok=True)
-        self.get_evaluation_dir(session_id).mkdir(parents=True, exist_ok=True)
+        self.get_sessions_dir(session_id).mkdir(parents=True, exist_ok=True)
+        self.get_report_dir(session_id).mkdir(parents=True, exist_ok=True)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
             "output_dir": str(self.output_dir),
-            "session_subdir": self.session_subdir,
-            "evaluation_subdir": self.evaluation_subdir,
             "pi_path": self.pi_path,
             "auto_approve": self.auto_approve,
             "timeout": self.timeout,

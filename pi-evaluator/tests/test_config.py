@@ -19,8 +19,6 @@ class TestConfig:
         """Test default configuration values."""
         config = Config()
         assert config.output_dir == Path(DEFAULTS["output_dir"])
-        assert config.session_subdir == DEFAULTS["session_subdir"]
-        assert config.evaluation_subdir == DEFAULTS["evaluation_subdir"]
         assert config.pi_path == DEFAULTS["pi_path"]
         assert config.auto_approve is True
         assert config.timeout == DEFAULTS["timeout"]
@@ -30,14 +28,11 @@ class TestConfig:
         """Test custom configuration."""
         config = Config(
             output_dir=Path("/custom/path"),
-            session_subdir="custom_sessions",
-            evaluation_subdir="custom_evals",
             pi_path="/usr/local/bin/pi",
             auto_approve=False,
             timeout=7200,
         )
         assert config.output_dir == Path("/custom/path")
-        assert config.session_subdir == "custom_sessions"
         assert config.auto_approve is False
         assert config.timeout == 7200
 
@@ -51,30 +46,61 @@ class TestConfig:
         with pytest.raises(ConfigError, match="must be positive"):
             Config(timeout=0)
 
-    def test_session_dir(self):
-        """Test session directory path generation."""
-        config = Config(output_dir=Path("/data"))
-        session_dir = config.get_session_dir("abc123")
-        assert session_dir == Path("/data/sessions/abc123")
-
-    def test_evaluation_dir(self):
-        """Test evaluation directory path generation."""
-        config = Config(output_dir=Path("/data"))
-        eval_dir = config.get_evaluation_dir("abc123")
-        assert eval_dir == Path("/data/evaluations/abc123")
-
-    def test_session_path(self):
-        """Test session file path generation."""
-        config = Config(output_dir=Path("/data"))
-        session_path = config.get_session_path("abc123")
-        assert session_path == Path("/data/sessions/abc123/session.jsonl")
-
     def test_to_dict(self):
         """Test configuration serialization."""
         config = Config(output_dir=Path("/test"))
         data = config.to_dict()
         assert data["output_dir"] == "/test"
         assert data["phase_weights"]["design"] == 0.3
+
+
+class TestNewDirectoryStructure:
+    """Tests for the new {id}/codes, {id}/sessions, {id}/report structure."""
+
+    def test_get_codes_dir(self):
+        """Test codes directory path."""
+        config = Config(output_dir=Path("/data"))
+        codes_dir = config.get_codes_dir("abc123")
+        assert codes_dir == Path("/data/abc123/codes")
+
+    def test_get_sessions_dir(self):
+        """Test sessions directory path."""
+        config = Config(output_dir=Path("/data"))
+        sessions_dir = config.get_sessions_dir("abc123")
+        assert sessions_dir == Path("/data/abc123/sessions")
+
+    def test_get_report_dir(self):
+        """Test report directory path."""
+        config = Config(output_dir=Path("/data"))
+        report_dir = config.get_report_dir("abc123")
+        assert report_dir == Path("/data/abc123/report")
+
+    def test_get_session_path(self):
+        """Test session.jsonl path."""
+        config = Config(output_dir=Path("/data"))
+        session_path = config.get_session_path("abc123")
+        assert session_path == Path("/data/abc123/sessions/session.jsonl")
+
+    def test_get_evaluation_path(self):
+        """Test evaluation.json path."""
+        config = Config(output_dir=Path("/data"))
+        eval_path = config.get_evaluation_path("abc123")
+        assert eval_path == Path("/data/abc123/report/evaluation.json")
+
+    def test_get_report_md_path(self):
+        """Test report.md path."""
+        config = Config(output_dir=Path("/data"))
+        md_path = config.get_report_md_path("abc123")
+        assert md_path == Path("/data/abc123/report/report.md")
+
+    def test_ensure_dirs_creates_all_three(self, tmp_path):
+        """Test ensure_dirs creates codes, sessions, and report subdirs."""
+        config = Config(output_dir=tmp_path)
+        config.ensure_dirs("abc123")
+
+        assert (tmp_path / "abc123/codes").exists()
+        assert (tmp_path / "abc123/sessions").exists()
+        assert (tmp_path / "abc123/report").exists()
 
 
 class TestConfigFromEnv:

@@ -130,7 +130,7 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
             print(f"Generated code in: {codes_dir}")
 
         # Evaluate session log if exists
-        session_log = codes_dir / "session.jsonl"
+        session_log = config.get_session_path(runner.session_id)
         if session_log.exists():
             if config.verbose:
                 print("Evaluating session...")
@@ -141,11 +141,10 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
             evaluator = Evaluator(config)
             result = evaluator.evaluate(entries, request=args.request, session_id=runner.session_id)
 
-
             # Save results
             reporter = Reporter(config.output_dir)
             json_path, md_path = reporter.save_evaluation(
-                result, config.get_evaluation_dir(runner.session_id)
+                result, config.get_report_dir(runner.session_id)
             )
 
             if config.verbose:

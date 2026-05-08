@@ -1,16 +1,16 @@
 # Keep generated code for inspection
-evaluations/codes/
+evaluations/*/codes/
 
-# Ignore sessions and evaluations (output)
-evaluations/sessions/
-evaluations/evaluations/
+# Ignore sessions and report outputs
+evaluations/*/sessions/
+evaluations/*/report/
 
 # Python
 __pycache__/
 *.pyc
 
 # Node modules (too large)
-evaluations/codes/*/node_modules/
+evaluations/*/codes/*/node_modules/
 
 # Four Sages workspace
-.sages/
+evaluations/*/codes/.sages/

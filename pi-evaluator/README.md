@@ -6,7 +6,7 @@ Auto-run and evaluate Four Sages Agents workflow sessions using HuggingFace `eva
 
 - **Auto-run Mode**: Execute Four Sages workflows with automatic phase transitions
 - **Auto-Proceed**: Detects tool completion and sends next command
-- **Code Preservation**: All generated code saved to `evaluations/codes/{id}/` for inspection
+- **Code Preservation**: All generated code saved to `evaluations/{id}/codes/` for inspection
 - **Evaluate Mode**: Analyze existing session logs for quality metrics
 - **Compare Mode**: Compare two sessions to track quality trends
 - **Phase Metrics**: Per-phase quality assessment (Design, Review, Execute, Audit)
@@ -31,31 +31,27 @@ pi-evaluator check-env
 # Run and evaluate workflow
 pi-evaluator run "Create a REST API"
 
-# Generated code is saved to evaluations/codes/{session_id}/
-# Session log is saved to evaluations/codes/{session_id}/session.jsonl
+# Generated code saved to evaluations/{id}/codes/
+# Session log saved to evaluations/{id}/sessions/
+# Evaluation report saved to evaluations/{id}/report/
 ```
 
-## Output Directory
+## Output Directory Structure
 
 ```
 evaluations/
-└── codes/
-    └── {session_id}/           # All generated artifacts (tracked in git)
-        ├── index.ts             # Source code
-        ├── index.test.ts        # Tests
-        ├── package.json         # Project config
-        ├── tsconfig.json
-        ├── session.jsonl        # Session log for evaluation
-        ├── evaluation.json       # Evaluation results
-        ├── report.md            # Human-readable report
-        └── .sages/             # Four Sages workflow artifacts
-            ├── workspace/        # Design, plan, execution.yaml
-            └── archive/         # Archived workflow
+└── {session_id}/
+    ├── codes/              # Generated source code (tracked in git)
+    │   ├── src/
+    │   ├── tests/
+    │   ├── package.json
+    │   └── .sages/         # Four Sages workflow artifacts
+    ├── sessions/           # Session logs (gitignored)
+    │   └── session.jsonl
+    └── report/             # Evaluation results (gitignored)
+        ├── evaluation.json
+        └── report.md
 ```
-
-**All outputs** are saved in `evaluations/codes/{session_id}/` for easy inspection.
-
-**Note**: `evaluations/codes/` is tracked in git to preserve generated code for inspection.
 
 ## Configuration
 
@@ -109,7 +105,7 @@ codes_dir = runner.run_workflow("Create REST API")
 print(f"Generated code in: {codes_dir}")
 
 # Evaluate session log
-session_log = codes_dir / "session.jsonl"
+session_log = config.get_session_path(runner.session_id)
 parser = Parser()
 entries = parser.parse(session_log)
 

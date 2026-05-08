@@ -259,22 +259,21 @@ pi-evaluator run "Test" -o ./eval -c config.yaml -vv
 
 ```
 evaluations/
-└── codes/
-    └── {session_id}/             # All generated artifacts (tracked in git)
-        ├── index.ts             # Source code
-        ├── index.test.ts        # Tests
-        ├── package.json         # Project config
-        ├── tsconfig.json
-        ├── session.jsonl        # Session log for evaluation
-        ├── evaluation.json       # Evaluation results
-        ├── report.md            # Human-readable report
-        ├── .sages/             # Four Sages workflow
-        │   ├── workspace/        # draft.md, plan.md, execution.yaml
-        │   └── archive/         # Archived workflow snapshot
-        └── node_modules/       # Dependencies (gitignored)
+└── {session_id}/
+    ├── codes/                    # Generated source code (tracked in git)
+    │   ├── src/
+    │   ├── tests/
+    │   ├── package.json
+    │   ├── tsconfig.json
+    │   └── .sages/              # Four Sages workflow artifacts
+    ├── sessions/                # Session logs (gitignored)
+    │   └── session.jsonl
+    └── report/                   # Evaluation results (gitignored)
+        ├── evaluation.json
+        └── report.md
 ```
 
-**Note**: The `codes/` directory is tracked in git to preserve generated code for inspection.
+**All outputs organized by session_id** for easy inspection and comparison.
 
 ### evaluation.json
 
