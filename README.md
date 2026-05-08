@@ -1,4 +1,4 @@
-# OpenCode Sages
+# Sages
 
 A multi-agent workflow system for [OpenCode](https://github.com/opencode-ai/opencode) and [pi](https://pi.dev), inspired by Chinese mythology.
 
