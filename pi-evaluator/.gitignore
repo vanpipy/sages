@@ -1,10 +1,16 @@
-# Keep evaluations/codes/ but ignore session/evaluation outputs
+# Keep generated code for inspection
+evaluations/codes/
+
+# Ignore sessions and evaluations (output)
 evaluations/sessions/
 evaluations/evaluations/
 
 # Python
 __pycache__/
 *.pyc
+
+# Node modules (too large)
+evaluations/codes/*/node_modules/
 
 # Four Sages workspace
 .sages/
