@@ -1,4 +1,10 @@
-evaluations/
+# Keep evaluations/codes/ but ignore session/evaluation outputs
+evaluations/sessions/
+evaluations/evaluations/
+
+# Python
 __pycache__/
 *.pyc
+
+# Four Sages workspace
 .sages/

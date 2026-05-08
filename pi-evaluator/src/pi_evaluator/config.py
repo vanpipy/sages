@@ -133,8 +133,13 @@ class Config:
         """Get path to report.md file."""
         return self.get_evaluation_dir(session_id) / "report.md"
 
+    def get_codes_dir(self, session_id: str) -> Path:
+        """Get directory for generated code files."""
+        return self.output_dir / "codes" / session_id
+
     def ensure_dirs(self, session_id: str) -> None:
         """Create necessary directories for a session."""
+        self.get_codes_dir(session_id).mkdir(parents=True, exist_ok=True)
         self.get_session_dir(session_id).mkdir(parents=True, exist_ok=True)
         self.get_evaluation_dir(session_id).mkdir(parents=True, exist_ok=True)
 

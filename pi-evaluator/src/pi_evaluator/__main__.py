@@ -120,40 +120,46 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
 
     runner = Runner(config)
     try:
-        session_path = runner.run_workflow(
+        codes_dir = runner.run_workflow(
             args.request,
             auto_approve=not args.no_auto_approve,
             timeout=args.timeout,
         )
 
         if config.verbose:
-            print(f"Session saved to: {session_path}")
+            print(f"Generated code in: {codes_dir}")
 
-        # Evaluate session
-        if config.verbose:
-            print("Evaluating session...")
+        # Evaluate session log if exists
+        session_log = codes_dir / "session.jsonl"
+        if session_log.exists():
+            if config.verbose:
+                print("Evaluating session...")
 
-        parser = Parser()
-        entries = parser.parse(session_path)
+            parser = Parser()
+            entries = parser.parse(session_log)
 
-        evaluator = Evaluator(config)
-        result = evaluator.evaluate(entries, request=args.request, session_id=runner.session_id)
+            evaluator = Evaluator(config)
+            result = evaluator.evaluate(entries, request=args.request, session_id=runner.session_id)
 
-        # Save results
-        reporter = Reporter(config.output_dir)
-        json_path, md_path = reporter.save_evaluation(
-            result, config.get_evaluation_dir(runner.session_id)
-        )
 
-        if config.verbose:
-            print(f"Evaluation saved to: {json_path}")
-            print(f"Report saved to: {md_path}")
+            # Save results
+            reporter = Reporter(config.output_dir)
+            json_path, md_path = reporter.save_evaluation(
+                result, config.get_evaluation_dir(runner.session_id)
+            )
 
-        # Print summary
-        print(f"\nVerdict: {result.verdict}")
-        print(f"Overall Score: {result.overall.overall_score:.1f}")
+            if config.verbose:
+                print(f"Evaluation saved to: {json_path}")
+                print(f"Report saved to: {md_path}")
 
-        return 0 if result.verdict != "POOR" else 1
+            # Print summary
+            print(f"\nVerdict: {result.verdict}")
+            print(f"Overall Score: {result.overall.overall_score:.1f}")
+
+            return 0 if result.verdict != "POOR" else 1
+        else:
+            print("Warning: No session log generated")
+            return 1
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

@@ -64,7 +64,7 @@ class Runner:
             timeout: Override timeout (default: from config)
 
         Returns:
-            Path to session.jsonl file
+            Path to codes directory
 
         Raises:
             RunnerError: If workflow execution fails
@@ -79,13 +79,13 @@ class Runner:
         if timeout is None:
             timeout = self.config.timeout
 
-        # Create directories
-        self.config.ensure_dirs(self.session_id)
-        session_path = self.config.get_session_path(self.session_id)
+        # Create codes directory for this session
+        codes_dir = self.config.get_codes_dir(self.session_id)
+        codes_dir.mkdir(parents=True, exist_ok=True)
 
         if self.config.verbose:
             print(f"Starting workflow: session_id={self.session_id}")
-            print(f"Session path: {session_path}")
+            print(f"Codes directory: {codes_dir}")
 
         # Check for API keys first
         if not self._has_api_keys():
@@ -97,10 +97,10 @@ class Runner:
         # Build comprehensive request
         full_request = self._build_full_request(request)
 
-        # Run pi in --print mode
-        self._run_print_mode(full_request, session_path, timeout)
+        # Run pi in --print mode from codes directory
+        self._run_print_mode(full_request, codes_dir, timeout)
 
-        return session_path
+        return codes_dir
 
     def _has_api_keys(self) -> bool:
         """Check if any API keys are configured."""
@@ -136,9 +136,12 @@ Please execute the complete Four Sages workflow:
 Show progress and summary at the end. Be concise but complete all phases."""
 
     def _run_print_mode(
-        self, request: str, session_path: Path, timeout: int
+        self, request: str, codes_dir: Path, timeout: int
     ) -> None:
-        """Run pi in --print mode with the given request."""
+        """Run pi in --print mode with the given request.
+        
+        Runs pi from the codes_dir so generated files are created there.
+        """
         try:
             # Build command
             cmd = [self.config.pi_path, "--print"]
@@ -153,17 +156,19 @@ Show progress and summary at the end. Be concise but complete all phases."""
             if self.config.verbose:
                 print(f"Running: {' '.join(cmd[:4])}...")
 
-            # Set up environment
+            # Set up environment - run from codes_dir
             env = os.environ.copy()
-            env["PI_SESSION_LOG"] = str(session_path)
+            session_log = codes_dir / "session.jsonl"
+            env["PI_SESSION_LOG"] = str(session_log)
 
-            # Spawn process
+            # Spawn process in codes_dir
             process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                cwd=str(codes_dir),
                 env=env,
             )
 
@@ -182,13 +187,17 @@ Show progress and summary at the end. Be concise but complete all phases."""
             # Capture output
             self.output_buffer = stdout.splitlines()
 
-            # Write session entries
-            self._write_session_entries(session_path, stdout)
+            # Write session log to codes directory
+            self._write_session_entries(session_log, stdout)
 
             if self.config.verbose:
                 print(f"Completed. Output: {len(self.output_buffer)} lines")
                 if stderr:
                     print(f"Stderr: {stderr[:200]}")
+                print(f"Generated files in: {codes_dir}")
+                for f in codes_dir.rglob("*"):
+                    if f.is_file() and f.name not in ["session.jsonl"]:
+                        print(f"  - {f.relative_to(codes_dir)}")
 
         except OSError as e:
             raise RunnerError(f"Failed to spawn pi subprocess: {e}") from e
