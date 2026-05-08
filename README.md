@@ -46,51 +46,52 @@ cd sages
 
 ```bash
 # Start workflow
-/fuxi "add dark mode to the app"
+/fuxi-start my-plan "add dark mode to the app"
 
-# Approve to proceed
-/fuxi-approve
+# Review draft
+/qiaochui-review
 ```
 
 ### pi
 
 ```bash
 # Start workflow
-/fuxi
+fuxi-start my-plan "add dark mode"
 
-# Or use skills directly
-/skill:fuxi
-/skill:qiaochui
-/skill:luban
-/skill:gaoyao
+# Create draft
+fuxi-request "add dark mode"
 ```
 
-## Available Tools
+## Commands
 
-### Fuxi (Design)
-| Tool | Description |
-|------|-------------|
-| `fuxi_create_draft` | Create architectural design using Eight Trigrams |
-| `fuxi_get_draft` | Read existing draft |
-| `fuxi_get_status` | Check workflow status |
+### Fuxi ( Design)
+| Command | Description |
+|---------|-------------|
+| `fuxi-start` | Start workflow |
+| `fuxi-request` | Create draft.md |
+| `fuxi-plan <score>` | Transition to plan (score > 80) |
+| `fuxi-recover` | Recover from state.json |
+| `fuxi-end` | End and archive workflow |
+| `fuxi-get-status` | Get workflow status |
 
-### QiaoChui (Review)
-| Tool | Description |
-|------|-------------|
-| `qiaochui_review` | Review design for feasibility |
-| `qiaochui_decompose` | Create execution plan |
+### QiaoChui ( Review)
+| Command | Description |
+|---------|-------------|
+| `qiaochui-review` | Review draft feasibility |
+| `qiaochui-decompose` | Create plan.md and execution.yaml |
 
-### LuBan (Implementation)
-| Tool | Description |
-|------|-------------|
-| `luban_execute_task` | Execute task with TDD |
-| `luban_get_status` | Check execution progress |
+### LuBan ( Execute)
+| Command | Description |
+|---------|-------------|
+| `luban-execute-task` | Execute single task (TDD) |
+| `luban-execute-all` | Execute all tasks |
+| `luban-get-status` | Get execution status |
 
-### GaoYao (Audit)
-| Tool | Description |
-|------|-------------|
-| `gaoyao_review` | Quality audit |
-| `gaoyao_check_security` | Security scan |
+### GaoYao ( Audit)
+| Command | Description |
+|---------|-------------|
+| `gaoyao-review` | Quality audit (Xie Zhi) |
+| `gaoyao-check-security` | Security scan |
 
 ## Workflow
 
@@ -119,7 +120,7 @@ Four Sages supports resuming interrupted workflows:
 | Scenario | Detection | Recovery Action |
 |----------|----------|----------------|
 | `draft.md` exists + `state.json` exists | Phase detected from `state.json` | Continue from stored phase |
-| `draft.md` missing + `state.json` exists | Workflow detected | `fuxi_create_draft` regenerates |
+| `draft.md` missing + `state.json` exists | Workflow detected | `fuxi-request` regenerates |
 | New request same workspace | Existing workflow | Draft updated, phase preserved |
 
 State is stored in `.sages/workspace/state.json` with phase progression:
@@ -134,13 +135,13 @@ Each design draft follows the **Multi-Dimensional Design (MDD)** framework:
 
 | Plane | Elements | Focus |
 |-------|----------|-------|
-| ☰ Business | Process × Rules | Business value delivery |
-| ☷ Data | Logic × State | Data processing |
-| ☳ Control | Strategy × Distribution | Decision execution |
-| ☴ Foundation | Resource × Abstraction | Infrastructure |
-| ☵ Observation | Data × Analysis | Monitoring |
-| ☶ Security | Identity × Permissions | Access control |
-| ☱ Evolution | Time × Change | Versioning & migration |
+|  Business | Process × Rules | Business value delivery |
+|  Data | Logic × State | Data processing |
+|  Control | Strategy × Distribution | Decision execution |
+|  Foundation | Resource × Abstraction | Infrastructure |
+|  Observation | Data × Analysis | Monitoring |
+|  Security | Identity × Permissions | Access control |
+|  Evolution | Time × Change | Versioning & migration |
 
 ## Project Structure
 
