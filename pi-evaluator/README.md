@@ -6,6 +6,7 @@ Auto-run and evaluate Four Sages Agents workflow sessions using HuggingFace `eva
 
 - **Auto-run Mode**: Execute Four Sages workflows with automatic phase transitions
 - **Auto-Proceed**: Detects tool completion and sends next command
+- **Code Preservation**: All generated code saved to `evaluations/codes/{id}/` for inspection
 - **Evaluate Mode**: Analyze existing session logs for quality metrics
 - **Compare Mode**: Compare two sessions to track quality trends
 - **Phase Metrics**: Per-phase quality assessment (Design, Review, Execute, Audit)
@@ -30,12 +31,27 @@ pi-evaluator check-env
 # Run and evaluate workflow
 pi-evaluator run "Create a REST API"
 
-# Evaluate existing session
-pi-evaluator evaluate session.jsonl
-
-# Compare two sessions
-pi-evaluator compare baseline.jsonl current.jsonl
+# Generated code is saved to evaluations/codes/{session_id}/
+# Session log is saved to evaluations/codes/{session_id}/session.jsonl
 ```
+
+## Output Directory
+
+```
+evaluations/
+└── codes/
+    └── {session_id}/           # All generated artifacts
+        ├── index.ts             # Source code
+        ├── index.test.ts        # Tests
+        ├── package.json         # Project config
+        ├── tsconfig.json
+        ├── session.jsonl        # Session log for evaluation
+        └── .sages/             # Four Sages workflow artifacts
+            ├── workspace/        # Design, plan, execution.yaml
+            └── archive/         # Archived workflow
+```
+
+**Note**: `evaluations/codes/` is tracked in git to preserve generated code for inspection.
 
 ## Configuration
 
@@ -47,8 +63,6 @@ Phases transition automatically without manual approval.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PI_EVALUATOR_OUTPUT_DIR` | `./evaluations/` | Base output directory |
-| `PI_EVALUATOR_SESSION_SUBDIR` | `sessions/` | Session logs subdirectory |
-| `PI_EVALUATOR_EVALUATION_SUBDIR` | `evaluations/` | Evaluation reports subdirectory |
 | `PI_EVALUATOR_PI_PATH` | `pi` | Path to pi binary |
 | `PI_EVALUATOR_AUTO_APPROVE` | `true` | Auto-send next command (no manual approval) |
 | `PI_EVALUATOR_TIMEOUT` | `3600` | Workflow timeout in seconds |
@@ -61,22 +75,7 @@ Default weights for overall score:
 - Execute: 30%
 - Audit: 20%
 
-## Output
-
-### Directory Structure
-
-```
-{output_dir}/
-├── sessions/
-│   └── {session_id}/
-│       └── session.jsonl
-└── evaluations/
-    └── {session_id}/
-        ├── evaluation.json
-        └── report.md
-```
-
-### Evaluation Result
+## Evaluation Result
 
 ```json
 {
@@ -101,11 +100,14 @@ config = Config(output_dir="./evaluations")
 
 # Run workflow
 runner = Runner(config)
-session_path = runner.run_workflow("Create REST API")
+codes_dir = runner.run_workflow("Create REST API")
 
-# Evaluate
+print(f"Generated code in: {codes_dir}")
+
+# Evaluate session log
+session_log = codes_dir / "session.jsonl"
 parser = Parser()
-entries = parser.parse(session_path)
+entries = parser.parse(session_log)
 
 evaluator = Evaluator(config)
 result = evaluator.evaluate(entries)

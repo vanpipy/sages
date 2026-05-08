@@ -85,9 +85,12 @@ pi-evaluator run "Create calculator" -vvv
 
 ```
 Running workflow: Create a calculator module...
-Session saved to: evaluations/sessions/abc12345/session.jsonl
-Evaluating session...
-Evaluation saved to: evaluations/evaluations/abc12345/evaluation.json
+Codes directory: evaluations/codes/abc12345
+Generated files in: evaluations/codes/abc12345
+  - index.ts
+  - index.test.ts
+  - package.json
+  - session.jsonl
 
 Verdict: GOOD
 Overall Score: 82.3
@@ -256,15 +259,20 @@ pi-evaluator run "Test" -o ./eval -c config.yaml -vv
 
 ```
 evaluations/
-├── sessions/
-│   └── {session_id}/
-│       └── session.jsonl         # Raw session logs (JSONL)
-│
-└── evaluations/
-    └── {session_id}/
-        ├── evaluation.json       # Structured results
-        └── report.md             # Human-readable report
+└── codes/
+    └── {session_id}/             # All generated artifacts (tracked in git)
+        ├── index.ts             # Source code
+        ├── index.test.ts        # Tests
+        ├── package.json         # Project config
+        ├── tsconfig.json
+        ├── session.jsonl        # Session log for evaluation
+        ├── .sages/             # Four Sages workflow
+        │   ├── workspace/        # draft.md, plan.md, execution.yaml
+        │   └── archive/         # Archived workflow snapshot
+        └── node_modules/       # Dependencies (gitignored)
 ```
+
+**Note**: The `codes/` directory is tracked in git to preserve generated code for inspection.
 
 ### evaluation.json
 
