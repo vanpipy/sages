@@ -266,6 +266,8 @@ evaluations/
         ├── package.json         # Project config
         ├── tsconfig.json
         ├── session.jsonl        # Session log for evaluation
+        ├── evaluation.json       # Evaluation results
+        ├── report.md            # Human-readable report
         ├── .sages/             # Four Sages workflow
         │   ├── workspace/        # draft.md, plan.md, execution.yaml
         │   └── archive/         # Archived workflow snapshot

@@ -40,16 +40,20 @@ pi-evaluator run "Create a REST API"
 ```
 evaluations/
 └── codes/
-    └── {session_id}/           # All generated artifacts
+    └── {session_id}/           # All generated artifacts (tracked in git)
         ├── index.ts             # Source code
         ├── index.test.ts        # Tests
         ├── package.json         # Project config
         ├── tsconfig.json
         ├── session.jsonl        # Session log for evaluation
+        ├── evaluation.json       # Evaluation results
+        ├── report.md            # Human-readable report
         └── .sages/             # Four Sages workflow artifacts
             ├── workspace/        # Design, plan, execution.yaml
             └── archive/         # Archived workflow
 ```
+
+**All outputs** are saved in `evaluations/codes/{session_id}/` for easy inspection.
 
 **Note**: `evaluations/codes/` is tracked in git to preserve generated code for inspection.
 
