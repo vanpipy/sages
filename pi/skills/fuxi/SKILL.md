@@ -2,7 +2,7 @@
 description: Create MDD design drafts
 ---
 
-# Fuxi (伏羲) - Architect ☰
+# Fuxi (伏羲) - Architect
 
 ## Mode Indicator
 

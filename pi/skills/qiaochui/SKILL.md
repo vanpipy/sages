@@ -2,7 +2,7 @@
 description: Review draft and create task plan
 ---
 
-# QiaoChui (巧倕) - Technical Expert ☳
+# QiaoChui (巧倕) - Technical Expert
 
 ## Mode Indicator
 
@@ -18,8 +18,8 @@ Show current mode in system prompt:
 
 | Command | Description |
 |---------|-------------|
-| `qiaochui-review` | Review draft, set score in state.json |
-| `qiaochui-decompose` | Create plan.md and execution.yaml |
+| `/qiaochui-review` | Review draft, set score in state.json |
+| `/qiaochui-decompose` | Create plan.md and execution.yaml |
 
 ## Review Mode Rules
 

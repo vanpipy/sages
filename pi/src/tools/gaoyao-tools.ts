@@ -1,11 +1,29 @@
 /**
- * GaoYao Tools - Audit phase tools using Xie Zhi methodology
+ * GaoYao Tools (皋陶) - Auditor 
+ * 
+ * Quality audit using Xie Zhi methodology.
  * Audit reports are saved to .sages/workspace/audit.md
  * 
- * Verdict outcomes:
- * - PASS: Meets standards, ready for deployment
- * - NEEDS_CHANGES: Requires fixes, return to LuBan
- * - REJECTED: Unacceptable, return to Fuxi
+ * Review Mode Rules:
+ * - ✅ Only modify audit.md
+ * - ❌ Read-only for all other files
+ * - ❌ No code modifications during audit
+ * 
+ * Five Audits (五刑审核):
+ * - 墨刑 (Ink): Code style
+ * - 劓刑 (Nose): Naming conventions
+ * - 剕刑 (Foot): Architecture
+ * - 宫刑 (Castration): Security
+ * - 大辟 (Death): Critical defects
+ * 
+ * Verdict:
+ * - PASS (≥70): Workflow complete
+ * - NEEDS_CHANGES: Return to implement
+ * - REJECTED: Return to design
+ * 
+ * Prohibited:
+ * - ❌ Modify files other than audit.md
+ * - ❌ Skip audit
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -29,13 +47,21 @@ interface FiveAudits {
 type Verdict = "PASS" | "NEEDS_CHANGES" | "REJECTED";
 
 export function registerGaoYaoTools(pi: ExtensionAPI): void {
+  /**
+   * gaoyao_review - Quality audit using Xie Zhi methodology
+   * Review Mode (Read-Only): Only modify audit.md
+   * 
+   * Five Audits (五刑审核): Ink, Nose, Foot, Castration, Death
+   * Checks: Code Quality, Security, Test Coverage, Performance, Documentation
+   * Verdict: PASS (≥70), NEEDS_CHANGES, REJECTED (critical defects)
+   */
   pi.registerTool({
     name: "gaoyao_review",
     label: "Quality Review",
-    description: "Perform quality audits using the Xie Zhi methodology (saves report to .sages/workspace/audit.md)",
+    description: "Quality audit using Xie Zhi methodology. Five Audits: Ink (style), Nose (naming), Foot (architecture), Castration (security), Death (critical). Saves to .sages/workspace/audit.md.",
     parameters: Type.Object({
-      plan_name: Type.Optional(Type.String({ description: "Plan name to audit" })),
-      review_mode: Type.Optional(Type.String({ description: "quick or full (default: full)" })),
+      plan_name: Type.Optional(Type.String({ description: "Plan name to audit (optional)" })),
+      review_mode: Type.Optional(Type.String({ description: "Review mode: 'quick' or 'full' (default: full)" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const { review_mode = "full" } = params;
@@ -101,12 +127,17 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
     },
   });
 
+  /**
+   * gaoyao_check_security - Security scan
+   * Scans: SQL injection, XSS, authentication, authorization, data exposure
+   * Severity: none/medium/high
+   */
   pi.registerTool({
     name: "gaoyao_check_security",
     label: "Security Scan",
-    description: "Run Xie Zhi security scan on modified files (SQL injection, XSS, auth, data exposure)",
+    description: "Security scan: SQL injection, XSS, authentication, authorization, data exposure. Returns vulnerabilities count and severity.",
     parameters: Type.Object({
-      files: Type.Array(Type.String(), { description: "Files to scan" }),
+      files: Type.Array(Type.String(), { description: "Files or directories to scan (e.g., [\"src/\"])" }),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const { files = [] } = params;

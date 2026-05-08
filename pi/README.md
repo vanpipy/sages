@@ -70,16 +70,38 @@ After installation, restart pi and use these commands:
 
 ### Workflow Commands
 
+#### Fuxi ( Design)
+
 | Command | Description |
 |---------|-------------|
-| `/fuxi <request>` | Start a new workflow with your request |
-| `/fuxi-approve` | Approve current phase and proceed |
-| `/fuxi-reject` | Reject and stop the workflow |
-| `/fuxi-status` | View current workflow status |
-| `/fuxi-execute` | Execute planned tasks |
-| `/fuxi-archive` | Archive completed workflow |
-| `/fuxi-archives` | List archived workflows |
-| `/fuxi-restore` | Restore an archived workflow |
+| `fuxi-start` | Start workflow, set design phase |
+| `fuxi-request` | Create draft.md |
+| `fuxi-plan <score>` | Transition to plan (only if score > 80) |
+| `fuxi-recover` | Recover from state.json |
+| `fuxi-end` | End workflow, archive |
+| `fuxi-get-status` | View current status |
+
+#### QiaoChui ( Review)
+
+| Command | Description |
+|---------|-------------|
+| `qiaochui-review` | Review draft, set score in state.json |
+| `qiaochui-decompose` | Create plan.md and execution.yaml |
+
+#### LuBan ( Execute)
+
+| Command | Description |
+|---------|-------------|
+| `luban-execute-task` | Execute a single task using TDD |
+| `luban-execute-all` | Execute all tasks from execution.yaml |
+| `luban-get-status` | Get TDD execution status |
+
+#### GaoYao ( Audit)
+
+| Command | Description |
+|---------|-------------|
+| `gaoyao-review` | Quality audit, generate report |
+| `gaoyao-check-security` | Security scan (SQL injection, XSS, auth) |
 
 ### Skills
 
@@ -92,24 +114,21 @@ After installation, restart pi and use these commands:
 
 ## Workflow Flow
 
-### Approval Points (Manual)
-
-Only two phases require manual approval:
+### Approval Points
 
 | Phase | Command | Description |
 |-------|---------|-------------|
-| ☰ **Design** | `/fuxi-approve` | Approve MDD design before review |
-| ☳ **Review** | `/fuxi-approve` | Approve tasks before execution |
-| 📁 **Archive** | `/fuxi-archive` | Manually archive completed workflow |
+|  **Design** | `fuxi-plan <score>` | Transition to plan (only if score > 80) |
+|  **Review** | QiaoChui auto-proceeds | After review with score > 80 |
+| 📁 **Archive** | `fuxi-end` | End workflow and archive |
 
-### Auto-Proceed Phases (Automatic)
-
-After approval, these phases run automatically:
+### Auto-Proceed Phases
 
 | Phase | Behavior |
 |-------|----------|
-| ☴ **Execute (LuBan)** | Auto-proceed to task execution |
-| ☲ **Audit (GaoYao)** | Auto-proceed to quality audit after execution |
+|  **Review** | Auto-proceeds after qiaochui-review |
+|  **Execute** | Manual via luban-execute commands |
+|  **Audit** | Manual via gaoyao commands |
 
 ## Workflow Recovery
 
@@ -119,8 +138,8 @@ Four Sages supports resuming interrupted workflows:
 
 | Scenario | Detection | Recovery Action |
 |----------|----------|----------------|
-| `draft.md` exists + `state.json` exists | Phase detected from `state.json` | `/fuxi-approve` continues from stored phase |
-| `draft.md` missing + `state.json` exists | Workflow detected but draft lost | `fuxi_create_draft` regenerates with original request |
+| `draft.md` exists + `state.json` exists | Phase detected from `state.json` | `fuxi-recover` continues from stored phase |
+| `draft.md` missing + `state.json` exists | Workflow detected but draft lost | `fuxi-request` regenerates with original request |
 | New request same workspace | Existing workflow detected | Draft updated, phase preserved |
 
 ### State File
@@ -153,39 +172,40 @@ idle → design → review → plan → execute → audit → complete
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
-                    │ ☰ Fuxi      │  Design (Manual)
+                    │  Fuxi      │  Design (Manual)
                     │ MDD Design  │
                     │ 7 Planes    │
                     └──────┬──────┘
                            │
-                    ┌──────▼──────┐     ← Manual Approval
-                    │/fuxi-approve│     Required
+                    ┌──────▼──────┐     ← Use fuxi-request
+                    │fuxi-request │     Create draft.md
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
-                    │ ☳ QiaoChui  │  Review (Manual)
-                    │ Review      │
-                    │ Decompose   │  Configure execution mode
+                    │  QiaoChui  │  Review (Manual)
+                    │ qiaochui-   │
+                    │ review      │
                     └──────┬──────┘
                            │
-                    ┌──────▼──────┐     ← Manual Approval
-                    │/fuxi-approve│     Required
+                    ┌──────▼──────┐     ← Use qiaochui-decompose
+                    │qiaochui-    │     Create tasks
+                    │decompose    │
                     └──────┬──────┘
                            │
-                    ┌──────▼──────┐
-                    │ ☴ LuBan     │  Execute (Auto!)
-                    │ TDD         │  ← Auto-proceed
-                    └──────┬──────┘     No approval needed
-                           │
-                           │  (Auto)
-                    ┌──────▼──────┐
-                    │ ☲ GaoYao    │  Audit (Auto!)
-                    │ Audit       │  ← Auto-proceed
-                    │ Security    │  No approval needed
+                    ┌──────▼──────┐     ← Use luban-execute-all
+                    │  LuBan     │  Execute
+                    │ luban-      │
+                    │ execute-all │
                     └──────┬──────┘
                            │
-                    ┌──────▼──────┐     ← Manual Action
-                    │/fuxi-archive│     Required
+                    ┌──────▼──────┐     ← Use gaoyao-review
+                    │  GaoYao    │  Audit
+                    │ gaoyao-     │
+                    │ review      │
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐     ← Use fuxi-end
+                    │fuxi-end     │     Archive
                     └──────┬──────┘
                            │
                     ┌──────▼──────┐
@@ -195,13 +215,15 @@ idle → design → review → plan → execute → audit → complete
 
 ### Phase Summary
 
-| # | Phase | Type | Confirmation |
-|---|-------|------|-------------|
-| 1 | ☰ Fuxi (Design) | Manual | `/fuxi-approve` |
-| 2 | ☳ QiaoChui (Review) | Manual | `/fuxi-approve` |
-| 3 | ☴ LuBan (Execute) | **Auto** | None |
-| 4 | ☲ GaoYao (Audit) | **Auto** | None |
-| 5 | 📁 Archive | Manual | `/fuxi-archive` |
+| # | Phase | Command | Description |
+|---|-------|---------|-------------|
+| 1 |  Fuxi | `fuxi-start` | Start workflow |
+| 2 |  Fuxi | `fuxi-request` | Create draft.md |
+| 3 |  QiaoChui | `qiaochui-review` | Review draft |
+| 4 |  QiaoChui | `qiaochui-decompose` | Create tasks |
+| 5 |  LuBan | `luban-execute-all` | Execute all tasks |
+| 6 |  GaoYao | `gaoyao-review` | Quality audit |
+| 7 | Archive | `fuxi-end` | End and archive |
 
 ## MDD Design Method
 
@@ -409,43 +431,52 @@ pi remove npm:@sages/pi-four-sages
 ### Full Workflow Example
 
 ```
-You: /fuxi Create a REST API for user management
+You: fuxi-start user-api Create a REST API for user management
 
-pi: [Fuxi] I'll design this using MDD Seven Planes...
-pi: Design draft created. Use /fuxi-approve to proceed.
+pi: [Fuxi] Starting workflow...
+pi: Workflow started: user-api
 
-You: /fuxi-approve
+You: fuxi-request Create a REST API for user management
+
+pi: [Fuxi] Creating MDD design draft...
+pi: Draft created: .sages/workspace/draft.md
+
+You: qiaochui-review
 
 pi: [QiaoChui] Reviewing technical feasibility...
-pi: [QiaoChui] Decomposing into tasks...
-pi: Tasks created with subagent mode (maxParallel: 3)
-pi: Use /fuxi-approve to proceed.
+pi: Score: 85 - APPROVED
 
-You: /fuxi-approve
+You: qiaochui-decompose
+
+pi: [QiaoChui] Decomposing into tasks...
+pi: Tasks created: .sages/workspace/execution.yaml
+
+You: fuxi-plan 85
+
+pi: Plan phase started (score: 85)
+
+You: luban-execute-all
 
 pi: [LuBan] Starting execution with 4 tasks...
-pi: [LuBan] Spawning subagents...
-pi: [LuBan #1] Task T1: Setup database - RED phase
-pi: [LuBan #2] Task T2: Wait for T1...
-pi: [LuBan #3] Task T3: Wait for T1...
-pi: [LuBan #4] Task T4: Wait for T2...
-pi: [LuBan #1] T1 complete ✓
-pi: [LuBan #2] Task T2: Creating model - RED phase
-pi: [LuBan #3] Task T3: Creating routes - RED phase
-pi: [LuBan #2] T2 complete ✓
-pi: [LuBan #4] Task T4: Writing tests - RED phase
-pi: [LuBan #3] T3 complete ✓
-pi: [LuBan #4] T4 complete ✓
-pi: All tasks complete! (4/4)
-pi: Use /fuxi-approve to proceed.
+pi: [LuBan #1] Task T1: RED → GREEN → REFACTOR
+pi: [LuBan #2] Task T2: Waiting for T1...
+pi: [LuBan #3] Task T3: Waiting for T1...
+pi: [LuBan #1] T1 complete ✓ (committed)
+pi: [LuBan #2] Task T2: RED → GREEN → REFACTOR
+pi: [LuBan #3] Task T3: RED → GREEN → REFACTOR
+pi: [LuBan #2] T2 complete ✓ (committed)
+pi: [LuBan #3] T3 complete ✓ (committed)
+pi: All tasks complete! (3/3)
 
-You: /fuxi-approve
+You: gaoyao-review
 
 pi: [GaoYao] Running quality audit...
-pi: [GaoYao] Running security scan...
 pi: [GaoYao] Verdict: PASS
 pi: Workflow complete!
-pi: Use /fuxi-archive to save
+
+You: fuxi-end
+
+pi: Workflow archived to .sages/archive/user-api/
 ```
 
 ## Documentation

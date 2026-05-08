@@ -195,12 +195,16 @@ build_package() {
     error "pi directory not found in repository"
   fi
 
-  info "Building package..."
-  cd "$pi_dir"
-  bun install
-  bun run build
-
-  success "Package built"
+  # Check if already built (skip if dist exists)
+  if [[ -d "$pi_dir/dist" && -f "$pi_dir/dist/index.js" ]]; then
+    info "Package already built (skipping rebuild)"
+  else
+    info "Building package..."
+    cd "$pi_dir"
+    bun install
+    bun run build
+    success "Package built"
+  fi
 }
 
 install_package() {
@@ -211,7 +215,12 @@ install_package() {
     info "Installing package..."
     echo "  mkdir -p $(dirname "$pkg_dest")"
     echo "  rm -rf $pkg_dest"
-    echo "  cp -r $pi_dir $pkg_dest"
+    echo "  mkdir -p $pkg_dest"
+    echo "  cp $pi_dir/package.json $pkg_dest/"
+    echo "  cp -r $pi_dir/dist $pkg_dest/"
+    echo "  cp -r $pi_dir/extensions $pkg_dest/"
+    echo "  cp -r $pi_dir/skills $pkg_dest/"
+    echo "  cp -r $pi_dir/prompts $pkg_dest/"
     return
   fi
 
@@ -223,8 +232,20 @@ install_package() {
   # Remove old installation
   rm -rf "$pkg_dest"
   
-  # Copy to persistent location
-  cp -r "$pi_dir" "$pkg_dest"
+  # Create package directory
+  mkdir -p "$pkg_dest"
+  
+  # Copy only necessary files (selective install)
+  # - package.json: package metadata
+  # - dist/: built JavaScript
+  # - extensions/: pi extensions (TypeScript)
+  # - skills/: skill definitions (MD)
+  # - prompts/: workflow prompts
+  cp "$pi_dir/package.json" "$pkg_dest/"
+  cp -r "$pi_dir/dist" "$pkg_dest/"
+  cp -r "$pi_dir/extensions" "$pkg_dest/"
+  cp -r "$pi_dir/skills" "$pkg_dest/"
+  cp -r "$pi_dir/prompts" "$pkg_dest/"
   
   # Disable cleanup so temp dir persists
   disable_cleanup
@@ -241,15 +262,31 @@ show_installation_info() {
   echo "Package: @sages/pi-four-sages"
   echo "Location: $SAGES_PKG_DIR"
   echo ""
-  echo "Commands available:"
-  echo "  /fuxi <request>       Start workflow"
-  echo "  /fuxi-approve         Approve current phase"
-  echo "  /fuxi-reject          Reject and stop"
-  echo "  /fuxi-status          View status"
-  echo "  /fuxi-execute         Execute tasks"
-  echo "  /fuxi-archive         Archive workflow"
-  echo "  /fuxi-archives        List archives"
-  echo "  /fuxi-restore         Restore archive"
+  echo "Commands:"
+  echo ""
+  echo "  FUXI (☰ Design):"
+  echo "    fuxi-start          Start workflow"
+  echo "    fuxi-request       Create requirement draft"
+  echo "    fuxi-plan           Start plan (score > 80)"
+  echo "    fuxi-recover        Recover workflow"
+  echo "    fuxi-end            End and archive workflow"
+  echo "    fuxi-get-status     Get workflow status"
+  echo ""
+  echo "  QIAOCHUI (☳ Review):"
+  echo "    qiaochui-review     Review draft feasibility"
+  echo "    qiaochui-decompose  Decompose into tasks"
+  echo ""
+  echo "  LUBAN (☴ Execute):"
+  echo "    luban-execute-task  Execute single task (TDD)"
+  echo "    luban-execute-all   Execute all tasks"
+  echo "    luban-get-status    Get execution status"
+  echo ""
+  echo "  GAOYAO (☲ Audit):"
+  echo "    gaoyao-review       Quality audit (Xie Zhi)"
+  echo "    gaoyao-check-security Security scan"
+  echo ""
+  echo "Workflow Phases:"
+  echo "  ☰ Design → ☳ Review → 📋 Plan → ☴ Execute → ☲ Audit"
   echo ""
   echo "Skills:"
   echo "  fuxi     - MDD System Design"

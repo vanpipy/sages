@@ -1,18 +1,25 @@
 /**
- * Fuxi Tools - Based on desc.md workflow
+ * Fuxi Tools (伏羲) - Architect 
  * 
- * Commands:
- * - /fuxi-start: Start workflow, set design status in state.json
- * - /fuxi-request: Create requirement draft
- * - /fuxi-plan: Start plan (only if score > 80)
- * - /fuxi-recover: Recover workflow from state.json
- * - /fuxi-end: End workflow, archive, set end status
+ * MDD Seven Planes:
+ * 1. Business Plane - Process × Rules
+ * 2. Data Plane - Logic × State
+ * 3. Control Plane - Strategy × Distribution
+ * 4. Foundation Plane - Resource × Abstraction
+ * 5. Observation Plane - Data × Analysis
+ * 6. Security Plane - Identity × Permissions
+ * 7. Evolution Plane - Time × Change
  * 
- * Phase modes (desc.md):
+ * Design Mode Rules:
+ * - ✅ Only modify draft.md
+ * - ❌ Read-only for all other files
+ * - ❌ No code writing in design phase
+ * 
+ * Phase modes:
  * - design: read-only, only draft.md
  * - plan: read-only, plan.md, execution.yaml
  * - implement: writeable, all files
- * - review: read-only, report-{time}.md
+ * - review: read-only, audit.md
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -130,15 +137,16 @@ function archiveWorkflow(cwd: string, state: WorkflowState): string | null {
 export function registerFuxiTools(pi: ExtensionAPI): void {
 
   /**
-   * fuxi_start - Start workflow, set design status in state.json
+   * fuxi_start - Start workflow, set design phase in state.json
+   * Design Mode (Read-Only): Only modify draft.md
    */
   pi.registerTool({
     name: "fuxi_start",
     label: "Start Workflow",
-    description: "Start workflow - set design status in state.json",
+    description: "Start workflow - set design phase in state.json. Creates state.json with planName and request.",
     parameters: Type.Object({
-      plan_name: Type.String({ description: "Plan name" }),
-      request: Type.String({ description: "User's request" }),
+      plan_name: Type.String({ description: "Plan name (e.g., 'my-feature')" }),
+      request: Type.String({ description: "User's feature request or description" }),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;
@@ -171,12 +179,13 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   });
 
   /**
-   * fuxi_request - Create requirement draft
+   * fuxi_request - Create MDD design draft using Seven Planes analysis
+   * Creates draft.md with: Business, Data, Control, Foundation, Observation, Security, Evolution planes
    */
   pi.registerTool({
     name: "fuxi_request",
-    label: "Create Request Draft",
-    description: "Create requirement draft (draft.md)",
+    label: "Create Draft",
+    description: "Create MDD design draft (draft.md) using Seven Planes analysis. Outputs overview, plane analysis, cross-plane deps, decisions, questions.",
     parameters: Type.Object({
       request: Type.String({ description: "User's request to create draft for" }),
     }),
@@ -207,12 +216,13 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   });
 
   /**
-   * fuxi_plan - Start plan (only if score > 80)
+   * fuxi_plan - Transition to plan phase (only if score > 80)
+   * Updates state phase to "plan" if score > 80
    */
   pi.registerTool({
     name: "fuxi_plan",
     label: "Start Plan",
-    description: "Start plan - only if score > 80",
+    description: "Transition to plan phase - only if score > 80. Updates phase to 'plan' in state.json.",
     parameters: Type.Object({
       score: Type.Number({ description: "Review score (must be > 80)" }),
     }),
@@ -271,11 +281,12 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
 
   /**
    * fuxi_recover - Recover workflow from state.json
+   * Returns current phase, planName, and workspace path
    */
   pi.registerTool({
     name: "fuxi_recover",
     label: "Recover Workflow",
-    description: "Recover workflow from state.json",
+    description: "Recover workflow from state.json. Returns state with phase, planName, request, score, workspace path.",
     parameters: Type.Object({}),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;
@@ -317,12 +328,12 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   });
 
   /**
-   * fuxi_end - End workflow, archive, set end status
+   * fuxi_end - End workflow, archive to .sages/archive/{plan}/{timestamp}/, set phase to complete
    */
   pi.registerTool({
     name: "fuxi_end",
     label: "End Workflow",
-    description: "End workflow, archive, and set end status",
+    description: "End workflow, archive to .sages/archive/{plan}/{timestamp}/, and set phase to 'complete'. Archives all workspace files.",
     parameters: Type.Object({}),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;
@@ -372,12 +383,13 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   });
 
   /**
-   * fuxi_get_status - Get current workflow status
+   * fuxi_get_status - Get current workflow status from state.json (also callable as fuxi-get-status)
+   * Returns: has_workflow, phase, planName, request, score, workspace_path
    */
   pi.registerTool({
     name: "fuxi_get_status",
     label: "Get Status",
-    description: "Get current workflow status",
+    description: "Get current workflow status. Returns: has_workflow, phase, planName, request, score, workspace_path.",
     parameters: Type.Object({}),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;
@@ -402,12 +414,13 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   });
 
   /**
-   * fuxi_update_score - Update review score in state
+   * fuxi_update_score - Update review score in state (set by qiaochui-review)
+   * Score thresholds: >80 proceed, 50-80 revise, <50 reject
    */
   pi.registerTool({
     name: "fuxi_update_score",
     label: "Update Score",
-    description: "Update review score in state (set by qiaochui-review)",
+    description: "Update review score in state. Used by qiaochui-review. Score >80 allows plan phase.",
     parameters: Type.Object({
       score: Type.Number({ description: "Review score from qiaochui" }),
     }),

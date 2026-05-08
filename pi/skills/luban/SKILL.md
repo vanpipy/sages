@@ -2,7 +2,7 @@
 description: Execute tasks with TDD
 ---
 
-# LuBan (鲁班) - Engineer ☴
+# LuBan (鲁班) - Engineer
 
 ## Mode Indicator
 
@@ -18,14 +18,16 @@ Show current mode in system prompt:
 ## Implement Mode Rules
 
 - ✅ All files writeable
-- ✅ Run /luban-execute
-- ❌ Must follow TDD cycle
+- ✅ Follow TDD cycle
+- ❌ Must follow RED → GREEN → REFACTOR
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/luban-execute` | Execute tasks from execution.yaml |
+| `/luban-execute-task` | Execute a single task using TDD |
+| `/luban-execute-all` | Execute all tasks from execution.yaml |
+| `/luban-get-status` | Get TDD execution status |
 
 ## TDD Cycle
 

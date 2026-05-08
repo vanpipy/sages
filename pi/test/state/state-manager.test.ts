@@ -1,6 +1,6 @@
 /**
  * Unit Tests for StateManager with Phase-Based Mode
- * Tests workflow state with mode restrictions as per desc.md
+ * Tests workflow state with mode restrictions (from skills)
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
@@ -23,17 +23,17 @@ describe("StateManager", () => {
     }
   });
 
-  describe("workflow phases (desc.md)", () => {
+  describe("workflow phases (skills)", () => {
     const validPhases = [
       "idle",
       "design",     // read-only, only draft.md
       "plan",       // read-only, plan.md + execution.yaml
       "implement",  // writeable, all files
-      "review",     // read-only, report-{time}.md
+      "review",     // read-only, audit.md
       "complete",
     ];
 
-    it("should support all phases from desc.md", () => {
+    it("should support all phases from skills", () => {
       validPhases.forEach(phase => {
         const state: WorkflowState = {
           id: "test",
@@ -65,7 +65,7 @@ describe("StateManager", () => {
     });
   });
 
-  describe("phase transitions (desc.md flow)", () => {
+  describe("phase transitions (skills flow)", () => {
     it("should transition from design to plan", () => {
       manager.create("test", "Test");
       manager.updatePhase("plan");
@@ -217,7 +217,7 @@ describe("WorkflowState types", () => {
     expect(state.planName).toBe("test-plan");
   });
 
-  it("should support implement phase (desc.md)", () => {
+  it("should support implement phase (LuBan)", () => {
     const state: WorkflowState = {
       id: "test",
       phase: "implement",
@@ -230,7 +230,7 @@ describe("WorkflowState types", () => {
     expect(state.phase).toBe("implement");
   });
 
-  it("should support review phase (desc.md)", () => {
+  it("should support review phase (GaoYao)", () => {
     const state: WorkflowState = {
       id: "test",
       phase: "review",

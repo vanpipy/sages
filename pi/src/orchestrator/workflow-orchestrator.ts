@@ -36,17 +36,15 @@ export class WorkflowOrchestrator {
    * Generate steer message for Design phase
    */
   generateDesignPhaseMessage(request: string, planName: string): string {
-    return `**Phase 1 - Design (Fuxi) ☰**
+    return `**Phase 1 - Design (Fuxi) **
 
 Create the architectural design for: "${request}"
 
-1. Call \`fuxi_create_draft\` with:
-   - name: "${planName}"
-   - request: "${request}"
+1. Call \`fuxi-request\` to create draft.md
 
-2. Present the draft to me for review
+2. Present the draft for review
 
-3. Say "DESIGN_COMPLETE" when ready for my approval`;
+3. When ready, proceed to qiaochui-review`;
   }
 
   /**
@@ -54,21 +52,21 @@ Create the architectural design for: "${request}"
    */
   generateRecoveryMessage(state: { phase: string; planName: string; request: string; tasks?: unknown[] }): string {
     const phaseEmoji: Record<string, string> = {
-      design: "☰",
-      review: "☳",
+      design: "",
+      review: "",
       plan: "📋",
-      execute: "☴",
-      audit: "☲",
+      execute: "",
+      audit: "",
       complete: "✅",
     };
 
     const phaseCommands: Record<string, string[]> = {
-      design: ["/fuxi-approve - approve draft", "/fuxi-restart - check state"],
-      review: ["/qiaochui-review - review draft", "/qiaochui-decompose - decompose"],
-      plan: ["/fuxi-approve - approve plan", "/fuxi-restart - check state"],
-      execute: ["/luban-execute-all - run tasks", "/luban-get-status - view progress"],
-      audit: ["/gaoyao-review - audit quality", "/gaoyao-check-security - scan security"],
-      complete: ["/fuxi-archive - archive workflow"],
+      design: ["fuxi-request - create draft", "fuxi-get-status - check state"],
+      review: ["qiaochui-review - review draft", "qiaochui-decompose - decompose"],
+      plan: ["fuxi-plan <score> - proceed", "fuxi-get-status - check state"],
+      execute: ["luban-execute-all - run tasks", "luban-get-status - view progress"],
+      audit: ["gaoyao-review - audit quality", "gaoyao-check-security - scan security"],
+      complete: ["fuxi-end - archive workflow"],
     };
 
     const emoji = phaseEmoji[state.phase] || "⏸️";
@@ -96,27 +94,26 @@ Create the architectural design for: "${request}"
    */
   generateReviewPhaseMessage(draftPath: string): string {
     if (this.config.autoProceedAfterReview) {
-      return `**Phase 2 - Review (QiaoChui) ☳**
+      return `**Phase 2 - Review (QiaoChui) **
 
-1. Call \`qiaochui_review\` to review the draft at \`${draftPath}\`
+1. Call \`qiaochui-review\` to review the draft at \`${draftPath}\`
 
 2. If verdict is "APPROVED":
-   - Call \`qiaochui_decompose\` to create the execution plan
-   - Say "PLAN_READY" and present the plan
+   - Call \`qiaochui-decompose\` to create the execution plan
 
 3. If verdict is "REVISE":
-   - Tell me what needs to be fixed
-   - Wait for me to update the draft
+   - Report what needs to be fixed
+   - Wait for draft update
    - Re-review after update`;
     }
 
-    return `**Phase 2 - Review (QiaoChui) ☳**
+    return `**Phase 2 - Review (QiaoChui) **
 
-1. Call \`qiaochui_review\` to review the draft at \`${draftPath}\`
+1. Call \`qiaochui-review\` to review the draft
 
-2. Present the review results to me
+2. Present the review results
 
-3. If I approve, call \`qiaochui_decompose\` and say "PLAN_READY"`;
+3. If approved, call \`qiaochui-decompose\``;
   }
 
   /**
@@ -130,47 +127,46 @@ Create the architectural design for: "${request}"
 📋 Execution plan created at: \`${planPath}\`
 
 Review the plan and:
-- **APPROVE**: Say "/fuxi-approve" to proceed with execution
-- **MODIFY**: Tell me what to change, then I'll update the plan
-- **REJECT**: Say "/fuxi-reject" to stop
+- **APPROVE**: Use \`fuxi-plan <score>\` to proceed (score > 80)
+- **MODIFY**: Update the plan
+- **REJECT**: Use \`fuxi-end\` to stop
 
-The plan lists all tasks with dependencies. I'll execute them in order.`;
+The plan lists all tasks with dependencies.`;
   }
 
   /**
    * Generate steer message for Execute phase
    */
   generateExecutePhaseMessage(planPath: string): string {
-    return `**Phase 3 - Execute (LuBan) ☴**
+    return `**Phase 3 - Execute (LuBan) **
 
 Execute tasks from the plan: \`${planPath}\`
 
-For each task:
-1. Call \`luban_execute_task\` with task details
-2. Implement using TDD (RED → GREEN → REFACTOR)
-3. Report progress
+1. Call \`luban-execute-task\` for single task
+2. Call \`luban-execute-all\` for all tasks
+3. Use TDD: RED → GREEN → REFACTOR
 
 Tasks will run in parallel when dependencies allow.
 
-Say "EXECUTION_COMPLETE" when all tasks are done`;
+Run \`luban-execute-all\` to execute all tasks`;
   }
 
   /**
    * Generate steer message for Audit phase
    */
   generateAuditPhaseMessage(): string {
-    return `**Phase 4 - Audit (GaoYao) ☲**
+    return `**Phase 4 - Audit (GaoYao) **
 
-1. Call \`gaoyao_review\` for quality audit (review_mode: "full")
+1. Call \`gaoyao-review\` for quality audit (mode: "full")
 
-2. Call \`gaoyao_check_security\` to scan for vulnerabilities
+2. Call \`gaoyao-check-security\` to scan for vulnerabilities
 
 3. Present the final verdict:
    - **PASS**: All checks passed 🎉
    - **NEEDS_CHANGES**: Issues found, fix required
    - **REJECTED**: Fundamental problems
 
-Say "AUDIT_COMPLETE" with the final verdict`;
+Use \`fuxi-end\` to archive when complete`;
   }
 
   /**
@@ -188,7 +184,7 @@ Say "AUDIT_COMPLETE" with the final verdict`;
 
 All phases completed successfully. The implementation is ready!
 
-Use \`/fuxi\` to start a new workflow, or \`/fuxi-status\` to review this one.`;
+Use \`fuxi-start\` to start a new workflow, or \`fuxi-get-status\` to review this one.`;
   }
 
   /**
@@ -227,11 +223,11 @@ Use \`/fuxi\` to start a new workflow, or \`/fuxi-status\` to review this one.`;
   updateStatus(phase: Phase, progress?: { completed: number; total: number }): void {
     const phaseLabels: Record<Phase, string> = {
       idle: "⏸️ Idle",
-      design: "☰ Design",
-      review: "☳ Review",
+      design: " Design",
+      review: " Review",
       plan: "📋 Plan",
-      execute: "☴ Execute",
-      audit: "☲ Audit",
+      execute: " Execute",
+      audit: " Audit",
       complete: "✅ Complete",
     };
 

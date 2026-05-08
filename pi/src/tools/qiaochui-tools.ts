@@ -1,7 +1,21 @@
 /**
- * QiaoChui Tools - Review and decomposition phase tools
- * Translates MDD design into technical specifications and execution plans
+ * QiaoChui Tools (巧倕) - Technical Expert 
+ * 
+ * Translates MDD design into technical specifications and execution plans.
  * Files are saved to .sages/workspace/
+ * 
+ * Review Mode Rules:
+ * - ✅ Read draft.md
+ * - ❌ No file modifications during review
+ * 
+ * Score Thresholds:
+ * - > 80: ✅ Can proceed to plan
+ * - 50-80: ⚠️ Revise draft
+ * - < 50: ❌ Major gaps
+ * 
+ * Prohibited:
+ * - ❌ Decompose without review
+ * - ❌ Decompose if score ≤ 80
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -46,12 +60,19 @@ interface DeepReviewResult {
 }
 
 export function registerQiaoChuiTools(pi: ExtensionAPI): void {
+  /**
+   * qiaochui_review - Review draft for technical feasibility
+   * Review Mode (Read-Only): Only read draft.md
+   * 
+   * Process: Validate structure → Analyze MDD planes → Identify risks → Calculate score
+   * Score thresholds: >80 APPROVED, 50-80 REVISE, <50 REJECTED
+   */
   pi.registerTool({
     name: "qiaochui_review",
     label: "Review Draft",
-    description: "Review design drafts for technical feasibility (MDD-aligned plane review)",
+    description: "Review draft for technical feasibility (MDD-aligned plane review). Validates structure, analyzes planes, identifies risks, calculates score (0-100). Verdict: APPROVED/REVISE/REJECTED.",
     parameters: Type.Object({
-      draft_path: Type.String({ description: "Path to the draft file (default: .sages/workspace/draft.md)" }),
+      draft_path: Type.Optional(Type.String({ description: "Path to draft.md (default: .sages/workspace/draft.md)" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;
@@ -118,15 +139,20 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
     },
   });
 
+  /**
+   * qiaochui_decompose - Decompose approved design into tasks
+   * Prerequisites: qiaochui_review completed, score > 80
+   * Creates: plan.md (task descriptions), execution.yaml (task config with dependencies)
+   */
   pi.registerTool({
     name: "qiaochui_decompose",
     label: "Decompose",
-    description: "Decompose approved design into executable tasks with MDD plane classification (saves to .sages/workspace/)",
+    description: "Decompose design into tasks. Creates plan.md and execution.yaml with MDD plane classification, priorities, dependencies.",
     parameters: Type.Object({
-      draft_path: Type.Optional(Type.String({ description: "Draft path (default: .sages/workspace/draft.md)" })),
-      max_tasks: Type.Optional(Type.Number({ description: "Max tasks to generate (default: 10)" })),
+      draft_path: Type.Optional(Type.String({ description: "Path to draft.md (default: .sages/workspace/draft.md)" })),
+      max_tasks: Type.Optional(Type.Number({ description: "Maximum number of tasks to generate (default: 10, max: 20)" })),
       use_subagent: Type.Optional(Type.Boolean({ description: "Use isolated subagent mode for parallel execution (default: true)" })),
-      max_parallel: Type.Optional(Type.Number({ description: "Max parallel subagents (default: 3)" })),
+      max_parallel: Type.Optional(Type.Number({ description: "Maximum parallel subagents (default: 3)" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;

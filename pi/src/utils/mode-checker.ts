@@ -1,11 +1,11 @@
 /**
- * ModeChecker - Phase-based file restrictions for Fuxi workflow
+ * ModeChecker - Phase-based file restrictions for Four Sages workflow
  * 
- * Based on desc.md:
- * - design: read-only, only draft.md
- * - plan: read-only, only plan.md and execution.yaml
- * - implement: writeable, all files
- * - review: read-only, only report-{time}.md
+ * Phase modes based on skills:
+ * - design: read-only, only draft.md (Fuxi)
+ * - plan: read-only, plan.md, execution.yaml (QiaoChui)
+ * - implement: writeable, all files (LuBan)
+ * - review: read-only, audit.md (GaoYao)
  */
 
 export interface ModeInfo {
@@ -15,13 +15,13 @@ export interface ModeInfo {
 }
 
 /**
- * Allowed files per phase as per desc.md
+ * Allowed files per phase (from skills)
  */
 const PHASE_ALLOWED_FILES: Record<string, string[]> = {
   design: ["draft.md"],
   plan: ["plan.md", "execution.yaml"],
   implement: ["*"],  // all files allowed
-  review: ["report-{time}.md"],
+  review: ["audit.md"],
 };
 
 /**
@@ -47,10 +47,10 @@ export function checkWritePermission(phase: string, filePath: string): boolean {
     return true;
   }
 
-  // Check for pattern match (e.g., report-{time}.md)
+  // Check for pattern match (e.g., audit-{timestamp}.md)
   for (const pattern of allowedFiles) {
-    if (pattern.includes("{time}")) {
-      const regex = new RegExp("^report-.*\\.md$");
+    if (pattern.includes("{")) {
+      const regex = new RegExp("^audit-.*\\.md$");
       if (regex.test(fileName)) {
         return true;
       }
@@ -79,10 +79,10 @@ export function getModeInfo(phase: string): ModeInfo {
  */
 function getModeDescription(phase: string): string {
   const descriptions: Record<string, string> = {
-    design: "Only modify: draft.md. Read-only for all other files.",
-    plan: "Only modify: plan.md, execution.yaml. Read-only for all other files.",
-    implement: "All files allowed. Follow TDD: RED → GREEN → REFACTOR.",
-    review: "Only modify: report-{time}.md. Read-only for all other files.",
+    design: "Fuxi: Only modify draft.md. Read-only for all other files.",
+    plan: "QiaoChui: Only modify plan.md, execution.yaml. Read-only for all other files.",
+    implement: "LuBan: All files allowed. Follow TDD: RED → GREEN → REFACTOR.",
+    review: "GaoYao: Only modify audit.md. Read-only for all other files.",
     idle: "No active workflow. No file modifications allowed.",
     complete: "Workflow complete. No further modifications.",
   };
@@ -97,10 +97,10 @@ export function getModeIndicator(phase: string): string {
   const info = getModeInfo(phase);
   
   const phaseEmoji: Record<string, string> = {
-    design: "☰",
+    design: "",
     plan: "📋",
-    implement: "☴",
-    review: "☲",
+    implement: "",
+    review: "",
     idle: "⏸️",
     complete: "✅",
   };

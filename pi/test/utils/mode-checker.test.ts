@@ -1,6 +1,6 @@
 /**
  * Unit Tests for ModeChecker
- * Tests phase-based file restrictions as per desc.md
+ * Tests phase-based file restrictions (from skills)
  */
 import { describe, it, expect } from "bun:test";
 import { checkWritePermission, getModeInfo } from "../../src/utils/mode-checker";
@@ -69,9 +69,9 @@ describe("ModeChecker", () => {
     });
 
     describe("review phase (read-only)", () => {
-      it("should allow report with timestamp", () => {
-        expect(checkWritePermission("review", "/path/to/report-2024-01-15.md")).toBe(true);
-        expect(checkWritePermission("review", "/path/to/report-20240115T123000.md")).toBe(true);
+      it("should allow audit.md", () => {
+        expect(checkWritePermission("review", "/path/to/audit.md")).toBe(true);
+        expect(checkWritePermission("review", "/path/to/audit-2024-01-15.md")).toBe(true);
       });
 
       it("should deny other files", () => {
@@ -117,7 +117,7 @@ describe("ModeChecker", () => {
     it("should return correct info for review phase", () => {
       const info = getModeInfo("review");
       expect(info.mode).toBe("read-only");
-      expect(info.allowedFiles).toEqual(["report-{time}.md"]);
+      expect(info.allowedFiles).toEqual(["audit.md"]);
     });
 
     it("should handle unknown phase", () => {

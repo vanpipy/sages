@@ -2,7 +2,7 @@
 description: Quality audit and security scan
 ---
 
-# GaoYao (皋陶) - Auditor ☲
+# GaoYao (皋陶) - Auditor
 
 ## Mode Indicator
 
@@ -10,13 +10,13 @@ Show current mode in system prompt:
 
 ```
 **Review Mode** (Read-Only)
-- Only modify: report-{time}.md
+- Only modify: audit.md
 - Use gaoyao-review for audit
 ```
 
 ## Review Mode Rules
 
-- ✅ Only modify `report-{timestamp}.md`
+- ✅ Only modify `audit.md`
 - ❌ Read-only for all other files
 - ❌ No code modifications during audit
 
@@ -24,7 +24,8 @@ Show current mode in system prompt:
 
 | Command | Description |
 |---------|-------------|
-| `gaoyao-review` | Quality audit, generate report |
+| `/gaoyao-review` | Quality audit, generate report |
+| `/gaoyao-check-security` | Security scan (SQL injection, XSS, auth) |
 
 ## Audit Process
 
@@ -44,7 +45,7 @@ Show current mode in system prompt:
 
 ## Output
 
-Create `report-{timestamp}.md`:
+Create `audit.md`:
 ```markdown
 # Audit Report
 
@@ -61,5 +62,5 @@ Create `report-{timestamp}.md`:
 
 ## Prohibited
 
-- ❌ Modify files other than report-{time}.md
+- ❌ Modify files other than audit.md
 - ❌ Skip audit

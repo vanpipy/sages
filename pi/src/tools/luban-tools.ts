@@ -1,14 +1,21 @@
 /**
- * LuBan Tools - TDD execution with Subagent support
- * Implements RED → GREEN → REFACTOR cycle with commit support
+ * LuBan Tools (鲁班) - Engineer 
  * 
- * Workflow:
- * 1. Acquire file locks
- * 2. RED: Write failing test
- * 3. GREEN: Write minimal code to pass
- * 4. REFACTOR: Improve code structure
- * 5. Commit code
- * 6. Release file locks
+ * TDD execution with Subagent support.
+ * 
+ * Implement Mode Rules:
+ * - ✅ All files writeable
+ * - ✅ Follow TDD cycle
+ * - ❌ Must follow RED → GREEN → REFACTOR
+ * 
+ * TDD Cycle:
+ * 1. RED: Write failing test, run test, confirm failure
+ * 2. GREEN: Write minimal code, run test, confirm pass
+ * 3. REFACTOR: Clean code structure, keep tests passing, commit
+ * 
+ * Prohibited:
+ * - ❌ Skip RED phase
+ * - ❌ Write code without tests
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -142,16 +149,23 @@ function parseSimpleYaml(content: string): { tasks: Task[]; settings: any } | nu
 }
 
 export function registerLuBanTools(pi: ExtensionAPI): void {
+  /**
+   * luban_execute_task - Execute single task using TDD cycle
+   * Implement Mode (Writeable): All files allowed
+   * 
+   * TDD Cycle: RED (write test) → GREEN (make pass) → REFACTOR (improve)
+   * Auto-commits after successful execution
+   */
   pi.registerTool({
     name: "luban_execute_task",
     label: "Execute Task (TDD)",
-    description: "Execute a single task using TDD cycle (RED → GREEN → REFACTOR) with commit",
+    description: "Execute single task using TDD: RED → GREEN → REFACTOR. Writes test first, then minimal code. Auto-commits after success.",
     parameters: Type.Object({
-      task_id: Type.String({ description: "Task ID from the plan (e.g., T1, T2)" }),
-      task_description: Type.String({ description: "What this task does" }),
-      files: Type.Array(Type.String(), { description: "Source files to work on" }),
-      test_files: Type.Optional(Type.Array(Type.String(), { description: "Test files" })),
-      test_command: Type.Optional(Type.String({ description: "Command to run tests (default: bun test)" })),
+      task_id: Type.String({ description: "Task ID from execution.yaml (e.g., T1, T2)" }),
+      task_description: Type.String({ description: "Task description from the plan" }),
+      files: Type.Array(Type.String(), { description: "Source files to work on (e.g., [\"src/index.ts\"])" }),
+      test_files: Type.Optional(Type.Array(Type.String(), { description: "Test files to create (auto-derived from files if not provided)" })),
+      test_command: Type.Optional(Type.String({ description: "Test command to run (default: bun test)" })),
       commit: Type.Optional(Type.Boolean({ description: "Commit after successful execution (default: true)" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -235,17 +249,21 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
     },
   });
 
+  /**
+   * luban_execute_all - Execute all tasks from execution.yaml
+   * Sorts by dependencies, executes in parallel (max 3), auto-commits
+   */
   pi.registerTool({
     name: "luban_execute_all",
     label: "Execute All Tasks",
-    description: "Execute all tasks using TDD with RED → GREEN → REFACTOR cycle and auto-commit (reads from execution.yaml)",
+    description: "Execute all tasks from execution.yaml with parallel TDD. Sorts by dependencies, max 3 parallel, auto-commits each task.",
     parameters: Type.Object({
       tasks: Type.Optional(Type.Array(Type.Object({
-        id: Type.String(),
-        description: Type.String(),
-        priority: Type.Optional(Type.String()),
-        depends_on: Type.Optional(Type.Array(Type.String())),
-        files: Type.Optional(Type.Array(Type.String())),
+        id: Type.String({ description: "Task ID (e.g., T1, T2)" }),
+        description: Type.String({ description: "Task description" }),
+        priority: Type.Optional(Type.String({ description: "Priority: high, medium, low" })),
+        depends_on: Type.Optional(Type.Array(Type.String(), { description: "Task IDs this depends on" })),
+        files: Type.Optional(Type.Array(Type.String(), { description: "Files to work on" })),
       }))),
       execution_yaml: Type.Optional(Type.String({ description: "Path to execution.yaml (default: .sages/workspace/execution.yaml)" })),
       commit: Type.Optional(Type.Boolean({ description: "Commit each task after success (default: true)" })),
@@ -379,10 +397,14 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
     },
   });
 
+  /**
+   * luban_get_status - Get TDD execution status with task progress
+   * Returns: status, total_tasks, tasks details
+   */
   pi.registerTool({
     name: "luban_get_status",
     label: "Get Execution Status",
-    description: "Get TDD execution status with task progress and commit history",
+    description: "Get TDD execution status with task progress. Returns status, total_tasks, task details from execution.yaml.",
     parameters: Type.Object({
       plan_name: Type.String({ description: "Plan name" }),
     }),

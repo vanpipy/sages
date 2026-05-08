@@ -1,7 +1,7 @@
 /**
  * Unit Tests for FuxiTools
- * Tests commands as per desc.md:
- * - /fuxi-start, /fuxi-request, /fuxi-plan, /fuxi-recover, /fuxi-end
+ * Tests commands from skills:
+ * - fuxi-start, fuxi-request, fuxi-plan, fuxi-recover, fuxi-end, fuxi-get-status
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
@@ -18,7 +18,7 @@ interface TestWorkflowState {
   score?: number;
 }
 
-describe("FuxiTools Commands (desc.md)", () => {
+describe("FuxiTools Commands (skills)", () => {
   let testDir: string;
 
   beforeEach(() => {
@@ -158,7 +158,7 @@ describe("FuxiTools Commands (desc.md)", () => {
     });
   });
 
-  describe("Phase modes (desc.md)", () => {
+  describe("Phase modes (skills)", () => {
     it("should enforce design phase read-only (only draft.md)", () => {
       const allowedFiles = ["draft.md"];
       const file1 = "draft.md";
@@ -185,11 +185,11 @@ describe("FuxiTools Commands (desc.md)", () => {
       expect(true).toBe(true); // Wildcard means all allowed
     });
 
-    it("should enforce review phase read-only (report-{time}.md)", () => {
-      const pattern = /^report-.*\.md$/;
+    it("should enforce review phase read-only (audit.md)", () => {
+      const pattern = /^audit-.*\.md$/;
       
-      expect(pattern.test("report-2024-01-15.md")).toBe(true);
-      expect(pattern.test("report-20240115T123000.md")).toBe(true);
+      expect(pattern.test("audit.md")).toBe(true);
+      expect(pattern.test("audit-2024-01-15.md")).toBe(true);
       expect(pattern.test("draft.md")).toBe(false);
     });
   });
@@ -212,7 +212,7 @@ describe("FuxiTools Commands (desc.md)", () => {
   });
 });
 
-describe("Workflow state transitions (desc.md)", () => {
+describe("Workflow state transitions (skills)", () => {
   it("should follow design → plan → implement → review flow", () => {
     const phases = ["design", "plan", "implement", "review", "complete"];
     

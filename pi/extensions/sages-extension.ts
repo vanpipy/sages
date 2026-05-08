@@ -1,424 +1,321 @@
 /**
- * Four Sages Agents - Pi Extension
+ * Four Sages Agents - pi Extension
  * 
- * Features:
- * - Auto-proceed after valid review (except plan)
- * - Real TDD execution
- * - Parallel task execution
- * - Progress tracking
- * - Workspace/Archive management
+ * Registers chat commands that map to MCP tools:
+ * - fuxi-* commands ( Design phase)
+ * - qiaochui-* commands ( Review phase)
+ * - luban-* commands ( Execute phase)
+ * - gaoyao-* commands ( Audit phase)
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { registerFuxiTools, registerQiaoChuiTools, registerLuBanTools, registerGaoYaoTools } from "../dist/tools/index.js";
-import { StateManager, type WorkflowState, type Task } from "../dist/state/state-manager.js";
-import { WorkflowOrchestrator } from "../dist/orchestrator/index.js";
-import { TaskExecutor } from "../dist/executor/index.js";
-
-// =============================================================================
-// Extension State
-// =============================================================================
-
-let currentStateManager: StateManager | null = null;
-let currentOrchestrator: WorkflowOrchestrator | null = null;
-let currentTaskExecutor: TaskExecutor | null = null;
-
-function getStateManager(pi: ExtensionAPI): StateManager {
-  if (!currentStateManager) {
-    const cwd = pi.getContext()?.cwd || process.cwd();
-    currentStateManager = new StateManager(cwd);
-  }
-  return currentStateManager;
-}
-
-function getOrchestrator(pi: ExtensionAPI): WorkflowOrchestrator {
-  if (!currentOrchestrator) {
-    const stateManager = getStateManager(pi);
-    currentOrchestrator = new WorkflowOrchestrator(pi, stateManager);
-  }
-  return currentOrchestrator;
-}
-
-// =============================================================================
-// Progress Tracking
-// =============================================================================
-
-function updateProgress(pi: ExtensionAPI, completed: number, total: number): void {
-  const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const state = getStateManager(pi).getState();
-  const phase = state?.phase || "idle";
-  
-  pi.getContext()?.ui?.setStatus("sages", `☴ ${phase} ${completed}/${total} (${percentage}%)`);
-}
-
-// =============================================================================
-// Extension Factory
-// =============================================================================
+import { 
+  registerFuxiTools, 
+  registerQiaoChuiTools, 
+  registerLuBanTools, 
+  registerGaoYaoTools 
+} from "../dist/tools/index.js";
 
 export default function (pi: ExtensionAPI) {
-  // Register all tools
+  // Register all MCP tools
   registerFuxiTools(pi);
   registerQiaoChuiTools(pi);
   registerLuBanTools(pi);
   registerGaoYaoTools(pi);
 
-  // =============================================================================
-  // /fuxi command - Start workflow
-  // =============================================================================
-  pi.registerCommand("fuxi", {
-    description: "Start Four Sages Agents automated workflow",
+  // ===========================================================================
+  // FUXI Commands ( Design Phase)
+  // ===========================================================================
+
+  /**
+   * fuxi-start - Start workflow, set design phase
+   * Usage: /fuxi-start <plan-name> [request description]
+   */
+  pi.registerCommand("fuxi-start", {
+    description: "Start workflow, set design phase in state.json",
+    handler: async (args, ctx) => {
+      const parts = (args || "").split(/\s+/);
+      const planName = parts[0] || "new-plan";
+      const request = parts.slice(1).join(" ") || "New feature request";
+
+      const result = await pi.callTool("fuxi_start", {
+        plan_name: planName,
+        request: request,
+      });
+
+      if (result?.isError) {
+        ctx.ui.notify("Failed to start workflow.", "error");
+      } else {
+        ctx.ui.notify(`🚀 Workflow started: ${planName}`, "success");
+        ctx.ui.setStatus("sages", " Designing");
+      }
+    },
+  });
+
+  /**
+   * fuxi-request - Create requirement draft
+   * Usage: /fuxi-request [request description]
+   */
+  pi.registerCommand("fuxi-request", {
+    description: "Create MDD design draft (draft.md) using Seven Planes analysis",
     handler: async (args, ctx) => {
       const request = args || "New feature request";
-      const planName = request.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30) || "plan";
 
-      // Initialize state
-      const stateManager = getStateManager(pi);
-      const existingState = stateManager.loadFromWorkspace();
+      const result = await pi.callTool("fuxi_request", {
+        request: request,
+      });
 
-      // Check for existing workflow
-      if (existingState) {
-        // Recover from existing workflow
-        if (args) {
-          existingState.request = args;
-          stateManager.save(existingState);
-        }
-        
-        currentOrchestrator = new WorkflowOrchestrator(pi, stateManager);
-        currentTaskExecutor = null;
-
-        ctx.ui.notify(`♻️ Recovering Four Sages: ${existingState.planName}`, "info");
-        ctx.ui.setStatus("sages", `${existingState.phase} (recovered)`);
-
-        pi.sendUserMessage(currentOrchestrator.generateRecoveryMessage(existingState), {
-          deliverAs: "steer",
-        });
+      if (result?.isError) {
+        ctx.ui.notify("Failed to create draft.", "error");
       } else {
-        // No existing workflow - create new
-        stateManager.create(planName, request);
-
-        // Initialize orchestrator
-        currentOrchestrator = new WorkflowOrchestrator(pi, stateManager);
-        currentTaskExecutor = null;
-
-        ctx.ui.notify(`🚀 Starting Four Sages: ${planName}`, "info");
-        ctx.ui.setStatus("sages", "☰ Designing...");
-
-        pi.sendUserMessage(currentOrchestrator.generateDesignPhaseMessage(request, planName), {
-          deliverAs: "steer",
-        });
+        ctx.ui.notify("📝 Draft created: .sages/workspace/draft.md", "success");
       }
     },
   });
 
-  // =============================================================================
-  // /fuxi-status command - Show progress
-  // =============================================================================
-  pi.registerCommand("fuxi-status", {
-    description: "Check Four Sages workflow status",
+  /**
+   * fuxi-plan - Transition to plan phase (only if score > 80)
+   * Usage: /fuxi-plan <score>
+   */
+  pi.registerCommand("fuxi-plan", {
+    description: "Transition to plan phase - only if score > 80",
     handler: async (args, ctx) => {
-      const stateManager = getStateManager(pi);
-      const state = stateManager.getState();
+      const score = parseInt(args) || 0;
 
-      if (!state) {
-        ctx.ui.notify("No active workflow. Use /fuxi to start.", "info");
-        return;
-      }
+      const result = await pi.callTool("fuxi_plan", {
+        score: score,
+      });
 
-      const progress = getProgress(state);
-      const statusMsg = buildStatusMessage(state, progress);
-      const workspace = stateManager.getWorkspaceFiles();
-
-      // Add workspace location
-      const workspaceInfo = [
-        "",
-        "",
-        `📁 **Workspace:** \`.sages/workspace/\``,
-        `- draft: ${workspace.draft ? "✅" : "❌"}`,
-        `- plan: ${workspace.plan ? "✅" : "❌"}`,
-        `- tasks: ${workspace.tasks ? "✅" : "❌"}`,
-        `- audit: ${workspace.audit ? "✅" : "❌"}`,
-      ].join("\n");
-
-      ctx.ui.notify(statusMsg + workspaceInfo, "info");
-    },
-  });
-
-  // =============================================================================
-  // /fuxi-approve command - Proceed to next phase
-  // =============================================================================
-  pi.registerCommand("fuxi-approve", {
-    description: "Approve current phase and continue",
-    handler: async (args, ctx) => {
-      const stateManager = getStateManager(pi);
-      const orchestrator = getOrchestrator(pi);
-      const state = stateManager.getState();
-
-      if (!state) {
-        ctx.ui.notify("No active workflow. Use /fuxi to start.", "warn");
-        return;
-      }
-
-      switch (state.phase) {
-        case "design":
-          stateManager.updatePhase("review");
-          ctx.ui.setStatus("sages", "☳ Reviewing...");
-          pi.sendUserMessage(orchestrator.generateReviewPhaseMessage(".sages/workspace/draft.md"), {
-            deliverAs: "steer",
-          });
-          break;
-
-        case "review":
-          stateManager.updatePhase("plan");
-          orchestrator.approvePlan();
-          ctx.ui.setStatus("sages", "📋 Review Plan");
-          pi.sendUserMessage(orchestrator.generatePlanPhaseMessage(".sages/workspace/plan.md"), {
-            deliverAs: "steer",
-          });
-          break;
-
-        case "execute":
-          stateManager.updatePhase("execute");
-          ctx.ui.setStatus("sages", "☴ Executing...");
-          
-          if (state.tasks && state.tasks.length > 0) {
-            currentTaskExecutor = new TaskExecutor(state.tasks, 3, ctx.cwd);
-          }
-          
-          pi.sendUserMessage(orchestrator.generateExecutePhaseMessage(".sages/workspace/execution.yaml"), {
-            deliverAs: "steer",
-          });
-          break;
-
-        case "audit":
-          stateManager.complete();
-          ctx.ui.setStatus("sages", "✅ Complete");
-          ctx.ui.notify("🎉 Four Sages workflow complete! Use /fuxi-archive to save.", "success");
-          pi.sendUserMessage(orchestrator.generateCompletionMessage(), {
-            deliverAs: "steer",
-          });
-          break;
-
-        default:
-          ctx.ui.notify(`Workflow in phase: ${state.phase}`, "info");
-      }
-    },
-  });
-
-  // =============================================================================
-  // /fuxi-reject command - Stop workflow
-  // =============================================================================
-  pi.registerCommand("fuxi-reject", {
-    description: "Reject and stop the workflow",
-    handler: async (args, ctx) => {
-      const stateManager = getStateManager(pi);
-      stateManager.clearWorkspace();
-      currentStateManager = null;
-      currentOrchestrator = null;
-      currentTaskExecutor = null;
-      ctx.ui.setStatus("sages", "❌ Stopped");
-      ctx.ui.notify("Workflow stopped.", "warn");
-    },
-  });
-
-  // =============================================================================
-  // /fuxi-execute command - Execute all tasks
-  // =============================================================================
-  pi.registerCommand("fuxi-execute", {
-    description: "Execute all tasks with parallel TDD",
-    handler: async (args, ctx) => {
-      const stateManager = getStateManager(pi);
-      const state = stateManager.getState();
-
-      if (!state || state.phase !== "execute") {
-        ctx.ui.notify("Workflow not in execution phase.", "warn");
-        return;
-      }
-
-      if (!state.tasks || state.tasks.length === 0) {
-        ctx.ui.notify("No tasks to execute.", "warn");
-        return;
-      }
-
-      ctx.ui.notify(`Executing ${state.tasks.length} tasks...`, "info");
-
-      const executor = new TaskExecutor(state.tasks, 3, ctx.cwd);
-      currentTaskExecutor = executor;
-
-      const results = await executor.executeAll(
-        (task) => {
-          ctx.ui.setStatus("sages", `☴ ${task.id}...`);
-        },
-        (task, result) => {
-          stateManager.updateTaskStatus(task.id, result.success ? "completed" : "failed", result);
-          updateProgress(pi, executor.getProgress().completed, executor.getProgress().total);
-        },
-        (task, error) => {
-          stateManager.updateTaskStatus(task.id, "failed", { error: String(error) });
-          ctx.ui.notify(`Task ${task.id} failed: ${error}`, "error");
-        }
-      );
-
-      const successCount = Array.from(results.values()).filter(r => r.success).length;
-      const totalCount = results.size;
-
-      ctx.ui.notify(
-        `Execution complete: ${successCount}/${totalCount} tasks succeeded`,
-        successCount === totalCount ? "success" : "warn"
-      );
-    },
-  });
-
-  // =============================================================================
-  // /fuxi-archive command - Archive current workflow
-  // =============================================================================
-  pi.registerCommand("fuxi-archive", {
-    description: "Archive current workflow to .sages/archive/",
-    handler: async (args, ctx) => {
-      const stateManager = getStateManager(pi);
-      const state = stateManager.getState();
-
-      if (!state) {
-        ctx.ui.notify("No active workflow to archive.", "warn");
-        return;
-      }
-
-      const archivePath = stateManager.archive();
-      
-      if (archivePath) {
-        ctx.ui.notify(`✅ Workflow archived to \`${archivePath}\``, "success");
+      if (result?.isError) {
+        ctx.ui.notify(`Score ${score} <= 80. Plan can only start when score > 80.`, "warn");
       } else {
-        ctx.ui.notify("Failed to archive workflow.", "error");
+        ctx.ui.notify(`📋 Plan phase started (score: ${score})`, "success");
+        ctx.ui.setStatus("sages", "📋 Planning");
       }
     },
   });
 
-  // =============================================================================
-  // /fuxi-archives command - List archived workflows
-  // =============================================================================
-  pi.registerCommand("fuxi-archives", {
-    description: "List archived workflows",
+  /**
+   * fuxi-recover - Recover workflow from state.json
+   * Usage: /fuxi-recover
+   */
+  pi.registerCommand("fuxi-recover", {
+    description: "Recover workflow from state.json",
     handler: async (args, ctx) => {
-      const stateManager = getStateManager(pi);
-      const plans = stateManager.listArchivedPlans();
+      const result = await pi.callTool("fuxi_recover", {});
 
-      if (plans.length === 0) {
-        ctx.ui.notify("No archived workflows.", "info");
-        return;
-      }
-
-      let message = "**📦 Archived Workflows:**\n\n";
-      
-      for (const planName of plans) {
-        const archives = stateManager.listArchives(planName);
-        message += `**${planName}** (${archives.length} archived)\n`;
-        for (const archive of archives.slice(0, 3)) { // Show last 3
-          const timestamp = archive.timestamp.replace(/-/g, ":").slice(0, 19);
-          message += `  - ${timestamp}\n`;
-        }
-        if (archives.length > 3) {
-          message += `  ... and ${archives.length - 3} more\n`;
-        }
-        message += "\n";
-      }
-
-      message += "\nUse `/fuxi-restore {plan} {timestamp}` to restore.";
-
-      ctx.ui.notify(message, "info");
-    },
-  });
-
-  // =============================================================================
-  // /fuxi-restore command - Restore an archived workflow
-  // =============================================================================
-  pi.registerCommand("fuxi-restore", {
-    description: "Restore an archived workflow",
-    handler: async (args, ctx) => {
-      // Parse args: "planName timestamp"
-      const parts = (args || "").trim().split(/\s+/);
-      if (parts.length < 2) {
-        ctx.ui.notify("Usage: /fuxi-restore {planName} {timestamp}", "warn");
-        return;
-      }
-
-      const [planName, ...timestampParts] = parts;
-      const timestamp = timestampParts.join("-");
-
-      const stateManager = getStateManager(pi);
-      const success = stateManager.restore(planName, timestamp);
-
-      if (success) {
-        const state = stateManager.getState();
-        ctx.ui.notify(
-          `✅ Restored workflow: ${planName}\nPhase: ${state?.phase || "unknown"}`,
-          "success"
-        );
+      if (result?.isError) {
+        ctx.ui.notify("No workflow state found. Use fuxi-start to start a new workflow.", "info");
       } else {
-        ctx.ui.notify("Failed to restore workflow. Check plan name and timestamp.", "error");
+        ctx.ui.notify("♻️ Workflow recovered.", "success");
+        ctx.ui.setStatus("sages", " Ready (recovered)");
       }
     },
   });
 
-  // =============================================================================
-  // /fuxi-cleanup command - Clean up old archives
-  // =============================================================================
-  pi.registerCommand("fuxi-cleanup", {
-    description: "Clean up old archives (older than N days)",
+  /**
+   * fuxi-end - End workflow, archive, and set end status
+   * Usage: /fuxi-end
+   */
+  pi.registerCommand("fuxi-end", {
+    description: "End workflow, archive, and set end status",
     handler: async (args, ctx) => {
-      const days = parseInt(args) || 30;
-      ctx.ui.notify(`Cleanup not implemented yet. Would delete archives older than ${days} days.`, "info");
+      const result = await pi.callTool("fuxi_end", {});
+
+      if (result?.isError) {
+        ctx.ui.notify("No active workflow to end.", "warn");
+      } else {
+        ctx.ui.notify("✅ Workflow ended and archived.", "success");
+        ctx.ui.setStatus("sages", "📦 Archived");
+      }
     },
   });
 
-  // =============================================================================
-  // Session events
-  // =============================================================================
-  pi.on("session_start", async (_event, ctx) => {
-    currentStateManager = new StateManager(ctx.cwd);
-    currentOrchestrator = null;
-    currentTaskExecutor = null;
+  /**
+   * fuxi-get-status - View current status
+   * Usage: /fuxi-get-status
+   */
+  pi.registerCommand("fuxi-get-status", {
+    description: "View current workflow status",
+    handler: async (args, ctx) => {
+      const result = await pi.callTool("fuxi_get_status", {});
+
+      if (result?.isError) {
+        ctx.ui.notify("No active workflow.", "info");
+      } else {
+        ctx.ui.notify("Status retrieved.", "info");
+      }
+    },
   });
-}
 
-// =============================================================================
-// Helper Functions
-// =============================================================================
+  // ===========================================================================
+  // QIAOCHUI Commands ( Review Phase)
+  // ===========================================================================
 
-function getProgress(state: WorkflowState): { completed: number; total: number } {
-  if (!state.tasks || state.tasks.length === 0) {
-    return { completed: 0, total: 0 };
-  }
-  const completed = state.tasks.filter(t => t.status === "completed").length;
-  return { completed, total: state.tasks.length };
-}
+  /**
+   * qiaochui-review - Review draft, set score in state.json
+   * Usage: /qiaochui-review [draft-path]
+   */
+  pi.registerCommand("qiaochui-review", {
+    description: "Review draft for technical feasibility - analyzes MDD planes, calculates score (0-100)",
+    handler: async (args, ctx) => {
+      const draftPath = args || ".sages/workspace/draft.md";
 
-function buildStatusMessage(state: WorkflowState, progress: { completed: number; total: number }): string {
-  const phaseEmoji: Record<string, string> = {
-    design: "☰",
-    review: "☳",
-    plan: "📋",
-    execute: "☴",
-    audit: "☲",
-    complete: "✅",
-  };
+      const result = await pi.callTool("qiaochui_review", {
+        draft_path: draftPath,
+      });
 
-  const lines = [
-    `**Workflow Status**`,
-    ``,
-    `**Phase:** ${phaseEmoji[state.phase] || "⏸️"} ${state.phase}`,
-    `**Plan:** ${state.planName}`,
-    `**Request:** ${state.request}`,
-    ``,
-  ];
+      if (result?.isError) {
+        ctx.ui.notify("Draft not found or review failed.", "error");
+      } else {
+        ctx.ui.notify(" Draft reviewed.", "success");
+        ctx.ui.setStatus("sages", " Reviewed");
+      }
+    },
+  });
 
-  if (state.tasks && state.tasks.length > 0) {
-    lines.push(`**Progress:** ${progress.completed}/${progress.total} tasks`);
-    lines.push(``);
-    lines.push(`**Tasks:**`);
-    for (const task of state.tasks) {
-      const statusIcon = task.status === "completed" ? "✅" : task.status === "failed" ? "❌" : task.status === "in_progress" ? "🔄" : "⏳";
-      lines.push(`  ${statusIcon} ${task.id}: ${task.description.slice(0, 50)}...`);
-    }
-  }
+  /**
+   * qiaochui-decompose - Create plan.md and execution.yaml
+   * Usage: /qiaochui-decompose
+   */
+  pi.registerCommand("qiaochui-decompose", {
+    description: "Decompose design into tasks - creates plan.md and execution.yaml",
+    handler: async (args, ctx) => {
+      const result = await pi.callTool("qiaochui_decompose", {});
 
-  return lines.join("\n");
+      if (result?.isError) {
+        ctx.ui.notify("Failed to decompose tasks.", "error");
+      } else {
+        ctx.ui.notify("📋 Tasks created: .sages/workspace/execution.yaml", "success");
+        ctx.ui.setStatus("sages", "📋 Tasks ready");
+      }
+    },
+  });
+
+  // ===========================================================================
+  // LUBAN Commands ( Execute Phase)
+  // ===========================================================================
+
+  /**
+   * luban-execute-task - Execute single task using TDD cycle
+   * Usage: /luban-execute-task <task-id> [description]
+   */
+  pi.registerCommand("luban-execute-task", {
+    description: "Execute single task using TDD: RED → GREEN → REFACTOR",
+    handler: async (args, ctx) => {
+      // Parse: "T1 description" or just use args as description
+      const parts = (args || "").match(/^([A-Z]\d+)?\s*(.*)$/);
+      const taskId = parts?.[1] || "T1";
+      const description = parts?.[2] || "Implement feature";
+
+      const result = await pi.callTool("luban_execute_task", {
+        task_id: taskId,
+        task_description: description,
+        files: ["src/"],
+      });
+
+      if (result?.isError) {
+        ctx.ui.notify(`Task ${taskId} failed.`, "error");
+      } else {
+        ctx.ui.notify(`✅ Task ${taskId} completed.`, "success");
+      }
+    },
+  });
+
+  /**
+   * luban-execute-all - Execute all tasks from execution.yaml
+   * Usage: /luban-execute-all
+   */
+  pi.registerCommand("luban-execute-all", {
+    description: "Execute all tasks from execution.yaml with parallel TDD",
+    handler: async (args, ctx) => {
+      const result = await pi.callTool("luban_execute_all", {
+        execution_yaml: ".sages/workspace/execution.yaml",
+      });
+
+      if (result?.isError) {
+        ctx.ui.notify("Execution failed.", "error");
+      } else {
+        ctx.ui.notify(" All tasks executed.", "success");
+        ctx.ui.setStatus("sages", " Execute complete");
+      }
+    },
+  });
+
+  /**
+   * luban-get-status - Get TDD execution status
+   * Usage: /luban-get-status [plan-name]
+   */
+  pi.registerCommand("luban-get-status", {
+    description: "Get TDD execution status with task progress",
+    handler: async (args, ctx) => {
+      const planName = args || "workflow";
+
+      const result = await pi.callTool("luban_get_status", {
+        plan_name: planName,
+      });
+
+      if (result?.isError) {
+        ctx.ui.notify("Failed to get status.", "info");
+      } else {
+        ctx.ui.notify("Status retrieved.", "info");
+      }
+    },
+  });
+
+  // ===========================================================================
+  // GAOYAO Commands ( Audit Phase)
+  // ===========================================================================
+
+  /**
+   * gaoyao-review - Quality audit, generate report
+   * Usage: /gaoyao-review [full|quick]
+   */
+  pi.registerCommand("gaoyao-review", {
+    description: "Quality audit using Xie Zhi methodology - generates report with verdict (PASS/NEEDS_CHANGES/REJECTED)",
+    handler: async (args, ctx) => {
+      const reviewMode = args || "full";
+
+      const result = await pi.callTool("gaoyao_review", {
+        plan_name: undefined,
+        review_mode: reviewMode,
+      });
+
+      if (result?.isError) {
+        ctx.ui.notify("Audit failed.", "error");
+      } else {
+        ctx.ui.notify(" Audit complete: .sages/workspace/audit.md", "success");
+        ctx.ui.setStatus("sages", " Audited");
+      }
+    },
+  });
+
+  /**
+   * gaoyao-check-security - Security scan
+   * Usage: /gaoyao-check-security [files...]
+   */
+  pi.registerCommand("gaoyao-check-security", {
+    description: "Security scan: SQL injection, XSS, auth, data exposure",
+    handler: async (args, ctx) => {
+      const files = (args || "src/").split(/\s+/);
+
+      const result = await pi.callTool("gaoyao_check_security", {
+        files: files,
+      });
+
+      if (result?.isError) {
+        ctx.ui.notify("Security scan failed.", "error");
+      } else {
+        ctx.ui.notify("🔒 Security scan complete.", "success");
+      }
+    },
+  });
+
+  // ===========================================================================
+  // Session Events
+  // ===========================================================================
+
+  pi.on("session_start", async (_event, context) => {
+    context.ui?.setStatus("sages", " Ready");
+  });
 }
