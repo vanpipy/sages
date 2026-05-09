@@ -1,11 +1,14 @@
 /**
  * Four Sages Agents - pi Extension
  * 
- * Registers chat commands that map to MCP tools:
+ * Registers chat commands that map to workflow tools:
  * - fuxi-* commands ( Design phase)
  * - qiaochui-* commands ( Review phase)
  * - luban-* commands ( Execute phase)
  * - gaoyao-* commands ( Audit phase)
+ * 
+ * The extension captures tool executors during registration and invokes them directly,
+ * avoiding the non-existent pi.callTool() method.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -16,12 +19,66 @@ import {
   registerGaoYaoTools 
 } from "../dist/tools/index.js";
 
+// Tool executor storage - populated during tool registration
+const toolExecutors: Map<string, Function> = new Map();
+
+/**
+ * Call a tool executor directly by name.
+ * This bypasses the non-existent pi.callTool() method.
+ */
+async function callToolDirect(
+  toolName: string,
+  params: Record<string, unknown>,
+  cwd: string
+): Promise<{ content: { type: string; text: string }[]; isError?: boolean; details?: unknown }> {
+  const executor = toolExecutors.get(toolName);
+  if (!executor) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({ success: false, error: `Tool ${toolName} not found` }) }],
+      isError: true,
+    };
+  }
+
+  try {
+    const result = await (executor as Function).call(null, 
+      `cmd-${Date.now()}`,
+      params,
+      undefined,
+      undefined,
+      { cwd }
+    );
+    return result;
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({ success: false, error: String(err) }) }],
+      isError: true,
+    };
+  }
+}
+
 export default function (pi: ExtensionAPI) {
-  // Register all MCP tools
+  // Intercept registerTool to capture executors before they are registered
+  const originalRegisterTool = pi.registerTool.bind(pi);
+  
+  // @ts-ignore - We're augmenting the API temporarily
+  pi.registerTool = function(tool: any) {
+    // Capture the execute function before registration
+    if (tool.name && tool.execute) {
+      toolExecutors.set(tool.name, tool.execute);
+    }
+    // Also register via original method so the tool is available to the LLM
+    return originalRegisterTool(tool);
+  };
+
+  // Register all tools (this captures the executors)
   registerFuxiTools(pi);
   registerQiaoChuiTools(pi);
   registerLuBanTools(pi);
   registerGaoYaoTools(pi);
+
+  // Restore original registerTool
+  // @ts-ignore
+  pi.registerTool = originalRegisterTool;
 
   // ===========================================================================
   // FUXI Commands ( Design Phase)
@@ -38,15 +95,15 @@ export default function (pi: ExtensionAPI) {
       const planName = parts[0] || "new-plan";
       const request = parts.slice(1).join(" ") || "New feature request";
 
-      const result = await pi.callTool("fuxi_start", {
+      const result = await callToolDirect("fuxi_start", {
         plan_name: planName,
         request: request,
-      });
+      }, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("Failed to start workflow.", "error");
       } else {
-        ctx.ui.notify(`🚀 Workflow started: ${planName}`, "success");
+        ctx.ui.notify(`🚀 Workflow started: ${planName}`, "info");
         ctx.ui.setStatus("sages", " Designing");
       }
     },
@@ -61,14 +118,14 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const request = args || "New feature request";
 
-      const result = await pi.callTool("fuxi_request", {
+      const result = await callToolDirect("fuxi_request", {
         request: request,
-      });
+      }, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("Failed to create draft.", "error");
       } else {
-        ctx.ui.notify("📝 Draft created: .sages/workspace/draft.md", "success");
+        ctx.ui.notify("📝 Draft created: .sages/workspace/draft.md", "info");
       }
     },
   });
@@ -82,14 +139,14 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const score = parseInt(args) || 0;
 
-      const result = await pi.callTool("fuxi_plan", {
+      const result = await callToolDirect("fuxi_plan", {
         score: score,
-      });
+      }, ctx.cwd);
 
       if (result?.isError) {
-        ctx.ui.notify(`Score ${score} <= 80. Plan can only start when score > 80.`, "warn");
+        ctx.ui.notify(`Score ${score} <= 80. Plan can only start when score > 80.`, "warning");
       } else {
-        ctx.ui.notify(`📋 Plan phase started (score: ${score})`, "success");
+        ctx.ui.notify(`📋 Plan phase started (score: ${score})`, "info");
         ctx.ui.setStatus("sages", "📋 Planning");
       }
     },
@@ -102,12 +159,12 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("fuxi-recover", {
     description: "Recover workflow from state.json",
     handler: async (args, ctx) => {
-      const result = await pi.callTool("fuxi_recover", {});
+      const result = await callToolDirect("fuxi_recover", {}, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("No workflow state found. Use fuxi-start to start a new workflow.", "info");
       } else {
-        ctx.ui.notify("♻️ Workflow recovered.", "success");
+        ctx.ui.notify("♻️ Workflow recovered.", "info");
         ctx.ui.setStatus("sages", " Ready (recovered)");
       }
     },
@@ -120,12 +177,12 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("fuxi-end", {
     description: "End workflow, archive, and set end status",
     handler: async (args, ctx) => {
-      const result = await pi.callTool("fuxi_end", {});
+      const result = await callToolDirect("fuxi_end", {}, ctx.cwd);
 
       if (result?.isError) {
-        ctx.ui.notify("No active workflow to end.", "warn");
+        ctx.ui.notify("No active workflow to end.", "warning");
       } else {
-        ctx.ui.notify("✅ Workflow ended and archived.", "success");
+        ctx.ui.notify("✅ Workflow ended and archived.", "info");
         ctx.ui.setStatus("sages", "📦 Archived");
       }
     },
@@ -138,7 +195,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("fuxi-get-status", {
     description: "View current workflow status",
     handler: async (args, ctx) => {
-      const result = await pi.callTool("fuxi_get_status", {});
+      const result = await callToolDirect("fuxi_get_status", {}, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("No active workflow.", "info");
@@ -161,14 +218,14 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const draftPath = args || ".sages/workspace/draft.md";
 
-      const result = await pi.callTool("qiaochui_review", {
+      const result = await callToolDirect("qiaochui_review", {
         draft_path: draftPath,
-      });
+      }, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("Draft not found or review failed.", "error");
       } else {
-        ctx.ui.notify(" Draft reviewed.", "success");
+        ctx.ui.notify("✅ Draft reviewed.", "info");
         ctx.ui.setStatus("sages", " Reviewed");
       }
     },
@@ -181,12 +238,12 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("qiaochui-decompose", {
     description: "Decompose design into tasks - creates plan.md and execution.yaml",
     handler: async (args, ctx) => {
-      const result = await pi.callTool("qiaochui_decompose", {});
+      const result = await callToolDirect("qiaochui_decompose", {}, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("Failed to decompose tasks.", "error");
       } else {
-        ctx.ui.notify("📋 Tasks created: .sages/workspace/execution.yaml", "success");
+        ctx.ui.notify("📋 Tasks created: .sages/workspace/execution.yaml", "info");
         ctx.ui.setStatus("sages", "📋 Tasks ready");
       }
     },
@@ -208,16 +265,16 @@ export default function (pi: ExtensionAPI) {
       const taskId = parts?.[1] || "T1";
       const description = parts?.[2] || "Implement feature";
 
-      const result = await pi.callTool("luban_execute_task", {
+      const result = await callToolDirect("luban_execute_task", {
         task_id: taskId,
         task_description: description,
         files: ["src/"],
-      });
+      }, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify(`Task ${taskId} failed.`, "error");
       } else {
-        ctx.ui.notify(`✅ Task ${taskId} completed.`, "success");
+        ctx.ui.notify(`✅ Task ${taskId} completed.`, "info");
       }
     },
   });
@@ -229,14 +286,14 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("luban-execute-all", {
     description: "Execute all tasks from execution.yaml with parallel TDD",
     handler: async (args, ctx) => {
-      const result = await pi.callTool("luban_execute_all", {
+      const result = await callToolDirect("luban_execute_all", {
         execution_yaml: ".sages/workspace/execution.yaml",
-      });
+      }, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("Execution failed.", "error");
       } else {
-        ctx.ui.notify(" All tasks executed.", "success");
+        ctx.ui.notify("✅ All tasks executed.", "info");
         ctx.ui.setStatus("sages", " Execute complete");
       }
     },
@@ -251,9 +308,9 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const planName = args || "workflow";
 
-      const result = await pi.callTool("luban_get_status", {
+      const result = await callToolDirect("luban_get_status", {
         plan_name: planName,
-      });
+      }, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("Failed to get status.", "info");
@@ -276,15 +333,15 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const reviewMode = args || "full";
 
-      const result = await pi.callTool("gaoyao_review", {
+      const result = await callToolDirect("gaoyao_review", {
         plan_name: undefined,
         review_mode: reviewMode,
-      });
+      }, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("Audit failed.", "error");
       } else {
-        ctx.ui.notify(" Audit complete: .sages/workspace/audit.md", "success");
+        ctx.ui.notify("✅ Audit complete: .sages/workspace/audit.md", "info");
         ctx.ui.setStatus("sages", " Audited");
       }
     },
@@ -299,14 +356,14 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const files = (args || "src/").split(/\s+/);
 
-      const result = await pi.callTool("gaoyao_check_security", {
+      const result = await callToolDirect("gaoyao_check_security", {
         files: files,
-      });
+      }, ctx.cwd);
 
       if (result?.isError) {
         ctx.ui.notify("Security scan failed.", "error");
       } else {
-        ctx.ui.notify("🔒 Security scan complete.", "success");
+        ctx.ui.notify("🔒 Security scan complete.", "info");
       }
     },
   });
