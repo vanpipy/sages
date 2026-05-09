@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pi_evaluator.types import ComparisonResult, EvaluationResult
+    from .types import ComparisonResult, EvaluationResult
 
 
 class Reporter:

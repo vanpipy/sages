@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-from pi_evaluator.config import Config
+from .config import Config
 
 
 class RunnerError(Exception):

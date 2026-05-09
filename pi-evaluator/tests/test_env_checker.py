@@ -2,7 +2,7 @@
 
 
 
-from pi_evaluator.env_checker import (
+from src.env_checker import (
     ValidationResult,
     check_datasets_library,
     check_evaluate_library,

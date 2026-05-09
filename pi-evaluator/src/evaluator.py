@@ -8,10 +8,10 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from pi_evaluator.config import Config
-from pi_evaluator.parser import Parser
-from pi_evaluator.scorer import Scorer
-from pi_evaluator.types import (
+from .config import Config
+from .parser import Parser
+from .scorer import Scorer
+from .types import (
     EvaluationResult,
     OverallResult,
     Phase,

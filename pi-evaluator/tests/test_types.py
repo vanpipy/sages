@@ -1,6 +1,6 @@
 """Tests for pi_evaluator.types module."""
 
-from pi_evaluator.types import (
+from src.types import (
     ContentBlock,
     EvaluationResult,
     Message,
@@ -101,7 +101,7 @@ class TestEvaluationResult:
 
     def test_to_dict(self):
         """Test EvaluationResult serialization."""
-        from pi_evaluator.types import OverallResult
+        from src.types import OverallResult
 
         result = EvaluationResult(
             session_id="test123",

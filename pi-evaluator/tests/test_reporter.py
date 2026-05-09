@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from pi_evaluator.reporter import Reporter
-from pi_evaluator.types import (
+from src.reporter import Reporter
+from src.types import (
     EvaluationResult,
     OverallResult,
     Phase,
@@ -141,7 +141,7 @@ class TestReporterComparison:
 
     def test_generate_comparison_markdown(self, reporter):
         """Test comparison markdown generation."""
-        from pi_evaluator.types import ComparisonResult
+        from src.types import ComparisonResult
 
         comparison = ComparisonResult(
             session1_id="session1",

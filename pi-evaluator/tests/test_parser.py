@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from pi_evaluator.parser import Parser, ParserError
-from pi_evaluator.types import Phase
+from src.parser import Parser, ParserError
+from src.types import Phase
 
 
 class TestParser:
@@ -142,7 +142,7 @@ class TestPhaseDetection:
 
     def test_detect_design_phase(self):
         """Test design phase detection."""
-        from pi_evaluator.types import detect_phase
+        from src.types import detect_phase
 
         assert detect_phase("fuxi_create_draft") == Phase.DESIGN
         assert detect_phase("fuxi_get_draft") == Phase.DESIGN
@@ -150,14 +150,14 @@ class TestPhaseDetection:
 
     def test_detect_review_phase(self):
         """Test review phase detection."""
-        from pi_evaluator.types import detect_phase
+        from src.types import detect_phase
 
         assert detect_phase("qiaochui_review") == Phase.REVIEW
         assert detect_phase("qiaochui_decompose") == Phase.REVIEW
 
     def test_detect_execute_phase(self):
         """Test execute phase detection."""
-        from pi_evaluator.types import detect_phase
+        from src.types import detect_phase
 
         assert detect_phase("luban_execute_task") == Phase.EXECUTE
         assert detect_phase("luban_execute_all") == Phase.EXECUTE
@@ -165,14 +165,14 @@ class TestPhaseDetection:
 
     def test_detect_audit_phase(self):
         """Test audit phase detection."""
-        from pi_evaluator.types import detect_phase
+        from src.types import detect_phase
 
         assert detect_phase("gaoyao_review") == Phase.AUDIT
         assert detect_phase("gaoyao_check_security") == Phase.AUDIT
 
     def test_detect_unknown_phase(self):
         """Test unknown phase returns None."""
-        from pi_evaluator.types import detect_phase
+        from src.types import detect_phase
 
         assert detect_phase("unknown_tool") is None
         assert detect_phase("") is None

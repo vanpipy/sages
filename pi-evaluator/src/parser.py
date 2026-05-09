@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from pi_evaluator.types import ContentBlock, Phase, SessionLogEntry
+from .types import ContentBlock, Phase, SessionLogEntry
 
 
 class ParserError(Exception):
@@ -22,12 +22,11 @@ class ParserError(Exception):
 class Parser:
     """Parser for pi session JSONL files.
 
-    Parses session logs with format:
-        {"type": "message", "timestamp": "...", "message": {...}}
-        {"type": "message", "timestamp": "...", "message": {...}}
-    
-    Also supports simple text format:
-        {"type": "message", "timestamp": "...", "content": "..."}
+    Supports two JSONL formats:
+        1. pi session format (pi coding agent):
+           {"type": "session"|"message"|"model_change", ...}
+        2. Simple format with just messages: 
+           {"type": "message", "timestamp": "...", "message": {...}}
     """
 
     def __init__(self, strict: bool = False):
@@ -179,7 +178,7 @@ class Parser:
             Dictionary mapping Phase to list of entries
 
         """
-        from pi_evaluator.types import detect_phase
+        from .types import detect_phase
 
         phases: dict[Phase, list[SessionLogEntry]] = {
             Phase.DESIGN: [],

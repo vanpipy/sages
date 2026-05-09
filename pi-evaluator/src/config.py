@@ -41,6 +41,8 @@ class Config:
 
     Attributes:
         output_dir: Base output directory
+        session_subdir: Subdirectory for session logs
+        evaluation_subdir: Subdirectory for evaluation reports
         pi_path: Path to pi binary
         auto_approve: Enable auto-approve for workflow phases
         timeout: Workflow timeout in seconds
@@ -50,6 +52,8 @@ class Config:
     """
 
     output_dir: Path = field(default_factory=lambda: Path(DEFAULTS["output_dir"]))
+    session_subdir: str = DEFAULTS["session_subdir"]
+    evaluation_subdir: str = DEFAULTS["evaluation_subdir"]
     pi_path: str = DEFAULTS["pi_path"]
     auto_approve: bool = DEFAULTS["auto_approve"]
     timeout: int = DEFAULTS["timeout"]

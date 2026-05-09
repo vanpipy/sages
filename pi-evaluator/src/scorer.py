@@ -5,8 +5,8 @@ Computes weighted scores for each phase and overall.
 
 from __future__ import annotations
 
-from pi_evaluator.config import Config
-from pi_evaluator.types import Phase, PhaseMetrics
+from .config import Config
+from .types import Phase, PhaseMetrics
 
 
 class Scorer:

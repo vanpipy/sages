@@ -2,9 +2,9 @@
 
 import pytest
 
-from pi_evaluator.config import Config
-from pi_evaluator.scorer import Scorer
-from pi_evaluator.types import Phase, PhaseMetrics
+from src.config import Config
+from src.scorer import Scorer
+from src.types import Phase, PhaseMetrics
 
 
 class TestScorer:

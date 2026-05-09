@@ -1,7 +1,7 @@
 """pi-evaluator: Auto-run and evaluate Four Sages Agents workflow sessions.
 
 Example usage:
-    from pi_evaluator import Runner, Parser, Evaluator, Config
+    from . import Runner, Parser, Evaluator, Config
 
     config = Config(output_dir="./evaluations")
 
@@ -19,15 +19,15 @@ Example usage:
     print(f"Score: {result.overall.overall_score}")
 """
 
-from pi_evaluator.comparator import Comparator
-from pi_evaluator.config import Config, ConfigError, load_config
-from pi_evaluator.env_checker import ValidationResult, validate_all, validate_or_exit
-from pi_evaluator.evaluator import Evaluator, EvaluatorError
-from pi_evaluator.parser import Parser, ParserError
-from pi_evaluator.reporter import Reporter
-from pi_evaluator.runner import Runner, RunnerError
-from pi_evaluator.scorer import Scorer
-from pi_evaluator.types import (
+from .comparator import Comparator
+from .config import Config, ConfigError, load_config
+from .env_checker import ValidationResult, validate_all, validate_or_exit
+from .evaluator import Evaluator, EvaluatorError
+from .parser import Parser, ParserError
+from .reporter import Reporter
+from .runner import Runner, RunnerError
+from .scorer import Scorer
+from .types import (
     ComparisonResult,
     ContentBlock,
     EvaluationResult,

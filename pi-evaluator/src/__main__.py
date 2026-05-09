@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from pi_evaluator import (
+from . import (
     Comparator,
     Config,
     Evaluator,
@@ -166,13 +166,88 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_evaluate(args: argparse.Namespace, config: Config) -> int:
-    """Handle evaluate command."""
+    """Handle evaluate command.
+    
+    Supports:
+    - Single session file: session.jsonl
+    - pi sessions directory: ~/.pi/agent/sessions/--home-leroy--
+    """
+    import glob
+    
     if config.verbose:
         print(f"Evaluating: {args.session}")
 
+    session_path = Path(args.session)
+    
+    # Check if it's a directory (pi sessions directory)
+    if session_path.is_dir():
+        # Find all session files
+        session_files = sorted(session_path.glob("*.jsonl"))
+        if not session_files:
+            print(f"No session files found in {args.session}", file=sys.stderr)
+            return 1
+        
+        if config.verbose:
+            print(f"Found {len(session_files)} sessions in directory")
+        
+        results = []
+        for session_file in session_files:
+            # Extract session ID from filename
+            # pi format: timestamp_uuid.jsonl where timestamp contains 'T' and 'Z'
+            parts = session_file.name.split("_")
+            if len(parts) == 2:
+                timestamp_part = parts[0]
+                uuid_part = parts[1].replace(".jsonl", "")
+                # pi session format has timestamp before underscore (contains 'T' and 'Z')
+                if 'T' in timestamp_part and 'Z' in timestamp_part:
+                    # This is a pi session format - use uuid
+                    session_id = uuid_part
+                else:
+                    # Not pi format, use stem
+                    session_id = session_file.stem
+            else:
+                session_id = session_file.stem
+            
+            if config.verbose:
+                print(f"  Parsing {session_file.name}...")
+            
+            parser = Parser()
+            try:
+                entries = parser.parse(session_file)
+            except Exception as e:
+                if config.verbose:
+                    print(f"  Error parsing {session_file.name}: {e}")
+                continue
+            
+            evaluator = Evaluator(config)
+            result = evaluator.evaluate(
+                entries,
+                request=args.request,
+                session_id=session_id,
+            )
+            results.append(result)
+        
+        if not results:
+            print("No sessions could be evaluated", file=sys.stderr)
+            return 1
+        
+        # Output summary for each result
+        for result in results:
+            print(f"\nSession: {result.session_id}")
+            print(f"  Verdict: {result.verdict}")
+            print(f"  Score: {result.overall.overall_score:.1f}")
+        
+        # Output full JSON for last result
+        if config.verbose or True:
+            output = json.dumps([r.to_dict() for r in results], indent=2)
+            print(f"\n{output}")
+        
+        return 0 if all(r.verdict != "POOR" for r in results) else 1
+    
+    # Single file evaluation
     parser = Parser()
     try:
-        entries = parser.parse(args.session)
+        entries = parser.parse(session_path)
     except Exception as e:
         print(f"Error parsing session: {e}", file=sys.stderr)
         return 1
@@ -181,14 +256,14 @@ def cmd_evaluate(args: argparse.Namespace, config: Config) -> int:
     result = evaluator.evaluate(
         entries,
         request=args.request,
-        session_id=args.session.parent.name,
+        session_id=session_path.parent.name,
     )
 
     # Output results
     output = json.dumps(result.to_dict(), indent=2)
     print(output)
 
-    return 0
+    return 0 if result.verdict != "POOR" else 1
 
 
 def cmd_compare(args: argparse.Namespace, config: Config) -> int:

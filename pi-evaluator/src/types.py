@@ -136,22 +136,98 @@ class SessionLogEntry:
     def from_jsonl_line(cls, line: str) -> SessionLogEntry:
         """Parse a single line from JSONL file."""
         data = json.loads(line.strip())
-        message = None
+        entry_type = data.get("type", "")
         
-        # Support both formats:
-        # 1. With "message" field: {"type": "message", "timestamp": "...", "message": {...}}
-        # 2. With "content" field: {"type": "message", "timestamp": "...", "content": "..."}
-        if data.get("message"):
-            message = Message.from_dict(data["message"])
-        elif data.get("content"):
-            # Simple text content - create a mock message structure
-            message = Message(role="user", content=[
-                ContentBlock(type="text", content=data["content"])
-            ])
+        # Handle various entry types (pi session format and legacy format)
+        if entry_type == "session":
+            return cls(
+                type="session_start",
+                timestamp=data.get("timestamp", ""),
+                message=None,
+            )
+        elif entry_type == "session_start":
+            return cls(
+                type="session_start",
+                timestamp=data.get("timestamp", ""),
+                message=None,
+            )
+        elif entry_type == "session_end":
+            return cls(
+                type="session_end",
+                timestamp=data.get("timestamp", ""),
+                message=None,
+            )
+        elif entry_type == "model_change":
+            return cls(
+                type="model_change",
+                timestamp=data.get("timestamp", ""),
+                message=None,
+            )
+        elif entry_type == "thinking_level_change":
+            return cls(
+                type="thinking_level_change",
+                timestamp=data.get("timestamp", ""),
+                message=None,
+            )
+        
+        # For message type, extract the nested message field (pi format)
+        # or use content directly (legacy format)
+        message = None
+        if entry_type == "message":
+            if data.get("message"):
+                # pi session format with nested message field
+                msg_data = data["message"]
+                content = []
+                
+                for block in msg_data.get("content", []):
+                    block_type = block.get("type")
+                    if block_type == "toolCall":
+                        content.append(ContentBlock(
+                            type="toolCall",
+                            name=block.get("name"),
+                            arguments=block.get("arguments"),
+                            content=None,
+                        ))
+                    elif block_type == "toolResult":
+                        content.append(ContentBlock(
+                            type="toolResult",
+                            name=block.get("name"),
+                            content=block.get("content"),
+                            is_error=block.get("isError", False),
+                        ))
+                    elif block_type == "text":
+                        content.append(ContentBlock(
+                            type="text",
+                            content=block.get("text"),
+                        ))
+                    elif block_type == "thinking":
+                        content.append(ContentBlock(
+                            type="thinking",
+                            content=block.get("thinking"),
+                        ))
+                
+                # Handle usage - pi uses input/output, convert to prompt_tokens/completion_tokens
+                usage = msg_data.get("usage", {})
+                if usage and "input" in usage:
+                    usage = {
+                        "prompt_tokens": usage.get("input", 0),
+                        "completion_tokens": usage.get("output", 0),
+                    }
+                
+                message = Message(
+                    role=msg_data.get("role", ""),
+                    content=content,
+                    usage=usage if usage else None,
+                )
+            elif data.get("content"):
+                # Legacy simple format with content field
+                message = Message(role="user", content=[
+                    ContentBlock(type="text", content=data["content"])
+                ])
         
         return cls(
-            type=data["type"],
-            timestamp=data["timestamp"],
+            type=entry_type if entry_type == "message" else "message",
+            timestamp=data.get("timestamp", ""),
             message=message,
         )
 

@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pi_evaluator.config import Config
-from pi_evaluator.parser import Parser
-from pi_evaluator.types import ComparisonResult, EvaluationResult
+from .config import Config
+from .parser import Parser
+from .types import ComparisonResult, EvaluationResult
 
 
 class Comparator:
@@ -130,6 +130,6 @@ class Comparator:
 
     def _create_evaluator(self):
         """Create evaluator instance."""
-        from pi_evaluator.evaluator import Evaluator
+        from .evaluator import Evaluator
 
         return Evaluator(self.config)

@@ -1,6 +1,6 @@
 """Review phase metrics (QiaoChui) for pi-evaluator."""
 
-from pi_evaluator.types import PhaseMetrics
+from .types import PhaseMetrics
 
 
 def compute_review_metrics(entries, content: str) -> PhaseMetrics:

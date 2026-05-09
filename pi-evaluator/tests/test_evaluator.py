@@ -3,9 +3,9 @@
 
 import pytest
 
-from pi_evaluator.config import Config
-from pi_evaluator.evaluator import Evaluator, EvaluatorError
-from pi_evaluator.types import (
+from src.config import Config
+from src.evaluator import Evaluator, EvaluatorError
+from src.types import (
     ContentBlock,
     EvaluationResult,
     Message,
@@ -151,11 +151,18 @@ class TestEvaluatorMetrics:
 
     def test_feasibility_score_calculation(self, evaluator):
         """Test feasibility score with blockers."""
-        # ⚠️ appears 2 times, ❌ appears 2 times = 4 blockers
-        # Score = 100 - 4*20 = 20
+        # Content has 4 lines with both emoji AND 'blocker' text
+        # Code counts: ⚠️ (2) + ❌ (2) + blocker (4) = 8 total
+        # Score = max(0, 100 - 8*20) = max(0, 100 - 160) = 0
         content = "⚠️ Blocker 1\n⚠️ Blocker 2\n❌ Blocker 3\n❌ Blocker 4"
         score = evaluator._calculate_feasibility_score(content)
-        assert score == 20.0  # 100 - 4*20
+        assert score == 0.0  # 100 - 8*20 = -60, capped at 0
+
+    def test_feasibility_score_no_blockers(self, evaluator):
+        """Test feasibility score without blockers."""
+        content = "Everything looks good"
+        score = evaluator._calculate_feasibility_score(content)
+        assert score == 100.0
 
     def test_task_count(self, evaluator):
         """Test task counting."""
