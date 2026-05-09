@@ -211,3 +211,106 @@ describe("DraftConfig", () => {
     expect(config.notes).toBe("Test notes");
   });
 });
+
+describe("Calculator/Math Requests", () => {
+  const calculatorRequest = "Create a simple calculator function that supports basic arithmetic operations: addition, subtraction, multiplication, and division.";
+
+  it("should NOT produce placeholder content for calculator requests", () => {
+    const draft = generateMinimalDraft("simple-calculator", calculatorRequest);
+    
+    // The draft should NOT contain generic placeholder text
+    expect(draft).not.toContain("User interaction flow");
+    expect(draft).not.toContain("Core workflow steps");
+    expect(draft).not.toContain("Business constraints");
+    expect(draft).not.toContain("Policy requirements");
+  });
+
+  it("should include calculator-specific operations in Business Plane", () => {
+    const draft = generateMinimalDraft("simple-calculator", calculatorRequest);
+    
+    // Should mention the actual operations
+    expect(draft.toLowerCase()).toContain("addition");
+    expect(draft.toLowerCase()).toContain("subtraction");
+    expect(draft.toLowerCase()).toContain("multiplication");
+    expect(draft.toLowerCase()).toContain("division");
+  });
+
+  it("should include error handling for division by zero", () => {
+    const draft = generateMinimalDraft("simple-calculator", calculatorRequest);
+    
+    // Division by zero is a critical concern for calculators
+    expect(draft.toLowerCase()).toContain("division by zero");
+  });
+
+  it("should describe the function interface in Foundation Plane", () => {
+    const draft = generateMinimalDraft("simple-calculator", calculatorRequest);
+    
+    // Should describe the public interface
+    expect(draft).toContain("Abstraction");
+    expect(draft.toLowerCase()).toMatch(/function|method|interface|api/);
+  });
+
+  it("should include data types for inputs/outputs", () => {
+    const draft = generateMinimalDraft("simple-calculator", calculatorRequest);
+    
+    // Calculator operations need number types
+    expect(draft.toLowerCase()).toMatch(/number|integer|float|operand/);
+  });
+
+  it("should include TypeScript schema in Data Plane", () => {
+    const draft = generateMinimalDraft("simple-calculator", calculatorRequest);
+    
+    // Should have TypeScript type definitions
+    expect(draft).toContain("type Operation");
+    expect(draft).toContain("CalculatorInput");
+    expect(draft).toContain("CalculatorResult");
+  });
+
+  it("should include control flow steps", () => {
+    const draft = generateMinimalDraft("simple-calculator", calculatorRequest);
+    
+    // Should have numbered control flow
+    expect(draft).toContain("Control Flow:");
+    expect(draft).toContain("1. Validate inputs");
+  });
+
+  it("should include multiple API options", () => {
+    const draft = generateMinimalDraft("simple-calculator", calculatorRequest);
+    
+    // Should have different API options
+    expect(draft).toContain("API Option A");
+    expect(draft).toContain("API Option B");
+    expect(draft).toContain("API Option C");
+  });
+
+  it("should include evolution phases", () => {
+    const draft = generateMinimalDraft("simple-calculator", calculatorRequest);
+    
+    // Should have roadmap phases
+    expect(draft).toContain("Phase 1:");
+    expect(draft).toContain("Phase 2:");
+    expect(draft).toContain("Phase 3:");
+  });
+});
+
+describe("Mathematical function requests", () => {
+  it("should handle 'math function' requests", () => {
+    const mathRequest = "Create a math utility module for scientific calculations";
+    const draft = generateMinimalDraft("math-utils", mathRequest);
+    
+    // Should contain math-specific terminology, not generic placeholders
+    expect(draft).not.toContain("User interaction flow");
+    expect(draft.toLowerCase()).toMatch(/math|scientific|calculation/);
+  });
+});
+
+describe("Arithmetic operation requests", () => {
+  it("should handle requests mentioning 'arithmetic'", () => {
+    const arithmeticRequest = "Implement arithmetic operations for financial calculations";
+    const draft = generateMinimalDraft("arithmetic-ops", arithmeticRequest);
+    
+    // Should have arithmetic-specific content
+    expect(draft).not.toContain("User interaction flow");
+    expect(draft.toLowerCase()).toMatch(/arithmetic|operation|financial/);
+  });
+});

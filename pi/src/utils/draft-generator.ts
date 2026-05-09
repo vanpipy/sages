@@ -483,6 +483,122 @@ function analyzeRequest(request: string): {
     };
   }
 
+  // Calculator/Mathematical function request
+  if (
+    lowerRequest.includes("calculator") ||
+    lowerRequest.includes("math") ||
+    lowerRequest.includes("arithmetic") ||
+    lowerRequest.includes("addition") ||
+    lowerRequest.includes("subtraction") ||
+    lowerRequest.includes("multiplication") ||
+    lowerRequest.includes("division") ||
+    (lowerRequest.includes("function") && lowerRequest.includes("operation"))
+  ) {
+    // Extract mentioned operations
+    const operations: string[] = [];
+    if (lowerRequest.includes("addition") || lowerRequest.includes("add"))
+      operations.push("Addition (a + b)");
+    if (lowerRequest.includes("subtraction") || lowerRequest.includes("subtract"))
+      operations.push("Subtraction (a - b)");
+    if (lowerRequest.includes("multiplication") || lowerRequest.includes("multiply"))
+      operations.push("Multiplication (a * b)");
+    if (lowerRequest.includes("division") || lowerRequest.includes("divide"))
+      operations.push("Division (a / b)");
+
+    return {
+      intent: `Mathematical Function: ${request}`,
+      businessProcess:
+        operations.length > 0
+          ? operations
+          : ["- Function invocation flow", "- Parameter passing", "- Result return"],
+      businessRules: [
+        "- Input validation: reject non-numeric types",
+        "- Division by zero: return Infinity or throw Error",
+        "- Precision: maintain 15 significant digits",
+        "- Type coercion: convert string digits to numbers",
+      ],
+      dataLogic: [
+        "- Data Schema:",
+        "  ```typescript",
+        "  type Operation = 'add' | 'subtract' | 'multiply' | 'divide';",
+        "  type Operands = { a: number; b: number; };",
+        "  type CalculatorInput = { op: Operation; a: number; b: number; };",
+        "  type CalculatorResult = { value: number; error?: string; };",
+        "  ```",
+        "- Pure function: no side effects, deterministic output",
+        "- Type coercion: string → number via Number() or parseFloat()",
+        "- Precision: use Math.round() for floating-point cleanup",
+      ],
+      dataState: [
+        "- No persistent state (pure functions)",
+        "- Immutable inputs/outputs",
+        "- Stateless operation evaluation",
+        "- No caching required (pure computation)",
+      ],
+      controlStrategy: [
+        "- Control Flow:",
+        "  1. Validate inputs (isNaN check)",
+        "  2. Coerce types if needed",
+        "  3. Route to operation handler",
+        "  4. Apply result or error",
+        "- Error Strategy: return { value: NaN, error: '...' } or throw",
+        "- Input Validation: typeof === 'number' || !isNaN(parseFloat())",
+      ],
+      controlDistribution: [
+        "- Single module export",
+        "- Option A: Single calculate(input) function",
+        "- Option B: Calculator class with add/subtract/multiply/divide methods",
+        "- Option C: Operator enum + switch statement dispatch",
+      ],
+      foundationResource: [
+        "- Language runtime only (no external deps)",
+        "- Optional: BigInt for integers > 2^53",
+        "- Optional: decimal.js for financial precision",
+        "- Testing: jest or bun test",
+      ],
+      foundationAbstraction: [
+        "- API Option A (Simple):",
+        "  ```typescript",
+        "  function calculate(a: number, b: number, op: string): number",
+        "  ```",
+        "- API Option B (Type-safe):",
+        "  ```typescript",
+        "  type Operation = 'add' | 'subtract' | 'multiply' | 'divide';",
+        "  function calculate(input: CalculatorInput): CalculatorResult",
+        "  ```",
+        "- API Option C (Functional):",
+        "  ```typescript",
+        "  const add = (a: number, b: number) => a + b",
+        "  const subtract = (a: number, b: number) => a - b",
+        "  ```",
+      ],
+      observationData: [
+        "- Operation call frequency (add vs divide)",
+        "- Error rates per operation type",
+        "- Average execution time per call",
+        "- NaN/Infinity return frequency",
+      ],
+      observationAnalysis: [
+        "- Performance: benchmark for large number inputs",
+        "- Usage: track most-used operations",
+      ],
+      securityIdentity: ["- No authentication required (pure computation)"],
+      securityPermissions: [
+        "- No access control needed",
+        "- Input sanitization for injection prevention",
+      ],
+      evolutionTime: [
+        "- Phase 1: Basic 4 operations (MVP)",
+        "- Phase 2: Modulo, power, sqrt",
+        "- Phase 3: Scientific functions (sin, cos, log)",
+      ],
+      evolutionChange: [
+        "- Backward compatible: add new operations without breaking API",
+        "- Breaking change: bump major version, document migration",
+      ],
+    };
+  }
+
   // Default generic request
   return {
     intent: request,
