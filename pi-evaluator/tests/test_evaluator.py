@@ -136,83 +136,29 @@ class TestEvaluatorMetrics:
 
     def test_plane_coverage_calculation(self, evaluator):
         """Test plane coverage calculation."""
-        entries = [
-            SessionLogEntry(
-                type="message",
-                timestamp="2026-05-07T10:00:00Z",
-                message=Message(
-                    role="assistant",
-                    content=[
-                        ContentBlock(
-                            type="text",
-                            content=(
-                                "Business Data Control Foundation "
-                                "Observation Security Evolution"
-                            ),
-                        )
-                    ],
-                ),
-            )
-        ]
-        coverage = evaluator._calculate_plane_coverage(entries)
+        content = (
+            "Business Data Control Foundation "
+            "Observation Security Evolution"
+        )
+        coverage = evaluator._calculate_plane_coverage(content)
         assert coverage == 100.0
 
     def test_plan_completeness_calculation(self, evaluator):
         """Test plan completeness calculation."""
-        entries = [
-            SessionLogEntry(
-                type="message",
-                timestamp="2026-05-07T10:00:00Z",
-                message=Message(
-                    role="assistant",
-                    content=[
-                        ContentBlock(
-                            type="text",
-                            content="## Overview\n## Tasks\n## Dependencies",
-                        )
-                    ],
-                ),
-            )
-        ]
-        completeness = evaluator._calculate_plan_completeness(entries)
+        content = "## Overview\n## Tasks\n## Dependencies\n## Plan"
+        completeness = evaluator._calculate_plan_completeness(content)
         assert completeness == 100.0
 
     def test_feasibility_score_calculation(self, evaluator):
         """Test feasibility score with blockers."""
-        entries = [
-            SessionLogEntry(
-                type="message",
-                timestamp="2026-05-07T10:00:00Z",
-                message=Message(
-                    role="assistant",
-                    content=[
-                        ContentBlock(
-                            type="text",
-                            content="⚠️ Blocker 1\n❌ Blocker 2",
-                        )
-                    ],
-                ),
-            )
-        ]
-        score = evaluator._calculate_feasibility_score(entries)
-        assert score == 60.0  # 100 - 2*20
+        # ⚠️ appears 2 times, ❌ appears 2 times = 4 blockers
+        # Score = 100 - 4*20 = 20
+        content = "⚠️ Blocker 1\n⚠️ Blocker 2\n❌ Blocker 3\n❌ Blocker 4"
+        score = evaluator._calculate_feasibility_score(content)
+        assert score == 20.0  # 100 - 4*20
 
     def test_task_count(self, evaluator):
         """Test task counting."""
-        entries = [
-            SessionLogEntry(
-                type="message",
-                timestamp="2026-05-07T10:00:00Z",
-                message=Message(
-                    role="assistant",
-                    content=[
-                        ContentBlock(
-                            type="text",
-                            content="T1 T2 T3 T4 T5",
-                        )
-                    ],
-                ),
-            )
-        ]
-        count = evaluator._count_tasks(entries)
+        content = "T1 T2 T3 T4 T5"
+        count = evaluator._count_tasks(content)
         assert count == 5

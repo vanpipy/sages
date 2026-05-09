@@ -224,16 +224,17 @@ class Parser:
             if content_text:
                 content_lower = content_text.lower()
                 
-                # Find ALL phase indicators and use the LAST one (most advanced)
+                # Find ALL phase indicators and use the FIRST one (earliest phase)
                 # This handles summary tables where all phases are listed
                 found_phases = []
                 for indicator, phase in phase_indicators.items():
                     if indicator in content_lower:
                         found_phases.append((indicator, phase))
                 
-                # Use the last found phase (phases typically listed in order)
+                # Use the first found phase (earliest phase in the session)
+                # This is because summary tables list all phases but content belongs to first one
                 if found_phases:
-                    current_phase = found_phases[-1][1]
+                    current_phase = found_phases[0][1]
                 else:
                     # Fallback to agent name checks
                     if "fuxi" in content_lower:

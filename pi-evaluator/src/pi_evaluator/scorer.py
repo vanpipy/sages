@@ -67,19 +67,21 @@ class Scorer:
             return 50.0  # Default score
 
         metrics_dict = metrics.to_dict()
-        total_weight = sum(weights.values())
-
-        if total_weight == 0:
-            return 50.0
-
+        
         weighted_sum = 0.0
+        total_weight = 0.0
         for key, weight in weights.items():
             value = metrics_dict.get(key, 0)
-            # Normalize weight to account for custom weights
-            normalized_weight = weight / total_weight
-            weighted_sum += value * normalized_weight
+            weighted_sum += value * weight
+            total_weight += weight
 
-        return min(100, max(0, weighted_sum))
+        # Normalize and scale to 0-100
+        if total_weight > 0:
+            score = (weighted_sum / total_weight) * 100.0
+        else:
+            score = 50.0
+
+        return min(100, max(0, score))
 
     def compute_overall_score(self, phase_scores: dict[str, float]) -> float:
         """Compute weighted overall score from phase scores.

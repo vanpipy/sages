@@ -77,13 +77,27 @@ class Evaluator:
         # Compute per-phase results
         phase_results: dict[str, PhaseResult] = {}
         for phase, phase_entries in phases.items():
-            metrics = self._compute_phase_metrics(phase, phase_entries, tool_calls)
+            # Extract all text content from phase entries
+            phase_content = " ".join(
+                str(block.content) 
+                for entry in phase_entries 
+                if entry.message and entry.message.content
+                for block in entry.message.content 
+                if block.type == "text" and block.content
+            ).lower()
+            
+            metrics = self._compute_phase_metrics(phase, phase_content)
             score = self.scorer.compute_phase_score(phase, metrics)
+            
+            # Count tool calls and errors specifically for this phase
+            phase_tool_calls = self._count_tool_calls_in_entries(phase_entries)
+            phase_errors = self._count_errors_in_entries(phase_entries)
+            
             phase_results[phase.value] = PhaseResult(
                 phase=phase,
                 duration_seconds=self._calculate_phase_duration(phase_entries),
-                tool_calls=len([tc for tc in phase_entries if self._has_tool_calls(tc)]),
-                errors=len([tc for tc in phase_entries if self._has_errors(tc)]),
+                tool_calls=phase_tool_calls,
+                errors=phase_errors,
                 outputs=self._extract_outputs(phase_entries),
                 score=score,
                 metrics=metrics,
@@ -154,50 +168,45 @@ class Evaluator:
     def _compute_phase_metrics(
         self,
         phase: Phase,
-        entries: list[SessionLogEntry],
-        all_tool_calls: list[tuple],
+        phase_content: str,
     ) -> PhaseMetrics:
-        """Compute metrics for a specific phase."""
+        """Compute metrics for a specific phase using content string."""
         metrics = PhaseMetrics()
-
-        # Filter tool calls for this phase
-        [
-            tc
-            for e, tc in all_tool_calls
-            if any(a.type == phase.value for a in e.message.content)
-            if e.message
-        ]
-
+        content_lower = phase_content.lower()
+        
         if phase == Phase.DESIGN:
             # Design phase metrics
-            metrics.plane_coverage = self._calculate_plane_coverage(entries)
-            metrics.content_depth = self._calculate_content_depth(entries)
-            metrics.cross_references = self._count_cross_references(entries)
-            metrics.decisions = self._count_decisions(entries)
+            metrics.plane_coverage = self._calculate_plane_coverage(phase_content)
+            metrics.content_depth = self._calculate_content_depth(phase_content)
+            metrics.cross_references = self._count_cross_references(phase_content)
+            metrics.decisions = self._count_decisions(phase_content)
 
         elif phase == Phase.REVIEW:
             # Review phase metrics
-            metrics.plan_completeness = self._calculate_plan_completeness(entries)
-            metrics.feasibility_score = self._calculate_feasibility_score(entries)
-            metrics.task_count = self._count_tasks(entries)
+            metrics.plan_completeness = self._calculate_plan_completeness(phase_content)
+            metrics.feasibility_score = self._calculate_feasibility_score(phase_content)
+            metrics.task_count = self._count_tasks(phase_content)
 
         elif phase == Phase.EXECUTE:
             # Execution phase metrics
-            metrics.task_completion_rate = self._calculate_task_completion(entries)
-            metrics.tdd_compliance = self._calculate_tdd_compliance(entries)
-            metrics.error_recovery_rate = self._calculate_error_recovery(entries)
-            metrics.parallel_efficiency = self._calculate_parallel_efficiency(entries)
+            metrics.task_completion_rate = self._calculate_task_completion(phase_content)
+            metrics.tdd_compliance = self._calculate_tdd_compliance(phase_content)
+            metrics.error_recovery_rate = self._calculate_error_recovery(phase_content)
+            metrics.parallel_efficiency = self._calculate_parallel_efficiency(phase_content)
 
         elif phase == Phase.AUDIT:
             # Audit phase metrics
-            metrics.quality_score = self._calculate_quality_score(entries)
-            metrics.security_pass_rate = self._calculate_security_score(entries)
-            metrics.test_coverage = self._calculate_test_coverage(entries)
+            metrics.quality_score = self._calculate_quality_score(phase_content)
+            metrics.security_pass_rate = self._calculate_security_score(phase_content)
+            metrics.test_coverage = self._calculate_test_coverage(phase_content)
 
         return metrics
 
-    def _calculate_plane_coverage(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_plane_coverage(self, content: str) -> float:
         """Calculate MDD plane coverage (0-100)."""
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        content = content.lower()
         planes = [
             "Business",
             "Data",
@@ -207,98 +216,147 @@ class Evaluator:
             "Security",
             "Evolution",
         ]
-        content = " ".join(self._get_text_content(entries)).lower()
         found = sum(1 for p in planes if p.lower() in content)
         return (found / len(planes)) * 100
 
-    def _calculate_content_depth(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_content_depth(self, content: str) -> float:
         """Calculate average content depth (0-100)."""
-        content = self._get_text_content(entries)
-        total_lines = sum(len(c.split("\n")) for c in content)
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        total_lines = len(content.split("\n"))
         # Rough heuristic: 50 lines per plane = 100%
         return min(100, (total_lines / 7) * 2)
 
-    def _count_cross_references(self, entries: list[SessionLogEntry]) -> int:
+    def _count_cross_references(self, content: str) -> int:
         """Count cross-plane references."""
-        content = " ".join(self._get_text_content(entries))
-        return content.lower().count("see also") + content.lower().count("related to")
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        content = content.lower()
+        return content.count("see also") + content.count("related to")
 
-    def _count_decisions(self, entries: list[SessionLogEntry]) -> int:
+    def _count_decisions(self, content: str) -> int:
         """Count key design decisions."""
-        content = " ".join(self._get_text_content(entries))
-        return content.count("Decision:") + content.lower().count("## Key Design Decisions")
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        return content.count("decision:") + content.lower().count("## key design decisions")
 
-    def _calculate_plan_completeness(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_plan_completeness(self, content: str) -> float:
         """Calculate plan completeness (0-100)."""
-        required = ["Overview", "Tasks", "Dependencies"]
-        content = " ".join(self._get_text_content(entries)).lower()
-        found = sum(1 for r in required if r.lower() in content)
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        content = content.lower()
+        required = ["overview", "tasks", "dependencies", "plan"]
+        found = sum(1 for r in required if r in content)
         return (found / len(required)) * 100
 
-    def _calculate_feasibility_score(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_feasibility_score(self, content: str) -> float:
         """Calculate feasibility score based on blockers."""
-        content = " ".join(self._get_text_content(entries))
-        blockers = content.count("⚠️") + content.count("❌") + content.count("BLOCKER")
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        blockers = content.count("⚠️") + content.count("❌") + content.lower().count("blocker")
         return max(0, 100 - blockers * 20)
 
-    def _count_tasks(self, entries: list[SessionLogEntry]) -> int:
+    def _count_tasks(self, content: str) -> int:
         """Count number of tasks."""
-        content = " ".join(self._get_text_content(entries))
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
         # Count T1, T2, etc. patterns
         import re
-
         return len(re.findall(r"\bT\d+\b", content))
 
-    def _calculate_task_completion(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_task_completion(self, content: str) -> float:
         """Calculate task completion rate (0-100)."""
-        content = " ".join(self._get_text_content(entries))
-        # Simplified: check for completion indicators
-        if "complete" in content.lower() or "done" in content.lower():
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        content = content.lower()
+        # Check for completion indicators
+        if "complete" in content or "done" in content:
+            # Check for explicit pass rate or coverage
+            import re
+            pass_match = re.search(r'(\d+)%', content)
+            if pass_match:
+                return float(pass_match.group(1))
             return 100.0
         return 50.0  # Unknown
 
-    def _calculate_tdd_compliance(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_tdd_compliance(self, content: str) -> float:
         """Calculate TDD compliance (0-100)."""
-        content = " ".join(self._get_text_content(entries)).lower()
-        has_test = "test" in content or "red" in content
-        has_impl = "implement" in content or "green" in content
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        content = content.lower()
+        has_test = "test" in content or "red" in content or "green" in content
+        has_impl = "implement" in content or "passing" in content or "green" in content
+        has_refactor = "refactor" in content
+        
         if has_test and has_impl:
-            return 80.0  # Simplified
-        return 50.0
+            base = 60.0
+            if has_refactor:
+                base = 80.0
+            # Check for explicit pass indicator
+            if "100%" in content or "all pass" in content:
+                base = 100.0
+            return base
+        return 40.0
 
-    def _calculate_error_recovery(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_error_recovery(self, content: str) -> float:
         """Calculate error recovery rate (0-100)."""
-        # Check for retry patterns
-        return 100.0  # Simplified
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        content = content.lower()
+        # Check for retry patterns or error mentions
+        if "error" in content:
+            if "retry" in content or "recover" in content:
+                return 100.0
+            return 70.0
+        return 100.0
 
-    def _calculate_parallel_efficiency(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_parallel_efficiency(self, content: str) -> float:
         """Calculate parallel execution efficiency (0-100)."""
-        return 75.0  # Simplified
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        content = content.lower()
+        # Check for parallel indicators
+        if "parallel" in content or "concurrent" in content:
+            return 85.0
+        return 75.0
 
-    def _calculate_quality_score(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_quality_score(self, content: str) -> float:
         """Calculate quality score (0-100)."""
-        return 90.0  # Simplified
-
-    def _calculate_security_score(self, entries: list[SessionLogEntry]) -> float:
-        """Calculate security pass rate (0-100)."""
-        content = " ".join(self._get_text_content(entries)).lower()
-        if "security" in content and "pass" in content:
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        content = content.lower()
+        # Check for quality indicators
+        if "100%" in content or "pass" in content:
             return 100.0
+        if "quality" in content:
+            return 90.0
+        return 70.0
+
+    def _calculate_security_score(self, content: str) -> float:
+        """Calculate security pass rate (0-100)."""
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        content = content.lower()
+        if "security" in content:
+            if "0" in content and "vuln" in content:
+                return 100.0
+            if "pass" in content:
+                return 95.0
         return 80.0
 
-    def _calculate_test_coverage(self, entries: list[SessionLogEntry]) -> float:
+    def _calculate_test_coverage(self, content: str) -> float:
         """Calculate test coverage (0-100)."""
-        return 80.0  # Simplified
-
-    def _get_text_content(self, entries: list[SessionLogEntry]) -> list[str]:
-        """Extract text content from entries."""
-        content = []
-        for entry in entries:
-            if entry.message:
-                for block in entry.message.content:
-                    if block.type == "text" and block.content:
-                        content.append(str(block.content))
-        return content
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content)
+        import re
+        # Look for coverage percentage
+        match = re.search(r'coverage[:\s]+(\d+)%', content.lower())
+        if match:
+            return float(match.group(1))
+        # Check for all passing
+        if "all pass" in content.lower() or "100%" in content:
+            return 100.0
+        return 80.0
 
     def _calculate_phase_duration(self, entries: list[SessionLogEntry]) -> float:
         """Calculate duration of phase entries."""
@@ -319,29 +377,32 @@ class Evaluator:
         delta = timestamps[-1] - timestamps[0]
         return delta.total_seconds()
 
-    def _has_tool_calls(self, entry: SessionLogEntry) -> bool:
-        """Check if entry has tool calls."""
-        if entry.message:
-            return any(b.type == "toolCall" for b in entry.message.content)
-        return False
+    def _count_tool_calls_in_entries(self, entries: list[SessionLogEntry]) -> int:
+        """Count tool calls in entries."""
+        count = 0
+        for entry in entries:
+            if entry.message and entry.message.content:
+                count += sum(1 for block in entry.message.content if block.type == "toolCall")
+        return count
 
-    def _has_errors(self, entry: SessionLogEntry) -> bool:
-        """Check if entry has errors."""
-        if entry.message:
-            return any(b.is_error for b in entry.message.content if b.type == "toolResult")
-        return False
+    def _count_errors_in_entries(self, entries: list[SessionLogEntry]) -> int:
+        """Count error tool results in entries."""
+        count = 0
+        for entry in entries:
+            if entry.message and entry.message.content:
+                count += sum(1 for block in entry.message.content if block.type == "toolResult" and block.is_error)
+        return count
 
     def _extract_outputs(self, entries: list[SessionLogEntry]) -> list[str]:
         """Extract output files from entries."""
         outputs = []
         for entry in entries:
-            if entry.message:
+            if entry.message and entry.message.content:
                 for block in entry.message.content:
                     if block.type == "toolResult" and block.content:
                         content = str(block.content)
                         # Look for file paths
                         import re
-
                         files = re.findall(r"[\w\-./]+\.(py|ts|js|md|yaml|json)", content)
                         outputs.extend(files)
         return list(set(outputs))
