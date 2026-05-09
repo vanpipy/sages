@@ -10,7 +10,7 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./extension": "./extensions/sages-extension.ts"
+    "./extension": "./dist/src/extensions/sages-extension.js"
   },
   "scripts": {
     "build": "tsc",
@@ -26,7 +26,7 @@
   ],
   "license": "MIT",
   "pi": {
-    "extensions": ["./extensions"],
+    "extensions": ["./dist/src/extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"]
   },
