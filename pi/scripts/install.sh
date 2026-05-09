@@ -221,7 +221,6 @@ install_package() {
     echo "  mkdir -p $pkg_dest"
     echo "  cp $pi_dir/package.json $pkg_dest/"
     echo "  cp -r $pi_dir/dist $pkg_dest/"
-    echo "  cp -r $pi_dir/extensions $pkg_dest/"
     echo "  cp -r $pi_dir/skills $pkg_dest/"
     echo "  cp -r $pi_dir/prompts $pkg_dest/"
     return
@@ -240,13 +239,11 @@ install_package() {
   
   # Copy only necessary files (selective install)
   # - package.json: package metadata
-  # - dist/: built JavaScript
-  # - extensions/: pi extensions (TypeScript)
+  # - dist/: built JavaScript (includes extensions in dist/src/extensions/)
   # - skills/: skill definitions (MD)
   # - prompts/: workflow prompts
   cp "$pi_dir/package.json" "$pkg_dest/"
   cp -r "$pi_dir/dist" "$pkg_dest/"
-  cp -r "$pi_dir/extensions" "$pkg_dest/"
   cp -r "$pi_dir/skills" "$pkg_dest/"
   cp -r "$pi_dir/prompts" "$pkg_dest/"
   
