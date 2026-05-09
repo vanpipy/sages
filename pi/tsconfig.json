@@ -12,8 +12,11 @@
     "rootDir": "./",
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["extensions/**/*.ts", "dist/**/*.ts"],
+  "include": ["src/**/*.ts", "extensions/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
