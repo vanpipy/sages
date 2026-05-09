@@ -69,7 +69,7 @@ export class SubagentExecutor {
   /**
    * Get tasks that are ready to execute (dependencies met)
    */
-  private getReadyTasks(): Task[] {
+  getReadyTasks(): Task[] {
     return this.tasks.filter(task => {
       if (task.status !== "pending") return false;
       if (this.completedTasks.has(task.id)) return false;

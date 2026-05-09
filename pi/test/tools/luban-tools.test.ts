@@ -330,10 +330,10 @@ describe("Task status transitions", () => {
   });
 
   it("should transition to in_progress when started", () => {
-    const task = {
+    const task: { id: string; description: string; status: string } = {
       id: "T1",
       description: "Test task",
-      status: "pending" as const,
+      status: "pending",
     };
 
     task.status = "in_progress";
@@ -341,10 +341,10 @@ describe("Task status transitions", () => {
   });
 
   it("should transition to completed on success", () => {
-    const task = {
+    const task: { id: string; description: string; status: string } = {
       id: "T1",
       description: "Test task",
-      status: "pending" as const,
+      status: "pending",
     };
 
     task.status = "completed";
@@ -352,10 +352,10 @@ describe("Task status transitions", () => {
   });
 
   it("should transition to failed on error", () => {
-    const task = {
+    const task: { id: string; description: string; status: string } = {
       id: "T1",
       description: "Test task",
-      status: "pending" as const,
+      status: "pending",
     };
 
     task.status = "failed";

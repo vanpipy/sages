@@ -28,7 +28,7 @@ describe("StateManager", () => {
       "idle",
       "design",     // read-only, only draft.md
       "plan",       // read-only, plan.md + execution.yaml
-      "implement",  // writeable, all files
+      "execute",    // writeable, all files (LuBan)
       "review",     // read-only, audit.md
       "complete",
     ];
@@ -74,17 +74,17 @@ describe("StateManager", () => {
       expect(state?.phase).toBe("plan");
     });
 
-    it("should transition from plan to implement", () => {
+    it("should transition from plan to execute", () => {
       manager.create("test", "Test");
-      manager.updatePhase("implement");
+      manager.updatePhase("execute");
       
       const state = manager.getState();
-      expect(state?.phase).toBe("implement");
+      expect(state?.phase).toBe("execute");
     });
 
-    it("should transition from implement to review", () => {
+    it("should transition from execute to review", () => {
       manager.create("test", "Test");
-      manager.updatePhase("implement");
+      manager.updatePhase("execute");
       manager.updatePhase("review");
       
       const state = manager.getState();
@@ -217,17 +217,17 @@ describe("WorkflowState types", () => {
     expect(state.planName).toBe("test-plan");
   });
 
-  it("should support implement phase (LuBan)", () => {
+  it("should support execute phase (LuBan)", () => {
     const state: WorkflowState = {
       id: "test",
-      phase: "implement",
+      phase: "execute",
       planName: "test",
       request: "test",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     
-    expect(state.phase).toBe("implement");
+    expect(state.phase).toBe("execute");
   });
 
   it("should support review phase (GaoYao)", () => {
