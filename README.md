@@ -1,6 +1,6 @@
 # Sages
 
-A multi-agent workflow system for [OpenCode](https://github.com/opencode-ai/opencode) and [pi](https://pi.dev), inspired by Chinese mythology.
+A multi-agent workflow system for [pi](https://pi.dev), inspired by Chinese mythology.
 
 ## Overview
 
@@ -14,16 +14,6 @@ Sages implements a Four Sages workflow where each agent has a specialized role:
 | **GaoYao (皋陶)** | Auditor | Quality Audit & Security |
 
 ## Installation
-
-### OpenCode
-
-```bash
-# Quick Install (Recommended)
-curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/opencode/install.sh | bash
-
-# Manual Install
-cd opencode && bun install && bun run install
-```
 
 ### pi
 
@@ -138,7 +128,7 @@ RED → GREEN → REFACTOR
 2. **GREEN**: Write minimal code to pass
 3. **REFACTOR**: Improve structure while keeping tests passing
 
-## Execution Modes (pi)
+## Execution Modes
 
 LuBan supports two execution modes:
 
@@ -182,19 +172,6 @@ All tasks share the **same LLM context**:
 
 ```
 sages/
-├── opencode/                    # OpenCode plugin
-│   ├── src/
-│   │   ├── agents/            # Agent personas (markdown)
-│   │   ├── engine/            # Workflow engine, file-lock, state-manager
-│   │   ├── hooks/             # Session hooks
-│   │   ├── tools/             # Tool definitions
-│   │   ├── utils/             # Utilities
-│   │   ├── workflows/         # YAML orchestration
-│   │   └── opencode-adapter.ts
-│   ├── scripts/               # Build scripts
-│   ├── test/                  # Tests
-│   └── tool/                  # Bundled tools
-│
 ├── pi/                         # pi plugin
 │   ├── src/
 │   │   ├── tools/             # Modular tools (fuxi, qiaochui, luban, gaoyao)
@@ -241,14 +218,14 @@ export type { Phase, OrchestratorConfig } from "./orchestrator/index.js";
 ## Development
 
 ```bash
-# Install all dependencies
+# Install dependencies
 bun install
 
 # Build pi package
 cd pi && bun run build
 
 # Run tests
-bun run test
+bun test
 ```
 
 ## License

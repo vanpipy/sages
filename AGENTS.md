@@ -1,6 +1,6 @@
-# OpenCode Sages - Four Sages Agents
+# Sages - Four Sages Agents
 
-A multi-agent workflow system for [OpenCode](https://github.com/opencode-ai/opencode) and [pi](https://pi.dev), inspired by Chinese mythology.
+A multi-agent workflow system for [pi](https://pi.dev), inspired by Chinese mythology.
 
 ## Architecture Overview
 
@@ -105,17 +105,6 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 
 ```
 sages/
-├── opencode/                    # OpenCode plugin
-│   ├── src/
-│   │   ├── agents/              # Agent personas
-│   │   ├── engine/              # Core engine
-│   │   ├── hooks/               # Session hooks
-│   │   ├── tools/               # Tool definitions
-│   │   ├── utils/               # Utilities
-│   │   └── workflows/           # YAML orchestration
-│   ├── test/                    # Tests
-│   └── tool/                    # Bundled tools
-│
 ├── pi/                          # pi plugin
 │   ├── src/
 │   │   ├── tools/               # Modular tools (fuxi, qiaochui, luban, gaoyao)

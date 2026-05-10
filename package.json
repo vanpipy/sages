@@ -1,20 +1,17 @@
 {
   "name": "@sages/sages",
   "version": "1.0.0",
-  "description": "Four Sages Agents - Multi-agent workflow for OpenCode and pi",
+  "description": "Four Sages Agents - Multi-agent workflow for pi",
   "private": true,
   "workspaces": [
-    "opencode",
     "pi"
   ],
   "scripts": {
-    "build": "bun run build:opencode",
-    "build:opencode": "cd opencode && bun run build:tools",
-    "test": "cd opencode && bun run test",
-    "install:all": "cd opencode && bun install && cd ../pi && bun install"
+    "build": "cd pi && bun run build",
+    "test": "cd pi && bun run test",
+    "install": "cd pi && bun install"
   },
   "keywords": [
-    "opencode",
     "pi",
     "agents",
     "sages",
