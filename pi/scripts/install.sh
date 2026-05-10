@@ -37,7 +37,7 @@ install() {
   tmp_dir=$(mktemp -d)
   
   echo "Cloning to $tmp_dir"
-  git clone --depth=1 --quiet "$REPO_URL" "$tmp_dir"
+  git clone "$REPO_URL" "$tmp_dir"
   
   echo "Installing to $PKG_DIR"
   mkdir -p "$PKG_DIR"
