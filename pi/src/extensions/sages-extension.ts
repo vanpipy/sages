@@ -17,7 +17,7 @@ import {
   registerQiaoChuiTools, 
   registerLuBanTools, 
   registerGaoYaoTools 
-} from "../tools/index.js";
+} from "./tools/index.js";
 
 // Tool executor storage - populated during tool registration
 const toolExecutors: Map<string, Function> = new Map();

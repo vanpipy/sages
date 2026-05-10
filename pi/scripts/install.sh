@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# Four Sages Installation Script
-# ================================
+# Four Sages Installation Script for pi
+# =====================================
 # Installs the Four Sages workflow for pi coding agent
+# No build step required - pi loads TypeScript directly
 #
 # Usage:
 #   ./install.sh [--prefix PATH] [--force] [--uninstall]
@@ -16,7 +17,6 @@
 #
 # Online Install:
 #   curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | bash -s -- --help
 #
 
 set -euo pipefail
@@ -33,10 +33,9 @@ PREFIX="${PI_DIR:-$HOME/.pi}"
 FORCE=false
 DRY_RUN=false
 UNINSTALL=false
-VERSION="main"
 REPO_URL="https://github.com/vanpipy/sages.git"
 PI_DIR_PATH=""
-SAGES_PKG_DIR=""
+EXT_DEST=""
 
 # Functions
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
@@ -52,7 +51,6 @@ show_help() {
   echo "  --force         Overwrite existing installation"
   echo "  --uninstall     Remove installed files"
   echo "  --dry-run       Preview without making changes"
-  echo "  --version REF   Git ref to install (default: main)"
   echo "  --help          Show this help message"
   echo ""
   echo "Examples:"
@@ -67,17 +65,6 @@ show_help() {
 
 check_dependencies() {
   info "Checking dependencies..."
-
-  local missing=()
-  for cmd in git bun; do
-    if ! command -v "$cmd" &> /dev/null; then
-      missing+=("$cmd")
-    fi
-  done
-
-  if [[ ${#missing[@]} -gt 0 ]]; then
-    error "Missing required commands: ${missing[*]}"
-  fi
 
   if ! command -v pi &> /dev/null || [[ ! -d "$HOME/.pi" ]]; then
     error "pi coding agent is not installed."
@@ -114,10 +101,6 @@ parse_args() {
         show_help
         exit 0
         ;;
-      --version)
-        VERSION="$2"
-        shift 2
-        ;;
       -*)
         error "Unknown option: $1"
         ;;
@@ -129,17 +112,15 @@ parse_args() {
 
   PI_DIR_PATH="$(eval echo "$PREFIX")"
   PI_DIR_PATH="$(cd "$PI_DIR_PATH" 2>/dev/null && pwd)" || true
-  SAGES_PKG_DIR="${PI_DIR_PATH}/packages/sages"
+  EXT_DEST="${PI_DIR_PATH}/agent/extensions/sages"
 }
 
 check_installation() {
-  local pkg_dir="$SAGES_PKG_DIR"
-
-  if [[ -d "$pkg_dir" ]]; then
+  if [[ -d "$EXT_DEST" ]]; then
     if [[ "$FORCE" == true ]]; then
       warn "Overwriting existing installation..."
     else
-      info "Four Sages appears to be installed at: $pkg_dir"
+      info "Four Sages appears to be installed at: $EXT_DEST"
       echo ""
       echo "Use --force to overwrite or --uninstall to remove"
       exit 0
@@ -147,134 +128,64 @@ check_installation() {
   fi
 }
 
-cleanup() {
-  if [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]]; then
-    rm -rf "$TEMP_DIR"
-  fi
-}
-
-disable_cleanup() {
-  # Disable cleanup trap so temp dir persists (for manual inspection)
-  trap - EXIT
-  info "Temp directory kept at: $TEMP_DIR"
-}
-
-create_temp_dir() {
-  info "Creating temporary directory..."
-  TEMP_DIR=$(mktemp -d)
-  trap cleanup EXIT
-  success "Temporary directory: $TEMP_DIR"
-}
-
-clone_repo() {
-  info "Cloning repository (version: $VERSION)..."
+install() {
+  local src_dir="$1"
 
   if [[ "$DRY_RUN" == true ]]; then
-    echo "  git clone --depth 1 --branch $VERSION $REPO_URL $TEMP_DIR/sages"
+    info "Installing to: $EXT_DEST"
+    echo "  mkdir -p $EXT_DEST"
+    echo "  cp -r $src_dir/src/extensions/sages-extension.ts $EXT_DEST/"
+    echo "  cp -r $src_dir/src/tools $EXT_DEST/"
+    echo "  cp -r $src_dir/src/state $EXT_DEST/"
+    echo "  cp -r $src_dir/src/executor $EXT_DEST/"
+    echo "  cp -r $src_dir/src/orchestrator $EXT_DEST/"
+    echo "  cp -r $src_dir/src/utils $EXT_DEST/"
+    echo "  cp -r $src_dir/src/index.ts $EXT_DEST/"
+    echo "  cp -r $src_dir/skills $EXT_DEST/"
+    echo "  cp -r $src_dir/prompts $EXT_DEST/"
     return
   fi
 
-  git clone --depth 1 --branch "$VERSION" "$REPO_URL" "$TEMP_DIR/sages"
-  success "Repository cloned"
+  info "Installing to: $EXT_DEST"
+  mkdir -p "$EXT_DEST"
+
+  # Copy extension and source files (TypeScript - no build needed for pi)
+  # All files are placed directly under extensions/sages/
+  cp "$src_dir/src/extensions/sages-extension.ts" "$EXT_DEST/"
+  cp -r "$src_dir/src/tools" "$EXT_DEST/"
+  cp -r "$src_dir/src/state" "$EXT_DEST/"
+  cp -r "$src_dir/src/executor" "$EXT_DEST/"
+  cp -r "$src_dir/src/orchestrator" "$EXT_DEST/"
+  cp -r "$src_dir/src/utils" "$EXT_DEST/"
+  cp "$src_dir/src/index.ts" "$EXT_DEST/"
+
+  # Copy skills and prompts for discovery
+  cp -r "$src_dir/skills" "$EXT_DEST/"
+  cp -r "$src_dir/prompts" "$EXT_DEST/"
+
+  success "Extension installed"
 }
 
-build_package() {
-  local pi_dir="$TEMP_DIR/sages/pi"
-
-  if [[ "$DRY_RUN" == true ]]; then
-    info "Building package..."
-    if [[ -d "$pi_dir" ]]; then
-      echo "  cd $pi_dir"
-      echo "  bun install"
-      echo "  bun run build"
-    else
-      echo "  (pi directory will be at $pi_dir after clone)"
-    fi
-    success "Package built (dry-run)"
-    return
-  fi
-
-  if [[ ! -d "$pi_dir" ]]; then
-    error "pi directory not found in repository"
-  fi
-
-  # Check if already built (skip if dist exists)
-  if [[ -d "$pi_dir/dist" && -f "$pi_dir/dist/index.js" ]]; then
-    info "Package already built (skipping rebuild)"
-  else
-    info "Building package..."
-    cd "$pi_dir"
-    bun install
-    bun run build
-    success "Package built"
-  fi
-}
-
-install_package() {
-  local pi_dir="$TEMP_DIR/sages/pi"
-  local pkg_dest="$SAGES_PKG_DIR"
-
-  if [[ "$DRY_RUN" == true ]]; then
-    info "Installing package..."
-    echo "  mkdir -p $(dirname "$pkg_dest")"
-    echo "  rm -rf $pkg_dest"
-    echo "  mkdir -p $pkg_dest"
-    echo "  cp $pi_dir/package.json $pkg_dest/"
-    echo "  cp -r $pi_dir/dist $pkg_dest/"
-    echo "  cp -r $pi_dir/skills $pkg_dest/"
-    echo "  cp -r $pi_dir/prompts $pkg_dest/"
-    return
-  fi
-
-  info "Installing package..."
-  
-  # Ensure parent directory exists (idempotent)
-  mkdir -p "$(dirname "$pkg_dest")"
-  
-  # Remove old installation
-  rm -rf "$pkg_dest"
-  
-  # Create package directory
-  mkdir -p "$pkg_dest"
-  
-  # Copy only necessary files (selective install)
-  # - package.json: package metadata
-  # - dist/: built JavaScript (includes extensions in dist/src/extensions/)
-  # - skills/: skill definitions (MD)
-  # - prompts/: workflow prompts
-  cp "$pi_dir/package.json" "$pkg_dest/"
-  cp -r "$pi_dir/dist" "$pkg_dest/"
-  cp -r "$pi_dir/skills" "$pkg_dest/"
-  cp -r "$pi_dir/prompts" "$pkg_dest/"
-  
-  # Disable cleanup so temp dir persists
-  disable_cleanup
-  
-  success "Package installed to: $pkg_dest"
-}
-
-register_package_in_settings() {
-  local pkg_dest="$SAGES_PKG_DIR"
+register_in_settings() {
   local settings_file="${PI_DIR_PATH}/agent/settings.json"
-  
-  if [[ ! -f "$settings_file" ]]; then
-    warn "Settings file not found at $settings_file, skipping package registration"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    info "Registering in settings.json..."
+    echo "  python3 update_settings"
     return
   fi
 
-  info "Registering package in settings.json..."
-  
-  # Use Python for reliable JSON manipulation
   if ! command -v python3 &> /dev/null; then
-    error "python3 not found. Cannot modify settings.json"
+    warn "python3 not found. Cannot register in settings.json"
+    return
   fi
-  
-  python3 - "$pkg_dest" "$settings_file" << 'PYTHON_EOF'
+
+  python3 - "$EXT_DEST" "$settings_file" << 'PYTHON_EOF'
 import sys
 import json
 import os
 
-package_ref = sys.argv[1]
+ext_path = sys.argv[1]
 settings_file = sys.argv[2]
 
 try:
@@ -288,28 +199,28 @@ except (json.JSONDecodeError, FileNotFoundError):
 if 'packages' not in settings:
     settings['packages'] = []
 
-# Normalize path for comparison (handle ~ expansion)
+# Normalize path for comparison
 home_dir = os.path.expanduser('~')
-package_ref_normalized = package_ref.replace('~', home_dir)
+ext_normalized = os.path.normpath(ext_path.replace('~', home_dir))
 
-# Check if package already exists
-needs_adding = True
+# Filter out any existing sages entries (deduplicate)
+filtered = []
 for pkg in settings['packages']:
-    pkg_normalized = pkg.replace('~', home_dir)
-    if pkg_normalized == package_ref_normalized:
-        needs_adding = False
-        break
+    pkg_normalized = os.path.normpath(pkg.replace('~', home_dir))
+    if 'sages' not in pkg_normalized:
+        filtered.append(pkg)
+settings['packages'] = filtered
 
-if needs_adding:
-    settings['packages'].append(package_ref)
-    with open(settings_file, 'w') as f:
-        json.dump(settings, f, indent=2)
-        f.write('\n')
-    print("Package registered in settings.json")
-else:
-    print("Package already registered in settings.json")
+# Add the extension path
+settings['packages'].append(ext_path)
+
+with open(settings_file, 'w') as f:
+    json.dump(settings, f, indent=2)
+    f.write('\n')
+
+print("Registered in settings.json")
 PYTHON_EOF
-  
+
   if [[ $? -eq 0 ]]; then
     success "Package registration complete"
   fi
@@ -321,123 +232,79 @@ show_installation_info() {
   success "Four Sages installed successfully!"
   echo "========================================"
   echo ""
-  echo "Package: @sages/pi-four-sages"
-  echo "Location: $SAGES_PKG_DIR"
+  echo "Location: $EXT_DEST"
   echo ""
   echo "Commands:"
   echo ""
-  echo "  FUXI (☰ Design):"
-  echo "    fuxi-start          Start workflow"
-  echo "    fuxi-request       Create requirement draft"
-  echo "    fuxi-plan           Start plan (score > 80)"
-  echo "    fuxi-recover        Recover workflow"
-  echo "    fuxi-end            End and archive workflow"
-  echo "    fuxi-get-status     Get workflow status"
+  echo "  FUXI (Design):"
+  echo "    /fuxi-start          Start workflow"
+  echo "    /fuxi-request       Create requirement draft"
+  echo "    /fuxi-plan           Start plan (score > 80)"
+  echo "    /fuxi-recover        Recover workflow"
+  echo "    /fuxi-end            End and archive workflow"
+  echo "    /fuxi-get-status     Get workflow status"
   echo ""
-  echo "  QIAOCHUI (☳ Review):"
-  echo "    qiaochui-review     Review draft feasibility"
-  echo "    qiaochui-decompose  Decompose into tasks"
+  echo "  QIAOCHUI (Review):"
+  echo "    /qiaochui-review     Review draft feasibility"
+  echo "    /qiaochui-decompose  Decompose into tasks"
   echo ""
-  echo "  LUBAN (☴ Execute):"
-  echo "    luban-execute-task  Execute single task (TDD)"
-  echo "    luban-execute-all   Execute all tasks"
-  echo "    luban-get-status    Get execution status"
+  echo "  LUBAN (Execute):"
+  echo "    /luban-execute-task  Execute single task (TDD)"
+  echo "    /luban-execute-all   Execute all tasks"
+  echo "    /luban-get-status    Get execution status"
   echo ""
-  echo "  GAOYAO (☲ Audit):"
-  echo "    gaoyao-review       Quality audit (Xie Zhi)"
-  echo "    gaoyao-check-security Security scan"
+  echo "  GAOYAO (Audit):"
+  echo "    /gaoyao-review       Quality audit (Xie Zhi)"
+  echo "    /gaoyao-check-security Security scan"
   echo ""
-  echo "Workflow Phases:"
-  echo "  ☰ Design → ☳ Review → 📋 Plan → ☴ Execute → ☲ Audit"
-  echo ""
-  echo "Skills:"
-  echo "  fuxi     - MDD System Design"
-  echo "  qiaochui - Technical Review"
-  echo "  luban    - TDD Implementation"
-  echo "  gaoyao   - Quality Audit"
-  echo ""
-  echo "Restart pi to load the new package:"
+  echo "Restart pi to load the extension:"
   echo "  exit && pi"
   echo ""
 }
 
-unregister_package_from_settings() {
-  local pkg_dest="$SAGES_PKG_DIR"
-  local settings_file="${PI_DIR_PATH}/agent/settings.json"
-  
-  if [[ ! -f "$settings_file" ]]; then
+uninstall() {
+  info "Uninstalling Four Sages..."
+
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "  rm -rf $EXT_DEST"
+    echo "  python3 unregister"
     return
   fi
 
-  info "Unregistering package from settings.json..."
-  
-  if ! command -v python3 &> /dev/null; then
-    warn "python3 not found. Cannot modify settings.json"
-    return
+  # Remove extension directory
+  if [[ -d "$EXT_DEST" ]]; then
+    rm -rf "$EXT_DEST"
+    success "Removed: $EXT_DEST"
   fi
-  
-  python3 - "$pkg_dest" "$settings_file" << 'PYTHON_EOF'
+
+  # Unregister from settings.json
+  if command -v python3 &> /dev/null; then
+    python3 - "$EXT_DEST" "${PI_DIR_PATH}/agent/settings.json" << 'PYTHON_EOF'
 import sys
 import json
 import os
 
-package_ref = sys.argv[1]
-settings_file = sys.argv[2]
-
 try:
+    settings_file = sys.argv[1]
     with open(settings_file, 'r') as f:
         settings = json.load(f)
-except (json.JSONDecodeError, FileNotFoundError):
-    print("ERROR: Failed to read/parse settings.json")
-    sys.exit(1)
-
-if 'packages' not in settings:
-    print("No packages to unregister")
+except:
     sys.exit(0)
 
-home_dir = os.path.expanduser('~')
-package_ref_normalized = package_ref.replace('~', home_dir)
+if 'packages' not in settings:
+    sys.exit(0)
 
-# Filter out the package
-original_count = len(settings['packages'])
 settings['packages'] = [
     pkg for pkg in settings['packages']
-    if pkg.replace('~', home_dir) != package_ref_normalized
+    if 'sages' not in pkg
 ]
 
-if len(settings['packages']) < original_count:
-    with open(settings_file, 'w') as f:
-        json.dump(settings, f, indent=2)
-        f.write('\n')
-    print("Package unregistered from settings.json")
-else:
-    print("Package not found in settings.json")
+with open(settings_file, 'w') as f:
+    json.dump(settings, f, indent=2)
+    f.write('\n')
+print("Unregistered from settings.json")
 PYTHON_EOF
-}
-
-uninstall_package() {
-  info "Uninstalling Four Sages..."
-
-  local pkg_paths=(
-    "$SAGES_PKG_DIR"
-    "$PI_DIR_PATH/agent/npm/@sages"
-    "$PI_DIR_PATH/agent/npm/sages"
-  )
-
-  if [[ "$DRY_RUN" == true ]]; then
-    echo "  rm -rf ${pkg_paths[*]}"
-    return
   fi
-
-  for path in "${pkg_paths[@]}"; do
-    if [[ -d "$path" ]]; then
-      rm -rf "$path"
-      success "Removed: $path"
-    fi
-  done
-
-  # Unregister from settings.json
-  unregister_package_from_settings
 
   success "Uninstallation complete"
 }
@@ -453,7 +320,7 @@ main() {
 
   if [[ "$UNINSTALL" == true ]]; then
     check_dependencies
-    uninstall_package
+    uninstall
     exit 0
   fi
 
@@ -468,11 +335,24 @@ main() {
   fi
 
   check_installation
-  create_temp_dir
-  clone_repo
-  build_package
-  install_package
-  register_package_in_settings
+
+  # Determine source directory
+  # If running from repo: ./pi/scripts/install.sh -> ../../ (sages root)
+  local script_dir="$(cd "$(dirname "$0")" && pwd)"
+  local repo_root="$(dirname "$script_dir")"
+  local src_dir="$repo_root"
+
+  # If src/extensions doesn't exist, assume we're in the pi subdirectory
+  if [[ ! -d "$src_dir/src/extensions" ]]; then
+    src_dir="$repo_root/pi"
+  fi
+
+  if [[ ! -d "$src_dir/src/extensions" ]]; then
+    error "Cannot find extension source in $src_dir"
+  fi
+
+  install "$src_dir"
+  register_in_settings
 
   if [[ "$DRY_RUN" == false ]]; then
     show_installation_info
