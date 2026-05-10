@@ -7,6 +7,8 @@
 set -euo pipefail
 
 PI_DIR="${PI_DIR:-$HOME/.pi}"
+PKG_NAME="sages"
+PKG_DIR="$PI_DIR/packages/$PKG_NAME"
 
 usage() {
   echo "Usage: $0 [--prefix DIR] [--force] [--uninstall]"
@@ -34,7 +36,7 @@ install() {
   tmp_dir=$(mktemp -d)
   
   echo "Cloning to $tmp_dir"
-  git clone --quiet "$REPO_URL" "$tmp_dir"
+  git clone --depth=1 --quiet "$REPO_URL" "$tmp_dir"
   
   echo "Installing to $PKG_DIR"
   mkdir -p "$PKG_DIR"
@@ -61,11 +63,8 @@ uninstall() {
 }
 
 main() {
-  FORCE=false
-  UNINSTALL=false
-  PKG_NAME="sages"
-  PKG_DIR="$PI_DIR/packages/$PKG_NAME"
-
+  local FORCE=false UNINSTALL=false REPO_URL="${REPO_URL:-file://$(pwd)}"
+  
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --prefix) PI_DIR="$2"; PKG_DIR="$PI_DIR/packages/$PKG_NAME"; shift 2 ;;
@@ -76,12 +75,14 @@ main() {
     esac
   done
 
-  [[ ! -d "$PI_DIR" ]] && { echo "Error: $PI_DIR not found"; exit 1; }
+  [[ ! -d "$PI_DIR" ]] && { echo "Error: $PI_DIR not found. Run: mkdir -p $PI_DIR"; exit 1; }
   command -v git &>/dev/null || { echo "Error: git required"; exit 1; }
-  REPO_URL="${REPO_URL:-$(git remote get-url origin 2>/dev/null)}"
-  [[ -z "$REPO_URL" ]] && { echo "Error: Cannot determine repo URL"; exit 1; }
 
-  $UNINSTALL && uninstall || install
+  if $UNINSTALL; then
+    uninstall
+  else
+    install
+  fi
 }
 
 main "$@"
