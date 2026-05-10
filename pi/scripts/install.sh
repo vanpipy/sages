@@ -46,7 +46,7 @@ install() {
     if [[ -d "$PKG_DIR/$dir" && "${FORCE:-false}" != true ]]; then
       echo "  Skipping $dir (exists)"
     else
-      cp -r${FORCE:+f} "$tmp_dir/pi/$dir" "$PKG_DIR/"
+      cp -r${FORCE:+ -f} "$tmp_dir/pi/$dir" "$PKG_DIR/"
       echo "  Copied $dir/"
     fi
   done
@@ -55,7 +55,7 @@ install() {
   if [[ -f "$PKG_DIR/package.json" && "${FORCE:-false}" != true ]]; then
     echo "  Skipping package.json (exists)"
   else
-    cp${FORCE:+f} "$tmp_dir/pi/package.json" "$PKG_DIR/package.json"
+    cp${FORCE:+ -f} "$tmp_dir/pi/package.json" "$PKG_DIR/package.json"
     echo "  Copied package.json"
   fi
   register_settings
