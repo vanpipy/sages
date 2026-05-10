@@ -32,6 +32,20 @@ print('Registered', p)
 "
 }
 
+unregister_settings() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return
+
+  python3 -c "
+import json, sys
+f, p = '$settings', '$PKG_DIR'
+d = json.load(open(f))
+d['packages'] = [x for x in d.get('packages', []) if x != p]
+json.dump(d, open(f, 'w'), indent=2)
+print('Unregistered', p)
+"
+}
+
 install() {
   local tmp_dir
   tmp_dir=$(mktemp -d)
@@ -67,7 +81,7 @@ install() {
 uninstall() {
   echo "Uninstalling..."
   [[ -d "$PKG_DIR" ]] && rm -rf "$PKG_DIR" && echo "  Removed $PKG_DIR"
-  register_settings
+  unregister_settings
   echo "Done."
 }
 
