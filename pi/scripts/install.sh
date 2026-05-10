@@ -9,6 +9,7 @@ set -euo pipefail
 PI_DIR="${PI_DIR:-$HOME/.pi}"
 PKG_NAME="sages"
 PKG_DIR="$PI_DIR/packages/$PKG_NAME"
+REPO_URL=""https://github.com/vanpipy/sages.git
 
 usage() {
   echo "Usage: $0 [--prefix DIR] [--force] [--uninstall]"
@@ -63,7 +64,7 @@ uninstall() {
 }
 
 main() {
-  local FORCE=false UNINSTALL=false REPO_URL="${REPO_URL:-file://$(pwd)}"
+  local FORCE=false UNINSTALL=false
   
   while [[ $# -gt 0 ]]; do
     case "$1" in
