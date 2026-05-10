@@ -75,10 +75,10 @@ export async function analyzeProject(cwd: string, request?: string): Promise<Pro
   const packageJson = loadPackageJson(cwd);
   const projectName = packageJson?.name || basename(cwd);
   const language = detectLanguage(cwd, packageJson);
-  const framework = detectFramework(packageJson, language);
+  const framework = detectFramework(packageJson, language, cwd);
   const projectType = detectProjectType(packageJson, framework, request);
   
-  const techStack = analyzeTechStack(packageJson);
+  const techStack = analyzeTechStack(packageJson, language, cwd);
   const structure = analyzeStructure(cwd);
   const patterns = detectPatterns(cwd, language);
   const components = detectComponents(cwd, language);
@@ -120,65 +120,86 @@ function detectLanguage(cwd: string, packageJson: Record<string, any> | null): s
     if (packageJson.dependencies?.react || packageJson.dependencies?.vue || packageJson.dependencies?.svelte) {
       return "typescript";
     }
-    if (packageJson.go_module) {
-      return "go";
-    }
     if (packageJson.java || packageJson.artifact) {
       return "java";
     }
   }
 
-  // Check file extensions in src/
-  const srcDir = join(cwd, "src");
-  if (existsSync(srcDir)) {
-    const files = getAllFiles(srcDir);
-    const extCounts: Record<string, number> = {};
-    
-    for (const file of files.slice(0, 100)) { // Sample first 100 files
-      const ext = extname(file).toLowerCase();
-      extCounts[ext] = (extCounts[ext] || 0) + 1;
-    }
-
-    const sorted = Object.entries(extCounts).sort((a, b) => b[1] - a[1]);
-    if (sorted.length > 0) {
-      const topExt = sorted[0][0];
-      const extToLang: Record<string, string> = {
-        ".ts": "typescript",
-        ".tsx": "typescript",
-        ".js": "javascript",
-        ".jsx": "javascript",
-        ".go": "go",
-        ".py": "python",
-        ".java": "java",
-        ".rs": "rust",
-        ".rb": "ruby",
-        ".php": "php",
-        ".cs": "csharp",
-        ".cpp": "cpp",
-        ".c": "c",
-      };
-      return extToLang[topExt] || "typescript";
-    }
-  }
-
-  // Check for language-specific config files
+  // Check for language-specific config files FIRST (before scanning src/)
   if (existsSync(join(cwd, "go.mod"))) return "go";
   if (existsSync(join(cwd, "Cargo.toml"))) return "rust";
-  if (existsSync(join(cwd, "requirements.txt")) || existsSync(join(cwd, "setup.py"))) return "python";
+  if (existsSync(join(cwd, "requirements.txt")) || existsSync(join(cwd, "setup.py")) || existsSync(join(cwd, "pyproject.toml"))) return "python";
   if (existsSync(join(cwd, "pom.xml"))) return "java";
   if (existsSync(join(cwd, "composer.json"))) return "php";
-  if (existsSync(join(cwd, ".csproj"))) return "csharp";
+  if (existsSync(join(cwd, ".csproj")) || existsSync(join(cwd, "*.sln"))) return "csharp";
+  if (existsSync(join(cwd, "Makefile"))) return "c"; // Common for C/C++ projects
+  
+  // Count file extensions across the entire project (not just src/)
+  const extCounts: Record<string, number> = {};
+  
+  // Scan multiple common directories for different languages
+  const dirsToScan = ["src", "lib", "internal", "cmd", "pkg", "internal", "app", "packages"];
+  for (const dir of dirsToScan) {
+    const dirPath = join(cwd, dir);
+    if (existsSync(dirPath)) {
+      const files = getAllFiles(dirPath);
+      for (const file of files.slice(0, 200)) { // Sample more files
+        const ext = extname(file).toLowerCase();
+        if (ext && !file.includes("node_modules")) {
+          extCounts[ext] = (extCounts[ext] || 0) + 1;
+        }
+      }
+    }
+  }
+  
+  // Also scan root level for Go projects (which often don't have src/)
+  if (Object.keys(extCounts).length === 0) {
+    try {
+      const rootFiles = readdirSync(cwd);
+      for (const file of rootFiles) {
+        if (file.endsWith(".go") || file.endsWith(".rs") || file.endsWith(".py")) {
+          const ext = extname(file).toLowerCase();
+          extCounts[ext] = (extCounts[ext] || 0) + 1;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  const sorted = Object.entries(extCounts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length > 0) {
+    const topExt = sorted[0][0];
+    const extToLang: Record<string, string> = {
+      ".ts": "typescript",
+      ".tsx": "typescript",
+      ".js": "javascript",
+      ".jsx": "javascript",
+      ".go": "go",
+      ".py": "python",
+      ".java": "java",
+      ".rs": "rust",
+      ".rb": "ruby",
+      ".php": "php",
+      ".cs": "csharp",
+      ".cpp": "cpp",
+      ".c": "c",
+    };
+    return extToLang[topExt] || "typescript";
+  }
 
   return "typescript"; // default
 }
 
 /**
- * Detect framework from package.json
+ * Detect framework from package.json or project files
  */
-function detectFramework(packageJson: Record<string, any> | null, language: string): string | null {
-  if (!packageJson) return null;
+function detectFramework(packageJson: Record<string, any> | null, language: string, cwd?: string): string | null {
+  const projectDir = cwd || ".";
 
-  const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
+  if (!packageJson && language !== "go") {
+    return null;
+  }
+
+  const deps = packageJson ? { ...packageJson.dependencies, ...packageJson.devDependencies } : {};
 
   if (language === "typescript" || language === "javascript") {
     if (deps.react) return "react";
@@ -190,19 +211,29 @@ function detectFramework(packageJson: Record<string, any> | null, language: stri
     if (deps.express || deps.fastify || deps.koa) return "express";
     if (deps.electron) return "electron";
     if (deps["@nestjs/core"]) return "nestjs";
+    if (deps["@charmbracelet/bubbletea"]) return "bubbletea";
+    if (deps["@charmbracelet/bubbles"]) return "bubbles";
     if (deps.arcade || deps.dgram) return "node";
+    return null;
   }
 
   if (language === "go") {
-    // Check go.mod for framework hints
-    const goModPath = join(dirname(packageJson.path || ""), "go.mod");
+    // Check go.mod for framework/library hints
+    const goModPath = join(projectDir, "go.mod");
     if (existsSync(goModPath)) {
-      const content = readFileSync(goModPath, "utf-8");
-      if (content.includes("github.com/gin-gonic")) return "gin";
-      if (content.includes("github.com/gofiber")) return "fiber";
-      if (content.includes("github.com/charmbracelet")) return "bubbletea";
-      if (content.includes("github.com/golang")) return "stdlib";
+      try {
+        const content = readFileSync(goModPath, "utf-8");
+        if (content.includes("github.com/charmbracelet/bubbletea")) return "bubbletea";
+        if (content.includes("github.com/charmbracelet/bubbles")) return "bubbles";
+        if (content.includes("github.com/charmbracelet/lipgloss")) return "lipgloss";
+        if (content.includes("github.com/gin-gonic/gin")) return "gin";
+        if (content.includes("github.com/gofiber")) return "fiber";
+        if (content.includes("github.com/spf13/cobra")) return "cobra";
+        if (content.includes("github.com/spf13/viper")) return "viper";
+        if (content.includes("github.com/golang")) return "stdlib";
+      } catch { /* ignore */ }
     }
+    return null;
   }
 
   if (language === "python") {
@@ -279,9 +310,9 @@ function detectProjectType(
 }
 
 /**
- * Analyze tech stack from package.json
+ * Analyze tech stack from package.json or go.mod
  */
-function analyzeTechStack(packageJson: Record<string, any> | null): TechStackInfo {
+function analyzeTechStack(packageJson: Record<string, any> | null, language?: string, cwd?: string): TechStackInfo {
   const result: TechStackInfo = {
     languages: [],
     frameworks: [],
@@ -289,6 +320,46 @@ function analyzeTechStack(packageJson: Record<string, any> | null): TechStackInf
     testing: [],
     linting: [],
   };
+
+  // For Go projects, analyze go.mod
+  if (language === "go") {
+    const goModPath = join(cwd || ".", "go.mod");
+    if (existsSync(goModPath)) {
+      try {
+        const content = readFileSync(goModPath, "utf-8");
+        // Extract Go version
+        const goVersion = content.match(/^go\s+(\d+\.\d+)/m);
+        if (goVersion) {
+          result.languages.push(`Go ${goVersion[1]}`);
+        }
+        
+        // Detect frameworks/libraries from imports
+        const frameworks = [];
+        if (content.includes("github.com/charmbracelet/bubbletea")) {
+          frameworks.push("bubbletea");
+        }
+        if (content.includes("github.com/charmbracelet/bubbles")) {
+          frameworks.push("bubbles");
+        }
+        if (content.includes("github.com/charmbracelet/lipgloss")) {
+          frameworks.push("lipgloss");
+        }
+        if (content.includes("github.com/spf13/cobra")) {
+          frameworks.push("cobra");
+        }
+        if (content.includes("github.com/spf13/viper")) {
+          frameworks.push("viper");
+        }
+        if (content.includes("github.com/gomodule/redigo")) {
+          result.testing.push("redigo");
+        }
+        result.frameworks = frameworks;
+        result.buildTools.push("go build");
+        result.buildTools.push("go mod");
+      } catch { /* ignore */ }
+    }
+    return result;
+  }
 
   if (!packageJson) return result;
 

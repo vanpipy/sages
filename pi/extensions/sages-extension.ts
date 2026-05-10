@@ -23,13 +23,18 @@ import {
 const toolExecutors: Map<string, Function> = new Map();
 
 /**
- * Call a tool executor directly by name.
+ * Call a tool executor directly by name with streaming support.
  * This bypasses the non-existent pi.callTool() method.
+ * 
+ * The onUpdate callback is called during execution to stream progress updates
+ * to the LLM, enabling real-time feedback during long operations like
+ * project analysis and draft generation.
  */
 async function callToolDirect(
   toolName: string,
   params: Record<string, unknown>,
-  cwd: string
+  cwd: string,
+  onUpdate?: (msg: { content: { type: string; text: string }[] }) => void | Promise<void>
 ): Promise<{ content: { type: string; text: string }[]; isError?: boolean; details?: unknown }> {
   const executor = toolExecutors.get(toolName);
   if (!executor) {
@@ -40,11 +45,12 @@ async function callToolDirect(
   }
 
   try {
-    const result = await (executor as Function).call(null, 
+    const result = await (executor as Function).call(
+      null,
       `cmd-${Date.now()}`,
       params,
-      undefined,
-      undefined,
+      undefined,  // signal (can be AbortController.signal)
+      onUpdate,   // ✅ Pass onUpdate for streaming progress
       { cwd }
     );
     return result;
@@ -110,22 +116,38 @@ export default function (pi: ExtensionAPI) {
   });
 
   /**
-   * fuxi-request - Create requirement draft
+   * fuxi-request - Create requirement draft with DEEP analysis
    * Usage: /fuxi-request [request description]
+   * 
+   * This command invokes deep project research and streams progress updates
+   * to the LLM via the onUpdate callback.
    */
   pi.registerCommand("fuxi-request", {
-    description: "Create MDD design draft (draft.md) using Seven Planes analysis",
+    description: "Create MDD design draft (draft.md) using Seven Planes analysis with DEEP project research",
     handler: async (args, ctx) => {
       const request = args || "New feature request";
 
-      const result = await callToolDirect("fuxi_request", {
-        request: request,
-      }, ctx.cwd);
+      // Create onUpdate callback to stream progress to LLM
+      const onUpdate = async (msg: { content: { type: string; text: string }[] }) => {
+        // Send streaming update to the UI/LLM
+        if (ctx.ui) {
+          const text = msg.content?.[0]?.text || "";
+          ctx.ui.notify(text, "info");
+        }
+      };
+
+      // Pass onUpdate to enable streaming
+      const result = await callToolDirect(
+        "fuxi_request",
+        { request },
+        ctx.cwd,
+        onUpdate
+      );
 
       if (result?.isError) {
         ctx.ui.notify("Failed to create draft.", "error");
       } else {
-        ctx.ui.notify("📝 Draft created: .sages/workspace/draft.md", "info");
+        ctx.ui.notify("📝 Draft created with deep analysis: .sages/workspace/draft.md", "info");
       }
     },
   });
