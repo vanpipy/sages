@@ -8,12 +8,6 @@ set -euo pipefail
 
 PI_DIR="${PI_DIR:-$HOME/.pi}"
 
-# Source directory (script's parent or parent's parent)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SRC_DIR="$(dirname "$SCRIPT_DIR")"
-[[ ! -d "$SRC_DIR/src" ]] && SRC_DIR="$SCRIPT_DIR/pi"
-[[ ! -d "$SRC_DIR/src" ]] && { echo "Error: Cannot find source"; exit 1; }
-
 usage() {
   echo "Usage: $0 [--prefix DIR] [--force] [--uninstall]"
   echo "  --prefix DIR   Set pi config dir (default: ~/.pi)"
@@ -36,18 +30,26 @@ print('Registered', p)
 }
 
 install() {
+  local tmp_dir
+  tmp_dir=$(mktemp -d)
+  
+  echo "Cloning to $tmp_dir"
+  git clone --quiet "$REPO_URL" "$tmp_dir"
+  
   echo "Installing to $PKG_DIR"
   mkdir -p "$PKG_DIR"
   for dir in prompts skills extensions src; do
-    [[ -d "$SRC_DIR/$dir" ]] || continue
+    [[ -d "$tmp_dir/pi/$dir" ]] || continue
     if [[ -d "$PKG_DIR/$dir" && "${FORCE:-false}" != true ]]; then
       echo "  Skipping $dir (exists)"
     else
-      cp -r${FORCE:+f} "$SRC_DIR/$dir" "$PKG_DIR/"
+      cp -r${FORCE:+f} "$tmp_dir/pi/$dir" "$PKG_DIR/"
       echo "  Copied $dir/"
     fi
   done
   register_settings
+  
+  rm -rf "$tmp_dir"
   echo "Done. Restart pi: exit && pi"
 }
 
@@ -75,6 +77,9 @@ main() {
   done
 
   [[ ! -d "$PI_DIR" ]] && { echo "Error: $PI_DIR not found"; exit 1; }
+  command -v git &>/dev/null || { echo "Error: git required"; exit 1; }
+  REPO_URL="${REPO_URL:-$(git remote get-url origin 2>/dev/null)}"
+  [[ -z "$REPO_URL" ]] && { echo "Error: Cannot determine repo URL"; exit 1; }
 
   $UNINSTALL && uninstall || install
 }
