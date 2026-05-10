@@ -3,15 +3,6 @@
   "version": "1.0.0",
   "description": "Four Sages Agents workflow for pi - Fuxi, QiaoChui, LuBan, GaoYao",
   "type": "module",
-  "main": "./src/index.js",
-  "types": "./src/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./src/index.js",
-      "types": "./src/index.d.ts"
-    },
-    "./extension": "./src/extensions/sages-extension.js"
-  },
   "keywords": [
     "pi-package",
     "pi",
@@ -22,7 +13,7 @@
   ],
   "license": "MIT",
   "pi": {
-    "extensions": ["./src/extensions"],
+    "extensions": ["./extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"]
   },
