@@ -2,7 +2,7 @@
 #
 # Four Sages Installation Script for pi
 # =====================================
-# Installs to ~/.pi/packages/sages (not ~/.pi/agent/...)
+# Installs to ~/.pi (copies extensions/, prompts/, skills/, src/)
 #
 # Usage:
 #   ./install.sh [--prefix PATH] [--force] [--uninstall]
@@ -22,7 +22,6 @@ FORCE=false
 DRY_RUN=false
 UNINSTALL=false
 PI_DIR_PATH=""
-PKG_DEST=""
 
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 success() { echo -e "${GREEN}[OK]${NC} $1"; }
@@ -32,7 +31,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 show_help() {
   echo "Usage: $0 [options]"
   echo "  --prefix PATH   Set pi config directory (default: ~/.pi)"
-  echo "  --force         Overwrite existing installation"
+  echo "  --force         Overwrite existing files"
   echo "  --uninstall     Remove installed files"
   echo "  --dry-run       Preview without making changes"
   echo "  --help          Show this help message"
@@ -61,45 +60,35 @@ parse_args() {
 
   PI_DIR_PATH="$(eval echo "$PREFIX")"
   PI_DIR_PATH="$(cd "$PI_DIR_PATH" 2>/dev/null && pwd)" || true
-  PKG_DEST="${PI_DIR_PATH}/packages/sages"
-}
-
-check_installation() {
-  if [[ -d "$PKG_DEST" ]]; then
-    if [[ "$FORCE" == true ]]; then
-      warn "Overwriting existing installation..."
-    else
-      info "Four Sages appears to be installed at: $PKG_DEST"
-      echo "Use --force to overwrite or --uninstall to remove"
-      exit 0
-    fi
-  fi
 }
 
 install() {
   local src_dir="$1"
 
   if [[ "$DRY_RUN" == true ]]; then
-    info "Installing to: $PKG_DEST"
-    echo "  rm -rf $PKG_DEST && mkdir -p $PKG_DEST"
-    echo "  cp -r $src_dir/src $PKG_DEST/"
-    echo "  cp -r $src_dir/skills $PKG_DEST/"
-    echo "  cp -r $src_dir/prompts $PKG_DEST/"
-    echo "  cp $src_dir/package.json $PKG_DEST/"
+    info "Installing to: $PI_DIR_PATH"
+    for dir in extensions prompts skills src; do
+      if [[ -d "$src_dir/$dir" ]]; then
+        echo "  cp -r$([ "$FORCE" == true ] && echo "f") $src_dir/$dir $PI_DIR_PATH/"
+      fi
+    done
     return
   fi
 
-  info "Installing to: $PKG_DEST"
-  rm -rf "$PKG_DEST"
-  mkdir -p "$PKG_DEST"
+  info "Installing to: $PI_DIR_PATH"
 
-  # Copy source files (TypeScript - pi loads via jiti)
-  cp -r "$src_dir/src" "$PKG_DEST/"
-  cp -r "$src_dir/skills" "$PKG_DEST/"
-  cp -r "$src_dir/prompts" "$PKG_DEST/"
-  cp "$src_dir/package.json" "$PKG_DEST/"
+  for dir in extensions prompts skills src; do
+    if [[ -d "$src_dir/$dir" ]]; then
+      if [[ -d "$PI_DIR_PATH/$dir" && "$FORCE" != true ]]; then
+        warn "Skipping $dir (exists). Use --force to overwrite"
+      else
+        cp -r$([ "$FORCE" == true ] && echo "f") "$src_dir/$dir" "$PI_DIR_PATH/"
+        success "Copied $dir/"
+      fi
+    fi
+  done
 
-  success "Installed to $PKG_DEST"
+  success "Installed to $PI_DIR_PATH"
 }
 
 register_in_settings() {
@@ -115,13 +104,12 @@ register_in_settings() {
     return
   fi
 
-  python3 - "$PKG_DEST" "$settings_file" << 'PYTHON_EOF'
+  python3 - "$settings_file" << 'PYTHON_EOF'
 import sys
 import json
 import os
 
-pkg_path = sys.argv[1]
-settings_file = sys.argv[2]
+settings_file = sys.argv[1]
 
 try:
     with open(settings_file, 'r') as f:
@@ -132,24 +120,12 @@ except:
 if 'packages' not in settings:
     settings['packages'] = []
 
-# Normalize and deduplicate
-home_dir = os.path.expanduser('~')
-filtered = []
-for pkg in settings['packages']:
-    normalized = os.path.normpath(pkg.replace('~', home_dir))
-    if 'sages' not in normalized:
-        filtered.append(pkg)
-    else:
-        # Update to the new path
-        pkg_path = pkg
-
-settings['packages'] = filtered
-settings['packages'].append(pkg_path)
+settings['packages'] = [p for p in settings['packages'] if 'sages' not in p]
 
 with open(settings_file, 'w') as f:
     json.dump(settings, f, indent=2)
     f.write('\n')
-print("Registered in settings.json")
+print("Updated settings.json")
 PYTHON_EOF
 }
 
@@ -159,7 +135,7 @@ show_info() {
   success "Four Sages installed successfully!"
   echo "========================================"
   echo ""
-  echo "Location: $PKG_DEST"
+  echo "Location: $PI_DIR_PATH/{extensions,prompts,skills,src}/"
   echo ""
   echo "Commands:"
   echo "  /fuxi-start, /fuxi-request, /fuxi-plan, /fuxi-recover, /fuxi-end, /fuxi-get-status"
@@ -175,27 +151,17 @@ uninstall() {
   info "Uninstalling Four Sages..."
 
   if [[ "$DRY_RUN" == true ]]; then
-    echo "  rm -rf $PKG_DEST"
+    for dir in extensions prompts skills src; do
+      echo "  rm -rf $PI_DIR_PATH/$dir"
+    done
     return
   fi
 
-  [[ -d "$PKG_DEST" ]] && rm -rf "$PKG_DEST" && success "Removed: $PKG_DEST"
+  for dir in extensions prompts skills src; do
+    [[ -d "$PI_DIR_PATH/$dir" ]] && rm -rf "$PI_DIR_PATH/$dir" && success "Removed: $dir/"
+  done
 
-  if command -v python3 &> /dev/null; then
-    python3 - "${PI_DIR_PATH}/agent/settings.json" << 'PYTHON_EOF'
-import sys, json, os
-try:
-    with open(sys.argv[1], 'r') as f:
-        settings = json.load(f)
-except: sys.exit(0)
-if 'packages' in settings:
-    settings['packages'] = [p for p in settings['packages'] if 'sages' not in p]
-    with open(sys.argv[1], 'w') as f:
-        json.dump(settings, f, indent=2)
-        f.write('\n')
-    print("Unregistered")
-PYTHON_EOF
-  fi
+  register_in_settings
 
   success "Uninstallation complete"
 }
@@ -219,7 +185,6 @@ main() {
 
   check_dependencies
   [[ -n "$PI_DIR_PATH" ]] && info "Install prefix: $PI_DIR_PATH"
-  check_installation
 
   # Determine source directory
   local script_dir="$(cd "$(dirname "$0")" && pwd)"
