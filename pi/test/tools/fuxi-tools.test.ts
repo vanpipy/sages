@@ -186,7 +186,7 @@ describe("FuxiTools Commands (skills)", () => {
     });
 
     it("should enforce review phase read-only (audit.md)", () => {
-      const pattern = /^audit-.*\.md$/;
+      const pattern = /^audit(-.*)?\.md$/;
       
       expect(pattern.test("audit.md")).toBe(true);
       expect(pattern.test("audit-2024-01-15.md")).toBe(true);

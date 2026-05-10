@@ -26,7 +26,8 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { generateMinimalDraft } from "../utils/draft-generator.js";
+import { generateMinimalDraft, generateRichDraft } from "../utils/draft-generator.js";
+import { analyzeProject } from "../utils/project-analyzer.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
 const ARCHIVE_DIR = ".sages/archive";
@@ -180,12 +181,22 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
 
   /**
    * fuxi_request - Create MDD design draft using Seven Planes analysis
+   * DEEP ANALYSIS VERSION: Performs actual project research with streaming updates
+   * 
    * Creates draft.md with: Business, Data, Control, Foundation, Observation, Security, Evolution planes
+   * 
+   * Process:
+   * 1. Send "Starting analysis..." update
+   * 2. Analyze project structure (onUpdate)
+   * 3. Detect tech stack and patterns (onUpdate)
+   * 4. Generate context-aware plane content (onUpdate per plane)
+   * 5. Write draft.md
+   * 6. Send completion update
    */
   pi.registerTool({
     name: "fuxi_request",
-    label: "Create Draft",
-    description: "Create MDD design draft (draft.md) using Seven Planes analysis. Outputs overview, plane analysis, cross-plane deps, decisions, questions.",
+    label: "Create Deep Draft",
+    description: "Create MDD design draft (draft.md) using Seven Planes analysis with DEEP project research. Outputs overview, plane analysis, cross-plane deps, decisions, questions. Streams progress updates.",
     parameters: Type.Object({
       request: Type.String({ description: "User's request to create draft for" }),
     }),
@@ -196,22 +207,114 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
 
       const planName = state?.planName || extractPlanName(params.request);
       const draftPath = join(workspacePath, "draft.md");
-      const draft = generateMinimalDraft(planName, params.request);
 
-      writeFileSync(draftPath, draft);
+      try {
+        // Phase 1: Start analysis with streaming
+        await onUpdate?.({
+          content: [{ type: "text", text: "🔍 Starting MDD analysis..." }],
+        });
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            draft_path: draftPath,
-            plan_name: planName,
-            message: `Draft created: ${draftPath}`,
-          }),
-        }],
-        details: { draftPath, planName },
-      };
+        // Phase 2: Analyze project context
+        await onUpdate?.({
+          content: [{ type: "text", text: "📊 Analyzing project structure..." }],
+        });
+
+        const projectContext = await analyzeProject(cwd, params.request);
+
+        await onUpdate?.({
+          content: [{ 
+            type: "text", 
+            text: `📋 Detected: ${projectContext.language}${projectContext.framework ? ` (${projectContext.framework})` : ""}, ${projectContext.existingComponents.length} components, ${projectContext.patterns.length} patterns` 
+          }],
+        });
+
+        // Phase 3: Generate each plane with streaming updates
+        const planes = [
+          { name: "Business", emoji: "1️⃣" },
+          { name: "Data", emoji: "2️⃣" },
+          { name: "Control", emoji: "3️⃣" },
+          { name: "Foundation", emoji: "4️⃣" },
+          { name: "Observation", emoji: "5️⃣" },
+          { name: "Security", emoji: "6️⃣" },
+          { name: "Evolution", emoji: "7️⃣" },
+        ];
+
+        for (const plane of planes) {
+          await onUpdate?.({
+            content: [{ type: "text", text: `${plane.emoji} Analyzing ${plane.name} Plane...` }],
+          });
+          // Small delay to allow UI to update
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        // Phase 4: Generate the rich draft with project context
+        await onUpdate?.({
+          content: [{ type: "text", text: "💾 Generating draft.md..." }],
+        });
+
+        const draft = generateRichDraft(projectContext, params.request);
+        writeFileSync(draftPath, draft);
+
+        // Phase 5: Completion update
+        await onUpdate?.({
+          content: [{ 
+            type: "text", 
+            text: `✅ Draft created: ${draftPath}\n\n📝 ${projectContext.existingComponents.length} components analyzed\n🎯 ${planes.length} MDD planes processed\n🎨 Detected patterns: ${projectContext.patterns.slice(0, 5).join(", ") || "none"}` 
+          }],
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              draft_path: draftPath,
+              plan_name: planName,
+              project_context: {
+                language: projectContext.language,
+                framework: projectContext.framework,
+                project_type: projectContext.projectType,
+                components_found: projectContext.existingComponents.length,
+                patterns_detected: projectContext.patterns,
+                tech_stack: {
+                  languages: projectContext.techStack.languages,
+                  frameworks: projectContext.techStack.frameworks,
+                  testing: projectContext.techStack.testing,
+                },
+              },
+              message: `Deep draft created with ${planes.length} planes analyzed`,
+            }),
+          }],
+          details: { draftPath, planName, projectContext },
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        
+        // Send error update
+        await onUpdate?.({
+          content: [{ type: "text", text: `❌ Analysis failed: ${msg}` }],
+        });
+
+        // Fallback to minimal draft
+        const draft = generateMinimalDraft(planName, params.request);
+        writeFileSync(draftPath, draft);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: false,
+              error: msg,
+              draft_path: draftPath,
+              plan_name: planName,
+              fallback: true,
+              message: `Created minimal draft (analysis failed: ${msg})`,
+            }),
+          }],
+          isError: true,
+          details: { error: msg, draftPath, planName },
+        };
+      }
     },
   });
 

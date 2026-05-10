@@ -21,7 +21,7 @@ const PHASE_ALLOWED_FILES: Record<string, string[]> = {
   design: ["draft.md"],
   plan: ["plan.md", "execution.yaml"],
   implement: ["*"],  // all files allowed
-  review: ["audit.md"],
+  review: ["audit*.md"],  // audit.md, audit-2024-01-15.md, etc.
 };
 
 /**
@@ -47,10 +47,11 @@ export function checkWritePermission(phase: string, filePath: string): boolean {
     return true;
   }
 
-  // Check for pattern match (e.g., audit-{timestamp}.md)
+  // Check for pattern matches
   for (const pattern of allowedFiles) {
-    if (pattern.includes("{")) {
-      const regex = new RegExp("^audit-.*\\.md$");
+    // Handle wildcard patterns like audit-*.md
+    if (pattern.includes("*")) {
+      const regex = new RegExp("^" + pattern.replace(".", "\\.").replace("*", ".*") + "$");
       if (regex.test(fileName)) {
         return true;
       }

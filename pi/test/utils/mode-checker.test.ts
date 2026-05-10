@@ -117,7 +117,7 @@ describe("ModeChecker", () => {
     it("should return correct info for review phase", () => {
       const info = getModeInfo("review");
       expect(info.mode).toBe("read-only");
-      expect(info.allowedFiles).toEqual(["audit.md"]);
+      expect(info.allowedFiles).toContain("audit*.md");
     });
 
     it("should handle unknown phase", () => {

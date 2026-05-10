@@ -1,7 +1,9 @@
 /**
  * Draft Generator - Creates MDD (Multi-Dimensional Design) drafts
- * Based on Fuxi's Seven Planes methodology
+ * Now supports context-aware generation from project analysis
  */
+
+import type { ProjectContext } from "./project-analyzer.js";
 
 export interface DraftConfig {
   name: string;
@@ -45,7 +47,7 @@ export interface DraftConfig {
 const DRAFT_TEMPLATE = `# System Design: {name}
 
 ## Overview
-{intelligence}
+{intent}
 
 ---
 
@@ -167,7 +169,7 @@ export function generateDraft(config: DraftConfig): string {
   return DRAFT_TEMPLATE
     .replace("{name}", config.name)
     .replace("{timestamp}", timestamp)
-    .replace("{intelligence}", config.intent || config.request)
+    .replace("{intent}", config.intent || config.request)
     // Business Plane
     .replace("{process}", formatList(config.business?.process))
     .replace("{rules}", formatList(config.business?.rules))
@@ -196,6 +198,573 @@ export function generateDraft(config: DraftConfig): string {
     .replace("{notes}", config.notes || "- Add notes here");
 }
 
+/**
+ * Generate rich draft from project context
+ * This is the NEW deep analysis version of generateMinimalDraft
+ */
+export function generateRichDraft(projectContext: ProjectContext, request: string): string {
+  const lowerRequest = request.toLowerCase();
+  
+  // Analyze request type to customize plane content
+  const requestType = analyzeRequestType(lowerRequest);
+  
+  // Generate plane content based on project context
+  const businessPlane = generateBusinessPlane(projectContext, request, requestType);
+  const dataPlane = generateDataPlane(projectContext, request, requestType);
+  const controlPlane = generateControlPlane(projectContext, request, requestType);
+  const foundationPlane = generateFoundationPlane(projectContext, request, requestType);
+  const observationPlane = generateObservationPlane(projectContext, request, requestType);
+  const securityPlane = generateSecurityPlane(projectContext, request, requestType);
+  const evolutionPlane = generateEvolutionPlane(projectContext, request, requestType);
+
+  return generateDraft({
+    name: projectContext.projectName,
+    request,
+    intent: `${requestType.description}\n\n**Project**: ${projectContext.projectName}\n**Language**: ${projectContext.language}${projectContext.framework ? ` (${projectContext.framework})` : ""}\n**Type**: ${projectContext.projectType}\n**Tech Stack**: ${projectContext.techStack.languages.join(", ")}${projectContext.techStack.frameworks.length > 0 ? `, ${projectContext.techStack.frameworks.join(", ")}` : ""}`,
+    business: businessPlane,
+    data: dataPlane,
+    control: controlPlane,
+    foundation: foundationPlane,
+    observation: observationPlane,
+    security: securityPlane,
+    evolution: evolutionPlane,
+    crossPlaneDependencies: [
+      "- Business Plane → needs → Data Plane",
+      "- Data Plane → feeds → Observation Plane",
+      "- Control Plane → manages → Business Plane",
+      "- Foundation Plane → supports → All Planes",
+      "- Security Plane → protects → All Planes",
+    ],
+    keyDecisions: [
+      `- Use ${projectContext.language} with ${projectContext.framework || "no framework"}`,
+      `- Follow existing patterns: ${projectContext.patterns.slice(0, 3).join(", ") || "standard project conventions"}`,
+      "- Apply MDD methodology for systematic design",
+    ],
+    openQuestions: [
+      `- Validate assumption: existing patterns are ${projectContext.patterns.length > 0 ? "appropriate" : "need to be defined"}`,
+      "- Review with QiaoChui for technical feasibility",
+      "- Validate assumptions with stakeholders",
+    ],
+    notes: "- Ready for QiaoChui review",
+  });
+}
+
+interface RequestType {
+  category: "refactor" | "feature" | "api" | "test" | "security" | "performance" | "general";
+  description: string;
+  focusPlanes: string[];
+}
+
+/**
+ * Analyze the type of request to customize content
+ */
+function analyzeRequestType(request: string): RequestType {
+  if (request.includes("refactor") || request.includes("reorganize") || request.includes("restructure")) {
+    return {
+      category: "refactor",
+      description: `Refactoring request: ${request}`,
+      focusPlanes: ["Data", "Control", "Foundation"],
+    };
+  }
+  
+  if (request.includes("api") || request.includes("endpoint") || request.includes("rest")) {
+    return {
+      category: "api",
+      description: `API Design: ${request}`,
+      focusPlanes: ["Foundation", "Data", "Security"],
+    };
+  }
+  
+  if (request.includes("test") || request.includes("tdd") || request.includes("coverage")) {
+    return {
+      category: "test",
+      description: `Test Implementation: ${request}`,
+      focusPlanes: ["Observation", "Data", "Control"],
+    };
+  }
+  
+  if (request.includes("security") || request.includes("vulnerability") || request.includes("auth")) {
+    return {
+      category: "security",
+      description: `Security Enhancement: ${request}`,
+      focusPlanes: ["Security", "Control", "Foundation"],
+    };
+  }
+  
+  if (request.includes("performance") || request.includes("optimize") || request.includes("speed")) {
+    return {
+      category: "performance",
+      description: `Performance Optimization: ${request}`,
+      focusPlanes: ["Control", "Observation", "Data"],
+    };
+  }
+  
+  if (request.includes("add") || request.includes("new") || request.includes("create") || request.includes("implement")) {
+    return {
+      category: "feature",
+      description: `New Feature: ${request}`,
+      focusPlanes: ["Business", "Foundation", "Data"],
+    };
+  }
+  
+  return {
+    category: "general",
+    description: `Feature Request: ${request}`,
+    focusPlanes: ["Business", "Data", "Control", "Foundation"],
+  };
+}
+
+/**
+ * Generate Business Plane content from project context
+ */
+function generateBusinessPlane(ctx: ProjectContext, request: string, reqType: RequestType): { process: string[]; rules: string[] } {
+  const { language, framework, projectType, patterns } = ctx;
+  
+  const process: string[] = [
+    "- User interaction flow",
+    `- Feature: ${request}`,
+  ];
+  
+  const rules: string[] = [
+    "- Business constraints",
+    "- Policy requirements",
+  ];
+
+  // Add language/framework specific rules
+  if (language === "typescript") {
+    process.push("- TypeScript type checking at compile time");
+    rules.push("- Strict null checking enabled");
+    rules.push("- ES2022+ target for modern features");
+  }
+  
+  if (framework === "react") {
+    process.push("- React component lifecycle management");
+    rules.push("- Hooks-first pattern (useState, useEffect, useCallback)");
+    rules.push("- Functional component only (no class components)");
+  }
+  
+  if (framework === "express" || framework === "fastify") {
+    process.push("- RESTful endpoint routing");
+    process.push("- Middleware chain for request processing");
+    rules.push("- JSON request/response format");
+    rules.push("- Standard HTTP status codes");
+  }
+  
+  if (framework === "gin" || framework === "fiber") {
+    process.push("- Go HTTP routing");
+    process.push("- Middleware for logging, auth, recovery");
+    rules.push("- Context-based request handling");
+    rules.push("- Error wrapping with stack traces");
+  }
+
+  // Request type specific
+  if (reqType.category === "feature") {
+    process.push("- Feature flag for gradual rollout");
+    rules.push("- Backward compatibility with existing APIs");
+  }
+  
+  if (reqType.category === "refactor") {
+    process.push("- Incremental refactoring approach");
+    process.push("- Parallel implementation and testing");
+    rules.push("- Preserve public API contracts");
+    rules.push("- No breaking changes");
+  }
+
+  return { process, rules };
+}
+
+/**
+ * Generate Data Plane content from project context
+ */
+function generateDataPlane(ctx: ProjectContext, request: string, reqType: RequestType): { logic: string[]; state: string[] } {
+  const { language, existingComponents } = ctx;
+  
+  const logic: string[] = [
+    "- Core business logic",
+    "- Data transformations",
+  ];
+  
+  const state: string[] = [
+    "- Entity state management",
+    "- Persistent state",
+  ];
+
+  // Language specific patterns
+  if (language === "typescript") {
+    logic.push("- TypeScript strict mode for type safety");
+    logic.push("- Zod/TypeBox for runtime validation");
+    logic.push("- Immutable data patterns (const assertions, Readonly)");
+    
+    // Check for existing patterns
+    if (ctx.patterns.includes("Union Types")) {
+      logic.push("- Discriminated unions for type-safe state");
+    }
+    if (ctx.patterns.includes("Async/Await")) {
+      logic.push("- Promise-based async operations");
+    }
+  }
+  
+  if (language === "go") {
+    logic.push("- Go idiomatic error handling (return errors)");
+    logic.push("- Structured logging with context");
+    logic.push("- Value receivers for simple types, pointer receivers for structs");
+    
+    if (ctx.patterns.includes("Interface Types")) {
+      logic.push("- Program to interfaces, not implementations");
+      logic.push("- Define interfaces where needed, not in advance");
+    }
+    if (ctx.patterns.includes("Concurrency (Goroutines)")) {
+      logic.push("- Concurrent operations with goroutines and channels");
+      logic.push("- Use sync.WaitGroup or context for synchronization");
+    }
+  }
+
+  // Component specific
+  if (existingComponents.length > 0) {
+    const componentTypes = [...new Set(existingComponents.map(c => c.type))];
+    logic.push(`- Existing components: ${componentTypes.join(", ")}`);
+  }
+
+  // Request type specific
+  if (reqType.category === "api") {
+    logic.push("- Request/Response DTOs");
+    logic.push("- Data validation in handler layer");
+    logic.push("- Business logic separated from HTTP concerns");
+  }
+  
+  if (reqType.category === "test") {
+    logic.push("- Test fixtures and mock data");
+    logic.push("- Assertion helpers for common patterns");
+    state.push("- Mock state for deterministic tests");
+  }
+
+  return { logic, state };
+}
+
+/**
+ * Generate Control Plane content from project context
+ */
+function generateControlPlane(ctx: ProjectContext, request: string, reqType: RequestType): { strategy: string[]; distribution: string[] } {
+  const { framework, language } = ctx;
+  
+  const strategy: string[] = [
+    "- Decision points",
+    "- Error handling strategy",
+  ];
+  
+  const distribution: string[] = [
+    "- Component communication",
+    "- Event flow",
+  ];
+
+  // Framework specific control flow
+  if (framework === "react") {
+    strategy.push("- Unidirectional data flow (parent → child)");
+    strategy.push("- State lifting for shared state");
+    strategy.push("- Composition over inheritance");
+    distribution.push("- Props drilling or Context for cross-component data");
+  }
+  
+  if (framework === "express" || framework === "fastify") {
+    strategy.push("- Middleware pattern for cross-cutting concerns");
+    strategy.push("- Next() pattern for request flow control");
+    distribution.push("- Route handlers as middleware chain");
+  }
+  
+  if (framework === "gin" || framework === "fiber") {
+    strategy.push("- Group-based routing for related endpoints");
+    strategy.push("- Panic recovery middleware");
+    distribution.push("- Handler functions with context");
+  }
+
+  // Language specific
+  if (language === "typescript") {
+    strategy.push("- Conditional rendering based on state");
+    strategy.push("- Early returns for error cases");
+  }
+  
+  if (language === "go") {
+    strategy.push("- Explicit error checking (no try/catch)");
+    strategy.push("- Deferred cleanup for resources");
+    strategy.push("- Context for cancellation and timeouts");
+    distribution.push("- Channel-based communication");
+    distribution.push("- Select statement for multi-way control");
+  }
+
+  // Request type specific
+  if (reqType.category === "performance") {
+    strategy.push("- Memoization for expensive computations");
+    strategy.push("- Debouncing for frequent events");
+    strategy.push("- Lazy loading for optional features");
+  }
+  
+  if (reqType.category === "error" || request.includes("error")) {
+    strategy.push("- Centralized error handler");
+    strategy.push("- Typed error classes");
+    strategy.push("- User-friendly error messages");
+  }
+
+  return { strategy, distribution };
+}
+
+/**
+ * Generate Foundation Plane content from project context
+ */
+function generateFoundationPlane(ctx: ProjectContext, request: string, reqType: RequestType): { resource: string[]; abstraction: string[] } {
+  const { language, framework, structure, keyFiles } = ctx;
+  
+  const resource: string[] = [
+    "- Infrastructure needed",
+    "- External dependencies",
+  ];
+  
+  const abstraction: string[] = [
+    "- Public interfaces",
+    "- API contracts",
+  ];
+
+  // Language specific resources
+  if (language === "typescript") {
+    resource.push("- Node.js runtime environment");
+    resource.push("- TypeScript compiler (tsc)");
+    
+    if (ctx.techStack.buildTools.includes("vite")) {
+      resource.push("- Vite for fast HMR and builds");
+    } else if (ctx.techStack.buildTools.includes("webpack")) {
+      resource.push("- Webpack for bundling");
+    }
+    
+    abstraction.push("- Module exports (named and default)");
+    abstraction.push("- TypeScript interfaces and types");
+  }
+  
+  if (language === "go") {
+    resource.push("- Go toolchain (1.21+)");
+    resource.push("- Go modules for dependency management");
+    
+    abstraction.push("- Package-level exports");
+    abstraction.push("- Go interfaces (implicit implementation)");
+    abstraction.push("- Error interface");
+  }
+
+  // Framework specific abstractions
+  if (framework === "react") {
+    abstraction.push("- React.Component interface");
+    abstraction.push("- React.FC for functional components");
+    abstraction.push("- HTML element types");
+  }
+  
+  if (framework === "express" || framework === "gin") {
+    abstraction.push("- Router interface");
+    abstraction.push("- Handler function signature");
+    abstraction.push("- Middleware function signature");
+  }
+
+  // Structure specific
+  if (structure.srcDir) {
+    resource.push(`- Source directory: ${structure.srcDir}`);
+  }
+  if (structure.mainFile) {
+    resource.push(`- Entry point: ${structure.mainFile}`);
+  }
+
+  // Key files
+  const configFiles = keyFiles.filter(f => f.purpose.includes("config") || f.purpose.includes("dependencies"));
+  if (configFiles.length > 0) {
+    resource.push(`- Config files: ${configFiles.map(f => basename(f.path)).join(", ")}`);
+  }
+
+  // Request type specific
+  if (reqType.category === "api") {
+    abstraction.push("- REST API endpoints");
+    abstraction.push("- Request/Response types");
+    abstraction.push("- Error response format");
+    resource.push("- HTTP client or REST library");
+  }
+  
+  if (reqType.category === "feature") {
+    resource.push("- Feature flag system (if needed)");
+    resource.push("- Configuration management");
+  }
+
+  return { resource, abstraction };
+}
+
+/**
+ * Generate Observation Plane content from project context
+ */
+function generateObservationPlane(ctx: ProjectContext, request: string, reqType: RequestType): { data: string[]; analysis: string[] } {
+  const { techStack, patterns } = ctx;
+  
+  const data: string[] = [
+    "- Key metrics",
+    "- Events to track",
+  ];
+  
+  const analysis: string[] = [
+    "- Monitoring strategy",
+    "- Alerting rules",
+  ];
+
+  // Testing framework specific
+  if (techStack.testing.includes("jest")) {
+    data.push("- Jest test results");
+    data.push("- Code coverage percentage");
+    data.push("- Test execution time");
+    analysis.push("- Coverage threshold alerts");
+  } else if (techStack.testing.includes("vitest")) {
+    data.push("- Vitest test results");
+    data.push("- V8 coverage reports");
+  } else if (techStack.testing.includes("pytest")) {
+    data.push("- Pytest results and coverage");
+    data.push("- Test discovery patterns");
+  }
+
+  // Logging patterns
+  if (patterns.includes("Debug Logging")) {
+    data.push("- Application logs");
+    data.push("- Error stack traces");
+    analysis.push("- Log aggregation (if using centralized logging)");
+  }
+
+  // Request type specific
+  if (reqType.category === "performance") {
+    data.push("- Response time histograms");
+    data.push("- Memory usage metrics");
+    data.push("- CPU utilization");
+    analysis.push("- Performance regression alerts");
+  }
+  
+  if (reqType.category === "test") {
+    data.push("- Test pass/fail rate");
+    data.push("- Flaky test detection");
+    data.push("- Coverage trends over time");
+    analysis.push("- Test execution time trends");
+  }
+
+  return { data, analysis };
+}
+
+/**
+ * Generate Security Plane content from project context
+ */
+function generateSecurityPlane(ctx: ProjectContext, request: string, reqType: RequestType): { identity: string[]; permissions: string[] } {
+  const { framework, language } = ctx;
+  
+  const identity: string[] = [
+    "- User identification",
+    "- Authentication mechanism",
+  ];
+  
+  const permissions: string[] = [
+    "- Access control model",
+    "- Permission structure",
+  ];
+
+  // Framework specific security
+  if (framework === "express" || framework === "fastify") {
+    identity.push("- JWT token authentication");
+    identity.push("- Session-based auth (if needed)");
+    permissions.push("- Route-level authorization middleware");
+    permissions.push("- RBAC (Role-Based Access Control)");
+  }
+  
+  if (framework === "gin" || framework === "fiber") {
+    identity.push("- JWT middleware for auth");
+    identity.push("- Session management");
+    permissions.push("- Middleware-based authorization");
+    permissions.push("- Context-based permission checks");
+  }
+
+  // Language specific
+  if (language === "typescript") {
+    identity.push("- Input sanitization");
+    identity.push("- XSS prevention in rendering");
+    permissions.push("- Environment variable access control");
+  }
+  
+  if (language === "go") {
+    identity.push("- Environment-based secrets");
+    identity.push("- Structured logging (no sensitive data in logs)");
+    permissions.push("- File system permission checks");
+  }
+
+  // Request type specific
+  if (reqType.category === "security") {
+    identity.push("- Enhanced input validation");
+    identity.push("- Rate limiting per user");
+    permissions.push("- Audit logging for sensitive operations");
+    permissions.push("- Secure password hashing (bcrypt/argon2)");
+  }
+  
+  if (reqType.category === "api") {
+    identity.push("- API key authentication");
+    identity.push("- OAuth 2.0 client credentials (if applicable)");
+    permissions.push("- Scope-based API access control");
+    permissions.push("- CORS configuration");
+  }
+
+  return { identity, permissions };
+}
+
+/**
+ * Generate Evolution Plane content from project context
+ */
+function generateEvolutionPlane(ctx: ProjectContext, request: string, reqType: RequestType): { time: string[]; change: string[] } {
+  const { language, framework } = ctx;
+  
+  const time: string[] = [
+    "- Feature timeline",
+    "- Milestone schedule",
+  ];
+  
+  const change: string[] = [
+    "- Versioning strategy",
+    "- Migration approach",
+  ];
+
+  // Package manager specific versioning
+  if (ctx.structure.hasPackageJson) {
+    time.push("- npm/semver versioning");
+    change.push("- Changelog maintained with conventional commits");
+  }
+  
+  if (ctx.structure.hasGoMod) {
+    time.push("- Go module versioning (v0, v1, v2...)");
+    change.push("- Go proxy for reproducible builds");
+  }
+
+  // Framework specific evolution
+  if (framework === "next" || framework === "nuxt") {
+    time.push("- Incremental static regeneration");
+    time.push("- Gradual deployment with feature flags");
+  }
+  
+  if (framework === "react") {
+    change.push("- React version upgrade path");
+    change.push("- StrictMode for deprecation warnings");
+  }
+
+  // Request type specific
+  if (reqType.category === "refactor") {
+    time.push("- Phased refactoring with stable releases");
+    time.push("- Parallel branch for breaking changes");
+    change.push("- Migration scripts for data if needed");
+    change.push("- Deprecation warnings in old code");
+  }
+  
+  if (reqType.category === "feature") {
+    time.push("- MVP first, then iterate");
+    time.push("- Feature flags for controlled rollout");
+    change.push("- Backward-compatible additions");
+  }
+
+  return { time, change };
+}
+
+/**
+ * Minimal draft generation (for backward compatibility)
+ */
 export function generateMinimalDraft(name: string, request: string): string {
   const analysis = analyzeRequest(request);
 
@@ -250,7 +819,7 @@ export function generateMinimalDraft(name: string, request: string): string {
 }
 
 /**
- * Analyze request to generate relevant MDD plane content
+ * Analyze request to generate relevant MDD plane content (legacy)
  */
 function analyzeRequest(request: string): {
   intent: string;
@@ -483,122 +1052,6 @@ function analyzeRequest(request: string): {
     };
   }
 
-  // Calculator/Mathematical function request
-  if (
-    lowerRequest.includes("calculator") ||
-    lowerRequest.includes("math") ||
-    lowerRequest.includes("arithmetic") ||
-    lowerRequest.includes("addition") ||
-    lowerRequest.includes("subtraction") ||
-    lowerRequest.includes("multiplication") ||
-    lowerRequest.includes("division") ||
-    (lowerRequest.includes("function") && lowerRequest.includes("operation"))
-  ) {
-    // Extract mentioned operations
-    const operations: string[] = [];
-    if (lowerRequest.includes("addition") || lowerRequest.includes("add"))
-      operations.push("Addition (a + b)");
-    if (lowerRequest.includes("subtraction") || lowerRequest.includes("subtract"))
-      operations.push("Subtraction (a - b)");
-    if (lowerRequest.includes("multiplication") || lowerRequest.includes("multiply"))
-      operations.push("Multiplication (a * b)");
-    if (lowerRequest.includes("division") || lowerRequest.includes("divide"))
-      operations.push("Division (a / b)");
-
-    return {
-      intent: `Mathematical Function: ${request}`,
-      businessProcess:
-        operations.length > 0
-          ? operations
-          : ["- Function invocation flow", "- Parameter passing", "- Result return"],
-      businessRules: [
-        "- Input validation: reject non-numeric types",
-        "- Division by zero: return Infinity or throw Error",
-        "- Precision: maintain 15 significant digits",
-        "- Type coercion: convert string digits to numbers",
-      ],
-      dataLogic: [
-        "- Data Schema:",
-        "  ```typescript",
-        "  type Operation = 'add' | 'subtract' | 'multiply' | 'divide';",
-        "  type Operands = { a: number; b: number; };",
-        "  type CalculatorInput = { op: Operation; a: number; b: number; };",
-        "  type CalculatorResult = { value: number; error?: string; };",
-        "  ```",
-        "- Pure function: no side effects, deterministic output",
-        "- Type coercion: string → number via Number() or parseFloat()",
-        "- Precision: use Math.round() for floating-point cleanup",
-      ],
-      dataState: [
-        "- No persistent state (pure functions)",
-        "- Immutable inputs/outputs",
-        "- Stateless operation evaluation",
-        "- No caching required (pure computation)",
-      ],
-      controlStrategy: [
-        "- Control Flow:",
-        "  1. Validate inputs (isNaN check)",
-        "  2. Coerce types if needed",
-        "  3. Route to operation handler",
-        "  4. Apply result or error",
-        "- Error Strategy: return { value: NaN, error: '...' } or throw",
-        "- Input Validation: typeof === 'number' || !isNaN(parseFloat())",
-      ],
-      controlDistribution: [
-        "- Single module export",
-        "- Option A: Single calculate(input) function",
-        "- Option B: Calculator class with add/subtract/multiply/divide methods",
-        "- Option C: Operator enum + switch statement dispatch",
-      ],
-      foundationResource: [
-        "- Language runtime only (no external deps)",
-        "- Optional: BigInt for integers > 2^53",
-        "- Optional: decimal.js for financial precision",
-        "- Testing: jest or bun test",
-      ],
-      foundationAbstraction: [
-        "- API Option A (Simple):",
-        "  ```typescript",
-        "  function calculate(a: number, b: number, op: string): number",
-        "  ```",
-        "- API Option B (Type-safe):",
-        "  ```typescript",
-        "  type Operation = 'add' | 'subtract' | 'multiply' | 'divide';",
-        "  function calculate(input: CalculatorInput): CalculatorResult",
-        "  ```",
-        "- API Option C (Functional):",
-        "  ```typescript",
-        "  const add = (a: number, b: number) => a + b",
-        "  const subtract = (a: number, b: number) => a - b",
-        "  ```",
-      ],
-      observationData: [
-        "- Operation call frequency (add vs divide)",
-        "- Error rates per operation type",
-        "- Average execution time per call",
-        "- NaN/Infinity return frequency",
-      ],
-      observationAnalysis: [
-        "- Performance: benchmark for large number inputs",
-        "- Usage: track most-used operations",
-      ],
-      securityIdentity: ["- No authentication required (pure computation)"],
-      securityPermissions: [
-        "- No access control needed",
-        "- Input sanitization for injection prevention",
-      ],
-      evolutionTime: [
-        "- Phase 1: Basic 4 operations (MVP)",
-        "- Phase 2: Modulo, power, sqrt",
-        "- Phase 3: Scientific functions (sin, cos, log)",
-      ],
-      evolutionChange: [
-        "- Backward compatible: add new operations without breaking API",
-        "- Breaking change: bump major version, document migration",
-      ],
-    };
-  }
-
   // Default generic request
   return {
     intent: request,
@@ -659,4 +1112,9 @@ function analyzeRequest(request: string): {
       "- Migration approach",
     ],
   };
+}
+
+// Helper to get basename
+function basename(path: string): string {
+  return path.split("/").pop() || path;
 }
