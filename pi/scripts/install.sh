@@ -52,10 +52,10 @@ install() {
   done
   
   echo "Copying package.json"
-  if [[ -f "$PKG_DIR/package.json" && "${FORCE:-false}" != true ]]; then
+  if [[ "${FORCE:-false}" != true ]]; then
     echo "  Skipping package.json (exists)"
   else
-    cp${FORCE:+ -f} "$tmp_dir/pi/package.json" "$PKG_DIR/package.json"
+    cp "$tmp_dir/pi/package.json" "$PKG_DIR/package.json"
     echo "  Copied package.json"
   fi
   register_settings
