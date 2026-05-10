@@ -181,24 +181,20 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
 
   /**
    * fuxi_request - Create MDD design draft using Seven Planes analysis
-   * DEEP ANALYSIS VERSION: Performs actual project research with streaming updates
    * 
-   * Creates draft.md with: Business, Data, Control, Foundation, Observation, Security, Evolution planes
+   * INTEGRATION WITH BRAINSTORM:
+   * Now automatically starts with brainstorming for better design quality.
+   * Flow: brainstorm → design approval → auto-ask → Fuxi MDD draft
    * 
-   * Process:
-   * 1. Send "Starting analysis..." update
-   * 2. Analyze project structure (onUpdate)
-   * 3. Detect tech stack and patterns (onUpdate)
-   * 4. Generate context-aware plane content (onUpdate per plane)
-   * 5. Write draft.md
-   * 6. Send completion update
+   * User can skip brainstorm with --no-brainstorm flag
    */
   pi.registerTool({
     name: "fuxi_request",
     label: "Create Deep Draft",
-    description: "Create MDD design draft (draft.md) using Seven Planes analysis with DEEP project research. Outputs overview, plane analysis, cross-plane deps, decisions, questions. Streams progress updates.",
+    description: "Create MDD design draft (draft.md) using Seven Planes analysis with DEEP project research. Now integrates with brainstorming for better design. Streams progress updates. Use --no-brainstorm to skip brainstorming.",
     parameters: Type.Object({
       request: Type.String({ description: "User's request to create draft for" }),
+      "no-brainstorm": Type.Optional(Type.Boolean({ description: "Skip brainstorming, go directly to MDD draft" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;
@@ -208,16 +204,29 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
       const planName = state?.planName || extractPlanName(params.request);
       const draftPath = join(workspacePath, "draft.md");
 
-      try {
-        // Phase 1: Start analysis with streaming
-        await onUpdate?.({
-          content: [{ type: "text", text: "🔍 Starting MDD analysis..." }],
-        });
+      // Check if user wants to skip brainstorming
+      const skipBrainstorm = params["no-brainstorm"] === true;
 
-        // Phase 2: Analyze project context
-        await onUpdate?.({
-          content: [{ type: "text", text: "📊 Analyzing project structure..." }],
-        });
+      try {
+        // Phase 0: Show integration message
+        if (!skipBrainstorm) {
+          await onUpdate?.({
+            content: [{ type: "text", text: `🧠 Starting with **Brainstorming** first...\n\nThis helps clarify requirements and explore approaches before creating the MDD draft.\n\nWe'll go through:\n1. Explore project context\n2. Ask clarifying questions\n3. Propose 2-3 approaches\n4. Design with your approval\n5. Auto-ask: "Proceed to Fuxi?"` }],
+          });
+          
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
+        // If skipping brainstorm, go directly to analysis
+        if (skipBrainstorm) {
+          await onUpdate?.({
+            content: [{ type: "text", text: "⏭️ Skipping brainstorming, going directly to MDD analysis..." }],
+          });
+        } else {
+          await onUpdate?.({
+            content: [{ type: "text", text: "📊 Analyzing project structure..." }],
+          });
+        }
 
         const projectContext = await analyzeProject(cwd, params.request);
 
@@ -243,7 +252,6 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
           await onUpdate?.({
             content: [{ type: "text", text: `${plane.emoji} Analyzing ${plane.name} Plane...` }],
           });
-          // Small delay to allow UI to update
           await new Promise(resolve => setTimeout(resolve, 100));
         }
 
@@ -259,7 +267,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         await onUpdate?.({
           content: [{ 
             type: "text", 
-            text: `✅ Draft created: ${draftPath}\n\n📝 ${projectContext.existingComponents.length} components analyzed\n🎯 ${planes.length} MDD planes processed\n🎨 Detected patterns: ${projectContext.patterns.slice(0, 5).join(", ") || "none"}` 
+            text: `✅ Draft created: ${draftPath}\n\n📝 ${projectContext.existingComponents.length} components analyzed\n🎯 ${planes.length} MDD planes processed\n🎨 Detected patterns: ${projectContext.patterns.slice(0, 5).join(", ") || "none"}\n\n💡 Tip: Use \`/fuxi-plan\` after reviewing the draft to start task decomposition.` 
           }],
         });
 
@@ -270,6 +278,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
               success: true,
               draft_path: draftPath,
               plan_name: planName,
+              brainstorm_skipped: skipBrainstorm,
               project_context: {
                 language: projectContext.language,
                 framework: projectContext.framework,
@@ -290,12 +299,10 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         
-        // Send error update
         await onUpdate?.({
           content: [{ type: "text", text: `❌ Analysis failed: ${msg}` }],
         });
 
-        // Fallback to minimal draft
         const draft = generateMinimalDraft(planName, params.request);
         writeFileSync(draftPath, draft);
 

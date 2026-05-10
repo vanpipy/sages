@@ -213,6 +213,51 @@ When you anticipate visual questions (mockups, layouts, diagrams):
 
 **This MUST be its own message** - no other content with the offer.
 
+## Auto-Ask After Approval (NEW!)
+
+When a design is approved, the system automatically asks:
+
+```
+✅ Design Approved!
+
+**Request:** add login feature
+**Approach:** JWT
+**Design:** .sages/designs/2024-01-01-login.md
+**Date:** 2024-01-01
+
+---
+
+**Next Steps:**
+
+1. **Proceed** → Start Fuxi workflow to create MDD draft
+2. **Defer** → Save design, start later with `/fuxi-start <plan>`
+3. **Exit** → Save nothing, end session
+
+---
+
+Just say one of:
+- `proceed` / `yes` / `start` - Create MDD draft
+- `defer` / `save` / `later` - Save design for later
+- `exit` / `cancel` - End without proceeding
+
+Or describe what you'd like to do next.
+```
+
+### Transition Options
+
+| Response | Action |
+|----------|--------|
+| `proceed`, `yes`, `start`, `implement`, `go` | Start Fuxi workflow with MDD draft |
+| `defer`, `save`, `later`, `pause` | Save design to `.sages/designs/` |
+| `exit`, `cancel`, `quit` | End session without proceeding |
+
+### Fuxi Integration
+
+After user says "proceed":
+1. System creates Fuxi context from approved design
+2. Invokes `fuxi_start` with design context
+3. Fuxi creates MDD draft using Seven Planes analysis
+
 ## Anti-Patterns
 
 ### "This is too simple"

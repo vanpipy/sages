@@ -538,6 +538,131 @@ export function finalizeDesign(
 }
 
 // ============================================================================
+// Auto-Ask Functions (for approval transition)
+// ============================================================================
+
+/**
+ * Transition action types
+ */
+export type TransitionAction = 'proceed' | 'defer' | 'exit';
+
+/**
+ * Transition result from user response
+ */
+export interface TransitionResult {
+  action: TransitionAction;
+  fuxiContext?: FuxiPlanContext;
+  designPath?: string;
+}
+
+/**
+ * Context for Fuxi workflow transition
+ */
+export interface FuxiPlanContext {
+  planName: string;
+  request: string;
+  designDoc: DesignDoc;
+  projectContext: BrainstormContextResult;
+}
+
+/**
+ * Response patterns for parsing user intent
+ */
+const RESPONSE_PATTERNS = {
+  proceed: /^(proceed|yes|y|start|implement|go|go ahead|do it|sounds good|lets?\s*(do|go|start|proceed))/i,
+  defer: /^(defer|save|later|pause|not now|wait|maybe later|skip for now)/i,
+  exit: /^(exit|cancel|quit|end|stop|never mind|nope|no thanks)/i,
+};
+
+/**
+ * Generate the auto-ask message shown after design approval
+ */
+export function generateApprovalMessage(
+  request: string,
+  designPath: string,
+  approach: Approach
+): string {
+  const date = new Date().toISOString().split('T')[0];
+  
+  return `
+✅ **Design Approved!**
+
+**Request:** ${request}
+**Approach:** ${approach.name}
+**Design:** ${designPath}
+**Date:** ${date}
+
+---
+
+**Next Steps:**
+
+1. **Proceed** → Start Fuxi workflow to create MDD draft
+2. **Defer** → Save design, start later with \`/fuxi-start <plan>\`
+3. **Exit** → Save nothing, end session
+
+---
+
+Just say one of:
+- \`proceed\` / \`yes\` / \`start\` - Create MDD draft
+- \`defer\` / \`save\` / \`later\` - Save design for later
+- \`exit\` / \`cancel\` - End without proceeding
+
+Or describe what you'd like to do next.
+`;
+}
+
+/**
+ * Parse user response to determine transition action
+ */
+export function parseTransitionResponse(response: string): TransitionResult {
+  const trimmed = response.trim();
+  
+  if (!trimmed) {
+    // Empty response defaults to proceed
+    return { action: 'proceed' };
+  }
+  
+  if (RESPONSE_PATTERNS.proceed.test(trimmed)) {
+    return { action: 'proceed' };
+  }
+  
+  if (RESPONSE_PATTERNS.defer.test(trimmed)) {
+    return { action: 'defer' };
+  }
+  
+  if (RESPONSE_PATTERNS.exit.test(trimmed)) {
+    return { action: 'exit' };
+  }
+  
+  // Unrecognized responses default to proceed
+  // (user likely wants to continue)
+  return { action: 'proceed' };
+}
+
+/**
+ * Create Fuxi context from brainstorm design
+ */
+export function createFuxiContext(
+  request: string,
+  designDoc: DesignDoc,
+  projectContext: BrainstormContextResult
+): FuxiPlanContext {
+  // Generate safe plan name from request
+  const planName = request
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50);
+  
+  return {
+    planName,
+    request,
+    designDoc,
+    projectContext,
+  };
+}
+
+// ============================================================================
 // Tool Definition (for pi agent)
 // ============================================================================
 
@@ -563,4 +688,7 @@ export default {
   processProposingPhase,
   processDesigningPhase,
   finalizeDesign,
+  generateApprovalMessage,
+  parseTransitionResponse,
+  createFuxiContext,
 };
