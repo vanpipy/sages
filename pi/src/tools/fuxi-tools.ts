@@ -27,7 +27,7 @@ import { Type } from "typebox";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { generateMinimalDraft, generateRichDraft } from "../utils/draft-generator.js";
-import { analyzeProject } from "../utils/project-analyzer.js";
+import { analyzeProject } from "../utils/analyzer/index.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
 const ARCHIVE_DIR = ".sages/archive";

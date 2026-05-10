@@ -3,7 +3,7 @@
  * Now supports context-aware generation from project analysis
  */
 
-import type { ProjectContext } from "./project-analyzer.js";
+import type { ProjectContext } from "./analyzer/index.js";
 
 export interface DraftConfig {
   name: string;
