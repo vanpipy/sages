@@ -15,14 +15,61 @@ export interface ModeInfo {
 }
 
 /**
- * Allowed files per phase (from skills)
+ * Phase mode configuration
  */
-const PHASE_ALLOWED_FILES: Record<string, string[]> = {
-  design: ["draft.md"],
-  plan: ["plan.md", "execution.yaml"],
-  implement: ["*"],  // all files allowed
-  review: ["audit*.md"],  // audit.md, audit-2024-01-15.md, etc.
+export interface PhaseConfig {
+  mode: "read-only" | "writeable";
+  allowedFiles: string[];
+  emoji: string;
+  description: string;
+}
+
+const PHASE_CONFIGS: Record<string, PhaseConfig> = {
+  design: {
+    mode: "read-only",
+    allowedFiles: ["draft.md"],
+    emoji: "",
+    description: "Fuxi: Only modify draft.md. Read-only for all other files.",
+  },
+  plan: {
+    mode: "read-only",
+    allowedFiles: ["plan.md", "execution.yaml"],
+    emoji: "📋",
+    description: "QiaoChui: Only modify plan.md, execution.yaml. Read-only for all other files.",
+  },
+  implement: {
+    mode: "writeable",
+    allowedFiles: ["*"], // all files allowed
+    emoji: "",
+    description: "LuBan: All files allowed. Follow TDD: RED → GREEN → REFACTOR.",
+  },
+  review: {
+    mode: "read-only",
+    allowedFiles: ["audit*.md"], // audit.md, audit-2024-01-15.md, etc.
+    emoji: "",
+    description: "GaoYao: Only modify audit.md. Read-only for all other files.",
+  },
+  idle: {
+    mode: "read-only",
+    allowedFiles: [],
+    emoji: "⏸️",
+    description: "No active workflow. No file modifications allowed.",
+  },
+  complete: {
+    mode: "read-only",
+    allowedFiles: [],
+    emoji: "✅",
+    description: "Workflow complete. No further modifications.",
+  },
 };
+
+
+/**
+ * Legacy compatibility - extract allowed files for permission checking
+ */
+const PHASE_ALLOWED_FILES: Record<string, string[]> = Object.fromEntries(
+  Object.entries(PHASE_CONFIGS).map(([phase, config]) => [phase, config.allowedFiles])
+);
 
 /**
  * Check if a file can be written based on current phase
@@ -65,51 +112,36 @@ export function checkWritePermission(phase: string, filePath: string): boolean {
  * Get mode information for a phase
  */
 export function getModeInfo(phase: string): ModeInfo {
-  const allowedFiles = PHASE_ALLOWED_FILES[phase] || [];
-  const mode = allowedFiles.includes("*") ? "writeable" : "read-only";
+  const config = PHASE_CONFIGS[phase];
+  
+  if (!config) {
+    return {
+      mode: "read-only",
+      allowedFiles: [],
+      description: "Unknown phase.",
+    };
+  }
 
   return {
-    mode,
-    allowedFiles,
-    description: getModeDescription(phase),
+    mode: config.mode,
+    allowedFiles: config.allowedFiles,
+    description: config.description,
   };
-}
-
-/**
- * Get human-readable mode description
- */
-function getModeDescription(phase: string): string {
-  const descriptions: Record<string, string> = {
-    design: "Fuxi: Only modify draft.md. Read-only for all other files.",
-    plan: "QiaoChui: Only modify plan.md, execution.yaml. Read-only for all other files.",
-    implement: "LuBan: All files allowed. Follow TDD: RED → GREEN → REFACTOR.",
-    review: "GaoYao: Only modify audit.md. Read-only for all other files.",
-    idle: "No active workflow. No file modifications allowed.",
-    complete: "Workflow complete. No further modifications.",
-  };
-
-  return descriptions[phase] || "Unknown phase.";
 }
 
 /**
  * Generate steer message with mode indicator for system prompt
  */
 export function getModeIndicator(phase: string): string {
-  const info = getModeInfo(phase);
-  
-  const phaseEmoji: Record<string, string> = {
-    design: "",
-    plan: "📋",
-    implement: "",
-    review: "",
-    idle: "⏸️",
-    complete: "✅",
+  const config = PHASE_CONFIGS[phase] ?? {
+    mode: "read-only",
+    allowedFiles: [],
+    emoji: "❓",
+    description: "Unknown phase.",
   };
 
-  const emoji = phaseEmoji[phase] || "❓";
-
-  return `**Phase: ${phase.charAt(0).toUpperCase() + phase.slice(1)}** ${emoji} (${info.mode.toUpperCase()})
-- ${info.description}`;
+  return `**Phase: ${phase.charAt(0).toUpperCase() + phase.slice(1)}** ${config.emoji} (${config.mode.toUpperCase()})
+- ${config.description}`;
 }
 
 /**

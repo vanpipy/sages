@@ -228,11 +228,6 @@ export class ProjectAnalyzer {
     switch (language) {
       case "go":
         this.analyzeGoTechStack(cwd, techStack);
-        // Add Go version to languages if not already there
-        if (!techStack.languages.some(l => l.startsWith("Go ")) && languageInfo) {
-          const goVersion = languageInfo.frameworks.find(f => f.match(/^Go\s+\d/));
-          if (goVersion) techStack.languages.push(goVersion);
-        }
         break;
       case "typescript":
       case "javascript":
