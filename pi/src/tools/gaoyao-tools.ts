@@ -1,94 +1,143 @@
 /**
- * GaoYao Tools (皋陶) - Auditor 
+ * GaoYao Tools (皋陶) - Enhanced Auditor
  * 
- * Quality audit using Xie Zhi methodology.
- * Audit reports are saved to .sages/workspace/audit.md
+ * Deep, agent-assisted quality audit using Xie Zhi methodology.
+ * Unlike static analysis tools, GaoYao leverages the agent's intelligence
+ * to understand semantics, cross-reference design with implementation,
+ * and find real issues that pattern matching would miss.
  * 
- * Review Mode Rules:
- * - ✅ Only modify audit.md
- * - ❌ Read-only for all other files
- * - ❌ No code modifications during audit
+ * Audit Reports: .sages/workspace/audit.md
  * 
- * Five Audits (五刑审核):
- * - 墨刑 (Ink): Code style
- * - 劓刑 (Nose): Naming conventions
- * - 剕刑 (Foot): Architecture
- * - 宫刑 (Castration): Security
- * - 大辟 (Death): Critical defects
+ * Five Audits (五刑审核) - Xie Zhi methodology:
+ * - 墨刑 (Ink): Code style (structure, naming, complexity)
+ * - 劓刑 (Nose): Naming & documentation (clarity, consistency)
+ * - 剕刑 (Foot): Architecture (design vs implementation)
+ * - 宫刑 (Castration): Security (vulnerabilities, risks)
+ * - 大辟 (Death): Critical defects (logic errors, breaking bugs)
  * 
  * Verdict:
- * - PASS (≥70): Workflow complete
- * - NEEDS_CHANGES: Return to implement
- * - REJECTED: Return to design
+ * - PASS (≥70): Workflow complete, archive
+ * - NEEDS_CHANGES (50-69): Return to LuBan for fixes
+ * - REJECTED (<50): Return to Fuxi for redesign
  * 
  * Prohibited:
- * - ❌ Modify files other than audit.md
- * - ❌ Skip audit
+ * - ❌ Modify implementation files
+ * - ❌ Skip any audit category
+ * - ❌ Use only static pattern matching
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { ProjectAnalyzer } from "../utils/analyzer/index.js";
 
-const WORKSPACE_DIR = ".sages/workspace";
+// ============================================================================
+// Types
+// ============================================================================
 
-/**
- * Five Audits (五刑审核) - Xie Zhi methodology
- */
-interface FiveAudits {
-  inkPunishment: { check: string; status: boolean; details: string };     // 墨刑 - Code style
-  nosePunishment: { check: string; status: boolean; details: string };    // 劓刑 - Naming
-  footPunishment: { check: string; status: boolean; details: string };     // 剕刑 - Architecture
-  castrationPunishment: { check: string; status: boolean; details: string }; // 宫刑 - Security
-  deathPunishment: { check: string; status: boolean; details: string };   // 大辟 - Critical defects
+interface AuditFinding {
+  category: "ink" | "nose" | "foot" | "castration" | "death";
+  severity: "critical" | "major" | "minor";
+  file?: string;
+  line?: number;
+  issue: string;
+  evidence?: string;
+  recommendation: string;
+}
+
+interface FiveAuditResults {
+  ink: { passed: boolean; score: number; findings: AuditFinding[] };
+  nose: { passed: boolean; score: number; findings: AuditFinding[] };
+  foot: { passed: boolean; score: number; findings: AuditFinding[] };
+  castration: { passed: boolean; score: number; findings: AuditFinding[] };
+  death: { passed: boolean; score: number; findings: AuditFinding[] };
 }
 
 type Verdict = "PASS" | "NEEDS_CHANGES" | "REJECTED";
 
+const WORKSPACE_DIR = ".sages/workspace";
+
+// ============================================================================
+// Main Tool Registration
+// ============================================================================
+
 export function registerGaoYaoTools(pi: ExtensionAPI): void {
+  
   /**
-   * gaoyao_review - Quality audit using Xie Zhi methodology
-   * Review Mode (Read-Only): Only modify audit.md
+   * gaoyao_review - Full quality audit with deep agent analysis
    * 
-   * Five Audits (五刑审核): Ink, Nose, Foot, Castration, Death
-   * Checks: Code Quality, Security, Test Coverage, Performance, Documentation
-   * Verdict: PASS (≥70), NEEDS_CHANGES, REJECTED (critical defects)
+   * This tool orchestrates a comprehensive audit by:
+   * 1. Analyzing project structure with ProjectAnalyzer
+   * 2. Reading design documents (plan.md, execution.yaml)
+   * 3. Guiding agent to perform deep semantic analysis
+   * 4. Aggregating findings into structured report
+   * 
+   * The agent does the actual analysis - this tool provides structure.
    */
   pi.registerTool({
     name: "gaoyao_review",
-    label: "Quality Review",
-    description: "Quality audit using Xie Zhi methodology. Five Audits: Ink (style), Nose (naming), Foot (architecture), Castration (security), Death (critical). Saves to .sages/workspace/audit.md.",
+    label: "Quality Audit",
+    description: "Deep quality audit using Xie Zhi methodology. Agent reads actual code and finds real issues with evidence. Generates comprehensive audit.md report.",
     parameters: Type.Object({
       plan_name: Type.Optional(Type.String({ description: "Plan name to audit (optional)" })),
-      review_mode: Type.Optional(Type.String({ description: "Review mode: 'quick' or 'full' (default: full)" })),
+      review_mode: Type.Optional(Type.Union([
+        Type.Literal("quick", { description: "Fast triage - only critical checks" }),
+        Type.Literal("full", { description: "Complete 5-audit deep analysis" })
+      ], { description: "Review depth: 'quick' or 'full' (default: full)" })),
     }),
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
       const { review_mode = "full" } = params;
       const workspacePath = join(ctx.cwd, WORKSPACE_DIR);
+      const analyzer = new ProjectAnalyzer();
 
       try {
-        // Perform Xie Zhi Five Audits
-        const fiveAudits = performFiveAudits(review_mode === "quick");
+        // Phase 1: Quick Project Analysis
+        const projectContext = await analyzer.analyze(ctx.cwd);
+
+        // Phase 2: Read Design Context
+        const planPath = join(workspacePath, "plan.md");
+        const executionPath = join(workspacePath, "execution.yaml");
         
-        // Calculate quality score
-        const auditChecks = {
-          codeQuality: fiveAudits.inkPunishment.status && fiveAudits.nosePunishment.status,
-          security: fiveAudits.castrationPunishment.status,
-          testCoverage: fiveAudits.footPunishment.status,
-          performance: fiveAudits.footPunishment.status,
-          documentation: fiveAudits.nosePunishment.status,
+        let designContext = {
+          plan: null as string | null,
+          execution: null as string | null,
         };
 
-        const passedChecks = Object.values(auditChecks).filter(Boolean).length;
-        const totalChecks = Object.keys(auditChecks).length;
-        const qualityScore = Math.round((passedChecks / totalChecks) * 100);
+        if (existsSync(planPath)) {
+          designContext.plan = readFileSync(planPath, "utf-8");
+        }
+        if (existsSync(executionPath)) {
+          designContext.execution = readFileSync(executionPath, "utf-8");
+        }
 
-        // Determine verdict based on Five Audits
-        const verdict = determineVerdict(fiveAudits, qualityScore);
+        // Phase 3: Generate Audit Guidance
+        // The agent will use this guidance to perform actual analysis
+        const auditGuidance = generateAuditGuidance(projectContext, designContext, review_mode);
 
-        const auditReport = generateXieZhiAuditReport(fiveAudits, auditChecks, review_mode, verdict, qualityScore);
+        // Phase 4: Structure findings (agent will populate via guidance)
+        const fiveAudits: FiveAuditResults = {
+          ink: { passed: true, score: 100, findings: [] },
+          nose: { passed: true, score: 100, findings: [] },
+          foot: { passed: true, score: 100, findings: [] },
+          castration: { passed: true, score: 100, findings: [] },
+          death: { passed: true, score: 100, findings: [] },
+        };
 
+        // Calculate initial scores (agent will update via findings)
+        const { verdict, score } = calculateVerdict(fiveAudits);
+
+        // Generate initial report structure
+        const auditReport = generateAuditReportStructure(
+          projectContext,
+          fiveAudits,
+          verdict,
+          score,
+          review_mode,
+          auditGuidance
+        );
+
+        // Ensure workspace exists
         if (!existsSync(workspacePath)) {
           mkdirSync(workspacePath, { recursive: true });
         }
@@ -100,21 +149,29 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
             text: JSON.stringify({
               success: true,
               verdict,
-              qualityScore,
+              score,
               reviewMode: review_mode,
-              summary: `Quality Score: ${qualityScore}%. ${passedChecks}/${totalChecks} checks passed. Verdict: ${verdict}`,
-              checks: auditChecks,
-              fiveAudits: {
-                ink: fiveAudits.inkPunishment.status ? "✅" : "❌",
-                nose: fiveAudits.nosePunishment.status ? "✅" : "❌",
-                foot: fiveAudits.footPunishment.status ? "✅" : "❌",
-                castration: fiveAudits.castrationPunishment.status ? "✅" : "❌",
-                death: fiveAudits.deathPunishment.status ? "✅" : "❌",
+              project: {
+                language: projectContext.language,
+                framework: projectContext.framework,
+                type: projectContext.projectType,
+                files: projectContext.structure.srcDir ? 
+                  `src/${projectContext.existingComponents.join(", ") || "detected"}` : "none",
               },
-              action: getVerdictAction(verdict),
+              summary: `GaoYao audit initiated. ${review_mode === "quick" ? "Quick" : "Full"} review mode. ` +
+                `Project: ${projectContext.language}/${projectContext.framework || "plain"}. ` +
+                `Verdict: ${verdict} (${score}%). See audit.md for guidance.`,
+              action: `Read audit.md for detailed audit instructions. ` +
+                `Follow the guidance to perform deep analysis and update findings.`,
             }),
           }],
-          details: { verdict, qualityScore, auditPath: join(workspacePath, "audit.md") },
+          details: {
+            verdict,
+            score,
+            auditPath: join(workspacePath, "audit.md"),
+            projectContext,
+            auditGuidance,
+          },
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -128,53 +185,239 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
   });
 
   /**
-   * gaoyao_check_security - Security scan
-   * Scans: SQL injection, XSS, authentication, authorization, data exposure
-   * Severity: none/medium/high
+   * gaoyao_quick_check - Fast triage for minor changes
+   * 
+   * For small changes/fixes, do a focused audit:
+   * - Only check ink (style) and castration (security)
+   * - Skip deep architecture review
    */
   pi.registerTool({
-    name: "gaoyao_check_security",
-    label: "Security Scan",
-    description: "Security scan: SQL injection, XSS, authentication, authorization, data exposure. Returns vulnerabilities count and severity.",
+    name: "gaoyao_quick_check",
+    label: "Quick Check",
+    description: "Fast triage audit for minor changes. Only checks critical issues: style and security. Skips deep architecture review.",
     parameters: Type.Object({
-      files: Type.Array(Type.String(), { description: "Files or directories to scan (e.g., [\"src/\"])" }),
+      files: Type.Array(Type.String(), { description: "Files changed" }),
     }),
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
       const { files = [] } = params;
+      const analyzer = new ProjectAnalyzer();
 
       try {
-        const securityChecks = {
-          sqlInjection: "passed" as const,
-          xss: "passed" as const,
-          authentication: "passed" as const,
-          authorization: "passed" as const,
-          dataExposure: "passed" as const,
-        };
-
-        const vulnerabilities = Object.entries(securityChecks)
-          .filter(([_, status]) => (status as string) === "failed").length;
-
-        const severity = vulnerabilities === 0 ? "none" : vulnerabilities < 3 ? "medium" : "high";
-        
-        // Map to Xie Zhi Five Audits (宫刑 - Security)
-        const castrationStatus = vulnerabilities === 0 ? "passed" : "failed";
+        const projectContext = await analyzer.analyze(ctx.cwd);
 
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
               success: true,
-              files_scanned: files.length,
-              vulnerabilities_found: vulnerabilities,
-              severity,
-              xieZhiVerdict: castrationStatus === "passed" ? "PASS" : "REJECTED",
-              checks: securityChecks,
-              action: castrationStatus === "passed" 
-                ? "No security issues found. Proceed to deployment."
-                : "Security vulnerabilities detected. Return to LuBan for fixes.",
+              mode: "quick",
+              filesToCheck: files,
+              project: {
+                language: projectContext.language,
+                framework: projectContext.framework,
+              },
+              summary: `Quick check for ${files.length} files. Focus on ink (style) and castration (security).`,
+              guidance: generateQuickCheckGuidance(files, projectContext),
             }),
           }],
-          details: { filesScanned: files.length, vulnerabilities, severity },
+          details: { mode: "quick", files, projectContext },
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: msg } }) }],
+          isError: true,
+          details: { error: msg },
+        };
+      }
+    },
+  });
+
+  /**
+   * gaoyao_check_security - Deep security vulnerability analysis
+   * 
+   * Focused security audit that:
+   * - Reads code semantically (not just pattern matching)
+   * - Checks for OWASP Top 10 issues
+   * - Verifies authentication/authorization logic
+   * - Reviews data handling and exposure risks
+   */
+  pi.registerTool({
+    name: "gaoyao_check_security",
+    label: "Security Scan",
+    description: "Deep security audit. Agent reads code semantically to find injection, auth, and data exposure risks. Returns vulnerability count with evidence.",
+    parameters: Type.Object({
+      files: Type.Optional(Type.Array(Type.String(), { description: "Files to scan (default: all source)" })),
+    }),
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      const { files = [] } = params;
+      const analyzer = new ProjectAnalyzer();
+
+      try {
+        const projectContext = await analyzer.analyze(ctx.cwd);
+        const srcDir = projectContext.structure.srcDir || "src";
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              mode: "security",
+              filesToScan: files.length > 0 ? files : [`${srcDir}/**/*.{ts,js,py,go,java}`],
+              project: {
+                language: projectContext.language,
+                framework: projectContext.framework,
+              },
+              summary: `Security audit initiated. Scan focus: injection, auth, data exposure.`,
+              guidance: generateSecurityGuidance(projectContext, files),
+            }),
+          }],
+          details: { mode: "security", files, projectContext },
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: msg } }) }],
+          isError: true,
+          details: { error: msg },
+        };
+      }
+    },
+  });
+
+  /**
+   * gaoyao_record_finding - Record a finding during audit
+   * 
+   * Call this to record each issue found during analysis.
+   * Agent aggregates all findings into final verdict.
+   */
+  pi.registerTool({
+    name: "gaoyao_record_finding",
+    label: "Record Finding",
+    description: "Record a single audit finding. Include evidence (file:line). Aggregates into final report.",
+    parameters: Type.Object({
+      category: Type.Union([
+        Type.Literal("ink", { description: "墨刑 - Code style" }),
+        Type.Literal("nose", { description: "劓刑 - Naming/doc" }),
+        Type.Literal("foot", { description: "剕刑 - Architecture" }),
+        Type.Literal("castration", { description: "宫刑 - Security" }),
+        Type.Literal("death", { description: "大辟 - Critical defect" }),
+      ], { description: "Audit category" }),
+      severity: Type.Union([
+        Type.Literal("critical", { description: "Must fix immediately" }),
+        Type.Literal("major", { description: "Should fix before release" }),
+        Type.Literal("minor", { description: "Can fix later" }),
+      ], { description: "Issue severity" }),
+      file: Type.Optional(Type.String({ description: "File path with issue" })),
+      line: Type.Optional(Type.Number({ description: "Line number" })),
+      issue: Type.String({ description: "Description of the issue" }),
+      evidence: Type.Optional(Type.String({ description: "Code snippet or reference" })),
+      recommendation: Type.String({ description: "How to fix this issue" }),
+    }),
+    async execute(toolCallId, params, _signal, _onUpdate, _ctx) {
+      const finding: AuditFinding = {
+        category: params.category,
+        severity: params.severity,
+        file: params.file,
+        line: params.line,
+        issue: params.issue,
+        evidence: params.evidence,
+        recommendation: params.recommendation,
+      };
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            findingRecorded: finding,
+            summary: `Recorded: [${params.category}] ${params.severity} - ${params.issue}${params.file ? ` (${params.file}:${params.line || "?"})` : ""}`,
+          }),
+        }],
+        details: { finding },
+      };
+    },
+  });
+
+  /**
+   * gaoyao_finalize - Generate final audit report
+   * 
+   * Call after all findings are recorded to generate
+   * the final verdict and comprehensive report.
+   */
+  pi.registerTool({
+    name: "gaoyao_finalize",
+    label: "Finalize Audit",
+    description: "Generate final audit report with verdict. Call after recording all findings.",
+    parameters: Type.Object({
+      findings: Type.Array(Type.Object({
+        category: Type.String(),
+        severity: Type.String(),
+        file: Type.Optional(Type.String()),
+        line: Type.Optional(Type.Number()),
+        issue: Type.String(),
+        evidence: Type.Optional(Type.String()),
+        recommendation: Type.String(),
+      }), { description: "All findings to include" }),
+      notes: Type.Optional(Type.String({ description: "Overall assessment notes" })),
+    }),
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      const workspacePath = join(ctx.cwd, WORKSPACE_DIR);
+      const analyzer = new ProjectAnalyzer();
+
+      try {
+        const projectContext = await analyzer.analyze(ctx.cwd);
+        const findings: AuditFinding[] = params.findings.map(f => ({
+          category: f.category as AuditFinding["category"],
+          severity: f.severity as AuditFinding["severity"],
+          file: f.file,
+          line: f.line,
+          issue: f.issue,
+          evidence: f.evidence,
+          recommendation: f.recommendation,
+        }));
+
+        // Calculate scores from findings
+        const fiveAudits = calculateScoresFromFindings(findings);
+        const { verdict, score } = calculateVerdict(fiveAudits);
+
+        // Generate final report
+        const auditReport = generateFinalAuditReport(
+          projectContext,
+          fiveAudits,
+          findings,
+          verdict,
+          score,
+          params.notes
+        );
+
+        writeFileSync(join(workspacePath, "audit.md"), auditReport);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              verdict,
+              score,
+              totalFindings: findings.length,
+              byCategory: {
+                ink: findings.filter(f => f.category === "ink").length,
+                nose: findings.filter(f => f.category === "nose").length,
+                foot: findings.filter(f => f.category === "foot").length,
+                castration: findings.filter(f => f.category === "castration").length,
+                death: findings.filter(f => f.category === "death").length,
+              },
+              bySeverity: {
+                critical: findings.filter(f => f.severity === "critical").length,
+                major: findings.filter(f => f.severity === "major").length,
+                minor: findings.filter(f => f.severity === "minor").length,
+              },
+              summary: `Audit finalized: ${verdict} (${score}%). ${findings.length} findings recorded.`,
+              action: getVerdictAction(verdict),
+            }),
+          }],
+          details: { verdict, score, findings, auditPath: join(workspacePath, "audit.md") },
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -188,190 +431,472 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
   });
 }
 
-/**
- * Perform Five Audits (五刑审核) - Xie Zhi methodology
- */
-function performFiveAudits(quickMode: boolean): FiveAudits {
-  // In a real implementation, these would analyze actual code
-  // For now, returning placeholder structure
-  return {
-    // 墨刑 (Ink) - Code style violations
-    inkPunishment: {
-      check: "Code Style",
-      status: !quickMode, // Full mode checks style
-      details: quickMode ? "Style check skipped in quick mode" : "Code follows project conventions",
-    },
-    // 劓刑 (Nose) - Naming issues
-    nosePunishment: {
-      check: "Naming Conventions",
-      status: true,
-      details: "Names are clear and meaningful",
-    },
-    // 剕刑 (Foot) - Architecture problems
-    footPunishment: {
-      check: "Architecture",
-      status: true,
-      details: "Architecture follows design patterns",
-    },
-    // 宫刑 (Castration) - Security vulnerabilities
-    castrationPunishment: {
-      check: "Security",
-      status: true,
-      details: "No security vulnerabilities detected",
-    },
-    // 大辟 (Death) - Critical defects
-    deathPunishment: {
-      check: "Critical Defects",
-      status: true,
-      details: "No critical defects found",
-    },
+// ============================================================================
+// Audit Guidance Generators
+// ============================================================================
+
+function generateAuditGuidance(
+  projectContext: any,
+  designContext: { plan: string | null; execution: string | null },
+  reviewMode: string
+): string {
+  const lines: string[] = [];
+
+  lines.push("# GaoYao Audit Guidance");
+  lines.push("");
+  lines.push(`**Mode**: ${reviewMode === "quick" ? "Quick Triage" : "Full Deep Audit"}`);
+  lines.push(`**Project**: ${projectContext.language}/${projectContext.framework || "plain"}`);
+  lines.push(`**Type**: ${projectContext.projectType}`);
+  lines.push("");
+
+  // Design Context
+  if (designContext.plan) {
+    lines.push("## Design Context (from plan.md)");
+    lines.push("");
+    lines.push("Review the plan to understand what was **supposed** to be built:");
+    lines.push("```");
+    lines.push(designContext.plan.slice(0, 2000));
+    if (designContext.plan.length > 2000) lines.push("... (truncated)");
+    lines.push("```");
+    lines.push("");
+  }
+
+  // Five Audits Guidance
+  lines.push("## Five Audits (五刑审核) - Your Tasks");
+  lines.push("");
+
+  if (reviewMode === "full") {
+    lines.push("### 墨刑 (Ink) - Code Style");
+    lines.push("**Read and check**:");
+    lines.push("- [ ] Source files for style consistency");
+    lines.push("- [ ] Naming conventions followed");
+    lines.push("- [ ] Complexity acceptable (no deeply nested logic)");
+    lines.push("- [ ] No obvious code smells");
+    lines.push("");
+
+    lines.push("### 劓刑 (Nose) - Naming & Documentation");
+    lines.push("**Read and check**:");
+    lines.push("- [ ] Public APIs have clear names");
+    lines.push("- [ ] Functions/modules have doc comments");
+    lines.push("- [ ] Domain terminology consistent");
+    lines.push("- [ ] README/usage docs present");
+    lines.push("");
+
+    lines.push("### 剕刑 (Foot) - Architecture");
+    lines.push("**Read and verify**:");
+    lines.push("- [ ] Structure matches design from plan.md");
+    lines.push("- [ ] Layer boundaries respected (api/service/repo)");
+    lines.push("- [ ] Dependencies follow architecture");
+    lines.push("- [ ] No circular dependencies");
+    lines.push("");
+
+    lines.push("### 宫刑 (Castration) - Security");
+    lines.push("**Read and verify**:");
+    lines.push("- [ ] No SQL/NoSQL injection vectors");
+    lines.push("- [ ] No XSS or command injection risks");
+    lines.push("- [ ] Auth/permissions properly enforced");
+    lines.push("- [ ] No sensitive data in logs/code");
+    lines.push("- [ ] Dependencies have no known vulns");
+    lines.push("");
+
+    lines.push("### 大辟 (Death) - Critical Defects");
+    lines.push("**Read and verify**:");
+    lines.push("- [ ] Core business logic correct");
+    lines.push("- [ ] Error handling in critical paths");
+    lines.push("- [ ] No obvious bugs or logic errors");
+    lines.push("- [ ] Edge cases handled");
+    lines.push("");
+  } else {
+    lines.push("### Quick Focus (Quick Mode)");
+    lines.push("- [ ] Security vulnerabilities (宫刑)");
+    lines.push("- [ ] Critical defects (大辟)");
+    lines.push("- [ ] Major style issues (墨刑)");
+    lines.push("");
+  }
+
+  // How to Record Findings
+  lines.push("## Recording Findings");
+  lines.push("");
+  lines.push("For each issue found, use `gaoyao_record_finding` with:");
+  lines.push("- `category`: ink, nose, foot, castration, or death");
+  lines.push("- `severity`: critical, major, or minor");
+  lines.push("- `file` and `line`: exact location");
+  lines.push("- `issue`: clear description");
+  lines.push("- `evidence`: code snippet or reference");
+  lines.push("- `recommendation`: how to fix");
+  lines.push("");
+  lines.push("After all findings recorded, use `gaoyao_finalize`.");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+function generateQuickCheckGuidance(files: string[], projectContext: any): string {
+  const lines: string[] = [];
+  
+  lines.push("# Quick Check Guidance");
+  lines.push("");
+  lines.push(`**Files to Check**: ${files.length > 0 ? files.join(", ") : "All source files"}`);
+  lines.push(`**Focus**: Critical style + Security`);
+  lines.push("");
+
+  lines.push("## Critical Checks");
+  lines.push("");
+  lines.push("### Security (宫刑 - Castration)");
+  lines.push("- [ ] No injection risks in these files");
+  lines.push("- [ ] No auth/permission bypasses");
+  lines.push("- [ ] No data exposure");
+  lines.push("");
+
+  lines.push("### Style (墨刑 - Ink)");
+  lines.push("- [ ] Consistent naming");
+  lines.push("- [ ] No obvious complexity issues");
+  lines.push("");
+
+  lines.push("## If issues found, use `gaoyao_record_finding`.");
+  lines.push("Then use `gaoyao_finalize` when done.");
+
+  return lines.join("\n");
+}
+
+function generateSecurityGuidance(projectContext: any, files: string[]): string {
+  const lines: string[] = [];
+
+  lines.push("# Security Audit Guidance");
+  lines.push("");
+  lines.push(`**Language**: ${projectContext.language}`);
+  lines.push(`**Framework**: ${projectContext.framework || "none"}`);
+  lines.push("");
+
+  lines.push("## OWASP Top 10 Focus");
+  lines.push("");
+  lines.push("For each file, read and check for:");
+
+  const checks = [
+    ["A01:2021 - Broken Access Control", 
+     "Look for: IDOR, privilege escalation, missing auth checks",
+     projectContext.language === "typescript" ? 
+       ["middleware without auth check", "req.user used without verification", ".find() without ownership check"] :
+     projectContext.language === "go" ?
+       ["middleware without auth", "sql.Open without parameterized query"] :
+     ["potential auth bypasses"]],
+    
+    ["A02:2021 - Cryptographic Failures",
+     "Look for: hardcoded secrets, weak crypto, no TLS",
+     ["password in code", "md5/sha1 for passwords", "http:// instead of https://"]],
+    
+    ["A03:2021 - Injection",
+     "Look for: SQL, NoSQL, OS, LDAP injection",
+     ["string concatenation in queries", "eval() usage", "innerHTML/unsafe HTML"]],
+    
+    ["A04:2021 - Insecure Design",
+     "Look for: missing rate limiting, no brute force protection",
+     ["no rate limit on auth endpoints", "no password attempt limits"]],
+    
+    ["A05:2021 - Security Misconfiguration",
+     "Look for: default creds, verbose errors, missing hardening",
+     ["console.error in production", "stack traces exposed", "debug mode enabled"]],
+    
+    ["A06:2021 - Vulnerable Components",
+     "Check: package.json/go.mod for known vulnerabilities",
+     ["outdated packages", "packages with known CVEs"]],
+    
+    ["A07:2021 - Auth Failures",
+     "Look for: weak passwords, credential exposure, session issues",
+     ["no password validation", "tokens in URL", "session fixation"]],
+  ];
+
+  for (const [title, description, examples] of checks) {
+    lines.push(`### ${title}`);
+    lines.push(`**Check**: ${description}`);
+    lines.push(`**Red flags**: ${(examples as string[]).join(", ")}`);
+    lines.push("");
+  }
+
+  lines.push("## Recording Findings");
+  lines.push("");
+  lines.push("Use `gaoyao_record_finding` with category `castration`.");
+  lines.push("After all findings, use `gaoyao_finalize`.");
+
+  return lines.join("\n");
+}
+
+// ============================================================================
+// Score Calculation
+// ============================================================================
+
+function calculateScoresFromFindings(findings: AuditFinding[]): FiveAuditResults {
+  const audits: FiveAuditResults = {
+    ink: { passed: true, score: 100, findings: [] },
+    nose: { passed: true, score: 100, findings: [] },
+    foot: { passed: true, score: 100, findings: [] },
+    castration: { passed: true, score: 100, findings: [] },
+    death: { passed: true, score: 100, findings: [] },
   };
+
+  const categoryMap: Record<string, keyof FiveAuditResults> = {
+    ink: "ink",
+    nose: "nose",
+    foot: "foot",
+    castration: "castration",
+    death: "death",
+  };
+
+  const penaltyMap = {
+    critical: 30,
+    major: 15,
+    minor: 5,
+  };
+
+  for (const finding of findings) {
+    const category = categoryMap[finding.category];
+    if (!category) continue;
+
+    audits[category].findings.push(finding);
+    audits[category].score = Math.max(0, audits[category].score - (penaltyMap[finding.severity] || 15));
+  }
+
+  // Determine pass/fail
+  for (const key of Object.keys(audits) as Array<keyof FiveAuditResults>) {
+    audits[key].passed = audits[key].score >= 70;
+  }
+
+  return audits;
 }
 
-/**
- * Determine verdict based on Five Audits
- */
-function determineVerdict(fiveAudits: FiveAudits, qualityScore: number): Verdict {
-  // Death penalty (critical defects) is absolute rejection
-  if (!fiveAudits.deathPunishment.status) {
-    return "REJECTED";
+function calculateVerdict(fiveAudits: FiveAuditResults): { verdict: Verdict; score: number } {
+  // Death penalty is absolute rejection
+  if (!fiveAudits.death.passed) {
+    return { verdict: "REJECTED", score: Math.min(fiveAudits.death.score, 49) };
   }
 
-  // Castration (security) is a hard requirement
-  if (!fiveAudits.castrationPunishment.status) {
-    return "NEEDS_CHANGES";
+  // Security issues require changes
+  if (!fiveAudits.castration.passed) {
+    return { verdict: "NEEDS_CHANGES", score: fiveAudits.castration.score };
   }
 
-  // Overall quality determines remaining verdicts
-  if (qualityScore >= 70) {
-    return "PASS";
+  // Calculate average score
+  const scores = [
+    fiveAudits.ink.score,
+    fiveAudits.nose.score,
+    fiveAudits.foot.score,
+    fiveAudits.castration.score,
+  ];
+
+  const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+  const finalScore = Math.round(avgScore);
+
+  let verdict: Verdict;
+  if (finalScore >= 70) {
+    verdict = "PASS";
+  } else if (finalScore >= 50) {
+    verdict = "NEEDS_CHANGES";
+  } else {
+    verdict = "REJECTED";
   }
 
-  return "NEEDS_CHANGES";
+  return { verdict, score: finalScore };
 }
 
-/**
- * Get action based on verdict
- */
 function getVerdictAction(verdict: Verdict): string {
   switch (verdict) {
     case "PASS":
-      return "Archive and deploy to production";
+      return "Archive workflow. Ready for deployment.";
     case "NEEDS_CHANGES":
-      return "Return to LuBan for fixes";
+      return "Return to LuBan for fixes based on audit findings.";
     case "REJECTED":
-      return "Return to Fuxi for redesign";
+      return "Critical issues require redesign. Return to Fuxi.";
   }
 }
 
-/**
- * Generate Xie Zhi audit report with Five Audits format
- */
-function generateXieZhiAuditReport(
-  fiveAudits: FiveAudits,
-  checks: Record<string, boolean>,
-  reviewMode: string,
-  verdict: Verdict,
-  qualityScore: number
-): string {
-  const passedCount = Object.values(checks).filter(Boolean).length;
-  const totalCount = Object.keys(checks).length;
+// ============================================================================
+// Report Generators
+// ============================================================================
 
+function generateAuditReportStructure(
+  projectContext: any,
+  fiveAudits: FiveAuditResults,
+  verdict: Verdict,
+  score: number,
+  reviewMode: string,
+  guidance: string
+): string {
   const verdictEmoji = verdict === "PASS" ? "✅" : verdict === "NEEDS_CHANGES" ? "⚠️" : "❌";
-  const verdictAction = getVerdictAction(verdict);
 
   return `# Audit Report
 
-Generated by: GaoYao (皋陶) - Supreme Judge
-Methodology: Xie Zhi (獬豸)
-Timestamp: ${new Date().toISOString()}
-Mode: ${reviewMode}
+**Status**: IN PROGRESS
+**Verdict**: ${verdictEmoji} ${verdict} (${score}%)
+**Mode**: ${reviewMode}
+**Generated**: ${new Date().toISOString()}
 
 ---
 
-## Verdict
+## Project Overview
 
-**${verdictEmoji} ${verdict}** - Quality Score: ${qualityScore}%
+| Property | Value |
+|----------|-------|
+| Language | ${projectContext.language} |
+| Framework | ${projectContext.framework || "none"} |
+| Type | ${projectContext.projectType} |
+| Source Dir | ${projectContext.structure.srcDir || "not detected"} |
+| Test Dir | ${projectContext.structure.testDir || "not detected"} |
 
-**Action Required**: ${verdictAction}
+## Five Audits Summary
 
----
-
-## Xie Zhi Five Audits (五刑审核)
-
-| Punishment | Audit | Status | Details |
-|------------|-------|--------|---------|
-| 墨刑 (Ink) | ${fiveAudits.inkPunishment.check} | ${fiveAudits.inkPunishment.status ? "✅" : "❌"} | ${fiveAudits.inkPunishment.details} |
-| 劓刑 (Nose) | ${fiveAudits.nosePunishment.check} | ${fiveAudits.nosePunishment.status ? "✅" : "❌"} | ${fiveAudits.nosePunishment.details} |
-| 剕刑 (Foot) | ${fiveAudits.footPunishment.check} | ${fiveAudits.footPunishment.status ? "✅" : "❌"} | ${fiveAudits.footPunishment.details} |
-| 宫刑 (Castration) | ${fiveAudits.castrationPunishment.check} | ${fiveAudits.castrationPunishment.status ? "✅" : "❌"} | ${fiveAudits.castrationPunishment.details} |
-| 大辟 (Death) | ${fiveAudits.deathPunishment.check} | ${fiveAudits.deathPunishment.status ? "✅" : "❌"} | ${fiveAudits.deathPunishment.details} |
-
----
-
-## Audit Categories (${passedCount}/${totalCount} passed)
-
-| Category | Status |
-|----------|--------|
-| Code Quality | ${checks.codeQuality ? "✅" : "❌"} |
-| Security | ${checks.security ? "✅" : "❌"} |
-| Test Coverage | ${checks.testCoverage ? "✅" : "❌"} |
-| Performance | ${checks.performance ? "✅" : "❌"} |
-| Documentation | ${checks.documentation ? "✅" : "❌"} |
+| Audit | Category | Status | Score | Findings |
+|-------|----------|--------|-------|----------|
+| 墨刑 | Code Style | ⏳ | - | - |
+| 劓刑 | Naming/Doc | ⏳ | - | - |
+| 剕刑 | Architecture | ⏳ | - | - |
+| 宫刑 | Security | ⏳ | - | - |
+| 大辟 | Critical | ⏳ | - | - |
 
 ---
 
-## Detailed Findings
+${guidance}
 
-### Code Quality
-- [${checks.codeQuality ? "x" : " "}] Complexity acceptable (cyclomatic < 10)
-- [${checks.codeQuality ? "x" : " "}] Names are clear and meaningful
-- [${checks.codeQuality ? "x" : " "}] Functions have single responsibility
-- [${checks.codeQuality ? "x" : " "}] No duplicated code
-- [${checks.codeQuality ? "x" : " "}] Follows project conventions
+---
 
-### Security Audit
-- [${checks.security ? "x" : " "}] No SQL injection risks
-- [${checks.security ? "x" : " "}] No XSS vulnerabilities
-- [${checks.security ? "x" : " "}] Authentication/authorization correct
-- [${checks.security ? "x" : " "}] No sensitive data exposure
-- [${checks.security ? "x" : " "}] Dependencies have no known vulnerabilities
+## Notes
 
-### Test Coverage
-- [${checks.testCoverage ? "x" : " "}] Core logic covered
-- [${checks.testCoverage ? "x" : " "}] Edge cases tested
-- [${checks.testCoverage ? "x" : " "}] Exception scenarios tested
-- [${checks.testCoverage ? "x" : " "}] Coverage meets target (>80%)
+*This report is in progress. Follow the guidance above to complete the audit.*
 
-### Performance Audit
-- [${checks.performance ? "x" : " "}] No N+1 queries
-- [${checks.performance ? "x" : " "}] No memory leaks
-- [${checks.performance ? "x" : " "}] Algorithm complexity reasonable
-- [${checks.performance ? "x" : " "}] Resource usage controlled
+---
 
-### Documentation Audit
-- [${checks.documentation ? "x" : " "}] README is complete
-- [${checks.documentation ? "x" : " "}] API documentation is clear
-- [${checks.documentation ? "x" : " "}] Key code has comments
-- [${checks.documentation ? "x" : " "}] Changelog is updated
+*Generated by Four Sages Agents - GaoYao (Supreme Judge)*
+`;
+}
+
+function generateFinalAuditReport(
+  projectContext: any,
+  fiveAudits: FiveAuditResults,
+  findings: AuditFinding[],
+  verdict: Verdict,
+  score: number,
+  notes?: string
+): string {
+  const verdictEmoji = verdict === "PASS" ? "✅" : verdict === "NEEDS_CHANGES" ? "⚠️" : "❌";
+  const action = getVerdictAction(verdict);
+
+  // Group findings by category
+  const byCategory = {
+    ink: findings.filter(f => f.category === "ink"),
+    nose: findings.filter(f => f.category === "nose"),
+    foot: findings.filter(f => f.category === "foot"),
+    castration: findings.filter(f => f.category === "castration"),
+    death: findings.filter(f => f.category === "death"),
+  };
+
+  // Group findings by severity
+  const critical = findings.filter(f => f.severity === "critical");
+  const major = findings.filter(f => f.severity === "major");
+  const minor = findings.filter(f => f.severity === "minor");
+
+  let report = `# Audit Report - FINAL
+
+**Status**: COMPLETE
+**Verdict**: ${verdictEmoji} ${verdict} (${score}%)
+**Generated**: ${new Date().toISOString()}
 
 ---
 
 ## Summary
 
-${verdict === "PASS" 
-  ? "All critical quality gates have been met. The implementation is ready for use."
-  : verdict === "NEEDS_CHANGES"
-  ? "Some quality gates failed. Review the findings above and return to LuBan for fixes."
-  : "Critical defects detected. This implementation must be redesigned from architecture."}
+| Metric | Value |
+|--------|-------|
+| Total Findings | ${findings.length} |
+| Critical | ${critical.length} |
+| Major | ${major.length} |
+| Minor | ${minor.length} |
+
+${notes ? `## Overall Assessment\n\n${notes}\n` : ""}
 
 ---
 
-## Next Steps
+## Five Audits Results
 
-${verdictAction}
+| Audit | Category | Status | Score | Issues |
+|-------|----------|--------|-------|--------|
+| 墨刑 | Code Style | ${fiveAudits.ink.passed ? "✅" : "❌"} | ${fiveAudits.ink.score}% | ${byCategory.ink.length} |
+| 劓刑 | Naming/Doc | ${fiveAudits.nose.passed ? "✅" : "❌"} | ${fiveAudits.nose.score}% | ${byCategory.nose.length} |
+| 剕刑 | Architecture | ${fiveAudits.foot.passed ? "✅" : "❌"} | ${fiveAudits.foot.score}% | ${byCategory.foot.length} |
+| 宫刑 | Security | ${fiveAudits.castration.passed ? "✅" : "❌"} | ${fiveAudits.castration.score}% | ${byCategory.castration.length} |
+| 大辟 | Critical | ${fiveAudits.death.passed ? "✅" : "❌"} | ${fiveAudits.death.score}% | ${byCategory.death.length} |
 
 ---
+
+## Detailed Findings
+
+`;
+
+  // Critical findings first
+  if (critical.length > 0) {
+    report += `### 🔴 Critical Issues (${critical.length})\n\n`;
+    for (const f of critical) {
+      report += `#### ${f.issue}\n`;
+      report += `- **File**: ${f.file || "N/A"}${f.line ? `:${f.line}` : ""}\n`;
+      report += `- **Category**: ${f.category}\n`;
+      if (f.evidence) report += `- **Evidence**:\n\`\`\`\n${f.evidence}\n\`\`\`\n`;
+      report += `- **Recommendation**: ${f.recommendation}\n\n`;
+    }
+  }
+
+  // Major findings
+  if (major.length > 0) {
+    report += `### 🟠 Major Issues (${major.length})\n\n`;
+    for (const f of major) {
+      report += `#### ${f.issue}\n`;
+      report += `- **File**: ${f.file || "N/A"}${f.line ? `:${f.line}` : ""}\n`;
+      report += `- **Category**: ${f.category}\n`;
+      if (f.evidence) report += `- **Evidence**:\n\`\`\`\n${f.evidence}\n\`\`\`\n`;
+      report += `- **Recommendation**: ${f.recommendation}\n\n`;
+    }
+  }
+
+  // Minor findings
+  if (minor.length > 0) {
+    report += `### 🟡 Minor Issues (${minor.length})\n\n`;
+    for (const f of minor) {
+      report += `- ${f.issue}`;
+      if (f.file) report += ` (${f.file})`;
+      report += ` - ${f.recommendation}\n`;
+    }
+    report += "\n";
+  }
+
+  if (findings.length === 0) {
+    report += "No issues found. Excellent work!\n\n";
+  }
+
+  report += `---
+
+## Verdict
+
+**${verdictEmoji} ${verdict}** - Score: ${score}%
+
+**Action Required**: ${action}
+
+`;
+
+  if (verdict !== "PASS") {
+    report += `### Action Items\n\n`;
+    if (!fiveAudits.castration.passed) {
+      report += `1. 🔴 **Security First**: Address all ${byCategory.castration.length} security issues before anything else\n`;
+    }
+    if (!fiveAudits.death.passed) {
+      report += `2. 🔴 **Critical Fixes**: Address all ${byCategory.death.length} critical defects - these are blocking issues\n`;
+    }
+    if (!fiveAudits.foot.passed) {
+      report += `3. 🟠 **Architecture Review**: Revisit ${byCategory.foot.length} architecture issues\n`;
+    }
+    if (!fiveAudits.ink.passed || !fiveAudits.nose.passed) {
+      report += `4. 🟡 **Quality Improvements**: Address ${byCategory.ink.length + byCategory.nose.length} style/naming issues\n`;
+    }
+    report += "\n";
+  }
+
+  report += `---
 
 ## Judge's Oath
 
@@ -382,7 +907,10 @@ ${verdictAction}
 > - To guard quality, never failing my duty
 
 ---
+
 *Generated by Four Sages Agents - GaoYao (Supreme Judge)*
 *Xie Zhi touches the unjust; impartial and selfless, honored through the ages*
 `;
+
+  return report;
 }
