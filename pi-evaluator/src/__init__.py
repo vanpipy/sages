@@ -17,10 +17,12 @@ Example usage:
     result = evaluator.evaluate(entries)
     print(f"Verdict: {result.verdict}")
     print(f"Score: {result.overall.overall_score}")
+    print(f"Cost: ${result.overall.total_cost:.6f}")
 """
 
 from .comparator import Comparator
 from .config import Config, ConfigError, load_config
+from .cost.analyzer import CostAnalyzer, CostMetrics, CostResult
 from .env_checker import ValidationResult, validate_all, validate_or_exit
 from .evaluator import Evaluator, EvaluatorError
 from .parser import Parser, ParserError
@@ -51,6 +53,10 @@ __all__ = [
     "Scorer",
     "Reporter",
     "Comparator",
+    # Cost analysis
+    "CostAnalyzer",
+    "CostMetrics",
+    "CostResult",
     # Types
     "Phase",
     "SessionLogEntry",

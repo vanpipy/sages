@@ -125,12 +125,15 @@ class SessionLogEntry:
     JSONL format: one JSON object per line
     Example:
         {"type": "message", "timestamp": "2026-05-07T12:00:00Z", "message": {...}}
-        {"type": "message", "timestamp": "2026-05-07T12:00:01Z", "message": {...}}
+        {"type": "model_change", "timestamp": "...", "provider": "deepseek", "modelId": "..."}
     """
 
-    type: Literal["message", "session_start", "session_end"]
+    type: Literal["message", "session_start", "session_end", "model_change"]
     timestamp: str  # ISO 8601 format
     message: Message | None = None
+    # Additional fields for model_change entries
+    provider: str | None = None
+    model_id: str | None = None
 
     @classmethod
     def from_jsonl_line(cls, line: str) -> SessionLogEntry:
@@ -162,6 +165,8 @@ class SessionLogEntry:
                 type="model_change",
                 timestamp=data.get("timestamp", ""),
                 message=None,
+                provider=data.get("provider"),
+                model_id=data.get("modelId"),
             )
         elif entry_type == "thinking_level_change":
             return cls(
@@ -306,6 +311,11 @@ class OverallResult:
     input_tokens: int = 0
     output_tokens: int = 0
     overall_score: float = 0.0  # Weighted average of phase scores
+    
+    # Cost metrics
+    total_cost: float = 0.0  # Total cost in USD
+    cost_per_quality: float = 0.0  # Cost per quality point
+    efficiency_rating: str = "unknown"  # excellent/good/fair/poor
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -316,6 +326,9 @@ class OverallResult:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "overall_score": round(self.overall_score, 1),
+            "total_cost_usd": round(self.total_cost, 6),
+            "cost_per_quality_point": round(self.cost_per_quality, 6),
+            "efficiency_rating": self.efficiency_rating,
         }
 
 

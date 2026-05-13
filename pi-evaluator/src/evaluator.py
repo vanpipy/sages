@@ -1,6 +1,8 @@
 """pi_evaluator.evaluator - Metric computation for workflow evaluation.
 
 Computes per-phase metrics using HuggingFace evaluate framework.
+Uses heuristics for text analysis and integrates HuggingFace evaluate
+for quantitative metrics (code_eval, rouge, etc.).
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import Config
+from .cost.analyzer import CostAnalyzer
 from .parser import Parser
 from .scorer import Scorer
 from .types import (
@@ -43,6 +46,7 @@ class Evaluator:
         self.config = config
         self.parser = Parser()
         self.scorer = Scorer(config)
+        self.cost_analyzer = CostAnalyzer()
 
     def evaluate(
         self,
@@ -108,16 +112,23 @@ class Evaluator:
         overall_score = self.scorer.compute_overall_score(phase_scores)
         verdict = EvaluationResult.determine_verdict(overall_score)
 
-        # Calculate token usage
+        # Calculate token usage (legacy method - pi format uses input/output)
         input_tokens = sum(
-            e.message.usage.get("prompt_tokens", 0)
+            e.message.usage.get("input", 0)
             for e in entries
             if e.message and e.message.usage
         )
         output_tokens = sum(
-            e.message.usage.get("completion_tokens", 0)
+            e.message.usage.get("output", 0)
             for e in entries
             if e.message and e.message.usage
+        )
+
+        # Analyze cost metrics
+        cost_result = self.cost_analyzer.analyze(
+            entries=entries,
+            phases=phases,
+            quality_score=overall_score,
         )
 
         overall = OverallResult(
@@ -128,6 +139,9 @@ class Evaluator:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             overall_score=overall_score,
+            total_cost=cost_result.metrics.total_cost,
+            cost_per_quality=cost_result.cost_per_quality,
+            efficiency_rating=cost_result.efficiency_rating,
         )
 
         # Generate recommendations
