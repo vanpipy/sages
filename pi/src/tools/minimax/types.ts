@@ -1,7 +1,56 @@
 /**
  * MiniMax TypeScript Interfaces
  * All 7 capabilities: text, image, video, speech, music, vision, search
+ * 
+ * Supports both API Plan and Token Plan:
+ * - API Plan: Full API access (chat, image, video, speech, music)
+ * - Token Plan: MCP endpoints (search, vision) + M2.7 text models
  */
+
+// ============ Known API Hosts ============
+
+export const KNOWN_API_HOSTS = [
+  "https://api.minimaxi.com",     // CN Platform (primary for CN keys)
+  "https://api.minimax.io",       // Global Platform
+  "https://api.minimax.chat",    // Legacy CN redirect
+] as const;
+
+export type KnownApiHost = typeof KNOWN_API_HOSTS[number];
+
+// ============ Supported Models ============
+
+export const TEXT_MODELS = {
+  M2_7: "MiniMax-M2.7",
+  M2_7_HIGHSPEED: "MiniMax-M2.7-highspeed",
+  M2_5: "MiniMax-M2.5",
+  M2_5_HIGHSPEED: "MiniMax-M2.5-highspeed",
+  M2_1: "MiniMax-M2.1",
+  M2_1_HIGHSPEED: "MiniMax-M2.1-highspeed",
+  M2: "MiniMax-M2",
+} as const;
+
+export const IMAGE_MODELS = {
+  IMAGE_01: "image-01",
+  IMAGE_01_PRO: "image-01-pro",
+} as const;
+
+export const VIDEO_MODELS = {
+  HAILUO_23: "Hailuo-2.3",
+  HAILUO_23_FAST: "Hailuo-2.3-Fast",
+} as const;
+
+export const SPEECH_MODELS = {
+  SPEECH_28_HD: "speech-2.8-hd",
+  SPEECH_28_TURBO: "speech-2.8-turbo",
+  SPEECH_26_HD: "speech-2.6-hd",
+  SPEECH_26_TURBO: "speech-2.6-turbo",
+  SPEECH_02_HD: "speech-02-hd",
+  SPEECH_02_TURBO: "speech-02-turbo",
+} as const;
+
+export const MUSIC_MODELS = {
+  MUSIC_26: "Music-2.6",
+} as const;
 
 // ============ Common Types ============
 
@@ -9,6 +58,10 @@ export interface BaseResponse {
   success: boolean;
   request_id?: string;
   cost?: number;
+  base_resp?: {
+    status_code: number;
+    status_msg: string;
+  };
 }
 
 export interface MiniMaxConfig {
@@ -16,6 +69,11 @@ export interface MiniMaxConfig {
   groupId?: string;
   baseURL?: string;
   timeout?: number;
+}
+
+export interface MiniMaxCredentials {
+  apiKey: string;
+  groupId?: string;
 }
 
 // ============ Text (Chat) Types ============
@@ -26,7 +84,7 @@ export interface ChatMessage {
 }
 
 export interface ChatCompletionRequest {
-  model: string;
+  model?: string;
   messages: ChatMessage[];
   max_tokens?: number;
   temperature?: number;
@@ -43,6 +101,7 @@ export interface ChatCompletionChoice {
 export interface ChatCompletionResponse extends BaseResponse {
   id: string;
   model: string;
+  object: string;
   choices: ChatCompletionChoice[];
   usage?: {
     prompt_tokens: number;
@@ -63,16 +122,16 @@ export interface ChatStreamChunk {
 // ============ Image Types ============
 
 export interface ImageGenerateRequest {
-  model: string;
+  model?: string;
   prompt: string;
   width?: number;
   height?: number;
-  num?: number;
+  num_images?: number;
   sample?: number;
 }
 
 export interface ImageResponse extends BaseResponse {
-  data?: Array<{
+  image_list?: Array<{
     url?: string;
     base64?: string;
   }>;
@@ -86,10 +145,11 @@ export interface ImageEditRequest extends ImageGenerateRequest {
 // ============ Video Types ============
 
 export interface VideoGenerateRequest {
-  model: string;
+  model?: string;
   prompt: string;
   duration?: number; // seconds, max 10
   fps?: number;
+  resolution?: "720p" | "1080p";
 }
 
 export interface VideoResponse extends BaseResponse {
@@ -101,25 +161,25 @@ export interface VideoResponse extends BaseResponse {
 // ============ Speech (TTS) Types ============
 
 export interface SpeechSynthesizeRequest {
-  model: string;
+  model?: string;
   text: string;
-  voice_setting?: {
-    voice_id?: string;
-    speed?: number;
-    pitch?: number;
-    volume?: number;
-  };
+  voice_id?: string;
+  speed?: number;
+  pitch?: number;
+  volume?: number;
+  output_format?: "mp3" | "pcm" | "flac" | "wav";
 }
 
 export interface SpeechResponse extends BaseResponse {
   data?: {
     audio_url?: string;
     duration?: number;
+    file_id?: string;
   };
 }
 
 export interface SpeechTranscribeRequest {
-  model: string;
+  model?: string;
   file?: string; // file path or URL
   language?: string;
 }
@@ -131,34 +191,38 @@ export interface TranscriptionResponse extends BaseResponse {
 // ============ Music Types ============
 
 export interface MusicGenerateRequest {
-  model: string;
+  model?: string;
   prompt: string;
   duration?: number;
-  make_instrumental?: boolean;
+  lyrics?: string;
+  instrumental?: boolean;
 }
 
 export interface MusicResponse extends BaseResponse {
   task_id?: string;
   status?: string;
   audio_url?: string;
+  file_id?: string;
 }
 
 // ============ Vision Types ============
 
+export interface VisionContent {
+  type: "text" | "image_url";
+  text?: string;
+  image_url?: {
+    url: string;
+    detail?: "low" | "high" | "auto";
+  };
+}
+
 export interface VisionMessage {
   role: "user" | "assistant";
-  content: Array<{
-    type: "text" | "image_url";
-    text?: string;
-    image_url?: {
-      url: string;
-      detail?: "low" | "high" | "auto";
-    };
-  }>;
+  content: VisionContent[];
 }
 
 export interface VisionRequest {
-  model: string;
+  model?: string;
   messages: VisionMessage[];
   max_tokens?: number;
 }
@@ -176,23 +240,27 @@ export interface VisionResponse extends BaseResponse {
   }>;
 }
 
-// ============ Search Types ============
+// ============ Search Types (Token Plan MCP) ============
 
 export interface SearchRequest {
   query: string;
   num_results?: number;
-  search_result_type?: "news" | "web" | "video";
 }
 
 export interface SearchResult {
   title: string;
-  url: string;
+  link: string;
   snippet: string;
   date?: string;
 }
 
+export interface RelatedSearch {
+  query: string;
+}
+
 export interface SearchResponse extends BaseResponse {
-  results: SearchResult[];
+  organic?: SearchResult[];
+  related_searches?: RelatedSearch[];
 }
 
 // ============ MiniMax Client Interface ============
@@ -224,6 +292,6 @@ export interface MiniMaxClient {
   // Vision
   vision(request: VisionRequest): Promise<VisionResponse>;
 
-  // Search
+  // Search (Token Plan MCP)
   search(request: SearchRequest): Promise<SearchResponse>;
 }
