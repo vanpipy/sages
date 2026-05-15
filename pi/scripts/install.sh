@@ -12,10 +12,11 @@ PKG_DIR="$PI_DIR/packages/$PKG_NAME"
 REPO_URL=""https://github.com/vanpipy/sages.git
 
 usage() {
-  echo "Usage: $0 [--prefix DIR] [--force] [--uninstall]"
-  echo "  --prefix DIR   Set pi config dir (default: ~/.pi)"
-  echo "  --force        Overwrite existing files"
-  echo "  --uninstall    Remove installed files"
+  echo "Usage: $0 [--prefix DIR] [--force] [--uninstall] [--install-pi]"
+  echo "  --prefix DIR     Set pi config dir (default: ~/.pi)"
+  echo "  --force          Overwrite existing files"
+  echo "  --uninstall      Remove installed files"
+  echo "  --install-pi     Install pi if not found"
 }
 
 register_settings() {
@@ -85,18 +86,41 @@ uninstall() {
   echo "Done."
 }
 
+install_pi() {
+  echo "==> Installing pi..."
+  if curl -fsSL https://pi.dev/install.sh | sh; then
+    echo "==> pi installed successfully"
+  else
+    echo "Error: Failed to install pi from https://pi.dev/install.sh"
+    return 1
+  fi
+}
+
 main() {
-  local FORCE=false UNINSTALL=false
+  local FORCE=false UNINSTALL=false INSTALL_PI=false
   
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --prefix) PI_DIR="$2"; PKG_DIR="$PI_DIR/packages/$PKG_NAME"; shift 2 ;;
       --force) FORCE=true; shift ;;
       --uninstall) UNINSTALL=true; shift ;;
+      --install-pi) INSTALL_PI=true; shift ;;
       --help|-h) usage; exit 0 ;;
       *) echo "Unknown: $1"; usage; exit 1 ;;
     esac
   done
+
+  # Check if pi is installed
+  if ! command -v pi &>/dev/null; then
+    if [[ "$INSTALL_PI" == true ]]; then
+      install_pi
+    else
+      echo "Error: pi not found in PATH"
+      echo "Please install pi first: curl -fsSL https://pi.dev/install.sh | sh"
+      echo "Or run with --install-pi to auto-install"
+      exit 1
+    fi
+  fi
 
   [[ ! -d "$PI_DIR" ]] && { echo "Error: $PI_DIR not found. Run: mkdir -p $PI_DIR"; exit 1; }
   command -v git &>/dev/null || { echo "Error: git required"; exit 1; }
