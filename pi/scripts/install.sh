@@ -13,54 +13,20 @@ REPO_URL="https://github.com/vanpipy/sages.git"
 AGENT_DIR="$PI_DIR/agent"
 
 usage() {
-  echo "Usage: $0 [OPTIONS]"
-  echo ""
-  echo "Options:"
-  echo "  --prefix DIR         Set pi config dir (default: ~/.pi)"
-  echo "  --force              Overwrite existing files"
-  echo "  --uninstall          Remove installed files"
-  echo "  --install-pi         Install pi if not found"
-  echo "  --with-system-prompt Install agent/SYSTEM.md"
-  echo "  --help, -h           Show this help"
-  echo ""
-  echo "Examples:"
-  echo "  $0 --install-pi --with-system-prompt"
-  echo "  $0 --uninstall"
+  echo "Usage: $0 [--prefix DIR] [--force] [--uninstall]"
+  echo "  --prefix DIR   Set pi config dir (default: ~/.pi)"
+  echo "  --force        Overwrite existing files"
+  echo "  --uninstall    Remove installed files"
 }
 
-# -----------------------------------------------------------------------------
-# Step 0: Install pi
-# -----------------------------------------------------------------------------
-install_pi() {
-  echo "==> Installing pi..."
-  
-  if command -v pi &>/dev/null; then
-    echo "==> Found existing pi: $(pi --version 2>/dev/null || echo 'unknown')"
-    return 0
-  fi
-  
-  if curl -fsSL https://pi.dev/install.sh | sh; then
-    echo "==> pi installed successfully"
-  else
-    echo "Error: Failed to install pi"
-    return 1
-  fi
-  
+install_pi_if_needed() {
   if ! command -v pi &>/dev/null; then
-    echo "Error: pi not in PATH. Add ~/.local/bin to PATH:"
-    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-    return 1
+    echo "==> Installing pi..."
+    curl -fsSL https://pi.dev/install.sh | sh || return 1
   fi
-  
-  return 0
 }
 
-# -----------------------------------------------------------------------------
-# Step 1: Install system prompt
-# -----------------------------------------------------------------------------
 install_system_prompt() {
-  echo "==> Installing system prompt..."
-  
   mkdir -p "$AGENT_DIR"
   
   cat > "$AGENT_DIR/SYSTEM.md" << 'EOF'
@@ -104,12 +70,9 @@ You are a strategic expert specializing in AI-driven DevOps (The Command Center)
 - **Compliance**: All activities must follow ethical guidelines within authorized scopes.
 EOF
   
-  echo "==> Created $AGENT_DIR/SYSTEM.md"
+  echo "  Installed $AGENT_DIR/SYSTEM.md"
 }
 
-# -----------------------------------------------------------------------------
-# Register/unregister in settings.json
-# -----------------------------------------------------------------------------
 register_settings() {
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && return
@@ -138,30 +101,28 @@ print('Unregistered', p)
 "
 }
 
-# -----------------------------------------------------------------------------
-# Install sages package
-# -----------------------------------------------------------------------------
-do_install() {
+install() {
+  install_pi_if_needed
+
   local tmp_dir
   tmp_dir=$(mktemp -d)
   
-  echo "==> Cloning sages to $tmp_dir"
+  echo "Cloning to $tmp_dir"
   git clone "$REPO_URL" "$tmp_dir"
   
-  echo "==> Installing to $PKG_DIR"
+  echo "Installing to $PKG_DIR"
   mkdir -p "$PKG_DIR"
-  
   for dir in prompts skills extensions src; do
     [[ -d "$tmp_dir/pi/$dir" ]] || continue
     if [[ -d "$PKG_DIR/$dir" && "${FORCE:-false}" != true ]]; then
-      echo "  Skipping $dir/ (exists)"
+      echo "  Skipping $dir (exists)"
     else
       cp -r${FORCE:+ -f} "$tmp_dir/pi/$dir" "$PKG_DIR/"
       echo "  Copied $dir/"
     fi
   done
   
-  echo "==> Copying package.json"
+  echo "Copying package.json"
   if [[ "${FORCE:-false}" != true && -f "$PKG_DIR/package.json" ]]; then
     echo "  Skipping package.json (exists)"
   else
@@ -171,76 +132,43 @@ do_install() {
   
   register_settings
   
+  # Install system prompt if missing or --force
+  if [[ ! -f "$AGENT_DIR/SYSTEM.md" || "${FORCE:-false}" == true ]]; then
+    install_system_prompt
+  fi
+  
   rm -rf "$tmp_dir"
-  echo "==> Done. Restart pi: exit && pi"
+  echo "Done. Restart pi: exit && pi"
 }
 
-# -----------------------------------------------------------------------------
-# Uninstall sages package
-# -----------------------------------------------------------------------------
-do_uninstall() {
-  echo "==> Uninstalling sages..."
+uninstall() {
+  echo "Uninstalling..."
   [[ -d "$PKG_DIR" ]] && rm -rf "$PKG_DIR" && echo "  Removed $PKG_DIR"
   unregister_settings
-  echo "==> Done."
+  echo "Done."
 }
 
-# -----------------------------------------------------------------------------
-# Main
-# -----------------------------------------------------------------------------
 main() {
-  local FORCE=false UNINSTALL=false INSTALL_PI=false SYSTEM_PROMPT=false
+  local FORCE=false UNINSTALL=false
   
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --prefix)
-        PI_DIR="$2"
-        PKG_DIR="$PI_DIR/packages/$PKG_NAME"
-        shift 2
-        ;;
+      --prefix) PI_DIR="$2"; PKG_DIR="$PI_DIR/packages/$PKG_NAME"; shift 2 ;;
       --force) FORCE=true; shift ;;
       --uninstall) UNINSTALL=true; shift ;;
-      --install-pi) INSTALL_PI=true; shift ;;
-      --with-system-prompt) SYSTEM_PROMPT=true; shift ;;
       --help|-h) usage; exit 0 ;;
       *) echo "Unknown: $1"; usage; exit 1 ;;
     esac
   done
 
-  # Check pi
-  if ! command -v pi &>/dev/null; then
-    if [[ "$INSTALL_PI" == true ]]; then
-      install_pi || exit 1
-    else
-      echo "Error: pi not found in PATH"
-      echo "Install: curl -fsSL https://pi.dev/install.sh | sh"
-      echo "Or run: $0 --install-pi"
-      exit 1
-    fi
-  fi
-
-  # Check directories
-  [[ -d "$PI_DIR" ]] || { echo "Error: $PI_DIR not found"; exit 1; }
+  [[ ! -d "$PI_DIR" ]] && { echo "Error: $PI_DIR not found. Run: mkdir -p $PI_DIR"; exit 1; }
   command -v git &>/dev/null || { echo "Error: git required"; exit 1; }
 
-  echo "==> Four Sages Installation"
-  echo "==> PI_DIR: $PI_DIR"
-  echo ""
-
-  if [[ "$UNINSTALL" == true ]]; then
-    do_uninstall
-    return
+  if $UNINSTALL; then
+    uninstall
+  else
+    install
   fi
-
-  do_install
-
-  if [[ "$SYSTEM_PROMPT" == true ]]; then
-    echo ""
-    install_system_prompt
-  fi
-  
-  echo ""
-  echo "==> Setup complete!"
 }
 
 main "$@"
