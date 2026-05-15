@@ -335,7 +335,7 @@ export function registerMiniMaxTools(pi: ExtensionAPI): void {
       "Examples:\n" +
       "  /minimax-search \"site:arxiv.org agentic process\" --num 10\n" +
       "  /minimax-search \"typescript error handling best practices\"",
-    schema: MinimaxSearchSchema,
+    parameters: MinimaxSearchSchema,
     execute: minimaxSearch,
   });
 
@@ -346,7 +346,7 @@ export function registerMiniMaxTools(pi: ExtensionAPI): void {
       "Examples:\n" +
       "  /minimax-chat \"Explain quantum computing\"\n" +
       "  /minimax-chat \"Write a hello world in Go\" --model MiniMax-M2.5",
-    schema: MinimaxChatSchema,
+    parameters: MinimaxChatSchema,
     execute: minimaxChat,
   });
 
@@ -357,7 +357,7 @@ export function registerMiniMaxTools(pi: ExtensionAPI): void {
       "Examples:\n" +
       "  /minimax-image \"A serene mountain landscape at sunset\"\n" +
       "  /minimax-image \"Cute robot\" --num 4 --width 1024 --height 1024",
-    schema: MinimaxImageSchema,
+    parameters: MinimaxImageSchema,
     execute: minimaxImage,
   });
 
@@ -368,7 +368,7 @@ export function registerMiniMaxTools(pi: ExtensionAPI): void {
       "Examples:\n" +
       "  /minimax-vision \"https://example.com/chart.png\" \"What data is shown?\"\n" +
       "  /minimax-vision \"https://example.com/meme.jpg\"",
-    schema: MinimaxVisionSchema,
+    parameters: MinimaxVisionSchema,
     execute: minimaxVision,
   });
 
@@ -379,7 +379,7 @@ export function registerMiniMaxTools(pi: ExtensionAPI): void {
       "Examples:\n" +
       "  /minimax-speech \"Hello, this is a test\" --voice male-qingse --speed 1.0\n" +
       "  /minimax-speech \"Welcome to our service\" --format mp3",
-    schema: MinimaxSpeechSchema,
+    parameters: MinimaxSpeechSchema,
     execute: minimaxSpeech,
   });
 
@@ -390,7 +390,7 @@ export function registerMiniMaxTools(pi: ExtensionAPI): void {
       "Examples:\n" +
       "  /minimax-music \"Upbeat electronic dance music\"\n" +
       "  /minimax-music \"Calm piano melody\" --duration 30",
-    schema: MinimaxMusicSchema,
+    parameters: MinimaxMusicSchema,
     execute: minimaxMusic,
   });
 
@@ -401,7 +401,7 @@ export function registerMiniMaxTools(pi: ExtensionAPI): void {
       "Examples:\n" +
       "  /minimax-video \"A cat playing piano\"\n" +
       "  /minimax-video \"Robot working\" --duration 10 --resolution 1080p",
-    schema: MinimaxVideoSchema,
+    parameters: MinimaxVideoSchema,
     execute: minimaxVideo,
   });
 }
