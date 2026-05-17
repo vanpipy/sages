@@ -3,27 +3,148 @@
 # Four Sages Installation Script for pi
 # Installs to ~/.pi/packages/sages
 #
+# Also installs pi-memory for persistent memory capabilities
+#
 
 set -euo pipefail
 
+# Core paths
 PI_DIR="${PI_DIR:-$HOME/.pi}"
 PKG_NAME="sages"
 PKG_DIR="$PI_DIR/packages/$PKG_NAME"
 REPO_URL="https://github.com/vanpipy/sages.git"
 AGENT_DIR="$PI_DIR/agent"
 
+# pi-memory package info
+PI_MEMORY_PKG="npm:@samfp/pi-memory"
+
+# Cleanup trap
+TMP_DIR=""
+cleanup() {
+  [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]] && rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
 usage() {
-  echo "Usage: $0 [--prefix DIR] [--force] [--uninstall]"
-  echo "  --prefix DIR   Set pi config dir (default: ~/.pi)"
-  echo "  --force        Overwrite existing files"
-  echo "  --uninstall    Remove installed files"
+  echo "Usage: $0 [OPTIONS]"
+  echo ""
+  echo "Options:"
+  echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
+  echo "  --force            Overwrite existing files"
+  echo "  --uninstall        Remove installed files"
+  echo "  --help, -h         Show this help message"
+}
+
+check_git() {
+  command -v git &>/dev/null || { echo "Error: git is required"; exit 1; }
 }
 
 install_pi_if_needed() {
   if ! command -v pi &>/dev/null; then
     echo "==> Installing pi..."
-    curl -fsSL https://pi.dev/install.sh | sh || return 1
+    curl -fsSL https://pi.dev/install.sh | sh || {
+      echo "Error: pi installation failed"
+      echo "Install manually: curl -fsSL https://pi.dev/install.sh | sh"
+      exit 1
+    }
   fi
+}
+
+is_pi_memory_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+  
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    packages = d.get('packages', [])
+    if '$PI_MEMORY_PKG' in packages or '@samfp/pi-memory' in packages:
+        sys.exit(0)
+    sys.exit(1)
+except:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_memory() {
+  echo "==> Installing pi-memory..."
+  
+  # Check if already installed
+  if is_pi_memory_installed; then
+    echo "  pi-memory already installed"
+    return 0
+  fi
+  
+  # Try using pi install command first
+  if command -v pi &>/dev/null; then
+    echo "  Installing via 'pi install $PI_MEMORY_PKG'..."
+    if pi install "$PI_MEMORY_PKG"; then
+      echo "  Installed pi-memory"
+      return 0
+    fi
+    echo "  pi install failed, trying manual..."
+  fi
+  
+  # Fallback: manually add to settings.json
+  echo "  Adding to settings.json..."
+  local settings="$PI_DIR/agent/settings.json"
+  mkdir -p "$(dirname "$settings")"
+  
+  if [[ ! -f "$settings" ]]; then
+    echo '{"packages": []}' > "$settings"
+  fi
+  
+  python3 -c "
+import json, sys
+f, pkg = '$settings', '$PI_MEMORY_PKG'
+try:
+    d = json.load(open(f))
+except (json.JSONDecodeError, FileNotFoundError):
+    d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+json.dump(d, open(f, 'w'), indent=2)
+print('  Added', pkg)
+"
+  
+  echo "  Installed pi-memory"
+}
+
+uninstall_pi_memory() {
+  echo "==> Uninstalling pi-memory..."
+  
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && { echo "  No settings file"; return 0; }
+  
+  local removed=false
+  python3 -c "
+import json, sys
+f, pkg = '$settings', '$PI_MEMORY_PKG'
+try:
+    d = json.load(open(f))
+    pkgs = d.get('packages', [])
+    # Remove exact match or @samfp/pi-memory variant
+    new_pkgs = [x for x in pkgs if x != pkg and x != 'pi-memory' and x != '@samfp/pi-memory']
+    if len(new_pkgs) < len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open(f, 'w'), indent=2)
+        print('Removed', pkg)
+    else:
+        print('Not found in settings')
+except Exception as e:
+    print('Warning:', e, file=sys.stderr)
+    sys.exit(1)
+"
+  
+  # Remove package directory if exists
+  local memory_dir="$PI_DIR/packages/pi-memory"
+  if [[ -d "$memory_dir" ]]; then
+    rm -rf "$memory_dir"
+    echo "  Removed $memory_dir"
+  fi
+  
+  echo "  pi-memory uninstalled"
 }
 
 install_system_prompt() {
@@ -70,91 +191,147 @@ You are a strategic expert specializing in AI-driven DevOps (The Command Center)
 - **Compliance**: All activities must follow ethical guidelines within authorized scopes.
 EOF
   
-  echo "  Installed $AGENT_DIR/SYSTEM.md"
+  echo "  Installed SYSTEM.md"
+}
+
+get_settings_packages() {
+  local settings="$PI_DIR/agent/settings.json"
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    print(json.dumps(d.get('packages', [])))
+except:
+    print('[]')
+" 2>/dev/null
+}
+
+is_sages_installed() {
+  [[ -d "$PKG_DIR" && -f "$PKG_DIR/package.json" ]]
 }
 
 register_settings() {
   local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && return
-
+  mkdir -p "$(dirname "$settings")"
+  
+  if [[ ! -f "$settings" ]]; then
+    echo '{"packages": []}' > "$settings"
+  fi
+  
   python3 -c "
 import json, sys
-f, p = '$settings', '$PKG_DIR'
-d = json.load(open(f))
-d['packages'] = [x for x in d.get('packages', []) if 'sages' not in x] + [p]
+f, pkg = '$settings', '$PKG_DIR'
+try:
+    d = json.load(open(f))
+except (json.JSONDecodeError, FileNotFoundError):
+    d = {'packages': []}
+# Remove existing sages entry, then add
+d['packages'] = [x for x in d.get('packages', []) if x != pkg and '$PKG_NAME' not in x]
+if pkg not in d['packages']:
+    d['packages'].append(pkg)
 json.dump(d, open(f, 'w'), indent=2)
-print('Registered', p)
+print('Registered sages')
 "
 }
 
 unregister_settings() {
   local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && return
-
+  [[ ! -f "$settings" ]] && return 0
+  
   python3 -c "
 import json, sys
-f, p = '$settings', '$PKG_DIR'
-d = json.load(open(f))
-d['packages'] = [x for x in d.get('packages', []) if x != p]
-json.dump(d, open(f, 'w'), indent=2)
-print('Unregistered', p)
+f, pkg = '$settings', '$PKG_DIR'
+try:
+    d = json.load(open(f))
+    d['packages'] = [x for x in d.get('packages', []) if x != pkg and '$PKG_NAME' not in x]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('Unregistered sages')
+except Exception as e:
+    print('Warning:', e, file=sys.stderr)
 "
 }
 
 install() {
-  echo "==> Ensuring pi is installed..."
+  echo "==> Installing sages + pi-memory..."
+  
+  # Pre-flight checks
+  check_git
   install_pi_if_needed
   
-  # Verify pi is available before proceeding
+  # Verify pi is available
   if ! command -v pi &>/dev/null; then
-    echo "Error: pi installation failed. Please install pi manually: curl -fsSL https://pi.dev/install.sh | sh"
+    echo "Error: pi not found after installation"
     exit 1
   fi
-  echo "  pi is ready"
   
-  echo "==> Installing sages to $PKG_DIR"
-  local tmp_dir
-  tmp_dir=$(mktemp -d)
+  # Install pi-memory first
+  install_pi_memory
   
-  echo "Cloning sages to $tmp_dir"
-  git clone "$REPO_URL" "$tmp_dir"
+  # Clone sages
+  echo "==> Installing sages..."
+  TMP_DIR=$(mktemp -d)
+  echo "  Cloning from $REPO_URL..."
+  git clone "$REPO_URL" "$TMP_DIR" || {
+    echo "Error: Failed to clone sages repository"
+    exit 1
+  }
   
-  echo "Installing to $PKG_DIR"
+  # Install sages
   mkdir -p "$PKG_DIR"
   for dir in prompts skills extensions src; do
-    [[ -d "$tmp_dir/pi/$dir" ]] || continue
-    if [[ -d "$PKG_DIR/$dir" && "${FORCE:-false}" != true ]]; then
-      echo "  Skipping $dir (exists)"
+    local src_dir="$TMP_DIR/pi/$dir"
+    local dest_dir="$PKG_DIR/$dir"
+    
+    if [[ ! -d "$src_dir" ]]; then
+      continue
+    fi
+    
+    if [[ -d "$dest_dir" && "${FORCE:-false}" != true ]]; then
+      echo "  Skipping $dir/ (exists, use --force to overwrite)"
     else
-      cp -r${FORCE:+ -f} "$tmp_dir/pi/$dir" "$PKG_DIR/"
-      echo "  Copied $dir/"
+      rm -rf "$dest_dir"
+      cp -r "$src_dir" "$PKG_DIR/"
+      echo "  Installed $dir/"
     fi
   done
   
-  echo "Copying package.json"
-  if [[ "${FORCE:-false}" != true && -f "$PKG_DIR/package.json" ]]; then
-    echo "  Skipping package.json (exists)"
-  else
-    cp "$tmp_dir/pi/package.json" "$PKG_DIR/package.json"
-    echo "  Copied package.json"
+  # Handle package.json
+  if [[ -f "$PKG_DIR/package.json" && "${FORCE:-false}" != true ]]; then
+    echo "  Keeping existing package.json"
+  elif [[ -f "$TMP_DIR/pi/package.json" ]]; then
+    cp "$TMP_DIR/pi/package.json" "$PKG_DIR/package.json"
+    echo "  Installed package.json"
   fi
   
+  # Register in settings
   register_settings
   
-  # Install system prompt if missing or --force
+  # Install system prompt
   if [[ ! -f "$AGENT_DIR/SYSTEM.md" || "${FORCE:-false}" == true ]]; then
     install_system_prompt
   fi
   
-  rm -rf "$tmp_dir"
-  echo "Done. Restart pi: exit && pi"
+  echo ""
+  echo "Done! Restart pi: exit && pi"
 }
 
 uninstall() {
-  echo "Uninstalling..."
-  [[ -d "$PKG_DIR" ]] && rm -rf "$PKG_DIR" && echo "  Removed $PKG_DIR"
+  echo "==> Uninstalling sages + pi-memory..."
+  
+  # Remove sages
+  if [[ -d "$PKG_DIR" ]]; then
+    rm -rf "$PKG_DIR"
+    echo "  Removed sages"
+  fi
+  
+  # Unregister sages
   unregister_settings
-  echo "Done."
+  
+  # Uninstall pi-memory
+  uninstall_pi_memory
+  
+  echo ""
+  echo "Done. Restart pi: exit && pi"
 }
 
 main() {
@@ -162,15 +339,17 @@ main() {
   
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --prefix) PI_DIR="$2"; PKG_DIR="$PI_DIR/packages/$PKG_NAME"; shift 2 ;;
+      --prefix)
+        PI_DIR="$2"
+        PKG_DIR="$PI_DIR/packages/$PKG_NAME"
+        shift 2
+        ;;
       --force) FORCE=true; shift ;;
       --uninstall) UNINSTALL=true; shift ;;
       --help|-h) usage; exit 0 ;;
-      *) echo "Unknown: $1"; usage; exit 1 ;;
+      *) echo "Error: Unknown option: $1"; usage; exit 1 ;;
     esac
   done
-
-  command -v git &>/dev/null || { echo "Error: git required"; exit 1; }
 
   if $UNINSTALL; then
     uninstall
