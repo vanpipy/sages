@@ -102,12 +102,21 @@ print('Unregistered', p)
 }
 
 install() {
+  echo "==> Ensuring pi is installed..."
   install_pi_if_needed
-
+  
+  # Verify pi is available before proceeding
+  if ! command -v pi &>/dev/null; then
+    echo "Error: pi installation failed. Please install pi manually: curl -fsSL https://pi.dev/install.sh | sh"
+    exit 1
+  fi
+  echo "  pi is ready"
+  
+  echo "==> Installing sages to $PKG_DIR"
   local tmp_dir
   tmp_dir=$(mktemp -d)
   
-  echo "Cloning to $tmp_dir"
+  echo "Cloning sages to $tmp_dir"
   git clone "$REPO_URL" "$tmp_dir"
   
   echo "Installing to $PKG_DIR"
@@ -161,7 +170,6 @@ main() {
     esac
   done
 
-  [[ ! -d "$PI_DIR" ]] && { echo "Error: $PI_DIR not found. Run: mkdir -p $PI_DIR"; exit 1; }
   command -v git &>/dev/null || { echo "Error: git required"; exit 1; }
 
   if $UNINSTALL; then
