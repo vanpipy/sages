@@ -17,12 +17,24 @@ Named after four sage figures from Chinese mythology, representing the complete 
 
 ### Quick Install
 
+**macOS / Linux / WSL:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | bash
 ```
 
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.ps1 | iex
+```
+
+**Windows (CMD):**
+```batch
+curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.bat -o install.bat && install.bat
+```
+
 ### Manual Install
 
+**macOS / Linux / WSL:**
 ```bash
 # Clone the repository
 git clone https://github.com/vanpipy/sages.git
@@ -32,8 +44,29 @@ cd sages
 ./pi/scripts/install.sh
 ```
 
+**Windows (PowerShell):**
+```powershell
+# Clone the repository
+git clone https://github.com/vanpipy/sages.git
+cd sages
+
+# Run installation
+.\pi\scripts\install.ps1
+```
+
+**Windows (CMD):**
+```batch
+REM Clone the repository
+git clone https://github.com/vanpipy/sages.git
+cd sages
+
+REM Run installation
+.\pi\scripts\install.bat
+```
+
 ### Options
 
+**macOS / Linux (bash):**
 ```bash
 ./pi/scripts/install.sh [options]
 
@@ -45,8 +78,25 @@ Options:
   --help          Show help message
 ```
 
+**Windows (PowerShell):**
+```powershell
+.\pi\scripts\install.ps1 [-Prefix PATH] [-Force] [-Uninstall] [-Help]
+```
+
+**Windows (CMD):**
+```batch
+.\pi\scripts\install.bat [options]
+
+Options:
+  --prefix PATH   pi config directory (default: ~\.pi)
+  --force         Overwrite existing installation
+  --uninstall     Remove installed files
+  --help, -h      Show help message
+```
+
 ### Examples
 
+**macOS / Linux:**
 ```bash
 # Install with defaults
 ./pi/scripts/install.sh
@@ -59,9 +109,36 @@ Options:
 
 # Uninstall
 ./pi/scripts/install.sh --uninstall
+```
 
-# Preview changes
-./pi/scripts/install.sh --dry-run
+**Windows (PowerShell):**
+```powershell
+# Install with defaults
+.\pi\scripts\install.ps1
+
+# Install to custom directory
+.\pi\scripts\install.ps1 -Prefix C:\custom\.pi
+
+# Overwrite existing
+.\pi\scripts\install.ps1 -Force
+
+# Uninstall
+.\pi\scripts\install.ps1 -Uninstall
+```
+
+**Windows (CMD):**
+```batch
+REM Install with defaults
+.\pi\scripts\install.bat
+
+REM Install to custom directory
+.\pi\scripts\install.bat --prefix C:\custom\.pi
+
+REM Overwrite existing
+.\pi\scripts\install.bat --force
+
+REM Uninstall
+.\pi\scripts\install.bat --uninstall
 ```
 
 ## Commands
@@ -418,12 +495,31 @@ pi update --extension npm:@sages/pi-four-sages
 
 ## Uninstalling
 
+**macOS / Linux:**
 ```bash
 # Using install script
 ./pi/scripts/install.sh --uninstall
 
 # Or using pi
 pi remove npm:@sages/pi-four-sages
+```
+
+**Windows (PowerShell):**
+```powershell
+# Using install script
+.\pi\scripts\install.ps1 -Uninstall
+
+# Or using pi
+pi remove npm:@sages/pi-four-sages
+```
+
+**Windows (CMD):**
+```batch
+REM Using install script
+.\pi\scripts\install.bat --uninstall
+
+REM Or using pi
+pi remove npm:@samfp/sages
 ```
 
 ## Examples
