@@ -1,5 +1,28 @@
 # Four Sages Workflow
 
+## Recommended Pre-Step: Brainstorming
+
+⚡ **HIGHLY RECOMMENDED** before starting any implementation:
+
+```
+/brainstorm [your request]
+```
+
+**When to brainstorm?**
+- Creating new features
+- Building components
+- Adding functionality
+- Modifying existing behavior
+- Even for "simple" projects
+
+**Why brainstorm first?**
+- Explore intent and clarify requirements
+- Propose 2-3 approaches with tradeoffs
+- Get design approval before implementation
+- Reduces wasted work on misaligned solutions
+
+**Auto-Transition**: After design approval, Fuxi workflow starts automatically (if not already in one).
+
 ## Phases
 
 | Phase | Mode | Allowed Files |
@@ -44,7 +67,7 @@ Always show mode in system prompt:
 ## Workflow Flow
 
 ```
-fuxi-start
+/brainstorm → [Design Approved] → fuxi-start (auto)
     ↓
 Design Phase (Fuxi)
     ↓ /fuxi-request

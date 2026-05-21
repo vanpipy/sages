@@ -3,7 +3,7 @@ name: brainstorming
 description: "Explore user intent, propose approaches, and design before implementation. Use this before any creative work - creating features, building components, adding functionality, or modifying behavior."
 ---
 
-# Brainstorming (头脑风暴) - Design Clarifier
+# Brainstorming - Design Clarifier
 
 ## Mode Indicator
 
@@ -21,7 +21,7 @@ Use this skill **before** starting any implementation work:
 - Modifying existing behavior
 - Even for "simple" projects
 
-This skill helps explore intent, understand requirements, and propose designs before writing code.
+**This is a standalone common action** - it works with or without an active Fuxi workflow.
 
 ## Command
 
@@ -47,8 +47,8 @@ flowchart TD
     G -->|No| H[Revise Section]
     H --> F
     G -->|Yes| I[Write Design Doc]
-    I --> J[Self Review Spec]
-    J --> K{User Reviews?}
+    I --> J[Spec Self-Review]
+    J --> K[User Reviews Spec]
     K -->|Changes| L[Update Spec]
     L --> K
     K -->|Approved| M[Transition to Fuxi]
@@ -58,7 +58,7 @@ flowchart TD
 ## Hard Gate
 
 <HARD-GATE>
-Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it.
+Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity. A todo list, a single-function utility, a config change — all of them.
 </HARD-GATE>
 
 Every project goes through this process. "Simple" projects are where unexamined assumptions cause the most wasted work.
@@ -73,7 +73,7 @@ Complete these items in order:
 4. **Propose 2-3 approaches** — With tradeoffs and recommendation
 5. **Present design sections** — Get approval after each section
 6. **Write design doc** — Save to `.sages/designs/YYYY-MM-DD-<topic>.md`
-7. **Spec self-review** — Fix placeholders, contradictions, ambiguity inline
+7. **Spec self-review** — 4-step inline check (see below)
 8. **User reviews written spec** — Wait for approval
 9. **Transition to implementation** — Can invoke `/fuxi-start` (optional)
 
@@ -86,7 +86,36 @@ Complete these items in order:
 | YAGNI | Remove unnecessary features from all designs |
 | Explore alternatives | Always propose 2-3 approaches |
 | Incremental validation | Get approval before moving on |
-| Be flexible | Go back to clarify when needed |
+| Be flexible | Go back and clarify when needed |
+
+## Design for Isolation
+
+Break the system into smaller units that each have one clear purpose, communicate through well-defined interfaces, and can be understood and tested independently.
+
+For each unit, you should be able to answer:
+- **What does it do?** - Clear single responsibility
+- **How do you use it?** - Well-defined interface/API
+- **What does it depend on?** - Minimal dependencies
+
+**Isolation checklist:**
+- Can someone understand what a unit does without reading its internals?
+- Can you change the internals without breaking consumers?
+- Can each unit be tested independently?
+
+If any answer is no, the boundaries need work. Smaller, well-bounded units are easier to reason about and modify reliably.
+
+## Working in Existing Codebases
+
+**Before proposing changes:**
+- Explore the current structure and follow existing patterns
+- Check coding style, naming conventions, and architecture patterns
+- Identify files that will be affected by the proposed changes
+
+**When existing code has problems** that affect the work (e.g., a file grown too large, unclear boundaries, tangled responsibilities):
+- Include targeted improvements as part of the design
+- Fix the problem as part of the feature, not as separate refactoring
+
+**Don't propose unrelated refactoring.** Stay focused on what serves the current goal.
 
 ## Phase Definitions
 
@@ -132,7 +161,7 @@ Present design sections:
 
 All design sections approved:
 - Write design document
-- Self-review inline
+- Spec self-review inline
 - Ask user to review
 - Transition when approved
 
@@ -191,20 +220,103 @@ All design sections approved:
 - [Criterion 2]
 ```
 
-## Integration with Fuxi
+## Spec Self-Review
 
-After design is approved, user can:
-1. **Invoke Fuxi manually**: `/fuxi-start <plan-name>` with design context
-2. **Request auto-transition**: Brainstorming can invoke `fuxi-start` with design loaded
+After writing the spec document, perform this 4-step inline check:
 
-The design document becomes input context for the MDD draft.
+| Step | Check | Action |
+|------|-------|--------|
+| 1 | **Placeholder scan** | Any "TBD", "TODO", incomplete sections, or vague requirements? Fix them. |
+| 2 | **Internal consistency** | Do any sections contradict each other? Does architecture match feature descriptions? Fix. |
+| 3 | **Scope check** | Is this focused enough for a single implementation plan, or does it need decomposition? |
+| 4 | **Ambiguity check** | Could any requirement be interpreted two different ways? Make it explicit. |
 
-## Scope Detection
+Fix any issues inline. No need to re-review — just fix and move on.
 
-If project is too large, flag immediately:
-- Multiple independent subsystems (chat + file storage + billing)
-- Help decompose into sub-projects first
-- Each sub-project gets own brainstorm → design → implement cycle
+## Trigger Modes
+
+### Mode A: Standalone (No Fuxi Workflow Active)
+
+When **no Fuxi workflow is running**, brainstorming is the **recommended first step**:
+
+```
+User: I want to add a login feature
+Agent: 💡 Recommend brainstorming first: /brainstorm add login feature
+      This helps explore intent and propose the best approach.
+```
+
+### Mode B: Auto-Transition (Fuxi Workflow Active)
+
+When **Fuxi workflow is running** and design is approved:
+
+```
+✅ Design Approved!
+
+**Request:** {request}
+**Approach:** {chosen approach}
+**Design:** .sages/designs/{date}-{topic}.md
+
+→ Starting Fuxi workflow with design context...
+```
+
+### Transition Behavior
+
+| Condition | Action |
+|----------|--------|
+| No Fuxi workflow + design approved | Suggest `/brainstorm` or auto-transition if user consents |
+| Fuxi workflow active + design approved | Auto-invoke `fuxi_start` with design context |
+| User says "defer"/"save"/"later" | Save to `.sages/designs/`, don't start Fuxi |
+| User says "exit"/"cancel" | End without proceeding |
+
+### Fuxi Integration
+
+On auto-transition:
+1. System creates Fuxi context from approved design
+2. Invokes `fuxi_start` with design context
+3. Fuxi creates MDD draft using Seven Planes analysis
+4. **User is notified**: "Fuxi workflow started. Use `/fuxi-plan <score>` to proceed after review."
+
+## Scope Detection & Decomposition
+
+### Step 1: Assess Scope
+
+Before asking detailed questions, assess if the project needs decomposition:
+
+**Too large if:**
+- Multiple independent subsystems (e.g., "build a platform with chat, file storage, billing")
+- Domains differ significantly
+- User expects multiple delivery milestones
+
+### Step 2: Decomposition Process
+
+If project is too large, help decompose:
+
+1. **Identify independent pieces** — What are the subsystems?
+2. **Map relationships** — How do they depend on each other?
+3. **Determine order** — Which should be built first?
+
+### Step 3: Choose First Sub-Project
+
+Help user choose which sub-project to brainstorm first:
+- Start with the foundation (what others depend on)
+- Or start with the highest value/use
+- Each sub-project gets its own: brainstorm → design → implement cycle
+
+### Example Decomposition
+
+```
+User: /brainstorm build a platform with chat, file storage, and billing
+
+Agent: This project has 3 independent subsystems:
+       1. Chat system (foundational - other features may use)
+       2. File storage (depends on user auth)
+       3. Billing system (depends on user accounts)
+
+       Recommended order:
+       1. Chat system (foundation) → 2. File storage → 3. Billing
+
+       Which should we brainstorm first? Or create separate sessions for each?
+```
 
 ## Visual Companion (Optional)
 
@@ -212,51 +324,6 @@ When you anticipate visual questions (mockups, layouts, diagrams):
 > "Some of what we're working on might be easier to explain with visuals. I can show mockups, diagrams, or comparisons in a browser. Want to try?"
 
 **This MUST be its own message** - no other content with the offer.
-
-## Auto-Ask After Approval (NEW!)
-
-When a design is approved, the system automatically asks:
-
-```
-✅ Design Approved!
-
-**Request:** add login feature
-**Approach:** JWT
-**Design:** .sages/designs/2024-01-01-login.md
-**Date:** 2024-01-01
-
----
-
-**Next Steps:**
-
-1. **Proceed** → Start Fuxi workflow to create MDD draft
-2. **Defer** → Save design, start later with `/fuxi-start <plan>`
-3. **Exit** → Save nothing, end session
-
----
-
-Just say one of:
-- `proceed` / `yes` / `start` - Create MDD draft
-- `defer` / `save` / `later` - Save design for later
-- `exit` / `cancel` - End without proceeding
-
-Or describe what you'd like to do next.
-```
-
-### Transition Options
-
-| Response | Action |
-|----------|--------|
-| `proceed`, `yes`, `start`, `implement`, `go` | Start Fuxi workflow with MDD draft |
-| `defer`, `save`, `later`, `pause` | Save design to `.sages/designs/` |
-| `exit`, `cancel`, `quit` | End session without proceeding |
-
-### Fuxi Integration
-
-After user says "proceed":
-1. System creates Fuxi context from approved design
-2. Invokes `fuxi_start` with design context
-3. Fuxi creates MDD draft using Seven Planes analysis
 
 ## Anti-Patterns
 
@@ -312,18 +379,35 @@ Agent: Presenting design section: Storage Layer...
 [... continues with design flow ...]
 ```
 
-### Complex Project
+### Complex Project (Decomposition)
 
 ```
 User: /brainstorm build a platform with chat, file storage, and billing
 
 Agent: This project has 3 independent subsystems that should be decomposed:
-       1. Chat system
-       2. File storage
-       3. Billing system
+       1. Chat system (foundation - other features may depend on it)
+       2. File storage (depends on user auth)
+       3. Billing system (depends on user accounts)
 
-       Which should we brainstorm first? Or would you like me to create
-       separate brainstorm sessions for each?
+       Recommended build order: 1 → 2 → 3
+       Which should we brainstorm first? Or create separate sessions for each?
+```
+
+### Working in Existing Codebase
+
+```
+User: /brainstorm add user notification preferences
+Agent: Exploring project context...
+Agent: I see the existing notification system in src/notifications/.
+       Current: monolithic NotificationService handling email, SMS, push.
+       I notice the file is 800+ lines with mixed responsibilities.
+
+       Design will include:
+       - Split notification service by channel (email/sms/push)
+       - Add UserPreferences model for per-user settings
+       - Keep backward compatibility during transition
+
+       First question: should preferences be per-channel or unified?
 ```
 
 ---
