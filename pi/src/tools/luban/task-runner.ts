@@ -5,10 +5,12 @@
  * Purpose: Execute single task with TDD cycle, supporting both direct and subagent modes
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, dirname, basename } from "node:path";
 import { execSync } from "node:child_process";
+import { FileService } from "../../services/file-service.js";
 import type { TDDConfig, TaskResult, TDDPhaseResult } from "./types.js";
+
+// FileService instance for workspace operations
+const fileService = new FileService(process.cwd(), ".sages/workspace");
 
 /**
  * Run a single task with TDD cycle
@@ -70,6 +72,24 @@ export async function runTDDCycle(config: TDDConfig): Promise<TDDPhaseResult[]> 
 }
 
 /**
+ * Extract filename from path
+ */
+function getFileName(filePath: string): string {
+  const parts = filePath.split("/");
+  const fileName = parts[parts.length - 1];
+  return fileName.replace(/\.(test\.)?(ts|js)$/, "");
+}
+
+/**
+ * Get directory from path
+ */
+function getDir(filePath: string): string {
+  const parts = filePath.split("/");
+  parts.pop();
+  return parts.join("/") || ".";
+}
+
+/**
  * RED Phase: Write failing test
  */
 async function runRedPhase(config: TDDConfig): Promise<TDDPhaseResult> {
@@ -80,10 +100,13 @@ async function runRedPhase(config: TDDConfig): Promise<TDDPhaseResult> {
     
     // Create test file if it doesn't exist
     for (const testFile of config.testFiles) {
-      if (!existsSync(testFile)) {
+      if (!fileService.exists(testFile)) {
         const testContent = generateTestTemplate(testFile);
-        ensureDir(dirname(testFile));
-        writeFileSync(testFile, testContent);
+        const dir = getDir(testFile);
+        if (dir && dir !== ".") {
+          fileService.ensureWorkspace();
+        }
+        fileService.write(testFile, testContent);
       }
     }
     
@@ -115,10 +138,9 @@ async function runGreenPhase(config: TDDConfig): Promise<TDDPhaseResult> {
     
     // Create source file if it doesn't exist
     for (const sourceFile of config.sourceFiles) {
-      if (!existsSync(sourceFile)) {
+      if (!fileService.exists(sourceFile)) {
         const sourceContent = generateSourceTemplate(sourceFile);
-        ensureDir(dirname(sourceFile));
-        writeFileSync(sourceFile, sourceContent);
+        fileService.write(sourceFile, sourceContent);
       }
     }
     
@@ -191,7 +213,7 @@ function runTests(config: TDDConfig): { passed: number; failed: number; total: n
  * Generate test file template
  */
 function generateTestTemplate(testFile: string): string {
-  const fileName = basename(testFile, ".test.ts");
+  const fileName = getFileName(testFile);
   
   return `/**
  * Test file for ${fileName}
@@ -202,7 +224,6 @@ import { describe, it, expect } from "bun:test";
 
 describe("${fileName}", () => {
   it("should be implemented", () => {
-    // TODO: Write actual test
     expect(true).toBe(false); // RED: Must fail
   });
 });
@@ -213,7 +234,7 @@ describe("${fileName}", () => {
  * Generate source file template
  */
 function generateSourceTemplate(sourceFile: string): string {
-  const fileName = basename(sourceFile, ".ts");
+  const fileName = getFileName(sourceFile);
   
   return `/**
  * ${fileName}
@@ -221,17 +242,7 @@ function generateSourceTemplate(sourceFile: string): string {
  */
 
 export function ${fileName.toLowerCase().replace(/[^a-z]/g, "_")}() {
-  // TODO: Implement
   return {};
 }
 `;
-}
-
-/**
- * Ensure directory exists
- */
-function ensureDir(dir: string): void {
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
 }
