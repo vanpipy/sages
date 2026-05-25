@@ -8,7 +8,8 @@
   ],
   "scripts": {
     "pi:typecheck": "cd pi && bun run typecheck",
-    "pi:test": "cd pi && bun test ./src ./test --path-ignore-patterns dist/"
+    "pi:test": "cd pi && bun test ./src ./test --path-ignore-patterns dist/",
+    "prepare": "husky install"
   },
   "keywords": [
     "pi",
@@ -17,6 +18,9 @@
     "four-sages",
     "workflow"
   ],
+  "devDependencies": {
+    "husky": "^9.1.7"
+  },
   "license": "MIT",
   "author": "vanpipy@gmail.com"
 }
