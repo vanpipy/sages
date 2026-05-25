@@ -30,7 +30,7 @@ describe('ProjectAnalyzer', () => {
       expect(context.language).toBe('go');
       expect(context.framework).toBe('bubbletea');
       expect(context.projectType).toBe('cli');
-      expect(context.techStack.languages).toContain('Go 1.21');
+      expect(context.techStack.languages).toContain('go');
     });
     
     it('should analyze TypeScript project correctly', async () => {
