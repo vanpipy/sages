@@ -145,16 +145,16 @@ sages/
 
 Each design draft follows the MDD Seven Planes structure:
 
-| Trigram | Section | Purpose |
-|---------|---------|---------|
-|  Qian | Core Intent | Why we're building this |
-|  Kun | Data Models | Entities and relationships |
-|  Zhen | Triggers | Events and conditions |
-|  Xun | Data Flow | Transformations |
-|  Kan | Error Handling | Fallback strategies |
-|  Li | Observability | Metrics and logging |
-|  Gen | Boundaries | Constraints and limits |
-|  Dui | Success Path | Happy path scenarios |
+| Section | Purpose |
+|---------|---------|
+| Core Intent | Why we're building this |
+| Data Models | Entities and relationships |
+| Triggers | Events and conditions |
+| Data Flow | Transformations |
+| Error Handling | Fallback strategies |
+| Observability | Metrics and logging |
+| Boundaries | Constraints and limits |
+| Success Path | Happy path scenarios |
 
 ## pi Package Architecture
 

@@ -106,15 +106,15 @@ Phase progression: `idle → design → review → plan → execute → audit �
 
 Each design draft follows the **Multi-Dimensional Design (MDD)** framework with Seven Planes:
 
-| Trigram | Plane | Elements | Focus |
-|---------|-------|----------|-------|
-|  Qian | Business | Process × Rules | Business value delivery |
-|  Kun | Data | Logic × State | Data processing |
-|  Zhen | Control | Strategy × Distribution | Decision execution |
-|  Xun | Foundation | Resource × Abstraction | Infrastructure |
-|  Kan | Observation | Data × Analysis | Monitoring |
-|  Li | Security | Identity × Permissions | Access control |
-|  Gen | Evolution | Time × Change | Versioning & migration |
+| Plane | Elements | Focus |
+|---------|----------|-------|
+| Business | Process × Rules | Business value delivery |
+| Data | Logic × State | Data processing |
+| Control | Strategy × Distribution | Decision execution |
+| Foundation | Resource × Abstraction | Infrastructure |
+| Observation | Data × Analysis | Monitoring |
+| Security | Identity × Permissions | Access control |
+| Evolution | Time × Change | Versioning & migration |
 
 ## TDD Implementation
 
