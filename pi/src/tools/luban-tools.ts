@@ -285,7 +285,7 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
           maxRetry: 1,
           autoCommit: shouldCommit,
           subagentConfig: {
-            model: "sonnet",
+            // Note: model is intentionally not set - SubagentExecutor will use user's default
             skills: ["luban"],
             maxContext: 4000,
             timeout: 300,
