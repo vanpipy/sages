@@ -6,6 +6,10 @@
   "workspaces": [
     "pi"
   ],
+  "scripts": {
+    "pi:typecheck": "cd pi && bun run typecheck",
+    "pi:test": "cd pi && bun test ./src ./test --path-ignore-patterns dist/"
+  },
   "keywords": [
     "pi",
     "agents",
