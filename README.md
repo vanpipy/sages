@@ -221,12 +221,14 @@ export type { Phase, OrchestratorConfig } from "./orchestrator/index.js";
 # Install dependencies
 bun install
 
-# Build pi package
-cd pi && bun run build
+# Type-check (run before committing)
+cd pi && bun run typecheck
 
 # Run tests
-bun test
+cd pi && bun test ./src ./test
 ```
+
+> **⚠️ Reminder**: Before committing, always run `bun run typecheck` to verify no TypeScript errors, and `bun test ./src ./test` to ensure all tests pass.
 
 ## License
 

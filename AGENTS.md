@@ -171,3 +171,15 @@ export type { Phase, OrchestratorConfig } from "./orchestrator/index.js";
 - Fail-fast with 3 retries
 - Retry delay: 1000ms
 - Max consecutive failures threshold: 5
+
+## Development Checklist
+
+**Before committing any changes:**
+
+```bash
+cd ~/Project/sages/pi
+bun run typecheck    # Verify no TypeScript errors
+bun test ./src ./test # Ensure all tests pass (425+ expected)
+```
+
+> **⚠️ Important**: Both checks must pass before committing. Run from the `pi/` subdirectory.
