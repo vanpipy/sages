@@ -7,9 +7,7 @@
     "pi"
   ],
   "scripts": {
-    "build": "cd pi && bun run build",
-    "test": "cd pi && bun run test",
-    "install": "cd pi && bun install"
+    "test": "cd pi && bun run test"
   },
   "keywords": [
     "pi",
