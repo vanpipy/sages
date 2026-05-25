@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { TaskExecutor } from "../../src/executor/task-executor.js";
+import { TaskExecutor, type Task } from "../../src/executor/task-executor.js";
+
+// Cast to any to access private method for testing
+// TypeScript's private is compile-time only
 
 describe("TaskExecutor - Topological Sort", () => {
   describe("getSortedTasks", () => {
@@ -11,9 +14,9 @@ describe("TaskExecutor - Topological Sort", () => {
       ];
       
       const executor = new TaskExecutor(tasks, 3, "/tmp");
-      const sorted = executor.getSortedTasks();
+      const sorted: Task[] = (executor as any).getSortedTasks();
       
-      expect(sorted.map(t => t.id)).toEqual(["T1", "T2", "T3"]);
+      expect(sorted.map((t: Task) => t.id)).toEqual(["T1", "T2", "T3"]);
     });
 
     it("should run high priority tasks before medium priority", () => {
@@ -24,7 +27,7 @@ describe("TaskExecutor - Topological Sort", () => {
       ];
       
       const executor = new TaskExecutor(tasks, 3, "/tmp");
-      const sorted = executor.getSortedTasks();
+      const sorted = (executor as any).getSortedTasks();
       
       expect(sorted[0].id).toBe("T2"); // high
       expect(sorted[1].id).toBe("T1"); // medium
@@ -40,11 +43,11 @@ describe("TaskExecutor - Topological Sort", () => {
       ];
       
       const executor = new TaskExecutor(tasks, 3, "/tmp");
-      const sorted = executor.getSortedTasks();
+      const sorted = (executor as any).getSortedTasks();
       
-      const t3Index = sorted.findIndex(t => t.id === "T3");
-      const t1Index = sorted.findIndex(t => t.id === "T1");
-      const t2Index = sorted.findIndex(t => t.id === "T2");
+      const t3Index = sorted.findIndex((t: Task) => t.id === "T3");
+      const t1Index = sorted.findIndex((t: Task) => t.id === "T1");
+      const t2Index = sorted.findIndex((t: Task) => t.id === "T2");
       
       expect(t1Index).toBeLessThan(t3Index);
       expect(t2Index).toBeLessThan(t3Index);
@@ -60,12 +63,12 @@ describe("TaskExecutor - Topological Sort", () => {
       ];
       
       const executor = new TaskExecutor(tasks, 3, "/tmp");
-      const sorted = executor.getSortedTasks();
+      const sorted = (executor as any).getSortedTasks();
       
       // All tasks should be in result (cycles are appended at end)
       // They will likely fail at runtime since dependencies form a cycle
       expect(sorted.length).toBe(3);
-      expect(sorted.map(t => t.id).sort()).toEqual(["T1", "T2", "T3"]);
+      expect(sorted.map((t: Task) => t.id).sort()).toEqual(["T1", "T2", "T3"]);
     });
 
     it("should include all tasks even with complex cycle", () => {
@@ -77,7 +80,7 @@ describe("TaskExecutor - Topological Sort", () => {
       ];
       
       const executor = new TaskExecutor(tasks, 3, "/tmp");
-      const sorted = executor.getSortedTasks();
+      const sorted = (executor as any).getSortedTasks();
       
       // T1, T2, T3 all in cycle - all appended at end
       expect(sorted.length).toBe(3);
@@ -91,10 +94,10 @@ describe("TaskExecutor - Topological Sort", () => {
       ];
       
       const executor = new TaskExecutor(tasks, 3, "/tmp");
-      const sorted = executor.getSortedTasks();
+      const sorted = (executor as any).getSortedTasks();
       
       // T1 and T2 are high priority, should come before T3
-      const highPriorityIds = sorted.filter(t => t.priority === "high").map(t => t.id);
+      const highPriorityIds = sorted.filter((t: Task) => t.priority === "high").map((t: Task) => t.id);
       expect(highPriorityIds).toContain("T1");
       expect(highPriorityIds).toContain("T2");
       expect(sorted[2].id).toBe("T3"); // T3 is medium, comes last
