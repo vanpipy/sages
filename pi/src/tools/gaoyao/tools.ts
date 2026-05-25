@@ -8,7 +8,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectAnalyzer } from "../../utils/analyzer/index.js";
+import { ProjectAnalyzer } from "../../utils/analyzer/index";
 
 import {
   AuditSessionManager,
@@ -21,14 +21,14 @@ import {
   calculateScoresFromFindings,
   calculateVerdict,
   getVerdictAction,
-} from "./session.js";
+} from "./session";
 
 import {
   enumerateSourceFiles,
   generateEnumerationGuidance,
   generatePhaseGuidance,
   generateFinalAuditReport,
-} from "./phases.js";
+} from "./phases";
 
 const WORKSPACE_DIR = ".sages/workspace";
 
