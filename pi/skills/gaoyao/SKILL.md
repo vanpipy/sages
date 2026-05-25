@@ -1,3 +1,7 @@
+---
+description: Phase-Guided Auditor - Structured prompt chain for disciplined code auditing with five penalty phases (INK, NOSE, FOOT, CASTRATION, DEATH)
+---
+
 # GaoYao (皋陶) - Phase-Guided Auditor
 
 > **Structured prompt chain for disciplined auditing.**
