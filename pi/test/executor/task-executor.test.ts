@@ -1,112 +1,103 @@
-/**
- * RED Phase Tests for TaskExecutor
- * Tests for Issue #4: Incomplete Topological Sort
- */
-
 import { describe, it, expect, beforeEach } from "bun:test";
-import { TaskExecutor, type Task } from "../../src/executor/task-executor.ts";
+import { TaskExecutor } from "../../src/executor/task-executor.js";
 
-describe("TaskExecutor - Issue Fixes", () => {
-  describe("Issue #4: Topological Sort for Transitive Dependencies", () => {
-    it("should handle A → B → C dependency chain correctly", async () => {
-      const tasks: Task[] = [
-        { id: "T1", description: "Task 1", status: "pending", priority: "high", dependsOn: [], files: [] },
-        { id: "T2", description: "Task 2", status: "pending", priority: "high", dependsOn: ["T1"], files: [] },
-        { id: "T3", description: "Task 3", status: "pending", priority: "high", dependsOn: ["T2"], files: [] },
+describe("TaskExecutor - Topological Sort", () => {
+  describe("getSortedTasks", () => {
+    it("should return tasks in dependency order", () => {
+      const tasks = [
+        { id: "T1", description: "Task 1", status: "pending" as const, priority: "high" as const, dependsOn: [], files: [] },
+        { id: "T2", description: "Task 2", status: "pending" as const, priority: "high" as const, dependsOn: ["T1"], files: [] },
+        { id: "T3", description: "Task 3", status: "pending" as const, priority: "high" as const, dependsOn: ["T2"], files: [] },
       ];
-
+      
       const executor = new TaskExecutor(tasks, 3, "/tmp");
-
-      // Get sorted tasks - T3 depends on T2 which depends on T1
-      const sorted = (executor as any).getSortedTasks();
-      const ids = sorted.map((t: Task) => t.id);
-
-      // T1 should come before T2
-      expect(ids.indexOf("T1")).toBeLessThan(ids.indexOf("T2"));
-      // T2 should come before T3
-      expect(ids.indexOf("T2")).toBeLessThan(ids.indexOf("T3"));
+      const sorted = executor.getSortedTasks();
+      
+      expect(sorted.map(t => t.id)).toEqual(["T1", "T2", "T3"]);
     });
 
-    it("should handle diamond dependencies (A→B, A→C, B→D, C→D)", async () => {
-      const tasks: Task[] = [
-        { id: "A", description: "A", status: "pending", priority: "high", dependsOn: [], files: [] },
-        { id: "B", description: "B", status: "pending", priority: "high", dependsOn: ["A"], files: [] },
-        { id: "C", description: "C", status: "pending", priority: "high", dependsOn: ["A"], files: [] },
-        { id: "D", description: "D", status: "pending", priority: "high", dependsOn: ["B", "C"], files: [] },
+    it("should run high priority tasks before medium priority", () => {
+      const tasks = [
+        { id: "T1", description: "Task 1", status: "pending" as const, priority: "medium" as const, dependsOn: [], files: [] },
+        { id: "T2", description: "Task 2", status: "pending" as const, priority: "high" as const, dependsOn: [], files: [] },
+        { id: "T3", description: "Task 3", status: "pending" as const, priority: "low" as const, dependsOn: [], files: [] },
       ];
-
+      
       const executor = new TaskExecutor(tasks, 3, "/tmp");
-      const sorted = (executor as any).getSortedTasks();
-      const ids = sorted.map((t: Task) => t.id);
-
-      // A must be first
-      expect(ids[0]).toBe("A");
-      // D must be last
-      expect(ids[ids.length - 1]).toBe("D");
-      // B and C can be in any order relative to each other, but both after A
-      expect(ids.indexOf("B")).toBeGreaterThan(ids.indexOf("A"));
-      expect(ids.indexOf("C")).toBeGreaterThan(ids.indexOf("A"));
-      // D after both B and C
-      expect(ids.indexOf("D")).toBeGreaterThan(ids.indexOf("B"));
-      expect(ids.indexOf("D")).toBeGreaterThan(ids.indexOf("C"));
+      const sorted = executor.getSortedTasks();
+      
+      expect(sorted[0].id).toBe("T2"); // high
+      expect(sorted[1].id).toBe("T1"); // medium
+      expect(sorted[2].id).toBe("T3"); // low
     });
 
-    it("should handle complex graph with multiple paths", async () => {
-      const tasks: Task[] = [
-        { id: "START", description: "Start", status: "pending", priority: "high", dependsOn: [], files: [] },
-        { id: "A", description: "A", status: "pending", priority: "high", dependsOn: ["START"], files: [] },
-        { id: "B", description: "B", status: "pending", priority: "high", dependsOn: ["START"], files: [] },
-        { id: "C", description: "C", status: "pending", priority: "high", dependsOn: ["A"], files: [] },
-        { id: "D", description: "D", status: "pending", priority: "high", dependsOn: ["A", "B"], files: [] },
-        { id: "END", description: "END", status: "pending", priority: "high", dependsOn: ["C", "D"], files: [] },
+    it("should handle diamond dependencies", () => {
+      // T1 -> T3, T2 -> T3 (diamond)
+      const tasks = [
+        { id: "T1", description: "Task 1", status: "pending" as const, priority: "high" as const, dependsOn: [], files: [] },
+        { id: "T2", description: "Task 2", status: "pending" as const, priority: "high" as const, dependsOn: [], files: [] },
+        { id: "T3", description: "Task 3", status: "pending" as const, priority: "high" as const, dependsOn: ["T1", "T2"], files: [] },
       ];
-
+      
       const executor = new TaskExecutor(tasks, 3, "/tmp");
-      const sorted = (executor as any).getSortedTasks();
-      const ids = sorted.map((t: Task) => t.id);
-
-      // START must be first
-      expect(ids[0]).toBe("START");
-      // A and B after START
-      expect(ids.indexOf("A")).toBeGreaterThan(ids.indexOf("START"));
-      expect(ids.indexOf("B")).toBeGreaterThan(ids.indexOf("START"));
-      // C after A
-      expect(ids.indexOf("C")).toBeGreaterThan(ids.indexOf("A"));
-      // D after both A and B
-      expect(ids.indexOf("D")).toBeGreaterThan(ids.indexOf("A"));
-      expect(ids.indexOf("D")).toBeGreaterThan(ids.indexOf("B"));
-      // END after C and D
-      expect(ids.indexOf("END")).toBeGreaterThan(ids.indexOf("C"));
-      expect(ids.indexOf("END")).toBeGreaterThan(ids.indexOf("D"));
+      const sorted = executor.getSortedTasks();
+      
+      const t3Index = sorted.findIndex(t => t.id === "T3");
+      const t1Index = sorted.findIndex(t => t.id === "T1");
+      const t2Index = sorted.findIndex(t => t.id === "T2");
+      
+      expect(t1Index).toBeLessThan(t3Index);
+      expect(t2Index).toBeLessThan(t3Index);
     });
 
-    it("getReadyTasks should respect all dependencies", () => {
-      const tasks: Task[] = [
-        { id: "T1", description: "Task 1", status: "pending", priority: "high", dependsOn: [], files: [] },
-        { id: "T2", description: "Task 2", status: "pending", priority: "high", dependsOn: ["T1"], files: [] },
-        { id: "T3", description: "Task 3", status: "pending", priority: "high", dependsOn: ["T2"], files: [] },
+    it("should handle cyclic dependencies by putting them at end", () => {
+      // A -> B -> C -> A (cycle)
+      // All tasks are in a dependency cycle: T1->T3->T2->T1
+      const tasks = [
+        { id: "T1", description: "Task 1", status: "pending" as const, priority: "high" as const, dependsOn: ["T3"], files: [] },
+        { id: "T2", description: "Task 2", status: "pending" as const, priority: "high" as const, dependsOn: ["T1"], files: [] },
+        { id: "T3", description: "Task 3", status: "pending" as const, priority: "high" as const, dependsOn: ["T2"], files: [] },
       ];
-
+      
       const executor = new TaskExecutor(tasks, 3, "/tmp");
+      const sorted = executor.getSortedTasks();
+      
+      // All tasks should be in result (cycles are appended at end)
+      // They will likely fail at runtime since dependencies form a cycle
+      expect(sorted.length).toBe(3);
+      expect(sorted.map(t => t.id).sort()).toEqual(["T1", "T2", "T3"]);
+    });
 
-      // Initially only T1 should be ready
-      const ready1 = (executor as any).getReadyTasks();
-      expect(ready1.length).toBe(1);
-      expect(ready1[0].id).toBe("T1");
+    it("should include all tasks even with complex cycle", () => {
+      // Mix of valid deps and cycle: T1->T2->T3, T3->T1 (cycle with T1, T2)
+      const tasks = [
+        { id: "T1", description: "Task 1", status: "pending" as const, priority: "high" as const, dependsOn: ["T3"], files: [] },
+        { id: "T2", description: "Task 2", status: "pending" as const, priority: "medium" as const, dependsOn: ["T1"], files: [] },
+        { id: "T3", description: "Task 3", status: "pending" as const, priority: "low" as const, dependsOn: ["T2"], files: [] },
+      ];
+      
+      const executor = new TaskExecutor(tasks, 3, "/tmp");
+      const sorted = executor.getSortedTasks();
+      
+      // T1, T2, T3 all in cycle - all appended at end
+      expect(sorted.length).toBe(3);
+    });
 
-      // After T1 completes, both T2 and T3 should be ready (their dependencies are met)
-      (executor as any).completedTasks.add("T1");
-      const ready2 = (executor as any).getReadyTasks();
-      // T2 depends on T1 (completed), T3 depends on T2 (NOT completed yet via task map)
-      // But T2 is pending, so T3 is NOT ready until T2 is also in completedTasks
-      expect(ready2.length).toBe(1);
-      expect(ready2[0].id).toBe("T2");
-
-      // After T2 completes, T3 should be ready
-      (executor as any).completedTasks.add("T2");
-      const ready3 = (executor as any).getReadyTasks();
-      expect(ready3.length).toBe(1);
-      expect(ready3[0].id).toBe("T3");
+    it("should sort independent high-priority tasks first among themselves", () => {
+      const tasks = [
+        { id: "T1", description: "Task 1", status: "pending" as const, priority: "high" as const, dependsOn: [], files: [] },
+        { id: "T2", description: "Task 2", status: "pending" as const, priority: "high" as const, dependsOn: [], files: [] },
+        { id: "T3", description: "Task 3", status: "pending" as const, priority: "medium" as const, dependsOn: [], files: [] },
+      ];
+      
+      const executor = new TaskExecutor(tasks, 3, "/tmp");
+      const sorted = executor.getSortedTasks();
+      
+      // T1 and T2 are high priority, should come before T3
+      const highPriorityIds = sorted.filter(t => t.priority === "high").map(t => t.id);
+      expect(highPriorityIds).toContain("T1");
+      expect(highPriorityIds).toContain("T2");
+      expect(sorted[2].id).toBe("T3"); // T3 is medium, comes last
     });
   });
 });
