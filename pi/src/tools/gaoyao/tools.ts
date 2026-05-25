@@ -8,11 +8,10 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectAnalyzer } from "../utils/analyzer/index.js";
+import { ProjectAnalyzer } from "../../utils/analyzer/index.js";
 
 import {
   AuditSessionManager,
-  AuditPhase,
   AuditFinding,
   AuditSession,
   PHASE_ORDER,
@@ -30,8 +29,6 @@ import {
   generatePhaseGuidance,
   generateFinalAuditReport,
 } from "./phases.js";
-
-import type { Verdict } from "./session.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
 
