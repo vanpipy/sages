@@ -6,11 +6,103 @@
  */
 
 import { execSync } from "node:child_process";
-import { FileService } from "../../services/file-service.js";
+import { FileService } from "@/services/file-service.js";
 import type { TDDConfig, TaskResult, TDDPhaseResult } from "./types.js";
 
 // FileService instance for workspace operations
 const fileService = new FileService(process.cwd(), ".sages/workspace");
+
+/**
+ * TDD Fallback Guide - Help the agent when exceptions occur
+ */
+export const TDD_GUIDE = {
+  /**
+   * Get guidance message for a specific phase failure
+   */
+  getPhaseGuidance(phase: string, error?: string): string {
+    const guides: Record<string, string> = {
+      RED: `
+📋 RED Phase Guidance:
+1. Write a failing test FIRST before any implementation
+2. The test should describe the expected behavior
+3. Run the test - it MUST fail
+4. Only then write minimal implementation
+
+Example:
+  // RED: Write this first
+  test("should add numbers", () => {
+    expect(add(2, 3)).toBe(5); // Fails until implemented
+  });
+`,
+      GREEN: `
+📋 GREEN Phase Guidance:
+1. Write MINIMAL implementation to pass the test
+2. Don't optimize yet - just make it work
+3. The goal is to get to REFACTOR as quickly as possible
+
+Example:
+  // GREEN: Minimal code
+  function add(a, b) {
+    return a + b;
+  }
+`,
+      REFACTOR: `
+📋 REFACTOR Phase Guidance:
+1. Improve code structure WITHOUT changing behavior
+2. Keep tests passing throughout
+3. Apply SOLID, DRY, YAGNI principles
+4. Remove dead code and simplify
+
+Focus areas:
+  - Extract reusable functions
+  - Rename variables for clarity
+  - Simplify complex conditionals
+  - Reduce duplication
+`,
+    };
+    return guides[phase] || this.getGeneralGuidance(error);
+  },
+
+  /**
+   * Get general guidance for unexpected errors
+   */
+  getGeneralGuidance(error?: string): string {
+    return `
+📋 TDD Fallback Guidance:
+
+An unexpected error occurred: ${error || "Unknown error"}
+
+Follow these steps:
+
+1. 🔴 RED PHASE - Write a failing test
+   - Identify what should happen
+   - Write test that describes expected behavior
+   - Verify it fails
+
+2. 🟢 GREEN PHASE - Make it work
+   - Write minimal code to pass the test
+   - Don't optimize yet
+
+3. 🔵 REFACTOR - Make it better
+   - Improve code structure
+   - Keep tests passing
+
+💡 Remember:
+- TDD is iterative: RED → GREEN → REFACTOR → RED → ...
+- If stuck, return to RED and write another test
+- Small steps: one test, one implementation at a time
+`;
+  },
+
+  /**
+   * Format error with guidance
+   */
+  formatError(phase: string, error: string): string {
+    return `${error}
+
+${this.getPhaseGuidance(phase, error)}`;
+  },
+};
 
 /**
  * Run a single task with TDD cycle
@@ -35,6 +127,7 @@ export async function runTask(config: TDDConfig): Promise<TaskResult> {
       phases,
     };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return {
       taskId: config.taskId,
       success: false,
@@ -42,7 +135,7 @@ export async function runTask(config: TDDConfig): Promise<TaskResult> {
       phases: [{
         name: "RED",
         status: "failed",
-        error: error instanceof Error ? error.message : String(error),
+        error: TDD_GUIDE.formatError("RED", errorMessage),
       }],
     };
   }
@@ -114,15 +207,16 @@ async function runRedPhase(config: TDDConfig): Promise<TDDPhaseResult> {
     const result = runTests(config);
     if (result.failed === 0 && result.passed > 0) {
       phase.status = "failed";
-      phase.error = "Test passed without implementation! Write test that fails first.";
+      phase.error = TDD_GUIDE.formatError("RED", "Test passed without implementation! Write test that fails first.");
       return phase;
     }
     
     phase.status = "completed";
     return phase;
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     phase.status = "failed";
-    phase.error = String(error);
+    phase.error = TDD_GUIDE.formatError("RED", errorMessage);
     return phase;
   }
 }
@@ -148,15 +242,16 @@ async function runGreenPhase(config: TDDConfig): Promise<TDDPhaseResult> {
     const result = runTests(config);
     if (result.failed > 0) {
       phase.status = "failed";
-      phase.error = `${result.failed} tests still failing`;
+      phase.error = TDD_GUIDE.formatError("GREEN", `${result.failed} tests still failing`);
       return phase;
     }
     
     phase.status = "completed";
     return phase;
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     phase.status = "failed";
-    phase.error = String(error);
+    phase.error = TDD_GUIDE.formatError("GREEN", errorMessage);
     return phase;
   }
 }
@@ -174,7 +269,7 @@ async function runRefactorPhase(config: TDDConfig): Promise<TDDPhaseResult> {
     const result = runTests(config);
     if (result.failed > 0) {
       phase.status = "failed";
-      phase.error = "Refactoring broke tests";
+      phase.error = TDD_GUIDE.formatError("REFACTOR", "Refactoring broke tests");
       return phase;
     }
     
@@ -182,8 +277,9 @@ async function runRefactorPhase(config: TDDConfig): Promise<TDDPhaseResult> {
     return phase;
   } catch (error) {
     // REFACTOR failures are warnings, not blockers
+    const errorMessage = error instanceof Error ? error.message : String(error);
     phase.status = "failed";
-    phase.error = String(error);
+    phase.error = TDD_GUIDE.formatError("REFACTOR", errorMessage);
     return phase;
   }
 }
