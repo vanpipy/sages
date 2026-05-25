@@ -345,49 +345,184 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ===========================================================================
-  // GAOYAO Commands ( Audit Phase)
+  // GAOYAO Commands ( Audit Phase - Phase-Guided)
   // ===========================================================================
 
   /**
-   * gaoyao-review - Quality audit, generate report
-   * Usage: /gaoyao-review [full|quick]
+   * gaoyao-init - Initialize phase-guided audit
+   * Usage: /gaoyao-init [full|quick]
    */
-  pi.registerCommand("gaoyao-review", {
-    description: "Quality audit using Xie Zhi methodology - generates report with verdict (PASS/NEEDS_CHANGES/REJECTED)",
+  pi.registerCommand("gaoyao-init", {
+    description: "Initialize phase-guided audit session. Enumerates files and returns Phase 1 guidance.",
     handler: async (args, ctx) => {
-      const reviewMode = args || "full";
+      const reviewMode = (args || "full").trim();
 
-      const result = await callToolDirect("gaoyao_review", {
-        plan_name: undefined,
-        review_mode: reviewMode,
+      const result = await callToolDirect("gaoyao_init", {
+        review_mode: reviewMode === "quick" ? "quick" : "full",
       }, ctx.cwd);
 
       if (result?.isError) {
-        ctx.ui.notify("Audit failed.", "error");
+        ctx.ui.notify("Failed to initialize audit.", "error");
       } else {
-        ctx.ui.notify("✅ Audit complete: .sages/workspace/audit.md", "info");
-        ctx.ui.setStatus("sages", " Audited");
+        ctx.ui.notify("✅ Audit session started. Phase 1: ENUMERATE", "info");
+        ctx.ui.setStatus("sages", " 🔍 Auditing");
       }
     },
   });
 
   /**
-   * gaoyao-check-security - Security scan
-   * Usage: /gaoyao-check-security [files...]
+   * gaoyao-status - Check audit status
+   * Usage: /gaoyao-status
    */
-  pi.registerCommand("gaoyao-check-security", {
-    description: "Security scan: SQL injection, XSS, auth, data exposure",
+  pi.registerCommand("gaoyao-status", {
+    description: "Check current audit session status",
     handler: async (args, ctx) => {
-      const files = (args || "src/").split(/\s+/);
+      const result = await callToolDirect("gaoyao_status", {}, ctx.cwd);
 
-      const result = await callToolDirect("gaoyao_check_security", {
-        files: files,
+      if (result?.isError) {
+        ctx.ui.notify("Failed to get status.", "error");
+      } else {
+        ctx.ui.notify("Status retrieved.", "info");
+      }
+    },
+  });
+
+  /**
+   * gaoyao-read - Record file read
+   * Usage: /gaoyao-read <path> [lines]
+   */
+  pi.registerCommand("gaoyao-read", {
+    description: "Record that a file was read. Required before recording findings.",
+    handler: async (args, ctx) => {
+      const parts = (args || "").trim().split(/\s+/);
+      const path = parts[0];
+      const lines = parts[1] ? parseInt(parts[1], 10) : 0;
+
+      if (!path) {
+        ctx.ui.notify("Usage: /gaoyao-read <path> [lines]", "warning");
+        return;
+      }
+
+      const result = await callToolDirect("gaoyao_record_file_read", {
+        path,
+        lines,
       }, ctx.cwd);
 
       if (result?.isError) {
-        ctx.ui.notify("Security scan failed.", "error");
+        ctx.ui.notify("Failed to record file read.", "error");
       } else {
-        ctx.ui.notify("🔒 Security scan complete.", "info");
+        ctx.ui.notify(`✅ Recorded: ${path}`, "info");
+      }
+    },
+  });
+
+  /**
+   * gaoyao-finding - Record a finding
+   * Usage: /gaoyao-finding <category> <severity> <issue>
+   * Categories: ink, nose, foot, castration, death
+   * Severities: critical, major, minor
+   */
+  pi.registerCommand("gaoyao-finding", {
+    description: "Record an audit finding. Phase-guarded - category must match current phase.",
+    handler: async (args, ctx) => {
+      // Parse: "ink major function too long" or JSON
+      let category: string, severity: string, issue: string;
+      
+      const parts = (args || "").trim().split(/\s+/);
+      if (parts.length >= 3) {
+        category = parts[0];
+        severity = parts[1];
+        issue = parts.slice(2).join(" ");
+      } else {
+        ctx.ui.notify("Usage: /gaoyao-finding <category> <severity> <issue>", "warning");
+        ctx.ui.notify("Categories: ink, nose, foot, castration, death", "info");
+        ctx.ui.notify("Severities: critical, major, minor", "info");
+        return;
+      }
+
+      const result = await callToolDirect("gaoyao_record_finding", {
+        category,
+        severity,
+        file: undefined,
+        line: undefined,
+        issue,
+        evidence: undefined,
+        recommendation: "Fix recommended",
+      }, ctx.cwd);
+
+      if (result?.isError) {
+        ctx.ui.notify("Failed to record finding.", "error");
+      } else {
+        ctx.ui.notify(`✅ Finding recorded: [${category}] ${severity}`, "info");
+      }
+    },
+  });
+
+  /**
+   * gaoyao-phase - Execute/complete current phase
+   * Usage: /gaoyao-phase <phase-name>
+   */
+  pi.registerCommand("gaoyao-phase", {
+    description: "Complete current phase and advance. Validates file reads and findings.",
+    handler: async (args, ctx) => {
+      const phase = (args || "").trim().toUpperCase();
+      const validPhases = ["ENUMERATE", "INK", "NOSE", "FOOT", "CASTRATION", "DEATH"];
+
+      if (!validPhases.includes(phase)) {
+        ctx.ui.notify(`Invalid phase. Valid: ${validPhases.join(", ")}`, "warning");
+        return;
+      }
+
+      const result = await callToolDirect("gaoyao_execute_phase", {
+        phase,
+      }, ctx.cwd);
+
+      if (result?.isError) {
+        ctx.ui.notify("Cannot advance phase. Check requirements.", "error");
+      } else {
+        ctx.ui.notify(`✅ Phase ${phase} complete.`, "info");
+      }
+    },
+  });
+
+  /**
+   * gaoyao-finalize - Finalize audit and get verdict
+   * Usage: /gaoyao-finalize [notes]
+   */
+  pi.registerCommand("gaoyao-finalize", {
+    description: "Finalize audit: calculate scores, generate verdict, write audit.md",
+    handler: async (args, ctx) => {
+      const notes = args?.trim();
+
+      const result = await callToolDirect("gaoyao_finalize", {
+        notes,
+      }, ctx.cwd);
+
+      if (result?.isError) {
+        ctx.ui.notify("Cannot finalize. Complete all phases first.", "error");
+      } else {
+        ctx.ui.notify("✅ Audit finalized. See .sages/workspace/audit.md", "info");
+        ctx.ui.setStatus("sages", " ✅ Audited");
+      }
+    },
+  });
+
+  /**
+   * gaoyao-reset - Reset audit session
+   * Usage: /gaoyao-reset
+   */
+  pi.registerCommand("gaoyao-reset", {
+    description: "Reset/clear current audit session. Use with caution!",
+    handler: async (args, ctx) => {
+      const result = await callToolDirect("gaoyao_reset", {
+        confirm: true,
+      }, ctx.cwd);
+
+      if (result?.isError) {
+        ctx.ui.notify("Failed to reset.", "error");
+      } else {
+        ctx.ui.notify("✅ Audit session reset.", "info");
+        ctx.ui.setStatus("sages", " Ready");
       }
     },
   });

@@ -1,287 +1,230 @@
----
-description: Quality audit and security scan with deep agent-assisted analysis
----
+# GaoYao (皋陶) - Phase-Guided Auditor
 
-# GaoYao (皋陶) - Auditor
+> **Structured prompt chain for disciplined auditing.**
 
-> **No plan/execution required!** GaoYao works standalone.
-
-## Philosophy
-
-GaoYao (皋陶) is the Supreme Judge who examines with Xie Zhi's divine insight. Unlike mechanical static analysis, GaoYao **leverages the agent's intelligence** to perform deep, contextual analysis that understands:
-
-- **Context**: Project structure and patterns
-- **Code**: What was actually written
-- **Findings**: Real issues with evidence
-
-## Two Usage Modes
-
-### 1. Standalone (No Plan Required)
-
-Use GaoYao directly on any code:
-
-| Scenario | Tool | When |
-|---------|------|------|
-| Quick review | `gaoyao_quick_check` | Before commit, small changes |
-| File audit | `gaoyao_check_security` | Security scan specific files |
-| PR review | `gaoyao_review` | Review changes in isolation |
-| Full audit | `gaoyao_review` | Comprehensive code review |
-
-### 2. Workflow Integration (With Fuxi)
-
-After Fuxi workflow execution:
+## Phase Flow
 
 ```
-Fuxi → QiaoChui → LuBan → GaoYao → fuxi-end
-                                    ↓
-                            [Verdict handling]
+gaoyao_init
+    ↓
+PHASE_1: ENUMERATE (read all files)
+    ↓
+PHASE_2: INK (code style)
+    ↓
+PHASE_3: NOSE (naming/doc)
+    ↓
+PHASE_4: FOOT (architecture)
+    ↓
+PHASE_5: CASTRATION (security)
+    ↓
+PHASE_6: DEATH (critical defects)
+    ↓
+gaoyao_finalize → Verdict
 ```
 
-## Mode Indicator
+## Tools (Phase-Guided)
 
-```
-**GaoYao Audit Mode**
-- Deep analysis: agent reads, reasons, and finds real issues
-- Review scope: any source files (standalone) or plan+execution (workflow)
-- Output: audit.md with evidence-backed findings
+| Tool | Phase | Purpose |
+|------|-------|---------|
+| `gaoyao_init` | - | Start audit, enumerate files |
+| `gaoyao_record_file_read` | All | Record file read (required before finding) |
+| `gaoyao_execute_phase` | All | Complete phase, advance to next |
+| `gaoyao_record_finding` | PHASE_GUARDED | Record finding (validates phase) |
+| `gaoyao_finalize` | FINAL | Generate verdict |
+| `gaoyao_status` | - | Check progress |
+| `gaoyao_reset` | - | Reset session |
+
+## Phase Completion Rules
+
+Each phase requires:
+1. **Minimum file reads** (varies by phase)
+2. **At least one finding** (except ENUMERATE)
+3. **Phase-category match** (finding category = current phase)
+
+## Usage
+
+### Start Audit
+
+```bash
+/gaoyao_init --review_mode full
 ```
 
-## Audit Framework (五刑审核)
+Returns:
+- Session ID
+- Files enumerated
+- Phase 1 guidance
+
+### Read Files
+
+For each file to analyze:
+```bash
+/read path/to/file.ts
+/gaoyao_record_file_read --path path/to/file.ts --lines 150
+```
+
+### Record Findings
+
+```bash
+/gaoyao_record_finding \
+  --category ink \
+  --severity major \
+  --file src/service/user.ts \
+  --line 42 \
+  --issue "Function exceeds 50 lines" \
+  --evidence "async function processUserData(id: string, filters: Filter[], options: Options) {" \
+  --recommendation "Split into smaller functions: validateInput(), fetchData(), formatOutput()"
+```
+
+### Advance Phase
+
+```bash
+/gaoyao_execute_phase --phase INK
+```
+
+Validates:
+- Required files read
+- Findings recorded
+- Then advances
+
+### Get Status
+
+```bash
+/gaoyao_status
+```
+
+### Finalize
+
+```bash
+/gaoyao_finalize --notes "Overall assessment..."
+```
+
+## Session State
+
+Session persists to: `.sages/workspace/.gaoyao-session.json`
+
+Includes:
+- Current phase
+- Files enumerated/read
+- All findings
+- Completed phases
+
+## Five Audits (五刑审核)
 
 ### 墨刑 (Ink) - Code Style
-- Read actual source files, not just patterns
-- Check naming consistency against project conventions
-- Look for code smells (duplication, complexity, dead code)
+- Phase: INK
+- Checks: naming, complexity, code smells
+- Min files: 3
 
-### 劓刑 (Nose) - Naming & Documentation  
-- Verify names match domain language
-- Check docstrings and comments on public APIs
-- Cross-reference with draft's terminology
+### 劓刑 (Nose) - Naming & Documentation
+- Phase: NOSE
+- Checks: docstrings, domain terminology
+- Min files: 2
 
 ### 剕刑 (Foot) - Architecture
-- Map implementation to design (plan.md → code structure)
-- Check layer boundaries (api/service/repository)
-- Verify dependencies follow architecture decisions
+- Phase: FOOT
+- Checks: layer boundaries, dependencies
+- Min files: 3
 
 ### 宫刑 (Castration) - Security
-- Agent reads code for vulnerability patterns (not just regex)
-- Check: injection risks, auth/authorization, data exposure
-- Verify sensitive data handling matches requirements
+- Phase: CASTRATION
+- Checks: injection, auth, data exposure
+- Min files: 3
 
 ### 大辟 (Death) - Critical Defects
-- Logic errors in core business logic
-- Missing error handling in critical paths
-- Integration mismatches with external systems
+- Phase: DEATH
+- Checks: business logic, error handling
+- Min files: 2
 
-## Audit Process
+## Verdict
 
-### Phase 1: Quick Scan (Fast)
-```
-1. Read execution.yaml → understand planned scope
-2. Read plan.md → understand design decisions
-3. Quick file enumeration → map structure
-```
+| Verdict | Score | Action |
+|---------|-------|--------|
+| PASS | ≥70 | Archive workflow |
+| NEEDS_CHANGES | 50-69 | Return to LuBan |
+| REJECTED | <50 | Return to Fuxi |
 
-### Phase 2: Deep Analysis (Thorough)
-```
-For each audit category:
-1. Load relevant source files
-2. Agent reads and understands code semantically
-3. Agent finds real issues (not just pattern matches)
-4. Agent documents evidence (code snippets, line references)
-```
-
-### Phase 3: Cross-Reference
-```
-1. Implementation vs Design: Does code match plan?
-2. Tests vs Implementation: Are critical paths tested?
-3. Dependencies vs Requirements: Any supply chain risks?
-```
-
-## Tools
-
-| Tool | Purpose | Standalone |
-|------|---------|------------|
-| `gaoyao_review` | Full 5-audit with agent reasoning | ✅ |
-| `gaoyao_quick_check` | Fast triage for specific files | ✅ |
-| `gaoyao_check_security` | Security scan (OWASP focus) | ✅ |
-| `gaoyao_record_finding` | Record findings during audit | ✅ |
-| `gaoyao_finalize` | Generate final verdict | ✅ |
-
-## Review Mode Rules
-
-- ✅ **Modify only**: `audit.md`
-- ✅ **Read**: Any file needed for analysis
-- ❌ **No modifications** to implementation files
-- ❌ **No skips** - every category must be addressed
-
-## Verdict Logic
-
-| Verdict | Condition | Action |
-|---------|-----------|--------|
-| PASS | All 5 audits pass OR only minor issues | Archive workflow |
-| NEEDS_CHANGES | Critical issues found | Return to LuBan |
-| REJECTED | Death penalty (critical defect) | Return to Fuxi |
-
-## Score Calculation
+## Modular Structure
 
 ```
-Base Score = 100
-- Ink (style) failure: -15
-- Nose (naming/doc) failure: -10
-- Foot (architecture) failure: -20
-- Castration (security) failure: -30
-- Death (critical defect): -100 (automatic REJECTED)
-
-Final Score ≥ 70: PASS
-Final Score 50-69: NEEDS_CHANGES
-Final Score < 50: REJECTED
+src/tools/gaoyao/
+├── index.ts      # Exports
+├── session.ts    # SessionManager, types, score calculation
+├── phases.ts     # File enumeration, guidance generation
+└── tools.ts      # Tool registrations
 ```
 
-## Output Format
+### session.ts
+- `AuditSessionManager` - Session state management
+- Types: `AuditPhase`, `AuditFinding`, `AuditSession`
+- Functions: `calculateScoresFromFindings()`, `calculateVerdict()`
 
-```markdown
-# Audit Report
+### phases.ts
+- `enumerateSourceFiles()` - File discovery
+- `generateEnumerationGuidance()` - ENUMERATE phase guidance
+- `generatePhaseGuidance()` - Per-phase guidance
+- `generateFinalAuditReport()` - Report generation
 
-## Verdict: [PASS | NEEDS_CHANGES | REJECTED]
-## Score: [0-100]
+### tools.ts
+- Tool registrations with phase guards
+- Legacy tool deprecation handlers
 
-## Five Audits Summary
-
-| Audit | Category | Status | Issues Found |
-|-------|----------|--------|--------------|
-| 墨刑 | Code Style | ✅/❌ | N issues |
-| 劓刑 | Naming/Doc | ✅/❌ | N issues |
-| 剕刑 | Architecture | ✅/❌ | N issues |
-| 宫刑 | Security | ✅/❌ | N issues |
-| 大辟 | Critical | ✅/❌ | N issues |
-
-## Detailed Findings
-
-### 墨刑 (Ink) - Code Style
-**Status**: ✅ PASS / ❌ FAILED
-
-*Evidence*:
-- [file:line] Issue description
-
-**Recommendations**:
-1. Recommendation for improvement
-
-...
-
-## Summary
-
-[Plain language summary of findings and their impact]
-
-## Next Steps
-
-[Verdict-specific action]
-```
-
-## Agent Instructions for GaoYao
-
-When performing audit:
-
-1. **Start with context**: Read `plan.md` and `execution.yaml` to understand what was built
-2. **Map structure**: Use `find`/`ls` to understand file organization
-3. **Deep read**: Actually read the code files (not just scan)
-4. **Find evidence**: For each issue, include specific file:line references
-5. **Assess severity**: Distinguish critical vs cosmetic issues
-6. **Be constructive**: Recommend fixes, not just criticism
-7. **Cross-reference**: Verify implementation matches design intent
-
-### Example Audit Session
-
-```
-// Step 1: Understand scope
-read: .sages/workspace/plan.md
-read: .sages/workspace/execution.yaml
-
-// Step 2: Map structure  
-bash: find src -type f -name "*.ts" | head -20
-
-// Step 3: Deep analysis
-read: src/services/user-service.ts
-read: src/repositories/user-repository.ts
-read: tests/user-service.test.ts
-
-// Step 4: Document findings
-// [Write to audit.md with evidence]
-```
-
-## Standalone Usage Examples
-
-### Quick File Review (Before Commit)
+## Unit Tests
 
 ```bash
-/gaoyao_quick_check --files=["src/utils/helper.ts", "src/api/user.ts"]
+bun test ./test/tools/gaoyao/session.test.ts
 ```
 
-Use when: Checking specific files before commit, small changes.
+Tests cover:
+- Session lifecycle (create, load, delete)
+- File read tracking
+- Finding recording
+- Phase advancement validation
+- Score calculation
+- Verdict generation
 
-### Security Scan (Library Audit)
+## Legacy Tools (Deprecated)
 
-```bash
-/gaoyao_check_security --files=["src/auth/", "src/payment/"]
+These tools are deprecated and return errors:
+- ❌ `gaoyao_review` → Use `gaoyao_init`
+- ❌ `gaoyao_quick_check` → Use `gaoyao_init --review_mode quick`
+- ❌ `gaoyao_check_security` → Phase CASTRATION
+
+## Example Session
+
+```
+> /gaoyao_init --review_mode full
+← { sessionId: "gaoyao-xxx", phase: "ENUMERATE", files: [...], guidance: "..." }
+
+> /read src/service/user.ts
+> /gaoyao_record_file_read --path src/service/user.ts --lines 200
+
+> /read src/repository/user-repo.ts
+> /gaoyao_record_file_read --path src/repository/user-repo.ts --lines 150
+
+> /gaoyao_execute_phase --phase ENUMERATE
+← { nextPhase: "INK", guidance: "Analyze code style..." }
+
+> /gaoyao_record_finding --category ink --severity major ...
+> /gaoyao_record_finding --category ink --severity minor ...
+
+> /gaoyao_execute_phase --phase INK
+← { nextPhase: "NOSE", ... }
+
+/gaoyao_finalize --notes "Good implementation with minor style issues"
+← { verdict: "PASS", score: 85 }
 ```
 
-Use when: Auditing security-sensitive code, third-party integrations.
+## Session Recovery
 
-### Full Code Review
-
-```bash
-/gaoyao_review --review_mode=full
+If session exists, `gaoyao_init` returns current state:
+```
+> /gaoyao_init
+← { resumed: true, phase: "NOSE", filesRead: 5, findings: 3 }
 ```
 
-Use when: Comprehensive review of entire codebase.
+## Reset
 
-### After Fuxi Workflow
-
-```bash
-/gaoyao_review
-/gaoyao_finalize --findings=[...]
-/fuxi-end
+To start over:
 ```
-
-Use when: Completing the Four Sages workflow.
-
-### No Plan Required!
-
-GaoYao can audit any code directly:
-- **Just code**: `/gaoyao_quick_check --files=["file.ts"]`
-- **Just project**: `/gaoyao_review`
-- **Just security**: `/gaoyao_check_security`
-
-Plan and execution are optional - GaoYao works standalone.
-
-## Prohibited
-
-- ❌ Modify implementation files
-- ❌ Skip any of the five audits
-- ❌ Use only static pattern matching
-- ❌ Report without reading actual code
-
-## Workflow Integration
-
-After completing audit, the verdict flows to Fuxi via `fuxi-end`:
-
-| Verdict | Fuxi Action |
-|---------|--------------|
-| **PASS** | Archives workflow, marks complete |
-| **NEEDS_CHANGES** | Returns to implement phase (LuBan) |
-| **REJECTED** | Returns to design phase (Fuxi) |
-
-### Verdict Format in audit.md
-
-The verdict **must** be in this format for Fuxi to parse:
-
-```markdown
-## Verdict: PASS | NEEDS_CHANGES | REJECTED
-## Score: 0-100
+/gaoyao_reset --confirm true
 ```
-
-### After Audit
-
-1. Run `gaoyao-finalize` with all findings
-2. Run `fuxi-end` to check verdict and transition
-3. Follow Fuxi's guidance for next action
