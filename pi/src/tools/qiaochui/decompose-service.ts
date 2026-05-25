@@ -99,25 +99,18 @@ export function inferPlaneFromDescription(desc: string): MDDPlane {
 }
 
 /**
- * Infer files from task description
+ * Infer files from task description (generic - no project-specific paths)
  */
 export function inferFilesFromDescription(desc: string): string[] {
   const lowerDesc = desc.toLowerCase();
   const files: string[] = [];
   
-  if (lowerDesc.includes("base/index")) files.push("src/tui/base/index.ts");
-  else if (lowerDesc.includes("websocket/index")) files.push("src/tui/websocket/index.ts");
-  else if (lowerDesc.includes("modal/index")) files.push("src/tui/modal/index.ts");
-  else if (lowerDesc.includes("editor/index")) files.push("src/tui/editor/index.ts");
-  else if (lowerDesc.includes("utils/index") || lowerDesc.includes("box export")) files.push("src/tui/utils/index.ts");
-  else if (lowerDesc.includes("index.ts")) files.push("src/tui/index.ts");
-  
-  if (lowerDesc.includes("colors")) files.push("src/tui/utils/colors.ts");
-  if (lowerDesc.includes("component")) files.push("src/tui/base/component.ts");
-  if (lowerDesc.includes("node-block")) files.push("src/tui/node-block-list.ts");
-  if (lowerDesc.includes("box")) files.push("src/tui/box-drawing.ts");
-  if (lowerDesc.includes("command")) files.push("src/tui/editor/editor-commands.ts");
-  if (lowerDesc.includes("kanban-editor")) files.push("src/tui/editor/kanban-editor.ts");
+  // Generic patterns that work across projects
+  if (lowerDesc.includes("index")) files.push("src/index.ts");
+  if (lowerDesc.includes("test")) files.push("src/test.ts");
+  if (lowerDesc.includes("config")) files.push("src/config.ts");
+  if (lowerDesc.includes("types")) files.push("src/types.ts");
+  if (lowerDesc.includes("utils")) files.push("src/utils/index.ts");
   
   return files.length > 0 ? files : ["src/"];
 }
@@ -141,29 +134,9 @@ export function generateMDDTasks(content: string, maxTasks: number): MDDTask[] {
 }
 
 /**
- * Resolve file conflicts by adding sequential dependencies
- * 
- * When multiple tasks edit the same file, they must run sequentially to avoid
- * merge conflicts. This function groups tasks by file and chains them by priority.
- * 
- * Algorithm:
- * 1. Group tasks by normalized file path
- * 2. Sort each group by priority (high → medium → low)
- * 3. Add dependency links: each task depends on the previous in its group
- * 4. Reorder result array by sorted groups
- * 
- * Example:
- *   T1 (high) edits install.sh
- *   T2 (medium) edits install.sh  
- *   T3 (high) edits install.sh
- * 
- * After sorting by priority: [T1, T3, T2]
- * Result:
- *   T1: dependsOn = []
- *   T3: dependsOn = ["T1"]  (waits for T1)
- *   T2: dependsOn = ["T3"]  (waits for T3, which waits for T1)
- * 
- * Note: Returns a new array, does not mutate input.
+ * Resolve file conflicts by adding sequential dependencies.
+ * Groups tasks by file, sorts by priority, chains dependencies.
+ * Does not mutate input.
  */
 export function resolveFileConflicts(tasks: MDDTask[]): MDDTask[] {
   // Clone tasks to avoid mutating input
