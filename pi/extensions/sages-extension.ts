@@ -15,7 +15,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { 
   registerFuxiTools, 
   registerQiaoChuiTools, 
-  registerLuBanTools, 
+  registerLubanTools, 
   registerGaoYaoTools,
   registerMiniMaxTools 
 } from "../src/tools/";
@@ -80,7 +80,7 @@ export default function (pi: ExtensionAPI) {
   // Register all tools (this captures the executors)
   registerFuxiTools(pi);
   registerQiaoChuiTools(pi);
-  registerLuBanTools(pi);
+  registerLubanTools(pi);
   registerGaoYaoTools(pi);
   registerMiniMaxTools(pi);
 
