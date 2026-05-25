@@ -1,7 +1,10 @@
 /**
  * Executor Index - Export all executors
+ * 
+ * Note: TDD and task execution are now in src/tools/luban/
+ * This module is kept for backwards compatibility but will be deprecated.
  */
 
-export { TDDRunner, type TDDResult, TDDPhase } from "./tdd-runner.js";
-export { TaskExecutor, type Task, type ExecutionResult } from "./task-executor.js";
-export { SubagentExecutor, type ExecutionSettings, type ExecutionProgress } from "./subagent-executor.js";
+export type { LubanTask, TDDConfig, TaskResult, TDDPhase, TDDPhaseResult, ExecutionSettings, ExecutionPlan } from "../tools/luban/types.js";
+export { parseExecutionYaml, resolveDependencies, sortByDependencies, getReadyTasks } from "../tools/luban/plan-parser.js";
+export { runTask, runTDDCycle } from "../tools/luban/task-runner.js";

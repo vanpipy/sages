@@ -4,6 +4,6 @@
 
 export { registerFuxiTools } from "./fuxi-tools.js";
 export { registerQiaoChuiTools } from "./qiaochui/index.js";
-export { registerLuBanTools } from "./luban-tools.js";
+export { registerLubanTools } from "./luban/index.js";
 export { registerGaoYaoTools } from "./gaoyao-tools.js";
 export { registerMiniMaxTools } from "./minimax-tools.js";

@@ -11,7 +11,7 @@
 // Tools
 export { registerFuxiTools } from "./tools/fuxi-tools.js";
 export { registerQiaoChuiTools } from "./tools/qiaochui/index.js";
-export { registerLuBanTools } from "./tools/luban-tools.js";
+export { registerLubanTools } from "./tools/luban/index.js";
 export { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
 
 // Services (NEW - refactored architecture)
@@ -23,9 +23,9 @@ export type { WorkflowState, Task, AuditResult, FuxiPhase, ArchiveInfo } from ".
 export { StateManager, WorkspaceManager } from "./state/index.js";
 export type { WorkflowState as LegacyWorkflowState, Task as LegacyTask, AuditResult as LegacyAuditResult } from "./state/index.js";
 
-// Executor
-export { TDDRunner, TaskExecutor } from "./executor/index.js";
-export type { TDDResult, TDDPhase, Task as ExecutorTask, ExecutionResult } from "./executor/index.js";
+// Executor (from luban module)
+export { runTask, runTDDCycle, parseExecutionYaml, resolveDependencies, sortByDependencies } from "./executor/index.js";
+export type { LubanTask, TDDConfig, TaskResult, TDDPhase, ExecutionSettings, ExecutionPlan } from "./executor/index.js";
 
 // Orchestrator
 export { WorkflowOrchestrator } from "./orchestrator/index.js";
