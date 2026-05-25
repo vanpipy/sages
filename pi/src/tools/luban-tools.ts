@@ -22,7 +22,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { TDDRunner, TaskExecutor, SubagentExecutor } from "../executor/index.js";
+import { TDDRunner, TaskExecutor, SubagentExecutor, FileLockManager } from "../executor/index.js";
 import type { Task, ExecutionResult } from "../executor/index.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
@@ -172,7 +172,35 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
       const { task_id, task_description, files, test_files, test_command, commit = true } = params;
       const cwd = ctx.cwd;
 
+      // Issue #1 fix: File locking with 30-min TTL
+      const lockManager = new FileLockManager(cwd);
+
       try {
+        const lockResult = lockManager.acquire(task_id, files);
+        
+        if (!lockResult.success) {
+          const conflictDetails = lockManager.getConflictDetails(task_id, files);
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: false,
+                error: {
+                  message: "File lock conflict",
+                  code: "LOCK_CONFLICT",
+                  conflicts: conflictDetails.map(c => ({
+                    file: c.file,
+                    locked_by: c.holder.taskId,
+                    ttl_remaining_ms: c.ttlRemaining,
+                  })),
+                },
+              }),
+            }],
+            isError: true,
+            details: { error: "lock_conflict", taskId: task_id },
+          };
+        }
+
         const tddConfig = {
           taskId: task_id,
           taskDescription: task_description,
@@ -245,6 +273,9 @@ export function registerLuBanTools(pi: ExtensionAPI): void {
           isError: true,
           details: { error: msg },
         };
+      } finally {
+        // Issue #1 fix: Always release locks after task completes
+        lockManager.release(task_id);
       }
     },
   });

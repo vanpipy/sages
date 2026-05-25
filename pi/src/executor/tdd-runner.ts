@@ -47,6 +47,8 @@ export class TDDRunner {
   private startTime: number = 0;
   private filesCreated: string[] = [];
   private filesModified: string[] = [];
+  // Issue #3 fix: Cache last test results to avoid calling runTests() twice in buildResult
+  private lastTestResults: { passed: number; failed: number; total: number } = { passed: 0, failed: 0, total: 0 };
 
   constructor(config: TDDConfig) {
     this.config = config;
@@ -168,14 +170,18 @@ export class TDDRunner {
       const passed = (output.match(/\u2713|passed|PASS|\+/g) || []).length;
       const failed = (output.match(/\u2717|failed|FAIL|x/g) || []).length;
 
-      return { passed, failed: Math.max(failed, 0), total: passed + failed };
+      // Issue #3 fix: Cache the results
+      this.lastTestResults = { passed, failed: Math.max(failed, 0), total: passed + failed };
+      return this.lastTestResults;
     } catch (error) {
       // Test command failed (expected in RED phase)
       const errorOutput = error instanceof Error ? error.message : String(error);
       if (errorOutput.includes("test") || errorOutput.includes("fail")) {
-        return { passed: 0, failed: 1, total: 1 };
+        this.lastTestResults = { passed: 0, failed: 1, total: 1 };
+        return this.lastTestResults;
       }
-      return { passed: 0, failed: 1, total: 1 };
+      this.lastTestResults = { passed: 0, failed: 1, total: 1 };
+      return this.lastTestResults;
     }
   }
 
@@ -232,11 +238,19 @@ export function ${className.toLowerCase()}() {
   }
 
   private log(msg: string): void {
-    const timestamp = new Date().toISOString().split("T")[1].slice(0, 8);
-    appendFileSync(
-      join(this.config.cwd, ".sages", "tdd.log"),
-      `[${timestamp}] [${this.config.taskId}] ${msg}\n`
-    );
+    try {
+      const logDir = join(this.config.cwd, ".sages");
+      if (!existsSync(logDir)) {
+        mkdirSync(logDir, { recursive: true });
+      }
+      const timestamp = new Date().toISOString().split("T")[1].slice(0, 8);
+      appendFileSync(
+        join(logDir, "tdd.log"),
+        `[${timestamp}] [${this.config.taskId}] ${msg}\n`
+      );
+    } catch {
+      // Silently ignore logging errors to not disrupt TDD flow
+    }
   }
 
   private buildResult(success: boolean): TDDResult {
@@ -246,7 +260,8 @@ export function ${className.toLowerCase()}() {
       phases: [...this.phases],
       filesCreated: [...new Set(this.filesCreated)],
       filesModified: [...new Set(this.filesModified)],
-      testResults: this.runTests(),
+      // Issue #3 fix: Use cached test results instead of calling runTests() again
+      testResults: { ...this.lastTestResults },
       duration: Date.now() - this.startTime,
     };
   }

@@ -207,6 +207,7 @@ export class TaskExecutor {
     return Array.from(this.tasks.values())
       .filter(task => {
         if (task.status !== "pending") return false;
+        if (this.completedTasks.has(task.id)) return false;  // Already completed
         // Check if all dependencies are completed
         return task.dependsOn.every(depId => this.completedTasks.has(depId));
       })
@@ -217,16 +218,92 @@ export class TaskExecutor {
       });
   }
 
+  /**
+   * Issue #4 fix: Proper topological sort using Kahn's algorithm
+   * Handles transitive dependencies (A→B→C) correctly
+   */
   private getSortedTasks(): Task[] {
-    return Array.from(this.tasks.values())
-      .filter(t => t.status === "pending")
-      .sort((a, b) => {
-        // Topological sort by dependencies
-        if (a.dependsOn.includes(b.id)) return 1;
-        if (b.dependsOn.includes(a.id)) return -1;
-        const priorityOrder = { high: 0, medium: 1, low: 2 };
-        return priorityOrder[a.priority] - priorityOrder[b.priority];
-      });
+    const pendingTasks = Array.from(this.tasks.values()).filter(t => t.status === "pending");
+    if (pendingTasks.length === 0) return [];
+
+    // Build adjacency list and in-degree count
+    const inDegree = new Map<string, number>();
+    const adjList = new Map<string, string[]>();
+    const taskMap = new Map<string, Task>();
+
+    // Initialize
+    for (const task of pendingTasks) {
+      taskMap.set(task.id, task);
+      inDegree.set(task.id, 0);
+      adjList.set(task.id, []);
+    }
+
+    // Build graph
+    for (const task of pendingTasks) {
+      for (const depId of task.dependsOn) {
+        // Only include edges for tasks in our pending set
+        if (taskMap.has(depId)) {
+          adjList.get(depId)!.push(task.id);
+          inDegree.set(task.id, inDegree.get(task.id)! + 1);
+        }
+      }
+    }
+
+    // Kahn's algorithm with priority queue
+    const queue: string[] = [];
+    const result: Task[] = [];
+
+    // Start with tasks that have no dependencies (in-degree = 0)
+    for (const [taskId, degree] of inDegree) {
+      if (degree === 0) {
+        queue.push(taskId);
+      }
+    }
+
+    // Sort queue by priority
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    queue.sort((a, b) => {
+      const taskA = taskMap.get(a)!;
+      const taskB = taskMap.get(b)!;
+      return priorityOrder[taskA.priority] - priorityOrder[taskB.priority];
+    });
+
+    while (queue.length > 0) {
+      const taskId = queue.shift()!;
+      const task = taskMap.get(taskId)!;
+      result.push(task);
+
+      // Reduce in-degree for all dependents
+      for (const dependentId of adjList.get(taskId)!) {
+        const newDegree = inDegree.get(dependentId)! - 1;
+        inDegree.set(dependentId, newDegree);
+        if (newDegree === 0) {
+          // Insert by priority
+          const insertIndex = result.findIndex((_, i) => {
+            const existingTask = result[i];
+            const existingDegree = inDegree.get(existingTask.id) || 0;
+            if (existingDegree === 0) {
+              return priorityOrder[task.priority] < priorityOrder[existingTask.priority];
+            }
+            return false;
+          });
+          if (insertIndex === -1) {
+            queue.push(dependentId);
+          } else {
+            queue.splice(insertIndex, 0, dependentId);
+          }
+        }
+      }
+    }
+
+    // Handle cycles (tasks that couldn't be sorted) - put them at the end
+    for (const task of pendingTasks) {
+      if (!result.includes(task)) {
+        result.push(task);
+      }
+    }
+
+    return result;
   }
 
   private sleep(ms: number): Promise<void> {

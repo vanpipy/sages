@@ -79,7 +79,8 @@ export class SubagentExecutor {
   }
 
   /**
-   * Execute all tasks using subagents
+   * Issue #2 fix: Execute all tasks using subagents with proper promise tracking
+   * Properly awaits all spawned tasks before returning
    */
   async executeAll(
     onTaskStart?: (task: Task) => void,
@@ -87,8 +88,7 @@ export class SubagentExecutor {
     onTaskError?: (task: Task, error: Error) => void,
     onProgress?: (progress: ExecutionProgress) => void
   ): Promise<Map<string, ExecutionResult>> {
-    const promises: Promise<void>[] = [];
-
+    const allPromises: Promise<void>[] = [];
     let maxIterations = this.tasks.length * 10;
     let iteration = 0;
 
@@ -97,18 +97,23 @@ export class SubagentExecutor {
 
       // Spawn ready tasks up to maxParallel
       const readyTasks = this.getReadyTasks();
-      const toSpawn = readyTasks.slice(0, this.settings.maxParallel - this.runningTasks.size);
+      const maxToSpawn = this.settings.maxParallel - this.runningTasks.size;
+      const toSpawn = readyTasks.slice(0, Math.max(0, maxToSpawn));
 
       for (const task of toSpawn) {
+        // Issue #2 fix: Properly track and await all promises
         const promise = this.spawnTask(task, onTaskStart, onTaskComplete, onTaskError);
-        promises.push(promise);
+        allPromises.push(promise);
       }
 
-      // Wait a bit before checking again
-      await this.sleep(500);
+      // Wait before checking again
+      await this.sleep(100);
       this.updateProgress();
       onProgress?.(this.getProgress());
     }
+
+    // Issue #2 fix: Await ALL promises before returning
+    await Promise.allSettled(allPromises);
 
     return this.results;
   }
