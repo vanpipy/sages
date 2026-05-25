@@ -247,20 +247,11 @@ export class ProjectAnalyzer {
   private analyzeGoTechStack(cwd: string, techStack: TechStackInfo): void {
     const goModPath = join(cwd, "go.mod");
     if (existsSync(goModPath)) {
-      try {
-        const content = readFileSync(goModPath, "utf-8");
-        
-        // Go version
-        const goVersion = content.match(/^go\s+(\d+\.\d+)/m);
-        if (goVersion) {
-          techStack.languages.push(`Go ${goVersion[1]}`);
-        }
-        
-        // Build tools
-        techStack.buildTools.push("go build", "go mod");
-        
-        // Frameworks already added from detector
-      } catch { /* ignore */ }
+      // Add Go to languages (no version specificity)
+      techStack.languages.push("go");
+      
+      // Build tools
+      techStack.buildTools.push("go build", "go mod");
     }
   }
   
