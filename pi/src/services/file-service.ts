@@ -28,6 +28,7 @@ export class FileService {
     this.cwd = cwd;
     this.workspaceDir = workspaceDir;
     this.allowedDir = resolve(cwd, workspaceDir);
+    this.ensureWorkspace();
   }
 
   /**
@@ -72,10 +73,10 @@ export class FileService {
 
   /**
    * Sanitize a pattern for safe regex use
-   * Escapes all regex special characters
+   * Escapes all regex special characters including *
    */
   sanitizeRegex(pattern: string): string {
-    return pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    return pattern.replace(/[.+*^${}()|[\]\\]/g, "\\$&");
   }
 
   /**
@@ -228,13 +229,14 @@ export class FileService {
       return { verdict: null, score: undefined };
     }
 
-    // Extract verdict
+    // Extract verdict - match **Verdict**: PASS or Verdict: PASS
     const verdictMatch = content.match(/\*\*Verdict\*\*:\s*([A-Z_]+)/i) ||
-                        content.match(/Verdict.*?\*\*([A-Z_]+)/i);
+                        content.match(/Verdict:\s*([A-Z_]+)/i);
     const verdict = verdictMatch?.[1] || null;
 
-    // Extract score
-    const scoreMatch = content.match(/Score:\s*(\d+)/) ||
+    // Extract score - match **Score**: 95 or Score: 95 or (95%)
+    const scoreMatch = content.match(/\*\*Score\*\*:\s*(\d+)/i) ||
+                      content.match(/Score:\s*(\d+)/i) ||
                       content.match(/\(\s*(\d+)\s*%\)/);
     const score = scoreMatch ? parseInt(scoreMatch[1], 10) : undefined;
 
