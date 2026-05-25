@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { performDeepReview } from "../../../src/tools/qiaochui/review-service.js";
+import { performDeepReview } from "@/tools/qiaochui/review-service.js";
 
 describe("performDeepReview", () => {
   it("should exist and be a function", () => {

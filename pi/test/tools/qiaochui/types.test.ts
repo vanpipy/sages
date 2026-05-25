@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { MDDPlane, PlaneAssessment, DeepReviewResult, MDDTask } from "../../../src/tools/qiaochui/types.js";
+import type { MDDPlane, PlaneAssessment, DeepReviewResult, MDDTask } from "@/tools/qiaochui/types.js";
 
 describe("MDDPlane type", () => {
   it("should have all 7 planes", () => {
