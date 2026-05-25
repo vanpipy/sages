@@ -10,7 +10,7 @@
 
 // Tools
 export { registerFuxiTools } from "./tools/fuxi-tools.js";
-export { registerQiaoChuiTools } from "./tools/qiaochui-tools.js";
+export { registerQiaoChuiTools } from "./tools/qiaochui/index.js";
 export { registerLuBanTools } from "./tools/luban-tools.js";
 export { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
 
