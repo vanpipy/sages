@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { parseExecutionYaml, resolveDependencies, sortByDependencies } from "./plan-parser.js";
-import type { ExecutionPlan, LubanTask } from "./types.js";
+import { parseExecutionYaml, resolveDependencies, sortByDependencies } from "../../../src/tools/luban/plan-parser.js";
+import type { ExecutionPlan, LubanTask } from "../../../src/tools/luban/types.js";
 
 describe("parseExecutionYaml", () => {
   it("should exist and be a function", () => {

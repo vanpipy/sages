@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { existsSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { getUserDefaultModel } from "./model-helper.js";
+import { getUserDefaultModel } from "../../src/utils/model-helper.js";
 
 describe("getUserDefaultModel", () => {
   const testSettingsPath = join(homedir(), ".pi/agent/settings.json");

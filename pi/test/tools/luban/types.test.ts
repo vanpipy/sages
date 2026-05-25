@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { LubanTask, TDDConfig, TaskResult, TDDPhase } from "./types.js";
+import type { LubanTask, TDDConfig, TaskResult, TDDPhase } from "../../../src/tools/luban/types.js";
 
 describe("LubanTask interface", () => {
   it("should have correct structure", () => {

@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { runTask, runTDDCycle } from "./task-runner.js";
-import type { TDDConfig, TaskResult } from "./types.js";
+import { runTask, runTDDCycle } from "../../../src/tools/luban/task-runner.js";
+import type { TDDConfig, TaskResult } from "../../../src/tools/luban/types.js";
 
 describe("runTask", () => {
   it("should exist and be a function", () => {

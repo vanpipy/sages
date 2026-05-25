@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { generateMDDTasks, extractTasksFromDraft, resolveFileConflicts } from "./decompose-service.js";
-import type { MDDTask } from "./types.js";
+import { generateMDDTasks, extractTasksFromDraft, resolveFileConflicts } from "../../../src/tools/qiaochui/decompose-service.js";
+import type { MDDTask } from "../../../src/tools/qiaochui/types.js";
 
 describe("generateMDDTasks", () => {
   it("should exist and be a function", () => {
