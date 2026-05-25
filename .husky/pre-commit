@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+cd ~/Project/sages/pi
+bun run typecheck || exit 1
+bun test ./src ./test --path-ignore-patterns dist/ || exit 1
