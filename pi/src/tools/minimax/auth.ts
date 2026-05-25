@@ -22,7 +22,7 @@ export interface AuthResult {
  * Detect the correct API host by probing known endpoints
  * Returns the first host that responds successfully
  */
-export async function detectApiHost(apiKey: string): Promise<string | null> {
+export async function detectApiHost(apiKey: string): Promise<string | undefined> {
   const timeout = 5000; // 5 second timeout per host
 
   for (const host of KNOWN_API_HOSTS) {
@@ -56,7 +56,7 @@ export async function detectApiHost(apiKey: string): Promise<string | null> {
     }
   }
 
-  return null;
+  return undefined;
 }
 
 /**

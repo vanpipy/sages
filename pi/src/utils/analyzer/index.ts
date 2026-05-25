@@ -29,7 +29,3 @@ export { JavaDetector } from './java-detector';
 
 // Export orchestrator
 export { ProjectAnalyzer, analyzeProject } from './orchestrator';
-
-// Import types for convenience
-import type { LanguageDetector, LanguageInfo, ProjectContext } from './base';
-export type { LanguageDetector, LanguageInfo, ProjectContext };

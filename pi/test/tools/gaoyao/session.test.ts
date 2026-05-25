@@ -15,7 +15,7 @@ import {
   calculateScoresFromFindings,
   calculateVerdict,
   getVerdictAction,
-} from "../../../src/tools/gaoyao/session.ts";
+} from "../../../src/tools/gaoyao/session";
 
 describe("AuditSessionManager", () => {
   const testDir = join(tmpdir(), `gaoyao-test-${Date.now()}`);

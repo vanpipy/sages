@@ -4,8 +4,9 @@ import {
   parseTransitionResponse,
   createFuxiContext,
   type TransitionResult,
+  type BrainstormContextResult,
 } from '../../src/tools/brainstorming/index';
-import type { Approach, DesignDoc, BrainstormContextResult } from '../../src/tools/brainstorming/index';
+import type { Approach, DesignDoc } from '../../src/tools/brainstorming/types';
 
 describe('generateApprovalMessage', () => {
   it('should include design approval status', () => {

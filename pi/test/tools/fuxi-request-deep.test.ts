@@ -33,7 +33,7 @@ describe("fuxi_request Deep Analysis", () => {
       let onUpdateCallCount = 0;
       const mockOnUpdate = mock(async (msg: UpdateMessage) => {
         onUpdateCallCount++;
-      });
+      }) as any;
 
       // Simulate the expected behavior
       expect(mockOnUpdate).toBeDefined();
@@ -53,7 +53,7 @@ describe("fuxi_request Deep Analysis", () => {
         if (msg.content[0]?.text) {
           progressMessages.push(msg.content[0].text);
         }
-      });
+      }) as any;
 
       // Simulate sending progress for each plane
       const planes = ["Business", "Data", "Control", "Foundation", "Observation", "Security", "Evolution"];
@@ -200,10 +200,10 @@ Tech Stack: ${mockProjectContext.techStack.join(", ")}
 
     it("should handle invalid request parameter", () => {
       const emptyRequest = "";
-      const nullRequest = null;
+      const nullRequest: string | null = null;
       
       expect(emptyRequest || "default").toBe("default");
-      expect((nullRequest as string) || "New feature request").toBe("New feature request");
+      expect((nullRequest ?? "New feature request")).toBe("New feature request");
     });
   });
 

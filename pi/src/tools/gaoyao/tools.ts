@@ -8,7 +8,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectAnalyzer } from "../../utils/analyzer/index";
+import { ProjectAnalyzer } from "../../utils/analyzer";
 
 import {
   AuditSessionManager,

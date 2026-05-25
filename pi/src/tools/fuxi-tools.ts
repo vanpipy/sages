@@ -52,10 +52,10 @@ interface WorkflowState {
 /**
  * Read audit verdict from audit.md
  */
-function readAuditVerdict(cwd: string): { verdict: AuditVerdict; score: number | null } {
+function readAuditVerdict(cwd: string): { verdict: AuditVerdict | null; score: number | undefined } {
   const auditPath = join(cwd, WORKSPACE_DIR, "audit.md");
   if (!existsSync(auditPath)) {
-    return { verdict: null, score: null };
+    return { verdict: null, score: undefined };
   }
   
   try {
@@ -68,11 +68,11 @@ function readAuditVerdict(cwd: string): { verdict: AuditVerdict; score: number |
                        content.match(/\(\s*(\d+)\s*%\)/);
     
     const verdict = verdictMatch?.[1] as AuditVerdict || null;
-    const score = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
+    const score = scoreMatch ? parseInt(scoreMatch[1], 10) : undefined;
     
     return { verdict, score };
   } catch {
-    return { verdict: null, score: null };
+    return { verdict: null, score: undefined };
   }
 }
 
@@ -535,6 +535,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         if (!skipBrainstorm) {
           await onUpdate?.({
             content: [{ type: "text", text: `🧠 Starting with **Brainstorming** first...\n\nThis helps clarify requirements and explore approaches before creating the MDD draft.\n\nWe'll go through:\n1. Explore project context\n2. Ask clarifying questions\n3. Propose 2-3 approaches\n4. Design with your approval\n5. Auto-ask: "Proceed to Fuxi?"` }],
+            details: {},
           });
           
           await new Promise(resolve => setTimeout(resolve, 200));
@@ -544,10 +545,12 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         if (skipBrainstorm) {
           await onUpdate?.({
             content: [{ type: "text", text: "⏭️ Skipping brainstorming, going directly to MDD analysis..." }],
+            details: {},
           });
         } else {
           await onUpdate?.({
             content: [{ type: "text", text: "📊 Analyzing project structure..." }],
+            details: {},
           });
         }
 
@@ -558,6 +561,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
             type: "text", 
             text: `📋 Detected: ${projectContext.language}${projectContext.framework ? ` (${projectContext.framework})` : ""}, ${projectContext.existingComponents.length} components, ${projectContext.patterns.length} patterns` 
           }],
+          details: {},
         });
 
         // Phase 3: Generate each plane with streaming updates
@@ -574,6 +578,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         for (const plane of planes) {
           await onUpdate?.({
             content: [{ type: "text", text: `${plane.emoji} Analyzing ${plane.name} Plane...` }],
+            details: {},
           });
           await new Promise(resolve => setTimeout(resolve, 100));
         }
@@ -581,6 +586,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         // Phase 4: Generate the rich draft with project context
         await onUpdate?.({
           content: [{ type: "text", text: "💾 Generating draft.md..." }],
+          details: {},
         });
 
         const draft = generateRichDraft(projectContext, params.request);
@@ -592,6 +598,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
             type: "text", 
             text: `✅ Draft created: ${draftPath}\n\n📝 ${projectContext.existingComponents.length} components analyzed\n🎯 ${planes.length} MDD planes processed\n🎨 Detected patterns: ${projectContext.patterns.slice(0, 5).join(", ") || "none"}\n\n💡 Tip: Use \`/fuxi-plan\` after reviewing the draft to start task decomposition.` 
           }],
+          details: {},
         });
 
         return {
@@ -624,6 +631,7 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         
         await onUpdate?.({
           content: [{ type: "text", text: `❌ Analysis failed: ${msg}` }],
+          details: {},
         });
 
         const draft = generateMinimalDraft(planName, params.request);
@@ -935,7 +943,7 @@ Run gaoyao-review or gaoyao-finalize to get an audit verdict.`
       const { state, workspacePath } = getWorkflowState(cwd);
       
       // Read current audit verdict if in audit phase
-      let auditInfo: { verdict: AuditVerdict; score: number | null } = { verdict: null, score: null };
+      let auditInfo: { verdict: AuditVerdict | null; score: number | undefined } = { verdict: null, score: undefined };
       if (state && (state.phase === "audit" || state.phase === "complete")) {
         auditInfo = readAuditVerdict(cwd);
       }
@@ -1113,9 +1121,11 @@ This is a preview. Use without --dry-run to apply changes.`,
       }
       
       // Update state to implement phase to wake LuBan
-      state.phase = "implement";
-      state.updatedAt = new Date().toISOString();
-      saveWorkflowState(cwd, state);
+      if (state) {
+        state.phase = "implement";
+        state.updatedAt = new Date().toISOString();
+        saveWorkflowState(cwd, state);
+      }
 
       return {
         content: [{

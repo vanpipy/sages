@@ -421,8 +421,8 @@ function generateDataPlane(ctx: ProjectContext, request: string, reqType: Reques
 
   // Component specific
   if (existingComponents.length > 0) {
-    const componentTypes = [...new Set(existingComponents.map(c => c.type))];
-    logic.push(`- Existing components: ${componentTypes.join(", ")}`);
+    const uniqueComponents = [...new Set(existingComponents)];
+    logic.push(`- Existing components: ${uniqueComponents.join(", ")}`);
   }
 
   // Request type specific
@@ -498,7 +498,7 @@ function generateControlPlane(ctx: ProjectContext, request: string, reqType: Req
     strategy.push("- Lazy loading for optional features");
   }
   
-  if (reqType.category === "error" || request.includes("error")) {
+  if (reqType.category === "general" && request.includes("error")) {
     strategy.push("- Centralized error handler");
     strategy.push("- Typed error classes");
     strategy.push("- User-friendly error messages");

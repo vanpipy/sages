@@ -17,6 +17,7 @@ import type {
   DesignSection,
   ClarifyingQuestion,
   IntentSpec,
+  DesignDoc,
 } from "./types";
 
 // ============================================================================
@@ -45,13 +46,19 @@ export interface BrainstormContextResult {
   keyFiles: { path: string; purpose: string }[];
 }
 
-export async function discoverProjectContext(cwd: string): Promise<BrainstormContextResult> {
+export function discoverProjectContext(cwd: string): BrainstormContextResult {
   const projectName = basename(cwd);
   
   // Detect language
   let language = "unknown";
   let framework: string | null = null;
-  const techStack = {
+  const techStack: {
+    languages: string[];
+    frameworks: string[];
+    buildTools: string[];
+    testing: string[];
+    linting: string[];
+  } = {
     languages: [],
     frameworks: [],
     buildTools: [],

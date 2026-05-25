@@ -11,7 +11,7 @@ import type {
   DesignDoc,
   ClarifyingQuestion,
   QuestionType,
-} from '../src/tools/brainstorming/types';
+} from '../../src/tools/brainstorming/types';
 
 describe('BrainstormPhase', () => {
   it('should allow all valid phase values', () => {

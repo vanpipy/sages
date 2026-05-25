@@ -223,7 +223,7 @@ export class JavaDetector extends BaseDetector {
         }
         
         if (!hasGenerics && /<[A-Z][a-zA-Z]*<|List<|Map<|Set<|Optional</.test(content)) {
-          hasGenerdas = true;
+          hasGenerics = true;
           patterns.push(JAVA_PATTERNS.GENERICS);
         }
         

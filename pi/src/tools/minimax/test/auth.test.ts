@@ -57,8 +57,8 @@ describe("Auth Module", () => {
   it("should export detectApiHost as async function", async () => {
     const { detectApiHost } = await import("../auth.js");
     // Just verify it's async (returns a Promise)
-    const result = detectApiHost("invalid-key");
-    expect(result).toBeInstanceOf(Promise);
+    const result: any = detectApiHost("invalid-key");
+    expect(result instanceof Promise).toBe(true);
     // Don't actually wait - would hit the network
   });
 

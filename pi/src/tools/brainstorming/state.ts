@@ -137,7 +137,7 @@ export class BrainstormStateMachine {
   // Event Handlers
   // ========================================================================
   
-  private handleStart(event: Extract<BrainstormEvent, { type: 'START' }>): { success: boolean } {
+  private handleStart(event: Extract<BrainstormEvent, { type: 'START' }>): { success: boolean; error?: string } {
     if (this.context.phase !== 'exploring') {
       return { success: false, error: 'Can only start from exploring phase' };
     }
@@ -149,14 +149,14 @@ export class BrainstormStateMachine {
     return { success: true };
   }
   
-  private handleContextFound(event: Extract<BrainstormEvent, { type: 'CONTEXT_FOUND' }>): { success: boolean } {
+  private handleContextFound(event: Extract<BrainstormEvent, { type: 'CONTEXT_FOUND' }>): { success: boolean; error?: string } {
     this.context.projectContext = event.context;
     
     // Auto-transition to clarifying
     return this.transitionTo('clarifying');
   }
   
-  private handleAskQuestion(event: Extract<BrainstormEvent, { type: 'ASK_QUESTION' }>): { success: boolean } {
+  private handleAskQuestion(event: Extract<BrainstormEvent, { type: 'ASK_QUESTION' }>): { success: boolean; error?: string } {
     if (this.context.phase !== 'clarifying') {
       return { success: false, error: 'Can only ask questions in clarifying phase' };
     }
@@ -169,7 +169,7 @@ export class BrainstormStateMachine {
     return { success: true };
   }
   
-  private handleAnswerQuestion(event: Extract<BrainstormEvent, { type: 'ANSWER_QUESTION' }>): { success: boolean } {
+  private handleAnswerQuestion(event: Extract<BrainstormEvent, { type: 'ANSWER_QUESTION' }>): { success: boolean; error?: string } {
     // Update intent spec with answer
     if (!this.context.intentSpec) {
       this.context.intentSpec = {
@@ -184,7 +184,7 @@ export class BrainstormStateMachine {
     return { success: true };
   }
   
-  private handleProposeApproaches(event: Extract<BrainstormEvent, { type: 'PROPOSE_APPROACHES' }>): { success: boolean } {
+  private handleProposeApproaches(event: Extract<BrainstormEvent, { type: 'PROPOSE_APPROACHES' }>): { success: boolean; error?: string } {
     if (this.context.phase !== 'clarifying' && this.context.phase !== 'proposing') {
       return { success: false, error: 'Invalid phase for proposing approaches' };
     }
@@ -199,7 +199,7 @@ export class BrainstormStateMachine {
     return { success: true };
   }
   
-  private handleSelectApproach(event: Extract<BrainstormEvent, { type: 'SELECT_APPROACH' }>): { success: boolean } {
+  private handleSelectApproach(event: Extract<BrainstormEvent, { type: 'SELECT_APPROACH' }>): { success: boolean; error?: string } {
     if (this.context.phase !== 'proposing') {
       return { success: false, error: 'Invalid phase for selecting approach' };
     }
@@ -211,7 +211,7 @@ export class BrainstormStateMachine {
     }
     
     // Mark all approaches
-    this.context.approaches = this.context.approaches.map(a => ({
+    this.context.approaches = (this.context.approaches ?? []).map(a => ({
       ...a,
       recommended: a.id === event.approachId,
     }));
@@ -220,7 +220,7 @@ export class BrainstormStateMachine {
     return this.transitionTo('designing');
   }
   
-  private handlePresentSection(event: Extract<BrainstormEvent, { type: 'PRESENT_SECTION' }>): { success: boolean } {
+  private handlePresentSection(event: Extract<BrainstormEvent, { type: 'PRESENT_SECTION' }>): { success: boolean; error?: string } {
     if (this.context.phase !== 'designing') {
       return { success: false, error: 'Invalid phase for presenting sections' };
     }
@@ -238,7 +238,7 @@ export class BrainstormStateMachine {
     return { success: true };
   }
   
-  private handleApproveSection(event: Extract<BrainstormEvent, { type: 'APPROVE_SECTION' }>): { success: boolean } {
+  private handleApproveSection(event: Extract<BrainstormEvent, { type: 'APPROVE_SECTION' }>): { success: boolean; error?: string } {
     const section = this.context.designSections?.find(s => s.id === event.sectionId);
     if (!section) {
       return { success: false, error: 'Section not found' };
@@ -248,15 +248,16 @@ export class BrainstormStateMachine {
     section.approvedAt = new Date().toISOString();
     
     // Check if all sections are approved
-    const allApproved = this.context.designSections?.every(s => s.approved);
-    if (allApproved && this.context.designSections.length > 0) {
+    const sections = this.context.designSections ?? [];
+    const allApproved = sections.length > 0 && sections.every(s => s.approved);
+    if (allApproved) {
       return this.transitionTo('approved');
     }
     
     return { success: true };
   }
   
-  private handleReviseSection(event: Extract<BrainstormEvent, { type: 'REVISE_SECTION' }>): { success: boolean } {
+  private handleReviseSection(event: Extract<BrainstormEvent, { type: 'REVISE_SECTION' }>): { success: boolean; error?: string } {
     const section = this.context.designSections?.find(s => s.id === event.sectionId);
     if (!section) {
       return { success: false, error: 'Section not found' };
@@ -272,7 +273,7 @@ export class BrainstormStateMachine {
     return { success: true };
   }
   
-  private handleWriteDesignDoc(): { success: boolean } {
+  private handleWriteDesignDoc(): { success: boolean; error?: string } {
     // This would trigger writing the design document
     // For now, just validate we have the necessary data
     if (!this.context.designSections?.length) {
@@ -282,7 +283,7 @@ export class BrainstormStateMachine {
     return { success: true };
   }
   
-  private handleUserReviewComplete(event: Extract<BrainstormEvent, { type: 'USER_REVIEW_COMPLETE' }>): { success: boolean } {
+  private handleUserReviewComplete(event: Extract<BrainstormEvent, { type: 'USER_REVIEW_COMPLETE' }>): { success: boolean; error?: string } {
     if (event.approved) {
       return this.transitionTo('approved');
     } else {
@@ -290,7 +291,7 @@ export class BrainstormStateMachine {
     }
   }
   
-  private handleTransitionToFuxi(): { success: boolean } {
+  private handleTransitionToFuxi(): { success: boolean; error?: string } {
     if (this.context.phase !== 'approved') {
       return { success: false, error: 'Can only transition to Fuxi from approved phase' };
     }
@@ -298,7 +299,7 @@ export class BrainstormStateMachine {
     return { success: true };
   }
   
-  private handleDeferTransition(): { success: boolean } {
+  private handleDeferTransition(): { success: boolean; error?: string } {
     if (this.context.phase !== 'approved') {
       return { success: false, error: 'Can only defer from approved phase' };
     }
@@ -306,7 +307,7 @@ export class BrainstormStateMachine {
     return { success: true };
   }
   
-  private handleCancel(): { success: boolean } {
+  private handleCancel(): { success: boolean; error?: string } {
     this.context.phase = 'cancelled';
     return { success: true };
   }

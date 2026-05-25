@@ -8,8 +8,8 @@ describe('LanguageDetector Interface', () => {
       return { language: 'go', confidence: 1.0 };
     };
     
-    const result = mockDetect('/some/path');
-    expect(result).toBeInstanceOf(Promise);
+    const result: any = mockDetect('/some/path');
+    expect(result instanceof Promise).toBe(true);
   });
 
   it('should define ProjectContext interface', () => {
@@ -22,7 +22,7 @@ describe('LanguageDetector Interface', () => {
     };
     
     expect(context.language).toBe('go');
-    expect(context.framework).toBeUndefined(); // no framework in LanguageInfo
+    expect(context.frameworks[0]).toBe('bubbletea');
   });
 
   it('should support all four languages', () => {
