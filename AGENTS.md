@@ -23,18 +23,22 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 - **Role**: Design review and task decomposition
 - **Tools**: `qiaochui-review`, `qiaochui-decompose`
 - **Focus**: Feasibility, executable task breakdown, execution orchestration
+- **Module**: `src/tools/qiaochui/` (index, review-service, decompose-service, types)
 
 ### LuBan (鲁班) - The Master Craftsman 
 
 - **Role**: Task execution with TDD methodology
 - **Tools**: `luban-execute-task`, `luban-execute-all`, `luban-get-status`
 - **Focus**: Implementation with RED → GREEN → REFACTOR, parallel execution
+- **Module**: `src/tools/luban/` (index, types, plan-parser, task-runner)
+- **TDD Guide**: Built-in fallback guidance for exceptions
 
 ### GaoYao (皋陶) - The Supreme Judge 
 
 - **Role**: Quality audit and security review
 - **Tools**: `gaoyao-review`, `gaoyao-check-security`
 - **Focus**: Code quality, security, test coverage, performance
+- **Phase-guided auditing**: INK → NOSE → FOOT → CASTRATION → DEATH
 
 ## Workflow Phases
 
@@ -57,10 +61,12 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 ### Phase 3: Execute (LuBan) 
 - Executes tasks with real TDD (RED → GREEN → REFACTOR)
 - Parallel execution (up to 3 tasks)
+- `luban_execute_all` internally calls `luban_execute_task`
 - Output: Implementation files
 
 ### Phase 4: Audit (GaoYao) 
 - Quality audit and security scan
+- Phase-guided: INK (style), NOSE (docs), FOOT (arch), CASTRATION (security), DEATH (critical)
 - Output: `.sages/workspace/audit.md`
 - **Requires**: User approval (`fuxi-plan`)
 
@@ -107,12 +113,26 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 sages/
 ├── pi/                          # pi plugin
 │   ├── src/
-│   │   ├── tools/               # Modular tools (fuxi, qiaochui, luban, gaoyao)
-│   │   ├── state/               # StateManager, WorkspaceManager
-│   │   ├── executor/            # TDDRunner, TaskExecutor
-│   │   ├── orchestrator/        # WorkflowOrchestrator
-│   │   └── utils/               # Draft parser/generator
-│   ├── extensions/             # pi extension entry
+│   │   ├── tools/               # Modular tools
+│   │   │   ├── fuxi/           # Fuxi (Architect)
+│   │   │   ├── qiaochui/       # QiaoChui (Review)
+│   │   │   │   ├── index.ts
+│   │   │   │   ├── types.ts
+│   │   │   │   ├── review-service.ts
+│   │   │   │   └── decompose-service.ts
+│   │   │   ├── luban/           # LuBan (Execute)
+│   │   │   │   ├── index.ts     # Tool registration
+│   │   │   │   ├── types.ts     # Shared interfaces
+│   │   │   │   ├── plan-parser.ts  # YAML parsing
+│   │   │   │   └── task-runner.ts  # TDD execution
+│   │   │   └── gaoyao/          # GaoYao (Audit)
+│   │   ├── services/            # Shared services
+│   │   │   ├── file-service.ts  # File operations
+│   │   │   └── workflow-state-manager.ts
+│   │   └── utils/               # Utilities
+│   │       ├── model-helper.ts  # Get default model
+│   │       └── mode-checker.ts
+│   ├── test/                    # Unit tests
 │   ├── skills/                  # Skill definitions
 │   └── prompts/                 # Workflow templates
 │
@@ -143,22 +163,41 @@ The pi package exports modular components:
 ```typescript
 // Tools
 export { registerFuxiTools } from "./tools/fuxi-tools.js";
-export { registerQiaoChuiTools } from "./tools/qiaochui-tools.js";
-export { registerLuBanTools } from "./tools/luban-tools.js";
+export { registerQiaoChuiTools } from "./tools/qiaochui/index.js";
+export { registerLubanTools } from "./tools/luban/index.js";
 export { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
 
-// State
-export { StateManager, WorkspaceManager } from "./state/index.js";
-export type { WorkflowState, Task, AuditResult } from "./state/index.js";
+// Services
+export { FileService } from "./services/file-service.js";
+export { WorkflowStateManager } from "./services/workflow-state-manager.js";
 
-// Executor
-export { TDDRunner, TaskExecutor } from "./executor/index.js";
-export type { TDDResult, TDDPhase, Task as ExecutorTask, ExecutionResult } from "./executor/index.js";
+// Executor (from luban module)
+export { runTask, runTDDCycle, parseExecutionYaml } from "./executor/index.js";
+export type { LubanTask, TDDConfig, TaskResult, TDDPhase } from "./executor/index.js";
 
 // Orchestrator
 export { WorkflowOrchestrator } from "./orchestrator/index.js";
 export type { Phase, OrchestratorConfig } from "./orchestrator/index.js";
 ```
+
+## LuBan Module Architecture
+
+LuBan is modularized for maintainability:
+
+```
+src/tools/luban/
+├── index.ts          # Tool registration (luban_execute_task, luban_execute_all)
+├── types.ts         # LubanTask, TDDConfig, TaskResult interfaces
+├── plan-parser.ts   # YAML parsing, dependency resolution
+└── task-runner.ts   # TDD execution (RED→GREEN→REFACTOR) + TDD_GUIDE
+```
+
+### Key Design
+
+- **`luban_execute_all`** internally calls **`luban_execute_task`**
+- **DRY**: TDD logic lives in one place
+- **TDD_GUIDE**: Built-in fallback guidance for exceptions
+- **FileService**: All file operations use FileService (no direct node:fs)
 
 ## File Locking (LuBan)
 
@@ -179,7 +218,14 @@ export type { Phase, OrchestratorConfig } from "./orchestrator/index.js";
 ```bash
 cd ~/Project/sages/pi
 bun run typecheck    # Verify no TypeScript errors
-bun test ./src ./test # Ensure all tests pass (425+ expected)
+bun test ./test      # Ensure all tests pass (425+ expected)
 ```
 
 > **⚠️ Important**: Both checks must pass before committing. Run from the `pi/` subdirectory.
+
+## Security Practices
+
+- **No direct node:fs**: All file operations use `FileService`
+- **Path validation**: `validatePath()` prevents traversal attacks
+- **No hardcoded models**: Use `getUserDefaultModel()` from `@/utils/model-helper.js`
+- **No API keys**: Never hardcode credentials
