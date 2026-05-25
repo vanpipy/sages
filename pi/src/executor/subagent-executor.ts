@@ -5,8 +5,29 @@
  */
 
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import type { Task, ExecutionResult } from "./task-executor.js";
+
+/**
+ * Read user's default model from pi settings
+ */
+function getUserDefaultModel(): string {
+  try {
+    const settingsPath = join(homedir(), ".pi/agent/settings.json");
+    if (existsSync(settingsPath)) {
+      const content = readFileSync(settingsPath, "utf-8");
+      const settings = JSON.parse(content);
+      if (settings.defaultModel) {
+        return settings.defaultModel;
+      }
+    }
+  } catch {
+    // Ignore errors, use fallback
+  }
+  return "MiniMax-M2.7-highspeed"; // Safe fallback
+}
 
 export interface SubagentConfig {
   model?: string;
@@ -185,7 +206,7 @@ export class SubagentExecutor {
   ): Promise<{ success: boolean; output?: string; error?: string }> {
     return new Promise((resolve) => {
       const prompt = this.buildTaskPrompt(task);
-      const model = config.model || "sonnet";
+      const model = config.model || getUserDefaultModel();
       const timeout = (config.timeout || 300) * 1000;
 
       // Spawn pi process in non-interactive mode (-p) with the task prompt
@@ -226,7 +247,7 @@ export class SubagentExecutor {
   }
 
   private buildTaskPrompt(task: Task): string {
-    const model = this.settings.subagentConfig?.model || "sonnet";
+    const model = this.settings.subagentConfig?.model || getUserDefaultModel();
     const skills = (this.settings.subagentConfig?.skills || ["luban"]).join(", ");
 
     return `You are a LuBan (鲁班) subagent - a skilled software engineer.

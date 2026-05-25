@@ -48,6 +48,7 @@ interface CommitResult {
  */
 function parseSimpleYaml(content: string): { tasks: Task[]; settings: any } | null {
   const tasks: Task[] = [];
+  // Note: model is intentionally not set here - SubagentExecutor will use user's default
   const settings: any = {
     name: "workflow",
     maxParallel: 3,
@@ -55,7 +56,6 @@ function parseSimpleYaml(content: string): { tasks: Task[]; settings: any } | nu
     maxRetry: 1,
     autoCommit: true,
     subagentConfig: {
-      model: "sonnet",
       skills: ["luban"],
       maxContext: 4000,
       timeout: 300,
