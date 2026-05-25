@@ -6,6 +6,8 @@
  * - plan: read-only, plan.md, execution.yaml (QiaoChui)
  * - implement: writeable, all files (LuBan)
  * - review: read-only, audit.md (GaoYao)
+ * 
+ * Security: All regex patterns are sanitized to prevent injection attacks.
  */
 
 export interface ModeInfo {
@@ -63,20 +65,18 @@ const PHASE_CONFIGS: Record<string, PhaseConfig> = {
   },
 };
 
-
-/**
- * Legacy compatibility - extract allowed files for permission checking
- */
+// Legacy compatibility - extract allowed files for permission checking
 const PHASE_ALLOWED_FILES: Record<string, string[]> = Object.fromEntries(
   Object.entries(PHASE_CONFIGS).map(([phase, config]) => [phase, config.allowedFiles])
 );
 
 /**
  * Check if a file can be written based on current phase
+ * Security: Uses sanitized regex to prevent injection attacks
  */
 export function checkWritePermission(phase: string, filePath: string): boolean {
   const allowedFiles = PHASE_ALLOWED_FILES[phase];
-  
+
   if (!allowedFiles) {
     return false;
   }
@@ -89,18 +89,29 @@ export function checkWritePermission(phase: string, filePath: string): boolean {
   // Extract filename from path
   const fileName = filePath.split("/").pop() || "";
 
-  // Check for exact match
+  // Check for exact match (case-sensitive)
   if (allowedFiles.includes(fileName)) {
     return true;
   }
 
-  // Check for pattern matches
+  // Check for pattern matches with sanitized regex
   for (const pattern of allowedFiles) {
-    // Handle wildcard patterns like audit-*.md
     if (pattern.includes("*")) {
-      const regex = new RegExp("^" + pattern.replace(".", "\\.").replace("*", ".*") + "$");
-      if (regex.test(fileName)) {
-        return true;
+      // Convert glob pattern to regex safely:
+      // 1. Escape all regex special chars except *
+      // 2. Replace * with .* for glob matching
+      const sanitizedPattern = pattern
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")  // escape special chars
+        .replace("*", ".*");  // convert glob * to regex .*
+      
+      try {
+        const regex = new RegExp(`^${sanitizedPattern}$`);
+        if (regex.test(fileName)) {
+          return true;
+        }
+      } catch {
+        // Invalid regex, skip this pattern
+        continue;
       }
     }
   }
@@ -113,7 +124,7 @@ export function checkWritePermission(phase: string, filePath: string): boolean {
  */
 export function getModeInfo(phase: string): ModeInfo {
   const config = PHASE_CONFIGS[phase];
-  
+
   if (!config) {
     return {
       mode: "read-only",
