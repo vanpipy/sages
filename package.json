@@ -6,9 +6,6 @@
   "workspaces": [
     "pi"
   ],
-  "scripts": {
-    "test": "cd pi && bun run test"
-  },
   "keywords": [
     "pi",
     "agents",
