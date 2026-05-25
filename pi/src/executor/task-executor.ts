@@ -219,8 +219,12 @@ export class TaskExecutor {
   }
 
   /**
-   * Issue #4 fix: Proper topological sort using Kahn's algorithm
-   * Handles transitive dependencies (A→B→C) correctly
+   * Topological sort using Kahn's algorithm with priority ordering
+   * - Tasks are sorted so dependencies come before dependents
+   * - Among tasks with no remaining dependencies, high priority runs first
+   * 
+   * Note: This method is tested directly by unit tests despite being private.
+   * TypeScript's private is compile-time only; tests access it at runtime.
    */
   private getSortedTasks(): Task[] {
     const pendingTasks = Array.from(this.tasks.values()).filter(t => t.status === "pending");
@@ -252,6 +256,7 @@ export class TaskExecutor {
     // Kahn's algorithm with priority queue
     const queue: string[] = [];
     const result: Task[] = [];
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
 
     // Start with tasks that have no dependencies (in-degree = 0)
     for (const [taskId, degree] of inDegree) {
@@ -260,15 +265,13 @@ export class TaskExecutor {
       }
     }
 
-    // Sort queue by priority
-    const priorityOrder = { high: 0, medium: 1, low: 2 };
-    queue.sort((a, b) => {
-      const taskA = taskMap.get(a)!;
-      const taskB = taskMap.get(b)!;
-      return priorityOrder[taskA.priority] - priorityOrder[taskB.priority];
-    });
+    // Sort initial queue by priority
+    queue.sort((a, b) => priorityOrder[taskMap.get(a)!.priority] - priorityOrder[taskMap.get(b)!.priority]);
 
     while (queue.length > 0) {
+      // Sort queue by priority before each pick (handles priority changes as deps complete)
+      queue.sort((a, b) => priorityOrder[taskMap.get(a)!.priority] - priorityOrder[taskMap.get(b)!.priority]);
+
       const taskId = queue.shift()!;
       const task = taskMap.get(taskId)!;
       result.push(task);
@@ -278,25 +281,15 @@ export class TaskExecutor {
         const newDegree = inDegree.get(dependentId)! - 1;
         inDegree.set(dependentId, newDegree);
         if (newDegree === 0) {
-          // Insert by priority
-          const insertIndex = result.findIndex((_, i) => {
-            const existingTask = result[i];
-            const existingDegree = inDegree.get(existingTask.id) || 0;
-            if (existingDegree === 0) {
-              return priorityOrder[task.priority] < priorityOrder[existingTask.priority];
-            }
-            return false;
-          });
-          if (insertIndex === -1) {
-            queue.push(dependentId);
-          } else {
-            queue.splice(insertIndex, 0, dependentId);
-          }
+          queue.push(dependentId);
         }
       }
     }
 
-    // Handle cycles (tasks that couldn't be sorted) - put them at the end
+    // Handle cycles: tasks in a dependency cycle cannot be topologically sorted.
+    // Kahn's algorithm leaves them out of result. We append them at the end
+    // as a best-effort ordering. These tasks will likely fail at runtime
+    // since their dependencies form a circular reference.
     for (const task of pendingTasks) {
       if (!result.includes(task)) {
         result.push(task);
