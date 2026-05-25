@@ -6,7 +6,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { FileService } from "@/services/file-service.js";
+import { FileService } from "../../services/file-service.js";
 import type { TDDConfig, TaskResult, TDDPhaseResult } from "./types.js";
 
 // FileService instance for workspace operations
