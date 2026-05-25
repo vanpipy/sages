@@ -74,13 +74,10 @@ export class GoDetector extends BaseDetector {
     const patterns: string[] = [];
     const components: string[] = [];
     
-    // Store goModPath for this analysis
+    // Parse go.mod for dependencies
     const goModPath = join(cwd, "go.mod");
-    
-    // 1. Parse go.mod for dependencies and Go version
     const goModContent = this.readFile(goModPath);
     if (goModContent) {
-      this.parseGoVersion(goModContent, frameworks);
       this.parseDependencies(goModContent, frameworks);
     }
     
@@ -106,16 +103,12 @@ export class GoDetector extends BaseDetector {
   // Private Methods
   // ========================================================================
   
-  private parseGoVersion(content: string, frameworks: string[]): void {
-    const match = content.match(/^go\s+(\d+\.\d+)/m);
-    if (match) {
-      frameworks.push(`Go ${match[1]}`);
-    }
-  }
-  
   private parseDependencies(content: string, frameworks: string[]): void {
     // Framework detection from import paths
     const frameworkMap: Record<string, string> = {
+      "charm.land/bubbletea": "bubbletea",
+      "charm.land/bubbles": "bubbles",
+      "charm.land/lipgloss": "lipgloss",
       "github.com/charmbracelet/bubbletea": "bubbletea",
       "github.com/charmbracelet/bubbles": "bubbles",
       "github.com/charmbracelet/lipgloss": "lipgloss",
