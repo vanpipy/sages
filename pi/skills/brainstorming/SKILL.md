@@ -9,7 +9,7 @@ description: "Explore user intent, propose approaches, and design before impleme
 
 Always show current mode in system prompt:
 ```
-[MODE: brainstorming] (exploring|clarifying|proposing|designing|approved)
+[MODE: brainstorming] (exploring|grilling|proposing|designing|approved)
 ```
 
 ## When to Use
@@ -39,20 +39,61 @@ Examples:
 flowchart TD
     A[Explore Project Context] --> B{Visual Questions?}
     B -->|Yes| C[Offer Visual Companion]
-    B -->|No| D[Ask Clarifying Questions]
+    B -->|No| D[Grilling: Question 1]
     C --> D
-    D --> E[Propose 2-3 Approaches]
-    E --> F[Present Design Sections]
-    F --> G{User Approves?}
-    G -->|No| H[Revise Section]
-    H --> F
-    G -->|Yes| I[Write Design Doc]
-    I --> J[Spec Self-Review]
-    J --> K[User Reviews Spec]
-    K -->|Changes| L[Update Spec]
-    L --> K
-    K -->|Approved| M[Transition to Fuxi]
-    M --> N[End - User proceeds]
+    D --> E{Branch resolved?}
+    E -->|No| F[Follow branch with recommended answer]
+    F --> E
+    E -->|Yes| G{More questions?}
+    G -->|Yes| D
+    G -->|No| H[Propose 2-3 Approaches]
+    H --> I[Present Design Sections]
+    I --> J{User Approves?}
+    J -->|No| K[Revise Section]
+    K --> I
+    J -->|Yes| L[Write Design Doc]
+    L --> M[Spec Self-Review]
+    M --> N[User Reviews Spec]
+    N -->|Changes| O[Update Spec]
+    O --> N
+    N -->|Approved| P[Transition to Fuxi]
+    P --> Q[End - User proceeds]
+```
+
+## Grill-Me Integration
+
+The **Grill-Me** protocol is now embedded in the questioning phase:
+
+### Branch Resolution Protocol
+
+1. **One question at a time** — Don't overwhelm
+2. **Provide recommendation** — Lead with suggested answer
+3. **Explore codebase first** — If the answer can be found by reading code, do that instead
+4. **Resolve each branch** — Don't move on until the decision is locked
+5. **Track dependencies** — Some decisions constrain others
+
+### Question Template
+
+```
+[Question about specific topic]
+
+Option A: [description] — Recommended
+Option B: [description]  
+Option C: [description]
+
+Your call — A, B, C, or something different?
+```
+
+### Example
+
+```
+What should be the scope of dark mode?
+
+A: Global toggle (simplest, applies to all users) — Recommended
+B: Per-user preference stored in database (syncs across devices)
+C: Per-user preference in LocalStorage (simpler, device-only)
+
+Recommendation: A for MVP because [reasoning]
 ```
 
 ## Hard Gate
@@ -69,7 +110,7 @@ Complete these items in order:
 
 1. **Explore project context** — Check files, docs, recent commits
 2. **Offer visual companion** — If topic involves visual questions (own message, no other content)
-3. **Ask clarifying questions** — One at a time, multiple choice preferred
+3. **Grill: Resolve decision branches** — One question at a time with recommendations
 4. **Propose 2-3 approaches** — With tradeoffs and recommendation
 5. **Present design sections** — Get approval after each section
 6. **Write design doc** — Save to `.sages/designs/YYYY-MM-DD-<topic>.md`
@@ -83,10 +124,11 @@ Complete these items in order:
 |-----------|-------------|
 | One question at a time | Don't overwhelm with multiple questions |
 | Multiple choice preferred | Easier to answer than open-ended |
+| Always recommend | For each question, provide suggested answer |
+| Explore codebase first | If answer is in the code, read it instead |
+| Resolve each branch | Don't move on until decision is locked |
 | YAGNI | Remove unnecessary features from all designs |
-| Explore alternatives | Always propose 2-3 approaches |
 | Incremental validation | Get approval before moving on |
-| Be flexible | Go back and clarify when needed |
 
 ## Design for Isolation
 
@@ -129,15 +171,16 @@ Understand the current project state:
 
 **Output**: `ProjectContext` with structure, patterns, components
 
-### 2. Clarifying
+### 2. Grilling
 
-Ask questions to refine the idea:
+Resolve each decision branch:
 - One question per message
-- Multiple choice when possible
-- Focus on: purpose, constraints, success criteria
-- Detect if project is too large (needs decomposition)
+- Provide recommendation + reasoning
+- Explore codebase when applicable
+- Track dependencies between decisions
+- Continue until no unresolved branches
 
-**Output**: `IntentSpec` with clarified requirements
+**Output**: `DecisionTree` with all branches resolved
 
 ### 3. Proposing
 
@@ -178,6 +221,11 @@ All design sections approved:
 ## Context
 [Project context from exploration]
 [Why this change is needed]
+
+## Decisions Resolved
+[Key decisions made during grilling phase]
+- [Decision 1]: [Resolution] — [Rationale]
+- [Decision 2]: [Resolution] — [Rationale]
 
 ## Requirements
 - [Requirement 1]
@@ -254,6 +302,7 @@ When **Fuxi workflow is running** and design is approved:
 
 **Request:** {request}
 **Approach:** {chosen approach}
+**Decisions Resolved:** {summary}
 **Design:** .sages/designs/{date}-{topic}.md
 
 → Starting Fuxi workflow with design context...
@@ -268,7 +317,7 @@ When **Fuxi workflow is running** and design is approved:
 | User says "defer"/"save"/"later" | Save to `.sages/designs/`, don't start Fuxi |
 | User says "exit"/"cancel" | End without proceeding |
 
-### Fuxi Integration
+## Fuxi Integration
 
 On auto-transition:
 1. System creates Fuxi context from approved design
@@ -302,22 +351,6 @@ Help user choose which sub-project to brainstorm first:
 - Or start with the highest value/use
 - Each sub-project gets its own: brainstorm → design → implement cycle
 
-### Example Decomposition
-
-```
-User: /brainstorm build a platform with chat, file storage, and billing
-
-Agent: This project has 3 independent subsystems:
-       1. Chat system (foundational - other features may use)
-       2. File storage (depends on user auth)
-       3. Billing system (depends on user accounts)
-
-       Recommended order:
-       1. Chat system (foundation) → 2. File storage → 3. Billing
-
-       Which should we brainstorm first? Or create separate sessions for each?
-```
-
 ## Visual Companion (Optional)
 
 When you anticipate visual questions (mockups, layouts, diagrams):
@@ -327,19 +360,15 @@ When you anticipate visual questions (mockups, layouts, diagrams):
 
 ## Anti-Patterns
 
-### "This is too simple"
-
-Every project goes through brainstorming. A todo list, a single-function utility, a config change — all of them.
-
-### Skipping exploration
-
-Always check project context first. Don't assume you know the codebase.
-
-### Too many questions
-
-If you're past 10 questions without moving to proposing, something's wrong. Either:
-- User's requirements are unclear (flag this)
-- You're asking unnecessary questions (simplify)
+| ❌ Don't | ✅ Do |
+|----------|-------|
+| "This is too simple" | Every project goes through brainstorming |
+| Skip exploration | Always check project context first |
+| Ask multiple questions at once | One question, wait for answer |
+| Ask without recommendation | Always lead with suggested answer |
+| Accept "whatever" answers | Push for explicit preference |
+| Move on without resolution | Stay until branch is resolved |
+| Too many questions (>10 before proposing) | Flag unclear requirements or simplify |
 
 ## Metrics (for skill improvement)
 
@@ -352,6 +381,7 @@ Track these for analysis:
 
 ## Related Skills
 
+- **Grill-Me**: Standalone decision tree resolver (embedded in brainstorming)
 - **Fuxi**: MDD design draft creation (after brainstorming approval)
 - **QiaoChui**: Task decomposition (implementation planning)
 - **LuBan**: TDD execution (implementation)
@@ -363,17 +393,32 @@ Track these for analysis:
 
 ```
 User: /brainstorm add dark mode
+Agent: [MODE: brainstorming] (exploring)
 Agent: Exploring project context...
 Agent: I see this is a TypeScript web app with React.
-       One clarifying question: should dark mode apply to all users or per-user preference?
 
-User: Per-user, stored in preferences
-Agent: Proposed approaches:
-       A. LocalStorage (simplest, not synced) - RECOMMENDED for MVP
-       B. User profile in database (complex, syncs across devices)
-       C. URL parameter (shareable, not persistent)
+Agent: [MODE: brainstorming] (grilling)
+Agent: First question: what should be the scope of dark mode?
 
+Option A: Global toggle (simplest, applies to all users) — Recommended
+Option B: Per-user preference stored in database (syncs across devices)
+Option C: Per-user preference in LocalStorage (device-only)
+
+Recommendation: A for MVP because [reasoning]
 User: A sounds good
+Agent: Locked: Global toggle. Next question: should it persist across sessions?
+
+[... continues until all branches resolved ...]
+
+Agent: [MODE: brainstorming] (proposing)
+Agent: With decisions resolved, here are 3 approaches:
+
+A. CSS custom properties + toggle button — Recommended for React
+B. CSS classes + body data attribute
+C. Theme provider with context
+
+User: A
+Agent: [MODE: brainstorming] (designing)
 Agent: Presenting design section: Storage Layer...
 
 [... continues with design flow ...]
@@ -408,9 +453,15 @@ Agent: I see the existing notification system in src/notifications/.
        - Keep backward compatibility during transition
 
        First question: should preferences be per-channel or unified?
+
+A: Per-channel (email, SMS, push separate) — Recommended
+B: Unified (one toggle per notification type)
+
+Recommendation: A because [isolation principle]
 ```
 
 ---
 
 *Brainstorming skill for Four Sages workflow*
+*Integrates Grill-Me protocol for decision tree resolution*
 *Integrates with Fuxi, QiaoChui, LuBan, GaoYao*
