@@ -6,6 +6,8 @@
 # Also installs pi-memory for persistent memory capabilities
 #
 
+$ErrorActionPreference = 'Stop'
+
 param(
     [string]$Prefix,
     [switch]$Force,
@@ -20,6 +22,15 @@ $PKG_DIR = "$PI_DIR\packages\$PKG_NAME"
 $REPO_URL = "https://github.com/vanpipy/sages.git"
 $AGENT_DIR = "$PI_DIR\agent"
 $PI_MEMORY_PKG = "npm:@samfp/pi-memory"
+
+# Temp directory for cloning (unique per run)
+$script:TMP_DIR = ""
+
+function cleanup {
+    if ($script:TMP_DIR -and (Test-Path $script:TMP_DIR)) {
+        Remove-Item -Recurse -Force $script:TMP_DIR -ErrorAction SilentlyContinue
+    }
+}
 
 function usage {
     Write-Host "Usage: $PSCommandPath [OPTIONS]"
@@ -268,19 +279,15 @@ function install {
     
     # Clone sages
     Write-Host "==> Installing sages..."
-    $TMP_DIR = [System.IO.Path]::GetTempPath()
-    $CLONE_DIR = Join-Path $TMP_DIR "sages-install"
-    
-    if (Test-Path $CLONE_DIR) {
-        Remove-Item -Recurse -Force $CLONE_DIR
-    }
-    $null = New-Item -ItemType Directory -Path $CLONE_DIR -Force
+    $script:TMP_DIR = Join-Path ([System.IO.Path]::GetTempPath()) "sages-install-$( [guid]::NewGuid().ToString('N') )"
+    $null = New-Item -ItemType Directory -Path $script:TMP_DIR -Force
     
     Write-Host "  Cloning from $REPO_URL..."
     try {
-        git clone $REPO_URL $CLONE_DIR 2>&1 | Out-Null
+        git clone $REPO_URL $script:TMP_DIR 2>&1 | Out-Null
     } catch {
         Write-Host "Error: Failed to clone sages repository" -ForegroundColor Red
+        cleanup
         exit 1
     }
     
@@ -289,7 +296,7 @@ function install {
     
     $dirs = @("prompts", "skills", "extensions", "src")
     foreach ($dir in $dirs) {
-        $srcDir = Join-Path $CLONE_DIR "pi\$dir"
+        $srcDir = Join-Path $script:TMP_DIR "pi\$dir"
         $destDir = Join-Path $PKG_DIR $dir
         
         if (-not (Test-Path $srcDir)) {
@@ -312,7 +319,7 @@ function install {
     if ((Test-Path $pkgJsonDest) -and -not $Force) {
         Write-Host "  Keeping existing package.json"
     } else {
-        $pkgJsonSrc = Join-Path $CLONE_DIR "pi\package.json"
+        $pkgJsonSrc = Join-Path $script:TMP_DIR "pi\package.json"
         if (Test-Path $pkgJsonSrc) {
             Copy-Item $pkgJsonSrc $pkgJsonDest -Force
             Write-Host "  Installed package.json"
@@ -329,9 +336,7 @@ function install {
     }
     
     # Cleanup
-    if (Test-Path $CLONE_DIR) {
-        Remove-Item -Recurse -Force $CLONE_DIR
-    }
+    cleanup
     
     Write-Host ""
     Write-Host "Done! Restart pi: exit && pi" -ForegroundColor Green
