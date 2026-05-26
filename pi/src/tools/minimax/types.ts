@@ -49,7 +49,9 @@ export const SPEECH_MODELS = {
 } as const;
 
 export const MUSIC_MODELS = {
-  MUSIC_26: "Music-2.6",
+  MUSIC_26: "music-2.6",
+  MUSIC_25_PLUS: "music-2.5+",
+  MUSIC_25: "music-2.5",
 } as const;
 
 // ============ Common Types ============
@@ -192,10 +194,19 @@ export interface TranscriptionResponse extends BaseResponse {
 
 export interface MusicGenerateRequest {
   model?: string;
-  prompt: string;
-  duration?: number;
+  prompt?: string;
   lyrics?: string;
-  instrumental?: boolean;
+  is_instrumental?: boolean;
+  lyrics_optimizer?: boolean;
+  duration?: number;
+  output_format?: "url" | "hex";
+  audio_setting?: {
+    format?: string;
+    sample_rate?: number;
+    bitrate?: number;
+    channel?: number;
+  };
+  instrumental?: boolean; // legacy alias for is_instrumental
 }
 
 export interface MusicResponse extends BaseResponse {
@@ -203,6 +214,11 @@ export interface MusicResponse extends BaseResponse {
   status?: string;
   audio_url?: string;
   file_id?: string;
+  data?: {
+    audio?: string;      // hex-encoded audio data
+    audio_url?: string;  // URL to audio file
+    status?: number;      // generation status
+  };
 }
 
 // ============ Vision Types ============

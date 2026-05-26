@@ -13,6 +13,7 @@ import { loadCredentials, cacheCredentials, getCredentials, detectApiHost, getAp
 import { MiniMaxError, parseAPIError } from "./errors.js";
 import {
   TEXT_MODELS,
+  MUSIC_MODELS,
   type MiniMaxConfig,
   type MiniMaxClient,
   type ChatCompletionRequest,
@@ -359,12 +360,28 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
 
     // ============ MUSIC ============
     async musicGenerate(request: MusicGenerateRequest): Promise<MusicResponse> {
+      // Handle both instrumental (boolean) and is_instrumental
+      const isInstrumental = request.is_instrumental ?? request.instrumental ?? false;
+      
+      // For instrumental music, provide default lyrics structure if not supplied
+      let lyrics = request.lyrics;
+      if (isInstrumental && !lyrics && !request.lyrics_optimizer) {
+        lyrics = "[intro] [outro]";
+      }
+
       const body = {
-        model: request.model || "Music-2.6",
-        prompt: request.prompt,
+        model: request.model || MUSIC_MODELS.MUSIC_26, // Use lowercase model name
+        prompt: request.prompt || "",
         duration: request.duration,
-        lyrics: request.lyrics,
-        instrumental: request.instrumental ?? false,
+        lyrics: lyrics,
+        is_instrumental: isInstrumental,
+        lyrics_optimizer: request.lyrics_optimizer,
+        output_format: request.output_format || "url",
+        audio_setting: request.audio_setting || {
+          format: "mp3",
+          sample_rate: 44100,
+          bitrate: 256000,
+        },
       };
 
       return apiCall<MusicResponse>(

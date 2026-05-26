@@ -80,6 +80,7 @@ function getApiHostFromEnv(): string | null {
 
 /**
  * Load credentials from config file (~/.mmx/config.json)
+ * Supports both mmx CLI format (api_key, group_id) and legacy format (apiKey, groupId)
  */
 function loadFromConfig(): MiniMaxCredentials | null {
   if (!existsSync(CONFIG_PATH)) {
@@ -88,10 +89,13 @@ function loadFromConfig(): MiniMaxCredentials | null {
 
   try {
     const config = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-    if (config.apiKey) {
+    // Support mmx CLI format (snake_case) and legacy format (camelCase)
+    const apiKey = config.api_key || config.apiKey;
+    const groupId = config.group_id || config.groupId;
+    if (apiKey) {
       return {
-        apiKey: config.apiKey,
-        groupId: config.groupId,
+        apiKey: apiKey,
+        groupId: groupId,
       };
     }
   } catch {

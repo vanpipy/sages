@@ -56,6 +56,7 @@ const MinimaxMusicSchema = Type.Object({
   prompt: Type.String({ description: "Music description/prompt" }),
   duration: Type.Optional(Type.Number({ description: "Duration in seconds (default: 60)" })),
   lyrics: Type.Optional(Type.String({ description: "Song lyrics (for singing)" })),
+  instrumental: Type.Optional(Type.Boolean({ description: "Generate instrumental music without vocals (default: false)" })),
 });
 
 const MinimaxVideoSchema = Type.Object({
@@ -254,7 +255,7 @@ export async function minimaxSpeech(
 // @ts-ignore - Tool signature mismatch with internal function
 export async function minimaxMusic(
   _id: string,
-  params: { prompt: string; duration?: number; lyrics?: string },
+  params: { prompt: string; duration?: number; lyrics?: string; instrumental?: boolean },
   _signal?: AbortSignal,
   _onUpdate?: any,
   _ctx?: any
@@ -262,16 +263,20 @@ export async function minimaxMusic(
   try {
     const mmx = await initMiniMaxSkill();
     const response = await mmx.musicGenerate({
+      model: "music-2.6",
       prompt: params.prompt,
       duration: params.duration,
       lyrics: params.lyrics,
+      is_instrumental: params.instrumental,
+      output_format: "url", // Request URL response for easier handling
     });
 
-    const audioUrl = response.audio_url;
+    // Check data.audio_url first (new response format), then fall back to audio_url
+    const audioUrl = response.data?.audio_url || response.audio_url;
     if (audioUrl) {
       return { content: [{ type: "text", text: `Music generated: ${audioUrl}` }] };
     }
-    return { content: [{ type: "text", text: `Music generated: task_id=${response.task_id}, status=${response.status}` }] };
+    return { content: [{ type: "text", text: `Music generated: task_id=${response.task_id}, status=${response.data?.status || response.status}` }] };
   } catch (error) {
     return {
       content: [{ type: "text", text: `Error: ${String(error)}` }],
