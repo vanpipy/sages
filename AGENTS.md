@@ -218,7 +218,7 @@ src/tools/luban/
 ```bash
 cd ~/Project/sages/pi
 bun run typecheck    # Verify no TypeScript errors
-bun test ./test      # Ensure all tests pass (430+ expected)
+bun test ./test      # Ensure all tests pass (417+ expected)
 ```
 
 > **⚠️ Important**: Both checks must pass before committing. Run from the `pi/` subdirectory.
