@@ -3,7 +3,7 @@
  * Tests MDD (Multi-Dimensional Design) draft generation
  */
 import { describe, it, expect } from "bun:test";
-import { generateMinimalDraft, generateDraft, type DraftConfig } from "../../src/utils/draft-generator";
+import { generateMinimalDraft, generateDraft, type DraftConfig } from "@/utils/draft-generator";
 
 describe("Draft Generator", () => {
   describe("generateMinimalDraft", () => {

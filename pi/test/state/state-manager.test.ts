@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { StateManager, type WorkflowState, type Task } from "../../src/state/state-manager";
+import { StateManager, type WorkflowState, type Task } from "@/state/state-manager";
 
 describe("StateManager", () => {
   let manager: StateManager;

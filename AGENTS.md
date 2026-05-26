@@ -218,10 +218,15 @@ src/tools/luban/
 ```bash
 cd ~/Project/sages/pi
 bun run typecheck    # Verify no TypeScript errors
-bun test ./test      # Ensure all tests pass (425+ expected)
+bun test ./test      # Ensure all tests pass (430+ expected)
 ```
 
 > **⚠️ Important**: Both checks must pass before committing. Run from the `pi/` subdirectory.
+
+## Import Conventions
+
+- **Use `@/` alias in `./pi/test/`**: When importing from `./pi/src/` in test files, use `from "@/..."` (e.g., `from "@/utils/draft-generator"`) instead of relative paths. Source files in `./pi/src/` should use relative paths.
+- **Rationale**: The `tsconfig.json` defines `paths: { "@/*": ["./src/*"] }`. This ensures consistent, maintainable imports across the codebase, especially when files are moved or refactored.
 
 ## Security Practices
 

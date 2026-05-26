@@ -3,7 +3,7 @@
  * Tests phase-based file restrictions (from skills)
  */
 import { describe, it, expect } from "bun:test";
-import { checkWritePermission, getModeInfo } from "../../src/utils/mode-checker";
+import { checkWritePermission, getModeInfo } from "@/utils/mode-checker";
 
 describe("ModeChecker", () => {
   describe("checkWritePermission", () => {

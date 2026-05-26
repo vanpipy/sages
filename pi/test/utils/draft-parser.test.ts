@@ -10,7 +10,7 @@ import {
   extractPlanName, 
   getPlaneSummary,
   type ParsedDraft 
-} from "../../src/utils/draft-parser";
+} from "@/utils/draft-parser";
 
 describe("Draft Parser", () => {
   describe("parseDraft", () => {
