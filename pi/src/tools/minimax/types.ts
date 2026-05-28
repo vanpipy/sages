@@ -243,6 +243,17 @@ export interface VisionRequest {
   max_tokens?: number;
 }
 
+// Token Plan VLM response format
+export interface VLMResponse {
+  content: string;
+  success?: boolean;  // Computed from base_resp.status_code
+  base_resp?: {
+    status_code: number;
+    status_msg: string;
+  };
+}
+
+// Legacy API Plan Vision response (deprecated)
 export interface VisionResponse extends BaseResponse {
   id: string;
   model: string;
@@ -305,8 +316,8 @@ export interface MiniMaxClient {
   // Music
   musicGenerate(request: MusicGenerateRequest): Promise<MusicResponse>;
 
-  // Vision
-  vision(request: VisionRequest): Promise<VisionResponse>;
+  // Vision (Token Plan VLM)
+  vision(request: VisionRequest): Promise<VLMResponse>;
 
   // Search (Token Plan MCP)
   search(request: SearchRequest): Promise<SearchResponse>;

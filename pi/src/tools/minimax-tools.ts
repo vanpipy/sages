@@ -15,6 +15,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { initMiniMaxSkill } from "./minimax/index.js";
 import type { SearchResponse, ChatCompletionResponse, ImageResponse, VisionResponse, MusicResponse, VideoResponse, SpeechResponse } from "./minimax/types.js";
+import { toDataUri } from "./minimax/image-utils.js";
 
 // ===========================================================================
 // Tool Schemas (T3 Schema with TypeBox)
@@ -193,18 +194,23 @@ export async function minimaxVision(
   _ctx?: any
 ): Promise<{ content: { type: string; text: string }[] }> {
   try {
+    // Convert local files and HTTP URLs to base64 data URIs
+    // This is required because the MiniMax VLM endpoint cannot access
+    // local files or non-public URLs directly
+    const imageDataUri = await toDataUri(params.image_url);
+
     const mmx = await initMiniMaxSkill();
     const response = await mmx.vision({
       messages: [{
         role: "user",
         content: [
-          { type: "image_url" as const, image_url: { url: params.image_url } },
+          { type: "image_url" as const, image_url: { url: imageDataUri } },
           { type: "text" as const, text: params.message || "Describe this image" },
         ],
       }],
     });
 
-    const reply = response.choices?.[0]?.message?.content || "No response";
+    const reply = response.content || "No response";
     return { content: [{ type: "text", text: reply }] };
   } catch (error) {
     return {

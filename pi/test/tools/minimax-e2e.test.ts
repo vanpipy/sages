@@ -271,35 +271,30 @@ describe("MiniMax E2E Tests", () => {
   });
 
   describe("Vision E2E", () => {
-    it("should analyze an image URL", async () => {
+    it("should analyze an image (Token Plan VLM)", async () => {
       if (skipE2E) return;
 
       const { createMiniMax } = await import("../../src/tools/minimax/index.js");
       const client = createMiniMax(credentials!);
 
+      // Use a data URI for the image (1x1 red pixel)
+      const dataUri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+
       const response = await client.vision({
-        model: "MiniMax-VL-01",
         messages: [
           {
             role: "user",
             content: [
-              {
-                type: "image_url",
-                image_url: {
-                  url: "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",
-                },
-              },
-              { type: "text", text: "Describe this image briefly." },
+              { type: "image_url", image_url: { url: dataUri } },
+              { type: "text", text: "What color is this image?" },
             ],
           },
         ],
-        max_tokens: 100,
       });
 
-      expect(response.success).toBe(true);
-      expect(response.choices).toBeDefined();
-      expect(response.choices.length).toBeGreaterThan(0);
-      expect(response.choices[0].message.content).toBeTruthy();
+      // Token Plan VLM response format
+      expect(response.content).toBeTruthy();
+      expect(response.content.toLowerCase()).toContain("red");
     }, { timeout: 30000 });
   });
 

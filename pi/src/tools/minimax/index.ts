@@ -31,6 +31,7 @@ import {
   type MusicGenerateRequest,
   type MusicResponse,
   type VisionRequest,
+  type VLMResponse,
   type VisionResponse,
   type SearchRequest,
   type SearchResponse,
@@ -58,12 +59,11 @@ const ENDPOINTS = {
   // Music
   MUSIC_GENERATION: "/v1/music_generation",
   
-  // Vision
-  VISION_CHAT: "/v1/vision/chatcompletion_v2",
+  // Vision - Token Plan uses VLM endpoint
+  VISION_CHAT: "/v1/coding_plan/vlm",
   
   // Token Plan MCP endpoints
   SEARCH: "/v1/coding_plan/search",
-  VLM: "/v1/coding_plan/vlm",
 } as const;
 
 /**
@@ -393,15 +393,20 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
       );
     },
 
-    // ============ VISION ============
-    async vision(request: VisionRequest): Promise<VisionResponse> {
+    // ============ VISION (Token Plan VLM) ============
+    async vision(request: VisionRequest): Promise<VLMResponse> {
+      // Token Plan VLM endpoint uses a simple prompt+image_url format
+      // Extract prompt and image_url from the messages structure
+      const userMessage = request.messages.find(m => m.role === 'user');
+      const imageContent = userMessage?.content.find(c => c.type === 'image_url');
+      const textContent = userMessage?.content.find(c => c.type === 'text');
+      
       const body = {
-        model: request.model || "MiniMax-VL-01",
-        messages: request.messages,
-        max_tokens: request.max_tokens ?? 4096,
+        prompt: textContent?.text || request.messages[0]?.content.find(c => c.type === 'text')?.text || 'Describe this image',
+        image_url: imageContent?.image_url?.url || '',
       };
 
-      return apiCall<VisionResponse>(
+      return apiCall<VLMResponse>(
         ENDPOINTS.VISION_CHAT,
         { baseURL },
         body,
