@@ -1,12 +1,17 @@
 /**
  * MiniMax Skill for pi
- * All 7 capabilities: text, image, video, speech, music, vision, search
- * 
+ * All 13 tools: text, image, video, speech, music, vision, search, voices, video_task, quota, file_list, file_upload, file_delete
+ *
  * Supports:
  * - API Plan: Full API access
  * - Token Plan: MCP endpoints (search, vision) + M2.7 text models
- * 
+ *
  * Auto-detects the correct API host based on the API key.
+ *
+ * Timeout strategy:
+ * - Fast APIs (chat, search, quota, voices, file_list/delete): 60s
+ * - Medium APIs (image, speech, vision): 120s
+ * - Slow APIs (video, music, file_upload): 300s
  */
 
 import { loadCredentials, cacheCredentials, getCredentials, detectApiHost, getApiHost } from "./auth.js";
@@ -87,6 +92,15 @@ const ENDPOINTS = {
 } as const;
 
 /**
+ * Timeout presets for different API categories (in milliseconds)
+ */
+const TIMEOUTS = {
+  FAST: 60000,      // 60s - chat, search, quota, voices, file_list/delete
+  MEDIUM: 120000,    // 120s - image, speech, vision
+  SLOW: 300000,      // 300s - video, music, file_upload
+} as const;
+
+/**
  * Internal API caller with auth and error handling
  */
 async function apiCall<T>(
@@ -94,7 +108,8 @@ async function apiCall<T>(
   config: { baseURL: string; timeout?: number },
   body: unknown,
   apiKey: string,
-  groupId?: string
+  groupId?: string,
+  timeoutPreset: keyof typeof TIMEOUTS = "FAST"
 ): Promise<T> {
   const url = `${config.baseURL}${endpoint}`;
   const headers: Record<string, string> = {
@@ -107,17 +122,19 @@ async function apiCall<T>(
     headers["GroupId"] = groupId;
   }
 
+  const timeout = config.timeout || TIMEOUTS[timeoutPreset];
+
   let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(config.timeout || 60000),
+      signal: AbortSignal.timeout(timeout),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new MiniMaxError("Request timeout", "timeout");
+      throw new MiniMaxError(`Request timeout after ${timeout / 1000}s`, "timeout");
     }
     throw new MiniMaxError(
       error instanceof Error ? error.message : "Network error",
@@ -252,7 +269,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "FAST"
       );
     },
 
@@ -295,7 +313,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "MEDIUM"
       );
     },
 
@@ -316,7 +335,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "MEDIUM"
       );
     },
 
@@ -335,7 +355,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "SLOW"
       );
     },
 
@@ -358,7 +379,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "MEDIUM"
       );
     },
 
@@ -374,7 +396,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "MEDIUM"
       );
     },
 
@@ -382,7 +405,7 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
     async musicGenerate(request: MusicGenerateRequest): Promise<MusicResponse> {
       // Handle both instrumental (boolean) and is_instrumental
       const isInstrumental = request.is_instrumental ?? request.instrumental ?? false;
-      
+
       // For instrumental music, provide default lyrics structure if not supplied
       let lyrics = request.lyrics;
       if (isInstrumental && !lyrics && !request.lyrics_optimizer) {
@@ -404,12 +427,14 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         },
       };
 
+      // Music generation can take 60-180 seconds - use extended timeout
       return apiCall<MusicResponse>(
         ENDPOINTS.MUSIC_GENERATION,
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "SLOW"
       );
     },
 
@@ -431,7 +456,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "MEDIUM"
       );
     },
 
@@ -447,7 +473,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "FAST"
       );
     },
 
@@ -460,7 +487,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "FAST"
       );
     },
 
@@ -473,7 +501,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "FAST"
       );
     },
 
@@ -484,7 +513,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         {},
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "FAST"
       );
     },
 
@@ -495,7 +525,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         {},
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "FAST"
       );
     },
 
@@ -530,7 +561,8 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
         { baseURL },
         body,
         config.apiKey,
-        config.groupId
+        config.groupId,
+        "FAST"
       );
     },
   };

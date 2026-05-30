@@ -304,8 +304,8 @@ export async function minimaxMusic(
       output_format: "url", // Request URL response for easier handling
     });
 
-    // Check data.audio_url first (new response format), then fall back to audio_url
-    const audioUrl = response.data?.audio_url || response.audio_url;
+    // Check data.audio first (API returns audio URL in data.audio), then fall back to audio_url
+    const audioUrl = response.data?.audio || response.audio_url;
     if (audioUrl) {
       return { content: [{ type: "text", text: `Music generated: ${audioUrl}` }] };
     }
