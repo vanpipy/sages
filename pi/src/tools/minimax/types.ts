@@ -253,6 +253,66 @@ export interface VLMResponse {
   };
 }
 
+// ============ Voice Types ============
+
+export interface VoiceInfo {
+  voice_id: string;
+  voice_name: string;
+  language: string[];
+  gender: string;
+  description?: string[];
+  preview_url?: string;
+}
+
+export interface VoiceListResponse extends BaseResponse {
+  system_voice?: VoiceInfo[];
+}
+
+// ============ Video Task Types ============
+
+export interface VideoTaskResponse extends BaseResponse {
+  task_id?: string;
+  status?: string;
+  file_id?: string;
+  video_url?: string;
+  video_width?: number;
+  video_height?: number;
+}
+
+// ============ Quota Types ============
+
+export interface ModelQuota {
+  model_name: string;
+  current_interval_total_count: number;
+  current_interval_usage_count: number;
+}
+
+export interface QuotaResponse extends BaseResponse {
+  model_remains?: ModelQuota[];
+}
+
+// ============ File Management Types ============
+
+export interface UploadedFile {
+  file_id: string;
+  filename: string;
+  bytes: number;
+  created_at: number;
+  purpose: string;
+}
+
+export interface FileListResponse extends BaseResponse {
+  files?: UploadedFile[];
+}
+
+export interface FileUploadResponse extends BaseResponse {
+  file?: UploadedFile;
+}
+
+export interface FileDeleteResponse extends BaseResponse {
+  file_id?: string;
+}
+
 // Legacy API Plan Vision response (deprecated)
 export interface VisionResponse extends BaseResponse {
   id: string;
@@ -321,4 +381,18 @@ export interface MiniMaxClient {
 
   // Search (Token Plan MCP)
   search(request: SearchRequest): Promise<SearchResponse>;
+
+  // Voices
+  voices(language?: string): Promise<VoiceListResponse>;
+
+  // Video task status
+  videoTask(taskId: string): Promise<VideoTaskResponse>;
+
+  // Quota
+  quota(): Promise<QuotaResponse>;
+
+  // File management
+  fileList(): Promise<FileListResponse>;
+  fileUpload(filePath: string, purpose?: string): Promise<FileUploadResponse>;
+  fileDelete(fileId: string): Promise<FileDeleteResponse>;
 }

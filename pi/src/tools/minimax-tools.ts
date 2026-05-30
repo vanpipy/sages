@@ -9,12 +9,18 @@
  * - minimax-speech: Text-to-speech
  * - minimax-music: Music generation
  * - minimax-video: Video generation
+ * - minimax-voices: List available voices
+ * - minimax-video-task: Query video task status
+ * - minimax-quota: Display usage quotas
+ * - minimax-file-list: List uploaded files
+ * - minimax-file-upload: Upload a file
+ * - minimax-file-delete: Delete an uploaded file
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { initMiniMaxSkill } from "./minimax/index.js";
-import type { SearchResponse, ChatCompletionResponse, ImageResponse, VisionResponse, MusicResponse, VideoResponse, SpeechResponse } from "./minimax/types.js";
+import type { SearchResponse, ChatCompletionResponse, ImageResponse, VisionResponse, MusicResponse, VideoResponse, SpeechResponse, VideoTaskResponse, VoiceListResponse, QuotaResponse, FileListResponse, FileUploadResponse, FileDeleteResponse } from "./minimax/types.js";
 import { toDataUri } from "./minimax/image-utils.js";
 
 // ===========================================================================
@@ -64,6 +70,27 @@ const MinimaxVideoSchema = Type.Object({
   prompt: Type.String({ description: "Video description" }),
   duration: Type.Optional(Type.Number({ description: "Duration in seconds (default: 6, max: 10)" })),
   resolution: Type.Optional(Type.String({ description: "Quality: 720p (default), 1080p" })),
+});
+
+const MinimaxVoicesSchema = Type.Object({
+  language: Type.Optional(Type.String({ description: "Filter voices by language (e.g. english, korean, japanese)" })),
+});
+
+const MinimaxVideoTaskSchema = Type.Object({
+  task_id: Type.String({ description: "Video generation task ID" }),
+});
+
+const MinimaxQuotaSchema = Type.Object({});
+
+const MinimaxFileListSchema = Type.Object({});
+
+const MinimaxFileUploadSchema = Type.Object({
+  file_path: Type.String({ description: "Path to the file to upload" }),
+  purpose: Type.Optional(Type.String({ description: "Purpose: music, video, or other (default: music)" })),
+});
+
+const MinimaxFileDeleteSchema = Type.Object({
+  file_id: Type.String({ description: "File ID to delete" }),
 });
 
 // ===========================================================================
@@ -324,6 +351,220 @@ export async function minimaxVideo(
   }
 }
 
+/**
+ * minimax-voices - List available system voices
+ * Usage: /minimax-voices [--language english]
+ */
+// @ts-ignore - Tool signature mismatch with internal function
+export async function minimaxVoices(
+  _id: string,
+  params: { language?: string },
+  _signal?: AbortSignal,
+  _onUpdate?: any,
+  _ctx?: any
+): Promise<{ content: { type: string; text: string }[] }> {
+  try {
+    const mmx = await initMiniMaxSkill();
+    const response = await mmx.voices(params.language);
+
+    const voices = response.system_voice || [];
+    if (voices.length === 0) {
+      return { content: [{ type: "text", text: "No voices found." }] };
+    }
+
+    let output = `🎤 Available Voices (${voices.length}):\n\n`;
+    voices.forEach((voice, i) => {
+      output += `${i + 1}. **${voice.voice_name}** (${voice.voice_id})\n`;
+      if (voice.description && voice.description.length > 0) {
+        output += `   ${voice.description.join(", ")}\n`;
+      }
+      output += "\n";
+    });
+    return { content: [{ type: "text", text: output }] };
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: `Error: ${String(error)}` }],
+      isError: true,
+    } as any;
+  }
+}
+
+/**
+ * minimax-video-task - Query video task status
+ * Usage: /minimax-video-task --task-id <id>
+ */
+// @ts-ignore - Tool signature mismatch with internal function
+export async function minimaxVideoTask(
+  _id: string,
+  params: { task_id: string },
+  _signal?: AbortSignal,
+  _onUpdate?: any,
+  _ctx?: any
+): Promise<{ content: { type: string; text: string }[] }> {
+  try {
+    const mmx = await initMiniMaxSkill();
+    const response = await mmx.videoTask(params.task_id);
+
+    let output = `🎬 Video Task Status\n`;
+    output += `Task ID: ${response.task_id}\n`;
+    output += `Status: ${response.status}\n`;
+    if (response.file_id) {
+      output += `File ID: ${response.file_id}\n`;
+    }
+    if (response.video_width && response.video_height) {
+      output += `Resolution: ${response.video_width}x${response.video_height}\n`;
+    }
+    return { content: [{ type: "text", text: output }] };
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: `Error: ${String(error)}` }],
+      isError: true,
+    } as any;
+  }
+}
+
+/**
+ * minimax-quota - Display Token Plan usage and remaining quotas
+ * Usage: /minimax-quota
+ */
+// @ts-ignore - Tool signature mismatch with internal function
+export async function minimaxQuota(
+  _id: string,
+  _params: Record<string, never>,
+  _signal?: AbortSignal,
+  _onUpdate?: any,
+  _ctx?: any
+): Promise<{ content: { type: string; text: string }[] }> {
+  try {
+    const mmx = await initMiniMaxSkill();
+    const response = await mmx.quota();
+
+    const models = response.model_remains || [];
+    if (models.length === 0) {
+      return { content: [{ type: "text", text: "No quota information available." }] };
+    }
+
+    let output = `📊 Token Plan Quotas\n\n`;
+    models.forEach((model) => {
+      const remaining = model.current_interval_total_count - model.current_interval_usage_count;
+      const percentage = model.current_interval_total_count > 0
+        ? Math.round((model.current_interval_usage_count / model.current_interval_total_count) * 100)
+        : 0;
+
+      output += `${model.model_name}\n`;
+      output += `  Used: ${model.current_interval_usage_count} / ${model.current_interval_total_count} (${percentage}%)\n`;
+      output += `  Remaining: ${remaining}\n\n`;
+    });
+    return { content: [{ type: "text", text: output }] };
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: `Error: ${String(error)}` }],
+      isError: true,
+    } as any;
+  }
+}
+
+/**
+ * minimax-file-list - List uploaded files in MiniMax storage
+ * Usage: /minimax-file-list
+ */
+// @ts-ignore - Tool signature mismatch with internal function
+export async function minimaxFileList(
+  _id: string,
+  _params: Record<string, never>,
+  _signal?: AbortSignal,
+  _onUpdate?: any,
+  _ctx?: any
+): Promise<{ content: { type: string; text: string }[] }> {
+  try {
+    const mmx = await initMiniMaxSkill();
+    const response = await mmx.fileList();
+
+    const files = response.files || [];
+    if (files.length === 0) {
+      return { content: [{ type: "text", text: "No files found." }] };
+    }
+
+    let output = `📁 Uploaded Files (${files.length}):\n\n`;
+    files.forEach((file, i) => {
+      const sizeKB = (file.bytes / 1024).toFixed(1);
+      const date = new Date(file.created_at * 1000).toISOString().slice(0, 16).replace('T', ' ');
+      output += `${i + 1}. ${file.filename}\n`;
+      output += `   ID: ${file.file_id}\n`;
+      output += `   Size: ${sizeKB} KB | Purpose: ${file.purpose} | Created: ${date}\n\n`;
+    });
+    return { content: [{ type: "text", text: output }] };
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: `Error: ${String(error)}` }],
+      isError: true,
+    } as any;
+  }
+}
+
+/**
+ * minimax-file-upload - Upload a file to MiniMax storage
+ * Usage: /minimax-file-upload --file-path <path> [--purpose music]
+ */
+// @ts-ignore - Tool signature mismatch with internal function
+export async function minimaxFileUpload(
+  _id: string,
+  params: { file_path: string; purpose?: string },
+  _signal?: AbortSignal,
+  _onUpdate?: any,
+  _ctx?: any
+): Promise<{ content: { type: string; text: string }[] }> {
+  try {
+    const mmx = await initMiniMaxSkill();
+    const response = await mmx.fileUpload(params.file_path, params.purpose);
+
+    if (response.file) {
+      return {
+        content: [{
+          type: "text",
+          text: `✅ File uploaded successfully!\nFile ID: ${response.file.file_id}\nFilename: ${response.file.filename}\nSize: ${(response.file.bytes / 1024).toFixed(1)} KB\nPurpose: ${response.file.purpose}`
+        }]
+      };
+    }
+    return { content: [{ type: "text", text: "File uploaded but no file info returned." }] };
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: `Error: ${String(error)}` }],
+      isError: true,
+    } as any;
+  }
+}
+
+/**
+ * minimax-file-delete - Delete an uploaded file from MiniMax storage
+ * Usage: /minimax-file-delete --file-id <id>
+ */
+// @ts-ignore - Tool signature mismatch with internal function
+export async function minimaxFileDelete(
+  _id: string,
+  params: { file_id: string },
+  _signal?: AbortSignal,
+  _onUpdate?: any,
+  _ctx?: any
+): Promise<{ content: { type: string; text: string }[] }> {
+  try {
+    const mmx = await initMiniMaxSkill();
+    const response = await mmx.fileDelete(params.file_id);
+
+    return {
+      content: [{
+        type: "text",
+        text: `🗑️ File deleted successfully!\nFile ID: ${response.file_id}`
+      }]
+    };
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: `Error: ${String(error)}` }],
+      isError: true,
+    } as any;
+  }
+}
+
 // ===========================================================================
 // Formatters
 // ===========================================================================
@@ -449,5 +690,73 @@ export function registerMiniMaxTools(pi: ExtensionAPI): void {
     parameters: MinimaxVideoSchema,
     // @ts-ignore - Parameter order differs between schema and function
     execute: minimaxVideo,
+  });
+
+  // Voices list
+  pi.registerTool({
+    name: "minimax_voices",
+    description: "🎤 List available system voices\n\n" +
+      "Examples:\n" +
+      "  /minimax-voices\n" +
+      "  /minimax-voices --language english",
+    parameters: MinimaxVoicesSchema,
+    // @ts-ignore - Parameter order differs between schema and function
+    execute: minimaxVoices,
+  });
+
+  // Video task status
+  pi.registerTool({
+    name: "minimax_video_task",
+    description: "🎬 Query video task status\n\n" +
+      "Examples:\n" +
+      "  /minimax-video-task --task-id 106916112212032",
+    parameters: MinimaxVideoTaskSchema,
+    // @ts-ignore - Parameter order differs between schema and function
+    execute: minimaxVideoTask,
+  });
+
+  // Quota
+  pi.registerTool({
+    name: "minimax_quota",
+    description: "📊 Display Token Plan usage and remaining quotas\n\n" +
+      "Examples:\n" +
+      "  /minimax-quota",
+    parameters: MinimaxQuotaSchema,
+    // @ts-ignore - Parameter order differs between schema and function
+    execute: minimaxQuota,
+  });
+
+  // File list
+  pi.registerTool({
+    name: "minimax_file_list",
+    description: "📁 List uploaded files in MiniMax storage\n\n" +
+      "Examples:\n" +
+      "  /minimax-file-list",
+    parameters: MinimaxFileListSchema,
+    // @ts-ignore - Parameter order differs between schema and function
+    execute: minimaxFileList,
+  });
+
+  // File upload
+  pi.registerTool({
+    name: "minimax_file_upload",
+    description: "📤 Upload a file to MiniMax storage\n\n" +
+      "Examples:\n" +
+      "  /minimax-file-upload --file-path ./audio.mp3\n" +
+      "  /minimax-file-upload --file-path ./video.mp4 --purpose video",
+    parameters: MinimaxFileUploadSchema,
+    // @ts-ignore - Parameter order differs between schema and function
+    execute: minimaxFileUpload,
+  });
+
+  // File delete
+  pi.registerTool({
+    name: "minimax_file_delete",
+    description: "🗑️ Delete an uploaded file from MiniMax storage\n\n" +
+      "Examples:\n" +
+      "  /minimax-file-delete --file-id file_123",
+    parameters: MinimaxFileDeleteSchema,
+    // @ts-ignore - Parameter order differs between schema and function
+    execute: minimaxFileDelete,
   });
 }

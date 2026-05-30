@@ -35,6 +35,12 @@ import {
   type VisionResponse,
   type SearchRequest,
   type SearchResponse,
+  type VoiceListResponse,
+  type VideoTaskResponse,
+  type QuotaResponse,
+  type FileListResponse,
+  type FileUploadResponse,
+  type FileDeleteResponse,
 } from "./types.js";
 
 /**
@@ -43,27 +49,41 @@ import {
 const ENDPOINTS = {
   // Text
   TEXT_CHAT: "/v1/text/chatcompletion_v2",
-  
+
   // Image
   IMAGE_GENERATION: "/v1/image_generation",
   IMAGE_EDITING: "/v1/image_editing",
-  
+
   // Video
   VIDEO_GENERATION: "/v1/video_generation",
-  
+
   // Speech
   SPEECH_T2A: "/v1/t2a_v2",
   SPEECH_ASYNC: "/v1/t2a_async",
   SPEECH_TRANSCRIBE: "/v1/audio/transcription",
-  
+
   // Music
   MUSIC_GENERATION: "/v1/music_generation",
-  
+
   // Vision - Token Plan uses VLM endpoint
   VISION_CHAT: "/v1/coding_plan/vlm",
-  
+
   // Token Plan MCP endpoints
   SEARCH: "/v1/coding_plan/search",
+
+  // Voices
+  VOICES: "/v1/t2a_v2/voice/list",
+
+  // Video task status
+  VIDEO_TASK: "/v1/video_generation/query",
+
+  // Quota
+  QUOTA: "/v1/coding_plan/quota",
+
+  // File management
+  FILE_LIST: "/v1/files/list",
+  FILE_UPLOAD: "/v1/files/upload",
+  FILE_DELETE: "/v1/files/delete",
 } as const;
 
 /**
@@ -424,6 +444,89 @@ export function createMiniMax(config: MiniMaxConfig): MiniMaxClient {
 
       return apiCall<SearchResponse>(
         ENDPOINTS.SEARCH,
+        { baseURL },
+        body,
+        config.apiKey,
+        config.groupId
+      );
+    },
+
+    // ============ VOICES ============
+    async voices(language?: string): Promise<VoiceListResponse> {
+      const body = language ? { language } : {};
+
+      return apiCall<VoiceListResponse>(
+        ENDPOINTS.VOICES,
+        { baseURL },
+        body,
+        config.apiKey,
+        config.groupId
+      );
+    },
+
+    // ============ VIDEO TASK STATUS ============
+    async videoTask(taskId: string): Promise<VideoTaskResponse> {
+      const body = { task_id: taskId };
+
+      return apiCall<VideoTaskResponse>(
+        ENDPOINTS.VIDEO_TASK,
+        { baseURL },
+        body,
+        config.apiKey,
+        config.groupId
+      );
+    },
+
+    // ============ QUOTA ============
+    async quota(): Promise<QuotaResponse> {
+      return apiCall<QuotaResponse>(
+        ENDPOINTS.QUOTA,
+        { baseURL },
+        {},
+        config.apiKey,
+        config.groupId
+      );
+    },
+
+    // ============ FILE MANAGEMENT ============
+    async fileList(): Promise<FileListResponse> {
+      return apiCall<FileListResponse>(
+        ENDPOINTS.FILE_LIST,
+        { baseURL },
+        {},
+        config.apiKey,
+        config.groupId
+      );
+    },
+
+    async fileUpload(filePath: string, purpose?: string): Promise<FileUploadResponse> {
+      // Use multipart form data for file upload
+      const url = `${baseURL}${ENDPOINTS.FILE_UPLOAD}`;
+
+      const formData = new FormData();
+      formData.append("file", await fetch(filePath).then(r => r.blob()), filePath.split("/").pop() || "file");
+      if (purpose) {
+        formData.append("purpose", purpose);
+      }
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          ...(config.groupId ? { "GroupId": config.groupId } : {}),
+        },
+        body: formData,
+      });
+
+      const data = await response.json() as FileUploadResponse;
+      return data;
+    },
+
+    async fileDelete(fileId: string): Promise<FileDeleteResponse> {
+      const body = { file_id: fileId };
+
+      return apiCall<FileDeleteResponse>(
+        ENDPOINTS.FILE_DELETE,
         { baseURL },
         body,
         config.apiKey,
