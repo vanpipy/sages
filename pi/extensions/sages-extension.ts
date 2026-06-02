@@ -16,8 +16,7 @@ import {
   registerFuxiTools, 
   registerQiaoChuiTools, 
   registerLubanTools, 
-  registerGaoYaoTools,
-  registerMiniMaxTools 
+  registerGaoYaoTools
 } from "../src/tools/";
 
 // Tool executor storage - populated during tool registration
@@ -82,8 +81,6 @@ export default function (pi: ExtensionAPI) {
   registerQiaoChuiTools(pi);
   registerLubanTools(pi);
   registerGaoYaoTools(pi);
-  registerMiniMaxTools(pi);
-
   // Restore original registerTool
   // @ts-ignore
   pi.registerTool = originalRegisterTool;
