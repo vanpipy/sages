@@ -56,6 +56,18 @@ export interface TDDConfig {
   testCommand: string;
   cwd: string;
   subagent?: boolean;
+  /**
+   * V-cases (Given/When/Then) parsed from draft.md ## Scenarios.
+   * When provided, the RED phase generates a test file with one
+   * it() block per scenario, with Given/When/Then as comments.
+   */
+  scenarios?: Array<{
+    name: string;
+    given: string;
+    when: string;
+    then: string;
+    but?: string;
+  }>;
 }
 
 /**

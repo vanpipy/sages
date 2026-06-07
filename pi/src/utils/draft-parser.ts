@@ -445,3 +445,93 @@ export function getPlaneSummary(parsed: ParsedDraft): Record<MDDPlane, number> {
 
   return summary;
 }
+
+// ============================================================================
+// Scenario & Out of Scope Parsers
+// ============================================================================
+
+export interface ParsedScenario {
+  name: string;
+  given: string;
+  when: string;
+  then: string;
+  but?: string;
+}
+
+/**
+ * Extract a markdown section's content (everything between `## Heading` and the next `## `).
+ * Returns null if the section doesn't exist.
+ */
+function extractMarkdownSection(content: string, heading: string): string | null {
+  // Find the heading line (## Heading)
+  const headingPattern = new RegExp(`^##\\s+${heading}\\s*$`, "m");
+  const match = content.match(headingPattern);
+  if (!match || match.index === undefined) return null;
+
+  const start = match.index + match[0].length;
+  // Find the next ## heading
+  const rest = content.substring(start);
+  const nextHeading = rest.match(/^##\s+/m);
+  const end = nextHeading?.index !== undefined ? start + nextHeading.index : content.length;
+  return content.substring(start, end).trim();
+}
+
+/**
+ * Parse the `## Scenarios` section of a draft into structured Given/When/Then items.
+ * Returns an empty array if the section is missing or has no scenarios.
+ */
+export function parseScenariosFromDraft(content: string): ParsedScenario[] {
+  const section = extractMarkdownSection(content, "Scenarios");
+  if (!section) return [];
+
+  const scenarios: ParsedScenario[] = [];
+
+  // Split on ### Scenario: name
+  const blocks = section.split(/###\s+Scenario:\s+/).slice(1);
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    const name = lines[0]?.trim();
+    if (!name) continue;
+
+    const scenario: ParsedScenario = { name, given: "", when: "", then: "" };
+    for (const line of lines.slice(1)) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("**Given**")) {
+        scenario.given = trimmed.replace(/^\*\*Given\*\*\s*/, "").trim();
+      } else if (trimmed.startsWith("**When**")) {
+        scenario.when = trimmed.replace(/^\*\*When\*\*\s*/, "").trim();
+      } else if (trimmed.startsWith("**Then**")) {
+        scenario.then = trimmed.replace(/^\*\*Then\*\*\s*/, "").trim();
+      } else if (trimmed.startsWith("**But**")) {
+        scenario.but = trimmed.replace(/^\*\*But\*\*\s*/, "").trim();
+      }
+    }
+    // Only include scenarios that have at least Given/When/Then
+    if (scenario.given && scenario.when && scenario.then) {
+      scenarios.push(scenario);
+    }
+  }
+
+  return scenarios;
+}
+
+/**
+ * Parse the `## Out of Scope` section into a list of file/component paths.
+ * Skips FILL IN placeholder items (agent/user must mark them explicitly).
+ * Returns an empty array if the section is missing.
+ */
+export function parseOutOfScopeFromDraft(content: string): string[] {
+  const section = extractMarkdownSection(content, "Out of Scope");
+  if (!section) return [];
+
+  return section
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line.startsWith("- "))
+    .map(line => line.substring(2).trim())
+    // Strip surrounding ** for emphasis
+    .map(line => line.replace(/^\*\*(.+)\*\*$/, "$1"))
+    // Skip FILL IN placeholders — they're not real scope decisions yet
+    .filter(line => !line.startsWith("_FILL IN") && !line.startsWith("FILL IN"))
+    .filter(Boolean);
+}

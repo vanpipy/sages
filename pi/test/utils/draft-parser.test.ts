@@ -3,13 +3,15 @@
  * Tests MDD (Multi-Dimensional Design) draft parsing
  */
 import { describe, it, expect } from "bun:test";
-import { 
-  parseDraft, 
-  validateDraft, 
-  generateTasksFromDraft, 
-  extractPlanName, 
+import {
+  parseDraft,
+  validateDraft,
+  generateTasksFromDraft,
+  extractPlanName,
   getPlaneSummary,
-  type ParsedDraft 
+  parseScenariosFromDraft,
+  parseOutOfScopeFromDraft,
+  type ParsedDraft
 } from "@/utils/draft-parser";
 
 describe("Draft Parser", () => {
@@ -535,9 +537,105 @@ Some content
     it("should detect 'none specified'", () => {
       const isPlaceholder = (text: string) =>
         text.toLowerCase().includes("none specified");
-      
+
       expect(isPlaceholder("None specified")).toBe(true);
       expect(isPlaceholder("Some requirement")).toBe(false);
     });
+  });
+});
+
+describe("parseScenariosFromDraft", () => {
+  it("should parse all Given/When/Then scenarios from draft", () => {
+    const content = `# System Design: auth
+
+## Scenarios
+
+> Given/When/Then specifications
+
+### Scenario: happy path
+**Given** user has valid credentials
+**When** user submits login form
+**Then** user is logged in
+
+### Scenario: invalid input
+**Given** user has empty fields
+**When** user submits login form
+**Then** error is shown
+**But** form is not submitted
+`;
+
+    const scenarios = parseScenariosFromDraft(content);
+    expect(scenarios.length).toBe(2);
+    expect(scenarios[0].name).toBe("happy path");
+    expect(scenarios[0].given).toBe("user has valid credentials");
+    expect(scenarios[0].when).toBe("user submits login form");
+    expect(scenarios[0].then).toBe("user is logged in");
+    expect(scenarios[1].but).toBe("form is not submitted");
+  });
+
+  it("should return empty array when no Scenarios section", () => {
+    const content = `# System Design: empty
+
+## Overview
+No scenarios here.
+`;
+    const scenarios = parseScenariosFromDraft(content);
+    expect(scenarios).toEqual([]);
+  });
+
+  it("should preserve order of scenarios as they appear in draft", () => {
+    const content = `## Scenarios
+
+### Scenario: first
+**Given** A
+**When** B
+**Then** C
+
+### Scenario: second
+**Given** D
+**When** E
+**Then** F
+`;
+    const scenarios = parseScenariosFromDraft(content);
+    expect(scenarios.map(s => s.name)).toEqual(["first", "second"]);
+  });
+});
+
+describe("parseOutOfScopeFromDraft", () => {
+  it("should extract Out of Scope list items", () => {
+    const content = `# System Design: test
+
+## Out of Scope
+
+- src/services/auth.ts
+- src/stores/authStore.ts
+- src/routes/RootNavigator.tsx
+`;
+    const items = parseOutOfScopeFromDraft(content);
+    expect(items).toEqual([
+      "src/services/auth.ts",
+      "src/stores/authStore.ts",
+      "src/routes/RootNavigator.tsx",
+    ]);
+  });
+
+  it("should return empty array when no Out of Scope section", () => {
+    const content = `# System Design: test
+
+## Overview
+Nothing here.
+`;
+    expect(parseOutOfScopeFromDraft(content)).toEqual([]);
+  });
+
+  it("should skip FILL IN placeholder items", () => {
+    const content = `## Out of Scope
+
+- _FILL IN: should this change touch utils/?_
+- src/important.ts
+`;
+    const items = parseOutOfScopeFromDraft(content);
+    // FILL IN lines are not actual scope decisions; agent must fill them in
+    expect(items).toEqual(["src/important.ts"]);
   });
 });

@@ -194,7 +194,11 @@ async function runRedPhase(config: TDDConfig): Promise<TDDPhaseResult> {
     // Create test file if it doesn't exist
     for (const testFile of config.testFiles) {
       if (!fileService.exists(testFile)) {
-        const testContent = generateTestTemplate(testFile);
+        // Use scenario-aware template when V-cases are provided,
+        // else fall back to the generic template
+        const testContent = config.scenarios && config.scenarios.length > 0
+          ? generateTestFromScenarios(testFile, config.scenarios)
+          : generateTestTemplate(testFile);
         const dir = getDir(testFile);
         if (dir && dir !== ".") {
           fileService.ensureWorkspace();
@@ -310,7 +314,7 @@ function runTests(config: TDDConfig): { passed: number; failed: number; total: n
  */
 function generateTestTemplate(testFile: string): string {
   const fileName = getFileName(testFile);
-  
+
   return `/**
  * Test file for ${fileName}
  * RED phase: This test should FAIL
@@ -324,6 +328,68 @@ describe("${fileName}", () => {
   });
 });
 `;
+}
+
+/**
+ * Generate a test file from V-cases (Given/When/Then scenarios).
+ * One `it()` block per scenario, with Given/When/Then as comments and
+ * placeholder assertion that the agent fills in. The test file name
+ * is used as the describe block label.
+ *
+ * Falls back to the generic template when no scenarios are provided.
+ */
+export interface ScenarioSpec {
+  name: string;
+  given: string;
+  when: string;
+  then: string;
+  but?: string;
+}
+
+export function generateTestFromScenarios(
+  testFileOrModule: string,
+  scenarios: ScenarioSpec[],
+): string {
+  const fileName = getFileName(testFileOrModule);
+
+  if (!scenarios || scenarios.length === 0) {
+    return generateTestTemplate(testFileOrModule);
+  }
+
+  const testBlocks = scenarios.map((s, i) => {
+    const but = s.but ? `\n    // But: ${s.but}` : "";
+    return `  it("${escapeForIt(s.name)}", () => {
+    // Given: ${s.given}
+    // When: ${s.when}
+    // Then: ${s.then}${but}
+
+    // V${i + 1}: TODO — implement assertion based on the Given/When/Then above
+    expect(true).toBe(false); // RED: must fail until implemented
+  });`;
+  }).join("\n\n");
+
+  return `/**
+ * Test file for ${fileName}
+ * RED phase: This test should FAIL for each scenario.
+ *
+ * Generated from draft.md ## Scenarios section.
+ * Agent must replace the placeholder assertions with real ones
+ * that verify the Given/When/Then contract.
+ */
+
+import { describe, it, expect } from "bun:test";
+
+describe("${fileName}", () => {
+${testBlocks}
+});
+`;
+}
+
+/**
+ * Escape a scenario name for use in it() — double quotes and backslashes
+ */
+function escapeForIt(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 /**
