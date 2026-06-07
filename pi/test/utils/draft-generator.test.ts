@@ -3,7 +3,13 @@
  * Tests MDD (Multi-Dimensional Design) draft generation
  */
 import { describe, it, expect } from "bun:test";
-import { generateMinimalDraft, generateDraft, type DraftConfig } from "@/utils/draft-generator";
+import {
+  generateMinimalDraft,
+  generateDraft,
+  generateRichDraft,
+  type DraftConfig,
+} from "@/utils/draft-generator";
+import type { ProjectContext } from "@/utils/analyzer/index";
 
 describe("Draft Generator", () => {
   describe("generateMinimalDraft", () => {
@@ -428,6 +434,89 @@ describe("KeyDesignDecisions (5-field structure)", () => {
     // Rows
     expect(draft).toContain("| React | popular | complex |");
     expect(draft).toContain("| Vue | simple | smaller ecosystem |");
+  });
+});
+
+/**
+ * Helper: build a ProjectContext fixture for mode-aware tests.
+ */
+function makeCtx(overrides: Partial<ProjectContext> = {}): ProjectContext {
+  return {
+    projectName: "sages",
+    language: "typescript",
+    framework: "node",
+    projectType: "library",
+    techStack: {
+      languages: ["TypeScript"],
+      frameworks: ["node", "typescript"],
+      buildTools: [],
+      testing: ["bun:test"],
+      linting: [],
+    },
+    structure: {
+      rootDir: "/proj",
+      srcDir: "src",
+      testDir: "test",
+      configDir: null,
+      mainFile: null,
+      hasPackageJson: true,
+      hasTsConfig: true,
+      hasGoMod: false,
+      hasCargoToml: false,
+      hasRequirements: false,
+      directoryTree: [],
+    },
+    patterns: ["ts-generics", "ts-interfaces", "ts-async-await"],
+    existingComponents: ["utils", "services", "tools", "analyzer"],
+    keyFiles: [],
+    dependencies: [],
+    ...overrides,
+  };
+}
+
+describe("Mode-aware draft (new vs improve)", () => {
+  it("includes a Mode callout in the intent for 'improve' requests", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    expect(draft).toContain("**Mode**: improve");
+  });
+
+  it("includes a Mode callout in the intent for 'new' requests", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Build a brand new billing subsystem");
+    expect(draft).toContain("**Mode**: new");
+  });
+
+  it("includes a 'Delta from existing' section when mode is 'improve'", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    expect(draft).toContain("## Delta from existing");
+  });
+
+  it("does NOT include 'Delta from existing' section when mode is 'new'", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Build a brand new billing subsystem");
+    expect(draft).not.toContain("## Delta from existing");
+  });
+
+  it("includes an 'Out of Scope' section listing files NOT to touch in 'improve' mode", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    expect(draft).toContain("## Out of Scope");
+  });
+
+  it("scenarios are still present in 'improve' mode (TDD still needs them)", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    expect(draft).toContain("## Scenarios");
+    expect(draft).toContain("### Scenario:");
+  });
+
+  it("'new' mode includes the full 7 MDD planes (regression)", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Build a brand new billing subsystem");
+    expect(draft).toContain("1. Business Plane");
+    expect(draft).toContain("7. Evolution Plane");
   });
 });
 

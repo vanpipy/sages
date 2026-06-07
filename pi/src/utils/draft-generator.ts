@@ -4,6 +4,7 @@
  */
 
 import type { ProjectContext } from "./analyzer/index.js";
+import { classifyRequest } from "./request-classifier.js";
 
 export interface Scenario {
   name: string;
@@ -66,6 +67,9 @@ export interface DraftConfig {
   crossPlaneDependencies?: string[];
   // SSD-style key decisions — force consideration of alternatives before commit
   keyDecisions?: KeyDecision[];
+  // Mode-aware sections (only rendered for "improve" requests)
+  deltaFromExisting?: string[];
+  outOfScope?: string[];
   openQuestions?: string[];
   notes?: string;
 }
@@ -83,6 +87,14 @@ const DRAFT_TEMPLATE = `# System Design: {name}
 > Cover: **normal path**, **error path**, and at least one **edge case**.
 
 {scenarios}
+
+---
+
+{deltaFromExisting}
+
+---
+
+{outOfScope}
 
 ---
 
@@ -244,6 +256,21 @@ export function generateDraft(config: DraftConfig): string {
       .join("\n\n");
   };
 
+  /**
+   * Render an optional section. Returns empty string if no items,
+   * so the section is invisible for "new" mode.
+   * If items exist, appends an instruction footer (not an empty-state msg).
+   */
+  const formatOptionalSection = (
+    _name: string,
+    items: string[] | undefined,
+    heading: string,
+    instruction: string,
+  ): string => {
+    if (!items || items.length === 0) return "";
+    return `## ${heading.replace(/^## /, "")}\n\n${items.map(i => `- ${i}`).join("\n")}\n\n_${instruction}_`;
+  };
+
   return DRAFT_TEMPLATE
     .replace("{name}", config.name)
     .replace("{timestamp}", timestamp)
@@ -273,6 +300,8 @@ export function generateDraft(config: DraftConfig): string {
     // Cross-cutting
     .replace("{crossPlaneDeps}", formatList(config.crossPlaneDependencies))
     .replace("{keyDecisions}", formatKeyDecisions(config.keyDecisions))
+    .replace("{deltaFromExisting}", formatOptionalSection("Delta from existing", config.deltaFromExisting, "## Delta from existing", "Refine manually as needed. The list above is auto-generated from project analysis."))
+    .replace("{outOfScope}", formatOptionalSection("Out of Scope", config.outOfScope, "## Out of Scope", "LuBan uses this list as a scope guard. Mark each item as 'do not touch' or 'in scope' explicitly."))
     .replace("{openQuestions}", formatList(config.openQuestions))
     .replace("{notes}", config.notes || "- Add notes here");
 }
@@ -283,10 +312,13 @@ export function generateDraft(config: DraftConfig): string {
  */
 export function generateRichDraft(projectContext: ProjectContext, request: string): string {
   const lowerRequest = request.toLowerCase();
-  
+
   // Analyze request type to customize plane content
   const requestType = analyzeRequestType(lowerRequest);
-  
+
+  // Classify request: "new" (greenfield) vs "improve" (modify existing)
+  const classification = classifyRequest(projectContext, request);
+
   // Generate plane content based on project context
   const businessPlane = generateBusinessPlane(projectContext, request, requestType);
   const dataPlane = generateDataPlane(projectContext, request, requestType);
@@ -299,11 +331,18 @@ export function generateRichDraft(projectContext: ProjectContext, request: strin
   // Generate starter scenarios (Given/When/Then) — TDD Red-phase input
   const scenarios = generateScenarios(projectContext, request, requestType);
 
+  // Mode-aware sections: only populate for "improve" mode
+  const isImprove = classification.mode === "improve";
+  const deltaFromExisting = isImprove ? buildDeltaFromExisting(projectContext) : undefined;
+  const outOfScope = isImprove ? buildOutOfScope(projectContext) : undefined;
+
   return generateDraft({
     name: projectContext.projectName,
     request,
-    intent: `${requestType.description}\n\n**Project**: ${projectContext.projectName}\n**Language**: ${projectContext.language}${projectContext.framework ? ` (${projectContext.framework})` : ""}\n**Type**: ${projectContext.projectType}\n**Tech Stack**: ${projectContext.techStack.languages.join(", ")}${projectContext.techStack.frameworks.length > 0 ? `, ${projectContext.techStack.frameworks.join(", ")}` : ""}`,
+    intent: `${requestType.description}\n\n**Mode**: ${classification.mode}${isImprove ? ` (score: ${classification.score.toFixed(2)})` : ""}\n**Signals**: ${classification.signals.length > 0 ? classification.signals.slice(0, 3).join("; ") : "none"}\n\n**Project**: ${projectContext.projectName}\n**Language**: ${projectContext.language}${projectContext.framework ? ` (${projectContext.framework})` : ""}\n**Type**: ${projectContext.projectType}\n**Tech Stack**: ${projectContext.techStack.languages.join(", ")}${projectContext.techStack.frameworks.length > 0 ? `, ${projectContext.techStack.frameworks.join(", ")}` : ""}`,
     scenarios,
+    deltaFromExisting,
+    outOfScope,
     business: businessPlane,
     data: dataPlane,
     control: controlPlane,
@@ -326,6 +365,43 @@ export function generateRichDraft(projectContext: ProjectContext, request: strin
     ],
     notes: "- Ready for QiaoChui review",
   });
+}
+
+/**
+ * Build the "Delta from existing" list — what's already in the codebase
+ * that the agent needs to understand before changing.
+ */
+function buildDeltaFromExisting(ctx: ProjectContext): string[] {
+  const lines: string[] = [];
+  if (ctx.existingComponents.length > 0) {
+    lines.push(`Existing components: ${ctx.existingComponents.join(", ")}`);
+  }
+  if (ctx.patterns.length > 0) {
+    lines.push(`Detected patterns: ${ctx.patterns.join(", ")}`);
+  }
+  if (ctx.keyFiles.length > 0) {
+    const paths = ctx.keyFiles.slice(0, 5).map(f => f.path.split("/").slice(-2).join("/"));
+    lines.push(`Key files: ${paths.join(", ")}`);
+  }
+  if (ctx.dependencies.length > 0) {
+    const deps = ctx.dependencies.slice(0, 3).map(d => d.name);
+    lines.push(`Dependencies: ${deps.join(", ")}`);
+  }
+  return lines;
+}
+
+/**
+ * Build the "Out of Scope" list — files/components that should NOT be touched
+ * (LuBan's scope guard reads from this).
+ */
+function buildOutOfScope(ctx: ProjectContext): string[] {
+  const lines: string[] = [];
+  // Components not in the request's "overlap" set are out of scope
+  // (a heuristic: list all components; agent/user refines)
+  for (const comp of ctx.existingComponents) {
+    lines.push(`_FILL IN: should this change touch \`${comp}/\`? If not, mark explicitly._`);
+  }
+  return lines;
 }
 
 interface RequestType {
