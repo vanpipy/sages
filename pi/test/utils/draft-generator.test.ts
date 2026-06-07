@@ -312,10 +312,122 @@ describe("Arithmetic operation requests", () => {
   it("should generate MDD structure for arithmetic requests", () => {
     const arithmeticRequest = "Implement arithmetic operations for financial calculations";
     const draft = generateMinimalDraft("arithmetic-ops", arithmeticRequest);
-    
+
     // Should generate valid MDD structure
     expect(draft).toContain("System Design: arithmetic-ops");
     expect(draft).toContain("MDD Plane Analysis");
     expect(draft).toContain("Business Plane");
   });
 });
+
+describe("Scenarios (Given/When/Then)", () => {
+  it("should include ## Scenarios section in draft", () => {
+    const draft = generateMinimalDraft("test", "Test request");
+    expect(draft).toContain("## Scenarios");
+  });
+
+  it("should include Given/When/Then structure for each scenario", () => {
+    const config: DraftConfig = {
+      name: "auth",
+      request: "Build login",
+      scenarios: [
+        { name: "valid login", given: "user exists", when: "user submits correct creds", then: "user is logged in" },
+        { name: "invalid login", given: "user exists", when: "user submits wrong password", then: "error shown" },
+      ],
+    };
+    const draft = generateDraft(config);
+    expect(draft).toContain("**Given** user exists");
+    expect(draft).toContain("**When** user submits correct creds");
+    expect(draft).toContain("**Then** user is logged in");
+  });
+
+  it("should support optional But clause for error/edge cases", () => {
+    const config: DraftConfig = {
+      name: "auth",
+      request: "Build login",
+      scenarios: [
+        {
+          name: "rate limit",
+          given: "user has failed 5 times",
+          when: "user tries again",
+          then: "request is blocked",
+          but: "after 60s, user can retry",
+        },
+      ],
+    };
+    const draft = generateDraft(config);
+    expect(draft).toContain("**But** after 60s, user can retry");
+  });
+});
+
+describe("KeyDesignDecisions (5-field structure)", () => {
+  it("should render Context, Decision, Rationale, Enforced by fields", () => {
+    const config: DraftConfig = {
+      name: "auth",
+      request: "Build login",
+      keyDecisions: [
+        {
+          id: "KD-1",
+          decision: "Use bcrypt for password hashing",
+          context: "Need secure password storage",
+          alternatives: [
+            { option: "bcrypt", pros: "battle-tested", cons: "slower" },
+            { option: "argon2", pros: "modern", cons: "less library support" },
+          ],
+          rationale: "bcrypt has wider library support and proven track record",
+          enforcedBy: "code review + dependency check",
+        },
+      ],
+    };
+    const draft = generateDraft(config);
+    expect(draft).toContain("**Context**: Need secure password storage");
+    expect(draft).toContain("**Decision**: Use bcrypt for password hashing");
+    expect(draft).toContain("**Rationale**: bcrypt has wider library support");
+    expect(draft).toContain("**Enforced by**: code review + dependency check");
+    expect(draft).toContain("| Option | Pros | Cons |");
+    expect(draft).toContain("| bcrypt | battle-tested | slower |");
+  });
+
+  it("should number key decisions as KD-1, KD-2, etc.", () => {
+    const config: DraftConfig = {
+      name: "test",
+      request: "Test",
+      keyDecisions: [
+        { id: "KD-1", decision: "first", context: "c1", alternatives: [], rationale: "r1", enforcedBy: "lint" },
+        { id: "KD-2", decision: "second", context: "c2", alternatives: [], rationale: "r2", enforcedBy: "test" },
+      ],
+    };
+    const draft = generateDraft(config);
+    expect(draft).toContain("### KD-1:");
+    expect(draft).toContain("### KD-2:");
+  });
+
+  it("should render alternatives as a markdown table", () => {
+    const config: DraftConfig = {
+      name: "test",
+      request: "Test",
+      keyDecisions: [
+        {
+          id: "KD-1",
+          decision: "Pick a framework",
+          context: "Need UI",
+          alternatives: [
+            { option: "React", pros: "popular", cons: "complex" },
+            { option: "Vue", pros: "simple", cons: "smaller ecosystem" },
+          ],
+          rationale: "team knows React",
+          enforcedBy: "team agreement",
+        },
+      ],
+    };
+    const draft = generateDraft(config);
+    // Header
+    expect(draft).toContain("| Option | Pros | Cons |");
+    // Separator
+    expect(draft).toContain("| --- | --- | --- |");
+    // Rows
+    expect(draft).toContain("| React | popular | complex |");
+    expect(draft).toContain("| Vue | simple | smaller ecosystem |");
+  });
+});
+

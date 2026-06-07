@@ -5,10 +5,35 @@
 
 import type { ProjectContext } from "./analyzer/index.js";
 
+export interface Scenario {
+  name: string;
+  given: string;
+  when: string;
+  then: string;
+  but?: string;
+}
+
+export interface KeyAlternative {
+  option: string;
+  pros: string;
+  cons: string;
+}
+
+export interface KeyDecision {
+  id: string;            // e.g. "KD-1", "KD-2"
+  decision: string;      // one-line summary of the choice
+  context: string;       // what situation forces this decision
+  alternatives: KeyAlternative[];
+  rationale: string;     // why this option over others
+  enforcedBy: string;    // code review | lint | test | convention | type check
+}
+
 export interface DraftConfig {
   name: string;
   request: string;
   intent?: string;
+  // SSD-style scenarios (Given/When/Then) — drive TDD Red phase deterministically
+  scenarios?: Scenario[];
   // MDD Planes
   business?: {
     process?: string[];
@@ -39,7 +64,8 @@ export interface DraftConfig {
     change?: string[];
   };
   crossPlaneDependencies?: string[];
-  keyDecisions?: string[];
+  // SSD-style key decisions — force consideration of alternatives before commit
+  keyDecisions?: KeyDecision[];
   openQuestions?: string[];
   notes?: string;
 }
@@ -48,6 +74,15 @@ const DRAFT_TEMPLATE = `# System Design: {name}
 
 ## Overview
 {intent}
+
+---
+
+## Scenarios
+
+> Given/When/Then specifications — each scenario maps 1:1 to a TDD Red phase in LuBan.
+> Cover: **normal path**, **error path**, and at least one **edge case**.
+
+{scenarios}
 
 ---
 
@@ -138,6 +173,9 @@ const DRAFT_TEMPLATE = `# System Design: {name}
 
 ## Key Design Decisions
 
+> Each decision records **Context → Decision → Alternatives → Rationale → Enforced by**.
+> Forces consideration of alternatives before commitment.
+
 {keyDecisions}
 
 ---
@@ -166,10 +204,51 @@ export function generateDraft(config: DraftConfig): string {
     return items.map(item => `- ${item}`).join("\n");
   };
 
+  const formatScenarios = (scenarios?: Scenario[]): string => {
+    if (!scenarios || scenarios.length === 0) {
+      return "_No scenarios defined yet. Add Given/When/Then cases to drive TDD._";
+    }
+    return scenarios
+      .map(s => {
+        let block = `### Scenario: ${s.name}\n`;
+        block += `**Given** ${s.given}\n`;
+        block += `**When** ${s.when}\n`;
+        block += `**Then** ${s.then}`;
+        if (s.but) block += `\n**But** ${s.but}`;
+        return block;
+      })
+      .join("\n\n");
+  };
+
+  const formatKeyDecisions = (decisions?: KeyDecision[]): string => {
+    if (!decisions || decisions.length === 0) {
+      return "_No key decisions recorded yet. Add KD-1, KD-2, ... to commit to specific choices._";
+    }
+    return decisions
+      .map(kd => {
+        let block = `### ${kd.id}: ${kd.decision}\n`;
+        block += `**Context**: ${kd.context}\n`;
+        block += `**Decision**: ${kd.decision}\n`;
+        if (kd.alternatives && kd.alternatives.length > 0) {
+          block += `**Alternatives**:\n`;
+          block += `| Option | Pros | Cons |\n`;
+          block += `| --- | --- | --- |\n`;
+          for (const alt of kd.alternatives) {
+            block += `| ${alt.option} | ${alt.pros} | ${alt.cons} |\n`;
+          }
+        }
+        block += `**Rationale**: ${kd.rationale}\n`;
+        block += `**Enforced by**: ${kd.enforcedBy}`;
+        return block;
+      })
+      .join("\n\n");
+  };
+
   return DRAFT_TEMPLATE
     .replace("{name}", config.name)
     .replace("{timestamp}", timestamp)
     .replace("{intent}", config.intent || config.request)
+    .replace("{scenarios}", formatScenarios(config.scenarios))
     // Business Plane
     .replace("{process}", formatList(config.business?.process))
     .replace("{rules}", formatList(config.business?.rules))
@@ -193,7 +272,7 @@ export function generateDraft(config: DraftConfig): string {
     .replace("{change}", formatList(config.evolution?.change))
     // Cross-cutting
     .replace("{crossPlaneDeps}", formatList(config.crossPlaneDependencies))
-    .replace("{keyDecisions}", formatList(config.keyDecisions))
+    .replace("{keyDecisions}", formatKeyDecisions(config.keyDecisions))
     .replace("{openQuestions}", formatList(config.openQuestions))
     .replace("{notes}", config.notes || "- Add notes here");
 }
@@ -217,10 +296,14 @@ export function generateRichDraft(projectContext: ProjectContext, request: strin
   const securityPlane = generateSecurityPlane(projectContext, request, requestType);
   const evolutionPlane = generateEvolutionPlane(projectContext, request, requestType);
 
+  // Generate starter scenarios (Given/When/Then) — TDD Red-phase input
+  const scenarios = generateScenarios(projectContext, request, requestType);
+
   return generateDraft({
     name: projectContext.projectName,
     request,
     intent: `${requestType.description}\n\n**Project**: ${projectContext.projectName}\n**Language**: ${projectContext.language}${projectContext.framework ? ` (${projectContext.framework})` : ""}\n**Type**: ${projectContext.projectType}\n**Tech Stack**: ${projectContext.techStack.languages.join(", ")}${projectContext.techStack.frameworks.length > 0 ? `, ${projectContext.techStack.frameworks.join(", ")}` : ""}`,
+    scenarios,
     business: businessPlane,
     data: dataPlane,
     control: controlPlane,
@@ -235,11 +318,7 @@ export function generateRichDraft(projectContext: ProjectContext, request: strin
       "- Foundation Plane → supports → All Planes",
       "- Security Plane → protects → All Planes",
     ],
-    keyDecisions: [
-      `- Use ${projectContext.language} with ${projectContext.framework || "no framework"}`,
-      `- Follow existing patterns: ${projectContext.patterns.slice(0, 3).join(", ") || "standard project conventions"}`,
-      "- Apply MDD methodology for systematic design",
-    ],
+    keyDecisions: generateKeyDecisions(projectContext, request, requestType),
     openQuestions: [
       `- Validate assumption: existing patterns are ${projectContext.patterns.length > 0 ? "appropriate" : "need to be defined"}`,
       "- Review with QiaoChui for technical feasibility",
@@ -763,6 +842,218 @@ function generateEvolutionPlane(ctx: ProjectContext, request: string, reqType: R
 }
 
 /**
+ * Generate starter Given/When/Then scenarios from request + project context.
+ * These map 1:1 to TDD Red phases in LuBan. The agent/user refines them.
+ *
+ * Default coverage: 1 normal path + 1 error/validation path + 1 edge case.
+ * Overridden by user-provided scenarios if any are passed via config.
+ */
+function generateScenarios(
+  ctx: ProjectContext,
+  request: string,
+  reqType: RequestType,
+): Scenario[] {
+  const projectLabel = ctx.projectName || "the system";
+  const featureHint = request.length > 80 ? `${request.slice(0, 77)}...` : request;
+
+  // Starter set: normal + error + edge. Each is concrete and verifiable.
+  const starters: Record<RequestType["category"], Scenario[]> = {
+    feature: [
+      {
+        name: "happy path",
+        given: `user invokes the new ${featureHint}`,
+        when: "all preconditions are met",
+        then: `${projectLabel} returns the expected successful result`,
+      },
+      {
+        name: "invalid input",
+        given: "user provides malformed or missing required input",
+        when: "the action is triggered",
+        then: `${projectLabel} returns a clear validation error and does not perform the action`,
+      },
+      {
+        name: "boundary",
+        given: "input is at the smallest or largest acceptable value",
+        when: "the action is triggered",
+        then: `${projectLabel} handles the boundary correctly (accepts the limit, rejects one past it)`,
+      },
+    ],
+    refactor: [
+      {
+        name: "behavior preserved",
+        given: "an existing caller uses the public API of the module being refactored",
+        when: "the refactored implementation runs the same call",
+        then: "the observable output is identical to the pre-refactor behavior",
+      },
+      {
+        name: "internal API unchanged",
+        given: "consumers depend on internal types or contracts",
+        when: "the refactor is applied",
+        then: "no breaking changes are introduced; tests still pass without modification",
+      },
+      {
+        name: "performance delta",
+        given: "the previous baseline metric is recorded",
+        when: "the refactored code runs the same workload",
+        then: `performance is within acceptable bounds (no regression > X%)`,
+      },
+    ],
+    api: [
+      {
+        name: "valid request",
+        given: "client sends a well-formed request with valid auth",
+        when: "the endpoint is called",
+        then: "the API returns 2xx with the expected response body",
+      },
+      {
+        name: "invalid request",
+        given: "client sends a malformed or unauthorized request",
+        when: "the endpoint is called",
+        then: "the API returns 4xx with a structured error message",
+      },
+      {
+        name: "rate limit / degradation",
+        given: "the service is under load or a downstream is unavailable",
+        when: "the endpoint is called",
+        then: "the API returns 5xx or a degraded response per the fallback strategy",
+      },
+    ],
+    test: [
+      {
+        name: "test passes for valid input",
+        given: "the system is in a known-good state",
+        when: "the new test case is executed",
+        then: "the assertion succeeds",
+      },
+      {
+        name: "test fails for invalid input",
+        given: "the system is in a known-bad state",
+        when: "a regression test is executed",
+        then: "the assertion fails with a clear message",
+      },
+      {
+        name: "coverage target met",
+        given: "the full test suite is run with coverage",
+        when: "the new code paths are exercised",
+        then: "coverage meets the agreed threshold (e.g., ≥80%)",
+      },
+    ],
+    security: [
+      {
+        name: "authenticated access allowed",
+        given: "a properly authenticated user with the required role",
+        when: "the protected resource is accessed",
+        then: "access is granted and the action is logged",
+      },
+      {
+        name: "unauthenticated access denied",
+        given: "an unauthenticated or unauthorized request",
+        when: "the protected resource is accessed",
+        then: "access is denied with a 401/403 and no sensitive data is leaked",
+      },
+      {
+        name: "injection attempt blocked",
+        given: "an attacker sends a crafted payload (SQLi/XSS/command injection)",
+        when: "the input reaches the trust boundary",
+        then: "the payload is rejected or sanitized; no execution occurs",
+      },
+    ],
+    performance: [
+      {
+        name: "target metric met",
+        given: "the system is under expected production load",
+        when: "the optimized code path is exercised",
+        then: `the target metric (latency/throughput/memory) meets the agreed SLO`,
+      },
+      {
+        name: "no regression on cold path",
+        given: "a previously slow path is still in use",
+        when: "the optimization is deployed",
+        then: "the cold path is not slower than before",
+      },
+      {
+        name: "resource bounds respected",
+        given: "sustained high load",
+        when: "the system runs for an extended period",
+        then: "memory and CPU stay within bounds (no leaks or runaway growth)",
+      },
+    ],
+    general: [
+      {
+        name: "happy path",
+        given: "the system is in a normal state",
+        when: "the requested change is exercised",
+        then: `${projectLabel} behaves as intended`,
+      },
+      {
+        name: "error path",
+        given: "an error condition occurs (bad input, missing dependency, etc.)",
+        when: "the requested change is exercised",
+        then: `${projectLabel} reports a clear error and does not corrupt state`,
+      },
+      {
+        name: "edge case",
+        given: "an unusual but legal condition (empty, max size, concurrent, etc.)",
+        when: "the requested change is exercised",
+        then: `${projectLabel} handles it gracefully`,
+      },
+    ],
+  };
+
+  return starters[reqType.category] || starters.general;
+}
+
+/**
+ * Generate starter KeyDecisions from request + project context.
+ * Each decision has placeholders the agent/user must fill in (alternatives, rationale).
+ * The structure forces considering trade-offs before committing.
+ */
+function generateKeyDecisions(
+  ctx: ProjectContext,
+  request: string,
+  reqType: RequestType,
+): KeyDecision[] {
+  const language = ctx.language || "unknown";
+  const framework = ctx.framework || "no framework";
+
+  return [
+    {
+      id: "KD-1",
+      decision: `Use ${language}${framework !== "no framework" ? ` with ${framework}` : ""}`,
+      context: `Request asks for ${reqType.category} work in a ${ctx.projectType || "unknown"} project`,
+      alternatives: [
+        { option: language, pros: "matches existing codebase", cons: "may not be ideal for this task" },
+        { option: "switch language/framework", pros: "may be a better fit", cons: "high migration cost" },
+      ],
+      rationale: `_FILL IN: why this language/framework is appropriate for the request_`,
+      enforcedBy: "typecheck + code review",
+    },
+    {
+      id: "KD-2",
+      decision: `Follow existing project patterns: ${ctx.patterns.slice(0, 3).join(", ") || "TBD"}`,
+      context: `Existing patterns detected: ${ctx.patterns.join(", ") || "none"}. Project has components: ${ctx.existingComponents.join(", ") || "none"}.`,
+      alternatives: [
+        { option: "follow existing patterns", pros: "consistency, lower friction", cons: "may inherit existing limitations" },
+        { option: "introduce new pattern", pros: "may be cleaner", cons: "cognitive overhead, inconsistency" },
+      ],
+      rationale: `_FILL IN: why existing patterns are appropriate OR why a new pattern is needed_`,
+      enforcedBy: "code review",
+    },
+    {
+      id: "KD-3",
+      decision: `_FILL IN: the most important design choice for this ${reqType.category} request_`,
+      context: `_FILL IN: what constraint or goal forces this decision_`,
+      alternatives: [
+        { option: "option A", pros: "_FILL IN_", cons: "_FILL IN_" },
+        { option: "option B", pros: "_FILL IN_", cons: "_FILL IN_" },
+      ],
+      rationale: `_FILL IN: why the chosen option wins_`,
+      enforcedBy: "_FILL IN: code review | lint | test | type check_",
+    },
+  ];
+}
+
+/**
  * Minimal draft generation (for backward compatibility)
  */
 export function generateMinimalDraft(name: string, request: string): string {
@@ -807,8 +1098,17 @@ export function generateMinimalDraft(name: string, request: string): string {
       "- Foundation Plane → supports → All Planes",
     ],
     keyDecisions: [
-      "- Focus on high-impact planes first",
-      "- Apply relevant planes only (not all 7 may apply)",
+      {
+        id: "KD-1",
+        decision: "Focus on high-impact planes first",
+        context: "MDD has 7 planes; not all apply to every request",
+        alternatives: [
+          { option: "all 7 planes", pros: "comprehensive", cons: "overkill for simple tasks" },
+          { option: "focused subset", pros: "faster, more relevant", cons: "may miss cross-plane concerns" },
+        ],
+        rationale: "_FILL IN: which planes are most relevant and why_",
+        enforcedBy: "code review",
+      },
     ],
     openQuestions: [
       "- Review with QiaoChui for technical feasibility",
