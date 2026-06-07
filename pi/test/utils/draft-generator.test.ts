@@ -520,3 +520,48 @@ describe("Mode-aware draft (new vs improve)", () => {
   });
 });
 
+describe("Why-First check (4 questions)", () => {
+  it("includes a '## Why-First Check' section in the draft", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    expect(draft).toContain("## Why-First Check");
+  });
+
+  it("auto-derives a 'Why does this exist?' answer from the request", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    expect(draft).toContain("**Why does this exist?**");
+  });
+
+  it("auto-derives a 'What problem?' answer from the request", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    expect(draft).toContain("**What problem does it solve?**");
+  });
+
+  it("auto-derives a 'Why shaped this way?' answer", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    expect(draft).toContain("**Why shaped this way?**");
+  });
+
+  it("auto-derives a 'Where does this belong?' answer using existing components", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    expect(draft).toContain("**Where does this belong?**");
+    // Should mention at least one existing component as a likely location
+    expect(draft).toMatch(/analyzer|utils|services/);
+  });
+
+  it("answers are not just placeholders — they reference actual project context", () => {
+    const ctx = makeCtx();
+    const draft = generateRichDraft(ctx, "Refactor the analyzer to handle monorepos");
+    // The "Why shaped this way" should reference the detected patterns
+    const whySection = draft.substring(
+      draft.indexOf("## Why-First Check"),
+      draft.indexOf("---", draft.indexOf("## Why-First Check")),
+    );
+    expect(whySection).toMatch(/ts-generics|ts-interfaces|ts-async/);
+  });
+});
+

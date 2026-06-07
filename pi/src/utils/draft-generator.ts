@@ -70,14 +70,36 @@ export interface DraftConfig {
   // Mode-aware sections (only rendered for "improve" requests)
   deltaFromExisting?: string[];
   outOfScope?: string[];
+  // Why-First check (4 questions, derived from project context)
+  whyFirst?: WhyFirstAnswers;
   openQuestions?: string[];
   notes?: string;
+}
+
+/**
+ * Why-First Check answers — the 4 questions from SSD-Template.
+ * Each field is a one-line answer (auto-derived from context, then refined).
+ */
+export interface WhyFirstAnswers {
+  whyExists: string;       // Why does this request/feature exist?
+  problem: string;         // What specific problem does it solve?
+  shapeRationale: string;  // Why is the code shaped this way?
+  location: string;        // Where does this belong in the codebase?
 }
 
 const DRAFT_TEMPLATE = `# System Design: {name}
 
 ## Overview
 {intent}
+
+---
+
+## Why-First Check
+
+> The 4 questions that must be answered before any code is written.
+> Auto-derived from project context — refine the answers in the draft itself.
+
+{whyFirst}
 
 ---
 
@@ -257,6 +279,25 @@ export function generateDraft(config: DraftConfig): string {
   };
 
   /**
+   * Render the Why-First Check section: 4 questions with auto-derived answers.
+   * Returns a placeholder block when no answers provided.
+   */
+  const formatWhyFirst = (answers?: WhyFirstAnswers): string => {
+    if (!answers) {
+      return "_No Why-First answers derived. Provide context for auto-derivation._";
+    }
+    return [
+      `**Why does this exist?** ${answers.whyExists}`,
+      ``,
+      `**What problem does it solve?** ${answers.problem}`,
+      ``,
+      `**Why shaped this way?** ${answers.shapeRationale}`,
+      ``,
+      `**Where does this belong?** ${answers.location}`,
+    ].join("\n");
+  };
+
+  /**
    * Render an optional section. Returns empty string if no items,
    * so the section is invisible for "new" mode.
    * If items exist, appends an instruction footer (not an empty-state msg).
@@ -276,6 +317,7 @@ export function generateDraft(config: DraftConfig): string {
     .replace("{timestamp}", timestamp)
     .replace("{intent}", config.intent || config.request)
     .replace("{scenarios}", formatScenarios(config.scenarios))
+    .replace("{whyFirst}", formatWhyFirst(config.whyFirst))
     // Business Plane
     .replace("{process}", formatList(config.business?.process))
     .replace("{rules}", formatList(config.business?.rules))
@@ -319,6 +361,9 @@ export function generateRichDraft(projectContext: ProjectContext, request: strin
   // Classify request: "new" (greenfield) vs "improve" (modify existing)
   const classification = classifyRequest(projectContext, request);
 
+  // Derive Why-First answers from context (4 questions)
+  const whyFirst = deriveWhyFirst(projectContext, request, requestType, classification);
+
   // Generate plane content based on project context
   const businessPlane = generateBusinessPlane(projectContext, request, requestType);
   const dataPlane = generateDataPlane(projectContext, request, requestType);
@@ -343,6 +388,7 @@ export function generateRichDraft(projectContext: ProjectContext, request: strin
     scenarios,
     deltaFromExisting,
     outOfScope,
+    whyFirst,
     business: businessPlane,
     data: dataPlane,
     control: controlPlane,
@@ -402,6 +448,52 @@ function buildOutOfScope(ctx: ProjectContext): string[] {
     lines.push(`_FILL IN: should this change touch \`${comp}/\`? If not, mark explicitly._`);
   }
   return lines;
+}
+
+/**
+ * Derive Why-First answers from project context + request.
+ * The 4 questions come from SSD-Template's Why-First principle.
+ * Each answer is one line, auto-derived; agent/user refines in the draft.
+ */
+function deriveWhyFirst(
+  ctx: ProjectContext,
+  request: string,
+  requestType: RequestType,
+  classification: { mode: "new" | "improve"; signals: string[] },
+): WhyFirstAnswers {
+  const componentList = ctx.existingComponents.length > 0
+    ? ctx.existingComponents.join(", ")
+    : "_no existing components detected_";
+  const patternList = ctx.patterns.length > 0
+    ? ctx.patterns.slice(0, 3).join(", ")
+    : "_no patterns detected_";
+
+  // Why does this exist? — rephrased from the request itself
+  const verbMap: Record<RequestType["category"], string> = {
+    feature: "introduce a new capability",
+    refactor: "improve an existing capability without changing behavior",
+    api: "expose functionality as a programmatic interface",
+    test: "verify behavior through automated tests",
+    security: "close a security gap or harden an attack surface",
+    performance: "improve latency, throughput, or resource use",
+    general: "deliver user-visible value",
+  };
+  const whyExists = `${verbMap[requestType.category]}: ${request.slice(0, 120)}${request.length > 120 ? "..." : ""}`;
+
+  // What problem does it solve? — based on classification mode
+  const problem = classification.mode === "improve"
+    ? `Refactor/modify friction in existing code (signals: ${classification.signals.slice(0, 2).join("; ") || "component overlap"}).`
+    : `Greenfield need not addressed by current components (${componentList}).`;
+
+  // Why shaped this way? — based on detected patterns
+  const shapeRationale = `Follow existing patterns (${patternList}) for consistency; deviations must be justified in Key Decisions.`;
+
+  // Where does this belong? — based on overlap with components
+  const location = ctx.existingComponents.length > 0
+    ? `In existing components (${componentList}), preferably the one most overlapped by the request.`
+    : `Create new module(s); placement TBD — see Key Decisions.`;
+
+  return { whyExists, problem, shapeRationale, location };
 }
 
 interface RequestType {
