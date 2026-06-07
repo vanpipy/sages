@@ -160,15 +160,100 @@ export class ProjectAnalyzer {
   }
   
   /**
+   * Resolve monorepo root to the workspace package that contains the actual source code.
+   * Returns the original cwd if not a monorepo, or the workspace path if found.
+   */
+  private resolveMonorepoWorkspace(cwd: string): { effectiveCwd: string; isMonorepo: boolean } {
+    const packageJsonPath = join(cwd, "package.json");
+    if (!existsSync(packageJsonPath)) {
+      return { effectiveCwd: cwd, isMonorepo: false };
+    }
+
+    let pkg: any;
+    try {
+      pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+    } catch {
+      return { effectiveCwd: cwd, isMonorepo: false };
+    }
+
+    const workspaces = pkg.workspaces;
+    if (!Array.isArray(workspaces) || workspaces.length === 0) {
+      return { effectiveCwd: cwd, isMonorepo: false };
+    }
+
+    // Expand glob patterns into actual directory paths
+    const candidates: string[] = [];
+    for (const pattern of workspaces) {
+      if (pattern.endsWith("/*")) {
+        // Glob pattern like "packages/*" — expand to subdirectories
+        const base = pattern.slice(0, -2);
+        const fullPath = join(cwd, base);
+        if (existsSync(fullPath)) {
+          try {
+            const entries = readdirSync(fullPath);
+            for (const entry of entries) {
+              const subPath = join(fullPath, entry);
+              try {
+                if (statSync(subPath).isDirectory()) {
+                  candidates.push(subPath);
+                }
+              } catch { /* skip */ }
+            }
+          } catch { /* skip */ }
+        }
+      } else {
+        // Direct path like "pi" — the pattern itself is the workspace
+        const fullPath = join(cwd, pattern);
+        if (existsSync(fullPath)) {
+          try {
+            if (statSync(fullPath).isDirectory()) {
+              candidates.push(fullPath);
+            }
+          } catch { /* skip */ }
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      return { effectiveCwd: cwd, isMonorepo: false };
+    }
+
+    // Prefer the workspace with its own package.json + source dir
+    for (const candidate of candidates) {
+      if (existsSync(join(candidate, "package.json"))) {
+        // Check if it has recognizable source (src/ with code, or tsconfig.json, etc.)
+        const hasSrc = existsSync(join(candidate, "src"));
+        const hasTsConfig = existsSync(join(candidate, "tsconfig.json"));
+        const hasGoMod = existsSync(join(candidate, "go.mod"));
+        if (hasSrc || hasTsConfig || hasGoMod) {
+          return { effectiveCwd: candidate, isMonorepo: true };
+        }
+      }
+    }
+
+    // Fall back to the first candidate
+    return { effectiveCwd: candidates[0], isMonorepo: true };
+  }
+
+  /**
    * Full project analysis - returns comprehensive ProjectContext
    */
   async analyze(cwd: string, request?: string): Promise<ProjectContext> {
+    // 0. Monorepo resolution: if root is a workspace container, drill into the actual package
+    const { effectiveCwd, isMonorepo } = this.resolveMonorepoWorkspace(cwd);
+    const analysisCwd = effectiveCwd;
+
     // 1. Detect language and frameworks
-    const languageInfo = await this.detectLanguage(cwd);
-    
+    let languageInfo = await this.detectLanguage(analysisCwd);
+
+    // Fallback: if monorepo resolution didn't help, retry on root
+    if (!languageInfo && !isMonorepo) {
+      languageInfo = await this.detectLanguage(cwd);
+    }
+
     const projectName = basename(cwd);
     const language = languageInfo?.language || "unknown";
-    
+
     // Filter out version strings from frameworks (e.g., "Go 1.21")
     const frameworks = (languageInfo?.frameworks || []).filter(f => 
       !f.match(/^(Go|Java|Python|TypeScript)\s+\d/)
@@ -182,17 +267,17 @@ export class ProjectAnalyzer {
     // 3. Detect project type
     const projectType = this.detectProjectType(language, framework, request);
     
-    // 4. Analyze tech stack
-    const techStack = this.analyzeTechStack(cwd, language, frameworks);
-    
+    // 4. Analyze tech stack (use analysisCwd to drill into workspace package)
+    const techStack = this.analyzeTechStack(analysisCwd, language, frameworks);
+
     // 5. Analyze project structure
-    const structure = this.analyzeStructure(cwd, language);
-    
+    const structure = this.analyzeStructure(analysisCwd, language);
+
     // 6. Detect key files
-    const keyFiles = this.detectKeyFiles(cwd, structure);
-    
+    const keyFiles = this.detectKeyFiles(analysisCwd, structure);
+
     // 7. Extract dependencies
-    const dependencies = this.extractDependencies(cwd, language);
+    const dependencies = this.extractDependencies(analysisCwd, language);
     
     return {
       projectName,

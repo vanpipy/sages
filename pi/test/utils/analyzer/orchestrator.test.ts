@@ -32,11 +32,21 @@ describe('ProjectAnalyzer', () => {
     
     it('should analyze TypeScript project correctly', async () => {
       const context = await analyzer.analyze('/home/leroy/Project/sages/pi');
-      
+
       expect(context.language).toBe('typescript');
       expect(typeof context.projectName).toBe('string');
     });
-    
+
+    it('should detect TypeScript from monorepo root by scanning workspaces', async () => {
+      // The sages repo is a monorepo: root has workspaces: ["pi"] but no TS code itself.
+      // The analyzer should fall back to scanning workspace packages.
+      const context = await analyzer.analyze('/home/leroy/Project/sages');
+
+      expect(context.language).toBe('typescript');
+      // Framework should be detected (the detector pushes "typescript" then "node")
+      expect(context.framework).toBeTruthy();
+    });
+
     it('should return ProjectContext with all required fields', async () => {
       const context = await analyzer.analyze('/home/leroy/Project/agentic-with-pi');
       
