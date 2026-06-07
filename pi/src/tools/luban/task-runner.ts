@@ -187,10 +187,22 @@ function getDir(filePath: string): string {
  */
 async function runRedPhase(config: TDDConfig): Promise<TDDPhaseResult> {
   const phase: TDDPhaseResult = { name: "RED", status: "pending" };
-  
+
   try {
     phase.status = "in_progress";
-    
+
+    // Scope guard: abort if any source/test file is in denyFiles
+    const scope = validateScope({
+      sourceFiles: config.sourceFiles,
+      testFiles: config.testFiles,
+      denyFiles: config.denyFiles || [],
+    });
+    if (!scope.ok) {
+      phase.status = "failed";
+      phase.error = scope.message;
+      return phase;
+    }
+
     // Create test file if it doesn't exist
     for (const testFile of config.testFiles) {
       if (!fileService.exists(testFile)) {
@@ -390,6 +402,54 @@ ${testBlocks}
  */
 function escapeForIt(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+// ============================================================================
+// Scope Guard
+// ============================================================================
+
+export interface ScopeConfig {
+  sourceFiles: string[];
+  testFiles: string[];
+  denyFiles: string[];
+}
+
+export interface ScopeResult {
+  ok: boolean;
+  violations: string[];
+  message: string;
+}
+
+/**
+ * Validate that no source/test file is in the denyFiles list.
+ * Returns {ok, violations, message} — message is human-readable.
+ * Pure function: no I/O, no side effects. Easy to test.
+ */
+export function validateScope(config: ScopeConfig): ScopeResult {
+  const deny = config.denyFiles || [];
+  if (deny.length === 0) {
+    return { ok: true, violations: [], message: "" };
+  }
+
+  const denySet = new Set(deny);
+  const violations: string[] = [];
+
+  for (const f of config.sourceFiles) {
+    if (denySet.has(f)) violations.push(f);
+  }
+  for (const f of config.testFiles) {
+    if (denySet.has(f)) violations.push(f);
+  }
+
+  if (violations.length === 0) {
+    return { ok: true, violations: [], message: "" };
+  }
+
+  return {
+    ok: false,
+    violations,
+    message: `Scope guard: the following files are marked as "Out of Scope" in draft.md and must not be touched:\n${violations.map(v => `  - ${v}`).join("\n")}\n\nEither remove them from denyFiles, or pick a different file for this task.`,
+  };
 }
 
 /**

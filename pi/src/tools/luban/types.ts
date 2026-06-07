@@ -68,6 +68,12 @@ export interface TDDConfig {
     then: string;
     but?: string;
   }>;
+  /**
+   * Files that LuBan must NOT touch (scope guard).
+   * Sourced from draft.md ## Out of Scope (after FILL IN items are filled in).
+   * LuBan aborts with a clear error if any sourceFile/testFile is in this list.
+   */
+  denyFiles?: string[];
 }
 
 /**

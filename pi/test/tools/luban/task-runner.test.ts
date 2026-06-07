@@ -59,3 +59,75 @@ describe("Scenarios → TDD Red phase integration", () => {
     expect(content).not.toContain("// Given:");
   });
 });
+
+describe("validateScope (denyFiles guard)", () => {
+  it("should exist and be a function", () => {
+    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+    expect(typeof validateScope).toBe("function");
+  });
+
+  it("returns ok when no files are denied", () => {
+    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+    const result = validateScope({
+      sourceFiles: ["src/auth.ts"],
+      testFiles: ["src/auth.test.ts"],
+      denyFiles: [],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("detects a sourceFile in denyFiles", () => {
+    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+    const result = validateScope({
+      sourceFiles: ["src/auth.ts", "src/utils.ts"],
+      testFiles: ["src/auth.test.ts"],
+      denyFiles: ["src/auth.ts"],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain("src/auth.ts");
+  });
+
+  it("detects a testFile in denyFiles", () => {
+    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+    const result = validateScope({
+      sourceFiles: ["src/auth.ts"],
+      testFiles: ["src/auth.test.ts"],
+      denyFiles: ["src/auth.test.ts"],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain("src/auth.test.ts");
+  });
+
+  it("reports multiple violations at once", () => {
+    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+    const result = validateScope({
+      sourceFiles: ["src/a.ts", "src/b.ts"],
+      testFiles: ["src/c.test.ts"],
+      denyFiles: ["src/a.ts", "src/b.ts", "src/c.test.ts"],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.violations.length).toBe(3);
+  });
+
+  it("uses exact match, not substring (auth.ts vs auth.test.ts)", () => {
+    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+    const result = validateScope({
+      sourceFiles: ["src/auth.test.ts"],
+      testFiles: [],
+      denyFiles: ["src/auth.ts"],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("includes a human-readable message in the result", () => {
+    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+    const result = validateScope({
+      sourceFiles: ["src/auth.ts"],
+      testFiles: [],
+      denyFiles: ["src/auth.ts"],
+    });
+    expect(result.message).toContain("src/auth.ts");
+    expect(result.message.toLowerCase()).toMatch(/scope|denied|out.of.scope/);
+  });
+});
