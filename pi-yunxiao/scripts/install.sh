@@ -105,7 +105,7 @@ main() {
     case "$1" in
       --force) FORCE=true; shift ;;
       --uninstall) UNINSTALL=true; shift ;;
-      --prefix) PI_DIR="$2"; PKG_DIR="$PI_DIR/packages/$PKG_NAME"; shift 2 ;;
+      --prefix) PI_DIR="$2"; PKG_DIR="$PI_DIR/packages/$PKG_NAME"; AGENT_DIR="$PI_DIR/agent"; SETTINGS="$AGENT_DIR/settings.json"; shift 2 ;;
       --help|-h) usage; exit 0 ;;
       *) echo "Unknown: $1"; usage; exit 1 ;;
     esac
