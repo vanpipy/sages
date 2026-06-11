@@ -65,3 +65,27 @@ rm -rf ~/.cache/yunxiao-mcp/
 | 闲置超时 | 10 min | `YUNXIAO_MCP_IDLE_MIN=30` |
 | 健康检查 | 2 次失败 | 改 `mcp-server-manager.ts` 重建实例 |
 | 端口 | 3000 | `YUNXIAO_MCP_PORT=3001` 避免冲突 |
+
+## 🚨 Yunxiao MCP 工具参数名易踩坑
+
+> 这些是从端到端测试里抓出来的。**Yunxiao 53 个工具的参数名不一致**，写 L2 wrapper 必须先调一次 `tools/list` 查 schema，或用真实 token 验证。
+
+| 工具 | 正确参数 | 易错写法 |
+|------|---------|---------|
+| `create_branch` | `branch` | ~~`newBranch`~~ |
+| `delete_branch` | `branchName` | ~~`branch`~~ |
+| `create_work_item` | `workItemType` | ~~`workItemTypeId`~~ |
+| `create_change_request` | `sourceBranch` + `targetBranch` | 需 sourceBranch 严格已存在 |
+| `list_pipelines` | (待验证) | 需配 organizationId |
+
+**给 wrapper 加测试**（避免再踩坑）：
+
+```ts
+// test/l2-arg-names.test.ts - 验证所有 L2 wrapper 用的参数名都符合官方 schema
+import { listTools } from "../src/tools/mcp-call.js";
+const tools = await listTools();
+const schema = tools.find(t => t.name === "create_branch");
+expect(schema.inputSchema.required).toContain("branch");
+```
+
+待完整验证所有 53 个工具 → `bun run test:l2-args`。
