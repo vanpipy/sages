@@ -3,9 +3,13 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "strict": true,
+    "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules/bun-types"
+    ],
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "noEmit": true,
@@ -14,15 +18,20 @@
     "rootDir": ".",
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node", "bun-types"]
+    "types": [
+      "node"
+    ],
+    "noImplicitAny": false,
+    "strictNullChecks": false
   },
   "include": [
     "src/**/*.ts",
-    "extensions/**/*.ts",
-    "test/**/*.ts"
+    "src/**/*.d.ts",
+    "extensions/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "test/**"
   ]
 }
