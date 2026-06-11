@@ -56,7 +56,6 @@ export function registerBranchTool(pi: ExtensionAPI) {
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], details: data };
       }
       const orgId = match[1];
-      const repoName = match[2].split("/").pop();
       const repositoryId = `${orgId}%2F${match[2]}`;
 
       try {
@@ -73,7 +72,9 @@ export function registerBranchTool(pi: ExtensionAPI) {
             method: "tools/call",
             params: {
               name: "create_branch",
-              arguments: { organizationId: orgId, repositoryId, sourceBranch, branch: newBranch, repoName },
+              // Schema: branch, organizationId, ref, repositoryId
+              // (no sourceBranch, no repoName — see E2E test)
+              arguments: { organizationId: orgId, repositoryId, ref: sourceBranch, branch: newBranch },
             },
           }),
         });

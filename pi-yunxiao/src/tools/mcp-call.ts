@@ -7,50 +7,8 @@
  */
 
 import { Type } from "typebox";
-import { McpServerManager } from "../services/mcp-server-manager.js";
-import { loadConfig } from "../services/config.js";
+import { McpClient } from "../services/mcp-client.js";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-
-const MCP_RPC_URL = (port: number) => `http://localhost:${port}/mcp`;
-
-/**
- * Internal: make a JSON-RPC call to the MCP server.
- */
-async function mcpRpc(
-  cfg: Awaited<ReturnType<typeof loadConfig>>,
-  mgr: McpServerManager,
-  method: string,
-  params: unknown,
-  tokenOverride?: string,
-): Promise<unknown> {
-  await mgr.ensureServer();
-
-  const body = {
-    jsonrpc: "2.0",
-    id: Date.now(),
-    method,
-    params,
-  };
-
-  const token = tokenOverride || cfg.token;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Accept: "application/json, text/event-stream",
-  };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(MCP_RPC_URL(cfg.port), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(`MCP RPC failed: ${res.status} ${res.statusText}`);
-  }
-  return res.json();
-}
 
 export function registerL1Tools(pi: ExtensionAPI) {
   // -------------------------------------------------------------------------
@@ -72,17 +30,20 @@ export function registerL1Tools(pi: ExtensionAPI) {
       ], { default: "all" })),
     }),
     async execute(toolCallId: any, _params: any, _signal: any, _onUpdate: any, _ctx: any) {
-      const cfg = await loadConfig();
-      const mgr = new McpServerManager(cfg);
+      const client = await McpClient.getInstance();
       try {
-        const result = await mcpRpc(cfg, mgr, "tools/list", {});
-        const data: any = { success: true, tools: (result as any)?.result?.tools || [] };
+        const result = await client.call("tools/list", {});
+        const data: any = { success: true, tools: result?.result?.tools || [] };
         return {
           content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
           details: data,
         };
-      } finally {
-        await mgr.touch();
+      } catch (e) {
+        const data = { success: false, error: { message: (e as Error).message } };
+        return {
+          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          details: data,
+        };
       }
     },
   });
@@ -106,10 +67,9 @@ export function registerL1Tools(pi: ExtensionAPI) {
     }),
     async execute(toolCallId: any, params: any, _signal: any, _onUpdate: any, _ctx: any) {
       const { tool, arguments: args, overrideToken } = params;
-      const cfg = await loadConfig();
-      const mgr = new McpServerManager(cfg);
+      const client = await McpClient.getInstance();
       try {
-        const result = await mcpRpc(cfg, mgr, "tools/call", { name: tool, arguments: args }, overrideToken);
+        const result = await client.call("tools/call", { name: tool, arguments: args }, { tokenOverride: overrideToken });
         const data: any = { success: true, tool, result };
         return {
           content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
@@ -121,8 +81,6 @@ export function registerL1Tools(pi: ExtensionAPI) {
           content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
           details: data,
         };
-      } finally {
-        await mgr.touch();
       }
     },
   });

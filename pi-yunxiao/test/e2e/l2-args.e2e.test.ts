@@ -31,12 +31,13 @@ const MCP_URL = `http://localhost:${MCP_PORT}/mcp`;
  */
 function getActualArgsSent(wrapper: string): string[] | null {
   // Mirror of the args used in src/tools/high-level/*.ts (kept in sync)
+  // Update this when wrapper code changes.
   const map: Record<string, string[]> = {
-    yunxiao_create_branch: ["organizationId", "repositoryId", "sourceBranch", "branch", "repoName"],
-    yunxiao_create_task: ["spaceId", "subject", "workItemType", "assignedTo", "customFieldValues"],
-    yunxiao_create_subtask: ["spaceId", "parentId", "subject", "workItemType", "assignedTo"],
-    yunxiao_create_bug: ["spaceId", "subject", "workItemType", "assignedTo"],
-    yunxiao_create_mr: ["organizationId", "repositoryId", "title", "sourceBranch", "targetBranch", "reviewers", "workItemIds"],
+    yunxiao_create_branch: ["organizationId", "repositoryId", "ref", "branch"],
+    yunxiao_create_task: ["spaceId", "subject", "workitemTypeId", "assignedTo", "customFieldValues"],
+    yunxiao_create_subtask: ["spaceId", "parentId", "subject", "workitemTypeId", "assignedTo"],
+    yunxiao_create_bug: ["spaceId", "subject", "workitemTypeId", "assignedTo"],
+    yunxiao_create_mr: ["organizationId", "repositoryId", "title", "sourceBranch", "targetBranch", "reviewerUserIds", "workItemIds"],
     yunxiao_trigger_pipeline: ["pipelineId", "branch"],
   };
   return map[wrapper] || null;
@@ -64,34 +65,26 @@ const L2_TOOL_MAPPING: Array<{
     wrapper: "yunxiao_create_branch",
     tool: "create_branch",
     expectedArgs: ["organizationId", "repositoryId", "ref", "branch"],
-    knownBroken:
-      "Wrapper sends 'sourceBranch' (should be 'ref') and extra 'repoName' (not in schema). Fix: rename sourceBranch → ref, drop repoName.",
   },
   {
     wrapper: "yunxiao_create_task",
     tool: "create_work_item",
     expectedArgs: ["spaceId", "subject", "workitemTypeId"],
-    knownBroken:
-      "Wrapper currently sends 'workItemType: \"Task\"' (string) but schema requires 'workitemTypeId' (32-char ID from get_work_item_types). Fix: do a 2-step lookup in the wrapper.",
   },
   {
     wrapper: "yunxiao_create_subtask",
     tool: "create_work_item",
     expectedArgs: ["spaceId", "subject", "workitemTypeId", "parentId"],
-    knownBroken: "Same as yunxiao_create_task — needs workitemTypeId lookup.",
   },
   {
     wrapper: "yunxiao_create_bug",
     tool: "create_work_item",
     expectedArgs: ["spaceId", "subject", "workitemTypeId"],
-    knownBroken: "Same as yunxiao_create_task — needs workitemTypeId lookup.",
   },
   {
     wrapper: "yunxiao_create_mr",
     tool: "create_change_request",
     expectedArgs: ["organizationId", "repositoryId", "title", "sourceBranch", "targetBranch", "reviewerUserIds", "workItemIds"],
-    knownBroken:
-      "Wrapper sends 'reviewers' (string array of usernames) but schema requires 'reviewerUserIds' (string array of user IDs). Fix: rename + lookup user IDs via search_organization_members.",
   },
   // ── Multi-step wrapper: trigger_pipeline ──
   {
@@ -246,8 +239,62 @@ describe("L2 wrapper argument name validation (E2E)", () => {
           throw new Error(msg);
         }
       }
+
+      // Phase 2 (multi-step only): verify the wrapper's actual args are also in schema.
+      // For single-step wrappers, actualArgs === expectedArgs (already checked).
+      // For multi-step (trigger_pipeline), this is critical: pipelineId is in create_pipeline_run, not list_pipelines.
+      if (mapping.step) {
+        const actualArgs = getActualArgsSent(mapping.wrapper) || [];
+        for (const sentArg of actualArgs) {
+          // Skip args that belong to OTHER steps
+          if (mapping.step.startsWith("1/")) {
+            // Step 1 (list_pipelines) only checks for organizationId; skip if this is for step 2
+            if (sentArg === "pipelineId" || sentArg === "branch") continue;
+          }
+          if (mapping.step.startsWith("2/")) {
+            // Step 2 (create_pipeline_run) accepts pipelineId+branch
+            if (sentArg === "organizationId") continue;
+          }
+          if (!schemaProps.has(sentArg)) {
+            throw new Error(
+              `❌ ${mapping.wrapper} [${mapping.step}]: actual arg '${sentArg}' is NOT in ${mapping.tool} schema.`,
+            );
+          }
+        }
+      }
     });
   }
+
+  it("actual sent args match schema (no wrapper drift)", () => {
+    if (skipReason) {
+      console.warn(`⚠️  SKIP: ${skipReason}`);
+      expect(true).toBe(true);
+      return;
+    }
+
+    // For each wrapper, verify that the args it ACTUALLY SENDS are all in their target tool's schema.
+    // This catches when a wrapper is updated without updating the mapping (or vice versa).
+    for (const mapping of L2_TOOL_MAPPING) {
+      const tool = tools.find((t) => t.name === mapping.tool);
+      if (!tool) continue;
+      const schemaProps = new Set(Object.keys(tool.inputSchema.properties || {}));
+      const actual = getActualArgsSent(mapping.wrapper) || [];
+
+      for (const arg of actual) {
+        // Multi-step: skip args that belong to OTHER steps
+        if (mapping.step?.startsWith("1/") && (arg === "pipelineId" || arg === "branch")) continue;
+        if (mapping.step?.startsWith("2/") && arg === "organizationId") continue;
+
+        if (!schemaProps.has(arg)) {
+          throw new Error(
+            `❌ Wrapper drift: ${mapping.wrapper} → ${mapping.tool}: actually sends '${arg}' but it's not in schema.\n` +
+              `   Either fix the wrapper or update expectedArgs in the mapping.\n` +
+              `   Available: ${[...schemaProps].sort().join(", ")}`,
+          );
+        }
+      }
+    }
+  });
 
   it("documents any unknown MCP tools used by our wrappers (forward-compat check)", () => {
     if (skipReason) {

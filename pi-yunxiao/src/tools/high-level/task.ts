@@ -8,6 +8,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { McpServerManager } from "../../services/mcp-server-manager.js";
 import { loadConfig } from "../../services/config.js";
+import { lookupWorkItemTypeId } from "./_lookups.js";
 
 export function registerTaskTool(pi: ExtensionAPI) {
   pi.registerTool({
@@ -28,6 +29,9 @@ export function registerTaskTool(pi: ExtensionAPI) {
       await mgr.ensureServer();
 
       try {
+        // Step 0: Look up workitemTypeId for "Task" (cached after first call)
+        const typeId = await lookupWorkItemTypeId(projectCode, "Task");
+
         // Step 1: Create work item
         const wiRes = await fetch(`http://localhost:${cfg.port}/mcp`, {
           method: "POST",
@@ -45,7 +49,7 @@ export function registerTaskTool(pi: ExtensionAPI) {
               arguments: {
                 spaceId: projectCode,
                 subject,
-                workItemType: "Task",
+                workitemTypeId: typeId,  // E2E test caught: was 'workItemType: "Task"'
                 assignedTo: assignee,
                 customFieldValues: estimatedHours ? { estimatedHours } : undefined,
               },

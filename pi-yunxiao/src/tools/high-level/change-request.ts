@@ -9,6 +9,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { McpServerManager } from "../../services/mcp-server-manager.js";
 import { loadConfig } from "../../services/config.js";
+import { lookupReviewerUserIds } from "./_lookups.js";
 import { execFileSync } from "node:child_process";
 
 function getCurrentBranch(): string {
@@ -67,6 +68,11 @@ export function registerChangeRequestTool(pi: ExtensionAPI) {
       await mgr.ensureServer();
 
       try {
+        // Look up reviewer user IDs (cached) if reviewers specified
+        const reviewerUserIds = reviewers && reviewers.length > 0
+          ? await lookupReviewerUserIds(reviewers)
+          : undefined;
+
         const res = await fetch(`http://localhost:${cfg.port}/mcp`, {
           method: "POST",
           headers: {
@@ -86,7 +92,7 @@ export function registerChangeRequestTool(pi: ExtensionAPI) {
                 title,
                 sourceBranch: srcBranch,
                 targetBranch,
-                reviewers,
+                reviewerUserIds,  // E2E test caught: was 'reviewers' (usernames)
                 workItemIds: workItemId ? [workItemId] : undefined,
               },
             },
@@ -103,6 +109,8 @@ export function registerChangeRequestTool(pi: ExtensionAPI) {
           sourceBranch: srcBranch,
           targetBranch,
           workItemId,
+          reviewers: reviewers || [],
+          reviewerUserIds: reviewerUserIds || [],
         };
         return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], details: data };
       } catch (e) {

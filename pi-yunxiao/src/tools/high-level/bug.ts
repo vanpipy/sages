@@ -8,6 +8,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { McpServerManager } from "../../services/mcp-server-manager.js";
 import { loadConfig } from "../../services/config.js";
+import { lookupWorkItemTypeId } from "./_lookups.js";
 
 export function registerBugTool(pi: ExtensionAPI) {
   pi.registerTool({
@@ -27,6 +28,9 @@ export function registerBugTool(pi: ExtensionAPI) {
       await mgr.ensureServer();
 
       try {
+        // Look up workitemTypeId for "Bug" (cached)
+        const typeId = await lookupWorkItemTypeId(projectCode, "Bug");
+
         const res = await fetch(`http://localhost:${cfg.port}/mcp`, {
           method: "POST",
           headers: {
@@ -43,7 +47,7 @@ export function registerBugTool(pi: ExtensionAPI) {
               arguments: {
                 spaceId: projectCode,
                 subject,
-                workItemType: "Bug",
+                workitemTypeId: typeId,  // E2E test caught: was 'workItemType: "Bug"'
                 assignedTo: assignee,
               },
             },

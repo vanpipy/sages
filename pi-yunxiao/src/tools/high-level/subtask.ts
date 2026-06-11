@@ -8,6 +8,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { McpServerManager } from "../../services/mcp-server-manager.js";
 import { loadConfig } from "../../services/config.js";
+import { lookupWorkItemTypeId } from "./_lookups.js";
 
 export function registerSubtaskTool(pi: ExtensionAPI) {
   pi.registerTool({
@@ -49,7 +50,10 @@ export function registerSubtaskTool(pi: ExtensionAPI) {
         }
         const spaceId = parentJson.result?.spaceId;
 
-        // Step 2: Create subtask
+        // Step 2: Look up workitemTypeId for "SubTask" (cached)
+        const typeId = await lookupWorkItemTypeId(spaceId, "SubTask");
+
+        // Step 3: Create subtask
         const subRes = await fetch(`http://localhost:${cfg.port}/mcp`, {
           method: "POST",
           headers: {
@@ -67,7 +71,7 @@ export function registerSubtaskTool(pi: ExtensionAPI) {
                 spaceId,
                 parentId: parentWorkItemId,
                 subject,
-                workItemType: "SubTask",
+                workitemTypeId: typeId,  // E2E test caught: was 'workItemType: "SubTask"'
                 assignedTo: assignee,
               },
             },
