@@ -30,13 +30,13 @@
 - `server.pid` — 当前 server PID（atomic write via mktemp + mv）
 - `server.lastused` — epoch 秒（闲置回收用）
 - `server.log` — server stdout+stderr（chmod 600, 启动时 truncate）
-- `lock` — flock 互斥
+- `lock` — flock 互斥（O_EXCL atomic create）
 
 ### 4. Token 管理
 
 - **优先级**：`YUNXIAO_ACCESS_TOKEN` env > `~/.config/yunxiao/credentials` (chmod 600)
 - **per-request override**：`yunxiao_mcp_call(overrideToken="pt-yyyy")` 切账号
-- **日志**：token 仅 prefix（前 10 字符）
+- **日志**：token 仅 prefix（前 10 字符），截断
 
 ### 5. TDD 纪律
 
@@ -48,26 +48,13 @@
 
 ### 6. TypeBox schema
 
-所有 pi tool 用 TypeBox 定义参数：
-
-```ts
-import { Type } from "typebox";
-pi.registerTool({
-  name: "yunxiao_create_branch",
-  parameters: Type.Object({
-    sourceBranch: Type.String(),
-    newBranch: Type.String(),
-  }),
-  // ...
-});
-```
+所有 pi tool 用 TypeBox 定义参数。`pi.registerTool` 的 execute 函数必须用精确的参数名（`toolCallId, params, signal, onUpdate, ctx`）。return 必须有 `details: T`。
 
 ## 跑测试
 
 ```bash
-bun test                    # 全部
-bun test test/specific.ts   # 单个
-bash test/smoke.sh          # 端到端
+bun test                    # 全部 75 unit tests
+bash test/smoke.sh          # 端到端 smoke
 npx tsc --noEmit            # 类型检查
 ```
 
@@ -76,3 +63,23 @@ npx tsc --noEmit            # 类型检查
 - Conventional Commits：`feat:` / `fix:` / `test:` / `refactor:` / `docs:` / `chore:`
 - 例：`feat(mcp-server-manager): atomic PID write via mktemp+mv`
 - 每个 task 完成后 commit 一次
+- 提交者用 git config 已配置的身份（不要 `-c user.name=...` 覆盖）
+
+## 关键约束
+
+- **不发布到 npm**——本地包
+- **不写 SYSTEM.md**——sages 装过
+- **不依赖 sages/pi**——独立包
+- **scripts/ 不拷到运行时**
+- **chmod 600 凭证**——必填
+
+## 已知陷阱
+
+1. **flock 共享 lock 文件**：每个 acquireLock 用 O_EXCL atomic create，**不要**用 per-acquirer sentinel（容易自欺欺人）。
+2. **Bun 不暴露 POSIX flock()**：用 `writeFile({flag: 'wx'})` 替代。
+3. **`spawn` 事件不等 lock 拿到**：flock shell 命令的 spawn 事件在子进程创建时立即触发，**不**等 lock 拿到。
+4. **Bun.spawn 的 'spawn' 事件同样不保证锁获取完成**——如果用 spawn 实现锁，要等子进程实际拿到锁。
+5. **execute 函数参数名严格匹配**：`pi.registerTool` 要求 `toolCallId, params, signal, onUpdate, ctx`（不能用 `_` 前缀）。
+6. **return type 必须有 `details: T`**：`AgentToolResult<T>` 是 required field。
+7. **MCP server `--streamable-http` 模式**：`PORT` env 控制端口（默认 3000）。
+8. **server 启动 ~3-5s**：首次 npx 下载 + initialize RPC；install-mcp-server.sh 后 <1s。
