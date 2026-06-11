@@ -73,7 +73,7 @@ export function registerBranchTool(pi: ExtensionAPI) {
             method: "tools/call",
             params: {
               name: "create_branch",
-              arguments: { organizationId: orgId, repositoryId, sourceBranch, newBranch, repoName },
+              arguments: { organizationId: orgId, repositoryId, sourceBranch, branch: newBranch, repoName },
             },
           }),
         });
