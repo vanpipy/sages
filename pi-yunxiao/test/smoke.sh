@@ -67,9 +67,9 @@ else
 fi
 
 echo ""
-echo "▶ 3. Unit tests (bun test)"
+echo "▶ 3. Unit tests (bun test, excludes e2e)"
 set +e
-bun test 2>&1 | tail -8
+bun test test/*.test.ts test/integration/*.test.ts 2>&1 | tail -8
 TEST_EXIT=${PIPESTATUS[0]}
 set -e
 if [[ $TEST_EXIT -eq 0 ]]; then

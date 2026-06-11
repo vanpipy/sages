@@ -7,7 +7,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test test/*.test.ts test/integration/*.test.ts",
-    "test:smoke": "bash test/smoke.sh"
+    "test:e2e": "bash scripts/test-e2e.sh",
+    "test:smoke": "bash test/smoke.sh",
+    "test:all": "bun run test && bun run test:e2e && bun run test:smoke"
   },
   "keywords": [
     "pi",
