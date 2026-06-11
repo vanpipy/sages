@@ -53,10 +53,29 @@
 ## 跑测试
 
 ```bash
-bun test                    # 全部 75 unit tests
-bash test/smoke.sh          # 端到端 smoke
-npx tsc --noEmit            # 类型检查
+bun test                     # 75 unit tests (always, CI safe)
+bun run test:e2e             # 10 e2e tests (real MCP server + real token)
+                             #   skips gracefully if no token
+bash test/smoke.sh           # 端到端 smoke (file inventory + typecheck + install.sh e2e)
+bun run test:all             # 上三者全部
+npx tsc --noEmit             # 类型检查
 ```
+
+## 开发工作流（**3rd-party API 集成**）
+
+**必须遵守**——Mock 测出来的 green 是骗人的。
+
+1. **写 wrapper 前**：先拿真 token 调一次 `tools/list` 看 schema
+2. **写 wrapper 后**：在 `test/e2e/l2-args.e2e.test.ts` 里加 mapping
+3. **提交前**：跑 `bash scripts/test-e2e.sh`（没 token 自动 SKIP）
+4. **修 wrapper 时**：同步更新 `_lookups.ts` cache + 测试里的 `getActualArgsSent()` 镜像
+
+## L2 wrapper 模式
+
+1. **string→ID 转换**：很多 API 用 ID 而非 string（如 `workitemTypeId` 而非 "Task"）。模式：`getXxxTypes(category)` → 找 ID → 用 ID 创建。缓存在 `_lookups.ts`。
+2. **username→userId 转换**：同理，`search_organization_members` 查 userId。
+3. **参数名校验**：见 `test/e2e/l2-args.e2e.test.ts` 的 L2_TOOL_MAPPING 列表，**这是 wrapper 必检清单**。
+4. **E2E Phase 1 + Phase 2**：Phase 1 检查 expectedArgs 在 schema 里；Phase 2 检查 wrapper 实际发送的 args。**两者都过**才能提交。
 
 ## 提交规范
 

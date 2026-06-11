@@ -66,26 +66,47 @@ rm -rf ~/.cache/yunxiao-mcp/
 | 健康检查 | 2 次失败 | 改 `mcp-server-manager.ts` 重建实例 |
 | 端口 | 3000 | `YUNXIAO_MCP_PORT=3001` 避免冲突 |
 
-## 🚨 Yunxiao MCP 工具参数名易踩坑
+## 🚨 Yunxiao MCP 工具参数名易踩坑（**已用 E2E 验证**）
 
 > 这些是从端到端测试里抓出来的。**Yunxiao 53 个工具的参数名不一致**，写 L2 wrapper 必须先调一次 `tools/list` 查 schema，或用真实 token 验证。
 
-| 工具 | 正确参数 | 易错写法 |
-|------|---------|---------|
-| `create_branch` | `branch` | ~~`newBranch`~~ |
-| `delete_branch` | `branchName` | ~~`branch`~~ |
-| `create_work_item` | `workItemType` | ~~`workItemTypeId`~~ |
-| `create_change_request` | `sourceBranch` + `targetBranch` | 需 sourceBranch 严格已存在 |
-| `list_pipelines` | (待验证) | 需配 organizationId |
+### 完整已验证列表（E2E test 覆盖）
 
-**给 wrapper 加测试**（避免再踩坑）：
+| 工具 | 正确参数 | 易错写法 | 状态 |
+|------|---------|---------|------|
+| `create_branch` | `branch`, `ref`, `organizationId`, `repositoryId` | ~~`newBranch`~~, ~~`sourceBranch`~~, ~~`repoName`~~ | ✅ L2 wrapper 已修 |
+| `delete_branch` | `branchName` | ~~`branch`~~ | 📋 未包装 (用 L1 直调) |
+| `create_work_item` | `workitemTypeId` (32-char ID), `spaceId`, `subject`, `parentId?`, `assignedTo?` | ~~`workItemType`~~ (string "Task") | ✅ L2 wrapper 已修（2-step lookup） |
+| `create_change_request` | `reviewerUserIds` (array of user IDs) | ~~`reviewers`~~ (usernames) | ✅ L2 wrapper 已修（2-step lookup） |
+| `list_pipelines` | `organizationId` | (需 organizationId 必填) | ✅ L2 wrapper (step 1/2) |
+| `create_pipeline_run` | `pipelineId`, `branch` | (无明显坑) | ✅ L2 wrapper (step 2/2) |
+| `get_current_organization_info` | (no args) | (返回 `lastOrganization` 字段) | ✅ used by lookups |
+| `get_work_item_types` | `organizationId`, `id` (spaceId), `category?` | (返回 array of `{id, name}`) | ✅ used by workitemTypeId lookup |
+| `search_organization_members` | `organizationId`, `query` | (返回 array of `{userId, name}`) | ✅ used by reviewerUserIds lookup |
+| `initialize` | `protocolVersion`, `capabilities`, `clientInfo` | (首次调用) | ✅ McpClient 内部 |
 
-```ts
-// test/l2-arg-names.test.ts - 验证所有 L2 wrapper 用的参数名都符合官方 schema
-import { listTools } from "../src/tools/mcp-call.js";
-const tools = await listTools();
-const schema = tools.find(t => t.name === "create_branch");
-expect(schema.inputSchema.required).toContain("branch");
+**待验证的工具**（v2 候选）：
+- `update_file`, `get_file_blobs`, `list_files` - 文件 API
+- `smart_list_pipelines` - NL 查询
+- `create_pipeline_from_description` - NL→YAML
+- `list_package_repositories`, `list_artifacts`, `get_artifact` - 制品仓库
+- 其它 50+
+
+### E2E 验证工作流（**已 commit**）
+
+```bash
+# 跑 E2E 测试（需真 token，没就 SKIP）
+bash scripts/test-e2e.sh
+
+# 跑全部测试
+bun run test:all
 ```
 
-待完整验证所有 53 个工具 → `bun run test:l2-args`。
+**E2E 测试 5 分钟内逮到 5 个 wrapper 真 bug**：
+1. `branch.ts` - `sourceBranch` → `ref`，删 `repoName`
+2. `task.ts` - `workItemType` → `workitemTypeId` (lookup)
+3. `subtask.ts` - 同上
+4. `bug.ts` - 同上
+5. `change-request.ts` - `reviewers` → `reviewerUserIds` (lookup)
+
+全部在 30 分钟内修好（详见 commit `36850eb`）。
