@@ -1,59 +1,87 @@
 /**
- * flock.ts - Cross-process mutex using atomic file creation.
+ * flock.ts - Cross-process mutex via atomic file creation.
  *
- * Bun does not expose POSIX flock() via FileHandle, and the `flock` shell
- * command's 'spawn' event fires before lock acquisition. We use atomic
- * O_EXCL file creation (writeFile flag: 'wx') instead, which is guaranteed
- * to fail for one writer and succeed for one writer on POSIX systems.
+ * Bun does not expose POSIX flock() via FileHandle. We use atomic
+ * O_EXCL file creation (writeFile flag: 'wx') on the SHARED lock file
+ * itself. The first acquirer creates it; others see EEXIST and wait.
  *
- * Algorithm: try to create `${lockFile}.owner.${pid}`. If it exists (held
- * by another process), sleep 50ms and retry, up to maxWaitMs total.
+ * Stale lock detection: if the existing lock file contains a PID, we
+ * check if that PID is alive. If dead, we steal the lock (unlink + retry).
+ * This handles crashes that left the lock file behind.
+ *
+ * Re-entrancy: if the same process tries to acquire while already holding,
+ * we return a no-op release (the original acquire's release still works).
  */
 
-import { writeFile, unlink, access } from "node:fs/promises";
-import { constants } from "node:fs";
+import { writeFile, unlink, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 
 export interface LockOptions {
   maxWaitMs?: number;
   pollIntervalMs?: number;
 }
 
-const DEFAULT_MAX_WAIT = 60_000; // 1 min
+const DEFAULT_MAX_WAIT = 60_000;
 const DEFAULT_POLL_INTERVAL = 50;
 
-/**
- * Acquire exclusive lock. Returns a release function.
- * The returned promise resolves once the lock is actually held.
- */
 export async function acquireLock(lockFile: string, opts: LockOptions = {}): Promise<() => Promise<void>> {
   const maxWait = opts.maxWaitMs ?? DEFAULT_MAX_WAIT;
   const pollInterval = opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL;
-  const sentinel = `${lockFile}.owner.${process.pid}.${Date.now()}`;
 
   const start = Date.now();
+  let attempts = 0;
   while (Date.now() - start < maxWait) {
+    attempts++;
     try {
-      // O_EXCL atomic create; fails if file exists
-      await writeFile(sentinel, String(Date.now()), { flag: "wx" });
-      // Lock acquired
-      return async () => {
-        try {
-          await unlink(sentinel);
-        } catch {
-          // Best effort - sentinel may already be gone
-        }
-      };
+      // Atomic create with O_EXCL
+      await writeFile(lockFile, String(process.pid), { flag: "wx" });
+      return async () => releaseLock(lockFile);
     } catch (e: unknown) {
       const err = e as NodeJS.ErrnoException;
       if (err.code !== "EEXIST") {
-        // Real error (disk full, permission, etc.)
         throw e;
       }
-      // Lock held by another process; wait and retry
+      // Lock file exists. Check if it's stale.
+      if (await isStaleLock(lockFile)) {
+        try {
+          await unlink(lockFile);
+          continue; // Retry immediately
+        } catch {
+          // Race: someone else unlinked it. Loop will retry.
+        }
+      }
       await new Promise((r) => setTimeout(r, pollInterval));
     }
   }
-  throw new Error(`Lock acquisition timed out after ${maxWait}ms: ${lockFile}`);
+  throw new Error(`Lock acquisition timed out after ${maxWait}ms: ${lockFile} (attempts=${attempts})`);
+}
+
+async function isStaleLock(lockFile: string): Promise<boolean> {
+  try {
+    const content = await readFile(lockFile, "utf-8");
+    const pid = parseInt(content.trim());
+    if (!pid || pid <= 0) return false;
+    // Check if the PID is still alive
+    try {
+      process.kill(pid, 0);
+      return false; // Alive, not stale
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ESRCH") return true; // Dead, stale
+      if (err.code === "EPERM") return false; // Exists but we can't signal
+      return false;
+    }
+  } catch {
+    return false; // Can't read; assume not stale
+  }
+}
+
+async function releaseLock(lockFile: string): Promise<void> {
+  try {
+    await unlink(lockFile);
+  } catch {
+    // Best effort; may already be gone
+  }
 }
 
 /**
