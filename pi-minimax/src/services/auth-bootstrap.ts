@@ -15,6 +15,16 @@
 import { execMmx, type ExecMmxArgs, type ExecMmxResult } from "./exec.js";
 import { parseAuthStatus, InvalidAuthStatusError } from "./auth-status.js";
 
+/**
+ * Hardcoded 5-minute TTL for the auth "ok" cache.
+ *
+ * Rationale: mmx-cli's OAuth tokens expire in ~1 hour, but we re-check every
+ * 5 minutes to detect session expiry mid-pi-session (avoids stale "ok" state
+ * when the OAuth token has silently expired). API-key sessions never expire,
+ * but we re-check anyway for consistency and to catch mmx-cli config changes.
+ */
+export const AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
+
 export class NotAuthedError extends Error {
     constructor(message: string) {
         super(message);
@@ -38,13 +48,21 @@ export interface EnsureAuthOptions {
     execMmx?: (args: Pick<ExecMmxArgs, "command"> & Partial<Pick<ExecMmxArgs, "args" | "apiKey">>) => Promise<ExecMmxResult>;
 }
 
-type AuthState = "ok" | "skipped-no-env" | "failed";
+type AuthState =
+    | { kind: "ok"; expiresAt: number }
+    | { kind: "skipped-no-env" }
+    | { kind: "failed" };
 
 let cachedState: AuthState | null = null;
 
 /** Reset the cached bootstrap state. For tests. */
 export function clearAuthState(): void {
     cachedState = null;
+}
+
+/** Test hook: check whether the "ok" cache is currently live. */
+export function isAuthCachedOk(): boolean {
+    return cachedState?.kind === "ok" && Date.now() < cachedState.expiresAt;
 }
 
 async function runExec(
@@ -61,11 +79,13 @@ export async function ensureAuth(opts: EnsureAuthOptions = {}): Promise<void> {
     const execFn = opts.execMmx ?? execMmx;
 
     // Cache hit → fast path
-    if (cachedState === "ok") return;
-    if (cachedState === "skipped-no-env") {
+    if (cachedState?.kind === "ok" && Date.now() < cachedState.expiresAt) {
+        return;
+    }
+    if (cachedState?.kind === "skipped-no-env") {
         throw new NotAuthedError("Run: mmx auth login, or export MINIMAX_API_KEY");
     }
-    if (cachedState === "failed") {
+    if (cachedState?.kind === "failed") {
         throw new BootstrapFailedError("Previous auth bootstrap attempt failed");
     }
 
@@ -74,7 +94,7 @@ export async function ensureAuth(opts: EnsureAuthOptions = {}): Promise<void> {
     try {
         statusResult = await runExec(execFn, { command: "auth status" });
     } catch (e) {
-        cachedState = "failed";
+        cachedState = { kind: "failed" };
         throw new BootstrapFailedError("Failed to run `mmx auth status`", e);
     }
 
@@ -83,22 +103,22 @@ export async function ensureAuth(opts: EnsureAuthOptions = {}): Promise<void> {
         status = parseAuthStatus(statusResult.stdout);
     } catch (e) {
         if (e instanceof InvalidAuthStatusError) {
-            cachedState = "failed";
+            cachedState = { kind: "failed" };
             throw new BootstrapFailedError("Failed to parse auth status JSON", e);
         }
         throw e;
     }
 
-    // Step 2: if already authed, cache and return
+    // Step 2: if already authed, cache with TTL and return
     if (status.authenticated === true || (status as { method?: string }).method) {
-        cachedState = "ok";
+        cachedState = { kind: "ok", expiresAt: Date.now() + AUTH_CACHE_TTL_MS };
         return;
     }
 
     // Step 3: unauthed — try env bootstrap
     const envKey = process.env.MINIMAX_API_KEY;
     if (!envKey) {
-        cachedState = "skipped-no-env";
+        cachedState = { kind: "skipped-no-env" };
         throw new NotAuthedError(
             "mmx is not authenticated and MINIMAX_API_KEY env is not set. " +
                 "Run: mmx auth login, or export MINIMAX_API_KEY.",
@@ -119,16 +139,16 @@ export async function ensureAuth(opts: EnsureAuthOptions = {}): Promise<void> {
     try {
         loginResult = await runExec(execFn, { command: "auth login", apiKey: envKey });
     } catch (e) {
-        cachedState = "failed";
+        cachedState = { kind: "failed" };
         throw new BootstrapFailedError("Failed to run `mmx auth login`", e);
     }
 
     if (loginResult.exitCode !== 0) {
-        cachedState = "failed";
+        cachedState = { kind: "failed" };
         throw new BootstrapFailedError(
             `mmx auth login exited with code ${loginResult.exitCode}: ${loginResult.stderr || loginResult.stdout}`,
         );
     }
 
-    cachedState = "ok";
+    cachedState = { kind: "ok", expiresAt: Date.now() + AUTH_CACHE_TTL_MS };
 }

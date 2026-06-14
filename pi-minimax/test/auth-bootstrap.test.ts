@@ -10,7 +10,7 @@
  * Plus: caching within session, clearAuthState() resets, onUpdate notification.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, setSystemTime } from "bun:test";
 import { ensureAuth, clearAuthState, NotAuthedError } from "../src/services/auth-bootstrap.js";
 import type { ExecMmxResult } from "../src/services/exec.js";
 
@@ -164,5 +164,71 @@ describe("auth-bootstrap", () => {
         clearAuthState();
         await ensureAuth({ execMmx: fn });
         expect(calls).toHaveLength(2);
+    });
+
+    describe("TTL (AUTH_CACHE_TTL_MS = 5min)", () => {
+        afterEach(() => {
+            setSystemTime(); // reset to real time
+        });
+
+        it("re-checks auth status after TTL elapses", async () => {
+            const baseTime = new Date("2026-06-14T12:00:00Z").getTime();
+            setSystemTime(new Date(baseTime));
+
+            const { fn, calls } = mockExecMmx([
+                {
+                    command: "auth status",
+                    result: {
+                        stdout: JSON.stringify({ authenticated: true, method: "api-key", source: "config.json" }),
+                        stderr: "",
+                        exitCode: 0,
+                    },
+                },
+                {
+                    command: "auth status",
+                    result: {
+                        stdout: JSON.stringify({ authenticated: true, method: "api-key", source: "config.json" }),
+                        stderr: "",
+                        exitCode: 0,
+                    },
+                },
+            ]);
+
+            await ensureAuth({ execMmx: fn });
+            expect(calls).toHaveLength(1);
+
+            // 4 minutes later — within TTL (5min), no re-check
+            setSystemTime(new Date(baseTime + 4 * 60 * 1000));
+            await ensureAuth({ execMmx: fn });
+            expect(calls).toHaveLength(1);
+
+            // 6 minutes later — past TTL, re-check
+            setSystemTime(new Date(baseTime + 6 * 60 * 1000));
+            await ensureAuth({ execMmx: fn });
+            expect(calls).toHaveLength(2);
+        });
+
+        it("ok cache is shared across subsequent calls within TTL", async () => {
+            const baseTime = new Date("2026-06-14T12:00:00Z").getTime();
+            setSystemTime(new Date(baseTime));
+
+            const { fn, calls } = mockExecMmx([
+                {
+                    command: "auth status",
+                    result: {
+                        stdout: JSON.stringify({ authenticated: true, method: "oauth", source: "config.json" }),
+                        stderr: "",
+                    exitCode: 0,
+                    },
+                },
+            ]);
+
+            await ensureAuth({ execMmx: fn });
+            setSystemTime(new Date(baseTime + 60 * 1000)); // 1 min
+            await ensureAuth({ execMmx: fn });
+            setSystemTime(new Date(baseTime + 4 * 60 * 1000 + 59 * 1000)); // 4m59s
+            await ensureAuth({ execMmx: fn });
+            expect(calls).toHaveLength(1); // All within TTL
+        });
     });
 });
