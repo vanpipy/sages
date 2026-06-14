@@ -8,27 +8,11 @@
 
 import { describe, it, expect } from "bun:test";
 import { runSearchQuery } from "../src/tools/search.js";
-import type { ExecMmxResult, FlatValue } from "../src/services/exec.js";
+import type { ExecMmxResult } from "../src/services/exec.js";
 import { NotAuthedError, type EnsureAuthOptions } from "../src/services/auth-bootstrap.js";
+import { mockExec } from "./_helpers/mockExec.js";
 
 type ExecFn = EnsureAuthOptions["execMmx"];
-
-function mockExec(scripted: ExecMmxResult[]): { fn: ExecFn; calls: Array<{ command: string; args?: Record<string, FlatValue>; apiKey?: string }> } {
-    const calls: Array<{ command: string; args?: Record<string, FlatValue>; apiKey?: string }> = [];
-    const queue = [...scripted];
-    const fn: ExecFn = async (a) => {
-        calls.push({ command: a.command, args: a.args as Record<string, FlatValue> | undefined, apiKey: a.apiKey });
-        const next = queue.shift();
-        if (!next) throw new Error("Unscripted");
-        let parsed: unknown;
-        const trimmed = next.stdout.trim();
-        if (trimmed.length > 0 && (trimmed[0] === "{" || trimmed[0] === "[")) {
-            try { parsed = JSON.parse(trimmed); } catch { /* not JSON */ }
-        }
-        return { ...next, parsed };
-    };
-    return { fn, calls };
-}
 
 describe("minimax_search_query tool", () => {
     it("S12: runs mmx search query --q and returns parsed results", async () => {

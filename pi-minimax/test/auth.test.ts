@@ -11,17 +11,13 @@
 
 import { describe, it, expect } from "bun:test";
 import { runAuthStatusTool } from "../src/tools/auth.js";
-import type { ExecMmxResult } from "../src/services/exec.js";
 import { NotAuthedError, type EnsureAuthOptions } from "../src/services/auth-bootstrap.js";
+import { AUTHED_APIKEY_RESPONSE } from "./_helpers/mockExec.js";
 
 type ExecFn = EnsureAuthOptions["execMmx"];
 
 function makeAuthedExec(): ExecFn {
-    return async () => ({
-        stdout: JSON.stringify({ authenticated: true, method: "api-key", source: "config.json", key: "sk-xxxx…" }),
-        stderr: "",
-        exitCode: 0,
-    });
+    return async () => AUTHED_APIKEY_RESPONSE();
 }
 
 describe("minimax_auth_status tool", () => {
