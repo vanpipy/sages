@@ -120,12 +120,19 @@ cd ~/Project/sages/pi-minimax
 # Then restart pi
 ```
 
+## Timeouts and auth cache
+
+- **60s exec timeout**: every `minimax_*` tool call has a hard 60-second timeout on the mmx subprocess. Long-running commands (e.g. `mmx video generate` polling) will hit the timeout. For long polls, use `minimax_exec({command: "video generate", args: {prompt: "...", async: true}})` and poll separately, or call mmx directly.
+- **5min auth cache TTL**: after a successful auth bootstrap, the "ok" state is cached for 5 minutes. After expiry, the next tool call re-checks `mmx auth status` (catches mid-session OAuth expiry).
+- Errors with code `TIMEOUT` indicate the 60s limit was hit.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `MMX_NOT_FOUND` | mmx not installed | `npm install -g mmx-cli` |
 | `NOT_AUTHED` | No credentials | `mmx auth login` or `export MINIMAX_API_KEY=…` |
+| `TIMEOUT` | mmx subprocess exceeded 60s | Use `mmx <cmd> --async` for long polls, or call mmx directly |
 | All calls slow (~150ms) | mmx spawn overhead per call | Expected; can't avoid without SDK import |
 | `OAuth session wiped` | — | Should not happen; bootstrap is gated by status check |
 | Token leakage in logs | — | mmx-cli's `maskToken` prefixes only (`sk-xxxx…`); we don't log full keys |

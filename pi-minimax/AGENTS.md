@@ -115,11 +115,17 @@ bun test ./test/binary-finder.test.ts
 4. **OAuth 和 api_key 互斥**：mmx-cli's `runOAuthLogin` 会 `delete existing.api_key`，反之亦然。我们的 bootstrap 只在 unauthed 时触发，不会破坏现有会话。
 5. **`bun test` 路径**：默认从 cwd 找 `*.test.ts`；显式路径要 `./test/foo.test.ts`（不是 `test/foo.test.ts`）。
 6. **tsc 不检查 test/**：bun-types 的 `bun:test` 模块 tsc 不识别。test tsconfig exclude 掉，bun runtime 处理。
+7. **exec timeout (60s)**：`EXEC_TIMEOUT_MS = 60_000` hardcoded。Long-running mmx commands (e.g. `video generate` polling) will hit timeout. Use `mmx <cmd> --async` for long polls, or call mmx directly outside pi.
+8. **auth cache TTL (5min)**：`AUTH_CACHE_TTL_MS = 300_000` hardcoded. The `ok` cache expires after 5min; next ensureAuth() re-checks. Catches OAuth session expiry mid-session.
+9. **Process-global module-level cache**：`cachedState` (auth-bootstrap) and `cached` (binary-finder) are bare `let` at module level. Assumes single pi agent per process. If you ever embed pi-minimax in a multi-instance scenario, wrap caches in a class instance.
+10. **Env param injection risk**：`execMmx`'s `env` param merges arbitrary Record<string,string> into subprocess env. If LLM is prompt-injected, could override `PATH` etc. Acceptable risk: `env` param only reachable via `minimax_exec` escape hatch (LLM-controlled). Not exposed in any L2 tool's TypeBox schema.
+11. **`--api-key` visible in ps aux**: `execMmx` appends `--api-key <key>` to mmx argv; briefly visible in `ps aux | grep mmx`. mmx-cli processes it in-memory and never logs it, but the key is in the OS process table for ~ms. Acceptable for single-user local use; consider env-var passing for CI/multi-user.
 
 ## 当前状态
 
-- 33 单元测试通过（binary-finder 8 + exec 8 + auth-status 6 + auth-bootstrap 6 + auth tool 4 + exec-tool 5 + search 6 + tools-index 1 + extension 2 = ~46 tests）
+- 54 单元测试通过（binary-finder 8 + exec 11 + auth-status 6 + auth-bootstrap 8 + auth tool 5 + exec-tool 6 + search 7 + tools-index 1 + extension 2 = 54 tests）
 - tsc clean
 - install.sh 部署到 ~/.pi/packages/minimax 验证通过
-- 11 个 git commits（T1-T15）
-- 17 个文件，~1100 LOC
+- 17 个 git commits（T1-T17, plus T18-T20 refactors）
+- 21 个文件，~1300 LOC
+- Audit verdict: 94/100 PASS (7 findings: 5 minor addressed in T18-T20, 2 major addressed in T16-T17)
