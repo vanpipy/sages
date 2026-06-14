@@ -96,7 +96,12 @@ export function registerExecTool(pi: ExtensionAPI): void {
             "Run any mmx subcommand. Args map to flags: scalars → --key value, " +
             "booleans → --key (true) or omitted (false), arrays → repeated --key v1 --key v2. " +
             "Use this for modalities not wrapped as dedicated tools (text/image/video/speech/music/vision/quota). " +
-            "See ~/.pi/packages/mmx-cli/skill/SKILL.md for flag reference.",
+            "See ~/.pi/packages/mmx-cli/skill/SKILL.md for flag reference. " +
+            "Returns {success, command, exitCode, stdout, stderr, parsed?} on success, " +
+            "or {success: false, error: {code: NOT_AUTHED | MMX_NOT_FOUND | TIMEOUT | UNKNOWN, message}}. " +
+            "Error codes: NOT_AUTHED (mmx not authed), MMX_NOT_FOUND (mmx not on PATH), " +
+            "TIMEOUT (> 60s), UNKNOWN (other). For long-running mmx commands, " +
+            "use mmx <cmd> --async to get a task ID instead.",
         parameters: Type.Object({
             command: Type.String({ description: "mmx subcommand, e.g. 'text chat', 'image generate', 'quota show'" }),
             args: Type.Optional(Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Array(Type.String())]), {

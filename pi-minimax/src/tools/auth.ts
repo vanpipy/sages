@@ -103,8 +103,12 @@ export function registerAuthTool(pi: ExtensionAPI): void {
         label: "mmx Auth Status",
         description:
             "Check mmx authentication state. Returns {success, method, source, ...} or " +
-            "{success: false, error: {code: NOT_AUTHED | MMX_NOT_FOUND, message}}. " +
-            "Auto-bootstraps from MINIMAX_API_KEY env if needed.",
+            "{success: false, error: {code: NOT_AUTHED | MMX_NOT_FOUND | TIMEOUT | " +
+            "AUTH_STATUS_PARSE_ERROR | UNKNOWN, message}}. " +
+            "Auto-bootstraps from MINIMAX_API_KEY env if needed. " +
+            "Error codes: NOT_AUTHED (no creds + no env), MMX_NOT_FOUND (mmx not on PATH), " +
+            "TIMEOUT (mmx auth status > 60s), AUTH_STATUS_PARSE_ERROR (mmx JSON malformed), " +
+            "UNKNOWN (other).",
         parameters: Type.Object({}),
         async execute(_toolCallId, _params, _signal, onUpdate, _ctx) {
             const result = await runAuthStatusTool({

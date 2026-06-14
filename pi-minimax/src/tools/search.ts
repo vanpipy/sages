@@ -98,7 +98,11 @@ export function registerSearchTool(pi: ExtensionAPI): void {
         description:
             "Web search via MiniMax. Runs `mmx search query --q <query>`. " +
             "Returns {success, query, results: [{title, link, snippet, date}]}. " +
-            "At most 10 results per call (mmx-cli API limit); refine query for different results.",
+            "At most 10 results per call (mmx-cli API limit); refine query for different results. " +
+            "On error returns {success: false, error: {code: NOT_AUTHED | MMX_NOT_FOUND | " +
+            "TIMEOUT | UNKNOWN, message}}. " +
+            "Error codes: NOT_AUTHED (mmx not authed), MMX_NOT_FOUND (mmx not on PATH), " +
+            "TIMEOUT (> 60s), UNKNOWN (other).",
         parameters: Type.Object({
             query: Type.String({ description: "Search query string" }),
             apiKey: Type.Optional(Type.String({ description: "Per-call token override" })),
