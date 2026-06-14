@@ -1,0 +1,40 @@
+{
+  "name": "@sages/pi-minimax",
+  "version": "0.1.0",
+  "description": "MiniMax AI Platform CLI wrapper for pi - thin shell-out to globally-installed mmx-cli (stateless, no daemon)",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/*.test.ts"
+  },
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "minimax",
+    "mmx"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "bun-types": "^1.3.14",
+    "typebox": "^1.1.34",
+    "typescript": "^5.4.0"
+  },
+  "author": "leroy",
+  "homepage": "https://codeup.aliyun.com"
+}
