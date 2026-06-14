@@ -13,6 +13,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { ensureAuth, NotAuthedError, type EnsureAuthOptions } from "../services/auth-bootstrap.js";
 import { execMmx, type ExecMmxResult } from "../services/exec.js";
 import { parseAuthStatus } from "../services/auth-status.js";
+import type { ToolError, ToolFailure } from "../services/result.js";
 
 type UpdateFn = NonNullable<EnsureAuthOptions["onUpdate"]>;
 
@@ -26,13 +27,7 @@ export type AuthToolResult =
           token_expires?: string;
           account?: string;
       }
-    | {
-          success: false;
-          error: {
-              code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "AUTH_STATUS_PARSE_ERROR" | "TIMEOUT" | "UNKNOWN";
-              message: string;
-          };
-      };
+    | ToolFailure;
 
 export interface AuthToolDeps {
     ensureAuth?: (opts?: EnsureAuthOptions) => Promise<void>;
@@ -95,7 +90,7 @@ export async function runAuthStatusTool(deps: AuthToolDeps = {}): Promise<AuthTo
     }
 }
 
-function fail(code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "AUTH_STATUS_PARSE_ERROR" | "TIMEOUT" | "UNKNOWN", message: string): AuthToolResult {
+function fail(code: ToolError["code"], message: string): AuthToolResult {
     return { success: false, error: { code, message } };
 }
 

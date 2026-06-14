@@ -12,6 +12,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { ensureAuth, NotAuthedError, type EnsureAuthOptions } from "../services/auth-bootstrap.js";
 import { execMmx, type ExecMmxArgs, type ExecMmxResult, type FlatValue } from "../services/exec.js";
+import type { ToolFailure } from "../services/result.js";
 
 type UpdateFn = NonNullable<EnsureAuthOptions["onUpdate"]>;
 
@@ -30,13 +31,7 @@ export type ExecToolResult =
           stderr: string;
           parsed?: unknown;
       }
-    | {
-          success: false;
-          error: {
-              code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "TIMEOUT" | "UNKNOWN";
-              message: string;
-          };
-      };
+    | ToolFailure;
 
 export interface ExecToolDeps {
     input: ExecToolInput;
