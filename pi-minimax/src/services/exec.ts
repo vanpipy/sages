@@ -164,10 +164,19 @@ export async function execMmx(
 
 /**
  * Append a single key/value pair (or repeated flag for arrays) to cmdArgs.
- *   string|number  → --key value
- *   boolean true   → --key
- *   boolean false  → (omit)
- *   string[]       → --key v1 --key v2 ...
+ *
+ * Type semantics:
+ *   - string|number  → --key value (value coerced to string)
+ *   - boolean true   → --key (flag-only, no value)
+ *   - boolean false  → omit (no flag pushed)
+ *   - string[]       → repeated --key v1 --key v2 ...
+ *
+ * The key is always prefixed with `--`. Caller is responsible for not
+ * passing already-prefixed keys.
+ *
+ * @param cmdArgs  The argv array being built (mutated in place)
+ * @param key      The flag name without `--` prefix
+ * @param value    The value (or boolean for flag-only)
  */
 function appendArg(cmdArgs: string[], key: string, value: FlatValue): void {
     if (typeof value === "boolean") {
@@ -183,6 +192,16 @@ function appendArg(cmdArgs: string[], key: string, value: FlatValue): void {
     cmdArgs.push(`--${key}`, String(value));
 }
 
+/**
+ * Check whether a flag was already added to the argv array.
+ *
+ * Used to detect caller-provided `--output` so we don't double-inject the
+ * auto agent-friendly flags (`--output json --quiet --non-interactive`).
+ *
+ * @param cmdArgs  The argv array to search
+ * @param flag     The flag to look for (e.g. `"--output"`)
+ * @returns        True if the flag appears as an exact element
+ */
 function hasFlag(cmdArgs: string[], flag: string): boolean {
     return cmdArgs.includes(flag);
 }
