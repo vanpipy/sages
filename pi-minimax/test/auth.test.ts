@@ -64,6 +64,18 @@ describe("minimax_auth_status tool", () => {
         }
     });
 
+    it("returns TIMEOUT error when execMmx returns timedOut: true", async () => {
+        const result = await runAuthStatusTool({
+            ensureAuth: async () => {},
+            execMmx: async () => ({ stdout: "", stderr: "killed", exitCode: 124, timedOut: true }),
+        });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.error.code).toBe("TIMEOUT");
+            expect(result.error.message).toMatch(/timed out/);
+        }
+    });
+
     it("forwards onUpdate to ensureAuth", async () => {
         const updates: string[] = [];
         await runAuthStatusTool({

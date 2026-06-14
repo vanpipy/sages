@@ -18,6 +18,17 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Hardcoded 60-second timeout for all mmx subprocess invocations.
+ *
+ * Rationale: long-running mmx commands (e.g. `video generate` polling for
+ * minutes by default) would block the pi agent indefinitely without a timeout.
+ * 60s is enough for most interactive calls (text, image, search, quota) but
+ * will cut off long polls — use `minimax_exec` with `mmx video generate
+ * --async` to get a task ID and poll separately.
+ */
+export const EXEC_TIMEOUT_MS = 60_000;
+
 export type FlatValue = string | number | boolean | string[];
 
 export interface ExecMmxArgs {
@@ -39,30 +50,31 @@ export interface ExecMmxResult {
     exitCode: number;
     /** JSON.parse(stdout) if valid JSON, else undefined */
     parsed?: unknown;
+    /** True if the subprocess was killed due to EXEC_TIMEOUT_MS */
+    timedOut?: true;
 }
 
 export type ExecFileFn = (
     cmd: string,
     args: string[],
     options?: { env?: Record<string, string> },
-) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+) => Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: true }>;
 
+/**
+ * Default execFile wrapper: runs the real subprocess with EXEC_TIMEOUT_MS.
+ * On error (including timeout), the error is propagated up; execMmx's outer
+ * try/catch handles timeout-vs-other-error classification.
+ */
 async function defaultExecFile(
     cmd: string,
     args: string[],
     options?: { env?: Record<string, string> },
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    try {
-        const result = await execFileAsync(cmd, args, { env: { ...process.env, ...options?.env } });
-        return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
-    } catch (e) {
-        const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string; code?: number };
-        return {
-            stdout: err.stdout ?? "",
-            stderr: err.stderr ?? String(err.message ?? err),
-            exitCode: typeof err.code === "number" ? err.code : 1,
-        };
-    }
+): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: true }> {
+    const result = await execFileAsync(cmd, args, {
+        env: { ...process.env, ...options?.env },
+        timeout: EXEC_TIMEOUT_MS,
+    });
+    return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
 }
 
 /**
@@ -99,8 +111,42 @@ export async function execMmx(
         cmdArgs.push("--api-key", args.apiKey);
     }
 
-    // 5. Execute
-    const { stdout, stderr, exitCode } = await execFileFn("mmx", cmdArgs, { env: args.env });
+    // 5. Execute (with timeout detection in catch block)
+    let stdout: string;
+    let stderr: string;
+    let exitCode: number;
+    let timedOut: true | undefined;
+    try {
+        const result = await execFileFn("mmx", cmdArgs, { env: args.env });
+        stdout = result.stdout;
+        stderr = result.stderr;
+        exitCode = result.exitCode;
+        timedOut = result.timedOut;
+    } catch (e) {
+        const err = e as NodeJS.ErrnoException & {
+            stdout?: string;
+            stderr?: string;
+            code?: string | number;
+            killed?: boolean;
+            signal?: string;
+        };
+        // Detect timeout: Node sets code='ERR_CHILD_PROCESS_TIMEOUT' on timeout.
+        // Also detectable via killed:true + signal:'SIGTERM' (fallback for older Node
+        // or for tests that mock the timeout shape).
+        const isTimeout =
+            err.code === "ERR_CHILD_PROCESS_TIMEOUT" ||
+            (err.killed === true && err.signal === "SIGTERM");
+        if (isTimeout) {
+            return {
+                stdout: err.stdout ?? "",
+                stderr: err.stderr ?? `mmx subprocess killed after ${EXEC_TIMEOUT_MS / 1000}s timeout`,
+                exitCode: 124,
+                timedOut: true,
+            };
+        }
+        // Non-timeout errors (ENOENT, parse, etc.) propagate to caller
+        throw e;
+    }
 
     // 6. Best-effort JSON parse
     let parsed: unknown;
@@ -113,7 +159,7 @@ export async function execMmx(
         }
     }
 
-    return { stdout, stderr, exitCode, parsed };
+    return { stdout, stderr, exitCode, parsed, timedOut };
 }
 
 /**

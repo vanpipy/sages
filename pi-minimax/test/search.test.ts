@@ -124,4 +124,17 @@ describe("minimax_search_query tool", () => {
             expect(result.results).toEqual([]);
         }
     });
+
+    it("returns TIMEOUT error when execMmx returns timedOut: true", async () => {
+        const result = await runSearchQuery({
+            input: { query: "x" },
+            ensureAuth: async () => {},
+            execMmx: async () => ({ stdout: "", stderr: "killed", exitCode: 124, timedOut: true }),
+        });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.error.code).toBe("TIMEOUT");
+            expect(result.error.message).toMatch(/timed out/);
+        }
+    });
 });

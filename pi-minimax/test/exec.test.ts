@@ -111,4 +111,37 @@ describe("exec", () => {
         const result = await execMmx({ command: "quota show" }, { execFile: fn });
         expect(result.exitCode).toBe(3);
     });
+
+    it("sets timedOut: true when execFile throws ERR_CHILD_PROCESS_TIMEOUT", async () => {
+        const fn: ExecFileFn = async () => {
+            const e = new Error("Command failed") as Error & { code: string; killed: boolean; signal: string };
+            e.code = "ERR_CHILD_PROCESS_TIMEOUT";
+            e.killed = true;
+            e.signal = "SIGTERM";
+            throw e;
+        };
+        const result = await execMmx({ command: "video generate", args: { prompt: "x" } }, { execFile: fn });
+        expect(result.timedOut).toBe(true);
+        expect(result.exitCode).toBe(124);
+    });
+
+    it("sets timedOut: true when execFile throws with killed+SIGTERM but no ERR_CHILD_PROCESS_TIMEOUT code", async () => {
+        const fn: ExecFileFn = async () => {
+            const e = new Error("killed") as Error & { killed: boolean; signal: string };
+            e.killed = true;
+            e.signal = "SIGTERM";
+            throw e;
+        };
+        const result = await execMmx({ command: "video generate", args: { prompt: "x" } }, { execFile: fn });
+        expect(result.timedOut).toBe(true);
+    });
+
+    it("does NOT set timedOut for non-timeout errors (mimicking defaultExecFile catch)", async () => {
+        // Mimic what defaultExecFile returns after catching an ENOENT:
+        // {stdout:'', stderr:'spawn mmx ENOENT', exitCode:1, timedOut:undefined}
+        const fn: ExecFileFn = async () => ({ stdout: "", stderr: "spawn mmx ENOENT", exitCode: 1 });
+        const result = await execMmx({ command: "quota show" }, { execFile: fn });
+        expect(result.timedOut).toBeUndefined();
+        expect(result.exitCode).toBe(1);
+    });
 });

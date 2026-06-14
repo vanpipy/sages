@@ -33,7 +33,7 @@ export type ExecToolResult =
     | {
           success: false;
           error: {
-              code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "UNKNOWN";
+              code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "TIMEOUT" | "UNKNOWN";
               message: string;
           };
       };
@@ -74,6 +74,13 @@ export async function runExecTool(deps: ExecToolDeps): Promise<ExecToolResult> {
             };
         }
         return { success: false, error: { code: "UNKNOWN", message: msg } };
+    }
+
+    if (result.timedOut) {
+        return {
+            success: false,
+            error: { code: "TIMEOUT", message: `mmx ${deps.input.command} timed out (60s). Use mmx <cmd> --async for long-running commands.` },
+        };
     }
 
     return {

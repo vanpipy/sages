@@ -29,7 +29,7 @@ export type AuthToolResult =
     | {
           success: false;
           error: {
-              code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "AUTH_STATUS_PARSE_ERROR" | "UNKNOWN";
+              code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "AUTH_STATUS_PARSE_ERROR" | "TIMEOUT" | "UNKNOWN";
               message: string;
           };
       };
@@ -67,6 +67,10 @@ export async function runAuthStatusTool(deps: AuthToolDeps = {}): Promise<AuthTo
         return fail("UNKNOWN", msg);
     }
 
+    if (result.timedOut) {
+        return fail("TIMEOUT", "mmx auth status timed out (60s)");
+    }
+
     if (result.exitCode !== 0 && result.exitCode !== undefined) {
         return fail("UNKNOWN", `mmx auth status exited ${result.exitCode}: ${result.stderr || result.stdout}`);
     }
@@ -91,7 +95,7 @@ export async function runAuthStatusTool(deps: AuthToolDeps = {}): Promise<AuthTo
     }
 }
 
-function fail(code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "AUTH_STATUS_PARSE_ERROR" | "UNKNOWN", message: string): AuthToolResult {
+function fail(code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "AUTH_STATUS_PARSE_ERROR" | "TIMEOUT" | "UNKNOWN", message: string): AuthToolResult {
     return { success: false, error: { code, message } };
 }
 

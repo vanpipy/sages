@@ -37,7 +37,7 @@ export type SearchToolResult =
     | {
           success: false;
           error: {
-              code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "UNKNOWN";
+              code: "NOT_AUTHED" | "MMX_NOT_FOUND" | "TIMEOUT" | "UNKNOWN";
               message: string;
           };
       };
@@ -78,6 +78,10 @@ export async function runSearchQuery(deps: SearchToolDeps): Promise<SearchToolRe
             };
         }
         return { success: false, error: { code: "UNKNOWN", message: msg } };
+    }
+
+    if (result.timedOut) {
+        return { success: false, error: { code: "TIMEOUT", message: "mmx search query timed out (60s)" } };
     }
 
     if (result.exitCode !== 0) {

@@ -105,4 +105,17 @@ describe("minimax_exec tool", () => {
             expect(result.error.code).toBe("MMX_NOT_FOUND");
         }
     });
+
+    it("returns TIMEOUT error when execMmx returns timedOut: true", async () => {
+        const result = await runExecTool({
+            input: { command: "video generate", args: { prompt: "x" } },
+            ensureAuth: async () => {},
+            execMmx: async () => ({ stdout: "", stderr: "killed", exitCode: 124, timedOut: true }),
+        });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.error.code).toBe("TIMEOUT");
+            expect(result.error.message).toMatch(/timed out.*60s/);
+        }
+    });
 });
