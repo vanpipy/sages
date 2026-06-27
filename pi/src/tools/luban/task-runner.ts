@@ -1,15 +1,46 @@
 /**
  * Task Runner - Unified TDD + Subagent execution
- * 
+ *
  * Part of: src/tools/luban/
  * Purpose: Execute single task with TDD cycle, supporting both direct and subagent modes
+ *
+ * ============================================================================
+ * IMPORTANT: LuBan Limitation (KD-4 deferred)
+ * ============================================================================
+ * This runner is a TDD CYCLE SCAFFOLD, not an AI implementation agent.
+ *
+ * The GREEN phase writes template stubs (`export function xxx() { return {} }`)
+ * via `generateSourceTemplate()` instead of invoking an LLM to produce real
+ * implementations. The `config.subagent` field is declared in types.ts but
+ * is **NEVER READ** in this file (grep -rnE "subagent" src/tools/luban/task-runner.ts
+ * → 0 hits for actual usage).
+ *
+ * CONSEQUENCE: Every `luban_execute_task` / `luban_execute_batch` call returns
+ * tasks with template stubs unless the caller (the agent in pi main context)
+ * manually inspects the resulting source files and writes the real implementation.
+ *
+ * **SAGES bootstrap (using LuBan to refactor LuBan) is therefore structurally
+ * impossible** in the current implementation. Any "use SAGES workflow to do X"
+ * task X cannot deliver real code via LuBan; the agent must take over.
+ *
+ * To upgrade: GREEN phase should check `config.subagent === true` and dispatch
+ * to a subagent (e.g., `Bun.spawn` running `pi -p <task-prompt>`) when set.
+ * This is a separate milestone (KD-4: TDD optimization).
+ * ============================================================================
+ *
+ * SECURITY: testCommand is passed unsanitized to `execSync()` (line 404).
+ * Indirect RCE chain: user request → qiaochui_decompose → execution.yaml
+ * testCommand → execSync. Treat the executor environment as trusted; if running
+ * LuBan against untrusted requests, sandbox at the process level.
  */
 
 import { execSync } from "node:child_process";
 import { FileService } from "../../services/file-service.js";
 import type { TDDConfig, TaskResult, TDDPhaseResult } from "./types.js";
 
-// FileService instance for workspace operations
+// FileService instance for workspace operations.
+// KNOWN LIMITATION: bound to process.cwd(), not config.cwd. Honoring
+// Batch.cwd requires threading FileService through runTask (planned for KD-4).
 const fileService = new FileService(process.cwd(), ".sages/workspace");
 
 /**

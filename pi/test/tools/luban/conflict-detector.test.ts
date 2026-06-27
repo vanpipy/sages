@@ -12,7 +12,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { detectFileConflicts } from "@/tools/luban/conflict-detector.js";
+import {
+  detectFileConflicts,
+  normalizeFilePath,
+  deriveTestFiles,
+} from "@/tools/luban/conflict-detector.js";
 import type { LubanTask, ConflictReport } from "@/tools/luban/types.js";
 
 // Minimal factory — only fields the detector needs.
@@ -101,5 +105,63 @@ describe("detectFileConflicts — S6 pure function contract", () => {
     expect(report.conflicts).toContain("src/auth.ts");
     expect(report.conflicts).toContain("src/user.ts");
     expect(report.conflicts).not.toContain("src/extra.ts"); // only T2 owns this
+  });
+});
+
+// ============================================================================
+// Path normalization + testFiles derivation (audit-driven regression tests)
+// ============================================================================
+
+describe("normalizeFilePath — shared helper for path consistency", () => {
+  it("treats ./src/a.ts and src/a.ts as the same path", () => {
+    expect(normalizeFilePath("./src/a.ts")).toBe(normalizeFilePath("src/a.ts"));
+  });
+
+  it("treats backslash and forward-slash paths as equivalent", () => {
+    expect(normalizeFilePath("src\\auth.ts")).toBe(normalizeFilePath("src/auth.ts"));
+  });
+
+  it("strips trailing slashes", () => {
+    expect(normalizeFilePath("src/a.ts/")).toBe("src/a.ts");
+  });
+
+  it("lowercases for case-insensitive filesystems", () => {
+    expect(normalizeFilePath("SRC/Auth.ts")).toBe("src/auth.ts");
+  });
+});
+
+describe("detectFileConflicts — path normalization", () => {
+  it("detects conflict between ./src/auth.ts and src/auth.ts (normalized same)", () => {
+    const report = detectFileConflicts([
+      makeTask("T1", ["./src/auth.ts"]),
+      makeTask("T2", ["src/auth.ts"]),
+    ]);
+    expect(report.conflicts.length).toBe(1);
+  });
+
+  it("detects conflict between Src/Auth.ts and src/auth.ts (case-insensitive)", () => {
+    const report = detectFileConflicts([
+      makeTask("T1", ["Src/Auth.ts"]),
+      makeTask("T2", ["src/auth.ts"]),
+    ]);
+    expect(report.conflicts.length).toBe(1);
+  });
+});
+
+describe("deriveTestFiles — shared helper (replaces 3x DRY violation)", () => {
+  it("derives .test.ts from .ts", () => {
+    expect(deriveTestFiles(["src/auth.ts"])).toEqual(["src/auth.test.ts"]);
+  });
+
+  it("derives .test.js from .js", () => {
+    expect(deriveTestFiles(["src/auth.js"])).toEqual(["src/auth.test.js"]);
+  });
+
+  it("leaves non-.ts/.js files unchanged", () => {
+    expect(deriveTestFiles(["README.md", "src/auth.ts"])).toEqual(["README.md", "src/auth.test.ts"]);
+  });
+
+  it("handles empty input", () => {
+    expect(deriveTestFiles([])).toEqual([]);
   });
 });

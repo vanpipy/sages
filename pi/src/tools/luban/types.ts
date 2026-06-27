@@ -130,11 +130,19 @@ export interface ExecutionPlan {
  * composes a batch from the decomposed plan; LuBan executes it as a unit.
  *
  * Contract:
+ * - maxParallel must be >= 1; values < 1 are rejected at runBatch entry (fail-fast).
+ *   Use maxParallel=1 for explicit serial execution (skips conflict detection).
  * - maxParallel is the optimistic concurrency cap. If intra-batch file
  *   conflicts are detected, the batch auto-degrades to serial regardless
  *   of maxParallel (S2 scenario).
  * - testCommand applies to every task in the batch; per-task overrides
  *   are not supported in this round.
+ *
+ * Limitation (KD-4 deferred):
+ * - `cwd` is honored for record-keeping and is passed to TDDConfig, but the
+ *   current task-runner uses a module-level FileService singleton bound to
+ *   process.cwd(). To make cwd truly take effect requires threading
+ *   FileService through runTask (planned for the TDD optimization milestone).
  */
 export interface Batch {
   tasks: LubanTask[];
@@ -175,6 +183,16 @@ export interface BatchResult {
   results: TaskResult[];
   /** IDs of tasks that completed successfully */
   completed: string[];
-  /** Wall-clock duration in milliseconds for the entire batch */
+  /**
+   * Wall-clock duration in milliseconds for the entire batch.
+   * Uses monotonic clock (performance.now()), robust to NTP corrections.
+   */
   totalDuration: number;
+  /**
+   * Top-3 failure messages (KD-3 diagnosis aid). Populated only when at
+   * least one task failed. Format: "<taskId>: <phase error>".
+   * Gives the agent a way to diagnose batch failures without bypassing
+   * the black-box contract by reading .sages/workspace/ directly.
+   */
+  topErrors?: string[];
 }

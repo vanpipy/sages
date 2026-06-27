@@ -21,6 +21,7 @@ import { FileService } from "../../services/file-service.js";
 import { parseExecutionYaml } from "./plan-parser.js";
 import { runTask } from "./task-runner.js";
 import { runBatch } from "./scheduler.js";
+import { deriveTestFiles } from "./conflict-detector.js";
 import type { Batch, BatchResult, TDDConfig, TaskResult } from "./types.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
@@ -55,7 +56,7 @@ async function executeTask(params: {
     task_id,
     task_description,
     files,
-    test_files = files.map(f => f.replace(/(\.ts|\.js)$/, ".test.$1")),
+    test_files = deriveTestFiles(files),
     test_command = "bun test",
     subagent = false
   } = params;

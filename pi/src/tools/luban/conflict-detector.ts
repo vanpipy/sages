@@ -11,6 +11,40 @@
 import type { ConflictReport, LubanTask } from "./types.js";
 
 /**
+ * Normalize a file path for conflict comparison.
+ *
+ * Rules:
+ * - Convert backslashes to forward slashes (Windows compat).
+ * - Strip trailing slashes.
+ * - Strip leading "./" (relative prefix).
+ * - Lowercase (case-insensitive filesystems).
+ *
+ * This matches qiaochui's `normalizeFilePath` (qiaochui/decompose-service.ts) so
+ * that conflict detection stays consistent with task decomposition. Sharing the
+ * helper avoids the drift seen in earlier revisions.
+ */
+export function normalizeFilePath(filePath: string): string {
+  return filePath
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .replace(/^\.\//, "")
+    .toLowerCase();
+}
+
+/**
+ * Derive test file paths from source files. Used as fallback when
+ * `LubanTask.testFiles` is not explicitly provided.
+ *
+ * Rule: `*.ts → *.test.ts`, `*.js → *.test.js`, others unchanged.
+ * Centralized to avoid DRY violations across index.ts / scheduler.ts.
+ */
+export function deriveTestFiles(sourceFiles: string[]): string[] {
+  // \.(ts|js)$ captures the extension WITHOUT the leading dot;
+  // replacement adds both the leading "." and "test." prefix.
+  return sourceFiles.map((f) => f.replace(/\.(ts|js)$/, ".test.$1"));
+}
+
+/**
  * Scan a list of tasks and report files that appear in more than one task.
  *
  * Conflict surface = task.files ∪ task.testFiles (when testFiles is provided).
@@ -32,10 +66,8 @@ export function detectFileConflicts(tasks: LubanTask[]): ConflictReport {
 
   for (const task of tasks) {
     // Surface = sourceFiles ∪ testFiles (S5: tests count as conflict surface)
-    const surface: string[] = [...task.files];
-    if (task.testFiles) {
-      surface.push(...task.testFiles);
-    }
+    // Normalize paths so "./src/a.ts" === "src/a.ts" (consistent with qiaochui).
+    const surface: string[] = [...task.files, ...(task.testFiles ?? [])].map(normalizeFilePath);
 
     for (const file of surface) {
       const existing = owners.get(file);

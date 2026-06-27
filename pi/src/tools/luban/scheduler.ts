@@ -18,7 +18,7 @@
  */
 
 import { runTask } from "./task-runner.js";
-import { detectFileConflicts } from "./conflict-detector.js";
+import { detectFileConflicts, deriveTestFiles } from "./conflict-detector.js";
 import type {
   Batch,
   BatchResult,
@@ -26,6 +26,36 @@ import type {
   TaskResult,
   TDDConfig,
 } from "./types.js";
+
+/**
+ * Thrown when topoLayers detects a circular dependency.
+ *
+ * Callers can use `instanceof CircularDependencyError` to distinguish cycle
+ * failures from other Error types (e.g. memory exhaustion, programmer errors).
+ */
+export class CircularDependencyError extends Error {
+  readonly cycleTaskIds: string[];
+  constructor(taskIds: string[]) {
+    super(`Circular dependency detected involving tasks: ${taskIds.join(", ")}`);
+    this.name = "CircularDependencyError";
+    this.cycleTaskIds = taskIds;
+  }
+}
+
+/**
+ * Build a synthetic TaskResult for a task that threw rather than returned.
+ * Used to preserve task input order in BatchResult.results even when
+ * runOne throws (serial + parallel modes both isolate failures).
+ */
+function syntheticFailedResult(task: LubanTask, error: unknown): TaskResult {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    taskId: task.id,
+    success: false,
+    duration: 0,
+    phases: [{ name: "RED", status: "failed", error: message }],
+  };
+}
 
 /**
  * Topologically sort tasks into dependency-respecting layers.
@@ -55,10 +85,7 @@ export function topoLayers(tasks: LubanTask[]): LubanTask[][] {
       }
     }
     if (ready.length === 0) {
-      throw new Error(
-        "Circular dependency detected: cannot resolve remaining tasks " +
-          [...remaining.keys()].join(", ")
-      );
+      throw new CircularDependencyError([...remaining.keys()]);
     }
     for (const t of ready) {
       remaining.delete(t.id);
@@ -81,7 +108,17 @@ export function topoLayers(tasks: LubanTask[]): LubanTask[][] {
  *   3. Execute accordingly; preserve input order in results[].
  */
 export async function runBatch(batch: Batch): Promise<BatchResult> {
-  const startTime = Date.now();
+  // ── 0. Validate inputs (fail-fast) ──────────────────────────────────────────
+  if (batch.maxParallel < 1) {
+    throw new Error(
+      `Invalid batch.maxParallel=${batch.maxParallel}: must be >= 1. ` +
+        `Use maxParallel=1 for explicit serial execution.`
+    );
+  }
+
+  // Use performance.now() (monotonic) instead of Date.now() (wall-clock) so
+  // totalDuration is robust to NTP corrections / manual clock changes / VM resume.
+  const startTime = performance.now();
   const totalTasks = batch.tasks.length;
   const results: (TaskResult | undefined)[] = new Array(totalTasks);
 
@@ -105,10 +142,14 @@ export async function runBatch(batch: Batch): Promise<BatchResult> {
 
   // ── 2. Execute ────────────────────────────────────────────────────────────
   if (mode === "serial") {
+    // Serial mode: isolate failures so one throw doesn't terminate the loop.
     for (let i = 0; i < totalTasks; i++) {
       const task = batch.tasks[i];
-      const result = await runOne(task, batch);
-      results[i] = result;
+      try {
+        results[i] = await runOne(task, batch);
+      } catch (error) {
+        results[i] = syntheticFailedResult(task, error);
+      }
     }
   } else {
     // Parallel mode — layer-by-layer, worker pool ≤ maxParallel
@@ -131,6 +172,16 @@ export async function runBatch(batch: Batch): Promise<BatchResult> {
   const completed = finalResults.filter((r) => r.success).map((r) => r.taskId);
   const success = finalResults.every((r) => r.success);
 
+  // KD-3 black-box contract: surface a small slice of failure reasons so the
+  // agent can diagnose batch failures without bypassing the contract.
+  const topErrors = finalResults
+    .filter((r) => !r.success)
+    .slice(0, 3)
+    .map((r) => {
+      const failedPhase = r.phases.find((p) => p.status === "failed");
+      return `${r.taskId}: ${failedPhase?.error ?? "unknown error"}`;
+    });
+
   return {
     success,
     mode,
@@ -138,7 +189,8 @@ export async function runBatch(batch: Batch): Promise<BatchResult> {
     conflicts,
     results: finalResults,
     completed,
-    totalDuration: Date.now() - startTime,
+    totalDuration: performance.now() - startTime,
+    ...(topErrors.length > 0 ? { topErrors } : {}),
   };
 }
 
@@ -159,21 +211,26 @@ async function runLayerWithPool(
       const task = queue.shift();
       if (!task) break;
       const origIndex = batch.tasks.findIndex((t) => t.id === task.id);
-      results[origIndex] = await runOne(task, batch);
+      try {
+        results[origIndex] = await runOne(task, batch);
+      } catch (error) {
+        results[origIndex] = syntheticFailedResult(task, error);
+      }
     }
   }
 
   const workers = Array.from({ length: workerCount }, () => worker());
-  await Promise.all(workers);
+  // Promise.allSettled: a thrown worker must not abandon siblings mid-execution.
+  // The contract documented in runBatch ("Promise.allSettled semantics") now
+  // actually matches the implementation.
+  await Promise.allSettled(workers);
 }
 
 /**
  * Wrap runTask with batch-level config.
  */
 async function runOne(task: LubanTask, batch: Batch): Promise<TaskResult> {
-  const testFiles =
-    task.testFiles ??
-    task.files.map((f) => f.replace(/(\.ts|\.js)$/, ".test.$1"));
+  const testFiles = task.testFiles ?? deriveTestFiles(task.files);
   const config: TDDConfig = {
     taskId: task.id,
     taskDescription: task.description,
