@@ -267,13 +267,13 @@ tasks:
     it("should have correct tool names", () => {
       const expectedTools = [
         "luban_execute_task",
-        "luban_execute_all",
+        "luban_execute_batch",
         "luban_get_status",
       ];
 
-      // These are the registered tool names
+      // These are the registered tool names (KD-1: execute_all removed, execute_batch added)
       expect(expectedTools).toContain("luban_execute_task");
-      expect(expectedTools).toContain("luban_execute_all");
+      expect(expectedTools).toContain("luban_execute_batch");
       expect(expectedTools).toContain("luban_get_status");
     });
 

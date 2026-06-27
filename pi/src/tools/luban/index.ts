@@ -1,20 +1,27 @@
 /**
  * LuBan Tools - TDD Task Execution
- * 
+ *
  * Part of: src/tools/luban/
  * Purpose: Execute tasks with TDD methodology (RED → GREEN → REFACTOR)
- * 
- * Architecture:
+ *
+ * Architecture (post-batch-refactor):
  * - luban_execute_task: Single task execution (direct or subagent mode)
- * - luban_execute_all: Execute all tasks from execution.yaml
+ * - luban_execute_batch: Execute a batch of tasks from execution.yaml
+ *   with optimistic concurrency + automatic serial degrade on conflicts (KD-2).
+ *
+ * Notes:
+ * - `luban_execute_all` was removed (KD-1: no alias for backward compat).
+ * - The caller (qiaochui / agent) is responsible for batch composition;
+ *   LuBan executes each batch as an atomic unit (KD-3 black-box contract).
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { FileService } from "../../services/file-service.js";
-import { parseExecutionYaml, sortByDependencies } from "./plan-parser.js";
+import { parseExecutionYaml } from "./plan-parser.js";
 import { runTask } from "./task-runner.js";
-import type { TDDConfig, TaskResult } from "./types.js";
+import { runBatch } from "./scheduler.js";
+import type { Batch, BatchResult, TDDConfig, TaskResult } from "./types.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
 
@@ -87,71 +94,59 @@ async function executeTask(params: {
 }
 
 /**
- * Execute all tasks from execution.yaml
+ * Execute a batch of tasks from execution.yaml.
+ *
+ * Reads `execution.yaml` (default: <workspace>/execution.yaml), parses it
+ * into a Batch, and runs via scheduler.ts runBatch.
+ *
+ * Returns BatchResult (full structure) — the tool layer surfaces a summary
+ * to the agent in content.text and the full result in details (KD-3).
  */
-async function executeAll(params: {
+async function executeBatch(params: {
   execution_yaml?: string;
   max_parallel?: number;
   subagent?: boolean;
-}, ctx: ToolContext): Promise<{ success: boolean; results: TaskResult[]; completed: string[] }> {
+}, ctx: ToolContext): Promise<BatchResult> {
   const {
     execution_yaml,
     max_parallel = 3,
-    subagent = false
+    subagent: _subagent = false,  // reserved; currently no-op
   } = params;
 
   try {
-    // Default path if not specified
     const yamlPath = execution_yaml || ctx.fileService.getFilePath("execution.yaml");
-    
-    // Read and parse execution.yaml
     const content = ctx.fileService.read(yamlPath);
-    
-    if (!content) {
-      return { success: false, results: [], completed: [] };
-    }
-    
+
+    const emptyResult = (): BatchResult => ({
+      success: false,
+      mode: "serial",
+      degraded: false,
+      results: [],
+      completed: [],
+      totalDuration: 0,
+    });
+
+    if (!content) return emptyResult();
+
     const plan = parseExecutionYaml(content);
-    
-    if (!plan) {
-      return { success: false, results: [], completed: [] };
-    }
+    if (!plan) return emptyResult();
 
-    const results: TaskResult[] = [];
-    const completed = new Set<string>();
-    const sortedTasks = sortByDependencies(plan.tasks);
-
-    // Execute tasks respecting dependencies and parallelism
-    for (const task of sortedTasks) {
-      // Wait for dependencies
-      while (task.dependsOn.length > 0 && !task.dependsOn.every(dep => completed.has(dep))) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-
-      // Execute task
-      const result = await executeTask({
-        task_id: task.id,
-        task_description: task.description,
-        files: task.files,
-        subagent,
-      }, ctx);
-
-      results.push(result.result);
-      if (result.success) {
-        completed.add(task.id);
-      }
-    }
-
-    return { 
-      success: completed.size === plan.tasks.length,
-      results,
-      completed: Array.from(completed)
+    const batch: Batch = {
+      tasks: plan.tasks,
+      maxParallel: max_parallel,
+      testCommand: "bun test",
+      cwd: ctx.cwd,
     };
+
+    return await runBatch(batch);
   } catch (error) {
     return {
       success: false,
+      mode: "serial",
+      degraded: false,
       results: [],
-      completed: []
+      completed: [],
+      totalDuration: 0,
     };
   }
 }
@@ -243,37 +238,48 @@ export function registerLubanTools(pi: ExtensionAPI): void {
   });
 
   /**
-   * luban_execute_all - Execute all tasks from execution.yaml
+   * luban_execute_batch - Execute a batch of tasks atomically.
+   *
+   * Reads execution.yaml (default: <workspace>/execution.yaml), parses into
+   * a Batch, and runs via runBatch with optimistic concurrency + auto-degrade
+   * to serial on intra-batch file conflicts (KD-2).
+   *
+   * Black-box contract (KD-3): content.text carries summary
+   * {success, mode, degraded, conflicts?, completed, totalDuration}; full
+   * BatchResult with per-task phase details is in the `details` field for
+   * GaoYao audit / debug — not surfaced to the agent.
    */
   pi.registerTool({
-    name: "luban_execute_all",
-    label: "Execute All Tasks",
-    description: "Execute all tasks from execution.yaml with parallel execution. Sorts by dependencies, max 3 parallel.",
+    name: "luban_execute_batch",
+    label: "Execute Batch (TDD)",
+    description: "Execute a batch of tasks from execution.yaml with optimistic concurrency and automatic serial degrade on file conflicts. Caller (qiaochui/agent) is responsible for batch composition. Returns BatchResult with mode (parallel|serial), degraded flag, and conflicts list.",
     parameters: Type.Object({
-      execution_yaml: Type.Optional(Type.String({ description: "Path to execution.yaml" })),
-      max_parallel: Type.Optional(Type.Number({ description: "Maximum parallel tasks (default: 3)" })),
-      subagent: Type.Optional(Type.Boolean({ description: "Use subagent mode (default: false)" })),
+      execution_yaml: Type.Optional(Type.String({ description: "Path to execution.yaml (default: <workspace>/execution.yaml)" })),
+      max_parallel: Type.Optional(Type.Number({ description: "Optimistic concurrency cap (default: 3). If intra-batch file conflicts are detected, batch auto-degrades to serial regardless." })),
+      subagent: Type.Optional(Type.Boolean({ description: "Subagent mode flag (reserved, currently no-op)" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const context = createContext(ctx.cwd);
-      
-      const result = await executeAll({
+
+      const result = await executeBatch({
         execution_yaml: params.execution_yaml,
         max_parallel: params.max_parallel,
         subagent: params.subagent,
       }, context);
 
+      // KD-3: content.text = summary for the agent
+      const summary = {
+        success: result.success,
+        mode: result.mode,
+        degraded: result.degraded,
+        ...(result.conflicts ? { conflicts: result.conflicts } : {}),
+        completed: result.completed,
+        totalDuration: result.totalDuration,
+      };
+
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: result.success,
-            completed: result.completed,
-            totalCompleted: result.completed.length,
-            totalTasks: result.results.length,
-          }),
-        }],
-        details: { results: result.results, completed: result.completed },
+        content: [{ type: "text", text: JSON.stringify(summary) }],
+        details: result,  // Full BatchResult (including per-task phases) for GaoYao audit
       };
     },
   });

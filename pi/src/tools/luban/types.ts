@@ -42,6 +42,12 @@ export interface LubanTask {
   priority: "high" | "medium" | "low";
   dependsOn: string[];
   files: string[];
+  /**
+   * Test files associated with this task. When provided, conflict detection
+   * considers these files as part of the conflict surface (S5 scenario).
+   * Optional — falls back to deriving from sourceFiles if absent.
+   */
+  testFiles?: string[];
   status: TaskStatus;
 }
 
@@ -113,4 +119,62 @@ export interface ExecutionPlan {
   name: string;
   settings: ExecutionSettings;
   tasks: LubanTask[];
+}
+
+// ============================================================================
+// Batch API (luban_execute_batch)
+// ============================================================================
+
+/**
+ * A batch is an atomic unit of execution. The caller (qiaochui or agent)
+ * composes a batch from the decomposed plan; LuBan executes it as a unit.
+ *
+ * Contract:
+ * - maxParallel is the optimistic concurrency cap. If intra-batch file
+ *   conflicts are detected, the batch auto-degrades to serial regardless
+ *   of maxParallel (S2 scenario).
+ * - testCommand applies to every task in the batch; per-task overrides
+ *   are not supported in this round.
+ */
+export interface Batch {
+  tasks: LubanTask[];
+  maxParallel: number;
+  testCommand: string;
+  cwd: string;
+}
+
+/**
+ * Conflict report from detectFileConflicts. Pure data — no I/O.
+ *
+ * `conflicts` lists file paths that appear in more than one task's
+ * file surface (sourceFiles ∪ testFiles).
+ *
+ * `owners` maps each conflicting file to the list of task IDs that
+ * reference it. Useful for debug logging; not exposed to agent by default.
+ */
+export interface ConflictReport {
+  conflicts: string[];
+  owners: Map<string, string[]>;
+}
+
+/**
+ * Result returned by runBatch. The agent sees mode/degraded/conflicts/
+ * completed/totalDuration in content.text; full per-task details are in
+ * the pi extension `details` field (KD-3: black-box contract).
+ */
+export interface BatchResult {
+  /** True if all tasks completed successfully (results.every(r => r.success)) */
+  success: boolean;
+  /** Actual execution mode chosen by the scheduler */
+  mode: "parallel" | "serial";
+  /** True when conflicts forced downgrade to serial */
+  degraded: boolean;
+  /** Populated only when degraded === true */
+  conflicts?: string[];
+  /** Per-task outcomes, ordered by tasks input order */
+  results: TaskResult[];
+  /** IDs of tasks that completed successfully */
+  completed: string[];
+  /** Wall-clock duration in milliseconds for the entire batch */
+  totalDuration: number;
 }
