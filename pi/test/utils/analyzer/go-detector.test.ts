@@ -4,6 +4,10 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { GoDetector } from '../../../src/utils/analyzer/go-detector';
 import type { LanguageInfo } from '../../../src/utils/analyzer/base';
 
+// Local fixtures replace previous hardcoded paths to /home/leroy/Project/agentic-with-pi.
+const GO_FIXTURE = 'test/fixtures/go-with-cobra';        // cobra + bubbletea + lipgloss + bubbles
+const VIPER_FIXTURE = 'test/fixtures/go-with-viper';     // viper only
+
 describe('GoDetector', () => {
   let detector: GoDetector;
 
@@ -19,7 +23,7 @@ describe('GoDetector', () => {
 
   describe('canHandle', () => {
     it('should return true when go.mod exists', () => {
-      const result = detector.canHandle('/home/leroy/Project/agentic-with-pi');
+      const result = detector.canHandle(GO_FIXTURE);
       expect(result).toBe(true);
     });
 
@@ -31,14 +35,13 @@ describe('GoDetector', () => {
 
   describe('detect', () => {
     it('should detect Go project with high confidence', async () => {
-      const info = await detector.detect('/home/leroy/Project/agentic-with-pi');
+      const info = await detector.detect(GO_FIXTURE);
 
       expect(info).not.toBeNull();
       expect(info!.language).toBe('go');
       expect(info!.confidence).toBeGreaterThan(0.5);
       expect(info!.frameworks).toContain('bubbletea');
       expect(info!.frameworks).toContain('cobra');
-      expect(info!.frameworks).toContain('viper');
     });
 
     it('should return null for non-Go projects', async () => {
@@ -49,13 +52,13 @@ describe('GoDetector', () => {
 
   describe('analyze', () => {
     it('should detect patterns in Go code', async () => {
-      const info = await detector.analyze('/home/leroy/Project/agentic-with-pi');
+      const info = await detector.analyze(GO_FIXTURE);
 
       expect(Array.isArray(info.patterns)).toBe(true);
     });
 
     it('should detect existing components', async () => {
-      const info = await detector.analyze('/home/leroy/Project/agentic-with-pi');
+      const info = await detector.analyze(GO_FIXTURE);
 
       expect(Array.isArray(info.components)).toBe(true);
       expect(info.components.length).toBeGreaterThan(0);
@@ -64,30 +67,32 @@ describe('GoDetector', () => {
 
   describe('Go-specific detection', () => {
     it('should detect Bubble Tea TUI framework', async () => {
-      const info = await detector.analyze('/home/leroy/Project/agentic-with-pi');
+      const info = await detector.analyze(GO_FIXTURE);
 
       expect(info.frameworks).toContain('bubbletea');
       expect(info.frameworks).toContain('lipgloss');
     });
 
     it('should detect Cobra CLI patterns', async () => {
-      const info = await detector.analyze('/home/leroy/Project/agentic-with-pi');
+      const info = await detector.analyze(GO_FIXTURE);
 
       expect(info.frameworks).toContain('cobra');
     });
 
-    it('should detect Viper config patterns', async () => {
-      const info = await detector.analyze('/home/leroy/Project/agentic-with-pi');
-
+    it('should detect Viper config patterns when present', async () => {
+      // Uses the local go-with-viper fixture (test/fixtures/go-with-viper/) which
+      // declares github.com/spf13/viper in go.mod. The detector rule lives in
+      // go-detector.ts (parseDependencies frameworkMap).
+      const info = await detector.analyze(VIPER_FIXTURE);
       expect(info.frameworks).toContain('viper');
     });
   });
 });
 
 describe('GoDetector Integration', () => {
-  it('should analyze the awp project correctly', async () => {
+  it('should analyze the go-with-cobra fixture correctly', async () => {
     const detector = new GoDetector();
-    const info = await detector.detect('/home/leroy/Project/agentic-with-pi');
+    const info = await detector.detect(GO_FIXTURE);
 
     // Verify full LanguageInfo structure
     expect(info).toBeDefined();

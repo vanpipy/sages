@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 
 import { PythonDetector } from '../../../src/utils/analyzer/python-detector';
 
+// Local fixture replaces previous hardcoded path to /home/leroy/Project/agentic-with-pi.
+const PYTHON_FIXTURE = 'test/fixtures/python-with-requirements';
+
 describe('PythonDetector', () => {
   let detector: PythonDetector;
   
@@ -17,9 +20,9 @@ describe('PythonDetector', () => {
   
   describe('canHandle', () => {
     it('should return true when requirements.txt exists', () => {
-      // Create a temp project with requirements.txt
-      const result = detector.canHandle('/home/leroy/Project/agentic-with-pi');
-      expect(typeof result).toBe('boolean');
+      // Uses local fixture (test/fixtures/python-with-requirements/) which has requirements.txt.
+      const result = detector.canHandle(PYTHON_FIXTURE);
+      expect(result).toBe(true);
     });
     
     it('should return false when no Python files exist', () => {

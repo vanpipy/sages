@@ -1,0 +1,2 @@
+# python-with-requirements fixture for PythonDetector tests.
+# Empty — existence alone is what PythonDetector's canHandle checks.

@@ -4,6 +4,10 @@ import { ProjectAnalyzer } from '../../../src/utils/analyzer/orchestrator';
 import { GoDetector } from '../../../src/utils/analyzer/go-detector';
 import { TypeScriptDetector } from '../../../src/utils/analyzer/typescript-detector';
 
+// Local fixtures replace previous hardcoded paths to /home/leroy/Project/agentic-with-pi
+// (see test/fixtures/* for the synthetic project directories).
+const GO_FIXTURE = 'test/fixtures/go-with-cobra';
+
 describe('ProjectAnalyzer', () => {
   let analyzer: ProjectAnalyzer;
   
@@ -22,8 +26,8 @@ describe('ProjectAnalyzer', () => {
   
   describe('analyze', () => {
     it('should analyze Go project correctly', async () => {
-      const context = await analyzer.analyze('/home/leroy/Project/agentic-with-pi');
-      
+      const context = await analyzer.analyze(GO_FIXTURE);
+
       expect(context.language).toBe('go');
       expect(context.framework).toBe('bubbletea');
       expect(context.projectType).toBe('cli');
@@ -48,8 +52,8 @@ describe('ProjectAnalyzer', () => {
     });
 
     it('should return ProjectContext with all required fields', async () => {
-      const context = await analyzer.analyze('/home/leroy/Project/agentic-with-pi');
-      
+      const context = await analyzer.analyze(GO_FIXTURE);
+
       expect(typeof context.projectName).toBe('string');
       expect(typeof context.language).toBe('string');
       expect(typeof context.framework).toBe('string');
@@ -64,8 +68,8 @@ describe('ProjectAnalyzer', () => {
   
   describe('detectLanguage', () => {
     it('should detect Go from go.mod', async () => {
-      const info = await analyzer.detectLanguage('/home/leroy/Project/agentic-with-pi');
-      
+      const info = await analyzer.detectLanguage(GO_FIXTURE);
+
       expect(info).not.toBeNull();
       expect(info!.language).toBe('go');
       expect(info!.confidence).toBeGreaterThan(0.5);
@@ -103,18 +107,18 @@ describe('ProjectAnalyzer', () => {
 describe('ProjectAnalyzer Integration', () => {
   it('should work with the existing project-analyzer interface', async () => {
     const analyzer = new ProjectAnalyzer();
-    
+
     // Should produce similar output to the original analyzeProject
-    const context = await analyzer.analyze('/home/leroy/Project/agentic-with-pi');
-    
+    const context = await analyzer.analyze(GO_FIXTURE);
+
     expect(context).toBeDefined();
-    expect(context.projectName).toBe('agentic-with-pi');
+    expect(context.projectName).toBe('go-with-cobra');
   });
-  
+
   it('should provide structured output for draft generation', async () => {
     const analyzer = new ProjectAnalyzer();
-    const context = await analyzer.analyze('/home/leroy/Project/agentic-with-pi');
-    
+    const context = await analyzer.analyze(GO_FIXTURE);
+
     // The context should be usable by draft-generator
     expect(context.techStack.frameworks.length).toBeGreaterThan(0);
     expect(context.patterns.length).toBeGreaterThan(0);
