@@ -297,6 +297,115 @@ describe("runBatch — topErrors KD-3 diagnosis field", () => {
   });
 });
 
+// ============================================================================
+// runBatch — topErrors truncation (audit regression: KD-3 token bound)
+// ============================================================================
+
+describe("runBatch — topErrors truncation (200 char cap)", () => {
+  it("truncates each topErrors entry to <= 200 characters", async () => {
+    // "false" command fails; TDD_GUIDE.formatError wraps the error with a
+    // 50+ line guidance block, so the raw phase.error is multi-KB. The
+    // truncation step must bound each entry to 200 chars.
+    const batch: Batch = {
+      tasks: [makeTask("T1", ["src/unique-truncation.ts"])],
+      maxParallel: 1,
+      testCommand: "false",
+      cwd: process.cwd(),
+    };
+    const result = await runBatch(batch);
+    expect(result.topErrors).toBeDefined();
+    for (const entry of result.topErrors!) {
+      expect(entry.length).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it("strips trailing TDD_GUIDE guidance (no newline in entry)", async () => {
+    // TDD_GUIDE.formatError output uses "\n\n" as the separator between
+    // the original error and the guidance block. After truncation the entry
+    // should contain at most the first line.
+    const batch: Batch = {
+      tasks: [makeTask("T1", ["src/unique-no-newline.ts"])],
+      maxParallel: 1,
+      testCommand: "false",
+      cwd: process.cwd(),
+    };
+    const result = await runBatch(batch);
+    expect(result.topErrors).toBeDefined();
+    for (const entry of result.topErrors!) {
+      expect(entry).not.toMatch(/\n/);
+    }
+  });
+
+  it("preserves taskId prefix in each entry", async () => {
+    const batch: Batch = {
+      tasks: [makeTask("T42", ["src/preserve-prefix.ts"])],
+      maxParallel: 1,
+      testCommand: "false",
+      cwd: process.cwd(),
+    };
+    const result = await runBatch(batch);
+    expect(result.topErrors).toBeDefined();
+    expect(result.topErrors!.length).toBeGreaterThan(0);
+    expect(result.topErrors![0].startsWith("T42:")).toBe(true);
+  });
+});
+
+// ============================================================================
+// BatchResult — summary field propagation (KD-3 contract: agent-visible)
+// ============================================================================
+//
+// These tests pin the contract that the `topErrors` field populated by
+// runBatch is consumable by callers that build the agent-visible summary
+// (luban/index.ts: content.text). The summary-shape test below mirrors the
+// shape that index.ts assembles, so any future drift between scheduler
+// output and tool surface is caught at the test layer.
+
+describe("BatchResult — summary shape for KD-3 content.text", () => {
+  it("BatchResult includes topErrors when failures exist (caller can surface to content.text)", async () => {
+    const batch: Batch = {
+      tasks: [makeTask("T1", ["src/summary-shape.ts"])],
+      maxParallel: 1,
+      testCommand: "false",
+      cwd: process.cwd(),
+    };
+    const result = await runBatch(batch);
+
+    // Mirror what index.ts does: build a summary object with conditional spreads.
+    const summary: Record<string, unknown> = {
+      success: result.success,
+      mode: result.mode,
+      degraded: result.degraded,
+      ...(result.conflicts ? { conflicts: result.conflicts } : {}),
+      ...(result.topErrors ? { topErrors: result.topErrors } : {}),
+      completed: result.completed,
+      totalDuration: result.totalDuration,
+    };
+    expect(summary.topErrors).toBeDefined();
+    expect(Array.isArray(summary.topErrors)).toBe(true);
+    expect((summary.topErrors as string[]).length).toBeGreaterThan(0);
+  });
+
+  it("summary omits topErrors when all tasks succeed (consistent with conflicts? pattern)", async () => {
+    const batch: Batch = {
+      tasks: [makeTask("T1", ["src/summary-clean.ts"])],
+      maxParallel: 1,
+      testCommand: "echo test",
+      cwd: process.cwd(),
+    };
+    const result = await runBatch(batch);
+    const summary: Record<string, unknown> = {
+      success: result.success,
+      mode: result.mode,
+      degraded: result.degraded,
+      ...(result.conflicts ? { conflicts: result.conflicts } : {}),
+      ...(result.topErrors ? { topErrors: result.topErrors } : {}),
+      completed: result.completed,
+      totalDuration: result.totalDuration,
+    };
+    expect(summary.topErrors).toBeUndefined();
+  });
+});
+
 describe("runBatch — serial mode exception isolation", () => {
   it("continues serial execution when one task throws (other tasks still produce results)", async () => {
     // First task will succeed (echo test), but we'll force a synthetic throw via

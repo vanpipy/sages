@@ -268,12 +268,16 @@ export function registerLubanTools(pi: ExtensionAPI): void {
         subagent: params.subagent,
       }, context);
 
-      // KD-3: content.text = summary for the agent
+      // KD-3: content.text = summary for the agent.
+      // topErrors (top-3 truncated failure messages) is included so the
+      // agent can diagnose batch failures inline, without bypassing the
+      // black-box contract by reading .sages/workspace/ directly.
       const summary = {
         success: result.success,
         mode: result.mode,
         degraded: result.degraded,
         ...(result.conflicts ? { conflicts: result.conflicts } : {}),
+        ...(result.topErrors ? { topErrors: result.topErrors } : {}),
         completed: result.completed,
         totalDuration: result.totalDuration,
       };

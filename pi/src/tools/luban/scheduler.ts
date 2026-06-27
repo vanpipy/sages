@@ -28,6 +28,42 @@ import type {
 } from "./types.js";
 
 /**
+ * Maximum length of a single topErrors entry. Bounded to keep KD-3 black-box
+ * summary small — phase.error from `TDD_GUIDE.formatError()` concatenates
+ * the original error with a 50+ line guidance block, which would explode
+ * the agent's context window if surfaced verbatim.
+ */
+const TOP_ERROR_MAX_LENGTH = 200;
+
+/**
+ * Truncate a TDD phase error string to a bounded single-line form for the
+ * KD-3 diagnosis field (`topErrors`).
+ *
+ * Rules:
+ * - Take the first line of the error (TDD_GUIDE.formatError puts the
+ *   original error before the first "\n\n" guidance block; the guidance
+ *   itself starts with a markdown heading emoji and is not actionable
+ *   for the agent).
+ * - Slice to TOP_ERROR_MAX_LENGTH as a safety net for unusually long
+ *   single-line errors (e.g. long TypeScript error messages).
+ *
+ * Pure function: no I/O, no side effects.
+ */
+export function truncatePhaseError(error: string | undefined): string {
+  if (!error) return "unknown error";
+  const firstLine = error.split("\n")[0] ?? "";
+  return firstLine.slice(0, TOP_ERROR_MAX_LENGTH);
+}
+
+/**
+ * Format a single topErrors entry from a failing TaskResult.
+ * Combines the taskId with the truncated first line of the failed phase error.
+ */
+function formatTopErrorEntry(taskId: string, error: string | undefined): string {
+  return `${taskId}: ${truncatePhaseError(error)}`;
+}
+
+/**
  * Thrown when topoLayers detects a circular dependency.
  *
  * Callers can use `instanceof CircularDependencyError` to distinguish cycle
@@ -174,12 +210,14 @@ export async function runBatch(batch: Batch): Promise<BatchResult> {
 
   // KD-3 black-box contract: surface a small slice of failure reasons so the
   // agent can diagnose batch failures without bypassing the contract.
+  // Each entry is bounded to TOP_ERROR_MAX_LENGTH characters and contains
+  // no newlines (TDD_GUIDE guidance block stripped).
   const topErrors = finalResults
     .filter((r) => !r.success)
     .slice(0, 3)
     .map((r) => {
       const failedPhase = r.phases.find((p) => p.status === "failed");
-      return `${r.taskId}: ${failedPhase?.error ?? "unknown error"}`;
+      return formatTopErrorEntry(r.taskId, failedPhase?.error);
     });
 
   return {
