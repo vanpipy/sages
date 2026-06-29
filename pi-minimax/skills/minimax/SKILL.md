@@ -74,6 +74,38 @@ minimax_search_query({ query: "MiniMax AI latest release" })
 // → {success: true, query: "MiniMax AI latest release", results: [{title, link, snippet, date}]}
 ```
 
+#### If you get HTTP 404 from search (or text chat) — region=cn workaround
+
+mmx-cli 1.0.15 and 1.0.16 have a **base_url resolver bug for `region=cn`**:
+they auto-detect `base_url = https://api.minimaxi.com/anthropic/v1` but the
+endpoint functions append paths assuming a plain `https://api.minimaxi.com`
+base, causing **double `/anthropic/v1/` in the URL → HTTP 404**. This affects
+both `search query` and `text chat`. Only `quota show` is unaffected.
+
+If you're on `region=cn` and see `API error: HTTP 404 (HTTP 404)`, pass
+`--base-url https://api.minimaxi.com` (without `/anthropic/v1`) explicitly:
+
+```ts
+// L2: dedicated search tool
+minimax_search_query({
+  query: "MiniMax AI latest release",
+  baseUrl: "https://api.minimaxi.com",
+})
+
+// L1: escape hatch (works for text chat too)
+minimax_exec({
+  command: "search query",
+  args: { q: "MiniMax AI", "base-url": "https://api.minimaxi.com" },
+})
+minimax_exec({
+  command: "text chat",
+  args: { message: "Hello", "base-url": "https://api.minimaxi.com" },
+})
+```
+
+This is **temporary** until mmx-cli upstream fixes the resolver. Confirmed
+still broken in mmx-cli 1.0.16 (released 4 weeks ago).
+
 ### Auth check
 ```ts
 minimax_auth_status({})
@@ -133,6 +165,7 @@ cd ~/Project/sages/pi-minimax
 | `MMX_NOT_FOUND` | mmx not installed | `npm install -g mmx-cli` |
 | `NOT_AUTHED` | No credentials | `mmx auth login` or `export MINIMAX_API_KEY=…` |
 | `TIMEOUT` | mmx subprocess exceeded 60s | Use `mmx <cmd> --async` for long polls, or call mmx directly |
+| `UNKNOWN` with `HTTP 404` in message | mmx-cli 1.0.15/1.0.16 region=cn base_url bug | Pass `baseUrl: "https://api.minimaxi.com"` to `minimax_search_query`, or `--base-url` flag via `minimax_exec` — see "If you get HTTP 404" above |
 | All calls slow (~150ms) | mmx spawn overhead per call | Expected; can't avoid without SDK import |
 | `OAuth session wiped` | — | Should not happen; bootstrap is gated by status check |
 | Token leakage in logs | — | mmx-cli's `maskToken` prefixes only (`sk-xxxx…`); we don't log full keys |

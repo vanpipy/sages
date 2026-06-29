@@ -121,4 +121,74 @@ describe("minimax_search_query tool", () => {
             expect(result.error.message).toMatch(/timed out/);
         }
     });
+
+    // ─── baseUrl param (workaround for mmx-cli region=cn base_url bug) ─────
+    // See SKILL.md "Known upstream bug" section for context.
+    // mmx-cli 1.0.15/1.0.16 auto-resolves base_url to https://api.minimaxi.com/anthropic/v1
+    // for region=cn, but endpoint fns append /v1/coding_plan/search etc. → 404.
+    // Passing --base-url https://api.minimaxi.com (no /anthropic/v1) bypasses the bug.
+
+    it("forwards baseUrl as --base-url flag to mmx", async () => {
+        const { fn, calls } = mockExec([
+            { stdout: '{"organic":[]}', stderr: "", exitCode: 0 },
+        ]);
+        await runSearchQuery({
+            input: { query: "MiniMax", baseUrl: "https://api.minimaxi.com" },
+            ensureAuth: async () => {},
+            execMmx: fn,
+        });
+        expect(calls[0]!.args).toEqual({
+            q: "MiniMax",
+            "base-url": "https://api.minimaxi.com",
+        });
+    });
+
+    it("omits --base-url flag when baseUrl not provided (preserves default behavior)", async () => {
+        const { fn, calls } = mockExec([
+            { stdout: '{"organic":[]}', stderr: "", exitCode: 0 },
+        ]);
+        await runSearchQuery({
+            input: { query: "x" },
+            ensureAuth: async () => {},
+            execMmx: fn,
+        });
+        expect(calls[0]!.args).toEqual({ q: "x" });
+        expect(calls[0]!.args).not.toHaveProperty("base-url");
+    });
+
+    it("treats empty baseUrl string as no override", async () => {
+        const { fn, calls } = mockExec([
+            { stdout: '{"organic":[]}', stderr: "", exitCode: 0 },
+        ]);
+        await runSearchQuery({
+            input: { query: "x", baseUrl: "" },
+            ensureAuth: async () => {},
+            execMmx: fn,
+        });
+        expect(calls[0]!.args).toEqual({ q: "x" });
+    });
+
+    it("returns parsed results when mmx succeeds with baseUrl override", async () => {
+        const { fn } = mockExec([
+            {
+                stdout: JSON.stringify({
+                    organic: [
+                        { title: "MiniMax-AI/cli on GitHub", link: "https://github.com/MiniMax-AI/cli", snippet: "Generate text, images, video, speech", date: "2026-06-01" },
+                    ],
+                }),
+                stderr: "",
+                exitCode: 0,
+            },
+        ]);
+        const result = await runSearchQuery({
+            input: { query: "MiniMax CLI", baseUrl: "https://api.minimaxi.com" },
+            ensureAuth: async () => {},
+            execMmx: fn,
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect(result.results).toHaveLength(1);
+            expect(result.results[0]!.link).toContain("github.com/MiniMax-AI");
+        }
+    });
 });

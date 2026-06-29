@@ -123,9 +123,9 @@ bun test ./test/binary-finder.test.ts
 
 ## 当前状态
 
-- 54 单元测试通过（binary-finder 8 + exec 11 + auth-status 6 + auth-bootstrap 8 + auth tool 5 + exec-tool 6 + search 7 + tools-index 1 + extension 2 = 54 tests）
+- 67 单元测试通过（binary-finder 8 + exec 11 + auth-status 6 + auth-bootstrap 8 + auth tool 5 + exec-tool 6 + search 11 + tools-index 10 + extension 2 = 67 tests）
 - tsc clean
 - install.sh 部署到 ~/.pi/packages/minimax 验证通过
-- 17 个 git commits（T1-T17, plus T18-T20 refactors）
-- 21 个文件，~1300 LOC
+- 21 个 git commits（T1-T22，最后一次 `31419a7 docs(pi-minimax): T22 fix tool description drift`）
+- 31 个 git-tracked 文件，~2972 LOC
 - Audit verdict: 94/100 PASS (7 findings: 5 minor addressed in T18-T20, 2 major addressed in T16-T17)

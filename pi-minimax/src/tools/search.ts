@@ -12,7 +12,7 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { ensureAuth, NotAuthedError, type EnsureAuthOptions } from "../services/auth-bootstrap.js";
-import { execMmx, type ExecMmxArgs, type ExecMmxResult } from "../services/exec.js";
+import { execMmx, type ExecMmxArgs, type ExecMmxResult, type FlatValue } from "../services/exec.js";
 import type { ToolFailure } from "../services/result.js";
 
 type UpdateFn = NonNullable<EnsureAuthOptions["onUpdate"]>;
@@ -27,6 +27,13 @@ export interface SearchResultItem {
 export type SearchToolInput = {
     query: string;
     apiKey?: string;
+    /**
+     * Override mmx-cli's auto-detected base URL. Pass `https://api.minimaxi.com`
+     * (without `/anthropic/v1` suffix) to work around the upstream bug where
+     * mmx-cli 1.0.15/1.0.16 + region=cn returns HTTP 404 for both search and
+     * text chat endpoints. See SKILL.md "Known upstream bug".
+     */
+    baseUrl?: string;
 };
 
 export type SearchToolResult =
@@ -59,9 +66,16 @@ export async function runSearchQuery(deps: SearchToolDeps): Promise<SearchToolRe
 
     let result: ExecMmxResult;
     try {
+        const execArgs: Record<string, FlatValue> = { q: deps.input.query };
+        if (deps.input.baseUrl && deps.input.baseUrl.length > 0) {
+            // mmx-cli flag is `--base-url` (kebab-case); our public API uses
+            // camelCase `baseUrl`. The args Record keys are the literal mmx
+            // flag names (see exec.ts `appendArg`).
+            execArgs["base-url"] = deps.input.baseUrl;
+        }
         result = await run({
             command: "search query",
-            args: { q: deps.input.query },
+            args: execArgs,
             apiKey: deps.input.apiKey,
         });
     } catch (e) {
@@ -106,6 +120,12 @@ export function registerSearchTool(pi: ExtensionAPI): void {
         parameters: Type.Object({
             query: Type.String({ description: "Search query string" }),
             apiKey: Type.Optional(Type.String({ description: "Per-call token override" })),
+            baseUrl: Type.Optional(Type.String({
+                description:
+                    "Override mmx-cli base URL. Set to 'https://api.minimaxi.com' " +
+                    "(no /anthropic/v1) to bypass the mmx-cli 1.0.15/1.0.16 region=cn " +
+                    "base_url resolver bug that returns HTTP 404 for search and text chat.",
+            })),
         }),
         async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
             const input = params as SearchToolInput;

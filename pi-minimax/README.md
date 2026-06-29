@@ -156,11 +156,11 @@ See `AGENTS.md` for project conventions, TDD discipline, and known traps.
 
 ## 📊 Status
 
-- **46 unit tests pass** (9 test files)
+- **67 unit tests pass** (9 test files: auth-status 6 + search 11 + exec 11 + tools-index 10 + exec-tool 6 + auth 5 + binary-finder 8 + auth-bootstrap 8 + extension 2)
 - **tsc clean** (`tsc --noEmit` exits 0)
 - **install.sh** verified deploys to `~/.pi/packages/minimax`
-- **15 git commits** (T1-T15) — atomic per task
-- **17 files**, ~1100 LOC (vs pi-yunxiao's 24 files / ~2400 LOC)
+- **21 git commits** (T1-T22) — atomic per task
+- **31 tracked files**, ~2972 LOC (vs pi-yunxiao's 24 files / ~2400 LOC)
 - **Real integration**: finds `mmx` via npm-global on this machine, runs the real auth-status JSON parser
 
 ## 📚 Docs
