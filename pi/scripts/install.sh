@@ -313,6 +313,14 @@ install_sages_files() {
     echo "  Installed package.json"
   fi
 
+  # Install dependencies into $PKG_DIR/node_modules
+  if [[ -f "$PKG_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    echo "  Installing dependencies (bun install)..."
+    (cd "$PKG_DIR" && bun install --silent 2>&1 | tail -3) || {
+      echo "  Warning: bun install failed, deps may be missing"
+    }
+  fi
+
   register_settings
 }
 

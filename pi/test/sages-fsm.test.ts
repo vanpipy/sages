@@ -31,11 +31,21 @@ const fsmModule = await import("../extensions/sages-fsm.js");
 class MockExtensionAPI {
 	events = {
 		listeners: new Map<string, Function[]>(),
+		// [修复] pi 0.79.10 真实 API:on() 返回 unsubscribe 函数
 		on(event: string, handler: Function) {
 			if (!this.listeners.has(event)) this.listeners.set(event, []);
 			this.listeners.get(event)!.push(handler);
+			// 返回 unsubscribe(与 pi 实际行为一致)
+			return () => {
+				const arr = this.listeners.get(event);
+				if (arr) {
+					const idx = arr.indexOf(handler);
+					if (idx >= 0) arr.splice(idx, 1);
+				}
+			};
 		},
 		off(event: string, handler: Function) {
+			// 不在 pi 真 API 中,仅为 mock 完整
 			const arr = this.listeners.get(event);
 			if (arr) {
 				const idx = arr.indexOf(handler);

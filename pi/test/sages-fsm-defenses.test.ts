@@ -18,7 +18,15 @@ const fsmModule = await import("../extensions/sages-fsm.js");
 class MockExtensionAPI {
 	events = {
 		listeners: new Map<string, Function[]>(),
-		on(e: string, h: Function) { (this.listeners.get(e) || this.listeners.set(e, []).get(e)!).push(h); },
+		// [修复] pi 真实 API:on() 返回 unsubscribe 函数
+		on(e: string, h: Function) {
+			const arr = this.listeners.get(e) || this.listeners.set(e, []).get(e)!;
+			arr.push(h);
+			return () => {
+				const i = arr.indexOf(h);
+				if (i >= 0) arr.splice(i, 1);
+			};
+		},
 		off(e: string, h: Function) { const a = this.listeners.get(e); if (a) { const i = a.indexOf(h); if (i >= 0) a.splice(i, 1); } },
 		emit(e: string, p: unknown) { (this.listeners.get(e) || []).forEach((h) => h(p)); },
 	};

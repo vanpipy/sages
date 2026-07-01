@@ -132,13 +132,16 @@ spec:
 		description: "[Sages] 显示当前 workflow 状态",
 		handler: async (_args, ctx) => {
 			const status = await new Promise<unknown>((resolve) => {
-				const handler = (payload: unknown) => {
-					pi.events.off("sages:status-response", handler);
+				// [修复] pi.events.on() 返回 unsubscribe 函数,而非 off() 方法
+				const unsubscribe = pi.events.on("sages:status-response", (payload: unknown) => {
+					unsubscribe();
 					resolve(payload);
-				};
-				pi.events.on("sages:status-response", handler);
+				});
 				pi.events.emit("sages:status-request", undefined);
-				setTimeout(() => resolve({ error: "FSM 未响应(可能未加载)" }), 1000);
+				setTimeout(() => {
+					unsubscribe();
+					resolve({ error: "FSM 未响应(可能未加载)" });
+				}, 1000);
 			});
 
 			const formatted = JSON.stringify(status, null, 2);
