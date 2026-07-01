@@ -5,6 +5,12 @@
 #
 # Also installs pi-memory for persistent memory capabilities
 #
+# Selective install options:
+#   --sages-only   only update sages (skip pi-memory and SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages and pi-memory)
+#
+# These flags are mutually exclusive with --uninstall and each other.
+#
 
 set -euo pipefail
 
@@ -32,7 +38,11 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
+  echo "  --sages-only       Only install/update sages (skip pi-memory, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory)"
   echo "  --help, -h         Show this help message"
+  echo ""
+  echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
 }
 
 check_git() {
@@ -53,7 +63,7 @@ install_pi_if_needed() {
 is_pi_memory_installed() {
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && return 1
-  
+
   python3 -c "
 import json, sys
 try:
@@ -69,13 +79,13 @@ except:
 
 install_pi_memory() {
   echo "==> Installing pi-memory..."
-  
+
   # Check if already installed
   if is_pi_memory_installed; then
     echo "  pi-memory already installed"
     return 0
   fi
-  
+
   # Try using pi install command first
   if command -v pi &>/dev/null; then
     echo "  Installing via 'pi install $PI_MEMORY_PKG'..."
@@ -85,16 +95,16 @@ install_pi_memory() {
     fi
     echo "  pi install failed, trying manual..."
   fi
-  
+
   # Fallback: manually add to settings.json
   echo "  Adding to settings.json..."
   local settings="$PI_DIR/agent/settings.json"
   mkdir -p "$(dirname "$settings")"
-  
+
   if [[ ! -f "$settings" ]]; then
     echo '{"packages": []}' > "$settings"
   fi
-  
+
   python3 -c "
 import json, sys
 f, pkg = '$settings', '$PI_MEMORY_PKG'
@@ -107,16 +117,16 @@ if pkg not in d.get('packages', []):
 json.dump(d, open(f, 'w'), indent=2)
 print('  Added', pkg)
 "
-  
+
   echo "  Installed pi-memory"
 }
 
 uninstall_pi_memory() {
   echo "==> Uninstalling pi-memory..."
-  
+
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && { echo "  No settings file"; return 0; }
-  
+
   local removed=false
   python3 -c "
 import json, sys
@@ -136,20 +146,25 @@ except Exception as e:
     print('Warning:', e, file=sys.stderr)
     sys.exit(1)
 "
-  
+
   # Remove package directory if exists
   local memory_dir="$PI_DIR/packages/pi-memory"
   if [[ -d "$memory_dir" ]]; then
     rm -rf "$memory_dir"
     echo "  Removed $memory_dir"
   fi
-  
+
   echo "  pi-memory uninstalled"
 }
 
 install_system_prompt() {
   mkdir -p "$AGENT_DIR"
-  
+
+  if [[ -f "$AGENT_DIR/SYSTEM.md" && "${FORCE:-false}" != true ]]; then
+    echo "  SYSTEM.md already exists (use --force to overwrite)"
+    return 0
+  fi
+
   cat > "$AGENT_DIR/SYSTEM.md" << 'EOF'
 # Role: DevSecOps & Polyglot Systems Engineer
 
@@ -199,7 +214,7 @@ You are a strategic expert specializing in AI-driven DevOps (The Command Center)
 - **Communication**: Be direct and technical. Use Markdown tables or Mermaid flowcharts for complex logic.
 - **Compliance**: All activities must follow ethical guidelines within authorized scopes.
 EOF
-  
+
   echo "  Installed SYSTEM.md"
 }
 
@@ -222,11 +237,11 @@ is_sages_installed() {
 register_settings() {
   local settings="$PI_DIR/agent/settings.json"
   mkdir -p "$(dirname "$settings")"
-  
+
   if [[ ! -f "$settings" ]]; then
     echo '{"packages": []}' > "$settings"
   fi
-  
+
   python3 -c "
 import json, sys
 f, pkg = '$settings', '$PKG_DIR'
@@ -246,7 +261,7 @@ print('Registered sages')
 unregister_settings() {
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && return 0
-  
+
   python3 -c "
 import json, sys
 f, pkg = '$settings', '$PKG_DIR'
@@ -260,41 +275,27 @@ except Exception as e:
 "
 }
 
-install() {
-  echo "==> Installing sages + pi-memory..."
-  
-  # Pre-flight checks
+# ────────────────────────────────────────────────────────────
+# 共享:克隆 + 复制 sages 文件
+# ────────────────────────────────────────────────────────────
+install_sages_files() {
   check_git
-  install_pi_if_needed
-  
-  # Verify pi is available
-  if ! command -v pi &>/dev/null; then
-    echo "Error: pi not found after installation"
-    exit 1
-  fi
-  
-  # Install pi-memory first
-  install_pi_memory
-  
-  # Clone sages
-  echo "==> Installing sages..."
   TMP_DIR=$(mktemp -d)
   echo "  Cloning from $REPO_URL..."
   git clone "$REPO_URL" "$TMP_DIR" || {
     echo "Error: Failed to clone sages repository"
-    exit 1
+    return 1
   }
-  
-  # Install sages
+
   mkdir -p "$PKG_DIR"
   for dir in prompts skills extensions src; do
     local src_dir="$TMP_DIR/pi/$dir"
     local dest_dir="$PKG_DIR/$dir"
-    
+
     if [[ ! -d "$src_dir" ]]; then
       continue
     fi
-    
+
     if [[ -d "$dest_dir" && "${FORCE:-false}" != true ]]; then
       echo "  Skipping $dir/ (exists, use --force to overwrite)"
     else
@@ -303,7 +304,7 @@ install() {
       echo "  Installed $dir/"
     fi
   done
-  
+
   # Handle package.json
   if [[ -f "$PKG_DIR/package.json" && "${FORCE:-false}" != true ]]; then
     echo "  Keeping existing package.json"
@@ -311,41 +312,102 @@ install() {
     cp "$TMP_DIR/pi/package.json" "$PKG_DIR/package.json"
     echo "  Installed package.json"
   fi
-  
-  # Register in settings
+
   register_settings
-  
-  # Install system prompt
-  if [[ ! -f "$AGENT_DIR/SYSTEM.md" || "${FORCE:-false}" == true ]]; then
-    install_system_prompt
+}
+
+# ────────────────────────────────────────────────────────────
+# 模式 1:全量安装(默认)
+# ────────────────────────────────────────────────────────────
+install() {
+  echo "==> Installing sages + pi-memory..."
+
+  # Pre-flight checks
+  install_pi_if_needed
+
+  # Verify pi is available
+  if ! command -v pi &>/dev/null; then
+    echo "Error: pi not found after installation"
+    exit 1
   fi
-  
+
+  # Install pi-memory first
+  install_pi_memory
+
+  # Install sages
+  echo "==> Installing sages..."
+  install_sages_files || exit 1
+
+  # Install system prompt
+  install_system_prompt
+
   echo ""
   echo "Done! Restart pi: exit && pi"
 }
 
+# ────────────────────────────────────────────────────────────
+# 模式 2:仅更新 sages(跳过 pi-memory 和 SYSTEM.md)
+# ────────────────────────────────────────────────────────────
+install_sages_only() {
+  echo "==> Installing sages only (skip pi-memory, skip SYSTEM.md)..."
+
+  # Pre-flight: pi 仍然需要(sages 是 pi extension)
+  install_pi_if_needed
+  if ! command -v pi &>/dev/null; then
+    echo "Error: pi not found after installation"
+    exit 1
+  fi
+
+  # 仅安装 sages 文件
+  echo "==> Installing sages..."
+  install_sages_files || exit 1
+
+  # 显式不调用 install_pi_memory / install_system_prompt
+  echo "  (skipped: pi-memory, SYSTEM.md)"
+
+  echo ""
+  echo "Done! Restart pi: exit && pi"
+}
+
+# ────────────────────────────────────────────────────────────
+# 模式 3:仅更新 SYSTEM.md(跳过 sages 和 pi-memory)
+# ────────────────────────────────────────────────────────────
+install_system_only() {
+  echo "==> Installing SYSTEM.md only (skip sages, skip pi-memory)..."
+  # 不需要 git / pi —— SYSTEM.md 是独立 markdown
+  install_system_prompt
+  echo "  (skipped: sages, pi-memory)"
+
+  echo ""
+  echo "Done! Restart pi: exit && pi"
+}
+
+# ────────────────────────────────────────────────────────────
+# 卸载(同时移除 sages 和 pi-memory)
+# ────────────────────────────────────────────────────────────
 uninstall() {
   echo "==> Uninstalling sages + pi-memory..."
-  
+
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
     rm -rf "$PKG_DIR"
     echo "  Removed sages"
   fi
-  
+
   # Unregister sages
   unregister_settings
-  
+
   # Uninstall pi-memory
   uninstall_pi_memory
-  
+
   echo ""
   echo "Done. Restart pi: exit && pi"
 }
 
 main() {
-  local FORCE=false UNINSTALL=false
-  
+  local FORCE=false UNINSTALL=false SAGES_ONLY=false SYSTEM_ONLY=false
+  local MODE_COUNT=0
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --prefix)
@@ -354,14 +416,28 @@ main() {
         shift 2
         ;;
       --force) FORCE=true; shift ;;
-      --uninstall) UNINSTALL=true; shift ;;
+      --uninstall) UNINSTALL=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
+      --sages-only) SAGES_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
+      --system-only) SYSTEM_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --help|-h) usage; exit 0 ;;
       *) echo "Error: Unknown option: $1"; usage; exit 1 ;;
     esac
   done
 
+  # 互斥校验:一次只能选一种模式
+  if [[ "$MODE_COUNT" -gt 1 ]]; then
+    echo "Error: --uninstall, --sages-only, --system-only are mutually exclusive"
+    echo "Pick at most one of them (or none for full install)."
+    usage
+    exit 1
+  fi
+
   if $UNINSTALL; then
     uninstall
+  elif $SAGES_ONLY; then
+    install_sages_only
+  elif $SYSTEM_ONLY; then
+    install_system_only
   else
     install
   fi

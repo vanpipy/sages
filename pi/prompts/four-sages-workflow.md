@@ -1,184 +1,116 @@
-# Four Sages Workflow
+# Sages Workflow System
 
-## Recommended Pre-Step: Brainstorming
+> Sages 通过**声明式 workflow** 驱动 4 贤协作。流程由 `.sages/workflow.yaml` + `.sages/workflows/{name}.yaml` 定义,**无需记忆 18 个 slash command**。
 
-⚡ **HIGHLY RECOMMENDED** before starting any implementation:
+---
+
+## 快速上手
+
+### 1. 全新项目
+
+```bash
+# pi 启动后,首次进入项目
+/sages-init
+```
+
+会自动创建:
+- `.sages/workflow.yaml`(默认 active=four-sages)
+- `.sages/workflows/{four-sages,bugfix}.yaml`(workflow 模板)
+- `.sages/prompts/`(所有 stage prompt)
+
+### 2. 启动 workflow
+
+只需在聊天中说"我想做 X" / "implement Y" / "fix Z",FSM 会:
+1. 加载当前 workflow 定义
+2. 自动注入 design 阶段的 prompt
+3. LLM 开始 MDD 7 Planes 设计
+
+### 3. 用户的唯一操作
+
+| 何时 | 做什么 | 命令 |
+|---|---|---|
+| 看到 review 通过通知 | **批准 plan** | `/sages-plan` |
+| 任何时候想看进度 | **查状态** | `/sages-status` |
+| 切换 workflow | **切换** | `/sages-workflow <name\|list\|current>` |
+
+### 4. 流程自动推进(基于真实证据)
+
+```
+[设计 (Fuxi)]  写 draft.md (≥500 字节)
+   ↓ (tool_result 检测 draft.md 创建)
+[审查 (QiaoChui)]  读 draft.md,写 state.score
+   ↓ (state.score ≥ 80)
+[等待 plan 批准]  你输入 /sages-plan
+   ↓ (manual gate)
+[分解 (QiaoChui)]  写 execution.yaml
+   ↓ (files-exist: plan.md + execution.yaml)
+[执行 (LuBan)]  TDD,写代码 + 测试,设 state.executeStatus=complete
+   ↓ (state-field: executeStatus=complete)
+[审计 (GaoYao)]  5 阶段审计,写 audit.md 包含 "**Verdict**:"
+   ↓ (file-content-match: "**Verdict**:")
+[归档]  根据 verdict 自动路由:
+   - PASS  →  archive → complete
+   - REJECTED →  回 design 重新设计
+   - NEEDS_CHANGES →  回 execute 修复
+```
+
+---
+
+## 推荐:头脑风暴
+
+⚡ **强烈建议** 在任何实现前先做:
 
 ```
 /brainstorm [your request]
 ```
 
-**When to brainstorm?**
-- Creating new features
-- Building components
-- Adding functionality
-- Modifying existing behavior
-- Even for "simple" projects
+详见 `.pi/agent/skills/brainstorming/SKILL.md`。
 
-**Why brainstorm first?**
-- Explore intent and clarify requirements
-- Propose 2-3 approaches with tradeoffs
-- Get design approval before implementation
-- Reduces wasted work on misaligned solutions
+---
 
-**Auto-Transition**: After design approval, Fuxi workflow starts automatically (if not already in one).
+## 当前可用 workflow
 
-## Phases
+| workflow | stages | 适用 |
+|---|---|---|
+| `four-sages` | 8(design→review→plan→decompose→execute→audit→archive→complete) | 完整功能开发 |
+| `bugfix` | 5(reproduce→fix→audit→archive→complete) | 已确认的小范围 bug |
 
-| Phase | Mode | Allowed Files |
-|-------|------|---------------|
-| Design | read-only | `draft.md` |
-| Review | read-only | `draft.md` (read) |
-| Plan | read-only | `plan.md`, `execution.yaml` |
-| Implement | writeable | all files |
-| Review | read-only | `report-{time}.md` |
+未来会加:
+- `adr`(架构决策记录)
+- `refactor`(重构专用)
+- `docs`(文档生成)
 
-## Mode Indicators
+---
 
-Always show mode in system prompt:
+## 当前阶段(2026-06-29)实现状态
 
-```
-**Design Mode** (Read-Only)
-- Only modify: draft.md
-- Read-only for all other files
-- Use /fuxi-request to create draft
-```
+| 特性 | 状态 |
+|---|---|
+| `.sages/pipeline.yaml`(已重命名为 `workflow.yaml`) | ✅ |
+| Workflow YAML 加载 + typebox schema 校验 | ✅ |
+| 7 个 stage 自动推进(tool_result 触发) | ✅ |
+| onVerdict 分支(PASS/REJECTED/NEEDS_CHANGES) | ✅ |
+| `/sages-plan` 手动 gate | ✅ |
+| `/sages-status` 状态查询 | ✅ |
+| `/sages-workflow` 切换 | ✅ |
+| `/sages-init` 初始化 | ✅ |
+| QualityGate 预检(hard/soft/advisory) | ✅ |
+| Attestation 哈希链 | ❌ 阶段 2+ |
+| Autonomy tier | ❌ 阶段 2+ |
+| Adapter 加载器 | ❌ 阶段 2+ |
+| 死锁检测(5 次后终止) | ✅ |
+| transition 边验证 | ✅ |
+| 文件缺失报错 | ✅ |
+| YAML 错误定位 | ✅(schema 报错含 instancePath) |
+| Conformance fixture(20+) | ❌ 阶段 1.5+ |
 
-```
-**Plan Mode** (Read-Only)
-- Only modify: plan.md, execution.yaml
-- Read-only for all other files
-- Use /fuxi-plan to proceed (score > 80)
-```
+---
 
-```
-**Implement Mode** (Writeable)
-- All files allowed
-- Follow TDD: RED → GREEN → REFACTOR
-- Use /luban-execute to run tasks
-```
+## 反馈
 
-```
-**Review Mode** (Read-Only)
-- Only modify: report-{time}.md
-- Use /gaoyao-review for audit
-```
-
-## Workflow Flow
-
-```
-/brainstorm → [Design Approved] → fuxi-start (auto)
-    ↓
-Design Phase (Fuxi)
-    ↓ /fuxi-request
-draft.md created
-    ↓
-Review Phase (QiaoChui)
-    ↓ qiaochui-review (sets score)
-score > 80?
-    ↓ yes
-Plan Phase (QiaoChui)
-    ↓ qiaochui-decompose
-plan.md + execution.yaml created
-    ↓ /fuxi-plan
-Implement Phase (LuBan)
-    ↓ /luban-execute
-Tasks executed (TDD)
-    ↓
-Audit Phase (GaoYao)
-    ↓ gaoyao-review
-report-{time}.md created
-    ↓ verdict = PASS
-fuxi-end → Archive
-```
-
-## Commands
-
-| Command | Phase | Description |
-|---------|-------|-------------|
-| `/fuxi-start` | - | Start workflow, set design phase |
-| `/fuxi-request` | design | Create draft.md |
-| `/fuxi-plan <score>` | plan | Transition to plan (only if score > 80) |
-| `/fuxi-recover` | - | Recover from state.json |
-| `/fuxi-end` | - | End workflow, archive |
-| `/fuxi-get-status` | - | View current status |
-| `qiaochui-review` | review | Review draft, set score |
-| `qiaochui-decompose` | plan | Create plan.md and execution.yaml |
-| `luban-execute` | implement | Execute tasks with TDD |
-| `gaoyao-review` | audit | Quality audit |
-
-## Task Scope
-
-All tasks in execution.yaml must include `files` field specifying exact files affected:
-
-```yaml
-tasks:
-  - id: T1
-    description: "Create user model"
-    files:
-      - "src/models/user.ts"
-      - "src/models/index.ts"
-    dependsOn: []
-```
-
-This ensures clear scope for LuBan's TDD execution.
-
-## MDD Seven Planes
-
-For design phase, analyze using 7 planes:
-
-1. **Business** - Process × Rules
-2. **Data** - Logic × State
-3. **Control** - Strategy × Distribution
-4. **Foundation** - Resource × Abstraction
-5. **Observation** - Data × Analysis
-6. **Security** - Identity × Permissions
-7. **Evolution** - Time × Change
-
-## TDD Cycle
-
-```
-RED → GREEN → REFACTOR
-```
-
-- **RED**: Write failing test first
-- **GREEN**: Write minimal code to pass
-- **REFACTOR**: Improve code structure
-
-## File Structure
-
-```
-.sages/
-├── workspace/
-│   ├── draft.md        # MDD Design (Fuxi)
-│   ├── plan.md         # Task plan (QiaoChui)
-│   ├── execution.yaml  # Task config
-│   ├── report-{time}.md # Audit report (GaoYao)
-│   └── state.json      # Workflow state
-└── archive/
-    └── {plan}/
-        └── {timestamp}/
-            └── ... (archived files)
-```
-
-## State Management
-
-state.json contains:
-```json
-{
-  "phase": "design",
-  "planName": "...",
-  "request": "...",
-  "score": 85,
-  "createdAt": "...",
-  "updatedAt": "..."
-}
-```
-
-## Prohibited
-
-- ❌ Modify files outside allowed list for current phase
-- ❌ Skip TDD cycle in implement phase
-- ❌ Decompose without review
-- ❌ Plan if score ≤ 80
-- ❌ Write code in read-only phases
+如果遇到问题:
+1. `/sages-status` 看当前 state
+2. 检查 `.sages/workspace/state.json` 的 `history` 字段
+3. 检查实际文件内容(draft.md / plan.md / execution.yaml / audit.md)
+4. 看 pi session 的 `sages-fsm-transition` 历史
+5. 提交 issue 或查看 `.sages/workflows/*.yaml` schema
