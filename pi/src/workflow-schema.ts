@@ -136,6 +136,9 @@ export const WorkflowSchema = Type.Object({
 				onFailure: Type.Optional(Type.Object({ strategy: Type.String() })),
 			}),
 		),
+		// [新增] plan 阶段自动通过开关——默认 true
+		// 设为 false 则 plan 的 command 触发器需用户手动 /sages-plan
+		autoApprovePlans: Type.Optional(Type.Boolean()),
 		stages: Type.Array(Stage, { minItems: 1 }),
 	}),
 });

@@ -81,6 +81,8 @@ type Workflow = {
 	spec: {
 		triggers?: Array<{ event: string; patterns?: string[] }>;
 		defaults?: { workspace?: string; timeout?: string; onFailure?: { strategy: string } };
+		// [重构] plan 阶段自动通过——默认 true
+		autoApprovePlans?: boolean;
 		stages: Stage[];
 	};
 };
@@ -138,6 +140,7 @@ class SagesFSM {
 	private workspace = ".sages/workspace";
 	private cwd = process.cwd();
 	private active = false;
+	private manualApproval = false; // [重构] /sages-plan 手动批准门
 	private ctx: { ui?: { notify?: (text: string, type?: string) => void } } = {};
 
 	// [m2] 统一的通知接口——优先 UI,降级 console
@@ -333,8 +336,13 @@ class SagesFSM {
 				}
 			}
 			case "command":
-				// command 触发器总是满足(等待用户输入)
-				return true;
+				// [重构] command 触发器受 autoApprovePlans 控制:
+				//   - autoApprovePlans !== false(默认 true): 自动通过
+				//   - autoApprovePlans === false: 需要用户在 /sages-plan 中手动批准
+				if (this.workflow.spec.autoApprovePlans !== false) {
+					return true;
+				}
+				return this.manualApproval;
 			default:
 				return true;
 		}
@@ -550,6 +558,9 @@ class SagesFSM {
 		this.state.history.push(transitionEntry);
 		this.saveState();
 
+		// [重构] 转换后消费手动批准——下一次需要重新批准
+		this.manualApproval = false;
+
 		// 持久化到 session
 		pi.appendEntry("sages-fsm-transition", transitionEntry);
 
@@ -651,6 +662,11 @@ class SagesFSM {
 			auditVerdict: this.state.auditVerdict,
 		};
 	}
+
+	// [重构] /sages-plan 手动批准——被 EventBus 监听器调用
+	approveCurrentStage(): void {
+		this.manualApproval = true;
+	}
 }
 
 // ────────────────────────────────────────────────────────────
@@ -715,5 +731,20 @@ export default function (pi: ExtensionAPI) {
 	// EventBus: status 请求响应
 	pi.events.on("sages:status-request", () => {
 		pi.events.emit("sages:status-response", fsm.getStatus());
+	});
+
+	// [重构] 监听 /sages-plan 手动批准
+	pi.events.on("sages:plan-approved", () => {
+		fsm.approveCurrentStage();
+		// 手动批准后立即重新检查当前 stage——若 plan 阶段完成,可推进
+		const ws = fsm["workspace"] || ".sages/workspace";
+		const planMd = path.join(savedCtx.cwd, ws, "plan.md");
+		const execYaml = path.join(savedCtx.cwd, ws, "execution.yaml");
+		if (fs.existsSync(planMd) && fs.existsSync(execYaml)) {
+			fsm.advance(
+				{ toolName: "write", path: planMd, content: fs.readFileSync(planMd, "utf-8") },
+				pi,
+			);
+		}
 	});
 }
