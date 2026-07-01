@@ -521,9 +521,8 @@ describe("FSM [C6]: prompt 缺失报错", () => {
 	});
 
 	it("prompt 文件不存在时不进入下一阶段,只通知", async () => {
-		// [修复] copyWorkflowsTo 复制了 prompts,现在不会缺失
-		// 改为:删掉 review 的 prompt 文件,模拟缺失
-		const reviewPrompt = path.join(tmpDir, "prompts", "four-sages", "review.md");
+		// [修复] prompts 已扁平化,改为删 four-sages-review.md
+		const reviewPrompt = path.join(tmpDir, "prompts", "four-sages-review.md");
 		fs.unlinkSync(reviewPrompt);
 
 		const ws = path.join(tmpDir, ".sages", "workspace");

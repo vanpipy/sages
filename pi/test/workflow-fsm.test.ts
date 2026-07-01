@@ -120,18 +120,19 @@ describe("Workflow Config", () => {
 });
 
 describe("Stage Prompts", () => {
-	const promptDir = path.join(PI_ROOT, "prompts", "four-sages");
+	// [修复] prompts 已扁平化,prefix 为 four-sages- / bugfix-
+	const promptDir = PI_ROOT; // 扁平化后 prompts 在 PI_ROOT/prompts/
 	const expectedPrompts = [
-		"design.md",
-		"review.md",
-		"plan-approval.md",
-		"execute.md",
-		"audit.md",
+		"four-sages-design.md",
+		"four-sages-review.md",
+		"four-sages-plan-approval.md",
+		"four-sages-execute.md",
+		"four-sages-audit.md",
 	];
 
 	for (const prompt of expectedPrompts) {
-		it(`prompts/four-sages/${prompt} 存在`, () => {
-			const p = path.join(promptDir, prompt);
+		it(`prompts/${prompt} 存在`, () => {
+			const p = path.join(promptDir, "prompts", prompt);
 			expect(fs.existsSync(p)).toBe(true);
 			const content = fs.readFileSync(p, "utf-8");
 			expect(content.length).toBeGreaterThan(100);  // 至少不是空文件
