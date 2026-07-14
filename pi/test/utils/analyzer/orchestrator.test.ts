@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { ProjectAnalyzer } from '../../../src/utils/analyzer/orchestrator';
 import { GoDetector } from '../../../src/utils/analyzer/go-detector';
 import { TypeScriptDetector } from '../../../src/utils/analyzer/typescript-detector';
 
-// Local fixtures replace previous hardcoded paths to /home/leroy/Project/agentic-with-pi
-// (see test/fixtures/* for the synthetic project directories).
-const GO_FIXTURE = 'test/fixtures/go-with-cobra';
+// Resolve fixture paths relative to test file location
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const FIXTURES = path.resolve(__dirname, '../../fixtures');
+const GO_FIXTURE = path.join(FIXTURES, 'go-with-cobra');
 
 describe('ProjectAnalyzer', () => {
   let analyzer: ProjectAnalyzer;

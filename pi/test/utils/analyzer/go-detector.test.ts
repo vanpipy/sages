@@ -1,12 +1,18 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Fixed: 3 levels up from test/utils/analyzer/ to reach project root
 import { GoDetector } from '../../../src/utils/analyzer/go-detector';
 import type { LanguageInfo } from '../../../src/utils/analyzer/base';
 
-// Local fixtures replace previous hardcoded paths to /home/leroy/Project/agentic-with-pi.
-const GO_FIXTURE = 'test/fixtures/go-with-cobra';        // cobra + bubbletea + lipgloss + bubbles
-const VIPER_FIXTURE = 'test/fixtures/go-with-viper';     // viper only
+// Resolve fixture paths relative to test file location (not CWD), so tests
+// pass regardless of where `bun test` is invoked from.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const FIXTURES = path.resolve(__dirname, '../../fixtures');
+const GO_FIXTURE = path.join(FIXTURES, 'go-with-cobra');        // cobra + bubbletea + lipgloss + bubbles
+const VIPER_FIXTURE = path.join(FIXTURES, 'go-with-viper');     // viper only
 
 describe('GoDetector', () => {
   let detector: GoDetector;

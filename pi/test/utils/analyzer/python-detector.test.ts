@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { PythonDetector } from '../../../src/utils/analyzer/python-detector';
 
-// Local fixture replaces previous hardcoded path to /home/leroy/Project/agentic-with-pi.
-const PYTHON_FIXTURE = 'test/fixtures/python-with-requirements';
+// Resolve fixture path relative to test file location
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const FIXTURES = path.resolve(__dirname, '../../fixtures');
+const PYTHON_FIXTURE = path.join(FIXTURES, 'python-with-requirements');
 
 describe('PythonDetector', () => {
   let detector: PythonDetector;
