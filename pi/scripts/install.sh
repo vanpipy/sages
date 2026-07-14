@@ -29,6 +29,9 @@ PI_MEMORY_PKG="npm:@samfp/pi-memory"
 # pi-codebase-memory package info
 PI_CODEBASE_MEMORY_PKG="npm:pi-codebase-memory"
 
+# pi-mcp-adapter package info (provides the `mcp` proxy tool — required for serena/lsp MCP integration)
+PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
+
 # pi-serena package info (local extension shipped with sages)
 # pi-serena is a local package, NOT installed via `pi install`. We register it directly
 # in settings.json with the absolute path — same pattern as sages and yunxiao.
@@ -264,6 +267,102 @@ except Exception as e:
   fi
 
   echo "  pi-codebase-memory uninstalled"
+}
+
+# ────────────────────────────────────────────────────────────
+# pi-mcp-adapter: provides the `mcp` proxy tool + direct tool registration
+# ────────────────────────────────────────────────────────────
+
+is_pi_mcp_adapter_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    packages = d.get('packages', [])
+    if '$PI_MCP_ADAPTER_PKG' in packages or 'pi-mcp-adapter' in packages:
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_mcp_adapter() {
+  echo "==> Installing pi-mcp-adapter..."
+
+  # Check if already installed
+  if is_pi_mcp_adapter_installed; then
+    echo "  pi-mcp-adapter already installed"
+    return 0
+  fi
+
+  # Try using pi install command first
+  if command -v pi &>/dev/null; then
+    echo "  Installing via 'pi install $PI_MCP_ADAPTER_PKG'..."
+    if pi install "$PI_MCP_ADAPTER_PKG"; then
+      echo "  Installed pi-mcp-adapter"
+      return 0
+    fi
+    echo "  pi install failed, trying manual..."
+  fi
+
+  # Fallback: manually add to settings.json
+  echo "  Adding to settings.json..."
+  local settings="$PI_DIR/agent/settings.json"
+  mkdir -p "$(dirname "$settings")"
+
+  if [[ ! -f "$settings" ]]; then
+    echo '{"packages": []}' > "$settings"
+  fi
+
+  python3 -c "
+import json, sys
+f, pkg = '$settings', '$PI_MCP_ADAPTER_PKG'
+try:
+    d = json.load(open(f))
+except (json.JSONDecodeError, FileNotFoundError):
+    d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Added', pkg)
+"
+
+  echo "  Installed pi-mcp-adapter (note: npm package may not be physically installed; run 'pi install npm:pi-mcp-adapter' to fetch)"
+}
+
+uninstall_pi_mcp_adapter() {
+  echo "==> Uninstalling pi-mcp-adapter..."
+
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && { echo "  No settings file"; return 0; }
+
+  python3 -c "
+import json, sys
+f, pkg = '$settings', '$PI_MCP_ADAPTER_PKG'
+try:
+    d = json.load(open(f))
+    pkgs = d.get('packages', [])
+    new_pkgs = [x for x in pkgs if x != pkg and x != 'pi-mcp-adapter']
+    if len(new_pkgs) < len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open(f, 'w'), indent=2)
+        print('Removed', pkg)
+    else:
+        print('Not found in settings')
+except Exception as e:
+    print('Warning:', e, file=sys.stderr)
+    sys.exit(1)
+"
+
+  # Note: npm package is in /home/leroy/.pi/agent/npm/node_modules, NOT PI_DIR/packages,
+  # so we don't rm -rf any dir under PI_DIR/packages. User can manually uninstall via
+  # `pi remove npm:pi-mcp-adapter` if desired.
+
+  echo "  pi-mcp-adapter uninstalled (npm pkg left in place, run 'pi remove' to fully remove)"
 }
 
 install_system_prompt() {
@@ -611,6 +710,9 @@ install() {
   # Install pi-codebase-memory
   install_pi_codebase_memory
 
+  # Install pi-mcp-adapter (provides mcp proxy tool, required for serena/lsp MCP)
+  install_pi_mcp_adapter
+
   # Install sages first (git clone populates TMP_DIR, needed by install_pi_serena)
   echo "==> Installing sages..."
   install_sages_files || exit 1
@@ -682,6 +784,9 @@ uninstall() {
 
   # Uninstall pi-codebase-memory
   uninstall_pi_codebase_memory
+
+  # Uninstall pi-mcp-adapter
+  uninstall_pi_mcp_adapter
 
   # Uninstall pi-serena
   uninstall_pi_serena
