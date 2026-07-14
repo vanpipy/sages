@@ -83,14 +83,15 @@ describe("pi-serena: package structure", () => {
 		expect(fs.existsSync(skillPath)).toBe(true);
 		const content = fs.readFileSync(skillPath, "utf-8");
 		expect(content.length).toBeGreaterThan(500);
-		// Should mention the 6 direct tools by name
+		// Should mention the 6 direct tools by their registered name
+		// (per pi-mcp-adapter toolPrefix: "short" + server "serena" → "serena_xxx")
 		for (const tool of [
-			"mcp_find_symbol",
-			"mcp_replace_symbol_body",
-			"mcp_insert_after_symbol",
-			"mcp_find_referencing_symbols",
-			"mcp_get_symbols_overview",
-			"mcp_read_file",
+			"serena_find_symbol",
+			"serena_replace_symbol_body",
+			"serena_insert_after_symbol",
+			"serena_find_referencing_symbols",
+			"serena_get_symbols_overview",
+			"serena_read_file",
 		]) {
 			expect(content).toContain(tool);
 		}

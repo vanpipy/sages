@@ -42,14 +42,16 @@ After install, you should see these tools in your pi tool list:
 
 | Tool | Purpose |
 |------|---------|
-| `mcp_find_symbol` | Find a symbol (function/class/variable) by name path |
-| `mcp_get_symbols_overview` | High-level map of a file/module's structure |
-| `mcp_find_referencing_symbols` | Find all references to a symbol (use before refactoring) |
-| `mcp_read_file` | Read a file or a range of lines |
-| `mcp_replace_symbol_body` | Precisely replace a function body (no string surgery) |
-| `mcp_insert_after_symbol` | Insert code after a given symbol (no manual line counting) |
+| `serena_find_symbol` | Find a symbol (function/class/variable) by name path pattern |
+| `serena_get_symbols_overview` | High-level map of a file/module's structure |
+| `serena_find_referencing_symbols` | Find all references to a symbol (use before refactoring) |
+| `serena_read_file` | Read a file or a range of lines |
+| `serena_replace_symbol_body` | Precisely replace a function body (no string surgery) |
+| `serena_insert_after_symbol` | Insert code after a given symbol (no manual line counting) |
 
 These are promoted to first-class so the LLM sees them in the system prompt without needing to call `mcp({search: ...})` first. Cost: ~150-300 tokens each.
+
+> ⚠️ **Registration timing**: these direct tools are registered only **once at pi session startup** (`mcpAdapter()` loops over `directSpecs` and calls `pi.registerTool()` for each). Modifying `~/.pi/agent/mcp.json` or `mcp-cache.json` after the session is running does **not** add new tools. Workaround: restart the pi session, or run `/mcp` in an interactive session and click **Reload** to trigger `ctx.reload()`. The `mcp` proxy tool works on-demand and always reflects the latest config.
 
 ### Proxy tool (1, for the long tail)
 
@@ -57,10 +59,11 @@ These are promoted to first-class so the LLM sees them in the system prompt with
 |------|---------|
 | `mcp` | Universal gateway to all 27 serena tools + any other MCP servers |
 
-Use this for the other 21 serena tools not in the whitelist (`mcp_rename_symbol`, `mcp_safe_delete_symbol`, `mcp_search_for_pattern`, etc.):
+Use this for the other 20 serena tools not in the whitelist (`serena_rename_symbol`, `serena_safe_delete_symbol`, `serena_search_for_pattern`, etc.):
 
 ```js
-mcp({ tool: "serena_rename_symbol", args: '{"name_path":"Foo","new_name":"Bar"}' })
+// note: `relative_path` is REQUIRED by `rename_symbol` (and most mutating tools)
+mcp({ tool: "serena_rename_symbol", args: '{"name_path":"Foo","relative_path":"src/x.ts","new_name":"Bar"}' })
 mcp({ search: "rename" })              // fuzzy search tool name
 mcp({ describe: "serena_rename_symbol" }) // see parameter schema
 mcp({ connect: "serena" })             // pre-warm (lazy by default)
@@ -80,10 +83,10 @@ mcp({})                                // see all server status
 
 | Sage stage | Recommended serena usage |
 |------------|-------------------------|
-| **Fuxi (design)** | `mcp_get_symbols_overview` + `mcp_find_symbol` to map module boundaries before designing |
-| **QiaoChui (decompose)** | `mcp_find_referencing_symbols` to identify impact surface of a change |
-| **LuBan (execute)** | `mcp_replace_symbol_body` / `mcp_insert_after_symbol` for precise edits (not string surgery) |
-| **GaoYao (audit)** | `mcp_find_referencing_symbols` to verify a commit actually changed the intended references |
+| **Fuxi (design)** | `serena_get_symbols_overview` + `serena_find_symbol` to map module boundaries before designing |
+| **QiaoChui (decompose)** | `serena_find_referencing_symbols` to identify impact surface of a change |
+| **LuBan (execute)** | `serena_replace_symbol_body` / `serena_insert_after_symbol` for precise edits (not string surgery) |
+| **GaoYao (audit)** | `serena_find_referencing_symbols` to verify a commit actually changed the intended references |
 
 > 💡 For LLM: read `skills/serena/SKILL.md` (auto-injected into system prompt) for the full decision tree.
 
@@ -123,6 +126,26 @@ pi-serena/
 | Serena opens Chrome browser | Silent mode not enforced | Re-run `pi install file:./pi-serena`; check `--enable-web-dashboard false` in `~/.pi/agent/mcp.json` |
 | `[pi-serena] sage workspace detected. serena MCP NOT configured` on session start | mcp.json missing | Run `./pi/scripts/install.sh` |
 
+### Diagnostic snippet (developer-only)
+
+Confirm pi-mcp-adapter configuration and cache validity:
+
+```bash
+# 1. Verify cache exists and is fresh
+node -e '
+  const fs = require("fs");
+  const config = JSON.parse(fs.readFileSync(process.env.HOME + "/.pi/agent/mcp.json"));
+  const cache  = JSON.parse(fs.readFileSync(process.env.HOME + "/.pi/agent/mcp-cache.json"));
+  console.log("server in config:", !!config.mcpServers.serena);
+  console.log("server in cache: ", !!cache.servers.serena);
+  console.log("directTools count:", config.mcpServers.serena.directTools.length);
+  console.log("cachedAt days old:", Math.round((Date.now() - cache.servers.serena.cachedAt) / 86400000));
+'
+
+# 2. If cache looks valid but pi can't see `serena_xxx` tools in its tool list,
+#    the session was started BEFORE the cache was populated. Restart pi.
+```
+
 ## Testing
 
 ```bash
@@ -136,7 +159,7 @@ End-to-end smoke test:
 ```bash
 # After installing, in a sages workspace:
 pi --print --tools mcp "Call mcp({}) and report server status verbatim"
-# Should show: "serena (27 tools)"
+# Should show: "serena (26 tools)"  (27 total - 1 excluded `execute_shell_command`)
 ```
 
 ## License
