@@ -3,12 +3,13 @@
 # Four Sages Installation Script for pi
 # Installs to ~/.pi/packages/sages
 #
-# Also installs pi-memory for persistent memory capabilities
-# and pi-codebase-memory for codebase indexing/search.
+# Also installs pi-memory for persistent memory capabilities,
+# pi-codebase-memory for codebase indexing/search, and
+# pi-serena for LSP-based code semantic retrieval/editing via MCP.
 #
 # Selective install options:
-#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory and SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory)
+#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-serena and SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-serena)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -28,6 +29,12 @@ PI_MEMORY_PKG="npm:@samfp/pi-memory"
 # pi-codebase-memory package info
 PI_CODEBASE_MEMORY_PKG="npm:pi-codebase-memory"
 
+# pi-serena package info (local extension shipped with sages)
+PI_SERENA_SRC_REL="pi-serena"
+PI_SERENA_DEST_DIR="$PI_DIR/packages/pi-serena"
+PI_SERENA_PKG="file:$PI_SERENA_DEST_DIR"
+PI_SERENA_MCP_JSON="$AGENT_DIR/mcp.json"
+
 # Cleanup trap
 TMP_DIR=""
 cleanup() {
@@ -42,7 +49,7 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, SYSTEM.md)"
+  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-serena, SYSTEM.md)"
   echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory)"
   echo "  --help, -h         Show this help message"
   echo ""
@@ -76,7 +83,7 @@ try:
     if '$PI_MEMORY_PKG' in packages or '@samfp/pi-memory' in packages:
         sys.exit(0)
     sys.exit(1)
-except:
+except Exception:
     sys.exit(1)
 " 2>/dev/null
 }
@@ -173,7 +180,7 @@ try:
     if '$PI_CODEBASE_MEMORY_PKG' in packages or 'pi-codebase-memory' in packages:
         sys.exit(0)
     sys.exit(1)
-except:
+except Exception:
     sys.exit(1)
 " 2>/dev/null
 }
@@ -439,10 +446,161 @@ install_sages_files() {
 }
 
 # ────────────────────────────────────────────────────────────
+# pi-serena: 复制本地 pi-serena/ 到 $PI_DIR/packages/pi-serena/
+# ────────────────────────────────────────────────────────────
+install_serena_files() {
+  local src_root="$TMP_DIR/$PI_SERENA_SRC_REL"
+
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in clone, skipping pi-serena files"
+    return 0
+  }
+
+  if [[ -d "$PI_SERENA_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-serena files (exists at $PI_SERENA_DEST_DIR, use --force to overwrite)"
+  else
+    rm -rf "$PI_SERENA_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_SERENA_DEST_DIR"
+    echo "  Installed pi-serena files to $PI_SERENA_DEST_DIR"
+  fi
+
+  # Install pi-serena deps if package.json exists and bun is available
+  if [[ -f "$PI_SERENA_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    echo "  Installing pi-serena dependencies (bun install)..."
+    (cd "$PI_SERENA_DEST_DIR" && bun install --silent 2>&1 | tail -3) || {
+      echo "  Warning: pi-serena bun install failed, deps may be missing"
+    }
+  fi
+}
+
+write_serena_mcp_config() {
+  # Locate the template: prefer the installed copy, fall back to the freshly-cloned TMP_DIR
+  local template=""
+  if [[ -f "$PI_SERENA_DEST_DIR/templates/mcp.json" ]]; then
+    template="$PI_SERENA_DEST_DIR/templates/mcp.json"
+  elif [[ -f "$TMP_DIR/$PI_SERENA_SRC_REL/templates/mcp.json" ]]; then
+    template="$TMP_DIR/$PI_SERENA_SRC_REL/templates/mcp.json"
+  fi
+
+  if [[ -z "$template" ]]; then
+    echo "  Warning: mcp.json template not found, skipping"
+    return 0
+  fi
+
+  if [[ -f "$PI_SERENA_MCP_JSON" && "${FORCE:-false}" != true ]]; then
+    echo "  mcp.json exists at $PI_SERENA_MCP_JSON (use --force to overwrite)"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$PI_SERENA_MCP_JSON")"
+  cp "$template" "$PI_SERENA_MCP_JSON"
+  echo "  Wrote $PI_SERENA_MCP_JSON from template"
+}
+
+is_pi_serena_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    # Exact match: avoid substring collision with hypothetical 'pi-serena-extras' etc.
+    if any(p == 'pi-serena' or p == '$PI_SERENA_PKG' or p.endswith('/pi-serena') for p in pkgs):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_serena() {
+  echo "==> Installing pi-serena..."
+
+  # Idempotency: if already registered and not forcing, only ensure mcp.json exists
+  if is_pi_serena_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-serena already installed (use --force to reinstall)"
+    write_serena_mcp_config
+    return 0
+  fi
+
+  # Copy files from clone to permanent location (must succeed for registration to work)
+  if ! install_serena_files; then
+    echo "  Error: install_serena_files failed, aborting pi-serena install"
+    return 1
+  fi
+
+  # Register with pi (settings.json)
+  if is_pi_serena_installed; then
+    echo "  pi-serena already registered in settings.json"
+  else
+    if command -v pi &>/dev/null; then
+      echo "  Registering via 'pi install $PI_SERENA_PKG'..."
+      if pi install "$PI_SERENA_PKG"; then
+        echo "  Registered pi-serena"
+      else
+        echo "  pi install failed, falling back to manual settings.json edit"
+        local settings="$PI_DIR/agent/settings.json"
+        mkdir -p "$(dirname "$settings")"
+        [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+        python3 -c "
+import json
+f, pkg = '$settings', '$PI_SERENA_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+print('  Added', pkg)
+"
+      fi
+    else
+      echo "  Warning: pi command not found, skipping registration"
+    fi
+  fi
+
+  # Write the curated .mcp.json (only if absent)
+  write_serena_mcp_config
+
+  echo "  pi-serena installed"
+}
+
+uninstall_pi_serena() {
+  echo "==> Uninstalling pi-serena..."
+
+  local settings="$PI_DIR/agent/settings.json"
+
+  # Remove from settings.json (exact match to avoid substring collision)
+  [[ -f "$settings" ]] && python3 -c "
+import json
+f = '$settings'
+try:
+    d = json.load(open(f))
+    d['packages'] = [x for x in d.get('packages', []) if not (x == 'pi-serena' or x == '$PI_SERENA_PKG' or x.endswith('/pi-serena'))]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Removed pi-serena from settings.json')
+except Exception as e:
+    print('  Warning:', e)
+"
+
+  # Remove the installed directory
+  if [[ -d "$PI_SERENA_DEST_DIR" ]]; then
+    rm -rf "$PI_SERENA_DEST_DIR"
+    echo "  Removed $PI_SERENA_DEST_DIR"
+  fi
+
+  # Note: we deliberately KEEP ~/.pi/agent/mcp.json because users
+  # may have customized it with additional MCP servers.
+  echo "  pi-serena uninstalled (kept $PI_SERENA_MCP_JSON)"
+}
+
+# ────────────────────────────────────────────────────────────
 # 模式 1:全量安装(默认)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-memory + pi-codebase-memory..."
+  echo "==> Installing sages + pi-memory + pi-codebase-memory + pi-serena..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -459,9 +617,12 @@ install() {
   # Install pi-codebase-memory
   install_pi_codebase_memory
 
-  # Install sages
+  # Install sages first (git clone populates TMP_DIR, needed by install_pi_serena)
   echo "==> Installing sages..."
   install_sages_files || exit 1
+
+  # Install pi-serena (uses TMP_DIR/pi-serena from the clone above)
+  install_pi_serena || true
 
   # Install system prompt
   install_system_prompt
@@ -474,7 +635,7 @@ install() {
 # 模式 2:仅更新 sages(跳过 pi-memory、pi-codebase-memory 和 SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-memory, pi-codebase-memory, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-memory, pi-codebase-memory, pi-serena, skip SYSTEM.md)..."
 
   # Pre-flight: pi 仍然需要(sages 是 pi extension)
   install_pi_if_needed
@@ -487,8 +648,8 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_memory / install_pi_codebase_memory / install_system_prompt
-  echo "  (skipped: pi-memory, pi-codebase-memory, SYSTEM.md)"
+  # 显式不调用 install_pi_memory / install_pi_codebase_memory / install_pi_serena / install_system_prompt
+  echo "  (skipped: pi-memory, pi-codebase-memory, pi-serena, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -498,10 +659,10 @@ install_sages_only() {
 # 模式 3:仅更新 SYSTEM.md(跳过 sages、pi-memory 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-memory, pi-codebase-memory)..."
+  echo "==> Installing SYSTEM.md only (skip sages, pi-memory, pi-codebase-memory, pi-serena)..."
   # 不需要 git / pi —— SYSTEM.md 是独立 markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-memory, pi-codebase-memory)"
+  echo "  (skipped: sages, pi-memory, pi-codebase-memory, pi-serena)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -511,7 +672,7 @@ install_system_only() {
 # 卸载(同时移除 sages、pi-memory 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-memory + pi-codebase-memory..."
+  echo "==> Uninstalling sages + pi-memory + pi-codebase-memory + pi-serena..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -527,6 +688,9 @@ uninstall() {
 
   # Uninstall pi-codebase-memory
   uninstall_pi_codebase_memory
+
+  # Uninstall pi-serena
+  uninstall_pi_serena
 
   echo ""
   echo "Done. Restart pi: exit && pi"

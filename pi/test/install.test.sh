@@ -106,6 +106,175 @@ test ! -d "$PI_DIR/packages/pi-codebase-memory" \
   || { echo "❌ FAIL: uninstall did not remove package dir"; exit 1; }
 echo "✅ PASS: uninstall() removes package dir"
 
+# ────────────────────────────────────────────────────────────
+# pi-serena tests (新增于 2026-07-14)
+# 验证: pi-serena 跟 pi-codebase-memory 一样被安装/卸载, 且会写 mcp.json
+# ────────────────────────────────────────────────────────────
+
+# 测试 12: PI_SERENA 常量定义
+grep -q 'PI_SERENA_PKG="file:' "$SCRIPT" \
+  || { echo "❌ FAIL: PI_SERENA_PKG constant missing or wrong"; exit 1; }
+echo "✅ PASS: PI_SERENA_PKG constant defined"
+
+# 测试 13: pi-serena 三个函数均已定义
+for fn in is_pi_serena_installed install_pi_serena uninstall_pi_serena install_serena_files write_serena_mcp_config; do
+  grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
+    || { echo "❌ FAIL: function $fn not defined"; exit 1; }
+done
+echo "✅ PASS: 5 pi-serena functions defined"
+
+# 测试 14: install() 流程包含 install_pi_serena
+sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_pi_serena" \
+  || { echo "❌ FAIL: install() does not call install_pi_serena"; exit 1; }
+echo "✅ PASS: install() invokes install_pi_serena"
+
+# 测试 15: uninstall() 流程包含 uninstall_pi_serena
+sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_pi_serena" \
+  || { echo "❌ FAIL: uninstall() does not call uninstall_pi_serena"; exit 1; }
+echo "✅ PASS: uninstall() invokes uninstall_pi_serena"
+
+# 测试 16: 加载并执行 pi-serena 函数 (需要模拟 pi-serena/ 已存在于 TMP)
+# 准备一个模拟的 pi-serena/ 目录,复制真实的模板以验证内容
+PI_SERENA_MOCK="$TMPDIR/pi-serena"
+mkdir -p "$PI_SERENA_MOCK/templates"
+REAL_TEMPLATE="$(cd "$(dirname "$SCRIPT")/../.." && pwd)/pi-serena/templates/mcp.json"
+if [[ -f "$REAL_TEMPLATE" ]]; then
+  cp "$REAL_TEMPLATE" "$PI_SERENA_MOCK/templates/mcp.json"
+else
+  echo "❌ FAIL: real template not found at $REAL_TEMPLATE"
+  exit 1
+fi
+mkdir -p "$PI_SERENA_MOCK/src"
+echo "export default function(){}" > "$PI_SERENA_MOCK/src/index.ts"
+
+# 加载新增的函数 (用 awk 提取 + 写到文件 + source)
+# 避免 eval 的双重变量展开问题
+AGENT_DIR="$PI_DIR/agent"
+# 提取常量
+{
+  awk '/^PI_SERENA_SRC_REL=/,/^$/' "$SCRIPT"
+  awk '/^PI_SERENA_DEST_DIR=/,/^$/' "$SCRIPT"
+  awk '/^PI_SERENA_MCP_JSON=/,/^$/' "$SCRIPT"
+  awk '/^PI_SERENA_PKG=/,/^$/' "$SCRIPT"
+  for fn in is_pi_serena_installed install_pi_serena uninstall_pi_serena install_serena_files write_serena_mcp_config; do
+    extract_fn "$fn"
+  done
+} > "$TMPDIR/pi-serena-fns.sh"
+# shellcheck disable=SC1090
+source "$TMPDIR/pi-serena-fns.sh"
+
+# 手动 inject TMP_DIR 模拟 git clone 后的目录
+TMP_DIR="$TMPDIR"
+
+# 测试 17: 初始状态 — is_pi_serena_installed 返回 false
+is_pi_serena_installed \
+  && { echo "❌ FAIL: reported installed when settings.json has no pi-serena"; exit 1; }
+echo "✅ PASS: is_pi_serena_installed returns false on empty settings"
+
+# 测试 17b: is_pi_serena_installed 对 substring 名字(如 pi-serena-extras)不误判
+# 模拟用户装了 pi-serena-extras(虚构包),应仍返回 false
+python3 -c "
+import json
+f = '$PI_DIR/agent/settings.json'
+d = {'packages': ['npm:pi-serena-extras', 'pi-serena-fork']}
+json.dump(d, open(f, 'w'))
+"
+is_pi_serena_installed \
+  && { echo "❌ FAIL: substring name 'pi-serena-extras' misdetected as pi-serena"; exit 1; } \
+  || echo "✅ PASS: is_pi_serena_installed does not match substring names"
+
+# 测试 17c: is_pi_serena_installed 对 exact match 正确识别
+python3 -c "
+import json
+f = '$PI_DIR/agent/settings.json'
+d = {'packages': ['file:$PI_SERENA_DEST_DIR']}
+json.dump(d, open(f, 'w'))
+"
+is_pi_serena_installed \
+  && echo "✅ PASS: is_pi_serena_installed matches file: prefix exact path" \
+  || { echo "❌ FAIL: should match 'file:' prefixed path"; exit 1; }
+
+# 测试 17d: uninstall 不误伤 substring name
+python3 -c "
+import json
+f = '$PI_DIR/agent/settings.json'
+d = {'packages': ['file:$PI_SERENA_DEST_DIR', 'npm:pi-serena-extras', 'pi-serena-fork']}
+json.dump(d, open(f, 'w'))
+"
+uninstall_pi_serena
+REMAINING=$(python3 -c "import json; d=json.load(open('$PI_DIR/agent/settings.json')); print(','.join(d.get('packages',[])))")
+echo "  After uninstall, packages: $REMAINING"
+echo "$REMAINING" | grep -q "pi-serena-extras" \
+  && echo "✅ PASS: uninstall did not remove pi-serena-extras" \
+  || { echo "❌ FAIL: uninstall incorrectly removed substring names"; exit 1; }
+echo "$REMAINING" | grep -q "pi-serena-fork" \
+  && echo "✅ PASS: uninstall did not remove pi-serena-fork" \
+  || { echo "❌ FAIL: uninstall incorrectly removed substring names"; exit 1; }
+
+# 测试 18: install_serena_files 从 TMP_DIR/pi-serena 复制到 PI_DIR/packages/pi-serena
+install_serena_files || { echo "❌ FAIL: install_serena_files failed"; exit 1; }
+test -d "$PI_SERENA_DEST_DIR" \
+  || { echo "❌ FAIL: $PI_SERENA_DEST_DIR not created"; exit 1; }
+test -f "$PI_SERENA_DEST_DIR/templates/mcp.json" \
+  || { echo "❌ FAIL: templates/mcp.json not copied"; exit 1; }
+echo "✅ PASS: install_serena_files copies pi-serena/ to PI_DIR/packages/pi-serena/"
+
+# 测试 19: write_serena_mcp_config 写 mcp.json 到 PI_DIR/agent/mcp.json
+write_serena_mcp_config
+test -f "$PI_SERENA_MCP_JSON" \
+  || { echo "❌ FAIL: $PI_SERENA_MCP_JSON not written"; exit 1; }
+python3 -c "
+import json
+d = json.load(open('$PI_SERENA_MCP_JSON'))
+assert 'serena' in d.get('mcpServers', {}), 'serena server missing in mcp.json'
+serena = d['mcpServers']['serena']
+assert '--enable-web-dashboard' in serena.get('args', []), 'silent flag missing'
+assert 'execute_shell_command' in serena.get('excludeTools', []), 'exclude rule missing'
+" || { echo "❌ FAIL: mcp.json content invalid"; exit 1; }
+echo "✅ PASS: write_serena_mcp_config writes valid mcp.json with silent mode + exclude"
+
+# 测试 20: 幂等 — 二次 write_serena_mcp_config 不覆盖 (因为文件已存在)
+ORIG_CONTENT=$(cat "$PI_SERENA_MCP_JSON")
+echo "{\"modified_by_user\":true}" > "$PI_SERENA_MCP_JSON"  # user 改过了
+write_serena_mcp_config
+MODIFIED_CONTENT=$(cat "$PI_SERENA_MCP_JSON")
+[[ "$MODIFIED_CONTENT" == '{"modified_by_user":true}' ]] \
+  || { echo "❌ FAIL: write_serena_mcp_config overwrote user-customized mcp.json"; exit 1; }
+echo "$ORIG_CONTENT" > "$PI_SERENA_MCP_JSON"  # restore
+echo "✅ PASS: write_serena_mcp_config respects user-customized mcp.json (idempotent)"
+
+# 测试 21: uninstall_pi_serena 清理物理目录 (settings.json 还没注册 pi-serena 时)
+uninstall_pi_serena
+test ! -d "$PI_SERENA_DEST_DIR" \
+  || { echo "❌ FAIL: uninstall did not remove $PI_SERENA_DEST_DIR"; exit 1; }
+echo "✅ PASS: uninstall_pi_serena removes package dir"
+
+# 测试 22: install_pi_serena 幂等 — 已注册时不会重跑 install_serena_files
+# setup: 模拟 "已安装" 状态 (settings.json 已有 pi-serena, PI_SERENA_DEST_DIR 已有内容)
+mkdir -p "$PI_SERENA_DEST_DIR"
+# 在 PI_SERENA_DEST_DIR 写个 marker 文件, 验证 install 时不会被覆盖
+MARKER="$PI_SERENA_DEST_DIR/INSTALL_MARKER"
+echo "originally installed" > "$MARKER"
+sleep 1
+# 手动注册到 settings.json
+python3 -c "
+import json
+f = '$PI_DIR/agent/settings.json'
+d = {'packages': ['$PI_SERENA_PKG']}
+json.dump(d, open(f, 'w'))
+"
+
+# 调 install_pi_serena — 应走幂等分支, 不重跑 install_serena_files
+OUTPUT=$(install_pi_serena 2>&1)
+echo "$OUTPUT" | grep -q "already installed" \
+  && echo "✅ PASS: install_pi_serena is idempotent (prints 'already installed')" \
+  || { echo "❌ FAIL: install_pi_serena did not detect already-installed state. Output: $OUTPUT"; exit 1; }
+
+# 验证 marker 文件未被覆盖 (说明 install_serena_files 没被调用)
+[[ -f "$MARKER" ]] && grep -q "originally installed" "$MARKER" \
+  && echo "✅ PASS: install_serena_files NOT re-run on idempotent install (marker preserved)" \
+  || { echo "❌ FAIL: install_serena_files was re-run (marker overwritten)"; exit 1; }
+
 # 清理
 rm -rf "$TMPDIR" "$FAKE_PATH"
 
