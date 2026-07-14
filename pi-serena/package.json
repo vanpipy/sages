@@ -1,6 +1,6 @@
 {
   "name": "@sages/pi-serena",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Serena (LSP-based semantic code retrieval/editing) integration for pi, shipped as a peer extension of sages",
   "type": "module",
   "license": "MIT",
@@ -26,21 +26,24 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "files": [
     "src",
+    "skills",
     "templates",
     "README.md"
   ],
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.1"
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.70.5"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.70.5",
     "@types/node": "^20.10.0",
     "typescript": "^6.0.3"
   }
