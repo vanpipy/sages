@@ -253,6 +253,7 @@ spec:
 			}
 
 			const oldWorkflow = config.spec.activeWorkflow;
+			// activeWorkflow = trimmed (mutation below)
 			config.spec.activeWorkflow = trimmed;
 
 			const newYaml = yaml.dump(config, { lineWidth: 100 });

@@ -175,6 +175,25 @@ class SagesFSM {
 		return path.join(this.cwd, substituted);
 	}
 
+	// [m2-fix] Resolve prompt name to actual file path.
+	// YAML references like "four-sages-design" should look up `prompts/four-sages-design.md`
+	// (the conventional layout under PI_ROOT). Also tries `.md` suffix variants.
+	private resolvePromptPath(promptName: string): string {
+		if (!promptName) return "";
+		// 1. Already a path (contains / or .) — use as-is
+		if (promptName.includes("/") || promptName.endsWith(".md")) {
+			return this.resolvePath(promptName);
+		}
+		// 2. Conventional: ${cwd}/prompts/${name}.md (test setup copies prompts/ here)
+		const conventional = path.join(this.cwd, "prompts", `${promptName}.md`);
+		if (fs.existsSync(conventional)) return conventional;
+		// 3. Fallback: ${cwd}/${name}.md
+		const withExt = path.join(this.cwd, `${promptName}.md`);
+		if (fs.existsSync(withExt)) return withExt;
+		// 4. Last resort: just return conventional path so caller emits consistent error
+		return conventional;
+	}
+
 	// ─── 加载配置 ───
 	load(cwd: string): { loaded: boolean; reason?: string } {
 		this.cwd = cwd;
@@ -537,7 +556,7 @@ class SagesFSM {
 		// [C6] 验证 prompt 文件存在
 		let promptText: string | null = null;
 		if (target.prompt) {
-			const promptPath = this.resolvePath(target.prompt);
+			const promptPath = this.resolvePromptPath(target.prompt);
 			if (!fs.existsSync(promptPath)) {
 				const err = `prompt file not found: ${promptPath}`;
 				this.notify(err, "error");
@@ -636,7 +655,7 @@ class SagesFSM {
 
 		const currentStageDef = this.workflow.spec.stages.find((s) => s.id === stage);
 		if (currentStageDef?.prompt) {
-			const promptPath = this.resolvePath(currentStageDef.prompt);
+			const promptPath = this.resolvePromptPath(currentStageDef.prompt);
 			if (fs.existsSync(promptPath)) {
 				const promptText = fs.readFileSync(promptPath, "utf-8");
 				pi.sendUserMessage(

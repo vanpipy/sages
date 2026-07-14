@@ -1,0 +1,122 @@
+apiVersion: sages.io/workflow-v1alpha1
+kind: Workflow
+metadata:
+  name: four-sages
+  description: |
+    Four Sages workflow: design → review → plan → decompose → execute →
+    audit → archive → complete. The plan stage is a manual gate triggered
+    by the /sages-plan command; all other transitions are auto-triggered.
+  author: vanpipy
+  version: 1
+spec:
+  autoApprovePlans: true
+  defaults:
+    workspace: .sages/workspace
+    timeout: 30m
+  stages:
+    - id: design
+      sage: fuxi
+      prompt: four-sages-design
+      trigger:
+        type: state-absent
+        path: .sages/workspace/draft.md
+      completion:
+        type: file-exists
+        path: .sages/workspace/draft.md
+      onComplete:
+        transition: review
+
+    - id: review
+      sage: qiaochui
+      prompt: four-sages-review
+      trigger:
+        type: file-exists
+        path: .sages/workspace/draft.md
+      # [C1] review completion checks state.json score via ${workspace} interpolation
+      completion:
+        type: state-field
+        path: ${workspace}/state.json
+        field: score
+        op: ">="
+        value: 80
+      qualityGates:
+        - name: score-min
+          metric: review-score
+          enforcement: hard-mandatory
+      onComplete:
+        transition: plan
+
+    - id: plan
+      prompt: four-sages-plan-approval
+      trigger:
+        type: command
+        command: /sages-plan
+      completion:
+        type: files-exist
+        files:
+          - .sages/workspace/plan.md
+          - .sages/workspace/execution.yaml
+      onComplete:
+        transition: decompose
+
+    - id: decompose
+      sage: qiaochui
+      prompt: four-sages-decompose
+      trigger:
+        type: files-exist
+        files:
+          - .sages/workspace/plan.md
+          - .sages/workspace/execution.yaml
+      onComplete:
+        transition: execute
+
+    - id: execute
+      sage: luban
+      prompt: four-sages-execute
+      trigger:
+        type: file-exists
+        path: .sages/workspace/execution.yaml
+      completion:
+        type: file-exists
+        path: .sages/workspace/state.json
+      onComplete:
+        transition: audit
+
+    - id: audit
+      sage: gaoyao
+      prompt: four-sages-audit
+      trigger:
+        type: file-exists
+        path: .sages/workspace/audit.md
+      # [C2] file-content-match uses substring (not regex) to find verdict marker
+      completion:
+        type: file-content-match
+        path: .sages/workspace/audit.md
+        pattern: "**Verdict**"
+      # [C3] onVerdict branches from audit content
+      onVerdict:
+        PASS:
+          transition: archive
+        REJECTED:
+          transition: design
+        NEEDS_CHANGES:
+          transition: execute
+
+    - id: archive
+      sage: fuxi
+      trigger:
+        type: state-field
+        field: auditVerdict
+        value: PASS
+        op: "=="
+      completion:
+        type: state-field
+        path: .sages/workspace/state.json
+        field: archiveComplete
+        value: true
+        op: "=="
+      onComplete:
+        transition: complete
+
+    - id: complete
+      terminal: true
