@@ -30,9 +30,11 @@ PI_MEMORY_PKG="npm:@samfp/pi-memory"
 PI_CODEBASE_MEMORY_PKG="npm:pi-codebase-memory"
 
 # pi-serena package info (local extension shipped with sages)
+# pi-serena is a local package, NOT installed via `pi install`. We register it directly
+# in settings.json with the absolute path — same pattern as sages and yunxiao.
 PI_SERENA_SRC_REL="pi-serena"
 PI_SERENA_DEST_DIR="$PI_DIR/packages/pi-serena"
-PI_SERENA_PKG="file:$PI_SERENA_DEST_DIR"
+PI_SERENA_PKG="$PI_SERENA_DEST_DIR"
 PI_SERENA_MCP_JSON="$AGENT_DIR/mcp.json"
 
 # Cleanup trap
@@ -532,20 +534,16 @@ install_pi_serena() {
     return 1
   fi
 
-  # Register with pi (settings.json)
+  # Register directly in settings.json with absolute path
+  # (matches sages/yunxiao pattern — no `pi install` needed for local packages)
   if is_pi_serena_installed; then
     echo "  pi-serena already registered in settings.json"
   else
-    if command -v pi &>/dev/null; then
-      echo "  Registering via 'pi install $PI_SERENA_PKG'..."
-      if pi install "$PI_SERENA_PKG"; then
-        echo "  Registered pi-serena"
-      else
-        echo "  pi install failed, falling back to manual settings.json edit"
-        local settings="$PI_DIR/agent/settings.json"
-        mkdir -p "$(dirname "$settings")"
-        [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
-        python3 -c "
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+    echo "  Registering pi-serena in settings.json..."
+    python3 -c "
 import json
 f, pkg = '$settings', '$PI_SERENA_PKG'
 try: d = json.load(open(f))
@@ -553,12 +551,8 @@ except: d = {'packages': []}
 if pkg not in d.get('packages', []):
     d['packages'] = d.get('packages', []) + [pkg]
     json.dump(d, open(f, 'w'), indent=2)
-print('  Added', pkg)
+print('  Registered', pkg)
 "
-      fi
-    else
-      echo "  Warning: pi command not found, skipping registration"
-    fi
   fi
 
   # Write the curated .mcp.json (only if absent)

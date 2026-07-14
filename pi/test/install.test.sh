@@ -111,8 +111,8 @@ echo "✅ PASS: uninstall() removes package dir"
 # 验证: pi-serena 跟 pi-codebase-memory 一样被安装/卸载, 且会写 mcp.json
 # ────────────────────────────────────────────────────────────
 
-# 测试 12: PI_SERENA 常量定义
-grep -q 'PI_SERENA_PKG="file:' "$SCRIPT" \
+# 测试 12: PI_SERENA 常量定义 (用绝对路径,不需 file: 前缀)
+grep -q 'PI_SERENA_PKG="$PI_SERENA_DEST_DIR"' "$SCRIPT" \
   || { echo "❌ FAIL: PI_SERENA_PKG constant missing or wrong"; exit 1; }
 echo "✅ PASS: PI_SERENA_PKG constant defined"
 
@@ -187,18 +187,18 @@ is_pi_serena_installed \
 python3 -c "
 import json
 f = '$PI_DIR/agent/settings.json'
-d = {'packages': ['file:$PI_SERENA_DEST_DIR']}
+d = {'packages': ['$PI_SERENA_DEST_DIR']}
 json.dump(d, open(f, 'w'))
 "
 is_pi_serena_installed \
-  && echo "✅ PASS: is_pi_serena_installed matches file: prefix exact path" \
-  || { echo "❌ FAIL: should match 'file:' prefixed path"; exit 1; }
+  && echo "✅ PASS: is_pi_serena_installed matches absolute path" \
+  || { echo "❌ FAIL: should match absolute path"; exit 1; }
 
 # 测试 17d: uninstall 不误伤 substring name
 python3 -c "
 import json
 f = '$PI_DIR/agent/settings.json'
-d = {'packages': ['file:$PI_SERENA_DEST_DIR', 'npm:pi-serena-extras', 'pi-serena-fork']}
+d = {'packages': ['$PI_SERENA_DEST_DIR', 'npm:pi-serena-extras', 'pi-serena-fork']}
 json.dump(d, open(f, 'w'))
 "
 uninstall_pi_serena
