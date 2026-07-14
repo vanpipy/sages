@@ -43,7 +43,11 @@ export default function piSerena(pi: ExtensionAPI): void {
 		const cwd = ctx?.cwd || process.cwd();
 		if (!isInSagesWorkspace(cwd)) return;
 
-		const mcpJsonPath = path.join(cwd, ".pi", "agent", "mcp.json");
+		// mcp.json is written to ~/.pi/agent/mcp.json (global pi config),
+		// NOT to cwd/.pi/agent/. PI_DIR env var controls the home, with
+		// ~/.pi as the default.
+		const piHome = process.env.PI_DIR || path.join(require("node:os").homedir(), ".pi");
+		const mcpJsonPath = path.join(piHome, "agent", "mcp.json");
 		const mcpConfigured = fs.existsSync(mcpJsonPath);
 
 		ctx.ui?.notify?.(

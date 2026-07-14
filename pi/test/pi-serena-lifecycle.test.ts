@@ -134,39 +134,52 @@ describe("pi-serena: lifecycle hooks", () => {
 		// Create a temp dir with .sages/workspace/ structure
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-serena-test-"));
 		fs.mkdirSync(path.join(tmpDir, ".sages", "workspace"), { recursive: true });
-		// Simulate mcp.json being present
-		fs.mkdirSync(path.join(tmpDir, ".pi", "agent"), { recursive: true });
+		// mcp.json lives at PI_DIR/agent/mcp.json (global), NOT cwd/.pi/agent/
+		// Simulate by writing to $PI_DIR override
+		const fakePiHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-home-"));
+		process.env.PI_DIR = fakePiHome;
+		fs.mkdirSync(path.join(fakePiHome, "agent"), { recursive: true });
 		fs.writeFileSync(
-			path.join(tmpDir, ".pi", "agent", "mcp.json"),
+			path.join(fakePiHome, "agent", "mcp.json"),
 			JSON.stringify({ mcpServers: { serena: {} } }),
 		);
 
-		piSerenaModule.default(mockPi as any);
-		await mockPi.trigger("session_start", {}, { cwd: tmpDir, ui: mockPi.ui });
+		try {
+			piSerenaModule.default(mockPi as any);
+			await mockPi.trigger("session_start", {}, { cwd: tmpDir, ui: mockPi.ui });
 
-		const notif = mockPi.notifications.find((n) => n.text.includes("pi-serena"));
-		expect(notif).toBeDefined();
-		expect(notif?.type).toBe("info");
-		expect(notif?.text).toContain("configured");
-		expect(notif?.text).toContain("mcp({ search:");
-
-		fs.rmSync(tmpDir, { recursive: true });
+			const notif = mockPi.notifications.find((n) => n.text.includes("pi-serena"));
+			expect(notif).toBeDefined();
+			expect(notif?.type).toBe("info");
+			expect(notif?.text).toContain("configured");
+			expect(notif?.text).toContain("mcp({ search:");
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true });
+			fs.rmSync(fakePiHome, { recursive: true });
+			delete process.env.PI_DIR;
+		}
 	});
 
 	it("session_start in sage workspace WITHOUT mcp.json emits 'NOT configured' warning", async () => {
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-serena-test-"));
 		fs.mkdirSync(path.join(tmpDir, ".sages", "workspace"), { recursive: true });
-		// No .pi/agent/mcp.json
+		// PI_DIR points to a dir without agent/mcp.json
+		const fakePiHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-home-empty-"));
+		process.env.PI_DIR = fakePiHome;
 
-		piSerenaModule.default(mockPi as any);
-		await mockPi.trigger("session_start", {}, { cwd: tmpDir, ui: mockPi.ui });
+		try {
+			piSerenaModule.default(mockPi as any);
+			await mockPi.trigger("session_start", {}, { cwd: tmpDir, ui: mockPi.ui });
 
-		const notif = mockPi.notifications.find((n) => n.text.includes("pi-serena"));
-		expect(notif).toBeDefined();
-		expect(notif?.type).toBe("warning");
-		expect(notif?.text).toContain("NOT configured");
-
-		fs.rmSync(tmpDir, { recursive: true });
+			const notif = mockPi.notifications.find((n) => n.text.includes("pi-serena"));
+			expect(notif).toBeDefined();
+			expect(notif?.type).toBe("warning");
+			expect(notif?.text).toContain("NOT configured");
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true });
+			fs.rmSync(fakePiHome, { recursive: true });
+			delete process.env.PI_DIR;
+		}
 	});
 
 	it("session_start in non-sage workspace is silent (no notification)", async () => {
