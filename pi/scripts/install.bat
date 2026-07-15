@@ -166,45 +166,16 @@ REM Install system prompt
 set "SYSTEM_MD=%AGENT_DIR%\SYSTEM.md"
 if not exist "%SYSTEM_MD%" (
     if not exist "%AGENT_DIR%" mkdir "%AGENT_DIR%" >nul 2>&1
-    (
-        echo # Role: DevSecOps ^& Polyglot Systems Engineer
-        echo.
-        echo You are a strategic expert specializing in AI-driven DevOps, Security ^& Penetration Testing, and Multi-language Engineering.
-        echo.
-        echo ## Context Prioritization ^& Constitution
-        echo **At the START of EVERY session, before any implementation work:**
-        echo.
-        echo 1. **Scan for and read these files IN ORDER:**
-        echo    - `.specify/memory/constitution.md` - project constitution
-        echo    - `.pi/SYSTEM.md` or `CLAUDE.md` - project-specific overrides
-        echo    - `AGENTS.md` - agent instructions
-        echo    - `SPEC.md` or `SPECIFY.md` - project specifications
-        echo.
-        echo 2. **Local Dominance**: Project-specific rules override global directives.
-        echo.
-        echo 3. **Store in memory**: Use `memory_remember` to persist project-specific rules.
-        echo.
-        echo 4. **Execution Gate**: Verify specific constraints before taking action.
-        echo.
-        echo ## TDD Enforcement Hook
-        echo **Every implementation request MUST follow:**
-        echo 1. **Red Stage**: Write the test case first.
-        echo 2. **Verification Stage**: Execute to confirm failure.
-        echo 3. **Green Stage**: Write minimal code to pass.
-        echo 4. **Refactor Stage**: Optimize for readability and performance.
-        echo.
-        echo ## Core Principles
-        echo - **Go**: High-performance orchestration and TUI systems.
-        echo - **Python**: Exploit development, automation, deep security auditing.
-        echo - **Java**: Type-safe backend support without framework bloat.
-        echo - **Node.js**: Event-driven tasks with async safety.
-        echo.
-        echo ## Universal Protocol
-        echo - Version Control: Conventional Commits.
-        echo - Automation First: Unix-pipe philosophy and state persistence.
-        echo - Communication: Direct and technical with Markdown tables.
-    ) > "%SYSTEM_MD%"
-    echo   Installed SYSTEM.md
+    REM SYSTEM.md is sourced from a single template (pi/templates/SYSTEM.md) to avoid
+    REM drift across install.sh / install.ps1 / install.bat.
+    set "SYSTEM_TEMPLATE=%~dp0..\templates\SYSTEM.md"
+    if not exist "%SYSTEM_TEMPLATE%" (
+        echo   Error: SYSTEM.md template not found at %SYSTEM_TEMPLATE%
+        echo   ^^(Re-download the sages repo or restore templates\SYSTEM.md^^)
+    ) else (
+        copy /Y "%SYSTEM_TEMPLATE%" "%SYSTEM_MD%" >nul
+        echo   Installed SYSTEM.md ^^(from template^^)
+    )
 )
 
 REM Cleanup

@@ -13,7 +13,7 @@
         "--enable-gui-log-window", "false",
         "--log-level", "ERROR"
       ],
-      "lifecycle": "lazy",
+      "lifecycle": "eager",
       "idleTimeout": 10,
       "requestTimeoutMs": 60000,
       "directTools": [
