@@ -32,6 +32,17 @@ PI_CODEBASE_MEMORY_PKG="npm:pi-codebase-memory"
 # pi-mcp-adapter package info (provides the `mcp` proxy tool — required for serena/lsp MCP integration)
 PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
 
+# pi-codebase-memory package info (sage peer for codebase-memory-mcp binary)
+PI_CODEBASE_MEMORY_PKG_NAME="@sages/pi-codebase-memory"
+PI_CODEBASE_MEMORY_SRC_REL="pi-codebase-memory"
+PI_CODEBASE_MEMORY_DEST_DIR="$PI_DIR/packages/pi-codebase-memory"
+PI_CODEBASE_MEMORY_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"
+
+# codebase-memory-mcp binary install info
+CBM_REPO="DeusData/codebase-memory-mcp"
+CBM_INSTALL_DIR="$HOME/.local/bin"
+CBM_BINARY_PATH="$CBM_INSTALL_DIR/codebase-memory-mcp"
+
 # pi-serena package info (local extension shipped with sages)
 # pi-serena is a local package, NOT installed via `pi install`. We register it directly
 # in settings.json with the absolute path — same pattern as sages and yunxiao.
@@ -884,8 +895,11 @@ uninstall() {
   # Uninstall pi-memory
   uninstall_pi_memory
 
-  # Uninstall pi-codebase-memory
+  # Uninstall pi-codebase-memory (sage peer)
   uninstall_pi_codebase_memory
+
+  # Uninstall codebase-memory-mcp binary
+  uninstall_codebase_memory_mcp_binary
 
   # Uninstall pi-mcp-adapter
   uninstall_pi_mcp_adapter

@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "codebase-memory-mcp": {
+      "command": "codebase-memory-mcp",
+      "args": [],
+      "lifecycle": "lazy",
+      "idleTimeout": 15,
+      "requestTimeoutMs": 120000,
+      "directTools": [
+        "list_projects",
+        "index_status",
+        "index_repository",
+        "delete_project",
+        "search_graph",
+        "search_code",
+        "trace_path",
+        "detect_changes",
+        "query_graph",
+        "get_graph_schema",
+        "get_code_snippet",
+        "get_architecture",
+        "manage_adr",
+        "ingest_traces"
+      ],
+      "excludeTools": []
+    }
+  },
+  "settings": {
+    "toolPrefix": "short",
+    "outputGuard": {
+      "maxBytes": 102400,
+      "maxLines": 3000
+    }
+  }
+}
