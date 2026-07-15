@@ -1,0 +1,51 @@
+{
+  "name": "@sages/pi-codebase-memory",
+  "version": "0.1.0",
+  "description": "codebase-memory-mcp integration for pi — full graph-based codebase intelligence (15 MCP tools, tree-sitter AST, 158 languages)",
+  "type": "module",
+  "license": "MIT",
+  "author": "vanpipy@gmail.com",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vanpipy/sages.git",
+    "directory": "pi-codebase-memory"
+  },
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "codebase-memory",
+    "codebase-memory-mcp",
+    "mcp",
+    "tree-sitter",
+    "knowledge-graph",
+    "code-intelligence",
+    "sages"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "files": [
+    "src",
+    "skills",
+    "templates",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.70.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^6.0.3"
+  }
+}

@@ -18,7 +18,7 @@ bash -n "$SCRIPT" || { echo "❌ FAIL: bash syntax error"; exit 1; }
 echo "✅ PASS: bash syntax OK"
 
 # 测试 3: 新常量存在且值正确
-grep -q 'PI_CODEBASE_MEMORY_PKG="npm:pi-codebase-memory"' "$SCRIPT" \
+grep -q 'PI_CODEBASE_MEMORY_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"' "$SCRIPT" \
   || { echo "❌ FAIL: PI_CODEBASE_MEMORY_PKG constant missing or wrong"; exit 1; }
 echo "✅ PASS: PI_CODEBASE_MEMORY_PKG constant defined"
 
@@ -68,26 +68,31 @@ mkdir -p "$PI_DIR/agent"
 echo '{"packages": []}' > "$PI_DIR/agent/settings.json"
 
 # 加载所需函数(extract_fn 是定义在脚本里的工具函数,不需要)
-eval "$(awk '/^PI_CODEBASE_MEMORY_PKG=/,/^$/' "$SCRIPT")"
-eval "$(extract_fn is_pi_codebase_memory_installed)"
-eval "$(extract_fn install_pi_codebase_memory)"
-eval "$(extract_fn uninstall_pi_codebase_memory)"
+# 提取所有 pi-codebase-memory 常量 + 函数 (需要 PI_CODEBASE_MEMORY_DEST_DIR 等)
+{
+  awk '/^PI_CODEBASE_MEMORY_.*=/,/^$/' "$SCRIPT"
+  for fn in is_pi_codebase_memory_installed install_pi_codebase_memory uninstall_pi_codebase_memory; do
+    extract_fn "$fn"
+  done
+} > "$TMPDIR/pi-codebase-memory-fns.sh"
+# shellcheck disable=SC1090
+source "$TMPDIR/pi-codebase-memory-fns.sh"
 
 # 测试 8: 初始状态 — 未安装
 is_pi_codebase_memory_installed \
   && { echo "❌ FAIL: reported installed when settings.json has no package"; exit 1; }
 echo "✅ PASS: is_pi_codebase_memory_installed returns false on empty settings"
 
-# 测试 9: install 函数将包追加到 settings.json
+# 测试 9: install 函数将包追加到 settings.json (绝对路径)
 install_pi_codebase_memory || true   # pi CLI 可能不存在,fallback 仍会写 settings.json
 
-grep -q "npm:pi-codebase-memory" "$PI_DIR/agent/settings.json" \
-  || { echo "❌ FAIL: install did not register npm:pi-codebase-memory"; cat "$PI_DIR/agent/settings.json"; exit 1; }
-echo "✅ PASS: install() registers npm:pi-codebase-memory"
+grep -q "packages/pi-codebase-memory" "$PI_DIR/agent/settings.json" \
+  || { echo "❌ FAIL: install did not register pi-codebase-memory"; cat "$PI_DIR/agent/settings.json"; exit 1; }
+echo "✅ PASS: install() registers pi-codebase-memory (absolute path)"
 
 # 测试 10: 幂等 — 二次 install 不重复添加
 install_pi_codebase_memory || true
-count=$(grep -c "npm:pi-codebase-memory" "$PI_DIR/agent/settings.json" || true)
+count=$(grep -c "packages/pi-codebase-memory" "$PI_DIR/agent/settings.json" || true)
 [[ "$count" -eq 1 ]] \
   || { echo "❌ FAIL: idempotent broken — count=$count"; exit 1; }
 echo "✅ PASS: install() is idempotent (count=$count)"
@@ -98,7 +103,7 @@ echo "stub" > "$PI_DIR/packages/pi-codebase-memory/package.json"
 
 uninstall_pi_codebase_memory
 
-grep -q "npm:pi-codebase-memory" "$PI_DIR/agent/settings.json" \
+grep -q "packages/pi-codebase-memory" "$PI_DIR/agent/settings.json" \
   && { echo "❌ FAIL: uninstall did not remove from settings.json"; exit 1; }
 echo "✅ PASS: uninstall() removes from settings.json"
 
