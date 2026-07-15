@@ -26,10 +26,14 @@
 	"pi": {
 		"extensions": [
 			"./src/index.ts"
+		],
+		"skills": [
+			"./skills"
 		]
 	},
 	"files": [
 		"src",
+		"skills",
 		"templates",
 		"README.md"
 	],
