@@ -837,11 +837,31 @@ install_sages_files() {
   fi
 
   register_settings
+
+  # Set up symlinks so peer packages (pi-serena, pi-graphify, pi-codebase-memory)
+  # resolve their @mariozechner/pi-coding-agent peer dep from pi/'s node_modules.
+  # Without this, `tsc` from pi/ fails with TS2307 when following test imports
+  # into peer source trees.
+  setup_peer_node_modules_symlinks "$TMP_DIR"
 }
 
-# ────────────────────────────────────────────────────────────
-# pi-serena: 复制本地 pi-serena/ 到 $PI_DIR/packages/pi-serena/
-# ────────────────────────────────────────────────────────────
+# Link each peer package's node_modules → ../pi/node_modules so that
+# bundler-resolution from peer source trees (which don't carry their own
+# node_modules) walks up to pi/'s installed deps. Idempotent.
+setup_peer_node_modules_symlinks() {
+  local repo_src_root="$1"
+  [[ -z "$repo_src_root" || ! -d "$repo_src_root" ]] && return 0
+  for peer in pi-serena pi-graphify pi-codebase-memory; do
+    local peer_dir="$repo_src_root/$peer"
+    [[ ! -d "$peer_dir" ]] && continue
+    if [[ -L "$peer_dir/node_modules" || -e "$peer_dir/node_modules" ]]; then
+      echo "  $peer/node_modules already exists, skipping symlink"
+    else
+      ln -s ../pi/node_modules "$peer_dir/node_modules"
+      echo "  Linked $peer/node_modules → ../pi/node_modules"
+    fi
+  done
+}
 install_serena_files() {
   local src_root="$TMP_DIR/$PI_SERENA_SRC_REL"
 
