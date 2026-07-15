@@ -1,50 +1,46 @@
 {
-  "name": "@sages/pi-graphify",
-  "version": "0.1.0",
-  "description": "Graphify integration for pi — knowledge graph queries via MCP (query, path, explain, god_nodes, etc.)",
-  "type": "module",
-  "license": "MIT",
-  "author": "vanpipy@gmail.com",
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/vanpipy/sages.git",
-    "directory": "pi-graphify"
-  },
-  "keywords": [
-    "pi",
-    "pi-extension",
-    "graphify",
-    "graphifyy",
-    "mcp",
-    "knowledge-graph",
-    "multi-modal",
-    "sages"
-  ],
-  "pi": {
-    "extensions": [
-      "./src/index.ts"
-    ],
-    "skills": [
-      "./skills"
-    ]
-  },
-  "files": [
-    "src",
-    "skills",
-    "templates",
-    "README.md"
-  ],
-  "engines": {
-    "node": ">=20"
-  },
-  "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.70.5"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.0",
-    "typescript": "^6.0.3"
-  }
+	"name": "@sages/pi-graphify",
+	"version": "0.2.0",
+	"description": "Graphify integration for pi — knowledge graph queries via MCP (query, path, explain, god_nodes, etc.)",
+	"type": "module",
+	"license": "MIT",
+	"author": "vanpipy@gmail.com",
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/vanpipy/sages.git",
+		"directory": "pi-graphify"
+	},
+	"keywords": [
+		"pi",
+		"pi-extension",
+		"graphify",
+		"graphifyy",
+		"mcp",
+		"knowledge-graph",
+		"multi-modal",
+		"sages"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"files": [
+		"src",
+		"templates",
+		"README.md"
+	],
+	"engines": {
+		"node": ">=20"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "^0.70.5"
+	},
+	"devDependencies": {
+		"@types/node": "^20.10.0",
+		"typescript": "^6.0.3"
+	}
 }

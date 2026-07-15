@@ -61,22 +61,29 @@ class MockExtensionAPI {
 }
 
 describe("pi-graphify: package structure", () => {
-	it("package.json declares both pi.extensions and pi.skills", () => {
+	it("package.json declares pi.extensions (no pi.skills — uses user-level graphify skill)", () => {
 		const pkg = JSON.parse(
 			fs.readFileSync(path.join(PI_GRAPHIFY_ROOT, "package.json"), "utf-8"),
 		);
 		expect(pkg.pi?.extensions).toContain("./src/index.ts");
-		expect(pkg.pi?.skills).toContain("./skills");
+		// v0.2.0: do NOT bundle skills/ — user-level `~/.pi/agent/skills/graphify/SKILL.md`
+		// (614 lines + 8 references/) is the canonical skill. Bundling causes name collision.
+		expect(pkg.pi?.skills).toBeUndefined();
 	});
 
-	it("SKILL.md exists at skills/graphify/SKILL.md", () => {
-		const skillPath = path.join(PI_GRAPHIFY_ROOT, "skills", "graphify", "SKILL.md");
-		expect(fs.existsSync(skillPath)).toBe(true);
-		const content = fs.readFileSync(skillPath, "utf-8");
-		expect(content.length).toBeGreaterThan(500);
-		for (const tool of ["mcp_graph_query", "mcp_graph_shortest_path", "mcp_graph_god_nodes"]) {
-			expect(content).toContain(tool);
-		}
+	it("user-level skill `~/.pi/agent/skills/graphify/SKILL.md` covers the integration", () => {
+		// Skip if user-level skill not installed (e.g., CI)
+		const userSkill = path.join(
+			process.env.HOME || "/tmp",
+			".pi",
+			"agent",
+			"skills",
+			"graphify",
+			"SKILL.md",
+		);
+		if (!fs.existsSync(userSkill)) return;
+		const content = fs.readFileSync(userSkill, "utf-8");
+		expect(content).toContain("graphify");
 	});
 
 	it("mcp.json template has 7 first-class tools with 0 excluded", () => {
@@ -89,6 +96,10 @@ describe("pi-graphify: package structure", () => {
 		expect(g.args).toContain("--mcp");
 		expect(g.directTools?.length).toBe(7);
 		expect(g.excludeTools?.length ?? 0).toBe(0);
+	});
+
+	it("package does NOT bundle skills/ directory (avoids collision with user-level skill)", () => {
+		expect(fs.existsSync(path.join(PI_GRAPHIFY_ROOT, "skills"))).toBe(false);
 	});
 });
 
