@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "graphify",
+      "args": ["--mcp"],
+      "lifecycle": "lazy",
+      "idleTimeout": 10,
+      "requestTimeoutMs": 60000,
+      "directTools": [
+        "query",
+        "shortest_path",
+        "get_node",
+        "get_neighbors",
+        "get_community",
+        "god_nodes",
+        "graph_stats"
+      ],
+      "excludeTools": []
+    }
+  },
+  "settings": {
+    "toolPrefix": "short",
+    "outputGuard": {
+      "maxBytes": 51200,
+      "maxLines": 2000
+    }
+  }
+}

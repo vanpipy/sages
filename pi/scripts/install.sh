@@ -281,6 +281,277 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
+# Sage peer for codebase-memory-mcp (file copy + mcp.json merge + binary download)
+# ────────────────────────────────────────────────────────────
+
+install_pi_codebase_memory_files() {
+  local src_root="$TMP_DIR/$PI_CODEBASE_MEMORY_SRC_REL"
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in clone, skipping pi-codebase-memory files"
+    return 0
+  }
+  if [[ -d "$PI_CODEBASE_MEMORY_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-codebase-memory files (exists, use --force)"
+  else
+    rm -rf "$PI_CODEBASE_MEMORY_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_CODEBASE_MEMORY_DEST_DIR"
+    echo "  Installed pi-codebase-memory files to $PI_CODEBASE_MEMORY_DEST_DIR"
+  fi
+  if [[ -f "$PI_CODEBASE_MEMORY_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    (cd "$PI_CODEBASE_MEMORY_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
+  fi
+}
+
+write_codebase_memory_mcp_config() {
+  local template=""
+  if [[ -f "$PI_CODEBASE_MEMORY_DEST_DIR/templates/mcp.json" ]]; then
+    template="$PI_CODEBASE_MEMORY_DEST_DIR/templates/mcp.json"
+  elif [[ -f "$TMP_DIR/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json" ]]; then
+    template="$TMP_DIR/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json"
+  fi
+  [[ -z "$template" ]] && { echo "  Warning: codebase-memory-mcp mcp.json template not found"; return 0; }
+  if [[ -f "$PI_DIR/agent/mcp.json" && "${FORCE:-false}" != true ]]; then
+    python3 -c "
+import json
+f = '$PI_DIR/agent/mcp.json'
+tpl = '$template'
+try: d = json.load(open(f))
+except: d = {'mcpServers': {}, 'settings': {}}
+tpl_d = json.load(open(tpl))
+if 'codebase-memory-mcp' not in d.get('mcpServers', {}):
+    d.setdefault('mcpServers', {}).update(tpl_d.get('mcpServers', {}))
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Added codebase-memory-mcp to mcp.json')
+else:
+    print('  codebase-memory-mcp already in mcp.json')
+"
+  else
+    mkdir -p "$PI_DIR/agent"
+    cp "$template" "$PI_DIR/agent/mcp.json"
+    echo "  Wrote $PI_DIR/agent/mcp.json from template"
+  fi
+}
+
+# ────────────────────────────────────────────────────────────
+# codebase-memory-mcp binary: download from GitHub releases
+# ────────────────────────────────────────────────────────────
+
+install_codebase_memory_mcp_binary() {
+  echo "==> Installing codebase-memory-mcp binary..."
+
+  if [[ -x "$CBM_BINARY_PATH" ]]; then
+    echo "  codebase-memory-mcp already installed at $CBM_BINARY_PATH"
+    return 0
+  fi
+  if ! command -v curl &>/dev/null; then
+    echo "  Error: curl required"
+    return 1
+  fi
+
+  local os arch portable ext archive url
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  case "$os" in linux|darwin) ;; *) echo "  Error: unsupported OS $os"; return 1 ;; esac
+  arch=$(uname -m)
+  case "$arch" in
+    x86_64|amd64) arch="amd64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) echo "  Error: unsupported arch $arch"; return 1 ;;
+  esac
+  portable=""; [[ "$os" = "linux" ]] && portable="-portable"
+  ext="tar.gz"
+  archive="codebase-memory-mcp-${os}-${arch}${portable}.${ext}"
+  url="https://github.com/${CBM_REPO}/releases/latest/download/${archive}"
+
+  echo "  Downloading ${archive}..."
+  local tmpdir; tmpdir=$(mktemp -d)
+  if ! curl -fSL --progress-bar -o "$tmpdir/$archive" "$url"; then
+    echo "  Error: download failed"
+    rm -rf "$tmpdir"; return 1
+  fi
+
+  mkdir -p "$CBM_INSTALL_DIR"
+  tar -xzf "$tmpdir/$archive" -C "$tmpdir"
+  local binary
+  binary=$(find "$tmpdir" -type f -name "codebase-memory-mcp" -executable 2>/dev/null | head -1)
+  [[ -z "$binary" ]] && { echo "  Error: binary not in archive"; rm -rf "$tmpdir"; return 1; }
+  mv "$binary" "$CBM_BINARY_PATH"
+  chmod +x "$CBM_BINARY_PATH"
+  rm -rf "$tmpdir"
+  echo "  Installed codebase-memory-mcp at $CBM_BINARY_PATH"
+}
+
+uninstall_codebase_memory_mcp_binary() {
+  echo "==> Uninstalling codebase-memory-mcp binary..."
+  if [[ ! -f "$CBM_BINARY_PATH" ]]; then
+    echo "  Binary not found at $CBM_BINARY_PATH"
+    return 0
+  fi
+  rm -f "$CBM_BINARY_PATH"
+  echo "  Removed $CBM_BINARY_PATH"
+}
+
+# ────────────────────────────────────────────────────────────
+# Sage peer for graphify MCP integration (file copy + mcp.json merge + uv tool install)
+# ────────────────────────────────────────────────────────────
+
+is_pi_graphify_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    if any(p == '$PI_GRAPHIFY_PKG' or p.endswith('/pi-graphify') for p in pkgs):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_graphify_files() {
+  local src_root="$TMP_DIR/$PI_GRAPHIFY_SRC_REL"
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in clone, skipping pi-graphify files"
+    return 0
+  }
+  if [[ -d "$PI_GRAPHIFY_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-graphify files (exists, use --force)"
+  else
+    rm -rf "$PI_GRAPHIFY_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_GRAPHIFY_DEST_DIR"
+    echo "  Installed pi-graphify files to $PI_GRAPHIFY_DEST_DIR"
+  fi
+  if [[ -f "$PI_GRAPHIFY_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    (cd "$PI_GRAPHIFY_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
+  fi
+}
+
+write_graphify_mcp_config() {
+  local template=""
+  if [[ -f "$PI_GRAPHIFY_DEST_DIR/templates/mcp.json" ]]; then
+    template="$PI_GRAPHIFY_DEST_DIR/templates/mcp.json"
+  elif [[ -f "$TMP_DIR/$PI_GRAPHIFY_SRC_REL/templates/mcp.json" ]]; then
+    template="$TMP_DIR/$PI_GRAPHIFY_SRC_REL/templates/mcp.json"
+  fi
+  [[ -z "$template" ]] && { echo "  Warning: graphify mcp.json template not found"; return 0; }
+  if [[ -f "$PI_DIR/agent/mcp.json" && "${FORCE:-false}" != true ]]; then
+    python3 -c "
+import json
+f = '$PI_DIR/agent/mcp.json'
+tpl = '$template'
+try: d = json.load(open(f))
+except: d = {'mcpServers': {}, 'settings': {}}
+tpl_d = json.load(open(tpl))
+if 'graphify' not in d.get('mcpServers', {}):
+    d.setdefault('mcpServers', {}).update(tpl_d.get('mcpServers', {}))
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Added graphify to mcp.json')
+else:
+    print('  graphify already in mcp.json')
+"
+  else
+    mkdir -p "$PI_DIR/agent"
+    cp "$template" "$PI_DIR/agent/mcp.json"
+    echo "  Wrote $PI_DIR/agent/mcp.json from template"
+  fi
+}
+
+install_graphify_binary() {
+  echo "==> Installing graphify CLI (with [mcp] extra)..."
+
+  if [[ -x "$GRAPHIFY_BIN_PATH" ]] && "$GRAPHIFY_BIN_PATH" --help 2>/dev/null | grep -q -- "--mcp"; then
+    echo "  graphify already installed with [mcp] extra at $GRAPHIFY_BIN_PATH"
+    return 0
+  fi
+  if ! command -v uv &>/dev/null; then
+    echo "  Error: uv required (curl -LsSf https://astral.sh/uv/install.sh | sh)"
+    return 1
+  fi
+  echo "  Installing via 'uv tool install graphifyy[mcp]'..."
+  if uv tool install "graphifyy[mcp]" 2>&1 | tail -3; then
+    echo "  Installed graphify at $GRAPHIFY_BIN_PATH"
+  else
+    echo "  uv tool install failed"
+    return 1
+  fi
+  if ! "$GRAPHIFY_BIN_PATH" --help 2>/dev/null | grep -q -- "--mcp"; then
+    echo "  Warning: [mcp] extra may not be installed. Run: uv tool install --reinstall 'graphifyy[mcp]'"
+    return 1
+  fi
+}
+
+uninstall_graphify_binary() {
+  echo "==> Uninstalling graphify..."
+  if ! command -v uv &>/dev/null; then
+    echo "  uv not found, cannot uninstall graphify"
+    return 0
+  fi
+  if uv tool uninstall graphifyy 2>&1 | tail -2; then
+    echo "  Removed graphify"
+  else
+    echo "  uv tool uninstall failed (may not be installed)"
+  fi
+}
+
+install_pi_graphify() {
+  echo "==> Installing pi-graphify..."
+  if is_pi_graphify_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-graphify already installed (use --force to reinstall)"
+    write_graphify_mcp_config
+    return 0
+  fi
+  if ! install_pi_graphify_files; then
+    echo "  Error: install_pi_graphify_files failed, aborting"
+    return 1
+  fi
+  if is_pi_graphify_installed; then
+    echo "  pi-graphify already registered in settings.json"
+  else
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_GRAPHIFY_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+  fi
+  write_graphify_mcp_config
+  echo "  pi-graphify installed"
+}
+
+uninstall_pi_graphify() {
+  echo "==> Uninstalling pi-graphify..."
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json
+f = '$settings'
+try:
+    d = json.load(open(f))
+    d['packages'] = [x for x in d.get('packages', []) if not (x == '$PI_GRAPHIFY_PKG' or x.endswith('/pi-graphify'))]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Removed pi-graphify from settings.json')
+except Exception as e:
+    print('  Warning:', e)
+"
+  if [[ -d "$PI_GRAPHIFY_DEST_DIR" ]]; then
+    rm -rf "$PI_GRAPHIFY_DEST_DIR"
+    echo "  Removed $PI_GRAPHIFY_DEST_DIR"
+  fi
+  echo "  pi-graphify uninstalled (graphify mcp.json entry left in place)"
+}
+
+
+# ────────────────────────────────────────────────────────────
 # pi-mcp-adapter: provides the `mcp` proxy tool + direct tool registration
 # ────────────────────────────────────────────────────────────
 
@@ -837,6 +1108,24 @@ install() {
 
   # Install pi-serena (uses TMP_DIR/pi-serena from the clone above)
   install_pi_serena || true
+
+  # Install pi-codebase-memory (sage peer for codebase-memory-mcp — uses same TMP_DIR)
+  install_pi_codebase_memory || true
+
+  # Install codebase-memory-mcp binary (~50MB download from GitHub releases)
+  install_codebase_memory_mcp_binary || {
+    echo "  Note: codebase-memory-mcp binary install failed."
+    echo "  Sage workflow will work without it; MCP graph tools unavailable until manually installed."
+    echo "  To retry: bash <(curl -fsSL https://raw.githubusercontent.com/${CBM_REPO}/main/install.sh)"
+  }
+
+  # Install pi-graphify (sage peer for graphify MCP integration)
+  install_pi_graphify || true
+
+  # Install graphify CLI with [mcp] extra
+  install_graphify_binary || {
+    echo "  Note: graphify CLI install failed. To retry: uv tool install 'graphifyy[mcp]'"
+  }
 
   # Install system prompt
   install_system_prompt
