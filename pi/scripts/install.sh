@@ -472,10 +472,22 @@ Trivial single-line edits and quick file inspections: `read` + `edit` + `bash` a
 |----------------------|-----------|----------|
 | `mcp_find_symbol`, `mcp_replace_symbol_body`, etc. | serena MCP server (lazy: 3-5s cold-start) | `mcp({ connect: "serena" })` |
 | Any `mcp_*` you haven't used yet | corresponding MCP server | `mcp({})` then `mcp({ connect: <name> })` |
-| `codebase_search`, `codebase_refs` | codebase index (slow first build) | `codebase_index` |
+| `codebase_search`, `codebase_refs` (NEW repo: no `.pi-codebase.json`) | codebase index (first build is slow) | `codebase_index` (one-time per workspace) |
 | Stale `codebase_*` results | outdated index | `codebase_update` |
 | Deep LSP features on a file | file must be "open" in LSP | `mcp_read_file({ relative_path })` first |
 | Any `[Skills]` skill | skill's full guidance | already auto-injected; re-read if forgotten |
+
+### First-session codebase initialization
+
+When you first work in a workspace, BEFORE any `codebase_*` call:
+
+1. Detect: `test -f .pi-codebase.json` in cwd (or `codebase_schema` returns "no index")
+2. If absent: run `codebase_index` ONCE — builds the initial symbol/reference index
+   - Slow on large repos: ~30s for 1k files, ~5min for 50k files
+   - User can interrupt if too slow
+3. Subsequent `codebase_*` calls work without re-indexing (incremental via `codebase_update` on file changes)
+
+This is the codebase analog of "connect serena before using mcp_*". Without it, every `codebase_search` on a new repo returns empty until you stumble on the "0 results" trigger — wasted round-trip.
 
 ### LSP server matrix (when `mcp_*` fails with "language server not found")
 
@@ -506,7 +518,8 @@ When a tool fails with "not connected" / "no results" / "LSP not found" / etc.:
 |---------|--------|
 | First `mcp_*` this session | `mcp({ connect: "serena" })` first |
 | `mcp_*` returns "not connected" | connect + retry |
-| `codebase_*` returns 0 results | `codebase_index` + retry |
+| New workspace (no `.pi-codebase.json`) | `codebase_index` first (one-time per workspace) |
+| `codebase_*` returns 0 results | `codebase_index` (or `codebase_update`) + retry |
 | `codebase_*` returns stale data | `codebase_update` + retry |
 | Symbol not found at expected path | `mcp_get_symbols_overview` on parent |
 | Multiple MCP servers, unsure which has what | `mcp({})` to list |
