@@ -1,10 +1,10 @@
 /**
  * pi-graphify: Graphify MCP integration for pi
  *
- * Responsibilities (v0.1.0):
+ * Responsibilities:
  * - Ship the .mcp.json template (templates/mcp.json) for graphify's MCP server
  * - Register a SKILL.md so LLM knows which tool to pick for which query
- * - Lifecycle hooks: detect if graphify-out/ exists in cwd, hint at build if not
+ * - Lifecycle hooks: detect graph status (missing/stale/fresh) and emit actionable guidance
  *
  * Workflow:
  *   1. Build (BATCH, via bash): `graphify .` — produces graphify-out/ in cwd
@@ -22,7 +22,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
@@ -41,11 +41,59 @@ function isInSagesWorkspace(cwd: string): boolean {
 }
 
 /**
- * Detect if graphify-out/ exists in cwd (i.e., graph has been built).
+ * Detect if graphify-out/graph.json exists in cwd (i.e., graph has been built).
  */
 function graphExists(cwd: string): boolean {
 	if (!cwd) return false;
 	return fs.existsSync(path.join(cwd, "graphify-out", "graph.json"));
+}
+
+/**
+ * Detect if cwd is inside a git repo.
+ */
+function isGitRepo(cwd: string): boolean {
+	try {
+		execFileSync("git", ["rev-parse", "--git-dir"], {
+			cwd,
+			stdio: "ignore",
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Check git status — returns { dirty: bool, ahead: bool, lastCommitTime: number }.
+ * Used to decide whether graph is stale.
+ */
+function gitStatus(cwd: string): {
+	dirty: boolean;
+	dirtyCount: number;
+	lastCommitTime: number;
+} {
+	try {
+		const porcelain = execFileSync("git", ["status", "--porcelain"], {
+			cwd,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const dirtyLines = porcelain
+			.split("\n")
+			.filter((l) => l.trim().length > 0);
+		const ts = execFileSync(
+			"git",
+			["log", "-1", "--format=%ct"],
+			{ cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+		).trim();
+		return {
+			dirty: dirtyLines.length > 0,
+			dirtyCount: dirtyLines.length,
+			lastCommitTime: parseInt(ts || "0", 10),
+		};
+	} catch {
+		return { dirty: false, dirtyCount: 0, lastCommitTime: 0 };
+	}
 }
 
 /**
@@ -62,10 +110,9 @@ function binaryInstalled(): boolean {
 }
 
 /**
- * Check if the graphify installation has the [mcp] extra (required for --mcp).
+ * Check if the graphify installation has the [mcp] extra (required for MCP server).
  * In v0.8.33, graphify no longer has a `--mcp` flag — MCP server is launched via
  * `uv run --with graphifyy --with mcp -m graphify.serve <graph.json>`.
- * So we check: does `python -c "from graphify.serve import serve"` work?
  */
 async function hasMcpExtra(): Promise<boolean> {
 	try {
@@ -80,6 +127,40 @@ async function hasMcpExtra(): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Compute graph freshness — returns one of:
+ *   - "missing": no graph.json
+ *   - "stale":   graph.json exists but is older than last git commit (or repo is dirty)
+ *   - "fresh":   graph.json exists and is up-to-date
+ *
+ * Used to give the LLM a precise action.
+ */
+type GraphStatus = "missing" | "stale" | "fresh";
+
+function checkGraphStatus(cwd: string): GraphStatus {
+	if (!graphExists(cwd)) return "missing";
+
+	if (!isGitRepo(cwd)) {
+		// No git repo — can't compare; assume fresh
+		return "fresh";
+	}
+
+	const graphMtime = fs.statSync(path.join(cwd, "graphify-out", "graph.json")).mtimeMs;
+	const status = gitStatus(cwd);
+
+	// If repo is dirty (uncommitted changes), graph is likely stale
+	if (status.dirty) return "stale";
+
+	// Compare graph mtime to last commit time
+	if (status.lastCommitTime > 0) {
+		const lastCommitMs = status.lastCommitTime * 1000;
+		// graph is stale if last commit is newer than graph by > 60s (clock skew tolerance)
+		if (lastCommitMs - graphMtime > 60_000) return "stale";
+	}
+
+	return "fresh";
 }
 
 export default function piGraphify(pi: ExtensionAPI): void {
@@ -99,7 +180,7 @@ export default function piGraphify(pi: ExtensionAPI): void {
 			return;
 		}
 
-		// Check if [mcp] extra is installed (needed for --mcp server mode)
+		// Check if [mcp] extra is installed (needed for MCP server mode)
 		const mcpReady = await hasMcpExtra();
 		if (!mcpReady) {
 			ctx.ui?.notify?.(
@@ -111,15 +192,39 @@ export default function piGraphify(pi: ExtensionAPI): void {
 			return;
 		}
 
-		const built = graphExists(cwd);
-		ctx.ui?.notify?.(
-			`[pi-graphify] sage workspace detected. graphify ${built ? "graph READY" : "NOT built"}. ` +
-				(built
-					? `Use \`mcp_graph_query\` / \`mcp_graph_shortest_path\` / \`mcp_graph_explain\`.`
-					: `Run \`graphify .\` (via bash) to build, then MCP tools become available.`) +
-				` Lazy MCP start: first call has ~1s cold start.`,
-			built ? "info" : "warning",
-		);
+		const status = checkGraphStatus(cwd);
+
+		if (status === "missing") {
+			// Strong warning — no graph at all
+			const dirtyInfo = isGitRepo(cwd)
+				? ` Repo: ${gitStatus(cwd).dirtyCount} uncommitted change(s).`
+				: "";
+			ctx.ui?.notify?.(
+				`[pi-graphify] sage workspace detected. graphify graph NOT built.${dirtyInfo}\n` +
+					`  ACTION: Run \`graphify .\` (via bash, ~5-10 min) to build the graph.\n` +
+					`  After build: mcp_graph_query / mcp_graph_shortest_path / etc. become available.\n` +
+					`  Lazy MCP start: first call has ~1s cold start.`,
+				"warning",
+			);
+			return;
+		}
+
+		if (status === "stale") {
+			// Soft warning — graph exists but is out of date
+			const dirtyCount = isGitRepo(cwd) ? gitStatus(cwd).dirtyCount : 0;
+			const reason = dirtyCount > 0
+				? `${dirtyCount} uncommitted change(s) since last build`
+				: `new commits since last build`;
+			ctx.ui?.notify?.(
+				`[pi-graphify] graphify graph STALE — ${reason}.\n` +
+					`  ACTION: Run \`graphify .\` (via bash, ~5-10 min) OR \`graphify . --update\` (faster, incremental) to rebuild.\n` +
+					`  Existing queries still work but may miss recent changes.`,
+				"warning",
+			);
+			return;
+		}
+
+		// fresh — silent OK
 	});
 
 	// ── Lifecycle: session_shutdown ───────────────────────────────────

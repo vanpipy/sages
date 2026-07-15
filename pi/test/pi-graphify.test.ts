@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -42,6 +43,82 @@ class MockExtensionAPI {
 	events = { listeners: new Map(), on: () => () => {}, off: () => {}, emit: () => {} };
 	on(event: string, handler: Function) { const a = this.handlers.get(event) || []; a.push(handler); this.handlers.set(event, a); }
 	async trigger(event: string, payload: unknown, ctx: unknown) { const a = this.handlers.get(event) || []; for (const h of a) await h(payload, ctx); }
+}
+
+/** Create a sage workspace in tmpDir with optional git repo + graph state. */
+function makeSagesWorkspace(opts: {
+	git?: boolean;
+	graphMtime?: "before-commit" | "after-commit" | "none";
+	dirtyFile?: boolean;
+}): string {
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pi-graphify-test-"));
+	fs.mkdirSync(path.join(tmp, ".sages", "workspace"), { recursive: true });
+	fs.writeFileSync(path.join(tmp, ".sages", "workspace", "state.json"), "{}");
+
+	if (opts.git) {
+		execFileSync("git", ["init", "-q"], { cwd: tmp });
+		fs.writeFileSync(path.join(tmp, "README.md"), "init");
+		execFileSync("git", ["add", "-A"], { cwd: tmp });
+		execFileSync(
+			"git",
+			["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
+			{ cwd: tmp },
+		);
+	}
+
+	if (opts.graphMtime && opts.graphMtime !== "none") {
+		fs.mkdirSync(path.join(tmp, "graphify-out"), { recursive: true });
+		fs.writeFileSync(path.join(tmp, "graphify-out", "graph.json"), "{}");
+
+		if (opts.git && opts.graphMtime === "after-commit") {
+			// Commit the graph first so working tree is clean
+			execFileSync("git", ["add", "-A"], { cwd: tmp });
+			execFileSync(
+				"git",
+				["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "add graph"],
+				{ cwd: tmp },
+			);
+			// Now set graph mtime = commit_ts + 60s (fresh: newer than HEAD)
+			const commitTs = parseInt(
+				execFileSync("git", ["log", "-1", "--format=%ct"], {
+					cwd: tmp,
+					encoding: "utf-8",
+				}).trim(),
+				10,
+			);
+			const graphTs = commitTs + 60;
+			fs.utimesSync(path.join(tmp, "graphify-out", "graph.json"), graphTs, graphTs);
+		}
+		if (opts.git && opts.graphMtime === "before-commit") {
+			// Commit graph first so it's not "dirty"
+			execFileSync("git", ["add", "-A"], { cwd: tmp });
+			execFileSync(
+				"git",
+				["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "add graph"],
+				{ cwd: tmp },
+			);
+			// Set graph mtime = commit_ts - 3600s (stale: 1 hour older than HEAD)
+			const commitTs = parseInt(
+				execFileSync("git", ["log", "-1", "--format=%ct"], {
+					cwd: tmp,
+					encoding: "utf-8",
+				}).trim(),
+				10,
+			);
+			const graphTs = commitTs - 3600;
+			fs.utimesSync(path.join(tmp, "graphify-out", "graph.json"), graphTs, graphTs);
+		}
+	}
+
+	if (opts.dirtyFile) {
+		fs.writeFileSync(path.join(tmp, "new-file.txt"), "uncommitted change");
+	}
+
+	return tmp;
+}
+
+function cleanSagesWorkspace(tmp: string) {
+	fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 describe("pi-graphify: package structure (v0.3.0 canonical skill)", () => {
@@ -131,6 +208,69 @@ describe("pi-graphify: lifecycle hooks", () => {
 			process.env.HOME = origHome;
 			fs.rmSync(tmpDir, { recursive: true });
 			fs.rmSync(fakeHome, { recursive: true });
+		}
+	});
+
+	it("session_start: missing graph (no git) emits 'NOT built' warning with action", async () => {
+		const tmp = makeSagesWorkspace({ git: false });
+		try {
+			mockPi = new MockExtensionAPI();
+			extModule = await import("../../pi-graphify/src/index.js");
+			extModule.default(mockPi as any);
+			await mockPi.trigger("session_start", {}, { cwd: tmp, ui: mockPi.ui });
+			const notif = mockPi.notifications.find((n) => n.text.includes("NOT built"));
+			expect(notif).toBeDefined();
+			expect(notif?.type).toBe("warning");
+			expect(notif?.text).toContain("graphify .");
+			expect(notif?.text).toContain("bash");
+		} finally {
+			cleanSagesWorkspace(tmp);
+		}
+	});
+
+	it("session_start: stale graph (repo dirty) emits STALE warning with --update hint", async () => {
+		const tmp = makeSagesWorkspace({ git: true, graphMtime: "after-commit", dirtyFile: true });
+		try {
+			mockPi = new MockExtensionAPI();
+			extModule = await import("../../pi-graphify/src/index.js");
+			extModule.default(mockPi as any);
+			await mockPi.trigger("session_start", {}, { cwd: tmp, ui: mockPi.ui });
+			const notif = mockPi.notifications.find((n) => n.text.includes("STALE"));
+			expect(notif).toBeDefined();
+			expect(notif?.type).toBe("warning");
+			expect(notif?.text).toContain("uncommitted change");
+			expect(notif?.text).toContain("--update");
+		} finally {
+			cleanSagesWorkspace(tmp);
+		}
+	});
+
+	it("session_start: stale graph (graph older than last commit) emits STALE warning", async () => {
+		const tmp = makeSagesWorkspace({ git: true, graphMtime: "before-commit" });
+		try {
+			mockPi = new MockExtensionAPI();
+			extModule = await import("../../pi-graphify/src/index.js");
+			extModule.default(mockPi as any);
+			await mockPi.trigger("session_start", {}, { cwd: tmp, ui: mockPi.ui });
+			const notif = mockPi.notifications.find((n) => n.text.includes("STALE"));
+			expect(notif).toBeDefined();
+			expect(notif?.text).toContain("new commits since last build");
+		} finally {
+			cleanSagesWorkspace(tmp);
+		}
+	});
+
+	it("session_start: fresh graph is silent (no notification)", async () => {
+		const tmp = makeSagesWorkspace({ git: true, graphMtime: "after-commit" });
+		try {
+			mockPi = new MockExtensionAPI();
+			extModule = await import("../../pi-graphify/src/index.js");
+			extModule.default(mockPi as any);
+			await mockPi.trigger("session_start", {}, { cwd: tmp, ui: mockPi.ui });
+			const notif = mockPi.notifications.find((n) => n.text.includes("pi-graphify"));
+			expect(notif).toBeUndefined();
+		} finally {
+			cleanSagesWorkspace(tmp);
 		}
 	});
 
