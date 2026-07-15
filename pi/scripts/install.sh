@@ -43,6 +43,14 @@ CBM_REPO="DeusData/codebase-memory-mcp"
 CBM_INSTALL_DIR="$HOME/.local/bin"
 CBM_BINARY_PATH="$CBM_INSTALL_DIR/codebase-memory-mcp"
 
+# pi-graphify package info (sage peer for graphify MCP integration)
+PI_GRAPHIFY_SRC_REL="pi-graphify"
+PI_GRAPHIFY_DEST_DIR="$PI_DIR/packages/pi-graphify"
+PI_GRAPHIFY_PKG="$PI_GRAPHIFY_DEST_DIR"
+
+# graphify CLI install info
+GRAPHIFY_BIN_PATH="$HOME/.local/bin/graphify"
+
 # pi-serena package info (local extension shipped with sages)
 # pi-serena is a local package, NOT installed via `pi install`. We register it directly
 # in settings.json with the absolute path — same pattern as sages and yunxiao.
