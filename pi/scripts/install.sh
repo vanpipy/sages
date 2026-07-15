@@ -429,7 +429,12 @@ Every implementation request MUST follow:
 
 **Default**: when a specialized tool exists for a task, USE IT FIRST. Do not fall back to `grep`/`read`/`edit`/`bash` when an LSP-semantic tool is available. Tool calls are cheap; reading whole files to find one symbol is expensive.
 
-> Loaded skills (`serena`, `codebase`, etc.) are auto-injected. Re-read the skill's `SKILL.md` at the start of any non-trivial task.
+> Loaded skills (`serena`, `codebase-memory-mcp`, `graphify`, etc.) are auto-injected. Re-read the skill's `SKILL.md` at the start of any non-trivial task.
+>
+> **Codebase-intelligence tool choice** (avoid the wrong default):
+> - **Code-only questions** about a repo (callers, impact, AST): use `codebase-memory-mcp` (MCP graph tools: `mcp_trace_path`, `mcp_detect_changes`, `mcp_get_architecture`).
+> - **Mixed-corpus questions** (code + docs + papers + images + video, or want Obsidian vault / HTML report): use `graphify` (`/graphify`).
+> - Default for sage workflow code tasks = `codebase-memory-mcp`. Reach for `graphify` only when the user explicitly wants a navigable document or the corpus has non-code artifacts.
 
 ### Decision tree (default tool per task)
 
