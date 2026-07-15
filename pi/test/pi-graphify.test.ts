@@ -156,17 +156,140 @@ describe("pi-graphify: package structure (v0.3.0 canonical skill)", () => {
 		expect(fs.existsSync(path.join(PI_GRAPHIFY_ROOT, "skills", "graphify-mcp"))).toBe(false);
 	});
 
-	it("mcp.json template has 7 first-class tools and uses uv-based MCP launch", () => {
+	it("mcp.json template has 7 first-class tools and uses wrapper script", () => {
 		const mcp = JSON.parse(fs.readFileSync(path.join(PI_GRAPHIFY_ROOT, "templates", "mcp.json"), "utf-8"));
 		const g = mcp.mcpServers?.["graphify"];
 		expect(g).toBeDefined();
-		// v0.8.33+: MCP server launched via `uv run --with graphifyy --with mcp -m graphify.serve`
-		expect(g.command).toBe("uv");
-		expect(g.args).toContain("run");
-		expect(g.args).toContain("--with");
-		expect(g.args).toContain("graphify.serve");
+		// v0.4.2: wrapper script achieves lazy auto-build on first MCP call
+		expect(g.command).toBe("bash");
+		// Template uses __PI_GRAPHIFY_START_MCP__ placeholder (sed-substituted at install time)
+		expect(g.args[0]).toBe("__PI_GRAPHIFY_START_MCP__");
+		expect(g.args).toContain("${workspaceFolder}");
 		expect(g.directTools?.length).toBe(7);
 		expect(g.excludeTools?.length ?? 0).toBe(0);
+	});
+
+	it("templates/start-mcp.sh exists and is executable", () => {
+		const wrapper = path.join(PI_GRAPHIFY_ROOT, "templates", "start-mcp.sh");
+		expect(fs.existsSync(wrapper)).toBe(true);
+		const stat = fs.statSync(wrapper);
+		// executable bit set
+		expect(stat.mode & 0o111).toBeGreaterThan(0);
+	});
+
+	it("start-mcp.sh: missing graph triggers build (logic test via mock graphify)", () => {
+		const tmp = makeSagesWorkspace({ git: false });
+		try {
+			const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "fake-bin-"));
+			const fakeGraphify = path.join(fakeBin, "graphify");
+			fs.writeFileSync(
+				fakeGraphify,
+				`#!/usr/bin/env bash
+mkdir -p graphify-out
+echo '{"nodes":[],"edges":[]}' > graphify-out/graph.json
+echo "[fake] built graph" >&2
+exit 0
+`,
+			);
+			fs.chmodSync(fakeGraphify, 0o755);
+
+			// Also need fake uv (to not actually run graphify.serve)
+			const fakeUv = path.join(fakeBin, "uv");
+			fs.writeFileSync(
+				fakeUv,
+				`#!/usr/bin/env bash
+echo "[fake-uv] would run: \$@" >&2
+exit 0
+`,
+			);
+			fs.chmodSync(fakeUv, 0o755);
+
+			const wrapper = path.join(PI_GRAPHIFY_ROOT, "templates", "start-mcp.sh");
+			const result = require("node:child_process").spawnSync(
+				"bash",
+				[wrapper, tmp],
+				{ env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` }, encoding: "utf-8" },
+			);
+			// Mock graphify should have created graph.json
+			expect(fs.existsSync(path.join(tmp, "graphify-out", "graph.json"))).toBe(true);
+			expect(result.status).toBe(0);
+
+			fs.rmSync(fakeBin, { recursive: true });
+		} finally {
+			cleanSagesWorkspace(tmp);
+		}
+	});
+
+	it("start-mcp.sh: existing graph skips build", () => {
+		const tmp = makeSagesWorkspace({ git: true, graphMtime: "after-commit" });
+		try {
+			const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "fake-bin-"));
+			const fakeGraphify = path.join(fakeBin, "graphify");
+			let graphifyCalled = false;
+			fs.writeFileSync(
+				fakeGraphify,
+				`#!/usr/bin/env bash
+graphifyCalled=1
+echo "[fake-graphify] CALLED when it shouldn't be!" >&2
+exit 1
+`,
+			);
+			fs.chmodSync(fakeGraphify, 0o755);
+			const fakeUv = path.join(fakeBin, "uv");
+			fs.writeFileSync(fakeUv, "#!/usr/bin/env bash\nexit 0\n");
+			fs.chmodSync(fakeUv, 0o755);
+
+			const wrapper = path.join(PI_GRAPHIFY_ROOT, "templates", "start-mcp.sh");
+			const result = require("node:child_process").spawnSync(
+				"bash",
+				[wrapper, tmp],
+				{ env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` }, encoding: "utf-8" },
+			);
+			expect(result.status).toBe(0);
+
+			fs.rmSync(fakeBin, { recursive: true });
+		} finally {
+			cleanSagesWorkspace(tmp);
+		}
+	});
+
+	it("start-mcp.sh: PI_GRAPHIFY_AUTO_BUILD=skip disables build check", () => {
+		const tmp = makeSagesWorkspace({ git: false });  // no graph
+		try {
+			const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "fake-bin-"));
+			// Fake graphify that would fail loudly if called
+			const fakeGraphify = path.join(fakeBin, "graphify");
+			fs.writeFileSync(
+				fakeGraphify,
+				`#!/usr/bin/env bash
+echo "[fake-graphify] CALLED but should have been skipped" >&2
+exit 99
+`,
+			);
+			fs.chmodSync(fakeGraphify, 0o755);
+			// Fake uv: exits 0 even when graph is missing (skip-mode shouldn't trigger build)
+			const fakeUv = path.join(fakeBin, "uv");
+			fs.writeFileSync(
+				fakeUv,
+				`#!/usr/bin/env bash
+# In skip mode, the wrapper skips build and goes straight to uv.
+# This fake uv just exits 0; if graphify was called we'd see its stderr.
+exit 0
+`,
+			);
+			fs.chmodSync(fakeUv, 0o755);
+
+			const wrapper = path.join(PI_GRAPHIFY_ROOT, "templates", "start-mcp.sh");
+			const result = require("node:child_process").spawnSync(
+				"bash",
+				[wrapper, tmp],
+				{ env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, PI_GRAPHIFY_AUTO_BUILD: "skip" }, timeout: 5000 },
+			);
+			// graphify should NOT have been called (it would exit 99 with stderr warning)
+			expect(result.stderr || "").not.toContain("fake-graphify] CALLED");
+		} finally {
+			cleanSagesWorkspace(tmp);
+		}
 	});
 });
 
@@ -222,7 +345,7 @@ describe("pi-graphify: lifecycle hooks", () => {
 			expect(notif).toBeDefined();
 			expect(notif?.type).toBe("warning");
 			expect(notif?.text).toContain("graphify .");
-			expect(notif?.text).toContain("bash");
+			expect(notif?.text).toContain("Lazy auto-build");
 		} finally {
 			cleanSagesWorkspace(tmp);
 		}

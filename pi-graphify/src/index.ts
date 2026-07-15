@@ -203,7 +203,8 @@ export default function piGraphify(pi: ExtensionAPI): void {
 
 		// ─── Auto-build path ─────────────────────────────────────
 		const autoBuild = (process.env.PI_GRAPHIFY_AUTO_BUILD || "").trim();
-		const autoMode = (["1", "true", "stale", "force"] as const).find((m) => m === autoBuild);
+		// "skip" / "0" / "false" = opt-out (used in start-mcp.sh to skip even on missing)
+		const autoMode = (["1", "true", "stale", "force", "skip"] as const).find((m) => m === autoBuild);
 
 		// Decide whether to trigger auto-build based on mode + status
 		const shouldAutoBuild =
@@ -213,7 +214,7 @@ export default function piGraphify(pi: ExtensionAPI): void {
 					? status === "missing" || status === "stale"
 					: autoMode === "force"
 						? true  // force always builds
-						: false;
+						: false;  // skip / 0 / false / unset → no auto-build at session_start
 
 		if (shouldAutoBuild && autoMode) {
 			ctx.ui?.notify?.(
@@ -273,10 +274,11 @@ export default function piGraphify(pi: ExtensionAPI): void {
 				: "";
 			ctx.ui?.notify?.(
 				`[pi-graphify] sage workspace detected. graphify graph NOT built.${dirtyInfo}\n` +
-					`  ACTION: Run \`graphify .\` (via bash, ~5-10 min) to build the graph.\n` +
-					`  TIP: Set PI_GRAPHIFY_AUTO_BUILD=1 to auto-build on session_start.\n` +
+					`  Lazy auto-build: first \`mcp_graph_*\` call will trigger \`graphify . --no-viz\` (~3-5 min).\n` +
+					`  To build eagerly now: set PI_GRAPHIFY_AUTO_BUILD=1.\n` +
+					`  To skip auto-build: set PI_GRAPHIFY_AUTO_BUILD=skip.\n` +
 					`  After build: mcp_graph_query / mcp_graph_shortest_path / etc. become available.\n` +
-					`  Lazy MCP start: first call has ~1s cold start.`,
+					`  MCP server: lazy start on first call (~1s cold start).`,
 				"warning",
 			);
 			return;
@@ -290,9 +292,9 @@ export default function piGraphify(pi: ExtensionAPI): void {
 				: `new commits since last build`;
 			ctx.ui?.notify?.(
 				`[pi-graphify] graphify graph STALE — ${reason}.\n` +
-					`  ACTION: Run \`graphify .\` (via bash, ~5-10 min) OR \`graphify . --update\` (faster, incremental) to rebuild.\n` +
-					`  TIP: Set PI_GRAPHIFY_AUTO_BUILD=stale to auto-rebuild on every session_start.\n` +
-					`  Existing queries still work but may miss recent changes.`,
+					`  ACTION: Run \`graphify . --update\` (faster, incremental) to refresh.\n` +
+					`  Existing queries still work but may miss recent changes.\n` +
+					`  To auto-rebuild on next start: set PI_GRAPHIFY_AUTO_BUILD=stale.`,
 				"warning",
 			);
 			return;

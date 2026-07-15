@@ -446,11 +446,17 @@ write_graphify_mcp_config() {
     template="$TMP_DIR/$PI_GRAPHIFY_SRC_REL/templates/mcp.json"
   fi
   [[ -z "$template" ]] && { echo "  Warning: graphify mcp.json template not found"; return 0; }
+
+  # Substitute __PI_GRAPHIFY_START_MCP__ placeholder with absolute path
+  local resolved_template
+  resolved_template=$(mktemp)
+  sed "s|__PI_GRAPHIFY_START_MCP__|$PI_GRAPHIFY_DEST_DIR/templates/start-mcp.sh|g" "$template" > "$resolved_template"
+
   if [[ -f "$PI_DIR/agent/mcp.json" && "${FORCE:-false}" != true ]]; then
     python3 -c "
 import json
 f = '$PI_DIR/agent/mcp.json'
-tpl = '$template'
+tpl = '$resolved_template'
 try: d = json.load(open(f))
 except: d = {'mcpServers': {}, 'settings': {}}
 tpl_d = json.load(open(tpl))
@@ -463,9 +469,10 @@ else:
 "
   else
     mkdir -p "$PI_DIR/agent"
-    cp "$template" "$PI_DIR/agent/mcp.json"
+    cp "$resolved_template" "$PI_DIR/agent/mcp.json"
     echo "  Wrote $PI_DIR/agent/mcp.json from template"
   fi
+  rm -f "$resolved_template"
 }
 
 install_graphify_binary() {
