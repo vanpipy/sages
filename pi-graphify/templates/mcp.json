@@ -3,8 +3,7 @@
     "graphify": {
       "command": "bash",
       "args": [
-        "__PI_GRAPHIFY_START_MCP__",
-        "${workspaceFolder}"
+        "__PI_GRAPHIFY_START_MCP__"
       ],
       "lifecycle": "lazy",
       "idleTimeout": 10,

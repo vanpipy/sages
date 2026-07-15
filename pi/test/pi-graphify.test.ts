@@ -156,15 +156,15 @@ describe("pi-graphify: package structure (v0.3.0 canonical skill)", () => {
 		expect(fs.existsSync(path.join(PI_GRAPHIFY_ROOT, "skills", "graphify-mcp"))).toBe(false);
 	});
 
-	it("mcp.json template has 7 first-class tools and uses wrapper script", () => {
+	it("mcp.json template has 7 first-class tools and uses wrapper script (no args)", () => {
 		const mcp = JSON.parse(fs.readFileSync(path.join(PI_GRAPHIFY_ROOT, "templates", "mcp.json"), "utf-8"));
 		const g = mcp.mcpServers?.["graphify"];
 		expect(g).toBeDefined();
-		// v0.4.2: wrapper script achieves lazy auto-build on first MCP call
+		// v0.5.1: wrapper uses git toplevel auto-detection, no ${workspaceFolder} arg
 		expect(g.command).toBe("bash");
-		// Template uses __PI_GRAPHIFY_START_MCP__ placeholder (sed-substituted at install time)
 		expect(g.args[0]).toBe("__PI_GRAPHIFY_START_MCP__");
-		expect(g.args).toContain("${workspaceFolder}");
+		// Should NOT have ${workspaceFolder} arg (wrapper self-detects sage root)
+		expect(JSON.stringify(g.args)).not.toContain("${workspaceFolder}");
 		expect(g.directTools?.length).toBe(7);
 		expect(g.excludeTools?.length ?? 0).toBe(0);
 	});
@@ -178,7 +178,8 @@ describe("pi-graphify: package structure (v0.3.0 canonical skill)", () => {
 	});
 
 	it("start-mcp.sh: missing graph triggers build (logic test via mock graphify)", () => {
-		const tmp = makeSagesWorkspace({ git: false });
+		// Make a git repo at tmp so wrapper's git-toplevel detection finds tmp
+		const tmp = makeSagesWorkspace({ git: true });
 		try {
 			const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "fake-bin-"));
 			const fakeGraphify = path.join(fakeBin, "graphify");
@@ -205,14 +206,60 @@ exit 0
 			fs.chmodSync(fakeUv, 0o755);
 
 			const wrapper = path.join(PI_GRAPHIFY_ROOT, "templates", "start-mcp.sh");
+			// Run wrapper with cwd=tmp so git toplevel finds tmp
 			const result = require("node:child_process").spawnSync(
 				"bash",
-				[wrapper, tmp],
-				{ env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` }, encoding: "utf-8" },
+				[wrapper],
+				{
+					cwd: tmp,
+					env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
+					encoding: "utf-8",
+				},
 			);
-			// Mock graphify should have created graph.json
+			// Mock graphify should have created graph.json at tmp/graphify-out/
 			expect(fs.existsSync(path.join(tmp, "graphify-out", "graph.json"))).toBe(true);
 			expect(result.status).toBe(0);
+
+			fs.rmSync(fakeBin, { recursive: true });
+		} finally {
+			cleanSagesWorkspace(tmp);
+		}
+	});
+
+	it("start-mcp.sh: git toplevel detection finds sage root from subdir (not nearest .sages/workspace)", () => {
+		// Reproduce the pi/.sages/workspace bug: subdir also has .sages/workspace
+		// The wrapper should find the git toplevel's .sages/workspace, NOT the nearest one
+		const tmp = makeSagesWorkspace({ git: true, graphMtime: "after-commit" });
+		// Add a fake nested .sages/workspace (mimics pi/.sages/workspace from LuBan tests)
+		const nestedDir = path.join(tmp, "pi");
+		fs.mkdirSync(path.join(nestedDir, ".sages", "workspace"), { recursive: true });
+		fs.writeFileSync(path.join(nestedDir, ".sages", "workspace", "marker.txt"), "nested");
+		// Also create a decoy graphify-out in nested dir (wrong location)
+		fs.mkdirSync(path.join(nestedDir, "graphify-out"), { recursive: true });
+		fs.writeFileSync(path.join(nestedDir, "graphify-out", "graph.json"), '{"decoy":true}');
+
+		try {
+			const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "fake-bin-"));
+			const fakeUv = path.join(fakeBin, "uv");
+			fs.writeFileSync(fakeUv, "#!/usr/bin/env bash\nexit 0\n");
+			fs.chmodSync(fakeUv, 0o755);
+
+			const wrapper = path.join(PI_GRAPHIFY_ROOT, "templates", "start-mcp.sh");
+			// Run wrapper from nestedDir (simulates pi session cwd)
+			const result = require("node:child_process").spawnSync(
+				"bash",
+				[wrapper],
+				{
+					cwd: nestedDir,
+					env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
+					encoding: "utf-8",
+					timeout: 5000,
+				},
+			);
+			// Should pick git toplevel (tmp), not nested (pi)
+			expect(result.stderr).toContain(`sage_root=${tmp}`);
+			// Should NOT pick nested sage root
+			expect(result.stderr).not.toContain(`sage_root=${nestedDir}`);
 
 			fs.rmSync(fakeBin, { recursive: true });
 		} finally {
@@ -225,11 +272,9 @@ exit 0
 		try {
 			const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "fake-bin-"));
 			const fakeGraphify = path.join(fakeBin, "graphify");
-			let graphifyCalled = false;
 			fs.writeFileSync(
 				fakeGraphify,
 				`#!/usr/bin/env bash
-graphifyCalled=1
 echo "[fake-graphify] CALLED when it shouldn't be!" >&2
 exit 1
 `,
@@ -242,8 +287,12 @@ exit 1
 			const wrapper = path.join(PI_GRAPHIFY_ROOT, "templates", "start-mcp.sh");
 			const result = require("node:child_process").spawnSync(
 				"bash",
-				[wrapper, tmp],
-				{ env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` }, encoding: "utf-8" },
+				[wrapper],
+				{
+					cwd: tmp,
+					env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
+					encoding: "utf-8",
+				},
 			);
 			expect(result.status).toBe(0);
 
@@ -254,7 +303,7 @@ exit 1
 	});
 
 	it("start-mcp.sh: PI_GRAPHIFY_AUTO_BUILD=skip disables build check", () => {
-		const tmp = makeSagesWorkspace({ git: false });  // no graph
+		const tmp = makeSagesWorkspace({ git: true });  // git + missing graph
 		try {
 			const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "fake-bin-"));
 			// Fake graphify that would fail loudly if called
@@ -267,23 +316,19 @@ exit 99
 `,
 			);
 			fs.chmodSync(fakeGraphify, 0o755);
-			// Fake uv: exits 0 even when graph is missing (skip-mode shouldn't trigger build)
 			const fakeUv = path.join(fakeBin, "uv");
-			fs.writeFileSync(
-				fakeUv,
-				`#!/usr/bin/env bash
-# In skip mode, the wrapper skips build and goes straight to uv.
-# This fake uv just exits 0; if graphify was called we'd see its stderr.
-exit 0
-`,
-			);
+			fs.writeFileSync(fakeUv, "#!/usr/bin/env bash\nexit 0\n");
 			fs.chmodSync(fakeUv, 0o755);
 
 			const wrapper = path.join(PI_GRAPHIFY_ROOT, "templates", "start-mcp.sh");
 			const result = require("node:child_process").spawnSync(
 				"bash",
-				[wrapper, tmp],
-				{ env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, PI_GRAPHIFY_AUTO_BUILD: "skip" }, timeout: 5000 },
+				[wrapper],
+				{
+					cwd: tmp,
+					env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, PI_GRAPHIFY_AUTO_BUILD: "skip" },
+					timeout: 5000,
+				},
 			);
 			// graphify should NOT have been called (it would exit 99 with stderr warning)
 			expect(result.stderr || "").not.toContain("fake-graphify] CALLED");
