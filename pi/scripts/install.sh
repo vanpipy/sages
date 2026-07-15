@@ -534,6 +534,17 @@ if pkg not in d.get('packages', []):
 "
   fi
   write_graphify_mcp_config
+
+  # Remove user-level graphify skill if present (v0.3.0: package owns canonical skill).
+  # pi skill priority rules give user-level skills precedence, so without this removal,
+  # the package's bundled skills/graphify/SKILL.md is silently skipped and a collision warning
+  # appears at startup.
+  local user_skill="$PI_DIR/agent/skills/graphify"
+  if [[ -d "$user_skill" ]]; then
+    rm -rf "$user_skill"
+    echo "  Removed user-level skill $user_skill (now owned by pi-graphify package)"
+  fi
+
   echo "  pi-graphify installed"
 }
 

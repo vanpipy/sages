@@ -2,7 +2,7 @@
 
 [Graphify](https://github.com/safishamsi/graphify) MCP integration for [pi](https://github.com/badlogic/pi-mono/), shipped as a peer extension of [sages](https://github.com/vanpipy/sages).
 
-> ⚠️ **v0.2.1**: Knowledge graph queries via MCP. 7 first-class tools (query/path/explain/god_nodes/etc.) + proxy. Handles mixed corpus (code + docs + papers + videos + images) — **complement** to codebase-memory-mcp, not replace it.
+> ⚠️ **v0.3.0**: Knowledge graph queries via MCP. 7 first-class tools (query/path/explain/god_nodes/etc.) + proxy. Handles mixed corpus (code + docs + papers + videos + images) — **complement** to codebase-memory-mcp, not replace it.
 
 ## What is this?
 
@@ -10,7 +10,7 @@
 
 1. Registers a curated `.mcp.json` template for `graphify --mcp`
 2. Promotes **7 read-only graph tools** to first-class pi tools
-3. Ships `skills/graphify-mcp/SKILL.md` so the LLM knows which `mcp_graph_*` to pick (does NOT collide with user-level `graphify`)
+3. **Owns the canonical `graphify` skill** (was user-level at `~/.pi/agent/skills/graphify/`, now bundled in package) — covers both CLI usage and MCP integration, 662 lines + 8 references/
 4. Adds lifecycle hooks (`session_start`) to surface binary + graph state in sage workspaces
 
 It does **not**:
@@ -96,8 +96,9 @@ pi-graphify/
 ├── src/
 │   └── index.ts              # extension entry + lifecycle hooks
 ├── skills/
-│   └── graphify-mcp/
-│       └── SKILL.md          # LLM-facing skill (name: graphify-mcp, NO collision with user-level `graphify`)
+│   └── graphify/             # canonical graphify skill (662 lines + 8 references/)
+│       ├── SKILL.md          # CLI usage + MCP integration
+│       └── references/       # add-watch, exports, extraction-spec, query, etc.
 └── templates/
     └── mcp.json              # graphify MCP server config (7 first-class tools)
 ```
