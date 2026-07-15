@@ -2,7 +2,7 @@
 
 [Graphify](https://github.com/safishamsi/graphify) MCP integration for [pi](https://github.com/badlogic/pi-mono/), shipped as a peer extension of [sages](https://github.com/vanpipy/sages).
 
-> ⚠️ **v0.3.0**: Knowledge graph queries via MCP. 7 first-class tools (query/path/explain/god_nodes/etc.) + proxy. Handles mixed corpus (code + docs + papers + videos + images) — **complement** to codebase-memory-mcp, not replace it.
+> ⚠️ **v0.5.0**: Knowledge graph queries via MCP. **Lazy auto-build via wrapper script** — first `mcp_graph_*` call transparently builds the graph (3-5 min) if missing. No env var needed. 7 first-class tools (query/path/explain/god_nodes/etc.) + proxy. Handles mixed corpus (code + docs + papers + videos + images) — **complement** to codebase-memory-mcp, not replace it.
 
 ## What is this?
 
@@ -11,7 +11,7 @@
 1. Registers a curated `.mcp.json` template for `graphify --mcp`
 2. Promotes **7 read-only graph tools** to first-class pi tools
 3. **Owns the canonical `graphify` skill** (was user-level at `~/.pi/agent/skills/graphify/`, now bundled in package) — covers both CLI usage and MCP integration, 662 lines + 8 references/
-4. Adds lifecycle hooks (`session_start`) to surface binary + graph state in sage workspaces
+4. Adds lifecycle hooks (`session_start`) to detect graph status (missing/stale/fresh) and warn in sage workspaces — auto-build itself is lazy via wrapper script
 
 It does **not**:
 - Re-implement the graphify algorithm
@@ -100,18 +100,40 @@ pi-graphify/
 │       ├── SKILL.md          # CLI usage + MCP integration
 │       └── references/       # add-watch, exports, extraction-spec, query, etc.
 └── templates/
-    └── mcp.json              # graphify MCP server config (7 first-class tools)
+    ├── mcp.json              # graphify MCP server config (7 first-class tools)
+    └── start-mcp.sh          # wrapper script: lazy auto-build if graph missing
 ```
+
+## Auto-build (lazy, no env var)
+
+`templates/start-mcp.sh` wraps the graphify MCP server launch:
+
+1. Check `graphify-out/graph.json` exists
+2. If missing → run `graphify . --no-viz` (3-5 min, output streams to pi console)
+3. `exec uv run --with graphifyy --with mcp -m graphify.serve <graph.json>`
+
+Because pi-mcp-adapter uses **lazy lifecycle**, the server starts on first `mcp_graph_*` call. So:
+
+```
+$ pi                                                    # plain, no env
+> "How does luban execute tasks?"
+[start-mcp.sh] auto-running: graphify . --no-viz         # first call triggers
+[graphify extract] AST extraction on 2464 code files...
+... 3-5 min later ...
+... answer comes back
+```
+
+The `PI_GRAPHIFY_AUTO_BUILD` env var (added in v0.4.1) was **removed in v0.5.0** — wrapper makes it unnecessary. To opt out, edit `start-mcp.sh` or set `PI_GRAPHIFY_AUTO_BUILD=skip`.
 
 ## First-time setup
 
 For a new workspace:
 
-1. **Install graphify with [mcp] extra**: `uv tool install "graphifyy[mcp]"` (or via sage install.sh)
-2. **Build the graph** (BATCH): `bash({command: "graphify ."})` — 5-10 min
-3. **Query via MCP**: `mcp_graph_query(...)` — ms response
+1. **Install graphify with [mcp] extra**: `uv tool install "graphifyy[mcp]"` (or via sage install.sh) — done by sage install.sh
+2. **Graph builds lazily** on first `mcp_graph_*` call (3-5 min)
+3. **Query via MCP**: `mcp_graph_query(...)` — ms response after first build
 
-The `session_start` hook walks you through these steps.
+The `session_start` lifecycle hook surfaces graph status (missing/stale/fresh) via warning notifications.
 
 ## Testing
 

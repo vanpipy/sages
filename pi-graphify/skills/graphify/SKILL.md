@@ -659,4 +659,15 @@ Need information from the graph?
 The `pi-graphify` extension warns at session_start if:
 - `~/.local/bin/graphify` is missing → run `uv tool install "graphifyy[mcp]"`
 - `[mcp]` extra is missing → run `uv tool install --reinstall "graphifyy[mcp]"`
-- `graphify-out/graph.json` is missing → run `graphify .` (5-10 min)
+- `graphify-out/graph.json` is missing → **no action needed** — the MCP wrapper script `templates/start-mcp.sh` will lazy-build on first `mcp_graph_*` call (~3-5 min, output streams to console)
+- `graphify-out/graph.json` is stale (git has uncommitted changes / new commits since last build) → run `graphify . --update` to refresh incrementally
+
+### Lazy auto-build (no env var needed, v0.5.0+)
+
+The MCP server is launched via `templates/start-mcp.sh` which:
+
+1. Checks if `graph.json` exists in cwd
+2. If missing, runs `graphify . --no-viz` and streams output to pi console
+3. `exec uv run --with graphifyy --with mcp -m graphify.serve <graph.json>`
+
+Because pi-mcp-adapter uses lazy lifecycle (server starts on first MCP call), auto-build happens transparently. Just call any `mcp_graph_*` tool — the wrapper handles the rest. The `PI_GRAPHIFY_AUTO_BUILD` env var was removed in v0.5.0 (the wrapper makes it unnecessary).

@@ -4,23 +4,20 @@
  * Responsibilities:
  * - Ship the .mcp.json template (templates/mcp.json) for graphify's MCP server
  * - Register a SKILL.md so LLM knows which tool to pick for which query
- * - Lifecycle hooks: detect graph status (missing/stale/fresh) and emit actionable guidance
- * - Optional auto-build: when PI_GRAPHIFY_AUTO_BUILD=1, run graphify . on missing graph
+ * - Lifecycle hooks: detect graph status (missing/stale/fresh) and emit warnings
  *
  * Workflow:
  *   1. Build (BATCH, via bash): `graphify .` — produces graphify-out/ in cwd
  *   2. Query (REAL-TIME, via MCP): `mcp_graph_query`, `mcp_graph_shortest_path`, etc.
  *
+ * Auto-build: handled by templates/start-mcp.sh wrapper script (lazy MCP start).
+ *   First mcp_graph_* call triggers `graphify . --no-viz` automatically if missing.
+ *   No env var needed — works out of the box.
+ *
  * Non-responsibilities:
  * - The graphify CLI itself is installed by sage's install.sh
  *   (`uv tool install graphifyy[mcp]`)
  * - The mcp binary is provided by pi-mcp-adapter
- *
- * Env vars:
- *   PI_GRAPHIFY_AUTO_BUILD=1       auto-run `graphify . --no-viz` if graph missing
- *   PI_GRAPHIFY_AUTO_BUILD=stale   also rebuild if graph stale
- *   PI_GRAPHIFY_AUTO_BUILD=force   always rebuild (delete + graphify .)
- *   (unset or 0)                    default — just warn, don't auto-build
  *
  * @see https://github.com/safishamsi/graphify
  * @see https://github.com/nicobailon/pi-mcp-adapter
@@ -29,11 +26,8 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { execFile, execFileSync } from "node:child_process";
-import { promisify } from "node:util";
+import { execFileSync } from "node:child_process";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Detect sage workspace.
@@ -123,6 +117,9 @@ function binaryInstalled(): boolean {
  */
 async function hasMcpExtra(): Promise<boolean> {
 	try {
+		const { execFile } = await import("node:child_process");
+		const { promisify } = await import("node:util");
+		const execFileAsync = promisify(execFile);
 		const { stdout } = await execFileAsync("uv", [
 			"run",
 			"--with", "graphifyy",
@@ -201,82 +198,16 @@ export default function piGraphify(pi: ExtensionAPI): void {
 
 		const status = checkGraphStatus(cwd);
 
-		// ─── Auto-build path ─────────────────────────────────────
-		const autoBuild = (process.env.PI_GRAPHIFY_AUTO_BUILD || "").trim();
-		// "skip" / "0" / "false" = opt-out (used in start-mcp.sh to skip even on missing)
-		const autoMode = (["1", "true", "stale", "force", "skip"] as const).find((m) => m === autoBuild);
-
-		// Decide whether to trigger auto-build based on mode + status
-		const shouldAutoBuild =
-			autoMode === "1" || autoMode === "true"
-				? status === "missing"
-				: autoMode === "stale"
-					? status === "missing" || status === "stale"
-					: autoMode === "force"
-						? true  // force always builds
-						: false;  // skip / 0 / false / unset → no auto-build at session_start
-
-		if (shouldAutoBuild && autoMode) {
-			ctx.ui?.notify?.(
-				`[pi-graphify] PI_GRAPHIFY_AUTO_BUILD=${autoMode} → auto-building graph...`,
-				"info",
-			);
-
-			let args: string[];
-			if (autoMode === "force") {
-				// Force = wipe + full rebuild
-				try {
-					fs.rmSync(path.join(cwd, "graphify-out"), { recursive: true, force: true });
-				} catch {}
-				args = [".", "--no-viz"];
-			} else if (status === "stale") {
-				// Incremental rebuild
-				args = [".", "--update", "--no-viz"];
-			} else {
-				// First build (after missing) — skip HTML viz for speed
-				args = [".", "--no-viz"];
-			}
-
-			try {
-				const t0 = Date.now();
-				await new Promise<void>((resolve, reject) => {
-					const child = execFile("graphify", args, { cwd }, (err: Error | null) => {
-						if (err) reject(err);
-						else resolve();
-					});
-					if (child.stdout) {
-						child.stdout.on("data", (chunk: Buffer) => process.stdout.write(chunk));
-					}
-					if (child.stderr) {
-						child.stderr.on("data", (chunk: Buffer) => process.stderr.write(chunk));
-					}
-				});
-				const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-				ctx.ui?.notify?.(
-					`[pi-graphify] auto-build complete in ${elapsed}s. Command: \`graphify ${args.join(" ")}\``,
-					"info",
-				);
-			} catch (err) {
-				ctx.ui?.notify?.(
-					`[pi-graphify] auto-build FAILED: ${(err as Error).message}\n` +
-						`  Try manually: \`graphify . --no-viz\``,
-					"warning",
-				);
-			}
-			return;
-		}
-
-		// ─── Default path: warn only ─────────────────────────────────────
 		if (status === "missing") {
 			// Strong warning — no graph at all
+			// Note: auto-build is handled by templates/start-mcp.sh wrapper (lazy MCP start)
 			const dirtyInfo = isGitRepo(cwd)
 				? ` Repo: ${gitStatus(cwd).dirtyCount} uncommitted change(s).`
 				: "";
 			ctx.ui?.notify?.(
 				`[pi-graphify] sage workspace detected. graphify graph NOT built.${dirtyInfo}\n` +
 					`  Lazy auto-build: first \`mcp_graph_*\` call will trigger \`graphify . --no-viz\` (~3-5 min).\n` +
-					`  To build eagerly now: set PI_GRAPHIFY_AUTO_BUILD=1.\n` +
-					`  To skip auto-build: set PI_GRAPHIFY_AUTO_BUILD=skip.\n` +
+					`  To build eagerly now: run \`graphify . --no-viz\` via bash.\n` +
 					`  After build: mcp_graph_query / mcp_graph_shortest_path / etc. become available.\n` +
 					`  MCP server: lazy start on first call (~1s cold start).`,
 				"warning",
@@ -293,8 +224,7 @@ export default function piGraphify(pi: ExtensionAPI): void {
 			ctx.ui?.notify?.(
 				`[pi-graphify] graphify graph STALE — ${reason}.\n` +
 					`  ACTION: Run \`graphify . --update\` (faster, incremental) to refresh.\n` +
-					`  Existing queries still work but may miss recent changes.\n` +
-					`  To auto-rebuild on next start: set PI_GRAPHIFY_AUTO_BUILD=stale.`,
+					`  Existing queries still work but may miss recent changes.`,
 				"warning",
 			);
 			return;
