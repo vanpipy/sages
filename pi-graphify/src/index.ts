@@ -63,12 +63,20 @@ function binaryInstalled(): boolean {
 
 /**
  * Check if the graphify installation has the [mcp] extra (required for --mcp).
+ * In v0.8.33, graphify no longer has a `--mcp` flag — MCP server is launched via
+ * `uv run --with graphifyy --with mcp -m graphify.serve <graph.json>`.
+ * So we check: does `python -c "from graphify.serve import serve"` work?
  */
 async function hasMcpExtra(): Promise<boolean> {
 	try {
-		const { stdout } = await execFileAsync("graphify", ["--help"]);
-		// If --mcp is listed in help, the [mcp] extra is installed
-		return stdout.includes("--mcp");
+		const { stdout } = await execFileAsync("uv", [
+			"run",
+			"--with", "graphifyy",
+			"--with", "mcp",
+			"python", "-c",
+			"from graphify.serve import serve; print('ok')",
+		]);
+		return stdout.includes("ok");
 	} catch {
 		return false;
 	}

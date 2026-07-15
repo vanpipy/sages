@@ -79,13 +79,17 @@ describe("pi-graphify: package structure (v0.3.0 canonical skill)", () => {
 		expect(fs.existsSync(path.join(PI_GRAPHIFY_ROOT, "skills", "graphify-mcp"))).toBe(false);
 	});
 
-	it("mcp.json template has 7 first-class tools", () => {
+	it("mcp.json template has 7 first-class tools and uses uv-based MCP launch", () => {
 		const mcp = JSON.parse(fs.readFileSync(path.join(PI_GRAPHIFY_ROOT, "templates", "mcp.json"), "utf-8"));
 		const g = mcp.mcpServers?.["graphify"];
 		expect(g).toBeDefined();
-		expect(g.command).toBe("graphify");
-		expect(g.args).toContain("--mcp");
+		// v0.8.33+: MCP server launched via `uv run --with graphifyy --with mcp -m graphify.serve`
+		expect(g.command).toBe("uv");
+		expect(g.args).toContain("run");
+		expect(g.args).toContain("--with");
+		expect(g.args).toContain("graphify.serve");
 		expect(g.directTools?.length).toBe(7);
+		expect(g.excludeTools?.length ?? 0).toBe(0);
 	});
 });
 

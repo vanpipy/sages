@@ -1,8 +1,14 @@
 {
   "mcpServers": {
     "graphify": {
-      "command": "graphify",
-      "args": ["--mcp"],
+      "command": "uv",
+      "args": [
+        "run",
+        "--with", "graphifyy",
+        "--with", "mcp",
+        "-m", "graphify.serve",
+        "${workspaceFolder}/graphify-out/graph.json"
+      ],
       "lifecycle": "lazy",
       "idleTimeout": 10,
       "requestTimeoutMs": 60000,

@@ -471,7 +471,13 @@ else:
 install_graphify_binary() {
   echo "==> Installing graphify CLI (with [mcp] extra)..."
 
-  if [[ -x "$GRAPHIFY_BIN_PATH" ]] && "$GRAPHIFY_BIN_PATH" --help 2>/dev/null | grep -q -- "--mcp"; then
+  # v0.8.33+: [mcp] extra is verified by checking if `graphify.serve` module is importable
+  # (not via `graphify --help | grep --mcp` anymore — that flag is gone in v0.8.33).
+  _graphify_mcp_ready() {
+    uv run --with graphifyy --with mcp python -c "from graphify.serve import serve; print('ok')" 2>/dev/null | grep -q "ok"
+  }
+
+  if [[ -x "$GRAPHIFY_BIN_PATH" ]] && _graphify_mcp_ready; then
     echo "  graphify already installed with [mcp] extra at $GRAPHIFY_BIN_PATH"
     return 0
   fi
@@ -486,7 +492,7 @@ install_graphify_binary() {
     echo "  uv tool install failed"
     return 1
   fi
-  if ! "$GRAPHIFY_BIN_PATH" --help 2>/dev/null | grep -q -- "--mcp"; then
+  if ! _graphify_mcp_ready; then
     echo "  Warning: [mcp] extra may not be installed. Run: uv tool install --reinstall 'graphifyy[mcp]'"
     return 1
   fi
