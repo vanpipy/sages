@@ -1,0 +1,56 @@
+# Exclude non-code files from semantic extraction (no LLM API key needed for code-only builds)
+# This lets graphify build a code-only graph without calling any LLM.
+
+# Documentation & skill files (markdown)
+*.md
+*.markdown
+*.rst
+*.txt
+
+# Papers & documents
+*.pdf
+*.docx
+*.doc
+*.odt
+
+# Images & videos (extracted via LLM in default mode)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
+*.svg
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# Archives
+*.zip
+*.tar.gz
+*.tgz
+
+# Generated / cache (already excluded by graphify defaults, but explicit)
+node_modules/
+.graphify-out/
+graphify-out/
+.serena/
+# Sage workflow noise (YAML state files)
+.sages/
+.pi/.sages/
+
+# claude/ codex agent scratch
+.claude/
+.codex/
+
+# pi-cache, eval outputs
+*.log
+*.tmp
+.cache/
+
+# Build artifacts
+dist/
+build/
+out/

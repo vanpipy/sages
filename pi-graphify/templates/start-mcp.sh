@@ -66,6 +66,27 @@ elif [[ ! -f "$GRAPH_JSON" ]]; then
   echo "[start-mcp.sh] graphify-out/graph.json NOT FOUND in sage root" >&2
   echo "[start-mcp.sh] auto-running: graphify . --no-viz (this takes ~3-5 min on first build)" >&2
   cd "$SAGE_ROOT"
+
+  # Auto-detect LLM API key. If none set AND .graphifyignore exists, code-only build.
+  # If no key AND no .graphifyignore, fall back to extracting with whatever docs/papers exist
+  # (will fail loudly if user has docs and no API key).
+  LLM_KEY_SET=false
+  for v in GEMINI_API_KEY GOOGLE_API_KEY MOONSHOT_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY; do
+    if [[ -n "${!v:-}" ]]; then
+      LLM_KEY_SET=true
+      echo "[start-mcp.sh] LLM API key detected: $v" >&2
+      break
+    fi
+  done
+
+  GRAPHIFY_ARGS=(".--no-viz")
+  if [[ "$LLM_KEY_SET" == false && -f "$SAGE_ROOT/.graphifyignore" ]]; then
+    echo "[start-mcp.sh] no LLM API key + .graphifyignore found → code-only build (non-code files skipped)" >&2
+    # Don't add --exclude; let .graphifyignore handle it
+  elif [[ "$LLM_KEY_SET" == false ]]; then
+    echo "[start-mcp.sh] WARNING: no LLM API key + no .graphifyignore — build may fail if repo has docs/papers/images" >&2
+  fi
+
   graphify . --no-viz
   cd - >/dev/null 2>&1 || true
 else
