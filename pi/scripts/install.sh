@@ -481,6 +481,156 @@ For any non-trivial coding task, the first 2 actions should be:
 2. `mcp_find_symbol` on the target identifier — locate before editing.
 
 Skipping these steps "to save time" always costs more time than it saves.
+
+## 8. Proactive Component Loading (CRITICAL)
+
+**Default behavior**: Before using a tool that depends on an external component, ENSURE the component is loaded. Do not call a tool that returns "not connected" / "not initialized" / "no results" and then give up — initialize the dependency and retry. This applies to MCP servers, code indexes, LSP file opens, and skill lookups.
+
+### What needs pre-loading
+
+| Tool you plan to use | Component to load | Pre-load action |
+|----------------------|-------------------|-----------------|
+| `mcp_find_symbol`, `mcp_replace_symbol_body`, `mcp_read_file`, etc. | serena MCP server (lazy: cold-start ~3–5s on first call) | `mcp({ connect: "serena" })` |
+| Any `mcp_*` tool you haven't used yet in this session | The corresponding MCP server | `mcp({})` to list servers, then `mcp({ connect: <name> })` |
+| `codebase_search`, `codebase_refs` | Codebase index (built once, refreshed on file changes) | `codebase_index` (slow first time, ~5–60s depending on repo size) |
+| `codebase_search` returning stale/missing results | Outdated index | `codebase_update` (re-index) |
+| `mcp_*` symbol ops on a TypeScript/Python file (deep LSP features) | The target file must be "open" in the LSP server | `mcp_read_file({ relative_path })` to register the file before symbol ops |
+| Any skill listed in `[Skills]` (e.g. `serena`, `codebase`, `graphify`) | Skill's full guidance | Already auto-injected — re-read if you forgot the decision tree |
+
+### Self-healing on tool failure
+
+When a tool returns ANY of:
+- `"not connected"` / `"not initialized"` / `"not loaded"`
+- Empty result with a hint that something needs initialization
+- `"index not found"` / `"no such project"` / `"file not open"`
+- Slow first call (cold-start)
+
+Then **do not give up and fall back to text tools**. Instead:
+
+1. **Read the error message carefully** — it usually names the missing component.
+2. **Pre-load the component** (see table above).
+3. **Retry the original tool call** up to 2 times.
+4. Only THEN consider text-based fallback (and document why in the response).
+
+### Concrete wrong-vs-right
+
+❌ Wrong (give up after first error):
+```ts
+const r = await mcp_find_symbol({ name_path: "executeTask" });
+// → "Error: serena MCP not connected"
+// Agent: "OK, let me grep instead"
+// const m = await bash({ command: `grep -rn "executeTask" src/` });
+```
+
+✅ Right (recover by initializing):
+```ts
+// Detect missing component from first error
+await mcp({ connect: "serena" });     // ~3-5s cold start, ONE time
+// Retry — now it works
+const r = await mcp_find_symbol({ name_path: "executeTask", depth: 0 });
+```
+
+❌ Wrong (use unindexed codebase):
+```ts
+const hits = await codebase_search({ query: "executeTask" });
+// → [] (index is stale or empty)
+// Agent: "No results, giving up"
+```
+
+✅ Right (rebuild index first):
+```ts
+await codebase_index();             // ~30s on large repos, ONE time per project
+const hits = await codebase_search({ query: "executeTask" });
+```
+
+### Proactive vs reactive decision matrix
+
+| Trigger | Action |
+|---------|--------|
+| First `mcp_*` call in this session | Connect first (`mcp({ connect: "serena" })`) |
+| `mcp_*` returns "not connected" | Connect + retry |
+| `codebase_*` returns 0 results | Index + retry |
+| `codebase_*` returns stale data (file changed since index) | Update + retry |
+| Symbol not found at expected `name_path` | `mcp_get_symbols_overview` on parent to discover structure |
+| Skill loaded but you forgot details | Re-read its `SKILL.md` (path in the [Skills] prompt section) |
+| Multiple MCP servers configured but you don't know which has what | `mcp({})` first to list all servers + their tool counts |
+| `mcp_*` fails with "language server not found" / "LSP not available" | See **Language-Specific LSP Initialization** below |
+
+### Language-Specific LSP Initialization
+
+When serena returns errors like `"language server gopls not found"`, `"no LSP for python"`, `"LSP not installed"`, or symbol ops return empty on a project that clearly has the language — the missing piece is the **per-language LSP server**, not the serena MCP itself. serena delegates semantic analysis to external LSP servers.
+
+#### LSP server matrix
+
+| Language | Detect via | LSP server | Install command (Linux) | Verify |
+|----------|-----------|-------------|------------------------|--------|
+| **Go** | `go.mod` | `gopls` | `go install golang.org/x/tools/gopls@latest` | `gopls version` |
+| **TypeScript / JavaScript** | `tsconfig.json` / `package.json` | `typescript-language-server` | `npm install -g typescript-language-server typescript` | `typescript-language-server --version` |
+| **Python** | `pyproject.toml` / `setup.py` | `pylsp` or `pyright` | `pip install python-lsp-server[all]` OR `pip install pyright` | `pylsp --help` OR `pyright --version` |
+| **Rust** | `Cargo.toml` | `rust-analyzer` | `rustup component add rust-analyzer` | `rust-analyzer --version` |
+| **Java** | `pom.xml` / `build.gradle` | `jdtls` | Manual download from `https://download.eclipse.org/jdtls/snapshots/` | `java -jar jdtls.jar` |
+| **C / C++** | `compile_commands.json` / `CMakeLists.txt` | `clangd` | `apt install clangd` (Debian/Ubuntu) | `clangd --version` |
+| **C#** | `*.csproj` | `csharp-ls` | `dotnet tool install -g csharp-ls` | `csharp-ls --help` |
+| **PHP** | `composer.json` | `phpactor` | `composer global require phpactor/phpactor` | `phpactor --version` |
+| **Ruby** | `Gemfile` | `solargraph` | `gem install solargraph` | `solargraph --version` |
+
+#### Recovery pattern (LSP missing)
+
+When `mcp_find_symbol` (or any symbol-level op) fails on a project with a known language:
+
+```
+1. DETECT language
+   ls <project_root> for go.mod / package.json / pyproject.toml / Cargo.toml / etc.
+
+2. CHECK if LSP exists
+   which <lsp>   # e.g. which gopls, which typescript-language-server
+   <lsp> --version
+
+3. INSTALL if missing
+   <install command from table above>
+   If install fails (e.g., missing system deps), surface the error and ASK the user
+   before falling back to text tools.
+
+4. VERIFY
+   <lsp> --version   # confirm binary is now in PATH
+
+5. RETRY the original mcp_* call
+   The LSP server needs a moment to index the project; first call may be slow.
+```
+
+#### Concrete example: Go project
+
+❌ Wrong (agent gives up after first failure):
+```ts
+const r = await mcp_find_symbol({ name_path: "executeTask", relative_path: "src/main.go" });
+// → "language server gopls not available"
+// Agent: "Let me grep instead"
+// const m = await bash({ command: `grep -n "func executeTask" .` });
+```
+
+✅ Right (detect → install → verify → retry):
+```ts
+// 1. Detect language
+const hasGo = await bash({ command: `test -f go.mod && echo yes || echo no` });
+// 2. Check LSP
+const hasGopls = await bash({ command: `which gopls` });
+if (!hasGopls) {
+  // 3. Install (assumes Go toolchain is installed)
+  await bash({ command: `go install golang.org/x/tools/gopls@latest` });
+  // 4. Verify
+  const ver = await bash({ command: `gopls version` });
+}
+// 5. Retry (first call after install may be slow while LSP indexes the project)
+const r = await mcp_find_symbol({ name_path: "executeTask", relative_path: "src/main.go" });
+```
+
+#### Why this matters
+
+- `mcp_find_symbol` on a Go project without `gopls` returns empty or errors — looks like the project has no symbols.
+- Falling back to `grep` finds the function but loses type info, reference graph, call hierarchy.
+- The cost of installing `gopls` is one `go install` (5-30s) and is amortized over the entire session.
+- LSP gives semantic understanding that grep cannot match.
+
 EOF
 
   echo "  Installed SYSTEM.md"
