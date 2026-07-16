@@ -25,23 +25,23 @@ const WORKSPACE_DIR = ".sages/workspace";
  */
 function validateReviewPrerequisite(cwd: string): { valid: boolean; score: number; message?: string } {
   const statePath = join(cwd, WORKSPACE_DIR, "state.json");
-  
+
   if (!existsSync(statePath)) {
     return { valid: false, score: 0, message: "No workflow state found. Run qiaochui_review first." };
   }
-  
+
   try {
     const content = readFileSync(statePath, "utf-8");
     const state = JSON.parse(content);
-    
-    if (!state.score) {
+
+    if (typeof state.score !== "number") {
       return { valid: false, score: 0, message: "No review score found. Run qiaochui_review first." };
     }
-    
-    if (state.score <= 80) {
-      return { valid: false, score: state.score, message: `Score ${state.score} is not > 80. Review must be approved (score > 80) before decomposition.` };
+
+    if (state.score < 80) {
+      return { valid: false, score: state.score, message: `Score ${state.score} is below 80. Review must be approved (score >= 80) before decomposition.` };
     }
-    
+
     return { valid: true, score: state.score };
   } catch {
     return { valid: false, score: 0, message: "Failed to read workflow state." };
@@ -120,16 +120,26 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
   /**
    * qiaochui_review - Review draft for technical feasibility
    * Review Mode (Read-Only): Only read draft.md
-   * 
-   * Process: Validate structure → Analyze MDD planes → Identify risks → Calculate score
-   * Score thresholds: >80 APPROVED, 50-80 REVISE, <50 REJECTED
+   *
+   * Two modes:
+   *   - Without observation: returns heuristic hints + semantic-tool guidance.
+   *     The LLM reads the draft using serena_read_file / graphify_query,
+   *     computes a score against the 5 dimensions, and re-calls with observation.
+   *   - With observation {score, notes?}: validates the score, computes verdict,
+   *     persists state.score to state.json. Returns verdict + can_start_plan.
+   *
+   * Score thresholds: >=80 APPROVED, 50-79 REVISE, <50 REJECTED
    */
   pi.registerTool({
     name: "qiaochui_review",
     label: "Review Draft",
-    description: "Review draft for technical feasibility (MDD-aligned plane review). Validates structure, analyzes planes, identifies risks, calculates score (0-100). Verdict: APPROVED/REVISE/REJECTED.",
+    description: "Review draft for technical feasibility. Without observation: returns heuristic hints + semantic-tool guidance for the LLM to score the draft. With observation {score, notes?}: persists score to state.json and returns verdict (APPROVED/REVISE/REJECTED). Threshold: >=80 APPROVED. Replaces the old qiaochui_review + fuxi_update_score two-step.",
     parameters: Type.Object({
       draft_path: Type.Optional(Type.String({ description: "Path to draft.md (default: .sages/workspace/draft.md)" })),
+      observation: Type.Optional(Type.Object({
+        score: Type.Number({ description: "LLM-assessed score (0-100)" }),
+        notes: Type.Optional(Type.String({ description: "Optional review notes" })),
+      }, { description: "Score observation (LLM's final assessment)" })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const cwd = ctx.cwd;
@@ -140,50 +150,101 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
         // Validate path to prevent traversal
         if (!fileService.validatePath(draft_filename)) {
           return {
-            content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: `Invalid path: ${draft_filename}` } }) }],
+            content: [{ type: "text", text: JSON.stringify({
+              status: "error",
+              error: `Invalid path: ${draft_filename}`,
+            }) }],
             isError: true,
             details: { draft_filename },
           };
         }
 
-        // Use FileService for safe file reading
         const content = fileService.read(draft_filename);
-        
         if (!content) {
           return {
-            content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: `Draft not found: ${draft_filename}` } }) }],
+            content: [{ type: "text", text: JSON.stringify({
+              status: "error",
+              error: `Draft not found: ${draft_filename}`,
+            }) }],
             isError: true,
             details: { draft_filename },
           };
         }
 
-        // Perform deep MDD-aligned plane review
-        const deepResult = performDeepReview(content);
+        // ── Observation path: validate + persist score ─────────────────
+        if (params.observation) {
+          const score = params.observation.score;
+          if (typeof score !== "number" || score < 0 || score > 100) {
+            return {
+              content: [{ type: "text", text: JSON.stringify({
+                status: "error",
+                error: `Score must be a number in range 0-100, got: ${params.observation.score}`,
+              }) }],
+              isError: true,
+              details: { score: params.observation.score },
+            };
+          }
 
-        // Generate detailed feasibility report
+          let verdict: "APPROVED" | "REVISE" | "REJECTED";
+          if (score >= 80) verdict = "APPROVED";
+          else if (score >= 50) verdict = "REVISE";
+          else verdict = "REJECTED";
+
+          // Persist to state.json via FileService.
+          const existing = fileService.readJson<Record<string, unknown>>("state.json") || {};
+          existing.score = score;
+          if (params.observation.notes) existing.reviewNotes = params.observation.notes;
+          fileService.writeJson("state.json", existing);
+
+          return {
+            content: [{ type: "text", text: JSON.stringify({
+              status: "complete",
+              score,
+              verdict,
+              can_start_plan: score >= 80,
+              state_persisted: true,
+              summary: `Review complete: ${verdict} (${score}). Plan can start: ${score > 80}.`,
+            }) }],
+            details: { score, verdict, persisted_to: "state.json" },
+          };
+        }
+
+        // ── No observation: return heuristic hints + guidance ──────────
+        const deepResult = performDeepReview(content);
         const feasibilityReport = generateDeepFeasibilityReport(deepResult);
 
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
-              success: true,
-              verdict: deepResult.overallStatus,
-              score: deepResult.score,
-              implementationComplexity: deepResult.implementationComplexity,
-              estimatedHours: deepResult.estimatedHours,
-              planeCount: deepResult.planeAssessments.length,
-              blockers: deepResult.blockers.length,
-              recommendations: deepResult.recommendations.slice(0, 5),
-              feasibilityReport,
+              status: "in_progress",
+              intent: "Read draft.md using semantic tools (serena_read_file, graphify_query) to assess the 5 dimensions below. Then call qiaochui_review with observation {score, notes?} to persist the score.",
+              validation: {
+                dimensions: [
+                  { name: "completeness", weight: 25, description: "All 7 MDD planes covered?" },
+                  { name: "clarity", weight: 20, description: "Writing clear? Examples concrete?" },
+                  { name: "feasibility", weight: 25, description: "Technical approach implementable? Dependencies clear?" },
+                  { name: "testability", weight: 15, description: "Success path defined? Error handling concrete?" },
+                  { name: "boundaries", weight: 15, description: "Out-of-scope clear? Limits stated?" },
+                ],
+                pass_threshold: 80,
+                draft_path: draft_filename,
+              },
+              heuristic_hints: {
+                heuristic_score: deepResult.score,
+                heuristic_verdict: deepResult.overallStatus,
+                plane_count: deepResult.planeAssessments.length,
+                blockers: deepResult.blockers.length,
+                top_recommendations: deepResult.recommendations.slice(0, 5),
+              },
             }),
           }],
-          details: { draft_filename, ...deepResult },
+          details: { draft_filename, deep_result: deepResult, feasibilityReport },
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: msg } }) }],
+          content: [{ type: "text", text: JSON.stringify({ status: "error", error: msg }) }],
           isError: true,
           details: { error: msg },
         };
@@ -218,17 +279,23 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
         // Validate path to prevent traversal
         if (!fileService.validatePath(draft_filename)) {
           return {
-            content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: `Invalid path: ${draft_filename}` } }) }],
+            content: [{ type: "text", text: JSON.stringify({
+              status: "error",
+              error: `Invalid path: ${draft_filename}`,
+            }) }],
             isError: true,
             details: { draft_filename },
           };
         }
 
-        // Validate review prerequisite: score must be > 80
+        // Validate review prerequisite: score must be >= 80
         const reviewValidation = validateReviewPrerequisite(cwd);
         if (!reviewValidation.valid) {
           return {
-            content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: reviewValidation.message } }) }],
+            content: [{ type: "text", text: JSON.stringify({
+              status: "error",
+              error: reviewValidation.message || "Review prerequisite failed",
+            }) }],
             isError: true,
             details: { score: reviewValidation.score },
           };
@@ -236,7 +303,7 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
 
         // Read draft content
         const content = fileService.read(draft_filename);
-        
+
         if (!content) {
           return {
             content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: `Draft not found: ${draft_filename}` } }) }],

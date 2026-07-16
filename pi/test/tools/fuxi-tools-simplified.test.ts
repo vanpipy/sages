@@ -197,7 +197,7 @@ describe("fuxi_design", () => {
       expect(payload.auto_advanced).toBe(true);
     });
 
-    it("observation {score: 80} is REJECTED (must be > 80, off-by-one)", async () => {
+    it("observation {score: 80} advances to plan (boundary, >= 80 passes)", async () => {
       await advanceToReview();
 
       const result = await pi.call(
@@ -206,9 +206,11 @@ describe("fuxi_design", () => {
         cwd,
       );
 
-      expect(result.isError).toBe(true);
+      expect(result.isError).toBeFalsy();
       const payload = JSON.parse(result.content[0].text);
-      expect(payload.error).toContain("80");
+      expect(payload.status).toBe("in_progress");
+      expect(payload.phase).toBe("plan");
+      expect(payload.auto_advanced).toBe(true);
     });
 
     it("observation {score: 50} is rejected (too low)", async () => {

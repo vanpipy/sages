@@ -289,11 +289,11 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
             details: { phase: obs.phase },
           };
         }
-        if (obs.score <= 80) {
+        if (obs.score < 80) {
           return {
             content: [{ type: "text", text: JSON.stringify({
               status: "error",
-              error: `Score ${obs.score} is not > 80. Plan can only start when score > 80.`,
+              error: `Score ${obs.score} is below 80. Plan can only start when score >= 80.`,
             }) }],
             isError: true,
             details: { score: obs.score },
