@@ -2,315 +2,584 @@
  * LuBan Tools - TDD Task Execution
  *
  * Part of: src/tools/luban/
- * Purpose: Execute tasks with TDD methodology (RED → GREEN → REFACTOR)
  *
- * Architecture (post-batch-refactor):
- * - luban_execute_task: Single task execution (direct or subagent mode)
- * - luban_execute_batch: Execute a batch of tasks from execution.yaml
- *   with optimistic concurrency + automatic serial degrade on conflicts (KD-2).
+ * Simplified surface (per the simplify-actions principle):
+ *   - luban_execute_task: single task, observe cycle (RED → GREEN → REFACTOR → complete)
+ *   - luban_run_batch: planner — reads execution.yaml, returns ordered plan + first contract
  *
- * Notes:
- * - `luban_execute_all` was removed (KD-1: no alias for backward compat).
- * - The caller (qiaochui / agent) is responsible for batch composition;
- *   LuBan executes each batch as an atomic unit (KD-3 black-box contract).
+ * Removed:
+ *   - luban_get_status (status returned in every execute_task response)
+ *   - luban_execute_all (already removed)
+ *   - luban_execute_batch (renamed to luban_run_batch; old name kept as deprecated stub)
+ *
+ * The LLM does the actual implementation via semantic tools
+ * (serena_replace_symbol_body, serena_create_text_file, etc.).
+ * LuBan validates test outcomes and auto-advances phases.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { FileService } from "../../services/file-service.js";
 import { parseExecutionYaml } from "./plan-parser.js";
-import { runTask } from "./task-runner.js";
-import { runBatch } from "./scheduler.js";
-import { deriveTestFiles } from "./conflict-detector.js";
-import type { Batch, BatchResult, TDDConfig, TaskResult } from "./types.js";
+import { detectFileConflicts, deriveTestFiles } from "./conflict-detector.js";
+import { runTests, validateScope, TDD_GUIDE } from "./task-runner.js";
+import type { LubanTask, TDDPhase } from "./types.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
+const TASK_STATE_FILE = ".luban-task-state.json";
 
 interface ToolContext {
   cwd: string;
   fileService: FileService;
 }
 
-/**
- * Create tool context
- */
-function createContext(cwd: string): ToolContext {
-  return {
-    cwd,
-    fileService: new FileService(cwd, WORKSPACE_DIR),
-  };
-}
+// ============================================================================
+// TaskStateManager — per-task state in .sages/workspace/.luban-task-state.json
+// ============================================================================
 
-/**
- * Execute a single task with TDD
- */
-async function executeTask(params: {
+type PhaseName = TDDPhase | "COMPLETE";
+
+interface TaskState {
   task_id: string;
   task_description: string;
   files: string[];
+  test_files: string[];
+  test_command: string;
+  current_phase: PhaseName;
+  history: Array<{
+    phase: PhaseName;
+    test_outcome: "pass" | "fail";
+    observed_at: string;
+  }>;
+  created_at: string;
+  updated_at: string;
+}
+
+class TaskStateManager {
+  private readonly cwd: string;
+  private readonly fileService: FileService;
+
+  constructor(cwd: string) {
+    this.cwd = cwd;
+    this.fileService = new FileService(cwd, WORKSPACE_DIR);
+  }
+
+  private statePath(): string {
+    return join(this.cwd, WORKSPACE_DIR, TASK_STATE_FILE);
+  }
+
+  private readAll(): Record<string, TaskState> {
+    const content = this.fileService.read(TASK_STATE_FILE);
+    if (!content) return {};
+    try {
+      return JSON.parse(content) as Record<string, TaskState>;
+    } catch {
+      return {};
+    }
+  }
+
+  private writeAll(states: Record<string, TaskState>): void {
+    const path = this.statePath();
+    if (!existsSync(path)) {
+      mkdirSync(join(path, ".."), { recursive: true });
+    }
+    writeFileSync(path, JSON.stringify(states, null, 2), "utf-8");
+  }
+
+  load(task_id: string): TaskState | null {
+    const all = this.readAll();
+    return all[task_id] ?? null;
+  }
+
+  save(state: TaskState): void {
+    const all = this.readAll();
+    state.updated_at = new Date().toISOString();
+    all[state.task_id] = state;
+    this.writeAll(all);
+  }
+
+  delete(task_id: string): void {
+    const all = this.readAll();
+    delete all[task_id];
+    this.writeAll(all);
+  }
+}
+
+// ============================================================================
+// Phase progression
+// ============================================================================
+
+const PHASE_ORDER: PhaseName[] = ["RED", "GREEN", "REFACTOR", "COMPLETE"];
+
+function nextPhase(current: PhaseName): PhaseName {
+  const idx = PHASE_ORDER.indexOf(current);
+  return PHASE_ORDER[idx + 1] ?? "COMPLETE";
+}
+
+function buildIntent(phase: PhaseName, task_description: string, files: string[], test_files: string[]): string {
+  if (phase === "RED") {
+    return `Write a failing test that exercises: "${task_description}". Use semantic tools (serena_create_text_file or serena_replace_symbol_body) to write the test file at ${test_files.join(", ")}. Run the test command and confirm it fails before re-calling.`;
+  }
+  if (phase === "GREEN") {
+    return `Make the test pass with a minimal implementation. Use semantic tools (serena_find_symbol, serena_replace_symbol_body, serena_insert_after_symbol) to implement in ${files.join(", ")}. Run the test command and confirm it passes before re-calling.`;
+  }
+  if (phase === "REFACTOR") {
+    return `Improve the code in ${files.join(", ")} without breaking the test. Use semantic tools to check for impact (serena_find_referencing_symbols, graphify_get_neighbors). Run the test command and confirm it still passes before re-calling.`;
+  }
+  return `Task complete.`;
+}
+
+function buildValidation(phase: PhaseName, state: TaskState): Record<string, unknown> {
+  return {
+    test_command: state.test_command,
+    expected_outcome: phase === "RED" ? "fail" : "pass",
+    files_required: phase === "RED" ? state.test_files : state.files,
+    current_phase: phase,
+  };
+}
+
+// ============================================================================
+// luban_execute_task — observe cycle
+// ============================================================================
+
+async function executeTask(params: {
+  task_id: string;
+  task_description?: string;
+  files?: string[];
   test_files?: string[];
   test_command?: string;
-  subagent?: boolean;
-}, ctx: ToolContext): Promise<{ success: boolean; result: TaskResult }> {
+  deny_files?: string[];
+  observation?: {
+    phase: "RED" | "GREEN" | "REFACTOR";
+    test_outcome: "pass" | "fail";
+    files_changed?: string[];
+  };
+}, ctx: ToolContext): Promise<{ content: any[]; details?: unknown; isError?: boolean }> {
   const {
     task_id,
     task_description,
-    files,
-    test_files = deriveTestFiles(files),
-    test_command = "bun test",
-    subagent = false
+    files = [],
+    test_files,
+    test_command,
+    deny_files = [],
+    observation,
   } = params;
 
-  try {
-    // Build TDD config
-    const config: TDDConfig = {
-      taskId: task_id,
-      taskDescription: task_description,
+  const stateManager = new TaskStateManager(ctx.cwd);
+  const effectiveTestFiles = test_files ?? deriveTestFiles(files);
+
+  // ── Scope guard (only on init, before any state is created) ───────────
+  if (!observation) {
+    const scope = validateScope({
       sourceFiles: files,
-      testFiles: test_files,
-      testCommand: test_command,
-      cwd: ctx.cwd,
-      subagent,
-    };
-
-    // Execute task
-    const result = await runTask(config);
-    
-    return { success: result.success, result };
-  } catch (error) {
-    return {
-      success: false,
-      result: {
-        taskId: task_id,
-        success: false,
-        duration: 0,
-        phases: [{
-          name: "RED",
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error)
-        }]
-      }
-    };
-  }
-}
-
-/**
- * Execute a batch of tasks from execution.yaml.
- *
- * Reads `execution.yaml` (default: <workspace>/execution.yaml), parses it
- * into a Batch, and runs via scheduler.ts runBatch.
- *
- * Returns BatchResult (full structure) — the tool layer surfaces a summary
- * to the agent in content.text and the full result in details (KD-3).
- */
-async function executeBatch(params: {
-  execution_yaml?: string;
-  max_parallel?: number;
-  subagent?: boolean;
-}, ctx: ToolContext): Promise<BatchResult> {
-  const {
-    execution_yaml,
-    max_parallel = 3,
-    subagent: _subagent = false,  // reserved; currently no-op
-  } = params;
-
-  try {
-    const yamlPath = execution_yaml || ctx.fileService.getFilePath("execution.yaml");
-    const content = ctx.fileService.read(yamlPath);
-
-    const emptyResult = (): BatchResult => ({
-      success: false,
-      mode: "serial",
-      degraded: false,
-      results: [],
-      completed: [],
-      totalDuration: 0,
+      testFiles: effectiveTestFiles,
+      denyFiles: deny_files,
     });
+    if (!scope.ok) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "error",
+          error: scope.message,
+          violations: scope.violations,
+        }) }],
+        isError: true,
+        details: { violations: scope.violations },
+      };
+    }
+  }
 
-    if (!content) return emptyResult();
+  // ── Observation path: validate, advance ────────────────────────────────
+  if (observation) {
+    const state = stateManager.load(task_id);
+    if (!state) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "error",
+          error: `Task '${task_id}' is not initialized. Call luban_execute_task without observation first.`,
+        }) }],
+        isError: true,
+        details: { task_id },
+      };
+    }
 
-    const plan = parseExecutionYaml(content);
-    if (!plan) return emptyResult();
+    if (observation.phase !== state.current_phase) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "error",
+          error: `Phase mismatch: task '${task_id}' is in '${state.current_phase}', got observation for '${observation.phase}'.`,
+          current_phase: state.current_phase,
+          observation_phase: observation.phase,
+        }) }],
+        isError: true,
+        details: { expected: state.current_phase, got: observation.phase },
+      };
+    }
 
-    const batch: Batch = {
-      tasks: plan.tasks,
-      maxParallel: max_parallel,
-      testCommand: "bun test",
-      cwd: ctx.cwd,
-    };
+    // Re-run test command to verify the LLM's claim.
+    const result = runTests({ testCommand: state.test_command, cwd: ctx.cwd });
 
-    return await runBatch(batch);
-  } catch (error) {
+    const observedPass = observation.test_outcome === "pass";
+    const observedFail = observation.test_outcome === "fail";
+
+    if (state.current_phase === "RED") {
+      if (!observedFail) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: TDD_GUIDE.formatError("RED", "RED phase requires the test to FAIL. Write a test that exercises the missing behavior."),
+          }) }],
+          isError: true,
+          details: { exitCode: result.exitCode, passed: result.passed, failed: result.failed },
+        };
+      }
+      // Sanity-check via actual test run.
+      if (result.exitCode === 0 && result.passed > 0 && result.failed === 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: TDD_GUIDE.formatError("RED", "Test passed without implementation. Write a test that fails first."),
+          }) }],
+          isError: true,
+          details: { exitCode: result.exitCode, passed: result.passed, failed: result.failed },
+        };
+      }
+    } else if (state.current_phase === "GREEN") {
+      if (!observedPass) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: TDD_GUIDE.formatError("GREEN", "GREEN phase requires the test to PASS. Implement the missing behavior."),
+          }) }],
+          isError: true,
+          details: { exitCode: result.exitCode, passed: result.passed, failed: result.failed },
+        };
+      }
+      if (result.failed > 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: TDD_GUIDE.formatError("GREEN", `${result.failed} tests still failing`),
+            exit_code: result.exitCode,
+            failed_count: result.failed,
+          }) }],
+          isError: true,
+          details: { exitCode: result.exitCode, passed: result.passed, failed: result.failed },
+        };
+      }
+    } else if (state.current_phase === "REFACTOR") {
+      if (!observedPass) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: TDD_GUIDE.formatError("REFACTOR", "REFACTOR phase requires the test to STILL PASS. Behavior must not change."),
+          }) }],
+          isError: true,
+          details: { exitCode: result.exitCode, passed: result.passed, failed: result.failed },
+        };
+      }
+      if (result.failed > 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: TDD_GUIDE.formatError("REFACTOR", `Refactoring broke ${result.failed} tests`),
+            exit_code: result.exitCode,
+            failed_count: result.failed,
+          }) }],
+          isError: true,
+          details: { exitCode: result.exitCode, passed: result.passed, failed: result.failed },
+        };
+      }
+    }
+
+    // Advance phase.
+    state.history.push({
+      phase: state.current_phase,
+      test_outcome: observation.test_outcome,
+      observed_at: new Date().toISOString(),
+    });
+    const next = nextPhase(state.current_phase);
+    state.current_phase = next;
+
+    if (next === "COMPLETE") {
+      const completed: TaskState = { ...state, current_phase: "COMPLETE" };
+      stateManager.delete(task_id);
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "complete",
+          task_id: completed.task_id,
+          phases: ["RED", "GREEN", "REFACTOR"],
+          history: completed.history,
+          summary: `Task '${completed.task_id}' complete: ${completed.task_description}`,
+        }) }],
+        details: { task: completed },
+      };
+    }
+
+    stateManager.save(state);
     return {
-      success: false,
-      mode: "serial",
-      degraded: false,
-      results: [],
-      completed: [],
-      totalDuration: 0,
+      content: [{ type: "text", text: JSON.stringify({
+        status: "in_progress",
+        task_id: state.task_id,
+        phase: state.current_phase,
+        intent: buildIntent(state.current_phase, state.task_description, state.files, state.test_files),
+        validation: buildValidation(state.current_phase, state),
+        auto_advanced: true,
+        last_observation: observation,
+      }) }],
+      details: { state, last_observation: observation },
     };
   }
-}
 
-/**
- * Get execution status
- */
-async function getStatus(planName: string, ctx: ToolContext): Promise<{ 
-  status: string; 
-  total: number; 
-  completed: string[];
-  failed: string[];
-}> {
-  try {
-    const workspacePath = ctx.fileService.getWorkspacePath();
-    const executionPath = ctx.fileService.getFilePath("execution.yaml");
-    
-    if (!ctx.fileService.exists("plan.md") || !ctx.fileService.exists("execution.yaml")) {
-      return { status: "no_workflow", total: 0, completed: [], failed: [] };
+  // ── Init path: create or continue ──────────────────────────────────────
+  let state = stateManager.load(task_id);
+  if (!state) {
+    if (!task_description || !files || !test_command) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "error",
+          error: "First call requires: task_id, task_description, files, test_command (test_files optional, defaults to derive from files).",
+        }) }],
+        isError: true,
+        details: { task_id },
+      };
     }
 
-    const content = ctx.fileService.read("execution.yaml");
-    if (!content) {
-      return { status: "invalid_plan", total: 0, completed: [], failed: [] };
-    }
-    
-    const plan = parseExecutionYaml(content);
-    
-    if (!plan) {
-      return { status: "invalid_plan", total: 0, completed: [], failed: [] };
-    }
+    state = {
+      task_id,
+      task_description,
+      files,
+      test_files: effectiveTestFiles,
+      test_command,
+      current_phase: "RED",
+      history: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    stateManager.save(state);
+  }
 
-    return {
+  return {
+    content: [{ type: "text", text: JSON.stringify({
       status: "in_progress",
-      total: plan.tasks.length,
-      completed: [],
-      failed: []
+      task_id: state.task_id,
+      phase: state.current_phase,
+      intent: buildIntent(state.current_phase, state.task_description, state.files, state.test_files),
+      validation: buildValidation(state.current_phase, state),
+      auto_advanced: false,
+      history: state.history,
+    }) }],
+    details: { state },
+  };
+}
+
+// ============================================================================
+// luban_run_batch — planner
+// ============================================================================
+
+async function runBatchPlanner(params: {
+  execution_yaml?: string;
+}, ctx: ToolContext): Promise<{ content: any[]; details?: unknown; isError?: boolean }> {
+  const path = params.execution_yaml || join(ctx.cwd, WORKSPACE_DIR, "execution.yaml");
+
+  if (!existsSync(path)) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        error: `execution.yaml not found at: ${path}`,
+      }) }],
+      isError: true,
+      details: { path },
     };
-  } catch {
-    return { status: "error", total: 0, completed: [], failed: [] };
+  }
+
+  try {
+    const content = readFileSync(path, "utf-8");
+    const plan = parseExecutionYaml(content);
+    if (!plan) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "error",
+          error: "Failed to parse execution.yaml",
+        }) }],
+        isError: true,
+        details: { path },
+      };
+    }
+
+    const conflictReport = detectFileConflicts(plan.tasks);
+    const executionOrder = plan.tasks.map((t) => t.id); // plan-parser already sorts topologically
+    const layers: string[][] = [];
+    const remaining = new Set(plan.tasks.map((t) => t.id));
+    const completed = new Set<string>();
+    while (remaining.size > 0) {
+      const layer: string[] = [];
+      for (const task of plan.tasks) {
+        if (!remaining.has(task.id)) continue;
+        if (task.dependsOn.every((d) => completed.has(d))) {
+          layer.push(task.id);
+        }
+      }
+      if (layer.length === 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: "Circular dependency detected in execution.yaml",
+            remaining: [...remaining],
+          }) }],
+          isError: true,
+          details: { remaining: [...remaining] },
+        };
+      }
+      for (const id of layer) {
+        remaining.delete(id);
+        completed.add(id);
+      }
+      layers.push(layer);
+    }
+
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "in_progress",
+        plan: {
+          name: plan.name,
+          task_ids: plan.tasks.map((t) => t.id),
+          execution_order: executionOrder,
+          layers,
+          conflicts: conflictReport.conflicts,
+          max_parallel: plan.settings.maxParallel,
+        },
+        next_action: "Iterate: call luban_execute_task for each task in execution_order, advancing through RED → GREEN → REFACTOR → complete.",
+      }) }],
+      details: { plan, conflicts: conflictReport },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        error: `Failed to read execution.yaml: ${msg}`,
+      }) }],
+      isError: true,
+      details: { error: msg },
+    };
   }
 }
 
-/**
- * Register LuBan tools with pi extension
- */
+// ============================================================================
+// Tool registration
+// ============================================================================
+
 export function registerLubanTools(pi: ExtensionAPI): void {
 
-  /**
-   * luban_execute_task - Execute a single task using TDD methodology
-   */
+  // ─── luban_execute_task ────────────────────────────────────────────────
   pi.registerTool({
     name: "luban_execute_task",
     label: "Execute Task (TDD)",
-    description: "Execute a single task using TDD methodology (RED → GREEN → REFACTOR). Writes test first, then minimal code. Auto-commits after success.",
+    description: "Execute a single task with TDD methodology (RED → GREEN → REFACTOR). The LLM does the actual implementation via semantic tools (serena_replace_symbol_body, etc.); this tool validates test outcomes and auto-advances phases. First call: returns contract for current phase. Subsequent calls with `observation`: validate and advance.",
     parameters: Type.Object({
       task_id: Type.String({ description: "Task ID (e.g., T1, T2)" }),
-      task_description: Type.String({ description: "Task description" }),
-      files: Type.Array(Type.String(), { description: "Source files to work on" }),
-      test_files: Type.Optional(Type.Array(Type.String(), { description: "Test files to create" })),
+      task_description: Type.Optional(Type.String({ description: "Task description (required on first call)" })),
+      files: Type.Optional(Type.Array(Type.String(), { description: "Source files the task will touch (required on first call)" })),
+      test_files: Type.Optional(Type.Array(Type.String(), { description: "Test files (optional, defaults to files with .test.ts suffix)" })),
       test_command: Type.Optional(Type.String({ description: "Test command to run (default: bun test)" })),
-      subagent: Type.Optional(Type.Boolean({ description: "Use subagent mode (default: false)" })),
+      deny_files: Type.Optional(Type.Array(Type.String(), { description: "Files that must NOT be touched (scope guard)" })),
+      observation: Type.Optional(Type.Object({
+        phase: Type.Union([
+          Type.Literal("RED"),
+          Type.Literal("GREEN"),
+          Type.Literal("REFACTOR"),
+        ], { description: "Phase being observed" }),
+        test_outcome: Type.Union([
+          Type.Literal("pass"),
+          Type.Literal("fail"),
+        ], { description: "Observed test outcome" }),
+        files_changed: Type.Optional(Type.Array(Type.String(), { description: "Files changed since last call" })),
+      }, { description: "Observation of work done (drives auto-advance)" })),
     }),
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const context = createContext(ctx.cwd);
-      
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      const fileService = new FileService(ctx.cwd, WORKSPACE_DIR);
+      const toolCtx: ToolContext = { cwd: ctx.cwd, fileService };
+
       const result = await executeTask({
         task_id: params.task_id,
         task_description: params.task_description,
         files: params.files,
         test_files: params.test_files,
         test_command: params.test_command,
-        subagent: params.subagent,
-      }, context);
+        deny_files: params.deny_files,
+        observation: params.observation,
+      }, toolCtx);
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: result.success,
-            taskId: result.result.taskId,
-            phases: result.result.phases,
-            duration: result.result.duration,
-          }),
-        }],
-        details: result.result,
+        content: result.content,
+        details: result.details,
+        isError: result.isError,
       };
     },
   });
 
-  /**
-   * luban_execute_batch - Execute a batch of tasks atomically.
-   *
-   * Reads execution.yaml (default: <workspace>/execution.yaml), parses into
-   * a Batch, and runs via runBatch with optimistic concurrency + auto-degrade
-   * to serial on intra-batch file conflicts (KD-2).
-   *
-   * Black-box contract (KD-3): content.text carries summary
-   * {success, mode, degraded, conflicts?, completed, totalDuration}; full
-   * BatchResult with per-task phase details is in the `details` field for
-   * GaoYao audit / debug — not surfaced to the agent.
-   */
+  // ─── luban_run_batch ───────────────────────────────────────────────────
   pi.registerTool({
-    name: "luban_execute_batch",
-    label: "Execute Batch (TDD)",
-    description: "Execute a batch of tasks from execution.yaml with optimistic concurrency and automatic serial degrade on file conflicts. Caller (qiaochui/agent) is responsible for batch composition. Returns BatchResult with mode (parallel|serial), degraded flag, and conflicts list.",
+    name: "luban_run_batch",
+    label: "Plan Batch (TDD)",
+    description: "Planner: reads execution.yaml and returns an ordered plan with file conflicts and topological layers. The LLM then iterates: call luban_execute_task for each task in execution_order, advancing through RED → GREEN → REFACTOR → complete.",
     parameters: Type.Object({
-      execution_yaml: Type.Optional(Type.String({ description: "Path to execution.yaml (default: <workspace>/execution.yaml)" })),
-      max_parallel: Type.Optional(Type.Number({ description: "Optimistic concurrency cap (default: 3). If intra-batch file conflicts are detected, batch auto-degrades to serial regardless." })),
-      subagent: Type.Optional(Type.Boolean({ description: "Subagent mode flag (reserved, currently no-op)" })),
+      execution_yaml: Type.Optional(Type.String({ description: "Path to execution.yaml (default: .sages/workspace/execution.yaml)" })),
     }),
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const context = createContext(ctx.cwd);
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      const fileService = new FileService(ctx.cwd, WORKSPACE_DIR);
+      const toolCtx: ToolContext = { cwd: ctx.cwd, fileService };
 
-      const result = await executeBatch({
-        execution_yaml: params.execution_yaml,
-        max_parallel: params.max_parallel,
-        subagent: params.subagent,
-      }, context);
-
-      // KD-3: content.text = summary for the agent.
-      // topErrors (top-3 truncated failure messages) is included so the
-      // agent can diagnose batch failures inline, without bypassing the
-      // black-box contract by reading .sages/workspace/ directly.
-      const summary = {
-        success: result.success,
-        mode: result.mode,
-        degraded: result.degraded,
-        ...(result.conflicts ? { conflicts: result.conflicts } : {}),
-        ...(result.topErrors ? { topErrors: result.topErrors } : {}),
-        completed: result.completed,
-        totalDuration: result.totalDuration,
-      };
+      const result = await runBatchPlanner(params, toolCtx);
 
       return {
-        content: [{ type: "text", text: JSON.stringify(summary) }],
-        details: result,  // Full BatchResult (including per-task phases) for GaoYao audit
+        content: result.content,
+        details: result.details,
+        isError: result.isError,
       };
     },
   });
 
-  /**
-   * luban_get_status - Get current TDD execution status
-   */
-  pi.registerTool({
-    name: "luban_get_status",
-    label: "Get Execution Status",
-    description: "Get current TDD execution status with task progress.",
-    parameters: Type.Object({
-      plan_name: Type.String({ description: "Plan name" }),
-    }),
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      const context = createContext(ctx.cwd);
-      
-      const status = await getStatus(params.plan_name, context);
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(status),
-        }],
-        details: status,
-      };
+  // ─── Deprecated stubs (keep old names alive with redirect hints) ──────
+  const stubs: Array<{ name: string; hint: string; deprecationNote: string }> = [
+    {
+      name: "luban_execute_all",
+      hint: "Use luban_run_batch to plan, then iterate with luban_execute_task.",
+      deprecationNote: "removed in v1 — replaced by planner + observe cycle",
     },
-  });
+    {
+      name: "luban_execute_batch",
+      hint: "Use luban_run_batch instead.",
+      deprecationNote: "renamed to luban_run_batch",
+    },
+    {
+      name: "luban_get_status",
+      hint: "Status is included in every luban_execute_task response.",
+      deprecationNote: "merged into luban_execute_task response",
+    },
+  ];
+
+  for (const stub of stubs) {
+    pi.registerTool({
+      name: stub.name,
+      label: `[Deprecated] ${stub.name}`,
+      description: `DEPRECATED (${stub.deprecationNote}): ${stub.hint}`,
+      parameters: Type.Object({}),
+      async execute() {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: false,
+            error: `${stub.name} is deprecated. ${stub.hint}`,
+            hint: stub.hint,
+            deprecated: true,
+            replacement: stub.hint.match(/Use (\w+)/)?.[1] ?? null,
+          }) }],
+          isError: true,
+          details: { deprecated: true, replacement: stub.hint },
+        };
+      },
+    });
+  }
 }

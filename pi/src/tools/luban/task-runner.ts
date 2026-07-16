@@ -1,17 +1,14 @@
 /**
- * Task Runner - Unified TDD execution
+ * Task Runner - TDD phase execution (RED / GREEN / REFACTOR)
  *
  * Part of: src/tools/luban/
- * Purpose: Run the TDD cycle (RED → GREEN → REFACTOR) for a single task.
  *
  * Design (post-simplify-actions):
- *   - runTask returns a TaskResult that the LLM (in main context) inspects to
- *     decide what to do next. The runner does NOT write template stubs or
- *     invoke an LLM directly — the LLM uses serena/codebase-memory/graphify
- *     to do the actual semantic work.
- *   - This file's previous "template stub" generation is being phased out:
- *     tests are still scaffolded (RED), but the GREEN phase now expects the
- *     LLM to write real implementations via semantic tools before re-calling.
+ *   - runTask executes ONE phase of a task. It does NOT write template stubs
+ *     or invoke an LLM directly. The LLM (in main context) does the actual
+ *     semantic work via serena / codebase-memory / graphify, then re-calls
+ *     luban_execute_task with an observation to validate.
+ *   - Per-task state is managed by TaskStateManager (in tools/index.ts).
  *
  * SECURITY: testCommand is passed unsanitized to `execSync()`.
  * Indirect RCE chain: user request → qiaochui_decompose → execution.yaml
@@ -20,17 +17,12 @@
  */
 
 import { execSync } from "node:child_process";
-import { FileService } from "../../services/file-service.js";
 import type { TDDConfig, TaskResult, TDDPhaseResult } from "./types.js";
 
-// FileService instance for workspace operations.
-// KNOWN LIMITATION: bound to process.cwd(), not config.cwd. Honoring
-// Batch.cwd requires threading FileService through runTask (planned for KD-4).
-const fileService = new FileService(process.cwd(), ".sages/workspace");
+// ============================================================================
+// TDD Fallback Guide - Help the agent when exceptions occur
+// ============================================================================
 
-/**
- * TDD Fallback Guide - Help the agent when exceptions occur
- */
 export const TDD_GUIDE = {
   /**
    * Get guidance message for a specific phase failure
@@ -114,71 +106,140 @@ Follow these steps:
    * Format error with guidance
    */
   formatError(phase: string, error: string): string {
-    return `${error}
-
-${this.getPhaseGuidance(phase, error)}`;
+    return `${error}\n\n${this.getPhaseGuidance(phase, error)}`;
   },
 };
 
+// ============================================================================
+// runTests — exit-code based, no more character counting
+// ============================================================================
+
 /**
- * Run a single task with TDD cycle
- * 
- * @param config - TDD configuration
- * @returns TaskResult with success status and phase details
+ * Run a test command. The runner treats exit code 0 as "passed" and any
+ * non-zero exit as "failed". Output is captured for diagnostics.
+ *
+ * The output parse tries to extract bun test's "(N) pass / (M) fail" format
+ * for richer reporting, but falls back to a binary passed/failed if the
+ * format isn't recognized.
+ */
+export interface RunTestsResult {
+  passed: number;
+  failed: number;
+  total: number;
+  exitCode: number;
+  output: string;
+}
+
+export function runTests(config: { testCommand: string; cwd: string }): RunTestsResult {
+  try {
+    const output = execSync(config.testCommand, {
+      cwd: config.cwd,
+      encoding: "utf-8",
+      timeout: 60000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const { passed, failed } = parseBunOutput(output);
+    return { passed, failed, total: passed + failed, exitCode: 0, output };
+  } catch (err) {
+    const anyErr = err as { stdout?: Buffer | string; stderr?: Buffer | string; status?: number };
+    const stdout = anyErr.stdout ? anyErr.stdout.toString() : "";
+    const stderr = anyErr.stderr ? anyErr.stderr.toString() : "";
+    const { passed, failed } = parseBunOutput(stdout + stderr);
+    const exitCode = anyErr.status ?? 1;
+    return {
+      passed,
+      failed: Math.max(failed, 1),
+      total: passed + Math.max(failed, 1),
+      exitCode,
+      output: stdout + stderr,
+    };
+  }
+}
+
+function parseBunOutput(output: string): { passed: number; failed: number } {
+  // bun test outputs like "(2) [123.45ms] ✓ test name\n\n 1 pass\n 2 fail"
+  // We look for the trailing pass/fail summary line.
+  const passedMatch = output.match(/(\d+)\s+pass/);
+  const failedMatch = output.match(/(\d+)\s+fail/);
+  return {
+    passed: passedMatch ? parseInt(passedMatch[1], 10) : 0,
+    failed: failedMatch ? parseInt(failedMatch[1], 10) : 0,
+  };
+}
+
+// ============================================================================
+// runTask — single-phase validation, no template stubs
+// ============================================================================
+
+/**
+ * Run a single TDD phase for a task. The function does NOT write any files
+ * (template stubs are gone — the LLM writes real code via semantic tools).
+ *
+ * It validates:
+ *   - The phase's expected outcome (RED: test fails, GREEN: test passes, REFACTOR: test passes)
+ *
+ * Returns a TaskResult describing what happened.
  */
 export async function runTask(config: TDDConfig): Promise<TaskResult> {
   const startTime = Date.now();
-  
   try {
-    // Run TDD cycle
-    const phases = await runTDDCycle(config);
-    
-    // Check if all phases passed
-    const success = phases.every(p => p.status === "completed");
-    
+    const result = runTests({ testCommand: config.testCommand, cwd: config.cwd });
+
+    let status: TDDPhaseResult["status"] = "completed";
+    let error: string | undefined;
+    let output = result.output;
+
+    // The phase name is implicit in the call — caller sets context. We treat
+    // a single runTask invocation as one phase verification. The caller
+    // (luban_execute_task tool) wraps this with the appropriate contract.
+    if (result.exitCode !== 0) {
+      status = "failed";
+      error = `Tests failed: ${result.failed} failed, ${result.passed} passed`;
+    }
+
     return {
       taskId: config.taskId,
-      success,
+      success: status === "completed",
       duration: Date.now() - startTime,
-      phases,
+      phases: [
+        {
+          name: "RED", // placeholder; tool layer interprets
+          status,
+          output,
+          error,
+        },
+      ],
     };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
     return {
       taskId: config.taskId,
       success: false,
       duration: Date.now() - startTime,
-      phases: [{
-        name: "RED",
-        status: "failed",
-        error: TDD_GUIDE.formatError("RED", errorMessage),
-      }],
+      phases: [
+        {
+          name: "RED",
+          status: "failed",
+          error: TDD_GUIDE.formatError("RED", errorMessage),
+        },
+      ],
     };
   }
 }
 
 /**
- * Run TDD cycle: RED → GREEN → REFACTOR
- * 
- * @param config - TDD configuration
- * @returns Array of phase results
+ * Run TDD cycle (kept for backward compat). Note: this no longer does the
+ * full RED→GREEN→REFACTOR sequence internally — each phase is now driven
+ * by the tool layer's observe cycle. This function is a thin wrapper.
  */
-export async function runTDDCycle(config: TDDConfig): Promise<TDDPhaseResult[]> {
-  const phases: TDDPhaseResult[] = [];
-  
-  // RED Phase
-  phases.push(await runRedPhase(config));
-  if (phases[0].status === "failed") return phases;
-  
-  // GREEN Phase
-  phases.push(await runGreenPhase(config));
-  if (phases[1].status === "failed") return phases;
-  
-  // REFACTOR Phase
-  phases.push(await runRefactorPhase(config));
-  
-  return phases;
+export async function runTDDCycle(_config: TDDConfig): Promise<TDDPhaseResult[]> {
+  return [];
 }
+
+// ============================================================================
+// Test template generation (kept for backward compat with existing tests)
+// ============================================================================
 
 /**
  * Extract filename from path
@@ -190,182 +251,12 @@ function getFileName(filePath: string): string {
 }
 
 /**
- * Get directory from path
+ * Escape a scenario name for use in it()
  */
-function getDir(filePath: string): string {
-  const parts = filePath.split("/");
-  parts.pop();
-  return parts.join("/") || ".";
+function escapeForIt(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-/**
- * RED Phase: Write failing test
- */
-async function runRedPhase(config: TDDConfig): Promise<TDDPhaseResult> {
-  const phase: TDDPhaseResult = { name: "RED", status: "pending" };
-
-  try {
-    phase.status = "in_progress";
-
-    // Scope guard: abort if any source/test file is in denyFiles
-    const scope = validateScope({
-      sourceFiles: config.sourceFiles,
-      testFiles: config.testFiles,
-      denyFiles: config.denyFiles || [],
-    });
-    if (!scope.ok) {
-      phase.status = "failed";
-      phase.error = scope.message;
-      return phase;
-    }
-
-    // Create test file if it doesn't exist
-    for (const testFile of config.testFiles) {
-      if (!fileService.exists(testFile)) {
-        // Use scenario-aware template when V-cases are provided,
-        // else fall back to the generic template
-        const testContent = config.scenarios && config.scenarios.length > 0
-          ? generateTestFromScenarios(testFile, config.scenarios)
-          : generateTestTemplate(testFile);
-        const dir = getDir(testFile);
-        if (dir && dir !== ".") {
-          fileService.ensureWorkspace();
-        }
-        fileService.write(testFile, testContent);
-      }
-    }
-    
-    // Run test to verify it fails
-    const result = runTests(config);
-    if (result.failed === 0 && result.passed > 0) {
-      phase.status = "failed";
-      phase.error = TDD_GUIDE.formatError("RED", "Test passed without implementation! Write test that fails first.");
-      return phase;
-    }
-    
-    phase.status = "completed";
-    return phase;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    phase.status = "failed";
-    phase.error = TDD_GUIDE.formatError("RED", errorMessage);
-    return phase;
-  }
-}
-
-/**
- * GREEN Phase: Write minimal implementation
- */
-async function runGreenPhase(config: TDDConfig): Promise<TDDPhaseResult> {
-  const phase: TDDPhaseResult = { name: "GREEN", status: "pending" };
-  
-  try {
-    phase.status = "in_progress";
-    
-    // Create source file if it doesn't exist
-    for (const sourceFile of config.sourceFiles) {
-      if (!fileService.exists(sourceFile)) {
-        const sourceContent = generateSourceTemplate(sourceFile);
-        fileService.write(sourceFile, sourceContent);
-      }
-    }
-    
-    // Run tests to verify they pass
-    const result = runTests(config);
-    if (result.failed > 0) {
-      phase.status = "failed";
-      phase.error = TDD_GUIDE.formatError("GREEN", `${result.failed} tests still failing`);
-      return phase;
-    }
-    
-    phase.status = "completed";
-    return phase;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    phase.status = "failed";
-    phase.error = TDD_GUIDE.formatError("GREEN", errorMessage);
-    return phase;
-  }
-}
-
-/**
- * REFACTOR Phase: Improve code
- */
-async function runRefactorPhase(config: TDDConfig): Promise<TDDPhaseResult> {
-  const phase: TDDPhaseResult = { name: "REFACTOR", status: "pending" };
-  
-  try {
-    phase.status = "in_progress";
-    
-    // Run tests to ensure refactoring didn't break anything
-    const result = runTests(config);
-    if (result.failed > 0) {
-      phase.status = "failed";
-      phase.error = TDD_GUIDE.formatError("REFACTOR", "Refactoring broke tests");
-      return phase;
-    }
-    
-    phase.status = "completed";
-    return phase;
-  } catch (error) {
-    // REFACTOR failures are warnings, not blockers
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    phase.status = "failed";
-    phase.error = TDD_GUIDE.formatError("REFACTOR", errorMessage);
-    return phase;
-  }
-}
-
-/**
- * Run test command and parse results
- */
-function runTests(config: TDDConfig): { passed: number; failed: number; total: number } {
-  try {
-    const output = execSync(config.testCommand, {
-      cwd: config.cwd,
-      encoding: "utf-8",
-      timeout: 60000,
-    });
-    
-    const passed = (output.match(/\u2713|passed|PASS|\+/g) || []).length;
-    const failed = (output.match(/\u2717|failed|FAIL|x/g) || []).length;
-    
-    return { passed, failed: Math.max(failed, 0), total: passed + failed };
-  } catch (error) {
-    // Test command failed
-    return { passed: 0, failed: 1, total: 1 };
-  }
-}
-
-/**
- * Generate test file template
- */
-function generateTestTemplate(testFile: string): string {
-  const fileName = getFileName(testFile);
-
-  return `/**
- * Test file for ${fileName}
- * RED phase: This test should FAIL
- */
-
-import { describe, it, expect } from "bun:test";
-
-describe("${fileName}", () => {
-  it("should be implemented", () => {
-    expect(true).toBe(false); // RED: Must fail
-  });
-});
-`;
-}
-
-/**
- * Generate a test file from V-cases (Given/When/Then scenarios).
- * One `it()` block per scenario, with Given/When/Then as comments and
- * placeholder assertion that the agent fills in. The test file name
- * is used as the describe block label.
- *
- * Falls back to the generic template when no scenarios are provided.
- */
 export interface ScenarioSpec {
   name: string;
   given: string;
@@ -374,6 +265,11 @@ export interface ScenarioSpec {
   but?: string;
 }
 
+/**
+ * Generate a test file from V-cases (Given/When/Then scenarios).
+ * Kept for tool-layer use: when the LLM is in RED phase and asks for
+ * test scaffolding, this produces the test file template.
+ */
 export function generateTestFromScenarios(
   testFileOrModule: string,
   scenarios: ScenarioSpec[],
@@ -381,7 +277,18 @@ export function generateTestFromScenarios(
   const fileName = getFileName(testFileOrModule);
 
   if (!scenarios || scenarios.length === 0) {
-    return generateTestTemplate(testFileOrModule);
+    return `/**
+ * Test file for ${fileName}
+ * RED phase: this test should fail until implementation exists.
+ */
+import { describe, it, expect } from "bun:test";
+
+describe("${fileName}", () => {
+  it("should be implemented", () => {
+    expect(true).toBe(false); // RED placeholder
+  });
+});
+`;
   }
 
   const testBlocks = scenarios.map((s, i) => {
@@ -390,34 +297,24 @@ export function generateTestFromScenarios(
     // Given: ${s.given}
     // When: ${s.when}
     // Then: ${s.then}${but}
-
-    // V${i + 1}: TODO — implement assertion based on the Given/When/Then above
-    expect(true).toBe(false); // RED: must fail until implemented
+    expect(true).toBe(false); // RED placeholder
   });`;
   }).join("\n\n");
 
   return `/**
  * Test file for ${fileName}
- * RED phase: This test should FAIL for each scenario.
+ * RED phase: each scenario should fail until implementation exists.
  *
  * Generated from draft.md ## Scenarios section.
  * Agent must replace the placeholder assertions with real ones
  * that verify the Given/When/Then contract.
  */
-
 import { describe, it, expect } from "bun:test";
 
 describe("${fileName}", () => {
 ${testBlocks}
 });
 `;
-}
-
-/**
- * Escape a scenario name for use in it() — double quotes and backslashes
- */
-function escapeForIt(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 // ============================================================================
@@ -464,23 +361,6 @@ export function validateScope(config: ScopeConfig): ScopeResult {
   return {
     ok: false,
     violations,
-    message: `Scope guard: the following files are marked as "Out of Scope" in draft.md and must not be touched:\n${violations.map(v => `  - ${v}`).join("\n")}\n\nEither remove them from denyFiles, or pick a different file for this task.`,
+    message: `Scope guard: the following files are marked as "Out of Scope" in draft.md and must not be touched:\n${violations.map((v) => `  - ${v}`).join("\n")}\n\nEither remove them from denyFiles, or pick a different file for this task.`,
   };
-}
-
-/**
- * Generate source file template
- */
-function generateSourceTemplate(sourceFile: string): string {
-  const fileName = getFileName(sourceFile);
-  
-  return `/**
- * ${fileName}
- * GREEN phase: Minimal implementation to pass tests
- */
-
-export function ${fileName.toLowerCase().replace(/[^a-z]/g, "_")}() {
-  return {};
-}
-`;
 }
