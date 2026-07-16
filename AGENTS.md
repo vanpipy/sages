@@ -12,66 +12,75 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 
 ## The Four Sages Agents
 
-### Fuxi (伏羲) - The Architect 
+### Fuxi (伏羲) - The Architect
 
 - **Role**: Architectural design using MDD Seven Planes methodology
-- **Tools**: `fuxi-start`, `fuxi-request`, `fuxi-plan`, `fuxi-recover`, `fuxi-end`, `fuxi-get-status`, `fuxi-update-score`
+- **Tools** (simplified 3-tool surface): `fuxi_start`, `fuxi_design` (observe cycle: design → review → plan), `fuxi_end` (verdict routing)
+- **Deprecated stubs** (kept for backward compat, return `isError` + hint): `fuxi_request`, `fuxi_plan`, `fuxi_recover`, `fuxi_get_status`, `fuxi_update_score`, `fuxi_brainstorm_recovery`
 - **Focus**: Core intent, success paths, boundaries, constraints
 
-### QiaoChui (巧倕) - The Sages Mechanist 
+### QiaoChui (巧倕) - The Sages Mechanist
 
 - **Role**: Design review and task decomposition
-- **Tools**: `qiaochui-review`, `qiaochui-decompose`
+- **Tools**: `qiaochui_review` (auto-writes `state.score` on observation), `qiaochui_decompose` (validates `score >= 80`)
 - **Focus**: Feasibility, executable task breakdown, execution orchestration
 - **Module**: `src/tools/qiaochui/` (index, review-service, decompose-service, types)
 
-### LuBan (鲁班) - The Master Craftsman 
+### LuBan (鲁班) - The Master Craftsman
 
-- **Role**: Task execution with TDD methodology
-- **Tools**: `luban-execute-task`, `luban-execute-all`, `luban-get-status`
-- **Focus**: Implementation with RED → GREEN → REFACTOR, parallel execution
-- **Module**: `src/tools/luban/` (index, types, plan-parser, task-runner)
+- **Role**: Task execution with TDD methodology (RED → GREEN → REFACTOR)
+- **Tools** (simplified 2-tool surface): `luban_execute_task` (observe cycle, auto-advance), `luban_run_batch` (planner — reads execution.yaml, returns ordered plan + file conflicts)
+- **Deprecated stubs**: `luban_get_status` (status in every response), `luban_execute_batch` (renamed), `luban_execute_all` (removed)
+- **Focus**: Implementation via **serena** / **codebase-memory** / **graphify** — LuBan validates outcomes, the LLM does the semantic work
+- **Module**: `src/tools/luban/` (index, types, plan-parser, task-runner, scheduler, conflict-detector)
 - **TDD Guide**: Built-in fallback guidance for exceptions
 
-### GaoYao (皋陶) - The Supreme Judge 
+### GaoYao (皋陶) - The Supreme Judge
 
-- **Role**: Quality audit and security review
-- **Tools**: `gaoyao-review`, `gaoyao-check-security`
+- **Role**: Quality audit and security review via semantic tools
+- **Tools** (simplified 3-tool surface): `gaoyao_audit` (init/resume/reset/status), `gaoyao_observe` (file_read + finding, auto-advance), `gaoyao_finalize` (verdict)
+- **Deprecated stubs**: 9 names including `gaoyao_init`, `gaoyao_record_file_read`, `gaoyao_record_finding`, `gaoyao_execute_phase`, `gaoyao_status`, `gaoyao_reset`, `gaoyao_review`, `gaoyao_quick_check`, `gaoyao_check_security`
 - **Focus**: Code quality, security, test coverage, performance
-- **Phase-guided auditing**: INK → NOSE → FOOT → CASTRATION → DEATH
+- **Phase-guided auditing**: ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH (auto-advance)
 
 ## Workflow Phases
 
 ```
- Design → fuxi-plan → Review (auto-proceed) → fuxi-plan → 
- Execute → fuxi-approve → Audit → Complete → fuxi-end
+ Design (Fuxi) → Review (QiaoChui) → Plan (user approves /sages-plan) →
+ Execute (LuBan) → Audit (GaoYao) → Archive
 ```
 
-### Phase 1: Design (Fuxi) 
-- Creates architectural draft using MDD Seven Planes
-- Output: `.sages/workspace/draft.md`
-- **Requires**: User approval (`fuxi-plan`)
+The simplified surface **auto-advances** on observation. The LLM calls each tool once per state transition; status comes back in the response.
 
-### Phase 2: Review (QiaoChui) 
-- Validates draft completeness and feasibility
-- **Auto-proceeds** if draft is valid (score > 80)
-- Creates execution plan
+### Phase 1: Design (Fuxi)
+- `fuxi_start` initializes workflow + design sub-state
+- `fuxi_design` observe cycle: design → review → plan
+  - LLM writes `draft.md` (≥ 500 bytes, MDD Seven Planes) → `fuxi_design { observation: { phase: "design", draft_path } }` → advances to review
+- Output: `.sages/workspace/draft.md`
+
+### Phase 2: Review (QiaoChui)
+- `qiaochui_review` with `observation: { score, notes? }` **auto-writes** `state.score` to `state.json`
+- Pass threshold: **score >= 80** (APPROVED)
+- LLM calls `qiaochui_decompose` to generate execution plan
 - Output: `.sages/workspace/plan.md`, `execution.yaml`
 
-### Phase 3: Execute (LuBan) 
-- Executes tasks with real TDD (RED → GREEN → REFACTOR)
-- Parallel execution (up to 3 tasks)
-- `luban_execute_all` internally calls `luban_execute_task`
+### Phase 3: Execute (LuBan)
+- `luban_run_batch` reads execution.yaml, returns ordered plan + file conflicts
+- LLM iterates `luban_execute_task` per task: RED → GREEN → REFACTOR → complete (observe cycle, auto-advance)
+- LLM uses **serena** / **codebase-memory** / **graphify** for actual implementation; LuBan validates
 - Output: Implementation files
 
-### Phase 4: Audit (GaoYao) 
-- Quality audit and security scan
-- Phase-guided: INK (style), NOSE (docs), FOOT (arch), CASTRATION (security), DEATH (critical)
+### Phase 4: Audit (GaoYao)
+- `gaoyao_audit` initializes session, returns file enumeration
+- `gaoyao_observe` accepts `file_read` or `finding`; auto-advances through ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH
+- `gaoyao_finalize` produces verdict (`**Verdict**: PASS|NEEDS_CHANGES|REJECTED`) in audit.md
 - Output: `.sages/workspace/audit.md`
-- **Requires**: User approval (`fuxi-plan`)
 
-### Phase 5: Archive
-- Saves complete workflow snapshot
+### Phase 5: End / Archive
+- `fuxi_end` with `observation: { verdict }`:
+  - PASS → archives and returns `complete`
+  - NEEDS_CHANGES → routes to implement (LuBan fixes)
+  - REJECTED → routes to design (Fuxi redesign)
 - Output: `.sages/archive/{plan}/{timestamp}/`
 
 ## Workspace & Archive Structure
@@ -175,9 +184,7 @@ export { WorkflowStateManager } from "./services/workflow-state-manager.js";
 export { runTask, runTDDCycle, parseExecutionYaml } from "./executor/index.js";
 export type { LubanTask, TDDConfig, TaskResult, TDDPhase } from "./executor/index.js";
 
-// Orchestrator
-export { WorkflowOrchestrator } from "./orchestrator/index.js";
-export type { Phase, OrchestratorConfig } from "./orchestrator/index.js";
+// Orchestrator (WorkflowOrchestrator removed in simplify-actions refactor — dead code)
 ```
 
 ## LuBan Module Architecture
@@ -186,15 +193,20 @@ LuBan is modularized for maintainability:
 
 ```
 src/tools/luban/
-├── index.ts          # Tool registration (luban_execute_task, luban_execute_all)
-├── types.ts         # LubanTask, TDDConfig, TaskResult interfaces
-├── plan-parser.ts   # YAML parsing, dependency resolution
-└── task-runner.ts   # TDD execution (RED→GREEN→REFACTOR) + TDD_GUIDE
+├── index.ts          # Tool registration (luban_execute_task, luban_run_batch)
+├── types.ts          # LubanTask, TDDConfig, TaskResult interfaces
+├── plan-parser.ts    # YAML parsing, dependency resolution
+├── task-runner.ts    # TDD verification (exit-code based runTests) + TDD_GUIDE
+├── scheduler.ts      # Optimistic concurrency + auto-degrade serial on file conflicts
+└── conflict-detector.ts  # Pure function for file conflict detection
 ```
 
-### Key Design
+### Key Design Decisions
 
-- **`luban_execute_all`** internally calls **`luban_execute_task`**
+- **KD-1**: `luban_execute_all` removed (no backward-compat alias)
+- **KD-2**: optimistic concurrency with auto-serial degrade on intra-batch file conflicts
+- **KD-3**: black-box contract — `content.text` = summary, `details` = full BatchResult for GaoYao audit
+- **KD-4**: TDD optimization (real LLM implementation) deferred — current runner validates test outcomes, LLM does the semantic work via serena/codebase-memory/graphify
 - **DRY**: TDD logic lives in one place
 - **TDD_GUIDE**: Built-in fallback guidance for exceptions
 - **FileService**: All file operations use FileService (no direct node:fs)

@@ -1,154 +1,82 @@
 ---
-description: Create MDD design drafts and manage workflow lifecycle
+description: Architectural design with MDD Seven Planes (simplified 3-tool surface)
 ---
 
 # Fuxi (伏羲) - Architect
 
+## Role
+
+Fuxi manages the design phase: create draft.md, get it reviewed, transition to plan. **Simplified 3-tool surface** with auto-advance on observation. The LLM uses **serena** / **graphify** to write the draft; Fuxi only validates.
+
 ## Mode Indicator
 
-Always show current mode in system prompt:
-
 ```
-**Design Mode** (Read-Only)
+**Design Mode** (Read-Only, except draft.md)
 - Only modify: draft.md
-- Read-only access to all other files
-- Use /fuxi-request to create draft
+- Use fuxi_design (observe cycle) to advance phases
 ```
 
-## Commands
+## Tools (Simplified Surface)
 
-| Command | Description |
-|---------|-------------|
-| `/fuxi-start` | Start workflow, set design phase |
-| `/fuxi-request` | Create draft.md |
-| `/fuxi-plan <score>` | Transition to plan (only if score > 80) |
-| `/fuxi-recover` | Recover from state.json |
-| `/fuxi-end` | End workflow based on audit verdict |
-| `/fuxi-get-status` | View current status |
-| `/fuxi-brainstorm-recovery` | Brainstorm fixes when audit fails |
+| Tool | Purpose |
+|---|---|
+| `fuxi_start` | Initialize workflow (creates `state.json` + design sub-state). Returns design contract. |
+| `fuxi_design` | Observe cycle through `design → review → plan`. First call returns contract; subsequent calls with `observation` validate and auto-advance. |
+| `fuxi_end` | End workflow based on audit verdict. `observation: { verdict }` routes PASS→archive, NEEDS_CHANGES→implement, REJECTED→design. |
 
-## Design Mode Rules
+The 6 deprecated stubs (`fuxi_request`, `fuxi_plan`, `fuxi_recover`, `fuxi_get_status`, `fuxi_update_score`, `fuxi_brainstorm_recovery`) return `isError` with redirect hints. **Do not call them.**
 
-- ✅ Only modify `draft.md`
-- ❌ Read-only for all other files
-- ❌ No code writing in design phase
+## fuxi_design Observe Cycle
 
-## Workflow Lifecycle
+Three sub-phases, auto-advance on observation:
 
 ```
-Design → Plan → Execute → Audit → [Verdict Handling]
-                                    ↓
-                         ┌──────────┼──────────┐
-                         ↓          ↓          ↓
-                       PASS     NEEDS_CHANGES  REJECTED
-                         ↓          ↓          ↓
-                    [Complete]   [Brainstorm]  [Brainstorm]
-                                    ↓          ↓
-                                (3 tries)   (back to)
-                                   ↓         Fuxi
-                              [Execute]   [Design]
+Call 1: fuxi_design {}
+        → design contract { phase: "design", intent: "Create draft.md using MDD Seven Planes...", validation: { file: "draft.md", min_size: 500 } }
+
+        (LLM uses serena_read_file + graphify_query to understand project context, then writes draft.md ≥ 500 bytes covering all 7 planes)
+
+Call 2: fuxi_design { observation: { phase: "design", draft_path: "draft.md" } }
+        → validates draft.md exists + ≥ 500 bytes → advances to review
+
+        (LLM runs qiaochui_review which auto-writes state.score)
+
+Call 3: fuxi_design { observation: { phase: "review", score: 85 } }
+        → validates score >= 80 → persists score → advances to plan
+
+        (LLM runs qiaochui_decompose to generate execution.yaml)
+
+Call 4: fuxi_design { observation: { phase: "plan", approved: true } }
+        → status: "complete", next: luban_run_batch
 ```
 
-## fuxi_end Verdict Handling
+The score threshold is **≥ 80** (not `> 80`). Off-by-one fixed.
 
-When calling `/fuxi-end`, the workflow checks audit verdict:
+## Per-Phase Validation
 
-| Verdict | Score | Action |
-|---------|-------|--------|
-| **PASS** | ≥70 | Archive and complete |
-| **NEEDS_CHANGES** | 50-69 | Return to implement (LuBan fixes) |
-| **REJECTED** | <50 | Return to design (Fuxi redesign) |
+| Phase | Validation |
+|---|---|
+| `design` | `draft.md` exists + ≥ 500 bytes (covers all 7 planes) |
+| `review` | `score >= 80` |
+| `plan` | acks; next stage is `luban_run_batch` |
 
-### Special Cases
+## fuxi_end Verdict Routing
 
-- After 3x `NEEDS_CHANGES` → auto-escalate to design phase
-- Use `--force` to archive regardless of verdict
+`observation: { verdict: "PASS" \| "NEEDS_CHANGES" \| "REJECTED" }`:
 
-### State Tracking
+| Verdict | Phase after | What to do next |
+|---|---|---|
+| **PASS** | `complete` | Archive. Workflow ends. |
+| **NEEDS_CHANGES** | `implement` | Run `luban_run_batch` to plan remediation, then iterate via `luban_execute_task` |
+| **REJECTED** | `design` | Re-run `fuxi_design` from scratch (design sub-state cleared) |
 
-```json
-{
-  "phase": "audit",
-  "planName": "...",
-  "auditVerdict": "PASS|NEEDS_CHANGES|REJECTED",
-  "auditScore": 85,
-  "auditAttempts": 1
-}
-```
+After 3× `NEEDS_CHANGES`, the tool auto-escalates to design phase.
 
-## Brainstorm Recovery
-
-When audit fails, use `/fuxi-brainstorm-recovery` to update the plan and re-execute:
-
-### Purpose
-- **Analyze** audit findings from GaoYao
-- **Update** plan.md with improved approaches
-- **Modify** execution.yaml with new/modified tasks
-- **Wake** LuBan to re-execute with updated plan
-
-### Focus Options
-
-| Focus | Use When |
-|-------|----------|
-| `all` | General improvement |
-| `critical` | Only critical/major issues |
-| `security` | Security vulnerabilities found |
-| `architecture` | Design/structure problems |
-| `style` | Code style/naming issues |
-
-### Parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `--focus` | Which findings to address |
-| `--dry-run` | Preview without updating files |
-
-### What It Does
-
-1. Reads audit.md and extracts findings
-2. Generates improvement notes for plan.md
-3. Creates new tasks in execution.yaml
-4. Sets phase to `implement`
-5. Wakes LuBan to continue
-
-### After Brainstorming
-
-1. Check updated plan.md with recovery notes
-2. Check execution.yaml for new tasks
-3. Use `/luban-execute-all` to re-execute
-4. Use `/gaoyao-review` to verify fixes
-5. Use `/fuxi-end` to check verdict
-
-### Example Flow
-
-```
-Audit verdict: NEEDS_CHANGES (65%)
-↓
-/fuxi-brainstorm-recovery --focus=security
-↓
-[Updates plan.md and execution.yaml]
-↓
-Phase set to: implement
-↓
-/luban-execute-all
-↓
-[Re-executes with new tasks]
-↓
-/gaoyao-review
-↓
-/fuxi-end
-```
-
-### Dry Run
-
-```bash
-/fuxi-brainstorm-recovery --focus=all --dry-run
-# Preview changes without applying
-```
+Without observation, `fuxi_end` validates that `audit.md` exists and surfaces the verdict so the LLM knows what to pass.
 
 ## MDD Seven Planes
 
-Analyze request using 7 planes:
+The LLM's draft must cover all 7 planes:
 
 1. **Business Plane** - Process × Rules
 2. **Data Plane** - Logic × State
@@ -158,22 +86,53 @@ Analyze request using 7 planes:
 6. **Security Plane** - Identity × Permissions
 7. **Evolution Plane** - Time × Change
 
-## Draft Content
+## Semantic Tool Usage
 
-Create `draft.md` with:
-- Overview (core intent, boundaries)
-- Each plane analysis
-- Cross-plane dependencies
-- Key decisions
-- Open questions
-- Directory and files structure
+| Phase | Tool | Purpose |
+|---|---|---|
+| design | `graphify_god_nodes`, `serena_read_file` | Understand existing project shape before writing |
+| design | `serena_create_text_file` | Write the draft.md |
+| review | `qiaochui_review` (separate tool) | Get the score; it auto-writes |
+| plan | `qiaochui_decompose` (separate tool) | Generate execution.yaml |
 
-## State
+## State Files
 
-```json
-{
-  "phase": "design",
-  "planName": "...",
-  "request": "..."
-}
+- `.sages/workspace/state.json` — main workflow state (planName, request, score, phase)
+- `.sages/workspace/.fuxi-design-state.json` — design sub-phase state (design → review → plan)
+- `.sages/workspace/draft.md` — the design draft
+
+## Prohibited
+
+- ❌ Call deprecated `fuxi_request`, `fuxi_plan`, `fuxi_recover`, `fuxi_get_status`, `fuxi_update_score`, `fuxi_brainstorm_recovery` (they all return `isError` with redirect hints)
+- ❌ Submit score < 80 in review observation
+- ❌ Submit `fuxi_end` observation without first running `gaoyao_finalize` (no audit verdict)
+
+## Example Flow
+
+```
+> fuxi_start { plan_name: "user-mgmt", request: "Build user CRUD API" }
+← { status: "in_progress", phase: "design", workflow_id: "sages-...", plan_name: "user-mgmt", intent: "Create draft.md...", validation: { file: "draft.md", min_size: 500 } }
+
+> fuxi_design {}
+← { status: "in_progress", phase: "design", intent: "Create draft.md using MDD Seven Planes...", validation: { file: "draft.md", min_size: 500 } }
+
+[LLM uses graphify_god_nodes + serena_read_file to understand project, then writes draft.md covering all 7 planes, ≥ 500 bytes]
+
+> fuxi_design { observation: { phase: "design", draft_path: "draft.md" } }
+← { status: "in_progress", phase: "review", auto_advanced: true, intent: "Get a review score for draft.md..." }
+
+[LLM runs qiaochui_review with observation {score: 85}, which auto-writes state.score]
+
+> fuxi_design { observation: { phase: "review", score: 85 } }
+← { status: "in_progress", phase: "plan", auto_advanced: true, score: 85 }
+
+[LLM runs qiaochui_decompose to generate execution.yaml]
+
+> fuxi_design { observation: { phase: "plan", approved: true } }
+← { status: "complete", summary: "Design phase complete. Run luban_run_batch..." }
+
+[After LuBan + GaoYao complete]
+
+> fuxi_end { observation: { verdict: "PASS" } }
+← { status: "complete", archive_path: ".sages/archive/user-mgmt/..." }
 ```

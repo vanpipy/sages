@@ -27,80 +27,81 @@ curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/insta
 
 ## Commands
 
-### Fuxi ( Design)
-| Command | Description |
-|---------|-------------|
-| `fuxi-start` | Start workflow, set design phase |
-| `fuxi-request` | Create draft.md |
-| `fuxi-plan <score>` | Transition to plan (score > 80) |
-| `fuxi-recover` | Recover from state.json |
-| `fuxi-end` | End workflow, archive |
-| `fuxi-get-status` | View current status |
-| `fuxi-update-score` | Update review score in state |
+> **Note**: The tool surface was simplified in the simplify-actions refactor (18+ → 10 active tools). Each tool returns `{status, intent, validation}` and auto-advances on observation. Deprecated tool names remain as stubs that return `isError` with a redirect hint.
 
-### QiaoChui ( Review)
-| Command | Description |
-|---------|-------------|
-| `qiaochui-review` | Review draft, set score in state |
-| `qiaochui-decompose` | Create plan.md and execution.yaml |
+### Fuxi ( Design) — 3 tools
+| Tool | Description |
+|------|-------------|
+| `fuxi_start` | Initialize workflow (`state.json` + design sub-state) |
+| `fuxi_design` | Observe cycle: `design` (write draft) → `review` (validate score >= 80) → `plan` |
+| `fuxi_end` | End workflow based on audit verdict (PASS / NEEDS_CHANGES / REJECTED) |
 
-### LuBan ( Execute)
-| Command | Description |
-|---------|-------------|
-| `luban-execute-task` | Execute single task (TDD) |
-| `luban-execute-all` | Execute all tasks |
-| `luban-get-status` | Get execution status |
+### QiaoChui ( Review) — 2 tools
+| Tool | Description |
+|------|-------------|
+| `qiaochui_review` | Review draft. Without observation: returns heuristic hints + semantic-tool guidance. With `observation: { score, notes? }`: validates 0-100, persists to `state.json`, returns verdict (APPROVED >= 80, REVISE 50-79, REJECTED < 50). |
+| `qiaochui_decompose` | Decompose approved design into `plan.md` + `execution.yaml`. Requires `state.score >= 80`. |
 
-### GaoYao ( Audit)
-| Command | Description |
-|---------|-------------|
-| `gaoyao-review` | Quality audit (phase-guided) |
-| `gaoyao-check-security` | Security scan |
+### LuBan ( Execute) — 2 tools
+| Tool | Description |
+|------|-------------|
+| `luban_execute_task` | Single task observe cycle (RED → GREEN → REFACTOR → complete). The LLM uses **serena** / **codebase-memory** / **graphify** for implementation; LuBan validates. |
+| `luban_run_batch` | Planner — reads `execution.yaml`, returns ordered plan with file conflicts and topological layers. |
+
+### GaoYao ( Audit) — 3 tools
+| Tool | Description |
+|------|-------------|
+| `gaoyao_audit` | Init / resume / reset / status (one tool). `reset: true` clears existing session. |
+| `gaoyao_observe` | Discriminated union: `file_read: {...}` or `finding: {...}`. Auto-advances when phase requirements are met. |
+| `gaoyao_finalize` | Generate `audit.md` with verdict. |
 
 ## Workflow
 
 ```
-Request → Fuxi Design → QiaoChui Review → fuxi-plan
-                                              ↓
-                    LuBan Execute ←── APPROVE
-                         ↓
-                    GaoYao Audit
-                         ↓
-                    Complete → fuxi-end
+Request → fuxi_start
+   ↓
+[fuxi_design observe cycle]
+   LLM writes draft.md → fuxi_design { observation: {phase:"design"} }
+   qiaochui_review { observation: {score: N} } auto-writes state.score
+   fuxi_design { observation: {phase:"review", score: N} } → advances if >= 80
+   qiaochui_decompose → execution.yaml
+   ↓
+[luban_run_batch → plan]
+[luban_execute_task observe cycle per task]
+   RED → GREEN → REFACTOR → complete (LLM does work via serena/codebase-memory/graphify)
+   ↓
+[gaoyao_audit / gaoyao_observe / gaoyao_finalize]
+   ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH → verdict
+   ↓
+fuxi_end { observation: {verdict: "PASS|NEEDS_CHANGES|REJECTED"} }
+   PASS → archive | NEEDS_CHANGES → LuBan | REJECTED → Fuxi
 ```
 
 **Phase Details:**
-1. **Design Phase**: Fuxi creates architectural draft
-2. **Review Phase**: QiaoChui reviews and creates execution plan
-3. **Plan Phase**: User approves (score > 80) or revises
-4. **Execute Phase**: LuBan executes tasks (parallel execution)
-5. **Audit Phase**: GaoYao performs quality check (INK→NOSE→FOOT→CASTRATION→DEATH)
-6. **Completion**: Workflow archived after passing audit
+1. **Design Phase** (Fuxi): write `draft.md` via `fuxi_design` observe cycle (MDD Seven Planes, ≥ 500 bytes)
+2. **Review Phase** (QiaoChui): `qiaochui_review { observation: {score} }` auto-writes; threshold ≥ 80
+3. **Plan Phase**: `qiaochui_decompose` generates `execution.yaml`
+4. **Execute Phase** (LuBan): `luban_run_batch` plans, `luban_execute_task` runs observe cycle per task
+5. **Audit Phase** (GaoYao): `gaoyao_audit / observe / finalize` walks 5 audit categories
+6. **End**: `fuxi_end` archives on PASS, routes NEEDS_CHANGES back to LuBan, REJECTED back to Fuxi
 
 ## Workflow Recovery
 
-Four Sages supports resuming interrupted workflows:
+Four Sages supports resuming interrupted workflows via per-tool init/resume semantics:
 
 | Scenario | Detection | Recovery Action |
 |----------|----------|----------------|
-| `draft.md` exists + `state.json` exists | Phase from `state.json` | Continue from stored phase |
-| `draft.md` missing + `state.json` exists | Workflow detected | `fuxi-request` regenerates |
-| New request same workspace | Existing workflow | Draft updated, phase preserved |
+| Resume workflow | `fuxi_design` (no observation) loads state | Returns current sub-phase (design/review/plan) |
+| Resume audit | `gaoyao_audit` (no params) loads session | Returns current phase + remaining work |
+| Resume task | `luban_execute_task` (no observation) loads task state | Returns current sub-phase (RED/GREEN/REFACTOR) |
+| Fresh start | `reset: true` on `gaoyao_audit`, or delete `.sages/workspace/` | Init from scratch |
 
-State is stored in `.sages/workspace/state.json`:
+State is stored in `.sages/workspace/state.json` (managed by `WorkflowStateManager`) with sub-state files for each sage:
+- `.sages/workspace/.fuxi-design-state.json` (design sub-phase)
+- `.sages/workspace/.luban-task-state.json` (per-task TDD phase)
+- `.sages/workspace/.gaoyao-session.json` (audit session)
 
-```json
-{
-  "id": "sages-1234567890",
-  "phase": "design",
-  "planName": "user-management",
-  "request": "Create REST API for user management",
-  "createdAt": "2024-01-01T00:00:00.000Z",
-  "updatedAt": "2024-01-01T00:00:00.000Z"
-}
-```
-
-Phase progression: `idle → design → review → plan → execute → audit → complete`
+Phase progression: `design → review → plan → execute → audit → complete`
 
 ## MDD Design
 
@@ -225,9 +226,7 @@ export { WorkflowStateManager } from "./services/workflow-state-manager.js";
 export { runTask, runTDDCycle, parseExecutionYaml } from "./executor/index.js";
 export type { LubanTask, TDDConfig, TaskResult, TDDPhase } from "./executor/index.js";
 
-// Orchestrator
-export { WorkflowOrchestrator } from "./orchestrator/index.js";
-export type { Phase, OrchestratorConfig } from "./orchestrator/index.js";
+// Orchestrator removed in simplify-actions refactor (dead code, replaced by FSM extension in extensions/sages-fsm.ts)
 ```
 
 ## Development

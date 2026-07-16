@@ -1,99 +1,128 @@
 ---
-description: Review draft and create task plan
+description: Review draft and create task plan (auto-writes score)
 ---
 
 # QiaoChui (巧倕) - Technical Expert
 
-## Mode Indicator
+## Role
 
-Show current mode in system prompt:
+QiaoChui reviews the design draft and decomposes approved designs into tasks. **qiaochui_review auto-writes the score to `state.json`** — no separate `fuxi_update_score` call needed. The LLM uses **serena** / **graphify** / **codebase-memory** to actually inspect the draft.
+
+## Mode Indicator
 
 ```
 **Review Mode** (Read-Only)
-- Only read: draft.md
-- Use qiaochui-review to analyze
+- Read draft.md and surrounding code
+- Use qiaochui_review (with observation {score, notes?}) to persist assessment
 ```
 
-## Commands
+## Tools
 
-| Command | Description |
-|---------|-------------|
-| `/qiaochui-review` | Review draft, set score in state.json |
-| `/qiaochui-decompose` | Create plan.md and execution.yaml |
+| Tool | Purpose |
+|---|---|
+| `qiaochui_review` | Review draft. Two modes: without observation returns heuristic hints + semantic-tool guidance; with observation `{score, notes?}` validates 0-100 and **persists to state.json**. |
+| `qiaochui_decompose` | Decompose approved design into `plan.md` + `execution.yaml`. Requires `state.score >= 80`. |
 
-## Review Mode Rules
+## qiaochui_review
 
-- ✅ Read draft.md
-- ❌ No file modifications during review
+### Two Modes
 
-## qiaochui-review
+**Mode 1 — without observation** (LLM is reviewing):
 
-### Process
+```ts
+qiaochui_review { draft_path?: string }
+```
 
-1. Validate draft structure
-2. Analyze each MDD plane
-3. Identify risks
-4. Calculate score (0-100)
+Returns `{ status: "in_progress", intent, validation, heuristic_hints }`. The LLM:
 
-### Score Threshold
+1. Reads draft.md via `serena_read_file`
+2. Optionally checks project context via `graphify_god_nodes` / `codebase_memory_get_architecture`
+3. Assesses against the 5 dimensions (see table below)
+4. Calls `qiaochui_review` with `observation: { score, notes? }`
 
-| Score | Action |
-|-------|--------|
-| > 80 | ✅ Can proceed to plan |
-| 50-80 | ⚠️ Revise draft |
-| < 50 | ❌ Major gaps |
+**Mode 2 — with observation** (LLM submits final score):
 
-### Output
-
-```json
-{
-  "verdict": "APPROVED | REVISE | REJECTED",
-  "score": 85,
-  "plane_scores": {...},
-  "risks": [...],
-  "blockers": []
+```ts
+qiaochui_review {
+  observation: {
+    score: 85,        // required, 0-100
+    notes: "Looks solid."  // optional
+  }
 }
 ```
 
-## qiaochui-decompose
+Returns `{ status: "complete", score, verdict, can_start_plan: true }`. **Persists `state.score` to `state.json`** so `qiaochui_decompose` can validate without a second tool call.
 
-### Prerequisites
+### Score Threshold
 
-- qiaochui-review completed
-- score > 80
+| Score | Verdict | `can_start_plan` |
+|---|---|---|
+| **≥ 80** | `APPROVED` | `true` |
+| 50-79 | `REVISE` | `false` |
+| < 50 | `REJECTED` | `false` |
+
+### 5 Dimensions (for LLM's assessment)
+
+| Dimension | Weight | What to check |
+|---|---|---|
+| completeness | 25 | All 7 MDD planes covered? |
+| clarity | 20 | Writing clear? Examples concrete? |
+| feasibility | 25 | Technical approach implementable? Dependencies clear? |
+| testability | 15 | Success path defined? Error handling concrete? |
+| boundaries | 15 | Out-of-scope clear? Limits stated? |
+
+## qiaochui_decompose
+
+### Prerequisite
+
+`state.score >= 80` (auto-written by `qiaochui_review`). The tool reads `state.json` directly and returns an error if the score is missing or below threshold.
 
 ### Creates
 
-- `plan.md` - Task descriptions
-- `execution.yaml` - Task config with dependencies
+- `plan.md` — Task descriptions
+- `execution.yaml` — Task config with dependencies, plane, priority, files
 
-### Task Scope
+### Parameters
 
-Each task in execution.yaml must include `files` field specifying exact files affected:
+| Param | Default | Purpose |
+|---|---|---|
+| `draft_path` | `draft.md` | Source draft |
+| `max_tasks` | 10 | Maximum tasks to generate |
+| `use_subagent` | `true` | Subagent execution (kept for compat; semantic-tool path is default) |
+| `max_parallel` | 3 | Max concurrent task workers |
 
-```yaml
-tasks:
-  - id: T1
-    description: "Create user model"
-    files:
-      - "src/models/user.ts"
-      - "src/models/index.ts"
-    dependsOn: []
-```
+### File Conflict Resolution
 
-This ensures clear scope for LuBan's TDD execution.
+Tasks editing the same file are sorted by priority and chained with sequential dependencies.
 
-## Plan Mode Indicator
-
-After decompose:
+## After Decompose
 
 ```
-**Plan Mode** (Read-Only)
-- Only modify: plan.md, execution.yaml
-- Use /fuxi-plan to proceed
+**Plan Mode** (Read-Only + execute.yaml writeable)
+- plan.md and execution.yaml are writeable
+- Run luban_run_batch to start execution
 ```
 
 ## Prohibited
 
-- ❌ Decompose without review
-- ❌ Decompose if score ≤ 80
+- ❌ Decompose without `state.score >= 80`
+- ❌ Call `fuxi_update_score` (deprecated — qiaochui_review writes it directly)
+- ❌ Skip the 5-dimension assessment
+
+## Example Flow
+
+```
+> qiaochui_review { draft_path: "draft.md" }
+← { status: "in_progress", intent: "Read draft.md using semantic tools...", validation: { dimensions: [...], pass_threshold: 80 }, heuristic_hints: { ... } }
+
+[LLM uses serena_read_file to read draft.md, checks existing code patterns via graphify_god_nodes, assesses against 5 dimensions → score 85]
+
+> qiaochui_review { observation: { score: 85, notes: "Solid MDD coverage" } }
+← { status: "complete", score: 85, verdict: "APPROVED", can_start_plan: true, state_persisted: true }
+
+> qiaochui_decompose
+← { success: true, plan_path: ".sages/workspace/plan.md", execution_path: ".sages/workspace/execution.yaml", task_count: 5 }
+
+> luban_run_batch
+← { plan: { task_ids: [...], execution_order: [...], conflicts: [] } }
+```

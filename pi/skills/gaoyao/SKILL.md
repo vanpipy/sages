@@ -1,234 +1,147 @@
 ---
-description: Phase-Guided Auditor - Structured prompt chain for disciplined code auditing with five penalty phases (INK, NOSE, FOOT, CASTRATION, DEATH)
+description: Phase-Guided Auditor using semantic tools (simplified 3-tool surface)
 ---
 
 # GaoYao (皋陶) - Phase-Guided Auditor
 
 > **Structured prompt chain for disciplined auditing.**
+> GaoYao enforces the audit discipline (phase/file-read/finding guards). The LLM does the actual inspection via **serena** / **codebase-memory** / **graphify**.
 
-## Phase Flow
+## Phase Flow (auto-advance)
 
 ```
-gaoyao_init
+gaoyao_audit (init / resume / status / reset)
     ↓
-PHASE_1: ENUMERATE (read all files)
-    ↓
-PHASE_2: INK (code style)
-    ↓
+PHASE_1: ENUMERATE (read files via semantic tools)
+    ↓ (auto-advance after 5 file reads)
+PHASE_2: INK (code style) — requires ≥1 ink finding
+    ↓ (auto-advance)
 PHASE_3: NOSE (naming/doc)
     ↓
-PHASE_4: FOOT (architecture)
+PHASE_4: FOOT (architecture) — use graphify_get_community
     ↓
-PHASE_5: CASTRATION (security)
+PHASE_5: CASTRATION (security) — use serena_search_for_pattern
     ↓
-PHASE_6: DEATH (critical defects)
-    ↓
-gaoyao_finalize → Verdict
+PHASE_6: DEATH (critical defects) — use codebase_memory_detect_changes
+    ↓ (auto-advance)
+gaoyao_finalize → verdict in audit.md
 ```
 
-## Tools (Phase-Guided)
+## Tools (Simplified 3-Tool Surface)
 
-| Tool | Phase | Purpose |
-|------|-------|---------|
-| `gaoyao_init` | - | Start audit, enumerate files |
-| `gaoyao_record_file_read` | All | Record file read (required before finding) |
-| `gaoyao_execute_phase` | All | Complete phase, advance to next |
-| `gaoyao_record_finding` | PHASE_GUARDED | Record finding (validates phase) |
-| `gaoyao_finalize` | FINAL | Generate verdict |
-| `gaoyao_status` | - | Check progress |
-| `gaoyao_reset` | - | Reset session |
+| Tool | Purpose |
+|---|---|
+| `gaoyao_audit` | Init / resume / reset / status (one tool). Returns current phase guidance. `reset: true` clears existing session. |
+| `gaoyao_observe` | Discriminated union: pass `file_read: {path, lines?}` OR `finding: {...}`. **Auto-advances** when phase requirements are met. |
+| `gaoyao_finalize` | Generates `audit.md` with verdict (`**Verdict**: PASS/NEEDS_CHANGES/REJECTED`). |
 
-## Phase Completion Rules
+The 9 deprecated stubs (`gaoyao_init`, `gaoyao_record_file_read`, `gaoyao_record_finding`, `gaoyao_execute_phase`, `gaoyao_status`, `gaoyao_reset`, `gaoyao_review`, `gaoyao_quick_check`, `gaoyao_check_security`) all return `isError` with redirect hints. **Do not call them.**
 
-Each phase requires:
-1. **Minimum file reads** (varies by phase)
-2. **At least one finding** (except ENUMERATE)
-3. **Phase-category match** (finding category = current phase)
+## gaoyao_audit
 
-## Usage
-
-### Start Audit
-
-```bash
-/gaoyao_init --review_mode full
+```ts
+gaoyao_audit {
+  reset?: boolean,
+  plan_name?: string,
+  review_mode?: "quick" | "full"
+}
 ```
 
-Returns:
-- Session ID
-- Files enumerated
-- Phase 1 guidance
+- Without `reset`: resumes existing session if any, otherwise creates new one.
+- With `reset: true`: clears existing session and starts fresh.
+- `review_mode`: only applies on init. Default `"full"`.
+- Returns `{ status: "in_progress", phase, session_id, intent, validation }`.
 
-### Read Files
+## gaoyao_observe (auto-advance)
 
-For each file to analyze:
-```bash
-/read path/to/file.ts
-/gaoyao_record_file_read --path path/to/file.ts --lines 150
+```ts
+gaoyao_observe {
+  file_read?: { path: string, lines?: number }     // records file read
+  finding?: {                                      // records finding (phase-guarded)
+    category: "ink" | "nose" | "foot" | "castration" | "death",
+    severity: "critical" | "major" | "minor",
+    file?: string,
+    line?: number,
+    issue: string,
+    evidence?: string,
+    recommendation: string,
+  }
+}
 ```
 
-### Record Findings
+**Auto-advance rules**:
+- After ENUMERATE phase (5 file reads minimum): auto-advance to INK
+- After INK/NOSE/FOOT/CASTRATION/DEATH (≥1 finding in current phase): auto-advance to next
+- Return shape includes `auto_advanced: true` and the next phase's guidance
 
-```bash
-/gaoyao_record_finding \
-  --category ink \
-  --severity major \
-  --file src/service/user.ts \
-  --line 42 \
-  --issue "Function exceeds 50 lines" \
-  --evidence "async function processUserData(id: string, filters: Filter[], options: Options) {" \
-  --recommendation "Split into smaller functions: validateInput(), fetchData(), formatOutput()"
+**Phase guards** (reject if violated):
+- `finding.category` must match `PHASE_CATEGORY_MAP[session.phase]`
+- `finding.file` must have been recorded via `file_read` first
+
+## gaoyao_finalize
+
+```ts
+gaoyao_finalize { notes?: string }
 ```
 
-### Advance Phase
+Generates `audit.md` with the Five Audits table, severity-grouped findings, and `**Verdict**: PASS|REEDS_CHANGES|REJECTED`. Deletes the session on success.
 
-```bash
-/gaoyao_execute_phase --phase INK
-```
+### Scoring
 
-Validates:
-- Required files read
-- Findings recorded
-- Then advances
+| Severity | Penalty |
+|---|---|
+| critical | 30 points |
+| major | 15 points |
+| minor | 5 points |
 
-### Get Status
+### Verdict Logic
 
-```bash
-/gaoyao_status
-```
+- `death.passed === false` → `REJECTED` (regardless of other scores)
+- `castration.passed === false` → `NEEDS_CHANGES`
+- average ≥ 70 → `PASS`
+- average ≥ 50 → `NEEDS_CHANGES`
+- else → `REJECTED`
 
-### Finalize
+## Semantic Tool Usage (by phase)
 
-```bash
-/gaoyao_finalize --notes "Overall assessment..."
-```
+| Phase | Primary semantic tools | What they find |
+|---|---|---|
+| ENUMERATE | `graphify_god_nodes`, `codebase_memory_get_architecture` | Authoritative file list, organized by community |
+| INK | `serena_get_symbols_overview`, `serena_read_file` | Style: formatting, length, naming consistency |
+| NOSE | `serena_find_symbol` (with `include_info: true`) | LSP hover = JSDoc / docstrings coverage |
+| FOOT | `graphify_get_community`, `graphify_shortest_path`, `codebase_memory_trace_path` | Layer boundaries, call-graph BFS, module coupling |
+| CASTRATION | `serena_search_for_pattern`, `codebase_memory_search_code` | `eval\\|innerHTML\|execSync\|sql.*\\+` and similar |
+| DEATH | `serena_get_diagnostics_for_file`, `codebase_memory_detect_changes` | TS errors, recently-changed risky files |
 
 ## Session State
 
-Session persists to: `.sages/workspace/.gaoyao-session.json`
+Session persists to: `.sages/workspace/.gaoyao-session.json`. Includes current phase, files read, findings, completed phases. Resumed automatically by `gaoyao_audit`.
 
-Includes:
-- Current phase
-- Files enumerated/read
-- All findings
-- Completed phases
+## Prohibited
 
-## Five Audits (五刑审核)
+- ❌ Call any deprecated tool (use `gaoyao_audit` / `gaoyao_observe` / `gaoyao_finalize`)
+- ❌ Record a finding for a file that hasn't been recorded as read
+- ❌ Record a finding with category not matching the current phase
+- ❌ Skip the observation cycle (every phase requires both file reads AND ≥1 finding, except ENUMERATE)
 
-### 墨刑 (Ink) - Code Style
-- Phase: INK
-- Checks: naming, complexity, code smells
-- Min files: 3
-
-### 劓刑 (Nose) - Naming & Documentation
-- Phase: NOSE
-- Checks: docstrings, domain terminology
-- Min files: 2
-
-### 剕刑 (Foot) - Architecture
-- Phase: FOOT
-- Checks: layer boundaries, dependencies
-- Min files: 3
-
-### 宫刑 (Castration) - Security
-- Phase: CASTRATION
-- Checks: injection, auth, data exposure
-- Min files: 3
-
-### 大辟 (Death) - Critical Defects
-- Phase: DEATH
-- Checks: business logic, error handling
-- Min files: 2
-
-## Verdict
-
-| Verdict | Score | Action |
-|---------|-------|--------|
-| PASS | ≥70 | Archive workflow |
-| NEEDS_CHANGES | 50-69 | Return to LuBan |
-| REJECTED | <50 | Return to Fuxi |
-
-## Modular Structure
+## Example Flow
 
 ```
-src/tools/gaoyao/
-├── index.ts      # Exports
-├── session.ts    # SessionManager, types, score calculation
-├── phases.ts     # File enumeration, guidance generation
-└── tools.ts      # Tool registrations
-```
+> gaoyao_audit { plan_name: "user-mgmt", review_mode: "full" }
+← { status: "in_progress", phase: "ENUMERATE", session_id: "gaoyao-...", intent: "Read each enumerated file (0/5 done)...", validation: { files_required: 5 } }
 
-### session.ts
-- `AuditSessionManager` - Session state management
-- Types: `AuditPhase`, `AuditFinding`, `AuditSession`
-- Functions: `calculateScoresFromFindings()`, `calculateVerdict()`
+[LLM uses graphify_god_nodes to find 50 files in the project, picks 5 to review]
 
-### phases.ts
-- `enumerateSourceFiles()` - File discovery
-- `generateEnumerationGuidance()` - ENUMERATE phase guidance
-- `generatePhaseGuidance()` - Per-phase guidance
-- `generateFinalAuditReport()` - Report generation
+> gaoyao_observe { file_read: { path: "src/auth.ts", lines: 200 } }  × 5
+← { auto_advanced: true, phase: "INK", intent: "Phase 墨刑 (Code Style): analyze files...", validation: { category_required: "ink", findings_required_min: 1 } }
 
-### tools.ts
-- Tool registrations with phase guards
-- Legacy tool deprecation handlers
+[LLM uses serena_get_symbols_overview + serena_read_file on each file, identifies style issues]
 
-## Unit Tests
+> gaoyao_observe { finding: { category: "ink", severity: "minor", file: "src/auth.ts", line: 42, issue: "function too long", recommendation: "split" } }
+← { auto_advanced: true, phase: "NOSE", validation: { category_required: "nose", findings_required_min: 1 } }
 
-```bash
-bun test ./test/tools/gaoyao/session.test.ts
-```
+[... continues through FOOT, CASTRATION, DEATH ...]
 
-Tests cover:
-- Session lifecycle (create, load, delete)
-- File read tracking
-- Finding recording
-- Phase advancement validation
-- Score calculation
-- Verdict generation
-
-## Legacy Tools (Deprecated)
-
-These tools are deprecated and return errors:
-- ❌ `gaoyao_review` → Use `gaoyao_init`
-- ❌ `gaoyao_quick_check` → Use `gaoyao_init --review_mode quick`
-- ❌ `gaoyao_check_security` → Phase CASTRATION
-
-## Example Session
-
-```
-> /gaoyao_init --review_mode full
-← { sessionId: "gaoyao-xxx", phase: "ENUMERATE", files: [...], guidance: "..." }
-
-> /read src/service/user.ts
-> /gaoyao_record_file_read --path src/service/user.ts --lines 200
-
-> /read src/repository/user-repo.ts
-> /gaoyao_record_file_read --path src/repository/user-repo.ts --lines 150
-
-> /gaoyao_execute_phase --phase ENUMERATE
-← { nextPhase: "INK", guidance: "Analyze code style..." }
-
-> /gaoyao_record_finding --category ink --severity major ...
-> /gaoyao_record_finding --category ink --severity minor ...
-
-> /gaoyao_execute_phase --phase INK
-← { nextPhase: "NOSE", ... }
-
-/gaoyao_finalize --notes "Good implementation with minor style issues"
-← { verdict: "PASS", score: 85 }
-```
-
-## Session Recovery
-
-If session exists, `gaoyao_init` returns current state:
-```
-> /gaoyao_init
-← { resumed: true, phase: "NOSE", filesRead: 5, findings: 3 }
-```
-
-## Reset
-
-To start over:
-```
-/gaoyao_reset --confirm true
+> gaoyao_finalize { notes: "Minor style issues, no security concerns" }
+← { status: "complete", verdict: "PASS", score: 85, total_findings: 7 }
 ```

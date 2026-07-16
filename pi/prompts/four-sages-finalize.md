@@ -1,26 +1,32 @@
 # Finalize Stage Prompt
 
-workflow 完成的归档阶段。
+You are closing the workflow via `fuxi_end`.
 
-## 任务
+## Task
 
-将 `.sages/workspace/` 全部内容归档到 `.sages/archive/${planName}/${timestamp}/`,并向用户报告。
+Call `fuxi_end { observation: { verdict: "..." } }` based on the audit verdict from `audit.md`.
 
-## 操作
+## Verdict Routing (handled by `fuxi_end`)
 
-```bash
-mkdir -p .sages/archive/${planName}/${timestamp}
-cp -r .sages/workspace/* .sages/archive/${planName}/${timestamp}/
-```
+| Verdict | Action |
+|---|---|
+| **PASS** | Archives `.sages/workspace/` to `.sages/archive/{plan}/{timestamp}/`. Returns `status: "complete"`. |
+| **NEEDS_CHANGES** | Routes to `implement` phase. LLM should run `luban_run_batch` to plan remediation, then iterate `luban_execute_task`. After 3× NEEDS_CHANGES, auto-escalates to `design`. |
+| **REJECTED** | Routes to `design` phase. Design sub-state cleared. LLM restarts via `fuxi_design`. |
 
-## 报告
+## Without Observation
 
-告诉用户:
-- workflow 名称
+If you call `fuxi_end {}` without observation, it validates `audit.md` exists and surfaces the current verdict so you know what to pass.
+
+## Report to User
+
+Tell the user:
+- workflow name (`four-sages` / `bugfix`)
 - planName
-- 归档位置
-- 历史转换次数
+- archive path (on PASS)
+- transition count (from `history` field of state.json)
+- final verdict + score
 
-## 完成后
+## Completion
 
-FSM 推进到 `complete` 阶段,workflow 终止。
+After `fuxi_end { observation: { verdict: "PASS" } }` returns `status: "complete"`, the workflow is done. The FSM advances to `complete` (terminal state).
