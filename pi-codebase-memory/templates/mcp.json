@@ -3,8 +3,8 @@
     "codebase-memory-mcp": {
       "command": "codebase-memory-mcp",
       "args": [],
-      "lifecycle": "lazy",
-      "idleTimeout": 15,
+      "lifecycle": "eager",
+      "idleTimeout": 0,
       "requestTimeoutMs": 120000,
       "directTools": [
         "list_projects",

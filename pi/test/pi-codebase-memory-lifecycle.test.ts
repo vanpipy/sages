@@ -106,7 +106,7 @@ describe("pi-codebase-memory: package structure", () => {
 		expect(cbm.directTools?.length).toBe(14);
 		expect(cbm.excludeTools?.length ?? 0).toBe(0);
 		expect(cbm.command).toBe("codebase-memory-mcp");
-		expect(cbm.lifecycle).toBe("lazy");
+		expect(cbm.lifecycle).toBe("eager");
 	});
 
 	it("mcp.json template includes the high-value sage tools", () => {
