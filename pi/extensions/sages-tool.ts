@@ -1,13 +1,13 @@
 /**
- * Sages Tool - 仅保留必须由人类明确触发的 slash command
+ * Sages Tool - 仅保留必须由人类明确触发的 slash command (极简版)
  *
- * 保留 2 个命令 (其余的"状态查询 / workflow 切换 / score 更新"等都是自然语言路由):
- * - /sages-init      一次性 setup: 初始化 .sages/workflow.yaml + 复制模板
- * - /sages-plan      唯一 REQUIRED 手动 gate: 批准 plan 后推进到 decompose/execute
+ * 移除 FSM 之后,sages 不再需要工作流配置 (.sages/workflow.yaml)、
+ * 阶段提示 (pi/prompts/) 或 workflow 模板。/sages-init 只创建 workspace
+ * 目录,/sages-plan 只是通知 (无 FSM 消费者)。
  *
- * 为什么只有这两个: 自然语言路由(“design an API” / “audit my code”等) 让 LLM
- * 动选选 sage 工具。同时查询(状态、score、workflow 列表)也同样由 LLM
- * 在工具响应中携带。消除能消的 slash command。
+ * 保留 2 个命令:
+ * - /sages-init      创建 .sages/workspace/ (sage 工具的产出目录)
+ * - /sages-plan      通知 (LLM 通过自然语言路由推进工作)
  */
 
 import * as fs from "node:fs";
@@ -21,99 +21,41 @@ const __dirname = path.dirname(__filename);
 // package 根目录(extensions/ 的上一级)
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
 
-// 模板源路径(package 内)
-const TEMPLATE_WORKFLOW_DIR = path.join(PACKAGE_ROOT, ".sages", "workflows");
-const TEMPLATE_PROMPTS_DIR = path.join(PACKAGE_ROOT, "prompts");
+// sages 运行时目录 — sage 工具 (fuxi / qiaochui / luban / gaoyao) 把
+// draft.md / plan.md / execution.yaml / audit.md 等写到这里
+const WORKSPACE_DIR = ".sages/workspace";
 
 export default function (pi: ExtensionAPI) {
-	// ─── /sages-init:初始化全新项目 ───
+	// ─── /sages-init:创建 workspace 目录(一次性) ───
 	pi.registerCommand("sages-init", {
-		description: "[Sages] 初始化 .sages/workflow.yaml + 复制模板(全新项目)",
+		description: "[Sages] 创建 .sages/workspace/ 目录 (sage 工具的产出位置)",
 		handler: async (_args, ctx) => {
-			const sagesDir = path.join(ctx.cwd, ".sages");
-			const workflowsDir = path.join(sagesDir, "workflows");
-			const configPath = path.join(sagesDir, "workflow.yaml");
-
-			if (fs.existsSync(configPath)) {
-				ctx.ui.notify("[Sages] .sages/workflow.yaml 已存在,无需初始化", "info");
+			const workspacePath = path.join(ctx.cwd, WORKSPACE_DIR);
+			if (fs.existsSync(workspacePath)) {
+				ctx.ui.notify(
+					`[Sages] ${WORKSPACE_DIR} 已存在,无需初始化`,
+					"info",
+				);
 				return;
 			}
-
-			// 创建目录
-			fs.mkdirSync(workflowsDir, { recursive: true });
-
-			// 写默认 config
-			const defaultConfig = `apiVersion: sages.io/workflow-v1alpha1
-kind: WorkflowConfig
-metadata:
-  name: user-defaults
-  description: Sages workflow 配置(由 /sages-init 创建)
-spec:
-  activeWorkflow: four-sages
-  aliases:
-    default: four-sages
-    bugfix: bugfix
-  workflowDir: ./.sages/workflows
-  onSwitch: strict
-  bootstrap:
-    onMissingConfig: fallback-to-default
-    onEmptyWorkspace: prompt-init
-`;
-			fs.writeFileSync(configPath, defaultConfig);
-
-			// [M1] 复制 workflow 模板
-			let copiedWorkflows: string[] = [];
-			if (fs.existsSync(TEMPLATE_WORKFLOW_DIR)) {
-				for (const file of fs.readdirSync(TEMPLATE_WORKFLOW_DIR)) {
-					if (file.endsWith(".yaml")) {
-						fs.copyFileSync(
-							path.join(TEMPLATE_WORKFLOW_DIR, file),
-							path.join(workflowsDir, file)
-						);
-						copiedWorkflows.push(file);
-					}
-				}
-			}
-
-			// 复制 prompts 目录(可选,如果存在)
-			const userPromptsDir = path.join(sagesDir, "prompts");
-			let copiedPrompts = 0;
-			if (fs.existsSync(TEMPLATE_PROMPTS_DIR)) {
-				fs.mkdirSync(userPromptsDir, { recursive: true });
-				const copyDir = (src: string, dest: string) => {
-					if (!fs.existsSync(src)) return;
-					fs.mkdirSync(dest, { recursive: true });
-					for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-						const srcPath = path.join(src, entry.name);
-						const destPath = path.join(dest, entry.name);
-						if (entry.isDirectory()) {
-							copyDir(srcPath, destPath);
-						} else {
-							fs.copyFileSync(srcPath, destPath);
-							copiedPrompts++;
-						}
-					}
-				};
-				copyDir(TEMPLATE_PROMPTS_DIR, userPromptsDir);
-			}
-
+			fs.mkdirSync(workspacePath, { recursive: true });
 			ctx.ui.notify(
-				`[Sages] 已创建 .sages/\n` +
-					`  workflow.yaml(activeWorkflow=four-sages)\n` +
-					`  workflows/: ${copiedWorkflows.join(", ") || "(none)"}\n` +
-					`  prompts/: ${copiedPrompts} 文件\n` +
-					`运行 /sages-plan 开始 workflow;其它进度通过自然语言查询`,
-				"info"
+				`[Sages] 已创建 ${WORKSPACE_DIR}\n` +
+					`sage 工具 (fuxi_design / qiaochui_review / luban_execute_task / gaoyao_audit 等)\n` +
+					`现在可以开始使用 — 直接说 "design a thing" 即可,无需更多命令。`,
+				"info",
 			);
 		},
 	});
 
-	// ─── /sages-plan:唯一手动 gate ───
+	// ─── /sages-plan:手动 gate 通知 (无消费者;LLM 通过自然语言推进) ───
 	pi.registerCommand("sages-plan", {
-		description: "[Sages] 批准 plan(唯一手动 gate)",
+		description: "[Sages] 手动 gate 通知 — sage 工具的响应已经隐含 plan 状态",
 		handler: async (_args, ctx) => {
-			pi.events.emit("sages:plan-approved", { at: Date.now(), cwd: ctx.cwd });
-			ctx.ui.notify("[Sages] plan approved. FSM 正在推进...", "info");
+			ctx.ui.notify(
+				"[Sages] plan acknowledged. sage 工具 (fuxi_design / qiaochui_decompose) 通过观察周期 (observe cycle) 处理 plan 状态。",
+				"info",
+			);
 		},
 	});
 }

@@ -155,6 +155,7 @@ Sage tools only declare contracts and validate outcomes. The semantic tools abov
 Project-specific overrides in this repo:
 - `AGENTS.md` — primary project doc (the only local override file)
 - `pi/skills/{fuxi,qiaochui,luban,gaoyao,brainstorming}/SKILL.md` — per-sage skill docs
-- `pi/prompts/four-sages-*.md`, `pi/prompts/bugfix-*.md` — stage prompts (auto-injected at FSM transitions)
+- `pi/skills/{fuxi,qiaochui,luban,gaoyao,brainstorming}/SKILL.md` — per-sage skill docs (auto-loaded)
+  - (FSM and stage prompts removed — sage tools work via natural-language routing)
 
 If a sage tool's return shape differs from what's documented here, the **test suite is the source of truth** (683 tests in `pi/test/`).

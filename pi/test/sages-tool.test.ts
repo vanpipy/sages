@@ -72,18 +72,16 @@ describe("sages-tool: /sages-init", () => {
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sages-init-test-"));
 	});
 
-	it("全新项目:创建 .sages/workflow.yaml + workflows/ 目录", () => {
+	it("全新项目:创建 .sages/workspace/ 目录 (sage 工具的产出位置)", () => {
 		const toolPath = path.join(PI_ROOT, "extensions", "sages-tool.ts");
 		const content = fs.readFileSync(toolPath, "utf-8");
 
-		// 验证 init 处理函数包含创建目录和写 config 的逻辑
+		// 验证 init 处理函数创建 workspace 目录
 		expect(content).toContain("mkdirSync");
-		expect(content).toContain("workflows");
-		expect(content).toContain("workflow.yaml");
-		expect(content).toContain("activeWorkflow");
+		expect(content).toContain(".sages/workspace");
 	});
 
-	it("已有 config:不覆盖", () => {
+	it("已有 workspace:不重复创建", () => {
 		const toolPath = path.join(PI_ROOT, "extensions", "sages-tool.ts");
 		const content = fs.readFileSync(toolPath, "utf-8");
 		// 验证 init 处理函数检查已存在的情况
@@ -92,11 +90,13 @@ describe("sages-tool: /sages-init", () => {
 });
 
 describe("sages-tool: /sages-plan 手动 gate", () => {
-	it("通过 EventBus 通知 FSM", () => {
+	it("notify-only:无 FSM 消费者(LLM 通过自然语言路由推进 plan)", () => {
 		const content = fs.readFileSync(
 			path.join(PI_ROOT, "extensions", "sages-tool.ts"),
 			"utf-8",
 		);
-		expect(content).toContain("sages:plan-approved");
+		// 不再 emit FSM 事件;LLM 通过 fuxi_design {observation: {phase: "plan", approved: true}} 推进
+		expect(content).not.toContain("sages:plan-approved");
+		expect(content).toContain("ui.notify");
 	});
 });

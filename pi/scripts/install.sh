@@ -806,19 +806,6 @@ install_sages_files() {
     fi
   done
 
-  # [修复] 也复制 .sages/workflows/ 模板——/sages-init 用它
-  local src_workflows="$TMP_DIR/pi/.sages/workflows"
-  local dest_workflows="$PKG_DIR/.sages/workflows"
-  if [[ -d "$src_workflows" ]]; then
-    if [[ -d "$dest_workflows" && "${FORCE:-false}" != true ]]; then
-      echo "  Skipping .sages/workflows/ (exists, use --force to overwrite)"
-    else
-      mkdir -p "$PKG_DIR/.sages"
-      rm -rf "$dest_workflows"
-      cp -r "$src_workflows" "$dest_workflows"
-      echo "  Installed .sages/workflows/"
-    fi
-  fi
 
   # Handle package.json
   if [[ -f "$PKG_DIR/package.json" && "${FORCE:-false}" != true ]]; then

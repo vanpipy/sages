@@ -226,7 +226,7 @@ export { WorkflowStateManager } from "./services/workflow-state-manager.js";
 export { runTask, runTDDCycle, parseExecutionYaml } from "./executor/index.js";
 export type { LubanTask, TDDConfig, TaskResult, TDDPhase } from "./executor/index.js";
 
-// Orchestrator removed in simplify-actions refactor (dead code, replaced by FSM extension in extensions/sages-fsm.ts)
+// Orchestrator / FSM 已删除 — sage 工具通过自然语言路由工作
 ```
 
 ## Development
