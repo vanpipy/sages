@@ -1,7 +1,16 @@
 /**
- * GaoYao Tools Registration
- * 
- * Phase-guided audit tools for the Four Sages workflow.
+ * GaoYao Tools Registration — Simplified 3-tool surface
+ *
+ * Per the simplify-actions principle (sages.simplify_principle):
+ *   - gaoyao_audit    (init / resume / reset / status — all in one)
+ *   - gaoyao_observe  (file_read + finding, with auto-advance)
+ *   - gaoyao_finalize (produces audit.md, unchanged)
+ *
+ * Each tool returns the contract shape: {status, intent, validation}.
+ * Phases auto-advance when their requirements are met — the LLM never
+ * has to call a separate "advance phase" tool.
+ *
+ * Deprecated stubs return isError with a redirect hint to the new tools.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -32,104 +41,137 @@ import {
 
 const WORKSPACE_DIR = ".sages/workspace";
 
-// ============================================================================
-// Tool Registrations
-// ============================================================================
+/**
+ * Build the standard intent string for a phase.
+ */
+function buildIntent(
+  phase: import("./session").AuditPhase,
+  filesReadCount: number,
+  filesRequired: number,
+  findingsInPhase: number,
+  findingsMin: number,
+): string {
+  const labels = PHASE_LABELS[phase];
+  if (phase === "ENUMERATE") {
+    return `Read each enumerated file (${filesReadCount}/${filesRequired} done). After reading all files, the audit will auto-advance.`;
+  }
+  return `Phase ${labels}: analyze files for this category. Findings so far: ${findingsInPhase}${findingsMin > 0 ? ` (need ≥${findingsMin} to advance)` : ""}. Record findings with gaoyao_observe.`;
+}
 
 /**
- * Register all GaoYao tools
- * @param pi - Extension API
+ * Build the standard validation block for a phase.
+ */
+function buildValidation(
+  phase: import("./session").AuditPhase,
+  session: AuditSession,
+): Record<string, unknown> {
+  const v: Record<string, unknown> = {
+    files_required: REQUIRED_FILES_PER_PHASE[phase],
+    files_read: session.filesRead.length,
+  };
+  const cat = PHASE_CATEGORY_MAP[phase];
+  if (cat) {
+    v.category_required = cat;
+    v.findings_required_min = 1;
+    v.findings_in_phase = session.findings.filter((f) => f.phase === phase).length;
+  }
+  return v;
+}
+
+/**
+ * Register all GaoYao tools.
  */
 export function registerGaoYaoTools(pi: ExtensionAPI): void {
 
-  /**
-   * gaoyao_init - Initialize audit session with file enumeration
-   */
+  // ───────────────────────────────────────────────────────────────────────
+  // gaoyao_audit: init / resume / reset / status (one tool)
+  // ───────────────────────────────────────────────────────────────────────
   pi.registerTool({
-    name: "gaoyao_init",
-    label: "Init Audit",
-    description: "Initialize phase-guided audit session. Enumerates files and returns Phase 1 guidance. Must call before other gaoyao tools.",
+    name: "gaoyao_audit",
+    label: "Audit",
+    description: "Start, resume, reset, or query the audit session. On first call (or with reset:true) initializes a new session. Otherwise resumes the current session and returns current phase guidance. Use this instead of the old gaoyao_init/gaoyao_status/gaoyao_reset tools.",
     parameters: Type.Object({
+      reset: Type.Optional(Type.Boolean({ description: "Discard any existing session and start fresh" })),
+      plan_name: Type.Optional(Type.String({ description: "Plan name (optional)" })),
       review_mode: Type.Optional(Type.Union([
         Type.Literal("quick", { description: "Fast triage - only critical checks" }),
-        Type.Literal("full", { description: "Complete 5-audit deep analysis (default)" })
-      ], { description: "Review depth" })),
-      plan_name: Type.Optional(Type.String({ description: "Plan name (optional)" })),
+        Type.Literal("full", { description: "Complete 5-audit deep analysis (default)" }),
+      ], { description: "Review depth (only applies when initializing)" })),
     }),
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const { review_mode = "full", plan_name } = params;
       const sessionManager = new AuditSessionManager(ctx.cwd);
 
-      // Check for existing session
-      const existingSession = sessionManager.load();
-      if (existingSession) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              resumed: true,
-              sessionId: existingSession.id,
-              phase: existingSession.phase,
-              reviewMode: existingSession.reviewMode,
-              filesEnumerated: existingSession.filesEnumerated.length,
-              filesRead: existingSession.filesRead.length,
-              findingsRecorded: existingSession.findings.length,
-              summary: `Resumed audit session. Current phase: ${PHASE_LABELS[existingSession.phase]}. ${existingSession.filesRead.length} files read.`,
-              nextAction: `Call \`gaoyao_execute_phase --phase ${existingSession.phase}\` to continue.`,
-            }),
-          }],
-          details: {
-            session: existingSession,
-            guidance: generatePhaseGuidance(
-              existingSession.phase,
-              existingSession.projectContext,
-              existingSession.filesRead.map(f => f.path),
-              existingSession.findings.filter(f => f.phase === existingSession.phase)
-            ),
+      // Handle reset: clear any existing session first.
+      if (params.reset) {
+        sessionManager.delete();
+      }
+
+      // If a session exists (and we weren't asked to reset), resume it.
+      const existing = sessionManager.load();
+      if (existing) {
+        const payload = {
+          status: "in_progress",
+          resumed: true,
+          session_id: existing.id,
+          phase: existing.phase,
+          phase_label: PHASE_LABELS[existing.phase],
+          intent: buildIntent(
+            existing.phase,
+            existing.filesRead.length,
+            REQUIRED_FILES_PER_PHASE[existing.phase],
+            existing.findings.filter((f) => f.phase === existing.phase).length,
+            PHASE_CATEGORY_MAP[existing.phase] ? 1 : 0,
+          ),
+          validation: buildValidation(existing.phase, existing),
+          progress: {
+            files_enumerated: existing.filesEnumerated.length,
+            files_read: existing.filesRead.length,
+            findings_total: existing.findings.length,
+            phases_completed: existing.completedPhases.length,
           },
+          files_read: existing.filesRead.map((f) => f.path),
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(payload) }],
+          details: { session: existing },
         };
       }
 
+      // No existing session — initialize a new one.
+      const review_mode = params.review_mode ?? "full";
       const analyzer = new ProjectAnalyzer();
 
       try {
         const projectContext = await analyzer.analyze(ctx.cwd);
         const files = enumerateSourceFiles(ctx.cwd, projectContext);
-        
-        const session = sessionManager.create(review_mode, plan_name);
+
+        const session = sessionManager.create(review_mode, params.plan_name);
         session.projectContext = projectContext;
         session.phase = "ENUMERATE";
         session.filesEnumerated = files;
         sessionManager.save();
 
+        const payload = {
+          status: "in_progress",
+          resumed: false,
+          session_id: session.id,
+          phase: "ENUMERATE",
+          phase_label: PHASE_LABELS["ENUMERATE"],
+          intent: buildIntent("ENUMERATE", 0, REQUIRED_FILES_PER_PHASE["ENUMERATE"], 0, 0),
+          validation: buildValidation("ENUMERATE", session),
+          files_enumerated: files.length,
+          files_read: [],
+        };
+
         const workspacePath = join(ctx.cwd, WORKSPACE_DIR);
         const planPath = join(workspacePath, "plan.md");
-        let designContext = null;
-        
+        let designContext: string | null = null;
         if (existsSync(planPath)) {
           designContext = readFileSync(planPath, "utf-8").slice(0, 1000);
         }
 
         return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              resumed: false,
-              sessionId: session.id,
-              phase: "ENUMERATE",
-              reviewMode: review_mode,
-              project: {
-                language: projectContext.language,
-                framework: projectContext.framework,
-                type: projectContext.projectType,
-              },
-              filesEnumerated: files.length,
-              summary: `Audit initialized. ${files.length} files enumerated. Begin Phase 1: ENUMERATE.`,
-              nextAction: "Read each file, then call gaoyao_execute_phase --phase ENUMERATE",
-            }),
-          }],
+          content: [{ type: "text", text: JSON.stringify(payload) }],
           details: {
             session,
             files: files.slice(0, 20),
@@ -141,7 +183,10 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: { message: msg } }) }],
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: { message: msg },
+          }) }],
           isError: true,
           details: { error: msg },
         };
@@ -149,296 +194,258 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
     },
   });
 
-  /**
-   * gaoyao_record_file_read - Record that a file was read
-   */
+  // ───────────────────────────────────────────────────────────────────────
+  // gaoyao_observe: file_read + finding with auto-advance
+  // ───────────────────────────────────────────────────────────────────────
   pi.registerTool({
-    name: "gaoyao_record_file_read",
-    label: "Record File Read",
-    description: "Record that a file was read. Required before recording findings. Tracks phase progress.",
+    name: "gaoyao_observe",
+    label: "Observe",
+    description: "Record a file read OR a finding, with auto-advance when the current phase is complete. Discriminated union: pass either {file_read: {...}} or {finding: {...}}. Replaces the old gaoyao_record_file_read, gaoyao_record_finding, and gaoyao_execute_phase tools.",
     parameters: Type.Object({
-      path: Type.String({ description: "Path to the file that was read" }),
-      lines: Type.Optional(Type.Number({ description: "Number of lines in the file" })),
+      file_read: Type.Optional(Type.Object({
+        path: Type.String({ description: "Path to the file that was read" }),
+        lines: Type.Optional(Type.Number({ description: "Number of lines in the file" })),
+      }, { description: "Record a file read for the current phase" })),
+      finding: Type.Optional(Type.Object({
+        category: Type.Union([
+          Type.Literal("ink"),
+          Type.Literal("nose"),
+          Type.Literal("foot"),
+          Type.Literal("castration"),
+          Type.Literal("death"),
+        ], { description: "Audit category (must match current phase)" }),
+        severity: Type.Union([
+          Type.Literal("critical"),
+          Type.Literal("major"),
+          Type.Literal("minor"),
+        ], { description: "Issue severity" }),
+        file: Type.Optional(Type.String()),
+        line: Type.Optional(Type.Number()),
+        issue: Type.String(),
+        evidence: Type.Optional(Type.String()),
+        recommendation: Type.String(),
+      }, { description: "Record an audit finding" })),
     }),
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const { path, lines = 0 } = params;
       const sessionManager = new AuditSessionManager(ctx.cwd);
       const session = sessionManager.load();
 
       if (!session) {
         return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "No active audit session. Call gaoyao_init first." }) }],
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: "No active audit session. Call gaoyao_audit first.",
+          }) }],
           isError: true,
           details: { error: "No session" },
         };
       }
 
-      sessionManager.recordFileRead(path, lines);
-      const updatedSession = sessionManager.load()!;
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            fileRecorded: path,
-            totalFilesRead: updatedSession.filesRead.length,
-            requiredForCurrentPhase: REQUIRED_FILES_PER_PHASE[session.phase],
-            summary: `Recorded read: ${path}. ${updatedSession.filesRead.length}/${REQUIRED_FILES_PER_PHASE[session.phase]} files read for ${PHASE_LABELS[session.phase]}.`,
-          }),
-        }],
-        details: {
-          file: path,
-          filesRead: updatedSession.filesRead.length,
-          required: REQUIRED_FILES_PER_PHASE[session.phase],
-        },
-      };
-    },
-  });
-
-  /**
-   * gaoyao_execute_phase - Complete current phase and get next guidance
-   */
-  pi.registerTool({
-    name: "gaoyao_execute_phase",
-    label: "Execute Phase",
-    description: "Complete current phase and advance. Validates file reads and findings before advancing.",
-    parameters: Type.Object({
-      phase: Type.Union([
-        Type.Literal("ENUMERATE"),
-        Type.Literal("INK"),
-        Type.Literal("NOSE"),
-        Type.Literal("FOOT"),
-        Type.Literal("CASTRATION"),
-        Type.Literal("DEATH"),
-      ], { description: "Phase to complete and advance from" }),
-      notes: Type.Optional(Type.String({ description: "Optional notes for this phase" })),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const { phase, notes } = params;
-      const sessionManager = new AuditSessionManager(ctx.cwd);
-      const session = sessionManager.load();
-
-      if (!session) {
+      // Discriminated union: must have exactly one of file_read / finding.
+      if (!params.file_read && !params.finding) {
         return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "No active audit session. Call gaoyao_init first." }) }],
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: "Provide either file_read or finding",
+          }) }],
           isError: true,
-          details: { error: "No session" },
+          details: { error: "missing field" },
+        };
+      }
+      if (params.file_read && params.finding) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: "Provide exactly one of file_read or finding, not both",
+          }) }],
+          isError: true,
+          details: { error: "both fields" },
         };
       }
 
-      if (phase !== session.phase) {
+      // ── file_read path ──
+      if (params.file_read) {
+        const { path: filePath, lines = 0 } = params.file_read;
+        sessionManager.recordFileRead(filePath, lines);
+        const updated = sessionManager.load()!;
+
+        // Auto-advance check.
+        const { canAdvance, reason } = sessionManager.canAdvancePhase();
+        if (canAdvance) {
+          const nextPhase = advancePhase(sessionManager);
+          if (nextPhase) {
+            const adv = sessionManager.load()!;
+            return {
+              content: [{ type: "text", text: JSON.stringify({
+                status: "in_progress",
+                phase: nextPhase,
+                phase_label: PHASE_LABELS[nextPhase],
+                intent: buildIntent(
+                  nextPhase,
+                  adv.filesRead.length,
+                  REQUIRED_FILES_PER_PHASE[nextPhase],
+                  adv.findings.filter((f) => f.phase === nextPhase).length,
+                  PHASE_CATEGORY_MAP[nextPhase] ? 1 : 0,
+                ),
+                validation: buildValidation(nextPhase, adv),
+                files_read: adv.filesRead.length,
+                auto_advanced: true,
+                observation: "file_read",
+              }) }],
+              details: {
+                observation: "file_read",
+                auto_advanced: true,
+                next_phase: nextPhase,
+                session: adv,
+              },
+            };
+          }
+        }
+
+        // No advance.
         return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              error: `Invalid phase. Current phase is ${session.phase}. Cannot complete ${phase}.`,
-              currentPhase: session.phase,
-              requestedPhase: phase,
-            }),
-          }],
-          isError: true,
-          details: { currentPhase: session.phase, requestedPhase: phase },
-        };
-      }
-
-      const { canAdvance, reason } = sessionManager.canAdvancePhase();
-      if (!canAdvance) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              error: reason,
-              phase: session.phase,
-              filesRead: session.filesRead.length,
-              required: REQUIRED_FILES_PER_PHASE[session.phase],
-              findingsRecorded: session.findings.filter(f => f.phase === session.phase).length,
-            }),
-          }],
-          isError: true,
-          details: { reason, phase: session.phase },
-        };
-      }
-
-      const completion = sessionManager.completePhase(phase, notes);
-
-      const currentIndex = PHASE_ORDER.indexOf(phase);
-      const nextPhase = PHASE_ORDER[currentIndex + 1];
-
-      if (nextPhase === "FINAL") {
-        sessionManager.setPhase("FINAL");
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              phaseCompleted: phase,
-              allPhasesComplete: true,
-              summary: `Phase ${PHASE_LABELS[phase]} complete. All audit phases finished. Call gaoyao_finalize for verdict.`,
-              nextAction: "Call gaoyao_finalize to generate final verdict.",
-            }),
-          }],
+          content: [{ type: "text", text: JSON.stringify({
+            status: "in_progress",
+            phase: updated.phase,
+            phase_label: PHASE_LABELS[updated.phase],
+            files_read: updated.filesRead.length,
+            files_required: REQUIRED_FILES_PER_PHASE[updated.phase],
+            auto_advanced: false,
+            observation: "file_read",
+            blocked_reason: canAdvance ? undefined : reason,
+          }) }],
           details: {
-            completedPhase: phase,
-            completion,
-            findingsSummary: {
-              ink: session.findings.filter(f => f.category === "ink").length,
-              nose: session.findings.filter(f => f.category === "nose").length,
-              foot: session.findings.filter(f => f.category === "foot").length,
-              castration: session.findings.filter(f => f.category === "castration").length,
-              death: session.findings.filter(f => f.category === "death").length,
-            },
+            observation: "file_read",
+            auto_advanced: false,
+            session: updated,
           },
         };
       }
 
-      sessionManager.setPhase(nextPhase);
-      const updatedSession = sessionManager.load()!;
-
-      const filesForPhase = updatedSession.filesRead.map(f => f.path);
-      const findingsForPhase = updatedSession.findings.filter(f => f.phase === nextPhase);
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            phaseCompleted: phase,
-            nextPhase,
-            summary: `Phase ${PHASE_LABELS[phase]} complete. Now starting ${PHASE_LABELS[nextPhase]}.`,
-            nextAction: `Analyze files for ${PHASE_LABELS[nextPhase]}, record findings, then call gaoyao_execute_phase --phase ${nextPhase}`,
-          }),
-        }],
-        details: {
-          completedPhase: phase,
-          nextPhase,
-          completion,
-          guidance: generatePhaseGuidance(nextPhase, updatedSession.projectContext, filesForPhase, findingsForPhase),
-        },
-      };
-    },
-  });
-
-  /**
-   * gaoyao_record_finding - Record a finding (PHASE-GUARDED)
-   */
-  pi.registerTool({
-    name: "gaoyao_record_finding",
-    label: "Record Finding",
-    description: "Record a finding. Must have read the file first (gaoyao_record_file_read). Phase-guarded.",
-    parameters: Type.Object({
-      category: Type.Union([
-        Type.Literal("ink", { description: "墨刑 - Code style" }),
-        Type.Literal("nose", { description: "劓刑 - Naming/doc" }),
-        Type.Literal("foot", { description: "剕刑 - Architecture" }),
-        Type.Literal("castration", { description: "宫刑 - Security" }),
-        Type.Literal("death", { description: "大辟 - Critical defect" }),
-      ], { description: "Audit category" }),
-      severity: Type.Union([
-        Type.Literal("critical", { description: "Must fix immediately" }),
-        Type.Literal("major", { description: "Should fix before release" }),
-        Type.Literal("minor", { description: "Can fix later" }),
-      ], { description: "Issue severity" }),
-      file: Type.Optional(Type.String({ description: "File path with issue" })),
-      line: Type.Optional(Type.Number({ description: "Line number" })),
-      issue: Type.String({ description: "Description of the issue" }),
-      evidence: Type.Optional(Type.String({ description: "Code snippet or reference" })),
-      recommendation: Type.String({ description: "How to fix this issue" }),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const { category, severity, file, line, issue, evidence, recommendation } = params;
-      const sessionManager = new AuditSessionManager(ctx.cwd);
-      const session = sessionManager.load();
-
-      if (!session) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "No active audit session. Call gaoyao_init first." }) }],
-          isError: true,
-          details: { error: "No session" },
-        };
-      }
-
+      // ── finding path ──
+      const f = params.finding!;
       const expectedPhase = PHASE_CATEGORY_MAP[session.phase];
-      if (expectedPhase !== category) {
+
+      if (!expectedPhase) {
         return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              error: `Invalid category '${category}' for current phase '${session.phase}'. Expected category: '${expectedPhase}'`,
-              currentPhase: session.phase,
-              expectedCategory: expectedPhase,
-              providedCategory: category,
-            }),
-          }],
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: `Phase '${session.phase}' has no category mapped and cannot accept findings. Record file_reads to advance to a numbered phase first.`,
+            current_phase: session.phase,
+            expected_category: expectedPhase,
+          }) }],
           isError: true,
-          details: { phase: session.phase, expectedCategory: expectedPhase, providedCategory: category },
+          details: { phase: session.phase },
         };
       }
 
-      if (file && !sessionManager.isFileRead(file)) {
+      if (f.category !== expectedPhase) {
         return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              error: `File '${file}' has not been read yet. Call gaoyao_record_file_read --path '${file}' first.`,
-              file,
-              filesRead: session.filesRead.map(f => f.path),
-            }),
-          }],
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: `Invalid category '${f.category}' for current phase '${session.phase}'. Expected category: '${expectedPhase}'.`,
+            current_phase: session.phase,
+            expected_category: expectedPhase,
+            provided_category: f.category,
+          }) }],
           isError: true,
-          details: { file, filesRead: session.filesRead.map(f => f.path) },
+          details: { phase: session.phase, expectedCategory: expectedPhase, providedCategory: f.category },
+        };
+      }
+
+      if (f.file && !sessionManager.isFileRead(f.file)) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: `File '${f.file}' has not been read yet. Call gaoyao_observe with file_read first.`,
+            file: f.file,
+            files_read: session.filesRead.map((x) => x.path),
+          }) }],
+          isError: true,
+          details: { file: f.file, filesRead: session.filesRead.map((x) => x.path) },
         };
       }
 
       const finding: AuditFinding = {
-        category,
-        severity,
-        file,
-        line,
-        issue,
-        evidence,
-        recommendation,
+        category: f.category,
+        severity: f.severity,
+        file: f.file,
+        line: f.line,
+        issue: f.issue,
+        evidence: f.evidence,
+        recommendation: f.recommendation,
         phase: session.phase,
         recordedAt: new Date().toISOString(),
       };
 
       sessionManager.addFinding(finding);
-      const updatedSession = sessionManager.load()!;
-      const findingsInPhase = updatedSession.findings.filter(f => f.phase === session.phase);
+      const updated = sessionManager.load()!;
+      const findingsInPhase = updated.findings.filter((x) => x.phase === session.phase);
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            findingRecorded: {
-              category,
-              severity,
-              issue,
-              file: file ? `${file}:${line || "?"}` : "N/A",
+      // Auto-advance check.
+      const { canAdvance, reason } = sessionManager.canAdvancePhase();
+      if (canAdvance) {
+        const nextPhase = advancePhase(sessionManager);
+        if (nextPhase) {
+          const adv = sessionManager.load()!;
+          return {
+            content: [{ type: "text", text: JSON.stringify({
+              status: "in_progress",
+              phase: nextPhase,
+              phase_label: PHASE_LABELS[nextPhase],
+              intent: buildIntent(
+                nextPhase,
+                adv.filesRead.length,
+                REQUIRED_FILES_PER_PHASE[nextPhase],
+                adv.findings.filter((x) => x.phase === nextPhase).length,
+                PHASE_CATEGORY_MAP[nextPhase] ? 1 : 0,
+              ),
+              validation: buildValidation(nextPhase, adv),
+              findings_recorded: findingsInPhase.length,
+              findings_total: updated.findings.length,
+              auto_advanced: true,
+              observation: "finding",
+            }) }],
+            details: {
+              observation: "finding",
+              auto_advanced: true,
+              next_phase: nextPhase,
+              session: adv,
+              finding_recorded: finding,
             },
-            phaseFindingsCount: findingsInPhase.length,
-            totalFindings: updatedSession.findings.length,
-            summary: `Recorded: [${category}] ${severity} - ${issue}${file ? ` (${file}:${line || "?"})` : ""}`,
-          }),
-        }],
-        details: { finding, phase: session.phase, findingsInPhase: findingsInPhase.length },
+          };
+        }
+      }
+
+      // No advance.
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "in_progress",
+          phase: session.phase,
+          phase_label: PHASE_LABELS[session.phase],
+          findings_recorded: findingsInPhase.length,
+          findings_total: updated.findings.length,
+          auto_advanced: false,
+          observation: "finding",
+          blocked_reason: canAdvance ? undefined : reason,
+        }) }],
+        details: {
+          observation: "finding",
+          auto_advanced: false,
+          session: updated,
+          finding_recorded: finding,
+        },
       };
     },
   });
 
-  /**
-   * gaoyao_finalize - Generate final verdict
-   */
+  // ───────────────────────────────────────────────────────────────────────
+  // gaoyao_finalize (unchanged behavior, shape simplified)
+  // ───────────────────────────────────────────────────────────────────────
   pi.registerTool({
     name: "gaoyao_finalize",
     label: "Finalize Audit",
-    description: "Generate final verdict and audit report. Requires all phases completed.",
+    description: "Generate final verdict and audit report. Requires all phases completed (auto-advance from DEATH).",
     parameters: Type.Object({
       notes: Type.Optional(Type.String({ description: "Overall assessment notes" })),
     }),
@@ -449,7 +456,10 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
 
       if (!session) {
         return {
-          content: [{ type: "text", text: JSON.stringify({ success: false, error: "No active audit session." }) }],
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: "No active audit session.",
+          }) }],
           isError: true,
           details: { error: "No session" },
         };
@@ -457,15 +467,12 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
 
       if (session.phase !== "FINAL") {
         return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              error: `Audit not complete. Current phase: ${session.phase}. Complete all phases before finalizing.`,
-              currentPhase: session.phase,
-              remainingPhases: PHASE_ORDER.slice(PHASE_ORDER.indexOf(session.phase) + 1, -1),
-            }),
-          }],
+          content: [{ type: "text", text: JSON.stringify({
+            status: "error",
+            error: `Audit not complete. Current phase: ${session.phase}. Continue observing until DEATH is done — it auto-advances to FINAL.`,
+            current_phase: session.phase,
+            remaining_phases: PHASE_ORDER.slice(PHASE_ORDER.indexOf(session.phase) + 1, -1),
+          }) }],
           isError: true,
           details: { currentPhase: session.phase },
         };
@@ -480,7 +487,7 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
         session.findings,
         verdict,
         score,
-        notes
+        notes,
       );
 
       const workspacePath = join(ctx.cwd, WORKSPACE_DIR);
@@ -489,29 +496,27 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
       sessionManager.delete();
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            verdict,
-            score,
-            totalFindings: session.findings.length,
-            byCategory: {
-              ink: session.findings.filter(f => f.category === "ink").length,
-              nose: session.findings.filter(f => f.category === "nose").length,
-              foot: session.findings.filter(f => f.category === "foot").length,
-              castration: session.findings.filter(f => f.category === "castration").length,
-              death: session.findings.filter(f => f.category === "death").length,
-            },
-            bySeverity: {
-              critical: session.findings.filter(f => f.severity === "critical").length,
-              major: session.findings.filter(f => f.severity === "major").length,
-              minor: session.findings.filter(f => f.severity === "minor").length,
-            },
-            summary: `Audit finalized: ${verdict} (${score}%). ${session.findings.length} findings.`,
-            action: getVerdictAction(verdict),
-          }),
-        }],
+        content: [{ type: "text", text: JSON.stringify({
+          status: "complete",
+          verdict,
+          score,
+          total_findings: session.findings.length,
+          by_category: {
+            ink: session.findings.filter((f) => f.category === "ink").length,
+            nose: session.findings.filter((f) => f.category === "nose").length,
+            foot: session.findings.filter((f) => f.category === "foot").length,
+            castration: session.findings.filter((f) => f.category === "castration").length,
+            death: session.findings.filter((f) => f.category === "death").length,
+          },
+          by_severity: {
+            critical: session.findings.filter((f) => f.severity === "critical").length,
+            major: session.findings.filter((f) => f.severity === "major").length,
+            minor: session.findings.filter((f) => f.severity === "minor").length,
+          },
+          summary: `Audit finalized: ${verdict} (${score}%). ${session.findings.length} findings.`,
+          action: getVerdictAction(verdict),
+          audit_path: join(workspacePath, "audit.md"),
+        }) }],
         details: {
           verdict,
           score,
@@ -523,198 +528,65 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
     },
   });
 
-  /**
-   * gaoyao_status - Get current audit status
-   */
-  pi.registerTool({
-    name: "gaoyao_status",
-    label: "Audit Status",
-    description: "Get current audit session status without modifying state.",
-    parameters: Type.Object({}),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const sessionManager = new AuditSessionManager(ctx.cwd);
-      const session = sessionManager.load();
+  // ───────────────────────────────────────────────────────────────────────
+  // Deprecated stubs — keep old tool names alive with redirect hints
+  // ───────────────────────────────────────────────────────────────────────
 
-      if (!session) {
+  const stubs: Array<{
+    name: string;
+    hint: string;
+    deprecationNote: string;
+  }> = [
+    { name: "gaoyao_init", hint: "Use gaoyao_audit instead.", deprecationNote: "merged into gaoyao_audit" },
+    { name: "gaoyao_record_file_read", hint: "Use gaoyao_observe { file_read: {...} } instead.", deprecationNote: "merged into gaoyao_observe" },
+    { name: "gaoyao_record_finding", hint: "Use gaoyao_observe { finding: {...} } instead.", deprecationNote: "merged into gaoyao_observe" },
+    { name: "gaoyao_execute_phase", hint: "gaoyao_observe auto-advances phases when their requirements are met.", deprecationNote: "auto-advance is now built-in" },
+    { name: "gaoyao_status", hint: "Use gaoyao_audit (without reset) to query the current session state.", deprecationNote: "merged into gaoyao_audit" },
+    { name: "gaoyao_reset", hint: "Use gaoyao_audit { reset: true } instead.", deprecationNote: "merged into gaoyao_audit" },
+    { name: "gaoyao_review", hint: "Use gaoyao_audit instead.", deprecationNote: "superseded by phase-guided gaoyao_audit" },
+    { name: "gaoyao_quick_check", hint: "Use gaoyao_audit { review_mode: 'quick' } instead.", deprecationNote: "superseded by phase-guided gaoyao_audit" },
+    { name: "gaoyao_check_security", hint: "Security is the CASTRATION phase in the phase-guided audit. Use gaoyao_audit then advance through phases to CASTRATION.", deprecationNote: "security is now CASTRATION phase" },
+  ];
+
+  for (const stub of stubs) {
+    pi.registerTool({
+      name: stub.name,
+      label: `[Deprecated] ${stub.name}`,
+      description: `DEPRECATED (${stub.deprecationNote}): ${stub.hint}`,
+      parameters: Type.Object({}),
+      async execute() {
         return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              hasSession: false,
-              summary: "No active audit session.",
-            }),
-          }],
-          details: { hasSession: false },
-        };
-      }
-
-      const { canAdvance, reason } = sessionManager.canAdvancePhase();
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            hasSession: true,
-            sessionId: session.id,
-            phase: session.phase,
-            phaseLabel: PHASE_LABELS[session.phase],
-            reviewMode: session.reviewMode,
-            progress: {
-              filesEnumerated: session.filesEnumerated.length,
-              filesRead: session.filesRead.length,
-              findingsTotal: session.findings.length,
-              findingsByPhase: {
-                ENUMERATE: session.findings.filter(f => f.phase === "ENUMERATE").length,
-                INK: session.findings.filter(f => f.phase === "INK").length,
-                NOSE: session.findings.filter(f => f.phase === "NOSE").length,
-                FOOT: session.findings.filter(f => f.phase === "FOOT").length,
-                CASTRATION: session.findings.filter(f => f.phase === "CASTRATION").length,
-                DEATH: session.findings.filter(f => f.phase === "DEATH").length,
-              },
-              phasesCompleted: session.completedPhases.length,
-              phasesTotal: 6,
-            },
-            canAdvance,
-            advanceBlockingReason: reason,
-            summary: `Phase: ${PHASE_LABELS[session.phase]}. ${session.filesRead.length} files read. ${session.findings.length} findings.`,
-          }),
-        }],
-        details: { session },
-      };
-    },
-  });
-
-  /**
-   * gaoyao_reset - Reset audit session
-   */
-  pi.registerTool({
-    name: "gaoyao_reset",
-    label: "Reset Audit",
-    description: "Reset/clear the current audit session. Use with caution - all progress will be lost.",
-    parameters: Type.Object({
-      confirm: Type.Boolean({ description: "Must be true to confirm reset" }),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const { confirm } = params;
-
-      if (!confirm) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              error: "Reset not confirmed. Pass confirm: true to actually reset.",
-            }),
-          }],
+          content: [{ type: "text", text: JSON.stringify({
+            success: false,
+            error: `${stub.name} is deprecated. ${stub.hint}`,
+            hint: stub.hint,
+            deprecated: true,
+            replacement: stub.hint.match(/Use (\w+)/)?.[1] ?? null,
+          }) }],
           isError: true,
-          details: { error: "Not confirmed" },
+          details: { deprecated: true, replacement: stub.hint },
         };
-      }
+      },
+    });
+  }
+}
 
-      const sessionManager = new AuditSessionManager(ctx.cwd);
-      const session = sessionManager.load();
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
-      if (!session) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              summary: "No session to reset.",
-            }),
-          }],
-          details: {},
-        };
-      }
+/**
+ * Advance the current phase. Returns the new phase, or null if at end.
+ * Mutates the session via sessionManager.
+ */
+function advancePhase(sessionManager: AuditSessionManager): import("./session").AuditPhase | null {
+  const session = sessionManager.load();
+  if (!session) return null;
+  const currentIndex = PHASE_ORDER.indexOf(session.phase);
+  const nextPhase = PHASE_ORDER[currentIndex + 1];
+  if (!nextPhase) return null;
 
-      sessionManager.delete();
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            summary: `Audit session ${session.id} has been reset.`,
-          }),
-        }],
-        details: { deletedSessionId: session.id },
-      };
-    },
-  });
-
-  // ==========================================================================
-  // Legacy tools (deprecated)
-  // ==========================================================================
-
-  pi.registerTool({
-    name: "gaoyao_review",
-    label: "[Deprecated] Full Audit",
-    description: "DEPRECATED: Use gaoyao_init instead for phase-guided auditing.",
-    parameters: Type.Object({
-      plan_name: Type.Optional(Type.String()),
-      review_mode: Type.Optional(Type.Union([Type.Literal("quick"), Type.Literal("full")])),
-    }),
-    async execute() {
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: false,
-            error: "gaoyao_review is deprecated. Use gaoyao_init instead for phase-guided auditing.",
-            hint: "Call gaoyao_init to start a new phase-guided audit session.",
-          }),
-        }],
-        isError: true,
-        details: { deprecated: true },
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "gaoyao_quick_check",
-    label: "[Deprecated] Quick Check",
-    description: "DEPRECATED: Use gaoyao_init with review_mode: 'quick' instead.",
-    parameters: Type.Object({
-      files: Type.Array(Type.String()),
-    }),
-    async execute() {
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: false,
-            error: "gaoyao_quick_check is deprecated. Use gaoyao_init with review_mode: 'quick' instead.",
-            hint: "Call gaoyao_init --review_mode quick to start a quick audit.",
-          }),
-        }],
-        isError: true,
-        details: { deprecated: true },
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "gaoyao_check_security",
-    label: "[Deprecated] Security Scan",
-    description: "DEPRECATED: Security is now part of phase-guided audit (CASTRATION phase).",
-    parameters: Type.Object({
-      files: Type.Optional(Type.Array(Type.String())),
-    }),
-    async execute() {
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: false,
-            error: "gaoyao_check_security is deprecated. Security is now the CASTRATION phase in phase-guided auditing.",
-            hint: "Call gaoyao_init, advance through phases to CASTRATION for security analysis.",
-          }),
-        }],
-        isError: true,
-        details: { deprecated: true },
-      };
-    },
-  });
+  sessionManager.completePhase(session.phase);
+  sessionManager.setPhase(nextPhase);
+  return nextPhase;
 }

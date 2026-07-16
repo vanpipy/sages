@@ -1,34 +1,19 @@
 /**
- * Task Runner - Unified TDD + Subagent execution
+ * Task Runner - Unified TDD execution
  *
  * Part of: src/tools/luban/
- * Purpose: Execute single task with TDD cycle, supporting both direct and subagent modes
+ * Purpose: Run the TDD cycle (RED → GREEN → REFACTOR) for a single task.
  *
- * ============================================================================
- * IMPORTANT: LuBan Limitation (KD-4 deferred)
- * ============================================================================
- * This runner is a TDD CYCLE SCAFFOLD, not an AI implementation agent.
+ * Design (post-simplify-actions):
+ *   - runTask returns a TaskResult that the LLM (in main context) inspects to
+ *     decide what to do next. The runner does NOT write template stubs or
+ *     invoke an LLM directly — the LLM uses serena/codebase-memory/graphify
+ *     to do the actual semantic work.
+ *   - This file's previous "template stub" generation is being phased out:
+ *     tests are still scaffolded (RED), but the GREEN phase now expects the
+ *     LLM to write real implementations via semantic tools before re-calling.
  *
- * The GREEN phase writes template stubs (`export function xxx() { return {} }`)
- * via `generateSourceTemplate()` instead of invoking an LLM to produce real
- * implementations. The `config.subagent` field is declared in types.ts but
- * is **NEVER READ** in this file (grep -rnE "subagent" src/tools/luban/task-runner.ts
- * → 0 hits for actual usage).
- *
- * CONSEQUENCE: Every `luban_execute_task` / `luban_execute_batch` call returns
- * tasks with template stubs unless the caller (the agent in pi main context)
- * manually inspects the resulting source files and writes the real implementation.
- *
- * **SAGES bootstrap (using LuBan to refactor LuBan) is therefore structurally
- * impossible** in the current implementation. Any "use SAGES workflow to do X"
- * task X cannot deliver real code via LuBan; the agent must take over.
- *
- * To upgrade: GREEN phase should check `config.subagent === true` and dispatch
- * to a subagent (e.g., `Bun.spawn` running `pi -p <task-prompt>`) when set.
- * This is a separate milestone (KD-4: TDD optimization).
- * ============================================================================
- *
- * SECURITY: testCommand is passed unsanitized to `execSync()` (line 404).
+ * SECURITY: testCommand is passed unsanitized to `execSync()`.
  * Indirect RCE chain: user request → qiaochui_decompose → execution.yaml
  * testCommand → execSync. Treat the executor environment as trusted; if running
  * LuBan against untrusted requests, sandbox at the process level.

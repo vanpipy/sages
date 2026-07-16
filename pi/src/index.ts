@@ -27,9 +27,5 @@ export type { WorkflowState as LegacyWorkflowState, Task as LegacyTask, AuditRes
 export { runTask, runTDDCycle, parseExecutionYaml, resolveDependencies, sortByDependencies } from "./executor/index.js";
 export type { LubanTask, TDDConfig, TaskResult, TDDPhase, ExecutionSettings, ExecutionPlan } from "./executor/index.js";
 
-// Orchestrator
-export { WorkflowOrchestrator } from "./orchestrator/index.js";
-export type { Phase, OrchestratorConfig } from "./orchestrator/index.js";
-
 // Utils
 export { checkWritePermission, getModeInfo, getModeIndicator, getAccessDeniedMessage } from "./utils/mode-checker.js";
