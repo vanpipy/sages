@@ -110,14 +110,16 @@ describe("FSM [m1]: TERMINAL_STAGES 常量正确性", () => {
 		expect(isTerminalStage("review")).toBe(false);
 	});
 
-	it("TERMINAL_STAGES 在 sages-tool.ts 中已定义", () => {
+	it("sages-tool.ts 不再定义 TERMINAL_STAGES(随 /sages-workflow 一起移除)", () => {
+		// TERMINAL_STAGES 原本专用于 /sages-workflow 的 strict-mode 检查,
+		// 移除该 slash command 后常量不再需要。
+		// FSM 内部仍以 terminal: true 标记终态 stage,见 workflow-fsm.test.ts。
 		const toolContent = fs.readFileSync(
 			path.join(PI_ROOT, "extensions", "sages-tool.ts"),
 			"utf-8"
 		);
-		expect(toolContent).toContain("TERMINAL_STAGES");
-		expect(toolContent).toContain("isTerminalStage");
-		expect(toolContent).not.toMatch(/state\.currentStage !== ['"]complete['"]/);
+		expect(toolContent).not.toContain("TERMINAL_STAGES");
+		expect(toolContent).not.toContain("isTerminalStage");
 	});
 });
 

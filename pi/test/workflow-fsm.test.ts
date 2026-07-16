@@ -151,11 +151,11 @@ describe("FSM Extension Files", () => {
 		expect(fs.existsSync(toolPath)).toBe(true);
 	});
 
-	it("sages-tool.ts 注册 2 个命令(/sages-plan, /sages-status)", () => {
+	it("sages-tool.ts 注册 2 个命令(/sages-init, /sages-plan)", () => {
 		const toolPath = path.join(PI_ROOT, "extensions", "sages-tool.ts");
 		const content = fs.readFileSync(toolPath, "utf-8");
 		expect(content).toContain('"sages-plan"');
-		expect(content).toContain('"sages-status"');
+		expect(content).toContain(`"sages-init"`);
 	});
 
 	it("sages-fsm.ts 使用 pi.on(\"tool_result\")", () => {

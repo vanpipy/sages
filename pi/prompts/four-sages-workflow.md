@@ -21,8 +21,6 @@ Just describe the intent in chat ("I want to do X" / "implement Y" / "fix Z"). T
 | When | Action | Command |
 |---|---|---|
 | See review-passed notification | **Approve plan** | `/sages-plan` |
-| Want to see progress | **Status** | `/sages-status` |
-| Switch workflow | **Switch** | `/sages-workflow <name\|list\|current>` |
 | First-time setup | **Init** | `/sages-init` |
 
 ### 4. Auto-advancing flow (sage tools handle phase transitions)
@@ -75,8 +73,6 @@ Future: `adr`, `refactor`, `docs`.
 | 7-stage auto-advance (tool_result events) | ✅ |
 | `onVerdict` branching (PASS/REJECTED/NEEDS_CHANGES) | ✅ |
 | `/sages-plan` manual gate | ✅ |
-| `/sages-status` status query | ✅ |
-| `/sages-workflow` switch | ✅ |
 | `/sages-init` initialize | ✅ |
 | QualityGate pre-check (hard/soft/advisory) | ✅ |
 | **Simplified 10-tool sage surface** (auto-advance) | ✅ |
@@ -92,7 +88,6 @@ Future: `adr`, `refactor`, `docs`.
 ## Feedback
 
 If something goes wrong:
-1. `/sages-status` — see current state
 2. Inspect `.sages/workspace/state.json`
 3. Inspect actual file contents (`draft.md` / `plan.md` / `execution.yaml` / `audit.md`)
 4. Check pi session's `sages-fsm-transition` history

@@ -10,7 +10,7 @@
  * - [C6] prompt 文件缺失时抛错,不静默卡住
  * - [M2] trigger 字段在 transition 时检查
  * - [M3] qualityGates 在 stage 完成时执行
- * - [M5] onSwitch 策略由 /sages-workflow 命令实现
+ * - [M5] onSwitch 策略(由 workflow.yaml 标记 + FSM 在 switch 时校验;无需 slash command)
  * - [M6] 死锁检测(同 stage 访问 > 5 次强制终止)
  * - [M7] transition 验证 from → to 边在 workflow 图中存在
  * - [M8] workflow.version 统一为 string

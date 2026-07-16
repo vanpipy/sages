@@ -37,7 +37,7 @@ That's **10 active tools** total. Each returns `{status, intent, validation}`. P
 
 The only manual gates are:
 - **User**: `/sages-plan` (slash command) to approve plan after review
-- **User**: `/sages-init`, `/sages-status`, `/sages-workflow` for setup/inspection
+- **User**: `/sages-init` (one-time setup), `/sages-plan` (the REQUIRED manual approval gate)
 
 ## 3. Tool Return Shape (Universal Contract)
 

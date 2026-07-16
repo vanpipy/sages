@@ -23,7 +23,7 @@ These are validated by `qiaochui_decompose` automatically:
 
 The user types `/sages-plan` in the chat to approve. This fires the `sages:plan-approved` event; FSM advances to decompose/eexecute.
 
-The user can also type `/sages-status` to see the current plan without approving.
+The user can ask the LLM "where are we?" or "show the current plan" to inspect progress without approving.
 
 ## Note
 

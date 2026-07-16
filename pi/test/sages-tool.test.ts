@@ -1,11 +1,12 @@
 /**
  * Sages Tool 测试
  *
- * 验证 4 个 slash command 的注册和基本行为:
- * - /sages-init
- * - /sages-plan
- * - /sages-status
- * - /sages-workflow [list|current|name]
+ * 验证 2 个 slash command 的注册和基本行为:
+ * - /sages-init  (一次性 setup)
+ * - /sages-plan  (唯一的 REQUIRED 人工批准 gate)
+ *
+ * 不再注册 /sages-status 和 /sages-workflow——自然语言路由覆盖这两个用例:
+ *   "where are we?" / "switch to bugfix" 由 LLM 直接处理。
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -24,13 +25,33 @@ describe("sages-tool: 命令注册", () => {
 		expect(fs.existsSync(toolPath)).toBe(true);
 	});
 
-	it("注册 4 个 command:init / plan / status / workflow", () => {
+	it("注册 2 个 command: init / plan", () => {
 		const toolPath = path.join(PI_ROOT, "extensions", "sages-tool.ts");
 		const content = fs.readFileSync(toolPath, "utf-8");
 		expect(content).toContain('"sages-init"');
 		expect(content).toContain('"sages-plan"');
-		expect(content).toContain('"sages-status"');
-		expect(content).toContain('"sages-workflow"');
+	});
+
+	it("不移除 /sages-status (因为自然语言已覆盖 status 查询)", () => {
+		// 明确去除——"where are we?" 由 LLM 直接响应,无需 slash command
+		const toolPath = path.join(PI_ROOT, "extensions", "sages-tool.ts");
+		const content = fs.readFileSync(toolPath, "utf-8");
+		expect(content).not.toContain('"sages-status"');
+	});
+
+	it("不移除 /sages-workflow (因为自然语言已覆盖 workflow 切换)", () => {
+		// 明确去除——"switch to bugfix" 由 LLM 直接编辑 workflow.yaml
+		const toolPath = path.join(PI_ROOT, "extensions", "sages-tool.ts");
+		const content = fs.readFileSync(toolPath, "utf-8");
+		expect(content).not.toContain('"sages-workflow"');
+	});
+
+	it("也不出现 TERMINAL_STAGES 常量 (随 /sages-workflow 一起移除)", () => {
+		// strict-mode 终态检查不再有 slash command 触发,常量也随之移除
+		const toolPath = path.join(PI_ROOT, "extensions", "sages-tool.ts");
+		const content = fs.readFileSync(toolPath, "utf-8");
+		expect(content).not.toContain("TERMINAL_STAGES");
+		expect(content).not.toContain("isTerminalStage");
 	});
 
 	it("不复用旧的 18 个 sage-specific 命令", () => {
@@ -52,7 +73,6 @@ describe("sages-tool: /sages-init", () => {
 	});
 
 	it("全新项目:创建 .sages/workflow.yaml + workflows/ 目录", () => {
-		// 直接读取源代码,确保逻辑正确
 		const toolPath = path.join(PI_ROOT, "extensions", "sages-tool.ts");
 		const content = fs.readFileSync(toolPath, "utf-8");
 
@@ -68,70 +88,6 @@ describe("sages-tool: /sages-init", () => {
 		const content = fs.readFileSync(toolPath, "utf-8");
 		// 验证 init 处理函数检查已存在的情况
 		expect(content).toContain("已存在");
-	});
-});
-
-describe("sages-tool: /sages-workflow 子命令", () => {
-	let tmpDir: string;
-	let toolContent: string;
-
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sages-wf-test-"));
-		const sagesDir = path.join(tmpDir, ".sages");
-		fs.mkdirSync(path.join(sagesDir, "workflows"), { recursive: true });
-
-		// 复制真实 workflow files
-		fs.copyFileSync(
-			path.join(PI_ROOT, ".sages", "workflow.yaml"),
-			path.join(sagesDir, "workflow.yaml"),
-		);
-		fs.copyFileSync(
-			path.join(PI_ROOT, ".sages", "workflows", "four-sages.yaml"),
-			path.join(sagesDir, "workflows", "four-sages.yaml"),
-		);
-		fs.copyFileSync(
-			path.join(PI_ROOT, ".sages", "workflows", "bugfix.yaml"),
-			path.join(sagesDir, "workflows", "bugfix.yaml"),
-		);
-
-		toolContent = fs.readFileSync(
-			path.join(PI_ROOT, "extensions", "sages-tool.ts"),
-			"utf-8",
-		);
-	});
-
-	it("list:列出 workflows/ 下的 .yaml 文件", () => {
-		expect(toolContent).toContain('trimmed === "list"');
-		expect(toolContent).toContain("readdirSync");
-	});
-
-	it("current:显示 activeWorkflow", () => {
-		expect(toolContent).toContain('trimmed === "current"');
-	});
-
-	it("切换:写入新的 activeWorkflow + emit EventBus 事件", () => {
-		expect(toolContent).toContain("activeWorkflow = trimmed");
-		expect(toolContent).toContain("sages:workflow-switched");
-	});
-
-	it("切换前检查 workflow 文件存在", () => {
-		expect(toolContent).toContain("workflow 不存在");
-	});
-
-	it("切换前检查 .sages/workflow.yaml 存在", () => {
-		expect(toolContent).toContain(".sages/workflow.yaml 不存在");
-	});
-});
-
-describe("sages-tool: /sages-status", () => {
-	it("通过 EventBus 异步请求状态", () => {
-		const content = fs.readFileSync(
-			path.join(PI_ROOT, "extensions", "sages-tool.ts"),
-			"utf-8",
-		);
-		expect(content).toContain("sages:status-request");
-		expect(content).toContain("sages:status-response");
-		expect(content).toContain("setTimeout"); // timeout fallback
 	});
 });
 
