@@ -32,17 +32,18 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # pi-memory package info
 PI_MEMORY_PKG="npm:@samfp/pi-memory"
 
-# pi-codebase-memory package info
+# pi-codebase-memory npm pkg identifier (single source of truth for is/install/uninstall)
 PI_CODEBASE_MEMORY_PKG="npm:pi-codebase-memory"
 
 # pi-mcp-adapter package info (provides the `mcp` proxy tool — required for serena/lsp MCP integration)
 PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
 
-# pi-codebase-memory package info (sage peer for codebase-memory-mcp binary)
+# pi-codebase-memory sage-peer (local package, installed by file-copy not `pi install npm:`)
 PI_CODEBASE_MEMORY_PKG_NAME="@sages/pi-codebase-memory"
 PI_CODEBASE_MEMORY_SRC_REL="pi-codebase-memory"
 PI_CODEBASE_MEMORY_DEST_DIR="$PI_DIR/packages/pi-codebase-memory"
-PI_CODEBASE_MEMORY_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"
+# Local-peer package identifier (the dest dir path, registered in settings.json like pi-serena)
+PI_CODEBASE_MEMORY_LOCAL_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"
 
 # codebase-memory-mcp binary install info
 CBM_REPO="DeusData/codebase-memory-mcp"
@@ -207,7 +208,8 @@ import json, sys
 try:
     d = json.load(open('$settings'))
     packages = d.get('packages', [])
-    if '$PI_CODEBASE_MEMORY_PKG' in packages or 'pi-codebase-memory' in packages:
+    # Match either npm pkg identifier OR local-peer dest-dir path
+    if '$PI_CODEBASE_MEMORY_PKG' in packages or '$PI_CODEBASE_MEMORY_LOCAL_PKG' in packages or 'pi-codebase-memory' in packages:
         sys.exit(0)
     sys.exit(1)
 except Exception:
@@ -234,7 +236,8 @@ install_pi_codebase_memory() {
     echo "  pi install failed, trying manual..."
   fi
 
-  # Fallback: manually add to settings.json
+  # Fallback: register local-peer dest dir in settings.json
+  # (PI_CODEBASE_MEMORY_LOCAL_PKG is a path; pi can resolve directory paths as packages)
   echo "  Adding to settings.json..."
   local settings="$PI_DIR/agent/settings.json"
   mkdir -p "$(dirname "$settings")"
@@ -245,7 +248,7 @@ install_pi_codebase_memory() {
 
   python3 -c "
 import json, sys
-f, pkg = '$settings', '$PI_CODEBASE_MEMORY_PKG'
+f, pkg = '$settings', '$PI_CODEBASE_MEMORY_LOCAL_PKG'
 try:
     d = json.load(open(f))
 except (json.JSONDecodeError, FileNotFoundError):
@@ -267,12 +270,12 @@ uninstall_pi_codebase_memory() {
 
   python3 -c "
 import json, sys
-f, pkg = '$settings', '$PI_CODEBASE_MEMORY_PKG'
+f, npm_pkg, local_pkg = '$settings', '$PI_CODEBASE_MEMORY_PKG', '$PI_CODEBASE_MEMORY_LOCAL_PKG'
 try:
     d = json.load(open(f))
     pkgs = d.get('packages', [])
-    # Remove exact match or pi-codebase-memory variant
-    new_pkgs = [x for x in pkgs if x != pkg and x != 'pi-codebase-memory']
+    # Remove npm pkg, local-peer dest path, or substring variant
+    new_pkgs = [x for x in pkgs if x != npm_pkg and x != local_pkg and x != 'pi-codebase-memory']
     if len(new_pkgs) < len(pkgs):
         d['packages'] = new_pkgs
         json.dump(d, open(f, 'w'), indent=2)
@@ -315,6 +318,22 @@ install_pi_codebase_memory_files() {
   if [[ -f "$PI_CODEBASE_MEMORY_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
     (cd "$PI_CODEBASE_MEMORY_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
   fi
+
+  # Register local-peer package in settings.json (matches pi-serena/pi-graphify pattern).
+  # Idempotent: skips if already present.
+  local settings="$PI_DIR/agent/settings.json"
+  mkdir -p "$(dirname "$settings")"
+  [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+  python3 -c "
+import json
+f, pkg = '$settings', '$PI_CODEBASE_MEMORY_LOCAL_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
 }
 
 write_codebase_memory_mcp_config() {
@@ -511,15 +530,25 @@ install_graphify_binary() {
     echo "  Error: uv required (curl -LsSf https://astral.sh/uv/install.sh | sh)"
     return 1
   fi
-  echo "  Installing via 'uv tool install graphifyy[mcp]'..."
-  if uv tool install "graphifyy[mcp]" 2>&1 | tail -3; then
+
+  # If binary exists but [mcp] extra is missing, plain `uv tool install graphifyy[mcp]`
+  # is a metadata no-op — uv doesn't reinstall to pull in new extras. Force --reinstall
+  # so the extra dependencies are actually fetched.
+  local reinstall_flag=""
+  if [[ -x "$GRAPHIFY_BIN_PATH" ]]; then
+    reinstall_flag="--reinstall"
+    echo "  Reinstalling graphify with [mcp] extra (binary exists without [mcp])..."
+  else
+    echo "  Installing via 'uv tool install graphifyy[mcp]'..."
+  fi
+  if uv tool install $reinstall_flag "graphifyy[mcp]" 2>&1 | tail -3; then
     echo "  Installed graphify at $GRAPHIFY_BIN_PATH"
   else
     echo "  uv tool install failed"
     return 1
   fi
   if ! _graphify_mcp_ready; then
-    echo "  Warning: [mcp] extra may not be installed. Run: uv tool install --reinstall 'graphifyy[mcp]'"
+    echo "  Warning: [mcp] extra still missing. Try: uv tool install --reinstall 'graphifyy[mcp]'"
     return 1
   fi
 }
@@ -825,28 +854,29 @@ install_sages_files() {
 
   register_settings
 
-  # Set up symlinks so peer packages (pi-serena, pi-graphify, pi-codebase-memory)
-  # resolve their @mariozechner/pi-coding-agent peer dep from pi/'s node_modules.
-  # Without this, `tsc` from pi/ fails with TS2307 when following test imports
-  # into peer source trees.
-  setup_peer_node_modules_symlinks "$TMP_DIR"
+  # NOTE: peer node_modules symlinks are set up in install() AFTER all peer file
+  # copies complete — not here, where peer dirs don't exist yet.
 }
 
-# Link each peer package's node_modules → ../pi/node_modules so that
-# bundler-resolution from peer source trees (which don't carry their own
-# node_modules) walks up to pi/'s installed deps. Idempotent.
+# Link each installed peer package's node_modules → ../sages/node_modules so that
+# tsc/test imports from peer source trees (which may not carry their own node_modules)
+# resolve shared deps via sages' installed deps. Idempotent: skipped if peer already
+# has its own node_modules (e.g., populated by `bun install` in install_*_files).
+#
+# IMPORTANT: this must run AFTER all peer file copies (in install()) — not in
+# install_sages_files(). The previous implementation ran inside the clone where
+# the symlink target `../pi/node_modules` was correct relative to $TMP_DIR/pi/,
+# but `cp -r` then copied those symlinks into $PI_DIR/packages/, where the same
+# relative path resolves to a non-existent `~/.pi/packages/pi/node_modules`.
 setup_peer_node_modules_symlinks() {
-  local repo_src_root="$1"
-  [[ -z "$repo_src_root" || ! -d "$repo_src_root" ]] && return 0
   for peer in pi-serena pi-graphify pi-codebase-memory; do
-    local peer_dir="$repo_src_root/$peer"
+    local peer_dir="$PI_DIR/packages/$peer"
     [[ ! -d "$peer_dir" ]] && continue
     if [[ -L "$peer_dir/node_modules" || -e "$peer_dir/node_modules" ]]; then
-      echo "  $peer/node_modules already exists, skipping symlink"
-    else
-      ln -s ../pi/node_modules "$peer_dir/node_modules"
-      echo "  Linked $peer/node_modules → ../pi/node_modules"
+      continue
     fi
+    ln -s ../sages/node_modules "$peer_dir/node_modules"
+    echo "  Linked $peer/node_modules → ../sages/node_modules"
   done
 }
 install_serena_files() {
@@ -1039,8 +1069,9 @@ install() {
   # Install pi-serena (uses TMP_DIR/pi-serena from the clone above)
   install_pi_serena || true
 
-  # Install pi-codebase-memory (sage peer for codebase-memory-mcp — uses same TMP_DIR)
-  install_pi_codebase_memory || true
+  # Install pi-codebase-memory sage peer (file copy from TMP_DIR/pi-codebase-memory + mcp.json merge)
+  install_pi_codebase_memory_files || true
+  write_codebase_memory_mcp_config
 
   # Install codebase-memory-mcp binary (~50MB download from GitHub releases)
   install_codebase_memory_mcp_binary || {
@@ -1056,6 +1087,10 @@ install() {
   install_graphify_binary || {
     echo "  Note: graphify CLI install failed. To retry: uv tool install 'graphifyy[mcp]'"
   }
+
+  # After ALL peer file copies are done, set up node_modules symlinks pointing
+  # at sages' shared deps (idempotent — skipped if peers already have node_modules).
+  setup_peer_node_modules_symlinks
 
   # Install system prompt
   install_system_prompt
