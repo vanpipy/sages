@@ -16,6 +16,7 @@ import { FileService } from "../../services/file-service.js";
 import { performDeepReview, generateDeepFeasibilityReport } from "./review-service.js";
 import { generateMDDTasks, resolveFileConflicts } from "./decompose-service.js";
 import { getUserDefaultModel } from "../../utils/model-helper.js";
+import { parseScopeSection } from "../../utils/scope-parser.js";
 import type { MDDTask } from "./types.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
@@ -210,36 +211,61 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
         }
 
         // ── No observation: return heuristic hints + guidance ──────────
-        const deepResult = performDeepReview(content);
+        const scope = parseScopeSection(content);
+        const deepResult = performDeepReview(
+          content,
+          scope ? { inScopePlanes: scope.inScope } : undefined,
+        );
         const feasibilityReport = generateDeepFeasibilityReport(deepResult);
+
+        // Build scope-aware dimensions list: when a Scope section is present,
+        // completeness is reframed around in-scope coverage and a new
+        // scope_justification dimension is added.
+        const baseDimensions = scope
+          ? [
+              { name: "completeness", weight: 20, description: `In-scope planes (${scope.inScope.join(", ")}) covered with sufficient depth?` },
+              { name: "scope_justification", weight: 10, description: `Are the scope decisions reasonable for this task? Tier '${scope.tier}' justified?` },
+              { name: "clarity", weight: 20, description: "Writing clear? Examples concrete?" },
+              { name: "feasibility", weight: 25, description: "Technical approach implementable? Dependencies clear?" },
+              { name: "testability", weight: 15, description: "Success path defined? Error handling concrete?" },
+              { name: "boundaries", weight: 10, description: "Out-of-scope justifications clear? Limits stated?" },
+            ]
+          : [
+              { name: "completeness", weight: 25, description: "All 7 MDD planes covered?" },
+              { name: "clarity", weight: 20, description: "Writing clear? Examples concrete?" },
+              { name: "feasibility", weight: 25, description: "Technical approach implementable? Dependencies clear?" },
+              { name: "testability", weight: 15, description: "Success path defined? Error handling concrete?" },
+              { name: "boundaries", weight: 15, description: "Out-of-scope clear? Limits stated?" },
+            ];
+
+        const intent = scope
+          ? `Scope-driven design detected (tier '${scope.tier}', in-scope: ${scope.inScope.join(", ")}). Read draft.md with serena_read_file; the heuristic below scores only in-scope planes. Then call qiaochui_review with observation {score, notes?} using the 6-dimension scope-aware rubric.`
+          : `Read draft.md using semantic tools (serena_read_file, graphify_query) to assess the 5 dimensions below. Then call qiaochui_review with observation {score, notes?} to persist the score.`;
 
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
               status: "in_progress",
-              intent: "Read draft.md using semantic tools (serena_read_file, graphify_query) to assess the 5 dimensions below. Then call qiaochui_review with observation {score, notes?} to persist the score.",
+              intent,
               validation: {
-                dimensions: [
-                  { name: "completeness", weight: 25, description: "All 7 MDD planes covered?" },
-                  { name: "clarity", weight: 20, description: "Writing clear? Examples concrete?" },
-                  { name: "feasibility", weight: 25, description: "Technical approach implementable? Dependencies clear?" },
-                  { name: "testability", weight: 15, description: "Success path defined? Error handling concrete?" },
-                  { name: "boundaries", weight: 15, description: "Out-of-scope clear? Limits stated?" },
-                ],
+                dimensions: baseDimensions,
                 pass_threshold: 80,
                 draft_path: draft_filename,
+                scope_driven: !!scope,
               },
               heuristic_hints: {
                 heuristic_score: deepResult.score,
                 heuristic_verdict: deepResult.overallStatus,
                 plane_count: deepResult.planeAssessments.length,
+                in_scope_count: scope ? scope.inScope.length : deepResult.planeAssessments.length,
                 blockers: deepResult.blockers.length,
                 top_recommendations: deepResult.recommendations.slice(0, 5),
+                tier: scope?.tier ?? null,
               },
             }),
           }],
-          details: { draft_filename, deep_result: deepResult, feasibilityReport },
+          details: { draft_filename, deep_result: deepResult, feasibilityReport, scope },
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

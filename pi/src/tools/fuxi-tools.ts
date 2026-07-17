@@ -24,10 +24,20 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { FileService } from "../services/file-service.js";
 import { WorkflowStateManager } from "../services/workflow-state-manager.js";
+import {
+  MIN_DRAFT_BYTES_BY_TIER,
+  type DesignTier,
+  type DraftScope,
+} from "./qiaochui/types.js";
+import { parseScopeSection, validateTierVsScope } from "../utils/scope-parser.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
 const DESIGN_STATE_FILE = ".fuxi-design-state.json";
-const MIN_DRAFT_BYTES = 500;
+/**
+ * Legacy / fallback min draft size — used when the draft has NO Scope section
+ * (i.e., the agent didn't opt into tier-aware design).
+ */
+const LEGACY_MIN_DRAFT_BYTES = MIN_DRAFT_BYTES_BY_TIER.standard;
 
 type DesignPhase = "design" | "review" | "plan";
 
@@ -83,12 +93,20 @@ class DesignStateManager {
   }
 }
 
-function buildDesignIntent(phase: DesignPhase, score?: number): string {
+function buildDesignIntent(phase: DesignPhase, score?: number, scope?: DraftScope | null): string {
   if (phase === "design") {
-    return `Create draft.md using MDD Seven Planes (Business, Data, Control, Foundation, Observation, Security, Evolution). Use semantic tools (serena_read_file, graphify_query) to understand the project context first. The draft must cover all 7 planes and be at least ${MIN_DRAFT_BYTES} bytes. Write it to .sages/workspace/draft.md and call fuxi_design with observation when done.`;
+    if (scope) {
+      const minBytes = MIN_DRAFT_BYTES_BY_TIER[scope.tier];
+      const inScopeList = scope.inScope.length > 0 ? scope.inScope.join(", ") : "(none declared)";
+      return `Tier '${scope.tier}' detected. Write draft.md covering ONLY these in-scope MDD planes: ${inScopeList}. Use semantic tools (serena_read_file, graphify_query) to understand project context first. The draft must be at least ${minBytes} bytes for this tier. Out-of-scope planes will not be scored. Write to .sages/workspace/draft.md and call fuxi_design with observation when done.`;
+    }
+    return `Create draft.md. RECOMMENDED: include a ## Scope section declaring Tier (trivial|simple|standard) + In scope + Out of scope (justified). Tier drives the minimum byte size: trivial=100, simple=250, standard=500. Without a Scope section, the legacy rule applies: cover all 7 MDD planes (Business, Data, Control, Foundation, Observation, Security, Evolution) and reach ${LEGACY_MIN_DRAFT_BYTES} bytes. Use semantic tools (serena_read_file, graphify_query) to understand project context first.`;
   }
   if (phase === "review") {
-    return `Get a review score for draft.md. Run qiaochui_review (which auto-writes the score to state.json). Then call fuxi_design with observation {phase: "review", score: N} where N > 80.`;
+    const scopeHint = scope
+      ? ` Scope is '${scope.tier}' with in-scope planes: ${scope.inScope.join(", ") || "(none)"}. Reviewer should assess scope_justification as a dimension.`
+      : ` No Scope section detected — legacy all-7-plane review applies.`
+    return `Get a review score for draft.md. Run qiaochui_review (which auto-writes the score to state.json).${scopeHint} Then call fuxi_design with observation {phase: "review", score: N} where N >= 80.`;
   }
   if (phase === "plan") {
     return `Plan is approved. Run qiaochui_decompose to generate execution.yaml, then call luban_run_batch to start the batch. The /sages-plan slash command is the user-facing approval gate.`;
@@ -96,13 +114,31 @@ function buildDesignIntent(phase: DesignPhase, score?: number): string {
   return `Design phase complete.`;
 }
 
-function buildDesignValidation(phase: DesignPhase, draftExists: boolean, draftSize: number, score?: number): Record<string, unknown> {
+function buildDesignValidation(
+  phase: DesignPhase,
+  draftExists: boolean,
+  draftSize: number,
+  score?: number,
+  scope?: DraftScope | null,
+): Record<string, unknown> {
   const base = { current_phase: phase };
   if (phase === "design") {
-    return { ...base, file: "draft.md", min_size: MIN_DRAFT_BYTES, draft_exists: draftExists, draft_size: draftSize };
+    const minBytes = scope ? MIN_DRAFT_BYTES_BY_TIER[scope.tier] : LEGACY_MIN_DRAFT_BYTES;
+    return {
+      ...base,
+      file: "draft.md",
+      min_size: minBytes,
+      legacy_min_size: LEGACY_MIN_DRAFT_BYTES,
+      tier: scope?.tier ?? null,
+      in_scope_planes: scope?.inScope ?? null,
+      out_of_scope_planes: scope?.outOfScope.map(o => o.plane) ?? null,
+      scope_justification_required: !!scope,
+      draft_exists: draftExists,
+      draft_size: draftSize,
+    };
   }
   if (phase === "review") {
-    return { ...base, score_required: "> 80", current_score: score };
+    return { ...base, score_required: ">= 80", current_score: score, scope_aware: !!scope };
   }
   if (phase === "plan") {
     return { ...base, next_step: "luban_run_batch" };
@@ -194,14 +230,15 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
         }
         const state = stateManager.loadLatest();
         const draftInfo = checkDraft(fileService, "draft.md");
+        const scope = draftInfo.exists ? parseScopeSection(draftInfo.content ?? "") : null;
         return {
           content: [{ type: "text", text: JSON.stringify({
             status: "in_progress",
             phase: design.current_phase,
             workflow_id: design.workflow_id,
             plan_name: state?.planName,
-            intent: buildDesignIntent(design.current_phase, state?.score),
-            validation: buildDesignValidation(design.current_phase, draftInfo.exists, draftInfo.size, state?.score),
+            intent: buildDesignIntent(design.current_phase, state?.score, scope),
+            validation: buildDesignValidation(design.current_phase, draftInfo.exists, draftInfo.size, state?.score, scope),
             auto_advanced: false,
           }) }],
           details: { design, draft: draftInfo, state },
@@ -250,16 +287,33 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
             details: { draft_path: draftPath },
           };
         }
-        if (draftInfo.size < MIN_DRAFT_BYTES) {
+
+        // Tier-aware validation: parse Scope section if present.
+        const scope = parseScopeSection(draftInfo.content ?? "");
+        const minBytes = scope ? MIN_DRAFT_BYTES_BY_TIER[scope.tier] : LEGACY_MIN_DRAFT_BYTES;
+        const tierLabel = scope ? `tier '${scope.tier}'` : "legacy (no Scope section)";
+
+        if (draftInfo.size < minBytes) {
+          const guidance = scope
+            ? `Tier '${scope.tier}' requires ≥ ${minBytes} bytes. Your draft is ${draftInfo.size} bytes.`
+            : `No ## Scope section found — falling back to legacy rule: cover all 7 MDD planes and reach ≥ ${LEGACY_MIN_DRAFT_BYTES} bytes. Your draft is ${draftInfo.size} bytes. Tip: add a Scope section (e.g. "## Scope\\n- Tier: trivial\\n- In scope: [Foundation, Business]") to lower the bar.`;
           return {
             content: [{ type: "text", text: JSON.stringify({
               status: "error",
-              error: `draft.md is too small (${draftInfo.size} bytes, min ${MIN_DRAFT_BYTES}). Cover all 7 MDD planes with sufficient detail.`,
+              error: `draft.md is too small (${draftInfo.size} bytes, min ${minBytes} for ${tierLabel}). ${guidance}`,
             }) }],
             isError: true,
-            details: { size: draftInfo.size, min_size: MIN_DRAFT_BYTES },
+            details: {
+              size: draftInfo.size,
+              min_size: minBytes,
+              tier: scope?.tier ?? null,
+              scope_driven: !!scope,
+            },
           };
         }
+
+        // Soft warning if tier doesn't match plane count band
+        const tierWarning = scope ? validateTierVsScope(scope) : null;
 
         design.current_phase = "review";
         designManager.save(design);
@@ -268,12 +322,15 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
             status: "in_progress",
             phase: "review",
             workflow_id: design.workflow_id,
-            intent: buildDesignIntent("review"),
-            validation: buildDesignValidation("review", true, draftInfo.size),
+            intent: buildDesignIntent("review", undefined, scope),
+            validation: buildDesignValidation("review", true, draftInfo.size, undefined, scope),
             auto_advanced: true,
             last_observation: obs,
+            tier: scope?.tier ?? null,
+            tier_warning: tierWarning,
+            scope_aware: !!scope,
           }) }],
-          details: { design, auto_advanced: true, draft: draftInfo },
+          details: { design, auto_advanced: true, draft: draftInfo, scope, tierWarning },
         };
       }
 
@@ -546,6 +603,7 @@ function checkDraft(fileService: FileService, path: string): {
   exists: boolean;
   size: number;
   fullPath: string;
+  content: string | null;
 } {
   const exists = fileService.exists(path);
   const content = exists ? fileService.read(path) : null;
@@ -553,5 +611,6 @@ function checkDraft(fileService: FileService, path: string): {
     exists,
     size: content ? content.length : 0,
     fullPath: fileService.getFilePath(path),
+    content,
   };
 }

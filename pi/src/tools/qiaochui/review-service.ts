@@ -1,24 +1,29 @@
 /**
  * Review Service - MDD Plane Analysis
- * 
+ *
  * Part of: src/tools/qiaochui/
  * Purpose: Perform deep MDD-aligned plane review on draft content
+ *
+ * Scope-aware (since Option A refactor):
+ *   - If `options.inScopePlanes` is provided, only those planes contribute
+ *     to `avgDepth` and `feasibleCount`. Out-of-scope planes are still
+ *     surfaced in `planeAssessments` for transparency but marked
+ *     "➖ Out of Scope" and excluded from scoring math.
+ *   - If `options.inScopePlanes` is undefined/empty, fall back to legacy
+ *     "all 7 planes" behavior.
  */
 
-import type { MDDPlane, PlaneAssessment, DeepReviewResult } from "./types.js";
+import {
+  MDD_PLANES,
+  type DeepReviewResult,
+  type MDDPlane,
+  type PlaneAssessment,
+} from "./types.js";
 
-/**
- * MDD Planes for task classification
- */
-const MDD_PLANES: MDDPlane[] = [
-  "Business",
-  "Data",
-  "Control",
-  "Foundation",
-  "Observation",
-  "Security",
-  "Evolution",
-];
+export interface ReviewOptions {
+  /** Planes the agent declared in scope. If undefined/empty, score all 7. */
+  inScopePlanes?: MDDPlane[];
+}
 
 /**
  * Plane number mapping for content extraction
@@ -35,32 +40,52 @@ const PLANE_NUMBERS: Record<string, string> = {
 
 /**
  * Perform DEEP MDD-aligned plane review
- * Analyzes content depth, identifies risks, validates dependencies
- * 
- * @param content - Draft content to review
- * @returns DeepReviewResult with assessments and recommendations
+ * Analyzes content depth, identifies risks, validates dependencies.
+ *
+ * @param content  Draft content to review.
+ * @param options  Optional scope. If `options.inScopePlanes` is provided and
+ *                 non-empty, scoring math (avgDepth, feasibleCount) operates
+ *                 only on those planes; out-of-scope planes are still assessed
+ *                 for transparency but marked "➖ Out of Scope".
+ *                 If undefined/empty, legacy "all 7 planes" behavior applies.
  */
-export function performDeepReview(content: string): DeepReviewResult {
+export function performDeepReview(
+  content: string,
+  options?: ReviewOptions,
+): DeepReviewResult {
+  const inScopeSet = options?.inScopePlanes && options.inScopePlanes.length > 0
+    ? new Set<string>(options.inScopePlanes)
+    : null;
+  const isScopeDriven = inScopeSet !== null;
+
   const planeAssessments: PlaneAssessment[] = [];
   const allRisks: DeepReviewResult["risks"] = [];
   const crossPlaneDeps: DeepReviewResult["crossPlaneDependencies"] = [];
   const blockers: string[] = [];
 
   let totalDepth = 0;
+  let scoredPlaneCount = 0;
 
   for (const plane of MDD_PLANES) {
-    const assessment = analyzePlaneContent(plane, content);
+    const inScope = !isScopeDriven || inScopeSet!.has(plane);
+    const assessment = analyzePlaneContent(plane, content, inScope);
     planeAssessments.push(assessment);
-    totalDepth += assessment.contentDepth;
 
-    // Collect plane-specific risks
-    for (const risk of assessment.risks) {
-      allRisks.push({ risk, impact: "medium", planes: [plane] });
+    if (inScope) {
+      totalDepth += assessment.contentDepth;
+      scoredPlaneCount++;
+
+      // Collect plane-specific risks (only for in-scope planes)
+      for (const risk of assessment.risks) {
+        allRisks.push({ risk, impact: "medium", planes: [plane] });
+      }
     }
 
-    // Check for cross-plane dependencies mentioned
-    const crossPlaneNotes = findCrossPlaneDependencies(plane, content);
-    crossPlaneDeps.push(...crossPlaneNotes);
+    // Cross-plane deps: only computed for in-scope planes (less noise)
+    if (inScope) {
+      const crossPlaneNotes = findCrossPlaneDependencies(plane, content);
+      crossPlaneDeps.push(...crossPlaneNotes);
+    }
   }
 
   // Analyze dependency graph for cycles
@@ -70,29 +95,32 @@ export function performDeepReview(content: string): DeepReviewResult {
     blockers.push(depCycleIssue);
   }
 
-  // Check for implementation blockers
-  checkImplementationBlockers(content, planeAssessments, blockers);
+  // Check for implementation blockers (scope-aware)
+  checkImplementationBlockers(content, planeAssessments, blockers, inScopeSet);
 
-  // Calculate overall score
-  const avgDepth = totalDepth / MDD_PLANES.length;
-  const feasibleCount = planeAssessments.filter(p => p.status === "✅ Feasible").length;
+  // Calculate overall score (denominator is the in-scope plane count, or all 7 if legacy)
+  const denominator = isScopeDriven ? scoredPlaneCount : MDD_PLANES.length;
+  const avgDepth = denominator > 0 ? totalDepth / denominator : 0;
+  const feasibleCount = planeAssessments.filter(
+    (p) => p.inScope && p.status === "✅ Feasible",
+  ).length;
   const score = Math.round(
-    (avgDepth * 0.4) + 
-    (feasibleCount / MDD_PLANES.length * 100 * 0.3) + 
-    (blockers.length === 0 ? 30 : 0)
+    (avgDepth * 0.4) +
+    (feasibleCount / denominator * 100 * 0.3) +
+    (blockers.length === 0 ? 30 : 0),
   );
 
-  // Determine overall status
+  // Determine overall status (scope-aware threshold)
   let overallStatus: DeepReviewResult["overallStatus"] = "APPROVED";
   if (blockers.length > 0) {
     overallStatus = "REJECTED";
-  } else if (feasibleCount < MDD_PLANES.length * 0.5 || avgDepth < 30) {
+  } else if (feasibleCount < denominator * 0.5 || avgDepth < 30) {
     overallStatus = "REVISE";
   }
 
   // Estimate complexity based on content
   const complexity = estimateComplexity(planeAssessments, content);
-  const estimatedHours = estimateImplementationHours(complexity, planeAssessments);
+  const estimatedHours = estimateImplementationHours(complexity, planeAssessments, denominator);
 
   return {
     overallStatus,
@@ -103,29 +131,51 @@ export function performDeepReview(content: string): DeepReviewResult {
     implementationComplexity: complexity,
     estimatedHours,
     blockers,
-    recommendations: generateRecommendations(planeAssessments, blockers),
+    recommendations: generateRecommendations(planeAssessments, blockers, inScopeSet),
   };
 }
 
 /**
- * Analyze a single plane's content with deep inspection
+ * Analyze a single plane's content with deep inspection.
+ *
+ * If `inScope` is false, the plane is still parsed (so the result has all 7
+ * entries for transparency) but marked "➖ Out of Scope" and skips the
+ * risk/question/recommendation pipeline - it can't be "Missing" if it was
+ * explicitly opted out.
  */
-function analyzePlaneContent(plane: MDDPlane, content: string): PlaneAssessment {
+function analyzePlaneContent(
+  plane: MDDPlane,
+  content: string,
+  inScope: boolean = true,
+): PlaneAssessment {
   const planeSection = extractPlaneSection(plane, content);
   const lines = planeSection.split('\n').filter(l => l.trim().length > 0);
-  
-  // Calculate content depth (0-100)
+
+  // Calculate content depth (0-100) - always computed for transparency
   const contentDepth = calculateContentDepth(plane, planeSection, lines);
-  
+
+  if (!inScope) {
+    return {
+      plane,
+      status: "➖ Out of Scope",
+      contentDepth,
+      inScope: false,
+      notes: [`Declared out of scope (content present but not scored)`],
+      risks: [],
+      questions: [],
+      recommendations: [],
+    };
+  }
+
   // Identify risks
   const risks = identifyPlaneRisks(plane, planeSection, lines);
-  
+
   // Generate review questions
   const questions = generatePlaneQuestions(plane, planeSection, lines);
-  
+
   // Generate recommendations
   const recommendations = generatePlaneRecommendations(plane, contentDepth, lines);
-  
+
   // Determine status
   let status: PlaneAssessment["status"] = "✅ Feasible";
   if (risks.some(r => r.includes("Missing")) || contentDepth < 20) {
@@ -138,6 +188,7 @@ function analyzePlaneContent(plane: MDDPlane, content: string): PlaneAssessment 
     plane,
     status,
     contentDepth,
+    inScope: true,
     notes: generatePlaneNotes(plane, lines),
     risks,
     questions,
@@ -151,7 +202,7 @@ function analyzePlaneContent(plane: MDDPlane, content: string): PlaneAssessment 
 function extractPlaneSection(plane: MDDPlane, content: string): string {
   const allPlanes = Object.keys(PLANE_NUMBERS);
   const currentIdx = allPlanes.indexOf(plane);
-  
+
   // Try multiple header patterns
   const patterns = [
     new RegExp(`###\\s*${PLANE_NUMBERS[plane]}\\.\\s*${plane}\\s*Plane`, 'i'),
@@ -159,7 +210,7 @@ function extractPlaneSection(plane: MDDPlane, content: string): string {
     new RegExp(`###\\s*${plane}\\s*Plane`, 'i'),
     new RegExp(`##\\s*${plane}(?!\\s*Plane)`, 'i'),
   ];
-  
+
   let start = -1;
   for (const pattern of patterns) {
     const match = content.match(pattern);
@@ -168,12 +219,12 @@ function extractPlaneSection(plane: MDDPlane, content: string): string {
       break;
     }
   }
-  
+
   if (start === -1) return "";
-  
+
   // Find end of section (next plane header or end of content)
   let end = content.length;
-  
+
   // Check for next numbered plane
   for (let i = currentIdx + 1; i < allPlanes.length; i++) {
     const nextNum = PLANE_NUMBERS[allPlanes[i]];
@@ -187,7 +238,7 @@ function extractPlaneSection(plane: MDDPlane, content: string): string {
       break;
     }
   }
-  
+
   return content.slice(start, end);
 }
 
@@ -196,12 +247,12 @@ function extractPlaneSection(plane: MDDPlane, content: string): string {
  */
 function calculateContentDepth(plane: MDDPlane, section: string, lines: string[]): number {
   if (lines.length === 0) return 0;
-  
+
   let score = 0;
-  
+
   // Base score: line count (max 30 points)
   score += Math.min(30, lines.length * 3);
-  
+
   // Check for key elements based on plane type
   const keyChecks = getKeyElementsForPlane(plane);
   for (const check of keyChecks) {
@@ -209,11 +260,11 @@ function calculateContentDepth(plane: MDDPlane, section: string, lines: string[]
       score += 10;
     }
   }
-  
+
   // Check for decision/action items (max 20 points)
   const decisionCount = (section.match(/^-?\s*\[|decision|action|implement|create|setup|configure/gi) || []).length;
   score += Math.min(20, decisionCount * 5);
-  
+
   // Check for specific details (max 20 points)
   const detailPatterns = [
     /\d+\s*(hours?|days?|minutes?)/gi,
@@ -226,7 +277,7 @@ function calculateContentDepth(plane: MDDPlane, section: string, lines: string[]
       score += 5;
     }
   }
-  
+
   return Math.min(100, score);
 }
 
@@ -252,16 +303,16 @@ function getKeyElementsForPlane(plane: MDDPlane): string[] {
  */
 function identifyPlaneRisks(plane: MDDPlane, section: string, lines: string[]): string[] {
   const risks: string[] = [];
-  
+
   // Check for missing content
   if (lines.length < 3) {
     risks.push(`${plane}: Missing detailed analysis (only ${lines.length} lines)`);
   }
-  
+
   // Check for placeholder content
   const placeholderPatterns = [
-    /\[todo\]/gi, 
-    /\[ FIXME \]/gi, 
+    /\[todo\]/gi,
+    /\[ FIXME \]/gi,
     /\[ placeholder \]/gi,
     /TBD|to be determined|not defined/gi,
   ];
@@ -271,7 +322,7 @@ function identifyPlaneRisks(plane: MDDPlane, section: string, lines: string[]): 
       break;
     }
   }
-  
+
   // Check for vague statements
   const vaguePatterns = [
     /\b(?:maybe|might|could be|possibly|probably)\b/gi,
@@ -281,7 +332,7 @@ function identifyPlaneRisks(plane: MDDPlane, section: string, lines: string[]): 
   if (vagueMatches && vagueMatches.length > 2) {
     risks.push(`${plane}: Contains ${vagueMatches.length} vague statements`);
   }
-  
+
   // Plane-specific risk checks
   switch (plane) {
     case "Data":
@@ -305,7 +356,7 @@ function identifyPlaneRisks(plane: MDDPlane, section: string, lines: string[]): 
       }
       break;
   }
-  
+
   return risks;
 }
 
@@ -350,18 +401,18 @@ function generatePlaneQuestions(plane: MDDPlane, section: string, lines: string[
       "Blue-green or canary deployment?",
     ],
   };
-  
+
   // Only ask questions that haven't been answered in the section
   const templates = questionTemplates[plane];
   const questions: string[] = [];
-  
+
   for (const q of templates) {
     const qKeywords = q.split(' ').slice(0, 3).join('|');
     if (!new RegExp(qKeywords, 'i').test(section)) {
       questions.push(q);
     }
   }
-  
+
   return questions;
 }
 
@@ -370,15 +421,15 @@ function generatePlaneQuestions(plane: MDDPlane, section: string, lines: string[
  */
 function generatePlaneRecommendations(plane: MDDPlane, contentDepth: number, lines: string[]): string[] {
   const recs: string[] = [];
-  
+
   if (contentDepth < 30) {
     recs.push(`Add more detailed analysis for ${plane} (only ${lines.length} lines)`);
   }
-  
+
   if (contentDepth < 60) {
     recs.push(`Include specific implementation details for ${plane}`);
   }
-  
+
   return recs;
 }
 
@@ -387,11 +438,11 @@ function generatePlaneRecommendations(plane: MDDPlane, contentDepth: number, lin
  */
 function generatePlaneNotes(plane: MDDPlane, lines: string[]): string[] {
   const notes: string[] = [];
-  
+
   if (lines.length > 0) {
     notes.push(`${plane} Plane has ${lines.length} lines of analysis`);
   }
-  
+
   // Check for specific patterns
   if (lines.some(l => l.includes("**"))) {
     notes.push("Contains decision points");
@@ -399,7 +450,7 @@ function generatePlaneNotes(plane: MDDPlane, lines: string[]): string[] {
   if (lines.some(l => l.includes("→") || l.includes("->"))) {
     notes.push("Contains relationship mappings");
   }
-  
+
   return notes;
 }
 
@@ -408,10 +459,10 @@ function generatePlaneNotes(plane: MDDPlane, lines: string[]): string[] {
  */
 function findCrossPlaneDependencies(fromPlane: MDDPlane, content: string): { from: MDDPlane; to: MDDPlane; note: string }[] {
   const deps: { from: MDDPlane; to: MDDPlane; note: string }[] = [];
-  
+
   for (const toPlane of MDD_PLANES) {
     if (toPlane === fromPlane) continue;
-    
+
     // Check for mentions of other planes
     const pattern = new RegExp(`${fromPlane}[\\s\\S]*?(?:needs?|uses?|depends on|feeds)(${toPlane})`, 'gi');
     const matches = content.match(pattern);
@@ -419,7 +470,7 @@ function findCrossPlaneDependencies(fromPlane: MDDPlane, content: string): { fro
       deps.push({ from: fromPlane, to: toPlane, note: `Flows data/decisions to ${toPlane}` });
     }
   }
-  
+
   return deps;
 }
 
@@ -433,22 +484,33 @@ function checkDependencyCycles(assessments: PlaneAssessment[]): string | null {
   if (emptyPlanes.length > 3) {
     return "Multiple planes have insufficient content - possible incomplete design";
   }
-  
+
   return null;
 }
 
 /**
- * Check for implementation blockers
+ * Check for implementation blockers.
+ *
+ * If `inScopeSet` is provided, only flag critical-plane blockers for planes
+ * that are actually in scope - an out-of-scope Data plane is not a blocker
+ * (the agent explicitly opted it out with a reason).
  */
-function checkImplementationBlockers(content: string, assessments: PlaneAssessment[], blockers: string[]): void {
+function checkImplementationBlockers(
+  content: string,
+  assessments: PlaneAssessment[],
+  blockers: string[],
+  inScopeSet: Set<string> | null,
+): void {
   // Check for "magic" claims (unspecified magic components)
   if (/\bmagic\b.*\b(AI|ML|algorithm)\b/gi.test(content)) {
     blockers.push("Contains 'magic' AI/ML claims without specification");
   }
-  
-  // Check for missing critical planes
+
+  // Check for missing critical planes (scope-aware)
   const criticalPlanes = ["Data", "Foundation"];
   for (const cp of criticalPlanes) {
+    // Skip if the plane was explicitly opted out of scope
+    if (inScopeSet && !inScopeSet.has(cp)) continue;
     const assessment = assessments.find(a => a.plane === cp);
     if (assessment && assessment.contentDepth < 20) {
       blockers.push(`${cp} Plane is critical but has insufficient detail`);
@@ -461,15 +523,15 @@ function checkImplementationBlockers(content: string, assessments: PlaneAssessme
  */
 function estimateComplexity(assessments: PlaneAssessment[], content: string): DeepReviewResult["implementationComplexity"] {
   let score = 0;
-  
+
   // Add score based on content depth variance
   const depths = assessments.map(a => a.contentDepth);
   const avg = depths.reduce((a, b) => a + b, 0) / depths.length;
   const variance = depths.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / depths.length;
-  
+
   if (variance > 500) score += 2;
   else if (variance > 200) score += 1;
-  
+
   // Check for technical complexity indicators
   const complexityIndicators = [
     /real-time|websocket|streaming/gi,
@@ -481,7 +543,7 @@ function estimateComplexity(assessments: PlaneAssessment[], content: string): De
   for (const pattern of complexityIndicators) {
     if (pattern.test(content)) score += 1;
   }
-  
+
   if (score >= 4) return "very-high";
   if (score >= 2) return "high";
   if (score >= 1) return "medium";
@@ -489,49 +551,69 @@ function estimateComplexity(assessments: PlaneAssessment[], content: string): De
 }
 
 /**
- * Estimate implementation hours
+ * Estimate implementation hours.
+ *
+ * `denominator` is the in-scope plane count (or 7 in legacy mode) - used
+ * to scale the active-planes ratio.
  */
-function estimateImplementationHours(complexity: DeepReviewResult["implementationComplexity"], assessments: PlaneAssessment[]): number {
+function estimateImplementationHours(
+  complexity: DeepReviewResult["implementationComplexity"],
+  assessments: PlaneAssessment[],
+  denominator: number,
+): number {
   const baseHours: Record<DeepReviewResult["implementationComplexity"], number> = {
     low: 8,
     medium: 24,
     high: 48,
     "very-high": 120,
   };
-  
+
   let hours = baseHours[complexity];
-  
-  // Adjust for planes with content
-  const activePlanes = assessments.filter(a => a.contentDepth > 30).length;
-  hours = Math.round(hours * (activePlanes / MDD_PLANES.length));
-  
+
+  // Adjust for in-scope planes with substantial content
+  const activePlanes = assessments.filter(a => a.inScope && a.contentDepth > 30).length;
+  const denom = denominator > 0 ? denominator : MDD_PLANES.length;
+  hours = Math.round(hours * (activePlanes / denom));
+
   return Math.max(4, hours);
 }
 
 /**
- * Generate overall recommendations
+ * Generate overall recommendations.
+ *
+ * Out-of-scope planes are excluded from the "needs review" / "low depth"
+ * recommendations — they were explicitly opted out, so flagging them as
+ * needing more depth would be noise.
  */
-function generateRecommendations(assessments: PlaneAssessment[], blockers: string[]): string[] {
+function generateRecommendations(
+  assessments: PlaneAssessment[],
+  blockers: string[],
+  inScopeSet: Set<string> | null,
+): string[] {
   const recs: string[] = [];
-  
+
   if (blockers.length > 0) {
     recs.push("Resolve blockers before proceeding to implementation");
   }
-  
-  const needsReview = assessments.filter(a => a.status === "⚠️ Needs Review");
+
+  const inScopeAssessments = inScopeSet
+    ? assessments.filter(a => inScopeSet.has(a.plane))
+    : assessments;
+
+  const needsReview = inScopeAssessments.filter(a => a.status === "⚠️ Needs Review");
   if (needsReview.length > 0) {
     recs.push(`Add detail to: ${needsReview.map(a => a.plane).join(", ")}`);
   }
-  
-  const lowDepth = assessments.filter(a => a.contentDepth < 40);
+
+  const lowDepth = inScopeAssessments.filter(a => a.contentDepth < 40);
   if (lowDepth.length > 0) {
     recs.push(`Expand analysis for: ${lowDepth.map(a => a.plane).join(", ")}`);
   }
-  
+
   if (recs.length === 0) {
     recs.push("Design is well-structured for implementation");
   }
-  
+
   return recs;
 }
 
