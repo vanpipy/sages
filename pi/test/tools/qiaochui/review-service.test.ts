@@ -238,8 +238,162 @@ Version management, migration strategies, rollback procedures, and deployment pr
 ## 2. Data Plane
 - Placeholder content
 `;
-    
+
     const result = performDeepReview(content);
     expect(result.blockers.length).toBeGreaterThan(0);
+  });
+});
+
+describe("performDeepReview - scope-aware (Tier system)", () => {
+  // A draft with deep coverage on 3 planes and shallow on the rest.
+  // Legacy scoring averages depth across all 7 → low score.
+  // Scope-aware scoring averages only in-scope → much higher score.
+  // Uses canonical `### N. X Plane` heading format (matches existing extractor).
+  const threePlanesDeep = `# System Design: Targeted fix
+
+## Scope
+- Tier: simple
+- In scope: [Foundation, Business, Observation]
+- Out of scope: Data, Control, Security, Evolution (no impact from this change)
+
+### 1. Business Plane
+The business plane contains detailed business process information with multiple steps, workflow definitions, and decision points, including rules for handling edge cases and policy enforcement, version control integration, and audit logging.
+
+### 2. Data Plane
+Just a brief mention.
+
+### 3. Control Plane
+Single line.
+
+### 4. Foundation Plane
+The foundation plane contains comprehensive API endpoint definitions, infrastructure component descriptions, and abstraction layer details with multiple integration points and clear interfaces.
+
+### 5. Observation Plane
+The observation plane defines metrics, monitoring, analysis, alerting, and structured logging with clear SLO definitions and on-call escalation paths.
+
+### 6. Security Plane
+Single line.
+
+### 7. Evolution Plane
+Single line.
+`;
+
+  it("scope-aware: 3 in-scope planes produce higher score than legacy 7-plane average", () => {
+    const legacy = performDeepReview(threePlanesDeep);
+    const scoped = performDeepReview(threePlanesDeep, {
+      inScopePlanes: ["Foundation", "Business", "Observation"],
+    });
+
+    // Scoped should outscore legacy because the deep 3 planes drive the average,
+    // not the 4 shallow ones.
+    expect(scoped.score).toBeGreaterThan(legacy.score);
+  });
+
+  it("scope-aware: out-of-scope planes are marked '➖ Out of Scope' and excluded from feasibleCount", () => {
+    const result = performDeepReview(threePlanesDeep, {
+      inScopePlanes: ["Foundation", "Business", "Observation"],
+    });
+
+    const outOfScope = result.planeAssessments.filter((a) => a.inScope === false);
+    expect(outOfScope).toHaveLength(4);
+    for (const a of outOfScope) {
+      expect(a.status).toBe("➖ Out of Scope");
+      expect(a.risks).toHaveLength(0);
+      expect(a.questions).toHaveLength(0);
+      expect(a.recommendations).toHaveLength(0);
+    }
+  });
+
+  it("scope-aware: in-scope planes still get full assessment", () => {
+    const result = performDeepReview(threePlanesDeep, {
+      inScopePlanes: ["Foundation", "Business", "Observation"],
+    });
+
+    const inScope = result.planeAssessments.filter((a) => a.inScope !== false);
+    expect(inScope).toHaveLength(3);
+    // Each should have a populated contentDepth and status from the normal pipeline
+    for (const a of inScope) {
+      expect(a.contentDepth).toBeGreaterThan(0);
+      expect(["✅ Feasible", "⚠️ Needs Review", "❌ Not Feasible"]).toContain(a.status);
+    }
+  });
+
+  it("scope-aware: critical-plane blocker for Data is skipped when Data is out of scope", () => {
+    // Build a draft where Data is missing/empty AND declared out of scope
+    const content = `# System Design: Refactor only
+
+## Scope
+- Tier: simple
+- In scope: [Foundation, Business]
+- Out of scope: Data (no schema change in this refactor)
+
+### 4. Foundation Plane
+${"Detailed foundation plane content with API endpoints, infrastructure components, and abstraction layers. ".repeat(3)}
+
+### 1. Business Plane
+${"Detailed business plane content with workflows, rules, and policies. ".repeat(3)}
+
+### 2. Data Plane
+TBD
+`;
+
+    const result = performDeepReview(content, {
+      inScopePlanes: ["Foundation", "Business"],
+    });
+
+    // Data blocker MUST NOT appear when Data is out of scope
+    const dataBlocker = result.blockers.find((b) => b.includes("Data Plane"));
+    expect(dataBlocker).toBeUndefined();
+  });
+
+  it("scope-aware: critical-plane blocker for Data FIRES when Data is in scope but empty", () => {
+    const content = `# System Design: Add endpoint
+
+### 4. Foundation Plane
+${"Detailed foundation plane content with API endpoints, infrastructure components, and abstraction layers. ".repeat(5)}
+
+### 2. Data Plane
+TBD
+`;
+
+    const result = performDeepReview(content, {
+      inScopePlanes: ["Foundation", "Data"],
+    });
+
+    // Data blocker MUST appear — Data is in scope and insufficient
+    expect(result.blockers.some((b) => b.includes("Data Plane"))).toBe(true);
+  });
+
+  it("scope-aware: empty inScopePlanes falls back to legacy 7-plane behavior", () => {
+    const result = performDeepReview(threePlanesDeep, { inScopePlanes: [] });
+    // No plane should be marked out-of-scope
+    expect(result.planeAssessments.every((a) => a.inScope !== false)).toBe(true);
+  });
+
+  it("scope-aware: undefined options falls back to legacy 7-plane behavior", () => {
+    const result = performDeepReview(threePlanesDeep);
+    expect(result.planeAssessments.every((a) => a.inScope !== false)).toBe(true);
+    expect(result.planeAssessments).toHaveLength(7);
+  });
+
+  it("scope-aware: estimatedHours scales with active in-scope plane count", () => {
+    // Draft with rich content on 2 planes only
+    const content = `# Design
+
+### 4. Foundation Plane
+${"A ".repeat(200)}
+
+### 1. Business Plane
+${"B ".repeat(200)}
+`;
+
+    const fullResult = performDeepReview(content);
+    const partialResult = performDeepReview(content, {
+      inScopePlanes: ["Foundation"],
+    });
+
+    // Legacy: hours scaled by 2 active / 7 total = ~29%
+    // Scoped: hours scaled by 1 active / 1 in-scope = 100%
+    expect(partialResult.estimatedHours).toBeGreaterThanOrEqual(fullResult.estimatedHours);
   });
 });

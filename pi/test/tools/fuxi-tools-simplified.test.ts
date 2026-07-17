@@ -261,6 +261,184 @@ describe("fuxi_design", () => {
       expect(payload.error.toLowerCase()).toMatch(/phase|expected/);
     });
   });
+
+  describe("tier-aware design (Scope section)", () => {
+    const draftWithScope = (tier: string, inScope: string[], bodyBytes: number) => {
+      const scopeLines = [
+        "## Scope",
+        `- Tier: ${tier}`,
+        `- In scope: [${inScope.join(", ")}]`,
+      ];
+      // Total length = scopeLines.join("\n").length + 1 (separator) + padding.length
+      const padding = "x".repeat(
+        Math.max(0, bodyBytes - scopeLines.join("\n").length - 1),
+      );
+      return scopeLines.join("\n") + "\n" + padding;
+    };
+
+    it("trivial tier accepts a 100-byte draft and reports tier in validation", async () => {
+      writeFileSync(
+        join(cwd, ".sages/workspace/draft.md"),
+        draftWithScope("trivial", ["Foundation"], 100),
+      );
+
+      const result = await pi.call(
+        "fuxi_design",
+        { observation: { phase: "design", draft_path: "draft.md" } },
+        cwd,
+      );
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.phase).toBe("review");
+      expect(payload.auto_advanced).toBe(true);
+      expect(payload.tier).toBe("trivial");
+      expect(payload.scope_aware).toBe(true);
+    });
+
+    it("trivial tier rejects a 50-byte draft (under tier min_size)", async () => {
+      writeFileSync(
+        join(cwd, ".sages/workspace/draft.md"),
+        draftWithScope("trivial", ["Foundation"], 50),
+      );
+
+      const result = await pi.call(
+        "fuxi_design",
+        { observation: { phase: "design", draft_path: "draft.md" } },
+        cwd,
+      );
+
+      expect(result.isError).toBe(true);
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.error).toMatch(/too small/);
+      expect(result.details.tier).toBe("trivial");
+      expect(result.details.scope_driven).toBe(true);
+    });
+
+    it("simple tier accepts a 250-byte draft and advances to review", async () => {
+      writeFileSync(
+        join(cwd, ".sages/workspace/draft.md"),
+        draftWithScope("simple", ["Foundation", "Business", "Evolution"], 250),
+      );
+      const result = await pi.call(
+        "fuxi_design",
+        { observation: { phase: "design", draft_path: "draft.md" } },
+        cwd,
+      );
+      expect(JSON.parse(result.content[0].text).phase).toBe("review");
+      expect(result.isError).toBeFalsy();
+    });
+
+    it("simple tier rejects a 100-byte draft (under tier min_size)", async () => {
+      writeFileSync(
+        join(cwd, ".sages/workspace/draft.md"),
+        draftWithScope("simple", ["Foundation", "Business", "Evolution"], 100),
+      );
+      const result = await pi.call(
+        "fuxi_design",
+        { observation: { phase: "design", draft_path: "draft.md" } },
+        cwd,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.details.tier).toBe("simple");
+    });
+
+    it("standard tier accepts a 500-byte draft and advances to review", async () => {
+      writeFileSync(
+        join(cwd, ".sages/workspace/draft.md"),
+        draftWithScope(
+          "standard",
+          ["Business", "Data", "Control", "Foundation", "Observation", "Security", "Evolution"],
+          500,
+        ),
+      );
+      const result = await pi.call(
+        "fuxi_design",
+        { observation: { phase: "design", draft_path: "draft.md" } },
+        cwd,
+      );
+      expect(JSON.parse(result.content[0].text).phase).toBe("review");
+      expect(result.isError).toBeFalsy();
+    });
+
+    it("standard tier rejects a 400-byte draft (under tier min_size)", async () => {
+      writeFileSync(
+        join(cwd, ".sages/workspace/draft.md"),
+        draftWithScope(
+          "standard",
+          ["Business", "Data", "Control", "Foundation", "Observation", "Security", "Evolution"],
+          400,
+        ),
+      );
+      const result = await pi.call(
+        "fuxi_design",
+        { observation: { phase: "design", draft_path: "draft.md" } },
+        cwd,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.details.tier).toBe("standard");
+    });
+
+    it("no Scope section uses legacy 500-byte minimum", async () => {
+      // 300-byte draft with no Scope section — fails (legacy needs 500)
+      writeFileSync(join(cwd, ".sages/workspace/draft.md"), "x".repeat(300));
+      let result = await pi.call(
+        "fuxi_design",
+        { observation: { phase: "design", draft_path: "draft.md" } },
+        cwd,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.details.scope_driven).toBe(false);
+      expect(result.details.min_size).toBe(500);
+
+      // 600-byte draft with no Scope section — passes (legacy)
+      writeFileSync(join(cwd, ".sages/workspace/draft.md"), "x".repeat(600));
+      result = await pi.call(
+        "fuxi_design",
+        { observation: { phase: "design", draft_path: "draft.md" } },
+        cwd,
+      );
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.phase).toBe("review");
+      expect(payload.tier).toBeNull();
+      expect(payload.scope_aware).toBe(false);
+    });
+
+    it("emits tier_warning when tier band doesn't match plane count", async () => {
+      // trivial tier with 2 in-scope planes — should be 'simple'
+      writeFileSync(
+        join(cwd, ".sages/workspace/draft.md"),
+        draftWithScope("trivial", ["Foundation", "Business"], 200),
+      );
+
+      const result = await pi.call(
+        "fuxi_design",
+        { observation: { phase: "design", draft_path: "draft.md" } },
+        cwd,
+      );
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.phase).toBe("review"); // still advances — warning is soft
+      expect(payload.tier_warning).toContain("Tier 'trivial'");
+    });
+
+    it("init (no observation) reports tier-aware validation block when Scope present", async () => {
+      writeFileSync(
+        join(cwd, ".sages/workspace/draft.md"),
+        draftWithScope("simple", ["Foundation", "Business", "Evolution"], 250),
+      );
+
+      const result = await pi.call("fuxi_design", {}, cwd);
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.validation.min_size).toBe(250);
+      expect(payload.validation.tier).toBe("simple");
+      expect(payload.validation.in_scope_planes).toEqual([
+        "Foundation",
+        "Business",
+        "Evolution",
+      ]);
+      expect(payload.validation.legacy_min_size).toBe(500);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

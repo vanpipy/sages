@@ -61,7 +61,11 @@ Returns `{ status: "complete", score, verdict, can_start_plan: true }`. **Persis
 | 50-79 | `REVISE` | `false` |
 | < 50 | `REJECTED` | `false` |
 
-### 5 Dimensions (for LLM's assessment)
+### Dimensions (for LLM's assessment)
+
+The rubric adapts to whether the draft declares a Scope section.
+
+#### Legacy rubric (no Scope section) — 5 dimensions, weights sum to 100
 
 | Dimension | Weight | What to check |
 |---|---|---|
@@ -70,6 +74,25 @@ Returns `{ status: "complete", score, verdict, can_start_plan: true }`. **Persis
 | feasibility | 25 | Technical approach implementable? Dependencies clear? |
 | testability | 15 | Success path defined? Error handling concrete? |
 | boundaries | 15 | Out-of-scope clear? Limits stated? |
+
+#### Scope-aware rubric (when draft has `## Scope`) — 6 dimensions, weights sum to 100
+
+When the agent declares Tier + in-scope planes, completeness is reframed around
+the in-scope subset and a new `scope_justification` dimension is added. The
+heuristic also scores only in-scope planes (see `performDeepReview`).
+
+| Dimension | Weight | What to check |
+|---|---|---|
+| completeness | 20 | In-scope planes (per Scope section) covered with sufficient depth? |
+| scope_justification | 10 | Are the scope decisions reasonable for this task? Tier justified? |
+| clarity | 20 | Writing clear? Examples concrete? |
+| feasibility | 25 | Technical approach implementable? Dependencies clear? |
+| testability | 15 | Success path defined? Error handling concrete? |
+| boundaries | 10 | Out-of-scope justifications clear? Limits stated? |
+
+**Tip**: when the Scope section exists, the heuristic in `details.heuristic_hints`
+already filters out out-of-scope planes — you don't need to manually re-derive the
+in-scope list. Just verify the scope choice makes sense for the task.
 
 ## qiaochui_decompose
 
@@ -107,7 +130,7 @@ Tasks editing the same file are sorted by priority and chained with sequential d
 
 - ❌ Decompose without `state.score >= 80`
 - ❌ Call `fuxi_update_score` (deprecated — qiaochui_review writes it directly)
-- ❌ Skip the 5-dimension assessment
+- ❌ Skip the dimension assessment (5-dim legacy OR 6-dim scope-aware)
 
 ## Example Flow
 

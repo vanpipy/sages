@@ -69,12 +69,20 @@ export function parseScopeSection(content: string): DraftScope | null {
   );
 
   // Out of scope: parse each line "- Out of scope (...): Plane1 (reason), Plane2 (reason), ..."
+  // Continuation lines (indented, no leading "-") are joined to the previous line.
   const outOfScope: { plane: MDDPlane; reason: string }[] = [];
-  const outOfScopeLines = section
-    .split("\n")
-    .filter((l) => /^\s*-\s*Out\s+of\s+scope/i.test(l));
+  const rawLines = section.split("\n");
+  const grouped: string[] = [];
+  for (const line of rawLines) {
+    if (/^\s*-\s*Out\s+of\s+scope/i.test(line)) {
+      grouped.push(line);
+    } else if (grouped.length > 0 && /^\s+\S/.test(line)) {
+      // Continuation of previous out-of-scope entry
+      grouped[grouped.length - 1] += " " + line.trim();
+    }
+  }
 
-  for (const line of outOfScopeLines) {
+  for (const line of grouped) {
     // Strip "- Out of scope (...) :" prefix if present
     const stripped = line.replace(/^\s*-\s*Out\s+of\s+scope[^:]*:\s*/i, "");
     // Split by comma, respecting nested parens
