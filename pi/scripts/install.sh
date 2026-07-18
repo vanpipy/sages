@@ -8,8 +8,8 @@
 # pi-serena for LSP-based code semantic retrieval/editing via MCP.
 #
 # Selective install options:
-#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-serena and SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-serena)
+#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-serena, pi-semantic-nudge and SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-serena, pi-semantic-nudge)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -63,6 +63,12 @@ PI_SERENA_DEST_DIR="$PI_DIR/packages/pi-serena"
 PI_SERENA_PKG="$PI_SERENA_DEST_DIR"
 PI_SERENA_MCP_JSON="$AGENT_DIR/mcp.json"
 
+# pi-semantic-nudge package info (keeps LLM using semantic tools in long sessions)
+# Same pattern as pi-serena — local peer, file-copy + register in settings.json.
+PI_SEMANTIC_NUDGE_SRC_REL="pi-semantic-nudge"
+PI_SEMANTIC_NUDGE_DEST_DIR="$PI_DIR/packages/pi-semantic-nudge"
+PI_SEMANTIC_NUDGE_PKG="$PI_SEMANTIC_NUDGE_DEST_DIR"
+
 # Cleanup trap
 TMP_DIR=""
 cleanup() {
@@ -77,8 +83,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-serena, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory)"
+  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-serena, pi-semantic-nudge, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-serena, pi-semantic-nudge)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -957,10 +963,133 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
+# pi-semantic-nudge: nudge LLM to prefer semantic tools over grep/read
+# (file-copy + settings.json register; no MCP config)
+# ────────────────────────────────────────────────────────────
+
+is_pi_semantic_nudge_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    # Exact match only — avoid substring collision with hypothetical 'pi-semantic-nudge-extra'.
+    if any(p == '$PI_SEMANTIC_NUDGE_PKG' or p.endswith('/pi-semantic-nudge') for p in pkgs):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_semantic_nudge_files() {
+  local src_root="$TMP_DIR/$PI_SEMANTIC_NUDGE_SRC_REL"
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in clone, skipping pi-semantic-nudge files"
+    return 0
+  }
+
+  if [[ -d "$PI_SEMANTIC_NUDGE_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-semantic-nudge files (exists at $PI_SEMANTIC_NUDGE_DEST_DIR, use --force to overwrite)"
+  else
+    rm -rf "$PI_SEMANTIC_NUDGE_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_SEMANTIC_NUDGE_DEST_DIR"
+    echo "  Installed pi-semantic-nudge files to $PI_SEMANTIC_NUDGE_DEST_DIR"
+  fi
+
+  # Install deps if package.json exists and bun is available
+  if [[ -f "$PI_SEMANTIC_NUDGE_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    echo "  Installing pi-semantic-nudge dependencies (bun install)..."
+    (cd "$PI_SEMANTIC_NUDGE_DEST_DIR" && bun install --silent 2>&1 | tail -3) || {
+      echo "  Warning: pi-semantic-nudge bun install failed, deps may be missing"
+    }
+  fi
+}
+
+install_pi_semantic_nudge() {
+  echo "==> Installing pi-semantic-nudge..."
+
+  # Idempotency: if already registered and not forcing, skip files copy.
+  if is_pi_semantic_nudge_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-semantic-nudge already installed (use --force to reinstall)"
+    return 0
+  fi
+
+  # Copy files from clone (requires TMP_DIR from install_sages_files above)
+  if ! install_semantic_nudge_files; then
+    echo "  Error: install_semantic_nudge_files failed, aborting pi-semantic-nudge install"
+    return 1
+  fi
+
+  # Register in settings.json (matches pi-serena/pi-graphify pattern)
+  if is_pi_semantic_nudge_installed; then
+    echo "  pi-semantic-nudge already registered in settings.json"
+  else
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+    echo "  Registering pi-semantic-nudge in settings.json..."
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_SEMANTIC_NUDGE_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+print('  Registered', pkg)
+"
+  fi
+
+  # Apply the initial tool-description patch right now (so LLM sees [PREFERRED]
+  # tags even before the next session_start fires the extension's ensurePatched).
+  if [[ -f "$PI_SEMANTIC_NUDGE_DEST_DIR/scripts/patch_tool_descriptions.py" ]]; then
+    if command -v python3 &>/dev/null; then
+      echo "  Patching tool descriptions (initial pass)..."
+      python3 "$PI_SEMANTIC_NUDGE_DEST_DIR/scripts/patch_tool_descriptions.py" || \
+        echo "  Note: initial patch failed (will retry on next session_start)"
+    fi
+  fi
+
+  echo "  pi-semantic-nudge installed"
+}
+
+uninstall_pi_semantic_nudge() {
+  echo "==> Uninstalling pi-semantic-nudge..."
+
+  local settings="$PI_DIR/agent/settings.json"
+
+  # Remove from settings.json (exact match to avoid substring collision)
+  [[ -f "$settings" ]] && python3 -c "
+import json
+f = '$settings'
+try:
+    d = json.load(open(f))
+    d['packages'] = [x for x in d.get('packages', []) if not (x == '$PI_SEMANTIC_NUDGE_PKG' or x.endswith('/pi-semantic-nudge'))]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Removed pi-semantic-nudge from settings.json')
+except Exception as e:
+    print('  Warning:', e)
+"
+
+  # Remove installed directory
+  if [[ -d "$PI_SEMANTIC_NUDGE_DEST_DIR" ]]; then
+    rm -rf "$PI_SEMANTIC_NUDGE_DEST_DIR"
+    echo "  Removed $PI_SEMANTIC_NUDGE_DEST_DIR"
+  fi
+
+  echo "  pi-semantic-nudge uninstalled"
+}
+
+# ────────────────────────────────────────────────────────────
 # 模式 1:全量安装(默认)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-memory + pi-codebase-memory + pi-serena..."
+  echo "==> Installing sages + pi-memory + pi-codebase-memory + pi-serena + pi-semantic-nudge..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -999,6 +1128,9 @@ install() {
 
   # Install pi-graphify (sage peer for graphify MCP integration)
   install_pi_graphify || true
+
+  # Install pi-semantic-nudge (sage peer for tool-priority enforcement)
+  install_pi_semantic_nudge || true
 
   # Install graphify CLI with [mcp] extra
   install_graphify_binary || {
@@ -1057,7 +1189,7 @@ install_system_only() {
 # 卸载(同时移除 sages、pi-memory 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-memory + pi-codebase-memory + pi-serena..."
+  echo "==> Uninstalling sages + pi-memory + pi-codebase-memory + pi-serena + pi-semantic-nudge..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1082,6 +1214,9 @@ uninstall() {
 
   # Uninstall pi-serena
   uninstall_pi_serena
+
+  # Uninstall pi-semantic-nudge (sage peer)
+  uninstall_pi_semantic_nudge
 
   echo ""
   echo "Done. Restart pi: exit && pi"
