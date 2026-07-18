@@ -32,18 +32,15 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # pi-memory package info
 PI_MEMORY_PKG="npm:@samfp/pi-memory"
 
-# pi-codebase-memory npm pkg identifier (single source of truth for is/install/uninstall)
-PI_CODEBASE_MEMORY_PKG="npm:pi-codebase-memory"
-
 # pi-mcp-adapter package info (provides the `mcp` proxy tool — required for serena/lsp MCP integration)
 PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
 
 # pi-codebase-memory sage-peer (local package, installed by file-copy not `pi install npm:`)
-PI_CODEBASE_MEMORY_PKG_NAME="@sages/pi-codebase-memory"
 PI_CODEBASE_MEMORY_SRC_REL="pi-codebase-memory"
 PI_CODEBASE_MEMORY_DEST_DIR="$PI_DIR/packages/pi-codebase-memory"
-# Local-peer package identifier (the dest dir path, registered in settings.json like pi-serena)
-PI_CODEBASE_MEMORY_LOCAL_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"
+# Package identifier used everywhere (registered in settings.json like pi-serena/pi-graphify).
+# Test contract: must be the dest-dir absolute path, NOT a `npm:` identifier.
+PI_CODEBASE_MEMORY_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"
 
 # codebase-memory-mcp binary install info
 CBM_REPO="DeusData/codebase-memory-mcp"
@@ -208,8 +205,9 @@ import json, sys
 try:
     d = json.load(open('$settings'))
     packages = d.get('packages', [])
-    # Match either npm pkg identifier OR local-peer dest-dir path
-    if '$PI_CODEBASE_MEMORY_PKG' in packages or '$PI_CODEBASE_MEMORY_LOCAL_PKG' in packages or 'pi-codebase-memory' in packages:
+    # Exact match only — substring 'pi-codebase-memory' would false-positive on
+    # unrelated forks like 'pi-codebase-memory-extra'.
+    if '$PI_CODEBASE_MEMORY_PKG' in packages:
         sys.exit(0)
     sys.exit(1)
 except Exception:
@@ -220,94 +218,19 @@ except Exception:
 install_pi_codebase_memory() {
   echo "==> Installing pi-codebase-memory..."
 
-  # Check if already installed
+  # Idempotent: if already registered in settings.json, only ensure files are present.
   if is_pi_codebase_memory_installed; then
     echo "  pi-codebase-memory already installed"
     return 0
   fi
 
-  # Try using pi install command first
-  if command -v pi &>/dev/null; then
-    echo "  Installing via 'pi install $PI_CODEBASE_MEMORY_PKG'..."
-    if pi install "$PI_CODEBASE_MEMORY_PKG"; then
-      echo "  Installed pi-codebase-memory"
-      return 0
-    fi
-    echo "  pi install failed, trying manual..."
-  fi
-
-  # Fallback: register local-peer dest dir in settings.json
-  # (PI_CODEBASE_MEMORY_LOCAL_PKG is a path; pi can resolve directory paths as packages)
-  echo "  Adding to settings.json..."
-  local settings="$PI_DIR/agent/settings.json"
-  mkdir -p "$(dirname "$settings")"
-
-  if [[ ! -f "$settings" ]]; then
-    echo '{"packages": []}' > "$settings"
-  fi
-
-  python3 -c "
-import json, sys
-f, pkg = '$settings', '$PI_CODEBASE_MEMORY_LOCAL_PKG'
-try:
-    d = json.load(open(f))
-except (json.JSONDecodeError, FileNotFoundError):
-    d = {'packages': []}
-if pkg not in d.get('packages', []):
-    d['packages'] = d.get('packages', []) + [pkg]
-json.dump(d, open(f, 'w'), indent=2)
-print('  Added', pkg)
-"
-
-  echo "  Installed pi-codebase-memory"
-}
-
-uninstall_pi_codebase_memory() {
-  echo "==> Uninstalling pi-codebase-memory..."
-
-  local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && { echo "  No settings file"; return 0; }
-
-  python3 -c "
-import json, sys
-f, npm_pkg, local_pkg = '$settings', '$PI_CODEBASE_MEMORY_PKG', '$PI_CODEBASE_MEMORY_LOCAL_PKG'
-try:
-    d = json.load(open(f))
-    pkgs = d.get('packages', [])
-    # Remove npm pkg, local-peer dest path, or substring variant
-    new_pkgs = [x for x in pkgs if x != npm_pkg and x != local_pkg and x != 'pi-codebase-memory']
-    if len(new_pkgs) < len(pkgs):
-        d['packages'] = new_pkgs
-        json.dump(d, open(f, 'w'), indent=2)
-        print('Removed', pkg)
-    else:
-        print('Not found in settings')
-except Exception as e:
-    print('Warning:', e, file=sys.stderr)
-    sys.exit(1)
-"
-
-  # Remove package directory if exists
-  local memory_dir="$PI_DIR/packages/pi-codebase-memory"
-  if [[ -d "$memory_dir" ]]; then
-    rm -rf "$memory_dir"
-    echo "  Removed $memory_dir"
-  fi
-
-  echo "  pi-codebase-memory uninstalled"
-}
-
-# ────────────────────────────────────────────────────────────
-# Sage peer for codebase-memory-mcp (file copy + mcp.json merge + binary download)
-# ────────────────────────────────────────────────────────────
-
-install_pi_codebase_memory_files() {
-  local src_root="$TMP_DIR/$PI_CODEBASE_MEMORY_SRC_REL"
-  [[ ! -d "$src_root" ]] && {
-    echo "  Warning: $src_root not found in clone, skipping pi-codebase-memory files"
-    return 0
-  }
-  if [[ -d "$PI_CODEBASE_MEMORY_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+  # Copy source files (from the freshly-cloned TMP_DIR; may be skipped if dir exists)
+  # Note: `${TMP_DIR:-}` defaults to empty string when unset (e.g. in unit-test isolation),
+  # making the path `"/pi-codebase-memory"` which won't exist → the ! -d branch triggers.
+  local src_root="${TMP_DIR:-}/$PI_CODEBASE_MEMORY_SRC_REL"
+  if [[ ! -d "$src_root" ]]; then
+    echo "  Warning: $src_root not found in clone, skipping file copy (settings.json registration still happens)"
+  elif [[ -d "$PI_CODEBASE_MEMORY_DEST_DIR" && "${FORCE:-false}" != true ]]; then
     echo "  Skipping pi-codebase-memory files (exists, use --force)"
   else
     rm -rf "$PI_CODEBASE_MEMORY_DEST_DIR"
@@ -315,6 +238,7 @@ install_pi_codebase_memory_files() {
     cp -r "$src_root" "$PI_CODEBASE_MEMORY_DEST_DIR"
     echo "  Installed pi-codebase-memory files to $PI_CODEBASE_MEMORY_DEST_DIR"
   fi
+
   if [[ -f "$PI_CODEBASE_MEMORY_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
     (cd "$PI_CODEBASE_MEMORY_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
   fi
@@ -326,7 +250,7 @@ install_pi_codebase_memory_files() {
   [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
   python3 -c "
 import json
-f, pkg = '$settings', '$PI_CODEBASE_MEMORY_LOCAL_PKG'
+f, pkg = '$settings', '$PI_CODEBASE_MEMORY_PKG'
 try: d = json.load(open(f))
 except: d = {'packages': []}
 if pkg not in d.get('packages', []):
@@ -334,7 +258,47 @@ if pkg not in d.get('packages', []):
     json.dump(d, open(f, 'w'), indent=2)
     print('  Registered', pkg)
 "
+
+  echo "  pi-codebase-memory installed"
 }
+
+uninstall_pi_codebase_memory() {
+  echo "==> Uninstalling pi-codebase-memory..."
+
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && { echo "  No settings file"; return 0; }
+
+  # Exact-match removal (no substring) — preserves hypothetical forks/extras.
+  python3 -c "
+import json, sys
+f, pkg = '$settings', '$PI_CODEBASE_MEMORY_PKG'
+try:
+    d = json.load(open(f))
+    pkgs = d.get('packages', [])
+    new_pkgs = [x for x in pkgs if x != pkg]
+    if len(new_pkgs) < len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open(f, 'w'), indent=2)
+        print('  Removed', pkg, 'from settings.json')
+    else:
+        print('  Not found in settings.json')
+except Exception as e:
+    print('  Warning:', e, file=sys.stderr)
+    sys.exit(1)
+"
+
+  # Remove package directory if exists
+  if [[ -d "$PI_CODEBASE_MEMORY_DEST_DIR" ]]; then
+    rm -rf "$PI_CODEBASE_MEMORY_DEST_DIR"
+    echo "  Removed $PI_CODEBASE_MEMORY_DEST_DIR"
+  fi
+
+  echo "  pi-codebase-memory uninstalled"
+}
+
+# ────────────────────────────────────────────────────────────
+# codebase-memory-mcp: mcp.json merge + binary download
+# ────────────────────────────────────────────────────────────
 
 write_codebase_memory_mcp_config() {
   local template=""
@@ -344,33 +308,17 @@ write_codebase_memory_mcp_config() {
     template="$TMP_DIR/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json"
   fi
   [[ -z "$template" ]] && { echo "  Warning: codebase-memory-mcp mcp.json template not found"; return 0; }
+  # NEVER-TOUCH policy (v3): see write_serena_mcp_config for the matching
+  # rationale + regression history. install.sh only writes mcp.json on first
+  # install; afterwards, the file is user-owned and untouched on every rerun.
   if [[ -f "$PI_DIR/agent/mcp.json" ]]; then
-    # Always merge (even with --force) — never overwrite the whole mcp.json,
-    # which would erase other servers' entries.
-    python3 -c "
-import json
-f = '$PI_DIR/agent/mcp.json'
-tpl = '$template'
-try: d = json.load(open(f))
-except: d = {'mcpServers': {}, 'settings': {}}
-tpl_d = json.load(open(tpl))
-existing = d.get('mcpServers', {})
-if existing.get('codebase-memory-mcp') != tpl_d.get('mcpServers', {}).get('codebase-memory-mcp'):
-    existing.update(tpl_d.get('mcpServers', {}))
-    d['mcpServers'] = existing
-    json.dump(d, open(f, 'w'), indent=2)
-    if 'codebase-memory-mcp' in tpl_d.get('mcpServers', {}):
-        print('  ${FORCE:+--force }refreshed codebase-memory-mcp in mcp.json')
-    else:
-        print('  Merged codebase-memory-mcp template into mcp.json')
-else:
-    print('  codebase-memory-mcp already in mcp.json (unchanged)')
-"
-  else
-    mkdir -p "$PI_DIR/agent"
-    cp "$template" "$PI_DIR/agent/mcp.json"
-    echo "  Wrote $PI_DIR/agent/mcp.json from template"
+    echo "  Skipped mcp.json (already exists, user-customized — preserved as-is)"
+    return 0
   fi
+
+  mkdir -p "$PI_DIR/agent"
+  cp "$template" "$PI_DIR/agent/mcp.json"
+  echo "  Wrote $PI_DIR/agent/mcp.json from template"
 }
 
 # ────────────────────────────────────────────────────────────
@@ -484,32 +432,16 @@ write_graphify_mcp_config() {
   resolved_template=$(mktemp)
   sed "s|__PI_GRAPHIFY_START_MCP__|$PI_GRAPHIFY_DEST_DIR/templates/start-mcp.sh|g" "$template" > "$resolved_template"
 
+  # NEVER-TOUCH policy: see write_serena_mcp_config for rationale.
   if [[ -f "$PI_DIR/agent/mcp.json" ]]; then
-    # Always merge (even with --force) — never overwrite the whole mcp.json.
-    python3 -c "
-import json
-f = '$PI_DIR/agent/mcp.json'
-tpl = '$resolved_template'
-try: d = json.load(open(f))
-except: d = {'mcpServers': {}, 'settings': {}}
-tpl_d = json.load(open(tpl))
-existing = d.get('mcpServers', {})
-if existing.get('graphify') != tpl_d.get('mcpServers', {}).get('graphify'):
-    existing.update(tpl_d.get('mcpServers', {}))
-    d['mcpServers'] = existing
-    json.dump(d, open(f, 'w'), indent=2)
-    if 'graphify' in tpl_d.get('mcpServers', {}):
-        print('  ${FORCE:+--force }refreshed graphify in mcp.json')
-    else:
-        print('  Merged graphify template into mcp.json')
-else:
-    print('  graphify already in mcp.json (unchanged)')
-"
-  else
-    mkdir -p "$PI_DIR/agent"
-    cp "$resolved_template" "$PI_DIR/agent/mcp.json"
-    echo "  Wrote $PI_DIR/agent/mcp.json from template"
+    echo "  Skipped mcp.json (already exists, user-customized — preserved as-is)"
+    rm -f "$resolved_template"
+    return 0
   fi
+
+  mkdir -p "$PI_DIR/agent"
+  cp "$resolved_template" "$PI_DIR/agent/mcp.json"
+  echo "  Wrote $PI_DIR/agent/mcp.json from template"
   rm -f "$resolved_template"
 }
 
@@ -919,33 +851,19 @@ write_serena_mcp_config() {
     return 0
   fi
 
+  # NEVER-TOUCH policy (v3): if the user's mcp.json already exists, leave it
+  # completely alone. See write_codebase_memory_mcp_config / write_graphify_mcp_config
+  # for the matching rationale + regression history. Test 20 (install.test.sh)
+  # asserts byte-for-byte preservation: user owns the file, install.sh is just
+  # a templating helper that fires only on first install.
   if [[ -f "$PI_SERENA_MCP_JSON" ]]; then
-    # Always merge (even with --force) — never overwrite the whole mcp.json,
-    # which would erase other servers' entries (graphify, codebase-memory-mcp).
-    python3 -c "
-import json
-f = '$PI_SERENA_MCP_JSON'
-tpl = '$template'
-try: d = json.load(open(f))
-except: d = {'mcpServers': {}, 'settings': {}}
-tpl_d = json.load(open(tpl))
-existing = d.get('mcpServers', {})
-if existing.get('serena') != tpl_d.get('mcpServers', {}).get('serena'):
-    existing.update(tpl_d.get('mcpServers', {}))
-    d['mcpServers'] = existing
-    json.dump(d, open(f, 'w'), indent=2)
-    if 'serena' in tpl_d.get('mcpServers', {}):
-        print('  ${FORCE:+--force }refreshed serena in mcp.json')
-    else:
-        print('  Merged serena template into mcp.json')
-else:
-    print('  serena already in mcp.json (unchanged)')
-"
-  else
-    mkdir -p "$(dirname "$PI_SERENA_MCP_JSON")"
-    cp "$template" "$PI_SERENA_MCP_JSON"
-    echo "  Wrote $PI_SERENA_MCP_JSON from template"
+    echo "  Skipped mcp.json (already exists, user-customized — preserved as-is)"
+    return 0
   fi
+
+  mkdir -p "$(dirname "$PI_SERENA_MCP_JSON")"
+  cp "$template" "$PI_SERENA_MCP_JSON"
+  echo "  Wrote $PI_SERENA_MCP_JSON from template"
 }
 
 is_pi_serena_installed() {
@@ -1056,9 +974,6 @@ install() {
   # Install pi-memory first
   install_pi_memory
 
-  # Install pi-codebase-memory
-  install_pi_codebase_memory
-
   # Install pi-mcp-adapter (provides mcp proxy tool, required for serena/lsp MCP)
   install_pi_mcp_adapter
 
@@ -1069,8 +984,10 @@ install() {
   # Install pi-serena (uses TMP_DIR/pi-serena from the clone above)
   install_pi_serena || true
 
-  # Install pi-codebase-memory sage peer (file copy from TMP_DIR/pi-codebase-memory + mcp.json merge)
-  install_pi_codebase_memory_files || true
+  # Install pi-codebase-memory sage peer (file copy from TMP_DIR/pi-codebase-memory + settings.json register).
+  # Old design had two steps (install_pi_codebase_memory + install_pi_codebase_memory_files); merged into one
+  # after we dropped the npm:pi-codebase-memory (R-Dson) variant in favor of the local peer only.
+  install_pi_codebase_memory || true
   write_codebase_memory_mcp_config
 
   # Install codebase-memory-mcp binary (~50MB download from GitHub releases)

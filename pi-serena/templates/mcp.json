@@ -13,8 +13,7 @@
         "--enable-gui-log-window", "false",
         "--log-level", "ERROR"
       ],
-      "lifecycle": "eager",
-      "idleTimeout": 10,
+      "lifecycle": "keep-alive",
       "requestTimeoutMs": 60000,
       "directTools": [
         "find_symbol",
