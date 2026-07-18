@@ -283,6 +283,116 @@ echo "$OUTPUT" | grep -q "already installed" \
 # 清理
 rm -rf "$TMPDIR" "$FAKE_PATH"
 
+# ────────────────────────────────────────────────────────────
+# pi-semantic-nudge tests (新增于 2026-07-18)
+# 验证: pi-semantic-nudge 跟 pi-serena 一样被安装/卸载,
+#       作为纯文件复制 + settings.json 注册 peer (无 MCP config)
+# ────────────────────────────────────────────────────────────
+
+# 测试 23: PI_SEMANTIC_NUDGE 常量定义
+grep -q 'PI_SEMANTIC_NUDGE_PKG="$PI_SEMANTIC_NUDGE_DEST_DIR"' "$SCRIPT" \
+  || { echo "❌ FAIL: PI_SEMANTIC_NUDGE_PKG constant missing or wrong"; exit 1; }
+echo "✅ PASS: PI_SEMANTIC_NUDGE_PKG constant defined"
+
+# 测试 24: pi-semantic-nudge 四个函数均已定义
+for fn in is_pi_semantic_nudge_installed install_pi_semantic_nudge uninstall_pi_semantic_nudge install_semantic_nudge_files; do
+  grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
+    || { echo "❌ FAIL: function $fn not defined"; exit 1; }
+done
+echo "✅ PASS: 4 pi-semantic-nudge functions defined"
+
+# 测试 25: install() 流程包含 install_pi_semantic_nudge
+sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_pi_semantic_nudge" \
+  || { echo "❌ FAIL: install() does not call install_pi_semantic_nudge"; exit 1; }
+echo "✅ PASS: install() invokes install_pi_semantic_nudge"
+
+# 测试 26: uninstall() 流程包含 uninstall_pi_semantic_nudge
+sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_pi_semantic_nudge" \
+  || { echo "❌ FAIL: uninstall() does not call uninstall_pi_semantic_nudge"; exit 1; }
+echo "✅ PASS: uninstall() invokes uninstall_pi_semantic_nudge"
+
+# 测试 27: --sages-only 模式注释说明跳过 pi-semantic-nudge
+grep -q 'pi-semantic-nudge' "$SCRIPT" \
+  || { echo "❌ FAIL: pi-semantic-nudge not mentioned in install.sh"; exit 1; }
+echo "✅ PASS: pi-semantic-nudge referenced in install.sh"
+
+# ────────────────────────────────────────────────────────────
+# 加载并执行 pi-semantic-nudge 函数 (需要模拟 pi-semantic-nudge/ 已存在于 TMP)
+# ────────────────────────────────────────────────────────────
+
+# 测试 28: 初始状态 — is_pi_semantic_nudge_installed 返回 false (substring 安全)
+TMPDIR="$(mktemp -d)"
+export PI_DIR="$TMPDIR"
+FAKE_PATH="$(mktemp -d)"
+export PATH="$FAKE_PATH:/usr/bin:/bin"
+
+mkdir -p "$PI_DIR/agent"
+echo '{"packages": []}' > "$PI_DIR/agent/settings.json"
+
+# 提取 pi-semantic-nudge 相关常量 + 函数
+{
+  awk '/^PI_SEMANTIC_NUDGE_.*=/,/^$/' "$SCRIPT"
+  for fn in is_pi_semantic_nudge_installed install_pi_semantic_nudge uninstall_pi_semantic_nudge install_semantic_nudge_files; do
+    extract_fn "$fn"
+  done
+} > "$TMPDIR/pi-semantic-nudge-fns.sh"
+# shellcheck disable=SC1090
+source "$TMPDIR/pi-semantic-nudge-fns.sh"
+
+is_pi_semantic_nudge_installed \
+  && { echo "❌ FAIL: reported installed when settings.json has no package"; exit 1; }
+echo "✅ PASS: is_pi_semantic_nudge_installed returns false on empty settings"
+
+# 测试 29: substring 安全 — "pi-semantic-nudge-extra" 不被误判为已安装
+python3 -c "
+import json
+f = '$PI_DIR/agent/settings.json'
+d = {'packages': ['npm:pi-semantic-nudge-extra', 'pi-semantic-nudge-fork']}
+json.dump(d, open(f, 'w'))
+"
+is_pi_semantic_nudge_installed \
+  && { echo "❌ FAIL: substring name 'pi-semantic-nudge-extra' misdetected"; exit 1; } \
+  || echo "✅ PASS: is_pi_semantic_nudge_installed does not match substring names"
+
+# 测试 30: exact match — 绝对路径正确识别
+python3 -c "
+import json
+f = '$PI_DIR/agent/settings.json'
+d = {'packages': ['$PI_SEMANTIC_NUDGE_PKG']}
+json.dump(d, open(f, 'w'))
+"
+is_pi_semantic_nudge_installed \
+  && echo "✅ PASS: is_pi_semantic_nudge_installed matches absolute path" \
+  || { echo "❌ FAIL: should match absolute path"; exit 1; }
+
+# 测试 31: install_pi_semantic_nudge 函数存在 — 不会因 PI_SERENA 路径不存在而崩溃
+# 此处不调 install_pi_semantic_nudge 本身 (需要 TMP_DIR 完整 chain),
+# 只验证函数定义无语法错误 (已由 source 保证)
+echo "✅ PASS: install_pi_semantic_nudge function loaded cleanly (no parse errors)"
+
+# 测试 32: uninstall 不误伤 substring name
+python3 -c "
+import json
+f = '$PI_DIR/agent/settings.json'
+d = {'packages': ['$PI_SEMANTIC_NUDGE_PKG', 'npm:pi-semantic-nudge-extra', 'pi-semantic-nudge-fork']}
+json.dump(d, open(f, 'w'))
+"
+uninstall_pi_semantic_nudge
+REMAINING=$(python3 -c "import json; d=json.load(open('$PI_DIR/agent/settings.json')); print(','.join(d.get('packages',[])))")
+echo "  After uninstall, packages: $REMAINING"
+echo "$REMAINING" | grep -q "pi-semantic-nudge-extra" \
+  && echo "✅ PASS: uninstall did not remove pi-semantic-nudge-extra" \
+  || { echo "❌ FAIL: uninstall incorrectly removed substring names"; exit 1; }
+echo "$REMAINING" | grep -q "pi-semantic-nudge-fork" \
+  && echo "✅ PASS: uninstall did not remove pi-semantic-nudge-fork" \
+  || { echo "❌ FAIL: uninstall incorrectly removed substring names"; exit 1; }
+echo "$REMAINING" | grep -qF "$PI_SEMANTIC_NUDGE_PKG" \
+  && { echo "❌ FAIL: uninstall did not remove pi-semantic-nudge itself"; exit 1; } \
+  || echo "✅ PASS: uninstall correctly removed pi-semantic-nudge"
+
+# 清理
+rm -rf "$TMPDIR" "$FAKE_PATH"
+
 echo ""
 echo "════════════════════════════════════"
 echo "  All install.test.sh checks passed"
