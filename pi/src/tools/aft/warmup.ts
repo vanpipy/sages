@@ -59,6 +59,10 @@ export function warmupCallgraph(projectRoot: string): Promise<void> {
  * tool pipeline.
  */
 export async function ensureReady(projectRoot: string): Promise<void> {
+	// Test override (e.g. wrap functional tests skip the real AFT configure
+	// round-trip and drive the bridge mock directly).
+	if (testEnsureReadyOverride) return testEnsureReadyOverride(projectRoot);
+
 	if (ready.get(projectRoot) === true) return;
 
 	const inflight = ensureInFlight.get(projectRoot);
@@ -99,4 +103,19 @@ export function __clearWarmups(): void {
 export function __resetReadyState(): void {
 	ready.clear();
 	ensureInFlight.clear();
+}
+
+/**
+ * Test-only: override `ensureReady` with a custom function. Pass
+ * `undefined` to restore the real implementation.
+ *
+ * Wrap functional tests use this to skip the real AFT configure round-trip
+ * — the wrap tool's `await ensureReady(cwd)` becomes a no-op so the test
+ * can drive the bridge mock directly.
+ */
+let testEnsureReadyOverride: ((projectRoot: string) => Promise<void>) | undefined;
+export function __setEnsureReadyForTesting(
+	fn: ((projectRoot: string) => Promise<void>) | undefined,
+): void {
+	testEnsureReadyOverride = fn;
 }

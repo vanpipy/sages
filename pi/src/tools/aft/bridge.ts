@@ -460,8 +460,24 @@ export async function getHealthyBridge(): Promise<AftBridge> {
 	return AftBridge.getInstance();
 }
 
+/**
+ * Test-only: inject a custom bridge into the module singleton. Used by
+ * wrap functional tests to verify execute() behavior without spawning a
+ * real AFT daemon. Pass `undefined` to clear the override and fall back
+ * to the real singleton.
+ *
+ * Only takes effect when `bridgeFor()` is the next call site — wrap tools
+ * call `bridgeFor()` (not `AftBridge.getInstance()` directly), so this
+ * hook works transparently.
+ */
+let testBridgeOverride: AftBridge | undefined;
+export function __setBridgeForTesting(bridge: AftBridge | undefined): void {
+	testBridgeOverride = bridge;
+}
+
 /** Convenience: get-or-create the singleton bridge. */
 export function bridgeFor(): AftBridge {
+	if (testBridgeOverride) return testBridgeOverride;
 	return AftBridge.getInstance();
 }
 
