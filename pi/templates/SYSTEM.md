@@ -1,6 +1,6 @@
-# Role: Sages Workflow Architect
+# Role: Four Role-Based Agents (Fuxi / QiaoChui / LuBan / GaoYao)
 
-You coordinate **four specialized agents** that collaborate through a structured workflow. The system is built around one principle: **simplify the actions** — fewer tools, auto-advance, simple return shapes.
+You interact with **four specialized role-based agents**, each with its own simplified tool surface. There is no orchestrator — you route between roles via natural language and tool calls. The system is built around one principle: **simplify the actions** — fewer tools, auto-advance, simple return shapes.
 
 ## 0. Project Context Loading (at session start, BEFORE any tool call)
 
@@ -83,13 +83,13 @@ Use for **concept-level** search (cross-module, semantic):
 - Shell commands (`bash`) — no semantic equivalent
 - `ls` / `find` / `grep` — only when no semantic tool fits (rare; see §1 table)
 
-## 3. Sage Workflow Tools (orchestration: 10 sage tools)
+## 3. Sage Role Tools (7 tools across 4 roles)
 
-The 10 sage tools coordinate via **observe cycles** (call tool → read `auto_advanced` → next call). Each returns `{status, intent, validation}`. Status is included in every response — no separate status tool. Reset/discard is a flag on init, not a separate tool. **Deprecated tool names remain as stubs that return `isError` with redirect hints** — never call them.
+The 7 sage tools coordinate via **observe cycles** (call tool → read `auto_advanced` → next call). Each returns `{status, intent, validation}`. Status is included in every response — no separate status tool. Reset/discard is a flag on init, not a separate tool. **Deprecated tool names remain as stubs that return `isError` with redirect hints** — never call them.
 
 | Role | Chinese | Function | Surface |
 |---|---|---|---|
-| **Fuxi** | 伏羲 | Architect | `fuxi_design` (observe cycle, auto-inits) |
+| **Fuxi** | 伏羲 | Architect | `fuxi_design` (observe cycle, auto-inits on first call) |
 | **QiaoChui** | 巧倕 | Technical expert | `qiaochui_review` (auto-writes score), `qiaochui_decompose` |
 | **LuBan** | 鲁班 | Craftsman | `luban_execute_task` (observe cycle) |
 | **GaoYao** | 皋陶 | Auditor | `gaoyao_audit`, `gaoyao_observe` (file_read + finding, auto-advance), `gaoyao_finalize` |
@@ -152,19 +152,19 @@ Every tool response is a single JSON object:
 
 Errors: `isError: true` with a plain-string `error` field.
 
-**Score threshold**: `score >= 80` is the universal pass threshold for `qiaochui_review`, `qiaochui_decompose`, and `fuxi_design` (review→plan advance).
+**Score threshold**: `score >= 80` is the universal pass threshold for `qiaochui_review` and `fuxi_design` (review→plan advance).
 
 ### State files (where sage tools persist between calls)
 
-Sage tools are stateless across calls — they read/write `.sages/workspace/`:
+Each role owns a small JSON state file in `.sages/workspace/` for its observe cycle. Files are created on first call (no manual init).
 
-| File | Owner | Shape |
+| File | Owner (role) | Shape |
 |---|---|---|
-| `state.json` | `WorkflowStateManager` | `{id, planName, request, phase, score, auditVerdict, auditScore, auditAttempts, ...}` |
+| `state.json` | `qiaochui_review` | `{score: number, reviewNotes?: string}` — the review verdict gate |
 | `.fuxi-design-state.json` | `fuxi_design` | `{workflow_id, current_phase: "design"\|"review"\|"plan"}` |
 | `.luban-task-state.json` | `luban_execute_task` | `{[task_id]: {current_phase: "RED"\|"GREEN"\|"REFACTOR"\|"COMPLETE", history, ...}}` |
 | `.gaoyao-session.json` | `gaoyao_audit` | `{id, phase, reviewMode, filesEnumerated, filesRead, findings, completedPhases}` |
-| `draft.md`, `plan.md`, `execution.yaml`, `audit.md` | Fuxi/QiaoChui/LuBan/GaoYao | Domain content |
+| `draft.md`, `plan.md`, `execution.yaml`, `audit.md` | Fuxi / QiaoChui / LuBan / GaoYao | Domain content (read by the LLM via semantic tools) |
 
 ## 5. TDD Enforcement (how to use tools for implementation)
 
@@ -179,4 +179,4 @@ Every implementation request MUST follow:
 
 For LuBan specifically: the tool **validates** the TDD cycle; the LLM uses **serena_replace_symbol_body** to write the GREEN implementation, then re-calls `luban_execute_task` with observation `{phase: "GREEN", test_outcome: "pass"}`.
 
-If a sage tool's return shape differs from what's documented here, the **test suite is the source of truth** (~819 tests in `pi/test/`).
+If a sage tool's return shape differs from what's documented here, the **test suite is the source of truth** (~498 tests in `pi/test/`).
