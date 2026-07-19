@@ -29,6 +29,7 @@ import { registerQiaoChuiTools } from "./tools/qiaochui/index.js";
 import { registerLubanTools } from "./tools/luban/index.js";
 import { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
 import { registerAllWrappers } from "./tools/wrap/index.js";
+import { __shutdownBridge } from "./tools/aft/bridge.js";
 
 /**
  * Default pi extension entrypoint. pi calls this once on package load.
@@ -46,4 +47,13 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 
 	// ── 9 sages_* semantic wrappers (talk to AFT through aft/) ─────
 	registerAllWrappers(pi);
+
+	// ── AFT daemon lifecycle ───────────────────────────────────────
+	// Kill the singleton AFT daemon when the pi session ends. Without this
+	// the daemon (one long-lived child process per session) keeps running
+	// after pi exits, observable as `aft-linux-x64` lingering in `ps aux`.
+	// pi's `session_shutdown` event fires for quit / reload / new / resume / fork.
+	pi.on("session_shutdown", () => {
+		__shutdownBridge();
+	});
 }

@@ -33,6 +33,10 @@ const RUNTIME_PKG = path.join(os.homedir(), ".pi/packages/sages");
 class MockExtensionAPI {
 	tools: Array<{ name: string; description?: string }> = [];
 	commands: Array<{ name: string }> = [];
+	handlers: Array<{ event: string; handler: (...args: unknown[]) => unknown }> = [];
+	on = (event: string, handler: (...args: unknown[]) => unknown): void => {
+		this.handlers.push({ event, handler });
+	};
 	registerTool = (tool: { name: string; description?: string }) => {
 		this.tools.push({ name: tool.name, description: tool.description });
 	};

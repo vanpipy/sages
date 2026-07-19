@@ -249,18 +249,26 @@ export class AftBridge {
 	private _sendRaw(request: AftRawRequest): Promise<AftResponse> {
 		return new Promise<AftResponse>((resolve, reject) => {
 			const id = request.id;
-			this.handle.pending.set(id, (r: AftResponse) => {
-				if (r.success) resolve(r);
-				else resolve(r); // never reject — let caller branch on success
-			});
-			this.handle.proc.stdin?.write(JSON.stringify(request) + "\n");
-			// Safety: 60s timeout
-			setTimeout(() => {
+
+			// Safety: 60s timeout — capture the timer handle so we can cancel
+			// it when a response arrives. Without clearTimeout, completed
+			// requests leave the timer to fire 60s later as a no-op, which
+			// accumulates in the event loop (matches user-reported symptom
+			// of "tool runs always and can't cancel").
+			const timer = setTimeout(() => {
 				if (this.handle.pending.has(id)) {
 					this.handle.pending.delete(id);
 					reject(new Error(`[AFT] Request ${id} timed out`));
 				}
 			}, 60_000);
+
+			this.handle.pending.set(id, (r: AftResponse) => {
+				clearTimeout(timer);
+				if (r.success) resolve(r);
+				else resolve(r); // never reject — let caller branch on success
+			});
+
+			this.handle.proc.stdin?.write(JSON.stringify(request) + "\n");
 		});
 	}
 
