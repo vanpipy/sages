@@ -6,7 +6,7 @@ description: Execute tasks with TDD observe cycle using semantic tools
 
 ## Role
 
-LuBan executes tasks via TDD (RED → GREEN → REFACTOR). The sage **does not write code itself** — it validates the LLM's work and auto-advances phases. The LLM uses **serena** / **codebase-memory** / **graphify** to do the actual implementation.
+LuBan executes tasks via TDD (RED → GREEN → REFACTOR). The sage **does not write code itself** — it validates the LLM's work and auto-advances phases. The LLM uses **sages_*** / **codebase-memory** / **graphify** to do the actual implementation.
 
 ## Mode Indicator
 
@@ -16,7 +16,7 @@ Show current mode in system prompt:
 **Implement Mode** (Writeable)
 - All files allowed
 - TDD: RED → GREEN → REFACTOR
-- Use semantic tools (serena_*, codebase_memory_*, graphify_*) for the work
+- Use semantic tools (sages_*, codebase_memory_*, graphify_*) for the work
 ```
 
 ## Tools (Simplified Surface)
@@ -35,17 +35,17 @@ The same tool handles all three phases. Four calls per task:
 Call 1: luban_execute_task { task_id, task_description, files, test_command }
         → RED contract { status: "in_progress", phase: "RED", intent, validation }
 
-        (LLM uses serena_create_text_file to write the test, runs `bun test`, observes failure)
+        (LLM uses sages_write_file to write the test, runs `bun test`, observes failure)
 
 Call 2: luban_execute_task { task_id, observation: { phase: "RED", test_outcome: "fail" } }
         → re-runs test, validates, advances to GREEN
 
-        (LLM uses serena_replace_symbol_body to implement, runs `bun test`, observes pass)
+        (LLM uses sages_replace_symbol to implement, runs `bun test`, observes pass)
 
 Call 3: luban_execute_task { task_id, observation: { phase: "GREEN", test_outcome: "pass" } }
         → validates, advances to REFACTOR
 
-        (LLM uses serena_find_referencing_symbols + graphify_get_neighbors to check impact, refactors, runs `bun test`)
+        (LLM uses sages_find_references + graphify_get_neighbors to check impact, refactors, runs `bun test`)
 
 Call 4: luban_execute_task { task_id, observation: { phase: "REFACTOR", test_outcome: "pass" } }
         → returns { status: "complete", phases: ["RED","GREEN","REFACTOR"] }
@@ -57,9 +57,9 @@ LuBan does **not** write files or generate code. The LLM uses:
 
 | Phase | Semantic tool | Purpose |
 |---|---|---|
-| RED | `serena_create_text_file`, `graphify_god_nodes` | Find existing test patterns; write the failing test |
-| GREEN | `serena_find_symbol`, `serena_replace_symbol_body`, `codebase_memory_trace_path` | Find existing module shape; write minimal impl |
-| REFACTOR | `serena_find_referencing_symbols`, `graphify_get_neighbors`, `codebase_memory_detect_changes` | Check blast radius; clean up without breaking behavior |
+| RED | `sages_write_file`, `graphify_god_nodes` | Find existing test patterns; write the failing test |
+| GREEN | `sages_find_symbol`, `sages_replace_symbol`, `codebase_memory_trace_path` | Find existing module shape; write minimal impl |
+| REFACTOR | `sages_find_references`, `graphify_get_neighbors`, `codebase_memory_detect_changes` | Check blast radius; clean up without breaking behavior |
 
 ## Validation Contract
 
@@ -105,22 +105,22 @@ When the tool returns an error, the embedded `TDD_GUIDE.formatError(phase, error
 ## Example Flow
 
 ```
-[LLM reads execution.yaml via `serena_read_file` to identify tasks T1, T2 in topological order]
+[LLM reads execution.yaml via `sages_read_file` to identify tasks T1, T2 in topological order]
 
 > luban_execute_task { task_id: "T1", task_description: "implement add(a,b)", files: ["src/math/add.ts"] }
 ← { status: "in_progress", phase: "RED", intent: "Write a failing test for: 'add(2,3) returns 5'...", validation: { test_command: "bun test src/math/add.test.ts", expected_outcome: "fail" } }
 
-[LLM uses serena_create_text_file to write src/math/add.test.ts, runs `bun test`, sees failure]
+[LLM uses sages_write_file to write src/math/add.test.ts, runs `bun test`, sees failure]
 
 > luban_execute_task { task_id: "T1", observation: { phase: "RED", test_outcome: "fail" } }
 ← { status: "in_progress", phase: "GREEN", auto_advanced: true, intent: "Make the test pass..." }
 
-[LLM uses serena_replace_symbol_body to write the implementation, runs `bun test`, sees pass]
+[LLM uses sages_replace_symbol to write the implementation, runs `bun test`, sees pass]
 
 > luban_execute_task { task_id: "T1", observation: { phase: "GREEN", test_outcome: "pass" } }
 ← { status: "in_progress", phase: "REFACTOR", auto_advanced: true }
 
-[LLM uses serena_find_referencing_symbols to check impact, refactors, runs `bun test`]
+[LLM uses sages_find_references to check impact, refactors, runs `bun test`]
 
 > luban_execute_task { task_id: "T1", observation: { phase: "REFACTOR", test_outcome: "pass" } }
 ← { status: "complete", phases: ["RED","GREEN","REFACTOR"] }

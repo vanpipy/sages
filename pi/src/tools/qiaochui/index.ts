@@ -123,7 +123,7 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
    *
    * Two modes:
    *   - Without observation: returns heuristic hints + semantic-tool guidance.
-   *     The LLM reads the draft using serena_read_file / graphify_query,
+   *     The LLM reads the draft using sages_read_file / graphify_query,
    *     computes a score against the 5 dimensions, and re-calls with observation.
    *   - With observation {score, notes?}: validates the score, computes verdict,
    *     persists state.score to state.json. Returns verdict + can_start_plan.
@@ -238,8 +238,8 @@ export function registerQiaoChuiTools(pi: ExtensionAPI): void {
             ];
 
         const intent = scope
-          ? `Scope-driven design detected (tier '${scope.tier}', in-scope: ${scope.inScope.join(", ")}). Read draft.md with serena_read_file; the heuristic below scores only in-scope planes. Then call qiaochui_review with observation {score, notes?} using the 6-dimension scope-aware rubric.`
-          : `Read draft.md using semantic tools (serena_read_file, graphify_query) to assess the 5 dimensions below. Then call qiaochui_review with observation {score, notes?} to persist the score.`;
+          ? `Scope-driven design detected (tier '${scope.tier}', in-scope: ${scope.inScope.join(", ")}). Read draft.md with sages_read_file; the heuristic below scores only in-scope planes. Then call qiaochui_review with observation {score, notes?} using the 6-dimension scope-aware rubric.`
+          : `Read draft.md using semantic tools (sages_read_file, graphify_query) to assess the 5 dimensions below. Then call qiaochui_review with observation {score, notes?} to persist the score.`;
 
         return {
           content: [{

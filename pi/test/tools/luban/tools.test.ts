@@ -6,7 +6,7 @@
  *     The LLM reads execution.yaml directly via semantic tools to plan iteration order.
  *
  * The LLM does the actual implementation work via semantic tools
- * (serena_replace_symbol_body, etc.). LuBan only validates test outcomes.
+ * (sages_replace_symbol, etc.). LuBan only validates test outcomes.
  *
  * Removed: luban_run_batch (planner; LLM reads execution.yaml directly),
  *          luban_get_status (status returned in every execute_task response).
@@ -450,5 +450,5 @@ describe("deprecated LuBan stubs", () => {
 //   "does NOT write template stub files (semantic-tool design)"
 // The first call to luban_execute_task must not auto-create source files
 // with `return {}` template stubs — the LLM writes real implementations
-// via serena_replace_symbol_body / serena_create_text_file.
+// via sages_replace_symbol / sages_write_file.
 // ---------------------------------------------------------------------------

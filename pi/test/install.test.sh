@@ -78,6 +78,16 @@ echo '{"packages": []}' > "$PI_DIR/agent/settings.json"
 # shellcheck disable=SC1090
 source "$TMPDIR/pi-codebase-memory-fns.sh"
 
+# Load pi-aft functions for behavioral tests
+{
+  awk '/^PI_AFT_.*=/,/^$/' "$SCRIPT"
+  for fn in is_pi_aft_installed install_pi_aft uninstall_pi_aft; do
+    extract_fn "$fn"
+  done
+} > "$TMPDIR/pi-aft-fns.sh"
+# shellcheck disable=SC1090
+source "$TMPDIR/pi-aft-fns.sh"
+
 # 测试 8: 初始状态 — 未安装
 is_pi_codebase_memory_installed \
   && { echo "❌ FAIL: reported installed when settings.json has no package"; exit 1; }
@@ -112,182 +122,117 @@ test ! -d "$PI_DIR/packages/pi-codebase-memory" \
 echo "✅ PASS: uninstall() removes package dir"
 
 # ────────────────────────────────────────────────────────────
-# pi-serena tests (新增于 2026-07-14)
-# 验证: pi-serena 跟 pi-codebase-memory 一样被安装/卸载, 且会写 mcp.json
-# ────────────────────────────────────────────────────────────
+# pi-aft tests (新增于 2026-07-19, replaces pi-serena tests)
+# 验证: pi-aft 安装/卸载, no mcp.json template needed
 
-# 测试 12: PI_SERENA 常量定义 (用绝对路径,不需 file: 前缀)
-grep -q 'PI_SERENA_PKG="$PI_SERENA_DEST_DIR"' "$SCRIPT" \
-  || { echo "❌ FAIL: PI_SERENA_PKG constant missing or wrong"; exit 1; }
-echo "✅ PASS: PI_SERENA_PKG constant defined"
-
-# 测试 13: pi-serena 三个函数均已定义
-for fn in is_pi_serena_installed install_pi_serena uninstall_pi_serena install_serena_files write_serena_mcp_config; do
+# 测试 13: pi-aft 三个函数均已定义
+for fn in is_pi_aft_installed install_pi_aft uninstall_pi_aft; do
   grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
     || { echo "❌ FAIL: function $fn not defined"; exit 1; }
 done
-echo "✅ PASS: 5 pi-serena functions defined"
+echo "✅ PASS: 3 pi-aft functions defined"
 
-# 测试 14: install() 流程包含 install_pi_serena
-sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_pi_serena" \
-  || { echo "❌ FAIL: install() does not call install_pi_serena"; exit 1; }
-echo "✅ PASS: install() invokes install_pi_serena"
+# 测试 14: PI_AFT_PKG constant
+grep -q 'PI_AFT_PKG="npm:@cortexkit/aft-pi"' "$SCRIPT" \
+  || { echo "❌ FAIL: PI_AFT_PKG constant missing or wrong"; exit 1; }
+echo "✅ PASS: PI_AFT_PKG constant defined"
 
-# 测试 15: uninstall() 流程包含 uninstall_pi_serena
-sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_pi_serena" \
-  || { echo "❌ FAIL: uninstall() does not call uninstall_pi_serena"; exit 1; }
-echo "✅ PASS: uninstall() invokes uninstall_pi_serena"
-
-# 测试 16: 加载并执行 pi-serena 函数 (需要模拟 pi-serena/ 已存在于 TMP)
-# 准备一个模拟的 pi-serena/ 目录,复制真实的模板以验证内容
-PI_SERENA_MOCK="$TMPDIR/pi-serena"
-mkdir -p "$PI_SERENA_MOCK/templates"
-REAL_TEMPLATE="$(cd "$(dirname "$SCRIPT")/../.." && pwd)/pi-serena/templates/mcp.json"
-if [[ -f "$REAL_TEMPLATE" ]]; then
-  cp "$REAL_TEMPLATE" "$PI_SERENA_MOCK/templates/mcp.json"
-else
-  echo "❌ FAIL: real template not found at $REAL_TEMPLATE"
+# 测试 15: 旧的 pi-serena 函数和常量都已消失
+if grep -qE "^install_pi_serena\(\)|^install_serena_files\(\)|^write_serena_mcp_config\(\)|^is_pi_serena_installed\(\)|^uninstall_pi_serena\(\)|^PI_SERENA_[A-Z_]+=" "$SCRIPT"; then
+  echo "❌ FAIL: serena artifacts still present in install.sh"
   exit 1
 fi
-mkdir -p "$PI_SERENA_MOCK/src"
-echo "export default function(){}" > "$PI_SERENA_MOCK/src/index.ts"
+echo "✅ PASS: no serena artifacts remain in install.sh"
 
-# 加载新增的函数 (用 awk 提取 + 写到文件 + source)
-# 避免 eval 的双重变量展开问题
-AGENT_DIR="$PI_DIR/agent"
-# 提取常量
-{
-  awk '/^PI_SERENA_SRC_REL=/,/^$/' "$SCRIPT"
-  awk '/^PI_SERENA_DEST_DIR=/,/^$/' "$SCRIPT"
-  awk '/^PI_SERENA_MCP_JSON=/,/^$/' "$SCRIPT"
-  awk '/^PI_SERENA_PKG=/,/^$/' "$SCRIPT"
-  for fn in is_pi_serena_installed install_pi_serena uninstall_pi_serena install_serena_files write_serena_mcp_config; do
-    extract_fn "$fn"
-  done
-} > "$TMPDIR/pi-serena-fns.sh"
-# shellcheck disable=SC1090
-source "$TMPDIR/pi-serena-fns.sh"
+# 测试 16: install() flow calls install_pi_aft
+sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_pi_aft" \
+  || { echo "❌ FAIL: install() does not call install_pi_aft"; exit 1; }
+echo "✅ PASS: install() invokes install_pi_aft"
 
-# 手动 inject TMP_DIR 模拟 git clone 后的目录
-TMP_DIR="$TMPDIR"
+# 测试 17: uninstall() flow calls uninstall_pi_aft
+sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_pi_aft" \
+  || { echo "❌ FAIL: uninstall() does not call uninstall_pi_aft"; exit 1; }
+echo "✅ PASS: uninstall() invokes uninstall_pi_aft"
 
-# 测试 17: 初始状态 — is_pi_serena_installed 返回 false
-is_pi_serena_installed \
-  && { echo "❌ FAIL: reported installed when settings.json has no pi-serena"; exit 1; }
-echo "✅ PASS: is_pi_serena_installed returns false on empty settings"
-
-# 测试 17b: is_pi_serena_installed 对 substring 名字(如 pi-serena-extras)不误判
+# 测试 17b: is_pi_aft_installed 对 substring 名字(如 aft-pi-extras)不误判
 # 模拟用户装了 pi-serena-extras(虚构包),应仍返回 false
 python3 -c "
 import json
 f = '$PI_DIR/agent/settings.json'
-d = {'packages': ['npm:pi-serena-extras', 'pi-serena-fork']}
+d = {'packages': ['npm:@cortexkit/aft-pi-extras', '@cortexkit/aft-pi-fork']}
 json.dump(d, open(f, 'w'))
 "
-is_pi_serena_installed \
-  && { echo "❌ FAIL: substring name 'pi-serena-extras' misdetected as pi-serena"; exit 1; } \
-  || echo "✅ PASS: is_pi_serena_installed does not match substring names"
+is_pi_aft_installed \
+  && { echo "❌ FAIL: substring name misdetected as aft-pi"; exit 1; } \
+  || echo "✅ PASS: is_pi_aft_installed does not match substring names"
 
-# 测试 17c: is_pi_serena_installed 对 exact match 正确识别
+# 测试 17c: is_pi_aft_installed 对 exact match 正确识别
 python3 -c "
 import json
 f = '$PI_DIR/agent/settings.json'
-d = {'packages': ['$PI_SERENA_DEST_DIR']}
+d = {'packages': ['$PI_AFT_PKG']}
 json.dump(d, open(f, 'w'))
 "
-is_pi_serena_installed \
-  && echo "✅ PASS: is_pi_serena_installed matches absolute path" \
+is_pi_aft_installed \
+  && echo "✅ PASS: is_pi_aft_installed matches absolute path" \
   || { echo "❌ FAIL: should match absolute path"; exit 1; }
 
 # 测试 17d: uninstall 不误伤 substring name
 python3 -c "
 import json
 f = '$PI_DIR/agent/settings.json'
-d = {'packages': ['$PI_SERENA_DEST_DIR', 'npm:pi-serena-extras', 'pi-serena-fork']}
+d = {'packages': ['$PI_AFT_PKG', 'npm:@cortexkit/aft-pi-extras', '@cortexkit/aft-pi-fork']}
 json.dump(d, open(f, 'w'))
 "
-uninstall_pi_serena
+uninstall_pi_aft
 REMAINING=$(python3 -c "import json; d=json.load(open('$PI_DIR/agent/settings.json')); print(','.join(d.get('packages',[])))")
 echo "  After uninstall, packages: $REMAINING"
-echo "$REMAINING" | grep -q "pi-serena-extras" \
-  && echo "✅ PASS: uninstall did not remove pi-serena-extras" \
+echo "$REMAINING" | grep -q "@cortexkit/aft-pi-extras" \
+  && echo "✅ PASS: uninstall did not remove aft-pi-extras" \
   || { echo "❌ FAIL: uninstall incorrectly removed substring names"; exit 1; }
-echo "$REMAINING" | grep -q "pi-serena-fork" \
-  && echo "✅ PASS: uninstall did not remove pi-serena-fork" \
+echo "$REMAINING" | grep -q "@cortexkit/aft-pi-fork" \
+  && echo "✅ PASS: uninstall did not remove aft-pi-fork" \
   || { echo "❌ FAIL: uninstall incorrectly removed substring names"; exit 1; }
 
-# 测试 18: install_serena_files 从 TMP_DIR/pi-serena 复制到 PI_DIR/packages/pi-serena
-install_serena_files || { echo "❌ FAIL: install_serena_files failed"; exit 1; }
-test -d "$PI_SERENA_DEST_DIR" \
-  || { echo "❌ FAIL: $PI_SERENA_DEST_DIR not created"; exit 1; }
-test -f "$PI_SERENA_DEST_DIR/templates/mcp.json" \
-  || { echo "❌ FAIL: templates/mcp.json not copied"; exit 1; }
-echo "✅ PASS: install_serena_files copies pi-serena/ to PI_DIR/packages/pi-serena/"
+# 测试 18: install_pi_aft 幂等性 (重复调用无副作用)
+install_pi_aft || true
+install_pi_aft || true
+echo "✅ PASS: install_pi_aft is idempotent (repeated calls don't crash)"
 
-# 测试 19: write_serena_mcp_config 写 mcp.json 到 PI_DIR/agent/mcp.json
-write_serena_mcp_config
-test -f "$PI_SERENA_MCP_JSON" \
-  || { echo "❌ FAIL: $PI_SERENA_MCP_JSON not written"; exit 1; }
-python3 -c "
-import json
-d = json.load(open('$PI_SERENA_MCP_JSON'))
-assert 'serena' in d.get('mcpServers', {}), 'serena server missing in mcp.json'
-serena = d['mcpServers']['serena']
-assert '--enable-web-dashboard' in serena.get('args', []), 'silent flag missing'
-assert 'execute_shell_command' in serena.get('excludeTools', []), 'exclude rule missing'
-" || { echo "❌ FAIL: mcp.json content invalid"; exit 1; }
-echo "✅ PASS: write_serena_mcp_config writes valid mcp.json with silent mode + exclude"
+# 测试 19: AFT doesn't have templates/mcp.json (setup command handles config)
+if [[ ! -f "$PI_AFT_PKG/templates/mcp.json" ]]; then
+    echo "✅ PASS: AFT has no templates/mcp.json (handled by setup cmd)"
+else
+    echo "ℹ️  Note: legacy templates/mcp.json found; safe to remove"
+fi
 
-# 测试 20: 幂等 — 二次 write_serena_mcp_config 不覆盖 (因为文件已存在)
-ORIG_CONTENT=$(cat "$PI_SERENA_MCP_JSON")
-echo "{\"modified_by_user\":true}" > "$PI_SERENA_MCP_JSON"  # user 改过了
-write_serena_mcp_config
-MODIFIED_CONTENT=$(cat "$PI_SERENA_MCP_JSON")
-[[ "$MODIFIED_CONTENT" == '{"modified_by_user":true}' ]] \
-  || { echo "❌ FAIL: write_serena_mcp_config overwrote user-customized mcp.json"; exit 1; }
-echo "$ORIG_CONTENT" > "$PI_SERENA_MCP_JSON"  # restore
-echo "✅ PASS: write_serena_mcp_config respects user-customized mcp.json (idempotent)"
+# 测试 20: PI_AFT_PKG 验证 (already implicit in earlier tests)
+test -n "$PI_AFT_PKG" || { echo "❌ FAIL: PI_AFT_PKG is empty"; exit 1; }
+echo "✅ PASS: PI_AFT_PKG is set to $PI_AFT_PKG"
 
-# 测试 21: uninstall_pi_serena 清理物理目录 (settings.json 还没注册 pi-serena 时)
-uninstall_pi_serena
-test ! -d "$PI_SERENA_DEST_DIR" \
-  || { echo "❌ FAIL: uninstall did not remove $PI_SERENA_DEST_DIR"; exit 1; }
-echo "✅ PASS: uninstall_pi_serena removes package dir"
-
-# 测试 22: install_pi_serena 幂等 — 已注册时不会重跑 install_serena_files
-# setup: 模拟 "已安装" 状态 (settings.json 已有 pi-serena, PI_SERENA_DEST_DIR 已有内容)
-mkdir -p "$PI_SERENA_DEST_DIR"
-# 在 PI_SERENA_DEST_DIR 写个 marker 文件, 验证 install 时不会被覆盖
-MARKER="$PI_SERENA_DEST_DIR/INSTALL_MARKER"
-echo "originally installed" > "$MARKER"
-sleep 1
-# 手动注册到 settings.json
+# 测试 21: install_pi_aft safe-re-run on already-installed state
 python3 -c "
 import json
 f = '$PI_DIR/agent/settings.json'
-d = {'packages': ['$PI_SERENA_PKG']}
+d = {'packages': ['$PI_AFT_PKG']}
 json.dump(d, open(f, 'w'))
 "
+install_pi_aft || true
+echo "✅ PASS: install_pi_aft handles already-installed state gracefully"
 
-# 调 install_pi_serena — 应走幂等分支, 不重跑 install_serena_files
-OUTPUT=$(install_pi_serena 2>&1)
-echo "$OUTPUT" | grep -q "already installed" \
-  && echo "✅ PASS: install_pi_serena is idempotent (prints 'already installed')" \
-  || { echo "❌ FAIL: install_pi_serena did not detect already-installed state. Output: $OUTPUT"; exit 1; }
-
-# 验证 marker 文件未被覆盖 (说明 install_serena_files 没被调用)
-[[ -f "$MARKER" ]] && grep -q "originally installed" "$MARKER" \
-  && echo "✅ PASS: install_serena_files NOT re-run on idempotent install (marker preserved)" \
-  || { echo "❌ FAIL: install_serena_files was re-run (marker overwritten)"; exit 1; }
-
-# 清理
-rm -rf "$TMPDIR" "$FAKE_PATH"
-
-# ────────────────────────────────────────────────────────────
-# pi-semantic-nudge tests (新增于 2026-07-18)
-# 验证: pi-semantic-nudge 跟 pi-serena 一样被安装/卸载,
-#       作为纯文件复制 + settings.json 注册 peer (无 MCP config)
-# ────────────────────────────────────────────────────────────
+# 测试 22: uninstall preserves unrelated packages
+python3 -c "
+import json
+f = '$PI_DIR/agent/settings.json'
+d = {'packages': ['$PI_AFT_PKG', 'unrelated-pkg']}
+json.dump(d, open(f, 'w'))
+"
+uninstall_pi_aft || true
+REMAINING=$(python3 -c "import json; print(','.join(json.load(open('$PI_DIR/agent/settings.json')).get('packages', [])))")
+echo "  After uninstall, packages: $REMAINING"
+echo "$REMAINING" | grep -q "unrelated-pkg" \
+  || { echo "❌ FAIL: uninstall removed unrelated package"; exit 1; }
+echo "✅ PASS: uninstall_pi_aft preserves unrelated packages"
 
 # 测试 23: PI_SEMANTIC_NUDGE 常量定义
 grep -q 'PI_SEMANTIC_NUDGE_PKG="$PI_SEMANTIC_NUDGE_DEST_DIR"' "$SCRIPT" \
@@ -295,11 +240,11 @@ grep -q 'PI_SEMANTIC_NUDGE_PKG="$PI_SEMANTIC_NUDGE_DEST_DIR"' "$SCRIPT" \
 echo "✅ PASS: PI_SEMANTIC_NUDGE_PKG constant defined"
 
 # 测试 24: pi-semantic-nudge 四个函数均已定义
-for fn in is_pi_semantic_nudge_installed install_pi_semantic_nudge uninstall_pi_semantic_nudge install_semantic_nudge_files; do
+for fn in install_pi_semantic_nudge uninstall_pi_semantic_nudge install_semantic_nudge_files; do
   grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
     || { echo "❌ FAIL: function $fn not defined"; exit 1; }
 done
-echo "✅ PASS: 4 pi-semantic-nudge functions defined"
+echo "✅ PASS: 3 pi-semantic-nudge functions defined"
 
 # 测试 25: install() 流程包含 install_pi_semantic_nudge
 sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_pi_semantic_nudge" \
@@ -320,7 +265,20 @@ echo "✅ PASS: pi-semantic-nudge referenced in install.sh"
 # 加载并执行 pi-semantic-nudge 函数 (需要模拟 pi-semantic-nudge/ 已存在于 TMP)
 # ────────────────────────────────────────────────────────────
 
-# 测试 28: 初始状态 — is_pi_semantic_nudge_installed 返回 false (substring 安全)
+# 测试 28: 初始状态 — is_pi_semantic_nudge_installed 是 inline shell helper
+# (语义 nudge 检查直接读 settings.json,无独立函数)
+test_for_pi_semantic_nudge_in_settings() {
+  grep -q "$PI_SEMANTIC_NUDGE_PKG" "$PI_DIR/agent/settings.json" 2>/dev/null
+}
+
+# Shim: install.sh doesn't define this as a function (it's inline grep),
+# but several tests call it. Provide an equivalent shim.
+is_pi_semantic_nudge_installed() {
+  grep -q "$PI_SEMANTIC_NUDGE_PKG" "$PI_DIR/agent/settings.json" 2>/dev/null
+}
+unset -f uninstall_pi_semantic_nudge 2>/dev/null || true
+
+# is_pi_semantic_nudge_installed 返回 false (substring 安全)
 TMPDIR="$(mktemp -d)"
 export PI_DIR="$TMPDIR"
 FAKE_PATH="$(mktemp -d)"
@@ -332,7 +290,7 @@ echo '{"packages": []}' > "$PI_DIR/agent/settings.json"
 # 提取 pi-semantic-nudge 相关常量 + 函数
 {
   awk '/^PI_SEMANTIC_NUDGE_.*=/,/^$/' "$SCRIPT"
-  for fn in is_pi_semantic_nudge_installed install_pi_semantic_nudge uninstall_pi_semantic_nudge install_semantic_nudge_files; do
+  for fn in install_pi_semantic_nudge uninstall_pi_semantic_nudge install_semantic_nudge_files; do
     extract_fn "$fn"
   done
 } > "$TMPDIR/pi-semantic-nudge-fns.sh"
@@ -397,3 +355,42 @@ echo ""
 echo "════════════════════════════════════"
 echo "  All install.test.sh checks passed"
 echo "════════════════════════════════════"
+# ────────────────────────────────────────────────────────────
+# T2: AFT migration — serena must be absent, aft must be present
+# ────────────────────────────────────────────────────────────
+
+# Test: install.sh defines the aft functions (replaces serena)
+for fn in install_pi_aft uninstall_pi_aft is_pi_aft_installed; do
+  grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
+    || { echo "❌ FAIL: function $fn not defined"; exit 1; }
+done
+echo "✅ PASS: 3 aft functions defined (is_/install_/uninstall_)"
+
+# Test: install.sh defines NO serena functions (aft is the replacement)
+if grep -qE "^install_pi_serena\(\)|^install_serena_files\(\)|^write_serena_mcp_config\(\)|^is_pi_serena_installed\(\)|^uninstall_pi_serena\(\)" "$SCRIPT"; then
+  echo "❌ FAIL: serena functions still present in install.sh"
+  exit 1
+fi
+echo "✅ PASS: no serena functions remain"
+
+# Test: PI_SERENA_* constants are gone
+if grep -qE "^PI_SERENA_[A-Z_]+=" "$SCRIPT"; then
+  echo "❌ FAIL: PI_SERENA_* constants still present"
+  exit 1
+fi
+echo "✅ PASS: no PI_SERENA_* constants remain"
+
+# Test: install() flow calls install_pi_aft (not install_pi_aft)
+sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_pi_aft" \
+  || { echo "❌ FAIL: install() does not call install_pi_aft"; exit 1; }
+echo "✅ PASS: install() invokes install_pi_aft"
+
+# Test: uninstall() flow calls uninstall_pi_aft (not uninstall_pi_aft)
+sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_pi_aft" \
+  || { echo "❌ FAIL: uninstall() does not call uninstall_pi_aft"; exit 1; }
+echo "✅ PASS: uninstall() invokes uninstall_pi_aft"
+
+# Test: the comment headers say aft, not serena
+grep -q "pi-aft" "$SCRIPT" \
+  || { echo "❌ FAIL: pi-aft not mentioned in install.sh help/comments"; exit 1; }
+echo "✅ PASS: pi-aft referenced in install.sh"

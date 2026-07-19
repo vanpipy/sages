@@ -9,14 +9,14 @@
  *   - TDD_GUIDE:          phase-specific error-message helper
  *
  * The actual implementation work is done by the LLM via semantic tools
- * (serena / codebase-memory / graphify). This module only validates the
+ * (sages_* / codebase-memory / graphify). This module only validates the
  * test outcomes the LLM observes.
  *
  * Removed (post simplify-actions):
  *   - runTask, runTDDCycle: the batch-style phase runners; replaced by the
  *     observe cycle inside luban_execute_task itself.
  *   - generateTestFromScenarios: template scaffolding generator. The LLM
- *     writes tests via serena_create_text_file, so this is dead.
+ *     writes tests via sages_write_file, so this is dead.
  *   - ScenarioSpec: only consumed by generateTestFromScenarios.
  *
  * SECURITY: testCommand is passed unsanitized to `execSync()`.

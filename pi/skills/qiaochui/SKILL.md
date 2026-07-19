@@ -6,7 +6,7 @@ description: Review draft and create task plan (auto-writes score)
 
 ## Role
 
-QiaoChui reviews the design draft and decomposes approved designs into tasks. **qiaochui_review auto-writes the score to `state.json`** — no separate `fuxi_update_score` call needed. The LLM uses **serena** / **graphify** / **codebase-memory** to actually inspect the draft.
+QiaoChui reviews the design draft and decomposes approved designs into tasks. **qiaochui_review auto-writes the score to `state.json`** — no separate `fuxi_update_score` call needed. The LLM uses **sages_*** / **graphify** / **codebase-memory** to actually inspect the draft.
 
 ## Mode Indicator
 
@@ -35,7 +35,7 @@ qiaochui_review { draft_path?: string }
 
 Returns `{ status: "in_progress", intent, validation, heuristic_hints }`. The LLM:
 
-1. Reads draft.md via `serena_read_file`
+1. Reads draft.md via `sages_read_file`
 2. Optionally checks project context via `graphify_god_nodes` / `codebase_memory_get_architecture`
 3. Assesses against the 5 dimensions (see table below)
 4. Calls `qiaochui_review` with `observation: { score, notes? }`
@@ -138,7 +138,7 @@ Tasks editing the same file are sorted by priority and chained with sequential d
 > qiaochui_review { draft_path: "draft.md" }
 ← { status: "in_progress", intent: "Read draft.md using semantic tools...", validation: { dimensions: [...], pass_threshold: 80 }, heuristic_hints: { ... } }
 
-[LLM uses serena_read_file to read draft.md, checks existing code patterns via graphify_god_nodes, assesses against 5 dimensions → score 85]
+[LLM uses sages_read_file to read draft.md, checks existing code patterns via graphify_god_nodes, assesses against 5 dimensions → score 85]
 
 > qiaochui_review { observation: { score: 85, notes: "Solid MDD coverage" } }
 ← { status: "complete", score: 85, verdict: "APPROVED", can_start_plan: true, state_persisted: true }

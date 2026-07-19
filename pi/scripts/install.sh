@@ -5,11 +5,11 @@
 #
 # Also installs pi-memory for persistent memory capabilities,
 # pi-codebase-memory for codebase indexing/search, and
-# pi-serena for LSP-based code semantic retrieval/editing via MCP.
+# pi-aft (via aft-pi extension) — AFT-backed code analysis (replaces serena, no LSP needed)
 #
 # Selective install options:
-#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-serena, pi-semantic-nudge and SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-serena, pi-semantic-nudge)
+#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-aft, pi-semantic-nudge and SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, pi-semantic-nudge)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -32,13 +32,13 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # pi-memory package info
 PI_MEMORY_PKG="npm:@samfp/pi-memory"
 
-# pi-mcp-adapter package info (provides the `mcp` proxy tool — required for serena/lsp MCP integration)
+# pi-mcp-adapter package info (provides the `mcp` proxy tool — optional for sages, AFT is the new layer)
 PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
 
 # pi-codebase-memory sage-peer (local package, installed by file-copy not `pi install npm:`)
 PI_CODEBASE_MEMORY_SRC_REL="pi-codebase-memory"
 PI_CODEBASE_MEMORY_DEST_DIR="$PI_DIR/packages/pi-codebase-memory"
-# Package identifier used everywhere (registered in settings.json like pi-serena/pi-graphify).
+# Package identifier used everywhere (registered in settings.json like pi-aft/pi-graphify).
 # Test contract: must be the dest-dir absolute path, NOT a `npm:` identifier.
 PI_CODEBASE_MEMORY_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"
 
@@ -55,16 +55,16 @@ PI_GRAPHIFY_PKG="$PI_GRAPHIFY_DEST_DIR"
 # graphify CLI install info
 GRAPHIFY_BIN_PATH="$HOME/.local/bin/graphify"
 
-# pi-serena package info (local extension shipped with sages)
-# pi-serena is a local package, NOT installed via `pi install`. We register it directly
-# in settings.json with the absolute path — same pattern as sages and yunxiao.
-PI_SERENA_SRC_REL="pi-serena"
-PI_SERENA_DEST_DIR="$PI_DIR/packages/pi-serena"
-PI_SERENA_PKG="$PI_SERENA_DEST_DIR"
-PI_SERENA_MCP_JSON="$AGENT_DIR/mcp.json"
+# pi-aft (via @cortexkit/aft-pi npm extension — replaces pi-serena entirely)
+# pi-aft is npm-installed; setup command registers automatically
+# The setup command (npx @cortexkit/aft@latest setup) registers it AND downloads the platform binary.
+# REMOVED: pi-serena no longer shipped (replaced by @cortexkit/aft-pi from npm)
+# REMOVED
+# REMOVED
+# REMOVED: AFT does not need a separate mcp.json (the setup command handles it)
 
 # pi-semantic-nudge package info (keeps LLM using semantic tools in long sessions)
-# Same pattern as pi-serena — local peer, file-copy + register in settings.json.
+# Same pattern as before — npm install.
 PI_SEMANTIC_NUDGE_SRC_REL="pi-semantic-nudge"
 PI_SEMANTIC_NUDGE_DEST_DIR="$PI_DIR/packages/pi-semantic-nudge"
 PI_SEMANTIC_NUDGE_PKG="$PI_SEMANTIC_NUDGE_DEST_DIR"
@@ -83,8 +83,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-serena, pi-semantic-nudge, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-serena, pi-semantic-nudge)"
+  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-aft, pi-semantic-nudge, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, pi-semantic-nudge)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -249,7 +249,7 @@ install_pi_codebase_memory() {
     (cd "$PI_CODEBASE_MEMORY_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
   fi
 
-  # Register local-peer package in settings.json (matches pi-serena/pi-graphify pattern).
+  # Register local-peer package in settings.json (matches pi-aft / pi-graphify pattern).
   # Idempotent: skips if already present.
   local settings="$PI_DIR/agent/settings.json"
   mkdir -p "$(dirname "$settings")"
@@ -314,7 +314,7 @@ write_codebase_memory_mcp_config() {
     template="$TMP_DIR/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json"
   fi
   [[ -z "$template" ]] && { echo "  Warning: codebase-memory-mcp mcp.json template not found"; return 0; }
-  # NEVER-TOUCH policy (v3): see write_serena_mcp_config for the matching
+  # NEVER-TOUCH policy (v3): see write_aft_setup_cmd for the matching
   # rationale + regression history. install.sh only writes mcp.json on first
   # install; afterwards, the file is user-owned and untouched on every rerun.
   if [[ -f "$PI_DIR/agent/mcp.json" ]]; then
@@ -438,7 +438,7 @@ write_graphify_mcp_config() {
   resolved_template=$(mktemp)
   sed "s|__PI_GRAPHIFY_START_MCP__|$PI_GRAPHIFY_DEST_DIR/templates/start-mcp.sh|g" "$template" > "$resolved_template"
 
-  # NEVER-TOUCH policy: see write_serena_mcp_config for rationale.
+  # NEVER-TOUCH policy: see install_pi_aft for rationale (user owns AFT setup).
   if [[ -f "$PI_DIR/agent/mcp.json" ]]; then
     echo "  Skipped mcp.json (already exists, user-customized — preserved as-is)"
     rm -f "$resolved_template"
@@ -807,7 +807,7 @@ install_sages_files() {
 # but `cp -r` then copied those symlinks into $PI_DIR/packages/, where the same
 # relative path resolves to a non-existent `~/.pi/packages/pi/node_modules`.
 setup_peer_node_modules_symlinks() {
-  for peer in pi-serena pi-graphify pi-codebase-memory; do
+  for peer in pi-aft pi-graphify pi-codebase-memory; do
     local peer_dir="$PI_DIR/packages/$peer"
     [[ ! -d "$peer_dir" ]] && continue
     if [[ -L "$peer_dir/node_modules" || -e "$peer_dir/node_modules" ]]; then
@@ -817,172 +817,104 @@ setup_peer_node_modules_symlinks() {
     echo "  Linked $peer/node_modules → ../sages/node_modules"
   done
 }
-install_serena_files() {
-  local src_root="$TMP_DIR/$PI_SERENA_SRC_REL"
+# ──────────────────────────────────────────────────────────────────
+# pi-aft (replaces pi-serena) — installed via npx + npm
+# Uses @cortexkit/aft-pi for the Pi extension and @cortexkit/aft-linux-x64 (or
+# similar) for the binary that the extension loads.
+# ──────────────────────────────────────────────────────────────────
 
-  [[ ! -d "$src_root" ]] && {
-    echo "  Warning: $src_root not found in clone, skipping pi-serena files"
+# pi-aft package info (npm-installed, replaces pi-serena entirely)
+PI_AFT_PKG="npm:@cortexkit/aft-pi"
+
+is_pi_aft_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    # Exact match: avoid substring collision with hypothetical 'pi-aft-extras' etc.
+    if any(p == 'npm:@cortexkit/aft-pi' or p == '$PI_AFT_PKG' or p.endswith('/aft-pi') for p in pkgs):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_aft() {
+  echo "==> Installing pi-aft (replaces pi-serena)..."
+
+  # Idempotent: skip if installed
+  if is_pi_aft_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-aft already installed (use --force to reinstall)"
     return 0
-  }
-
-  if [[ -d "$PI_SERENA_DEST_DIR" && "${FORCE:-false}" != true ]]; then
-    echo "  Skipping pi-serena files (exists at $PI_SERENA_DEST_DIR, use --force to overwrite)"
-  else
-    rm -rf "$PI_SERENA_DEST_DIR"
-    mkdir -p "$PI_DIR/packages"
-    cp -r "$src_root" "$PI_SERENA_DEST_DIR"
-    echo "  Installed pi-serena files to $PI_SERENA_DEST_DIR"
   fi
 
-  # Install pi-serena deps if package.json exists and bun is available
-  if [[ -f "$PI_SERENA_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
-    echo "  Installing pi-serena dependencies (bun install)..."
-    (cd "$PI_SERENA_DEST_DIR" && bun install --silent 2>&1 | tail -3) || {
-      echo "  Warning: pi-serena bun install failed, deps may be missing"
+  # Force-install path: uninstall first
+  if [[ "${FORCE:-false}" == true ]] && is_pi_aft_installed; then
+    echo "  Force-reinstall: removing previous aft-pi first"
+    uninstall_pi_aft
+  fi
+
+  # 1) Install the npm package via pi
+  if command -v pi &>/dev/null; then
+    echo "  Installing @cortexkit/aft-pi via pi..."
+    (cd "$TMP_DIR" && pi install npm:@cortexkit/aft-pi --approve 2>&1 | tail -5) || {
+      echo "  Warning: pi install failed; try 'npx @cortexkit/aft@latest setup --harness pi' manually"
+    }
+  else
+    echo "  'pi' command not found; skipping npm install (user must install manually)"
+  fi
+
+  # 2) Run the AFT setup wizard, which:
+  #    - Downloads the platform binary (linux-x64, darwin-arm64, etc.) to ~/.cache/aft
+  #    - Registers the binary path for the extension
+  #    - Creates ~/.config/cortexkit/aft.jsonc with the recommended surface
+  if command -v npx &>/dev/null; then
+    echo "  Running AFT setup (downloads platform binary + registers extension)..."
+    npx --yes @cortexkit/aft@latest setup --harness pi 2>&1 | tail -10 || {
+      echo "  Warning: AFT setup returned non-zero. Run 'npx @cortexkit/aft@latest doctor' to diagnose."
+    }
+  else
+    echo "  npx not available; user must run AFT setup manually"
+  fi
+
+  echo "  pi-aft installed"
+}
+
+uninstall_pi_aft() {
+  echo "==> Uninstalling pi-aft..."
+
+  # 1) Run AFT's own uninstall (removes binary + pi extension from settings.json)
+  if command -v npx &>/dev/null; then
+    npx --yes @cortexkit/aft@latest uninstall --harness pi 2>&1 | tail -5 || {
+      echo "  AFT uninstall non-zero; falling back to manual cleanup"
     }
   fi
-}
 
-write_serena_mcp_config() {
-  # Locate the template: prefer the installed copy, fall back to the freshly-cloned TMP_DIR
-  local template=""
-  if [[ -f "$PI_SERENA_DEST_DIR/templates/mcp.json" ]]; then
-    template="$PI_SERENA_DEST_DIR/templates/mcp.json"
-  elif [[ -f "$TMP_DIR/$PI_SERENA_SRC_REL/templates/mcp.json" ]]; then
-    template="$TMP_DIR/$PI_SERENA_SRC_REL/templates/mcp.json"
-  fi
-
-  if [[ -z "$template" ]]; then
-    echo "  Warning: mcp.json template not found, skipping"
-    return 0
-  fi
-
-  # NEVER-TOUCH policy (v3): if the user's mcp.json already exists, leave it
-  # completely alone. See write_codebase_memory_mcp_config / write_graphify_mcp_config
-  # for the matching rationale + regression history. Test 20 (install.test.sh)
-  # asserts byte-for-byte preservation: user owns the file, install.sh is just
-  # a templating helper that fires only on first install.
-  if [[ -f "$PI_SERENA_MCP_JSON" ]]; then
-    echo "  Skipped mcp.json (already exists, user-customized — preserved as-is)"
-    return 0
-  fi
-
-  mkdir -p "$(dirname "$PI_SERENA_MCP_JSON")"
-  cp "$template" "$PI_SERENA_MCP_JSON"
-  echo "  Wrote $PI_SERENA_MCP_JSON from template"
-}
-
-is_pi_serena_installed() {
+  # 2) Manual fallback: strip aft-pi from settings.json
   local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && return 1
-
-  python3 -c "
-import json, sys
-try:
-    d = json.load(open('$settings'))
-    pkgs = d.get('packages', [])
-    # Exact match: avoid substring collision with hypothetical 'pi-serena-extras' etc.
-    if any(p == 'pi-serena' or p == '$PI_SERENA_PKG' or p.endswith('/pi-serena') for p in pkgs):
-        sys.exit(0)
-    sys.exit(1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null
-}
-
-install_pi_serena() {
-  echo "==> Installing pi-serena..."
-
-  # Idempotency: if already registered and not forcing, only ensure mcp.json exists
-  if is_pi_serena_installed && [[ "${FORCE:-false}" != true ]]; then
-    echo "  pi-serena already installed (use --force to reinstall)"
-    write_serena_mcp_config
-    return 0
-  fi
-
-  # Copy files from clone to permanent location (must succeed for registration to work)
-  if ! install_serena_files; then
-    echo "  Error: install_serena_files failed, aborting pi-serena install"
-    return 1
-  fi
-
-  # Register directly in settings.json with absolute path
-  # (matches sages/yunxiao pattern — no `pi install` needed for local packages)
-  if is_pi_serena_installed; then
-    echo "  pi-serena already registered in settings.json"
-  else
-    local settings="$PI_DIR/agent/settings.json"
-    mkdir -p "$(dirname "$settings")"
-    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
-    echo "  Registering pi-serena in settings.json..."
-    python3 -c "
-import json
-f, pkg = '$settings', '$PI_SERENA_PKG'
-try: d = json.load(open(f))
-except: d = {'packages': []}
-if pkg not in d.get('packages', []):
-    d['packages'] = d.get('packages', []) + [pkg]
-    json.dump(d, open(f, 'w'), indent=2)
-print('  Registered', pkg)
-"
-  fi
-
-  # Write the curated .mcp.json (only if absent)
-  write_serena_mcp_config
-
-  echo "  pi-serena installed"
-}
-
-uninstall_pi_serena() {
-  echo "==> Uninstalling pi-serena..."
-
-  local settings="$PI_DIR/agent/settings.json"
-
-  # Remove from settings.json (exact match to avoid substring collision)
   [[ -f "$settings" ]] && python3 -c "
-import json
-f = '$settings'
-try:
-    d = json.load(open(f))
-    d['packages'] = [x for x in d.get('packages', []) if not (x == 'pi-serena' or x == '$PI_SERENA_PKG' or x.endswith('/pi-serena'))]
-    json.dump(d, open(f, 'w'), indent=2)
-    print('  Removed pi-serena from settings.json')
-except Exception as e:
-    print('  Warning:', e)
-"
-
-  # Remove the installed directory
-  if [[ -d "$PI_SERENA_DEST_DIR" ]]; then
-    rm -rf "$PI_SERENA_DEST_DIR"
-    echo "  Removed $PI_SERENA_DEST_DIR"
-  fi
-
-  # Note: we deliberately KEEP ~/.pi/agent/mcp.json because users
-  # may have customized it with additional MCP servers.
-  echo "  pi-serena uninstalled (kept $PI_SERENA_MCP_JSON)"
-}
-
-# ────────────────────────────────────────────────────────────
-# pi-semantic-nudge: nudge LLM to prefer semantic tools over grep/read
-# (file-copy + settings.json register; no MCP config)
-# ────────────────────────────────────────────────────────────
-
-is_pi_semantic_nudge_installed() {
-  local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && return 1
-
-  python3 -c "
 import json, sys
 try:
     d = json.load(open('$settings'))
     pkgs = d.get('packages', [])
-    # Exact match only — avoid substring collision with hypothetical 'pi-semantic-nudge-extra'.
-    if any(p == '$PI_SEMANTIC_NUDGE_PKG' or p.endswith('/pi-semantic-nudge') for p in pkgs):
-        sys.exit(0)
+    new_pkgs = [p for p in pkgs if p != 'npm:@cortexkit/aft-pi' and not p.endswith('/aft-pi')]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open('$settings', 'w'), indent=2)
+        print('  Removed aft-pi from settings.json')
+except Exception as e:
     sys.exit(1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null
+" 2>/dev/null || true
+
+  # 3) Remove cached binary (best-effort)
+  rm -rf "$HOME/.cache/aft" 2>/dev/null && echo "  Removed ~/.cache/aft"
+
+  echo "  pi-aft uninstalled"
 }
 
 install_semantic_nudge_files() {
@@ -1025,7 +957,7 @@ install_pi_semantic_nudge() {
     return 1
   fi
 
-  # Register in settings.json (matches pi-serena/pi-graphify pattern)
+  # Register in settings.json (matches pi-aft/pi-graphify pattern)
   if is_pi_semantic_nudge_installed; then
     echo "  pi-semantic-nudge already registered in settings.json"
   else
@@ -1089,7 +1021,7 @@ except Exception as e:
 # 模式 1:全量安装(默认)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-memory + pi-codebase-memory + pi-serena + pi-semantic-nudge..."
+  echo "==> Installing sages + pi-memory + pi-codebase-memory + pi-aft + pi-semantic-nudge..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1103,15 +1035,15 @@ install() {
   # Install pi-memory first
   install_pi_memory
 
-  # Install pi-mcp-adapter (provides mcp proxy tool, required for serena/lsp MCP)
+  # Install pi-mcp-adapter (provides mcp proxy tool, optional for sages)
   install_pi_mcp_adapter
 
-  # Install sages first (git clone populates TMP_DIR, needed by install_pi_serena)
+  # Install sages first (git clone populates TMP_DIR)
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # Install pi-serena (uses TMP_DIR/pi-serena from the clone above)
-  install_pi_serena || true
+  # Install pi-aft (replaces pi-serena; uses npm + npx setup)
+  install_pi_aft || true
 
   # Install pi-codebase-memory sage peer (file copy from TMP_DIR/pi-codebase-memory + settings.json register).
   # Old design had two steps (install_pi_codebase_memory + install_pi_codebase_memory_files); merged into one
@@ -1152,7 +1084,7 @@ install() {
 # 模式 2:仅更新 sages(跳过 pi-memory、pi-codebase-memory 和 SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-memory, pi-codebase-memory, pi-serena, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-memory, pi-codebase-memory, pi-aft, skip SYSTEM.md)..."
 
   # Pre-flight: pi 仍然需要(sages 是 pi extension)
   install_pi_if_needed
@@ -1165,8 +1097,8 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_memory / install_pi_codebase_memory / install_pi_serena / install_system_prompt
-  echo "  (skipped: pi-memory, pi-codebase-memory, pi-serena, SYSTEM.md)"
+  # 显式不调用 install_pi_memory / install_pi_codebase_memory / install_pi_aft / install_system_prompt
+  echo "  (skipped: pi-memory, pi-codebase-memory, pi-aft, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1176,10 +1108,10 @@ install_sages_only() {
 # 模式 3:仅更新 SYSTEM.md(跳过 sages、pi-memory 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-memory, pi-codebase-memory, pi-serena)..."
+  echo "==> Installing SYSTEM.md only (skip sages, pi-memory, pi-codebase-memory, pi-aft)..."
   # 不需要 git / pi —— SYSTEM.md 是独立 markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-memory, pi-codebase-memory, pi-serena)"
+  echo "  (skipped: sages, pi-memory, pi-codebase-memory, pi-aft)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1189,7 +1121,7 @@ install_system_only() {
 # 卸载(同时移除 sages、pi-memory 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-memory + pi-codebase-memory + pi-serena + pi-semantic-nudge..."
+  echo "==> Uninstalling sages + pi-memory + pi-codebase-memory + pi-aft + pi-semantic-nudge..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1212,8 +1144,8 @@ uninstall() {
   # Uninstall pi-mcp-adapter
   uninstall_pi_mcp_adapter
 
-  # Uninstall pi-serena
-  uninstall_pi_serena
+  # Uninstall pi-aft (replaces pi-serena)
+  uninstall_pi_aft
 
   # Uninstall pi-semantic-nudge (sage peer)
   uninstall_pi_semantic_nudge

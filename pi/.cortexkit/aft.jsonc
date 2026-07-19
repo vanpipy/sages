@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cortexkit/aft/master/assets/aft.schema.json",
+  "tool_surface": "recommended",
+  "hoist_builtin_tools": true,
+  "restrict_to_project_root": true,
+  "search_index": true,
+  "semantic_search": false
+}

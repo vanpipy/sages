@@ -5,7 +5,7 @@ description: Phase-Guided Auditor using semantic tools (simplified 3-tool surfac
 # GaoYao (皋陶) - Phase-Guided Auditor
 
 > **Structured prompt chain for disciplined auditing.**
-> GaoYao enforces the audit discipline (phase/file-read/finding guards). The LLM does the actual inspection via **serena** / **codebase-memory** / **graphify**.
+> GaoYao enforces the audit discipline (phase/file-read/finding guards). The LLM does the actual inspection via **sages_*** / **codebase-memory** / **graphify**.
 
 ## Phase Flow (auto-advance)
 
@@ -20,7 +20,7 @@ PHASE_3: NOSE (naming/doc)
     ↓
 PHASE_4: FOOT (architecture) — use graphify_get_community
     ↓
-PHASE_5: CASTRATION (security) — use serena_search_for_pattern
+PHASE_5: CASTRATION (security) — use sages_search
     ↓
 PHASE_6: DEATH (critical defects) — use codebase_memory_detect_changes
     ↓ (auto-advance)
@@ -107,11 +107,11 @@ Generates `audit.md` with the Five Audits table, severity-grouped findings, and 
 | Phase | Primary semantic tools | What they find |
 |---|---|---|
 | ENUMERATE | `graphify_god_nodes`, `codebase_memory_get_architecture` | Authoritative file list, organized by community |
-| INK | `serena_get_symbols_overview`, `serena_read_file` | Style: formatting, length, naming consistency |
-| NOSE | `serena_find_symbol` (with `include_info: true`) | LSP hover = JSDoc / docstrings coverage |
+| INK | `sages_outline`, `sages_read_file` | Style: formatting, length, naming consistency |
+| NOSE | `sages_find_symbol` (with `include_info: true`) | LSP hover = JSDoc / docstrings coverage |
 | FOOT | `graphify_get_community`, `graphify_shortest_path`, `codebase_memory_trace_path` | Layer boundaries, call-graph BFS, module coupling |
-| CASTRATION | `serena_search_for_pattern`, `codebase_memory_search_code` | `eval\\|innerHTML\|execSync\|sql.*\\+` and similar |
-| DEATH | `serena_get_diagnostics_for_file`, `codebase_memory_detect_changes` | TS errors, recently-changed risky files |
+| CASTRATION | `sages_search`, `codebase_memory_search_code` | `eval\\|innerHTML\|execSync\|sql.*\\+` and similar |
+| DEATH | `sages_diagnostics`, `codebase_memory_detect_changes` | TS errors, recently-changed risky files |
 
 ## Session State
 
@@ -135,7 +135,7 @@ Session persists to: `.sages/workspace/.gaoyao-session.json`. Includes current p
 > gaoyao_observe { file_read: { path: "src/auth.ts", lines: 200 } }  × 5
 ← { auto_advanced: true, phase: "INK", intent: "Phase 墨刑 (Code Style): analyze files...", validation: { category_required: "ink", findings_required_min: 1 } }
 
-[LLM uses serena_get_symbols_overview + serena_read_file on each file, identifies style issues]
+[LLM uses sages_outline + sages_read_file on each file, identifies style issues]
 
 > gaoyao_observe { finding: { category: "ink", severity: "minor", file: "src/auth.ts", line: 42, issue: "function too long", recommendation: "split" } }
 ← { auto_advanced: true, phase: "NOSE", validation: { category_required: "nose", findings_required_min: 1 } }

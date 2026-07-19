@@ -12,7 +12,7 @@
  * All return isError with redirect hint to fuxi_design.
  *
  * The LLM does the actual design / drafting work via semantic tools
- * (serena_replace_symbol_body, graphify_god_nodes, etc.). Fuxi only
+ * (sages_replace_symbol, graphify_god_nodes, etc.). Fuxi only
  * validates state and advances phases.
  */
 
@@ -111,9 +111,9 @@ function buildDesignIntent(phase: DesignPhase, scope?: DraftScope | null): strin
     if (scope) {
       const minBytes = MIN_DRAFT_BYTES_BY_TIER[scope.tier];
       const inScopeList = scope.inScope.length > 0 ? scope.inScope.join(", ") : "(none declared)";
-      return `Tier '${scope.tier}' detected. Write draft.md covering ONLY these in-scope MDD planes: ${inScopeList}. Use semantic tools (serena_read_file, graphify_query) to understand project context first. The draft must be at least ${minBytes} bytes for this tier. Out-of-scope planes will not be scored. Write to .sages/workspace/draft.md and call fuxi_design with observation when done.`;
+      return `Tier '${scope.tier}' detected. Write draft.md covering ONLY these in-scope MDD planes: ${inScopeList}. Use semantic tools (sages_read_file, graphify_query) to understand project context first. The draft must be at least ${minBytes} bytes for this tier. Out-of-scope planes will not be scored. Write to .sages/workspace/draft.md and call fuxi_design with observation when done.`;
     }
-    return `Create draft.md. RECOMMENDED: include a ## Scope section declaring Tier (trivial|simple|standard) + In scope + Out of scope (justified). Tier drives the minimum byte size: trivial=100, simple=250, standard=500. Without a Scope section, the legacy rule applies: cover all 7 MDD planes (Business, Data, Control, Foundation, Observation, Security, Evolution) and reach ${LEGACY_MIN_DRAFT_BYTES} bytes. Use semantic tools (serena_read_file, graphify_query) to understand project context first.`;
+    return `Create draft.md. RECOMMENDED: include a ## Scope section declaring Tier (trivial|simple|standard) + In scope + Out of scope (justified). Tier drives the minimum byte size: trivial=100, simple=250, standard=500. Without a Scope section, the legacy rule applies: cover all 7 MDD planes (Business, Data, Control, Foundation, Observation, Security, Evolution) and reach ${LEGACY_MIN_DRAFT_BYTES} bytes. Use semantic tools (sages_read_file, graphify_query) to understand project context first.`;
   }
   if (phase === "review") {
     const scopeHint = scope

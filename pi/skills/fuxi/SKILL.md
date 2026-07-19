@@ -6,7 +6,7 @@ description: Architectural design with MDD Seven Planes (single-tool surface wit
 
 ## Role
 
-Fuxi manages the design phase: create draft.md, get it reviewed, transition to plan. **Single-tool surface** (`fuxi_design`) with auto-init on first call and auto-advance on observation. The LLM uses **serena** / **graphify** to write the draft; Fuxi only validates.
+Fuxi manages the design phase: create draft.md, get it reviewed, transition to plan. **Single-tool surface** (`fuxi_design`) with auto-init on first call and auto-advance on observation. The LLM uses **sages_*** / **graphify** to write the draft; Fuxi only validates.
 
 ## Mode Indicator
 
@@ -33,7 +33,7 @@ Call 1: fuxi_design {}
         → design contract { phase: "design", intent: "...", validation: { file: "draft.md", min_size: 100|250|500 } }
         (design sub-state auto-created on first call)
 
-        (LLM uses serena_read_file + graphify_query to understand project context,
+        (LLM uses sages_read_file + graphify_query to understand project context,
          then writes draft.md — recommended: include ## Scope section declaring Tier + in-scope planes)
 
 Call 2: fuxi_design { observation: { phase: "design", draft_path: "draft.md" } }
@@ -111,8 +111,8 @@ The Seven Planes remain the canonical model. With Scope & Tier:
 
 | Phase | Tool | Purpose |
 |---|---|---|
-| design | `graphify_god_nodes`, `serena_read_file` | Understand existing project shape before writing |
-| design | `serena_create_text_file` | Write the draft.md |
+| design | `graphify_god_nodes`, `sages_read_file` | Understand existing project shape before writing |
+| design | `sages_write_file` | Write the draft.md |
 | review | `qiaochui_review` (separate tool) | Get the score; it auto-writes |
 | plan | `qiaochui_decompose` (separate tool) | Generate execution.yaml |
 
@@ -132,7 +132,7 @@ The Seven Planes remain the canonical model. With Scope & Tier:
 > fuxi_design {}
 ← { status: "in_progress", phase: "design", workflow_id: "sages-...", intent: "Create draft.md using MDD Seven Planes...", validation: { file: "draft.md", min_size: 500 } }
 
-[LLM uses graphify_god_nodes + serena_read_file to understand project, then writes draft.md covering all 7 planes, ≥ 500 bytes]
+[LLM uses graphify_god_nodes + sages_read_file to understand project, then writes draft.md covering all 7 planes, ≥ 500 bytes]
 
 > fuxi_design { observation: { phase: "design", draft_path: "draft.md" } }
 ← { status: "in_progress", phase: "review", auto_advanced: true, intent: "Get a review score for draft.md..." }
