@@ -59,13 +59,4 @@ export const AUTHED_APIKEY_RESPONSE = (): ExecMmxResult => ({
     exitCode: 0,
 });
 
-/** Common fixture: an unauthenticated auth status response. */
-export const UNAUTHED_RESPONSE = (): ExecMmxResult => ({
-    stdout: JSON.stringify({
-        authenticated: false,
-        message: "Not authenticated.",
-        hint: "Run: mmx auth login\nOr set $MINIMAX_API_KEY",
-    }),
-    stderr: "",
-    exitCode: 0,
-});
+

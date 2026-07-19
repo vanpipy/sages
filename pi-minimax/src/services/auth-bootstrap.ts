@@ -63,10 +63,7 @@ export function clearAuthState(): void {
     cachedState = null;
 }
 
-/** Test hook: check whether the "ok" cache is currently live. */
-export function isAuthCachedOk(): boolean {
-    return cachedState?.kind === "ok" && Date.now() < cachedState.expiresAt;
-}
+
 
 async function runExec(
     execFn: NonNullable<EnsureAuthOptions["execMmx"]>,
