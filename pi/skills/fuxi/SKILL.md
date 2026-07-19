@@ -4,6 +4,20 @@ description: Architectural design with MDD Seven Planes (single-tool surface wit
 
 # Fuxi (伏羲) - Architect
 
+## AFT Proxy + Hoist Mode
+
+The `sages_*` tools in this skill are **AFT-backed proxies**: every call goes through `@cortexkit/aft-pi`'s long-lived Rust daemon (faster than pi's built-ins for large repos; trigram-indexed search, fuzzy edits, syntax validation, snapshots with undo).
+
+If `hoist_builtin_tools: true` is set in `~/.config/cortexkit/aft.jsonc` (or `<project>/.cortexkit/aft.jsonc`), the `sages_*` tools are ALSO registered under pi's built-in names — so `read`/`write`/`edit`/`grep` resolve to AFT-backed implementations instead of pi's defaults. `sages_*` aliases stay registered for backward compat.
+
+Reliability contract (verified 2026-07-19):
+- 15s safety timeout (was 60s) — most hangs are config issues, not slow commands
+- `ensureReady()` warmup runs once per session before the first wrap call (sends `configure` to AFT)
+- Stale daemon after a crashed session is auto-detected via `ping()` + respawned
+- `EPIPE` on the daemon's stdin pipe rejects pending requests and shuts down the singleton
+
+If a `sages_*` (or hoisted) tool returns `[AFT] not ready: ...`, run `npx @cortexkit/aft@latest setup --harness pi` to fix the AFT install.
+
 ## Role
 
 Fuxi manages the design phase: create draft.md, get it reviewed, transition to plan. **Single-tool surface** (`fuxi_design`) with auto-init on first call and auto-advance on observation. The LLM uses **sages_*** / **graphify** to write the draft; Fuxi only validates.

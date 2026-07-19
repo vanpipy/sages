@@ -32,7 +32,15 @@
 	//                    project (e.g., workspace peers in ~/.pi/packages/).
 	// ─────────────────────────────────────────────────────────────────────────
 	"backup": true,
-	"restrict_to_project_root": false
+	"restrict_to_project_root": false,
+
+	// ─── Hoist mode (sages_ → pi built-in tool names) ──────────────────────
+	// When true: the sages extension registers `read`/`write`/`edit`/`grep`
+	// under pi's built-in tool names, so AFT-backed versions replace pi's
+	// defaults. `sages_*` aliases remain registered for backward compat.
+	// Default false: only `sages_*` names are visible — explicit opt-in.
+	// ─────────────────────────────────────────────────────────────────────────
+	"hoist_builtin_tools": false
 
 	// ─── Per-session (NOT pinned here — bridge sets these on session_start) ──
 	// "harness": "pi"              // set by aft/project.ts ensureConfigured()

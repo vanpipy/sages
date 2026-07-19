@@ -52,6 +52,12 @@ cd sages
 
 Each role exposes a small set of tools with observe-cycle semantics. The LLM calls each tool; the tool validates state and returns the next contract.
 
+### AFT Proxy + Hoist Mode
+
+The 9 `sages_*` tools (read_file, outline, find_symbol, search, write_file, replace_symbol, insert_after_symbol, find_references, diagnostics) are AFT-backed proxies: every call goes through `@cortexkit/aft-pi`'s long-lived Rust daemon. Faster than pi's built-ins for large repos; trigram-indexed search, fuzzy edits, syntax validation, snapshots with undo.
+
+Set `hoist_builtin_tools: true` in `~/.config/cortexkit/aft.jsonc` (or `<project>/.cortexkit/aft.jsonc`) to register the same implementations under pi's built-in names — `read`/`write`/`edit`/`grep` resolve to AFT-backed versions instead of pi's defaults. `sages_*` aliases stay registered for backward compat.
+
 ### Fuxi (Design)
 
 | Tool | Purpose |
