@@ -71,7 +71,7 @@ File operations (`read`/`write`/`edit`/`grep`/`bash`) are provided by `@cortexki
 
 | Tool | Purpose |
 |------|---------|
-| `luban_execute_task` | Single task with observe cycle `RED → GREEN → REFACTOR → complete`. Re-runs the test command to validate each phase. LLM does the actual coding via `serena_*` / `codebase_memory_*` / `graphify_*`; LuBan only validates outcomes. |
+| `luban_execute_task` | Single task with observe cycle `RED → GREEN → REFACTOR → complete`. Re-runs the test command to validate each phase. LLM does the actual coding via `read`/`write`/`edit`/`grep` (AFT-backed), `codebase_memory_*` (graph queries), and `graphify_*` (knowledge graph). LuBan only validates outcomes. |
 
 ### GaoYao (Audit)
 
@@ -210,7 +210,7 @@ tasks:
     dependsOn: [T1]
 ```
 
-The LLM reads this file via `serena_read_file` and iterates `luban_execute_task` per task in topological order.
+The LLM reads this file via `read` (AFT-backed) and iterates `luban_execute_task` per task in topological order.
 
 ## Audit Phases (GaoYao)
 

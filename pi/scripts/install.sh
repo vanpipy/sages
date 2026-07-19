@@ -3,13 +3,14 @@
 # Four Sages Installation Script for pi
 # Installs to ~/.pi/packages/sages
 #
-# Also installs pi-memory for persistent memory capabilities,
-# pi-codebase-memory for codebase indexing/search, and
-# pi-aft (via aft-pi extension) — AFT-backed code analysis (replaces serena, no LSP needed)
+# Also installs pi-codebase-memory for codebase indexing/search,
+# pi-aft (via aft-pi extension) — AFT-backed code analysis (replaces serena, no LSP needed),
+# and pi-magic-context — CortexKit's persistent memory + context layer
+# (replaces the older pi-memory + pi-semantic-nudge).
 #
 # Selective install options:
-#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-semantic-nudge and SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-semantic-nudge)
+#   --sages-only   only update sages (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context and SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -36,9 +37,6 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # distinguish "our template" from a user's hand-edited config.
 AFT_TEMPLATE="$SCRIPT_DIR/../templates/aft.jsonc"
 AFT_CONFIG_PATH="$HOME/.config/cortexkit/aft.jsonc"
-
-# pi-memory package info
-PI_MEMORY_PKG="npm:@samfp/pi-memory"
 
 # pi-mcp-adapter package info (provides the `mcp` proxy tool — optional for sages, AFT is the new layer)
 PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
@@ -71,12 +69,6 @@ GRAPHIFY_BIN_PATH="$HOME/.local/bin/graphify"
 # REMOVED
 # REMOVED: AFT does not need a separate mcp.json (the setup command handles it)
 
-# pi-semantic-nudge package info (keeps LLM using semantic tools in long sessions)
-# Same pattern as before — npm install.
-PI_SEMANTIC_NUDGE_SRC_REL="pi-semantic-nudge"
-PI_SEMANTIC_NUDGE_DEST_DIR="$PI_DIR/packages/pi-semantic-nudge"
-PI_SEMANTIC_NUDGE_PKG="$PI_SEMANTIC_NUDGE_DEST_DIR"
-
 # Cleanup trap
 TMP_DIR=""
 cleanup() {
@@ -91,8 +83,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-semantic-nudge, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-semantic-nudge)"
+  echo "  --sages-only       Only install/update sages (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -111,103 +103,6 @@ install_pi_if_needed() {
       exit 1
     }
   fi
-}
-
-is_pi_memory_installed() {
-  local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && return 1
-
-  python3 -c "
-import json, sys
-try:
-    d = json.load(open('$settings'))
-    packages = d.get('packages', [])
-    if '$PI_MEMORY_PKG' in packages or '@samfp/pi-memory' in packages:
-        sys.exit(0)
-    sys.exit(1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null
-}
-
-install_pi_memory() {
-  echo "==> Installing pi-memory..."
-
-  # Check if already installed
-  if is_pi_memory_installed; then
-    echo "  pi-memory already installed"
-    return 0
-  fi
-
-  # Try using pi install command first
-  if command -v pi &>/dev/null; then
-    echo "  Installing via 'pi install $PI_MEMORY_PKG'..."
-    if pi install "$PI_MEMORY_PKG"; then
-      echo "  Installed pi-memory"
-      return 0
-    fi
-    echo "  pi install failed, trying manual..."
-  fi
-
-  # Fallback: manually add to settings.json
-  echo "  Adding to settings.json..."
-  local settings="$PI_DIR/agent/settings.json"
-  mkdir -p "$(dirname "$settings")"
-
-  if [[ ! -f "$settings" ]]; then
-    echo '{"packages": []}' > "$settings"
-  fi
-
-  python3 -c "
-import json, sys
-f, pkg = '$settings', '$PI_MEMORY_PKG'
-try:
-    d = json.load(open(f))
-except (json.JSONDecodeError, FileNotFoundError):
-    d = {'packages': []}
-if pkg not in d.get('packages', []):
-    d['packages'] = d.get('packages', []) + [pkg]
-json.dump(d, open(f, 'w'), indent=2)
-print('  Added', pkg)
-"
-
-  echo "  Installed pi-memory"
-}
-
-uninstall_pi_memory() {
-  echo "==> Uninstalling pi-memory..."
-
-  local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && { echo "  No settings file"; return 0; }
-
-  local removed=false
-  python3 -c "
-import json, sys
-f, pkg = '$settings', '$PI_MEMORY_PKG'
-try:
-    d = json.load(open(f))
-    pkgs = d.get('packages', [])
-    # Remove exact match or @samfp/pi-memory variant
-    new_pkgs = [x for x in pkgs if x != pkg and x != 'pi-memory' and x != '@samfp/pi-memory']
-    if len(new_pkgs) < len(pkgs):
-        d['packages'] = new_pkgs
-        json.dump(d, open(f, 'w'), indent=2)
-        print('Removed', pkg)
-    else:
-        print('Not found in settings')
-except Exception as e:
-    print('Warning:', e, file=sys.stderr)
-    sys.exit(1)
-"
-
-  # Remove package directory if exists
-  local memory_dir="$PI_DIR/packages/pi-memory"
-  if [[ -d "$memory_dir" ]]; then
-    rm -rf "$memory_dir"
-    echo "  Removed $memory_dir"
-  fi
-
-  echo "  pi-memory uninstalled"
 }
 
 is_pi_codebase_memory_installed() {
@@ -1180,111 +1075,11 @@ uninstall_aft_config() {
   fi
 }
 
-install_semantic_nudge_files() {
-  local src_root="$TMP_DIR/$PI_SEMANTIC_NUDGE_SRC_REL"
-  [[ ! -d "$src_root" ]] && {
-    echo "  Warning: $src_root not found in clone, skipping pi-semantic-nudge files"
-    return 0
-  }
-
-  if [[ -d "$PI_SEMANTIC_NUDGE_DEST_DIR" && "${FORCE:-false}" != true ]]; then
-    echo "  Skipping pi-semantic-nudge files (exists at $PI_SEMANTIC_NUDGE_DEST_DIR, use --force to overwrite)"
-  else
-    rm -rf "$PI_SEMANTIC_NUDGE_DEST_DIR"
-    mkdir -p "$PI_DIR/packages"
-    cp -r "$src_root" "$PI_SEMANTIC_NUDGE_DEST_DIR"
-    echo "  Installed pi-semantic-nudge files to $PI_SEMANTIC_NUDGE_DEST_DIR"
-  fi
-
-  # Install deps if package.json exists and bun is available
-  if [[ -f "$PI_SEMANTIC_NUDGE_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
-    echo "  Installing pi-semantic-nudge dependencies (bun install)..."
-    (cd "$PI_SEMANTIC_NUDGE_DEST_DIR" && bun install --silent 2>&1 | tail -3) || {
-      echo "  Warning: pi-semantic-nudge bun install failed, deps may be missing"
-    }
-  fi
-}
-
-install_pi_semantic_nudge() {
-  echo "==> Installing pi-semantic-nudge..."
-
-  # Idempotency: if already registered and not forcing, skip files copy.
-  if is_pi_semantic_nudge_installed && [[ "${FORCE:-false}" != true ]]; then
-    echo "  pi-semantic-nudge already installed (use --force to reinstall)"
-    return 0
-  fi
-
-  # Copy files from clone (requires TMP_DIR from install_sages_files above)
-  if ! install_semantic_nudge_files; then
-    echo "  Error: install_semantic_nudge_files failed, aborting pi-semantic-nudge install"
-    return 1
-  fi
-
-  # Register in settings.json (matches pi-aft/pi-graphify pattern)
-  if is_pi_semantic_nudge_installed; then
-    echo "  pi-semantic-nudge already registered in settings.json"
-  else
-    local settings="$PI_DIR/agent/settings.json"
-    mkdir -p "$(dirname "$settings")"
-    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
-    echo "  Registering pi-semantic-nudge in settings.json..."
-    python3 -c "
-import json
-f, pkg = '$settings', '$PI_SEMANTIC_NUDGE_PKG'
-try: d = json.load(open(f))
-except: d = {'packages': []}
-if pkg not in d.get('packages', []):
-    d['packages'] = d.get('packages', []) + [pkg]
-    json.dump(d, open(f, 'w'), indent=2)
-print('  Registered', pkg)
-"
-  fi
-
-  # Apply the initial tool-description patch right now (so LLM sees [PREFERRED]
-  # tags even before the next session_start fires the extension's ensurePatched).
-  if [[ -f "$PI_SEMANTIC_NUDGE_DEST_DIR/scripts/patch_tool_descriptions.py" ]]; then
-    if command -v python3 &>/dev/null; then
-      echo "  Patching tool descriptions (initial pass)..."
-      python3 "$PI_SEMANTIC_NUDGE_DEST_DIR/scripts/patch_tool_descriptions.py" || \
-        echo "  Note: initial patch failed (will retry on next session_start)"
-    fi
-  fi
-
-  echo "  pi-semantic-nudge installed"
-}
-
-uninstall_pi_semantic_nudge() {
-  echo "==> Uninstalling pi-semantic-nudge..."
-
-  local settings="$PI_DIR/agent/settings.json"
-
-  # Remove from settings.json (exact match to avoid substring collision)
-  [[ -f "$settings" ]] && python3 -c "
-import json
-f = '$settings'
-try:
-    d = json.load(open(f))
-    d['packages'] = [x for x in d.get('packages', []) if not (x == '$PI_SEMANTIC_NUDGE_PKG' or x.endswith('/pi-semantic-nudge'))]
-    json.dump(d, open(f, 'w'), indent=2)
-    print('  Removed pi-semantic-nudge from settings.json')
-except Exception as e:
-    print('  Warning:', e)
-"
-
-  # Remove installed directory
-  if [[ -d "$PI_SEMANTIC_NUDGE_DEST_DIR" ]]; then
-    rm -rf "$PI_SEMANTIC_NUDGE_DEST_DIR"
-    echo "  Removed $PI_SEMANTIC_NUDGE_DEST_DIR"
-  fi
-
-  echo "  pi-semantic-nudge uninstalled"
-}
-
 # ────────────────────────────────────────────────────────────
 # 模式 1:全量安装(默认)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-memory + pi-codebase-memory + pi-aft + pi-semantic-nudge..."
+  echo "==> Installing sages + pi-codebase-memory + pi-aft + pi-magic-context..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1294,9 +1089,6 @@ install() {
     echo "Error: pi not found after installation"
     exit 1
   fi
-
-  # Install pi-memory first
-  install_pi_memory
 
   # Install pi-mcp-adapter (provides mcp proxy tool, optional for sages)
   install_pi_mcp_adapter
@@ -1331,9 +1123,6 @@ install() {
   # Install pi-graphify (sage peer for graphify MCP integration)
   install_pi_graphify || true
 
-  # Install pi-semantic-nudge (sage peer for tool-priority enforcement)
-  install_pi_semantic_nudge || true
-
   # Install graphify CLI with [mcp] extra
   install_graphify_binary || {
     echo "  Note: graphify CLI install failed. To retry: uv tool install 'graphifyy[mcp]'"
@@ -1351,10 +1140,10 @@ install() {
 }
 
 # ────────────────────────────────────────────────────────────
-# 模式 2:仅更新 sages(跳过 pi-memory、pi-codebase-memory 和 SYSTEM.md)
+# 模式 2:仅更新 sages(跳过 pi-codebase-memory 和 SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-codebase-memory, pi-aft, AFT config, skip SYSTEM.md)..."
 
   # Pre-flight: pi 仍然需要(sages 是 pi extension)
   install_pi_if_needed
@@ -1367,31 +1156,31 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_memory / install_pi_codebase_memory / install_pi_aft / install_aft_config / install_pi_magic_context / install_system_prompt
-  echo "  (skipped: pi-memory, pi-codebase-memory, pi-aft, AFT config, SYSTEM.md)"
+  # 显式不调用 install_pi_codebase_memory / install_pi_aft / install_aft_config / install_pi_magic_context / install_system_prompt
+  echo "  (skipped: pi-codebase-memory, pi-aft, AFT config, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
 }
 
 # ────────────────────────────────────────────────────────────
-# 模式 3:仅更新 SYSTEM.md(跳过 sages、pi-memory 和 pi-codebase-memory)
+# 模式 3:仅更新 SYSTEM.md(跳过 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config)..."
+  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-aft, AFT config)..."
   # 不需要 git / pi —— SYSTEM.md 是独立 markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-memory, pi-codebase-memory, pi-aft, AFT config)"
+  echo "  (skipped: sages, pi-codebase-memory, pi-aft, AFT config)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
 }
 
 # ────────────────────────────────────────────────────────────
-# 卸载(同时移除 sages、pi-memory 和 pi-codebase-memory)
+# 卸载(同时移除 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-memory + pi-codebase-memory + pi-aft + pi-semantic-nudge + AFT config..."
+  echo "==> Uninstalling sages + pi-codebase-memory + pi-aft + pi-magic-context + AFT config..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1401,9 +1190,6 @@ uninstall() {
 
   # Unregister sages
   unregister_settings
-
-  # Uninstall pi-memory
-  uninstall_pi_memory
 
   # Uninstall pi-codebase-memory (sage peer)
   uninstall_pi_codebase_memory
@@ -1422,9 +1208,6 @@ uninstall() {
 
   # Uninstall pi-magic-context (cross-session memory layer)
   uninstall_pi_magic_context
-
-  # Uninstall pi-semantic-nudge (sage peer)
-  uninstall_pi_semantic_nudge
 
   echo ""
   echo "Done. Restart pi: exit && pi"
