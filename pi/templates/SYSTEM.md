@@ -19,71 +19,63 @@ Scan and read in priority order — skip files that don't exist:
 
 ## 1. Tool Priority — Semantic > Built-in (which tool to pick)
 
-Built-in tools (`grep`/`read`/`edit`/`bash`) are **fallbacks only**. For any code task, prefer semantic tools FIRST. Cold-start cost (3-5s on first call) is worth the precision.
+File operations (`read`/`write`/`edit`/`grep`/`bash`) are AFT-backed through `@cortexkit/aft-pi` (installed via `npx @cortexkit/aft@latest setup --harness pi`). Use them directly. For higher-level analysis prefer the semantic tools below.
 
 | Task | First choice | Fallback | Why |
 |------|--------------|----------|-----|
-| Find function/class/symbol definition | `sages_find_symbol` | — | AFT tree-sitter indexed, no false positives |
-| Edit a function body (preserve indent) | `sages_replace_symbol` | — | Tree-sitter validated, auto-snapshot |
-| Insert after a symbol | `sages_insert_after_symbol` | — | Anchor-replace strategy, auto-snapshot |
-| Find all references to a symbol | `sages_find_references` | — | Resolves imports & re-exports; may return "building" status if AFT callgraph still indexing |
-| File structure overview | `sages_outline` | — | Tree-shaped, no scroll |
-| Read file (path/content) | `sages_read_file` | — | AFT-backed Rust reader, faster on large repos |
-| Write/overwrite file | `sages_write_file` | — | Auto-snapshots to `.sages/snapshots/` before writing |
-| Search project for pattern | `sages_search` | — | Trigram-indexed, fast on large repos |
-| Code health report | `sages_diagnostics` | — | Duplicates + dead code + unused exports + TODOs |
+| Read file (path/content) | `read` | — | AFT-backed Rust reader, faster on large repos |
+| Write/overwrite file | `write` | — | AFT atomic write + auto-format + backup |
+| Edit (substring replace) | `edit` | — | AFT fuzzy-match, tolerates whitespace drift |
+| Search project for pattern | `grep` | — | AFT trigram-indexed search |
+| Shell command | `bash` | — | AFT subprocess runner |
+| File structure overview | `aft_outline` | — | Tree-shaped, no scroll |
+| Symbol-level inspection (with call-graph) | `aft_zoom` | — | Tree-sitter-validated, no false positives |
+| Find all references to a symbol | `aft_callgraph` | — | Resolves imports & re-exports |
 | Who calls function X (multi-hop BFS) | `codebase_memory_trace_path` | manual grep chain | Graph BFS vs O(n) grep |
 | Repo architecture / package map | `codebase_memory_get_architecture` | `find` + `read` | Cross-package relations |
 | `git diff` impact / blast radius | `codebase_memory_detect_changes` | `bash git diff` | Maps diff → affected callers |
 | Find symbol by name pattern | `codebase_memory_search_graph` | `grep -r` | Qualified-name aware |
 | Cross-module concept search | `graphify_query` / `graphify_shortest_path` | none | Embedding similarity |
-| Read single file (small, known path) | `sages_read_file` | — | Single semantic API |
-| Shell command | `bash` | — | Built-in is fine here |
+| Code health report | `aft_inspect` | — | Duplicates + dead code + unused exports + TODOs |
 
-**Rule**: Before reaching for built-in tools (`read`/`write`/`edit`/`grep`), ask: *"Is there a `sages_*` / `codebase_memory_*` that does this better?"* Use it instead. (Note: when AFT is installed with `hoist_builtin_tools: true`, the built-in tools ARE AFT-backed — same backend, different name.)
-
-**Violation**: `grep -r "class Foo"` to find a class → should have been `sages_search({ pattern: "Foo" })`.
+**Rule**: Before reaching for shell `grep`/`find`/`cat`, ask: *"Is there an `aft_*` or `codebase_memory_*` that does this better?"* Use it instead.
 
 ## 2. Semantic Tool Catalog (what each tool does)
 
-**These beat built-in tools.** Why:
-- `sages_*` — AFT-backed, tree-sitter indexed. No false-positive matches.
-- `codebase_memory_*` — pre-indexed graph. BFS over callers in <10ms; same query with `grep` + `read` chase takes minutes.
-- `graphify_*` — embedding-based concept search. No grep equivalent.
+### `aft_*` — AFT-backed semantic layer (provided by `@cortexkit/aft-pi`)
 
-### `sages_*` — AFT-backed semantic layer
-
-Use for **symbol-level** operations on a known file:
-- `sages_find_symbol` — find a function/class by name (replaces `grep -rn "class Name"`)
-- `sages_find_references` — who calls/imports this (replaces grep + manual chase)
-- `sages_outline` — file structure as tree (replaces `read` whole file then scroll)
-- `sages_replace_symbol` — edit a function preserving indent (replaces `edit` with full body, which breaks indentation)
-- `sages_insert_after_symbol` / `sages_insert_after_symbol` — insert at a symbol boundary (no line counting)
-- `sages_search` — ripgrep-style search within a file tree
-- `sages_read_file` / `sages_write_file` — symmetric with built-in `read`/`write` (prefer for sage-scope writes)
+Use for **symbol-level** operations on a known file or cross-file graph:
+- `aft_outline` — file structure as tree (no scrolling)
+- `aft_zoom` — symbol-level inspection with call-graph annotations
+- `aft_callgraph` — multi-hop call graph: callers, call_tree, impact
+- `aft_search` — semantic search (embeddings, ONNX or OpenAI-compatible)
+- `aft_inspect` — code health: duplicates, dead code, unused exports, TODOs
+- `aft_safety` — per-file undo, named checkpoints, restore
+- `aft_import` — language-aware import add / remove / organize
+- `aft_conflicts` — one-call merge conflict inspection
 
 ### `codebase_memory_*` — graph-based code intelligence
 
 Use for **project-wide** queries (cross-file, cross-package):
-- `codebase_memory_trace_path` — multi-hop call chain BFS (no grep equivalent)
-- `codebase_memory_detect_changes` — `git diff` → affected symbols + blast radius (replaces `bash git diff` + manual impact analysis)
-- `codebase_memory_get_architecture` — packages/services/clusters overview (replaces `find` + read many files)
-- `codebase_memory_search_graph` — find by qualified name (replaces `grep -r` with name-aware matching)
+- `codebase_memory_trace_path` — multi-hop call chain BFS
+- `codebase_memory_detect_changes` — `git diff` → affected symbols + blast radius
+- `codebase_memory_get_architecture` — packages/services/clusters overview
+- `codebase_memory_search_graph` — find by qualified name
 - `codebase_memory_search_code` — full-text in indexed code (faster than shell `grep`)
-- `codebase_memory_get_code_snippet` — function body by qualified name (no need to know file path)
+- `codebase_memory_get_code_snippet` — function body by qualified name
 - `codebase_memory_query_graph` — Cypher for complex multi-hop patterns
 
 ### `graphify_*` — knowledge graph
 
 Use for **concept-level** search (cross-module, semantic):
-- `graphify_query` / `graphify_shortest_path` — embedding similarity between concepts (no grep equivalent)
+- `graphify_query` / `graphify_shortest_path` — embedding similarity between concepts
 - `graphify_god_nodes` — most-imported / most-connected abstractions (entry points)
 - `graphify_get_community` — module/cluster boundaries
 - `graphify_get_neighbors` — adjacency around a node
 
-### Built-in `read`/`bash` are still fine for:
+### Built-in `read`/`bash` are fine for:
 
-- Reading a small file at a known path (where `sages_read_file` adds no value)
+- Reading a small file at a known path
 - Shell commands (`bash`) — no semantic equivalent
 - `ls` / `find` / `grep` — only when no semantic tool fits (rare; see §1 table)
 
@@ -123,13 +115,13 @@ There are no manual gates — the LLM progresses through phases by calling each 
 
 Pair sage workflow phases with the semantic tools from §2:
 
-- Fuxi design → `graphify_god_nodes` + `sages_read_file` (before writing draft.md)
-- LuBan RED → `sages_write_file` + `graphify_god_nodes`
-- LuBan GREEN → `sages_replace_symbol` + `codebase_memory_trace_path`
-- LuBan REFACTOR → `sages_find_references` + `graphify_get_neighbors`
+- Fuxi design → `graphify_god_nodes` + `read` (before writing draft.md)
+- LuBan RED → `write` + `graphify_god_nodes`
+- LuBan GREEN → `edit` + `codebase_memory_trace_path`
+- LuBan REFACTOR → `aft_callgraph` + `graphify_get_neighbors`
 - GaoYao FOOT → `graphify_get_community` + `codebase_memory_trace_path`
-- GaoYao CASTRATION → `sages_search` + `codebase_memory_search_code`
-- GaoYao DEATH → `sages_diagnostics` + `codebase_memory_detect_changes`
+- GaoYao CASTRATION → `grep` + `codebase_memory_search_code`
+- GaoYao DEATH → `aft_inspect` + `codebase_memory_detect_changes`
 
 ## 4. Tool Return Shape (universal contract)
 
@@ -181,6 +173,6 @@ Every implementation request MUST follow:
 
 **VIOLATION BLOCKER**: never provide implementation code without a failing test first.
 
-For LuBan specifically: the tool **validates** the TDD cycle; the LLM uses **sages_replace_symbol** to write the GREEN implementation, then re-calls `luban_execute_task` with observation `{phase: "GREEN", test_outcome: "pass"}`.
+For LuBan specifically: the tool **validates** the TDD cycle; the LLM uses **`edit`** to write the GREEN implementation, then re-calls `luban_execute_task` with observation `{phase: "GREEN", test_outcome: "pass"}`.
 
 If a sage tool's return shape differs from what's documented here, the **test suite is the source of truth** (~498 tests in `pi/test/`).

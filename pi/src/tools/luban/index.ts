@@ -13,7 +13,7 @@
  *   - luban_execute_batch (renamed, then removed with luban_run_batch)
  *
  * The LLM does the actual implementation via semantic tools
- * (sages_replace_symbol, sages_write_file, etc.).
+ * (edit, write, read, etc.).
  * LuBan validates test outcomes and auto-advances phases.
  */
 
@@ -120,13 +120,13 @@ function nextPhase(current: PhaseName): PhaseName {
 
 function buildIntent(phase: PhaseName, task_description: string, files: string[], test_files: string[]): string {
   if (phase === "RED") {
-    return `Write a failing test that exercises: "${task_description}". Use semantic tools (sages_write_file or sages_replace_symbol) to write the test file at ${test_files.join(", ")}. Run the test command and confirm it fails before re-calling.`;
+    return `Write a failing test that exercises: "${task_description}". Use semantic tools (write or edit) to write the test file at ${test_files.join(", ")}. Run the test command and confirm it fails before re-calling.`;
   }
   if (phase === "GREEN") {
-    return `Make the test pass with a minimal implementation. Use semantic tools (sages_find_symbol, sages_replace_symbol, sages_insert_after_symbol) to implement in ${files.join(", ")}. Run the test command and confirm it passes before re-calling.`;
+    return `Make the test pass with a minimal implementation. Use semantic tools (read, edit, aft_callgraph) to implement in ${files.join(", ")}. Run the test command and confirm it passes before re-calling.`;
   }
   if (phase === "REFACTOR") {
-    return `Improve the code in ${files.join(", ")} without breaking the test. Use semantic tools to check for impact (sages_find_references, graphify_get_neighbors). Run the test command and confirm it still passes before re-calling.`;
+    return `Improve the code in ${files.join(", ")} without breaking the test. Use semantic tools to check for impact (aft_callgraph, graphify_get_neighbors). Run the test command and confirm it still passes before re-calling.`;
   }
   return `Task complete.`;
 }
@@ -383,7 +383,7 @@ export function registerLubanTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "luban_execute_task",
     label: "Execute Task (TDD)",
-    description: "Execute a single task with TDD methodology (RED → GREEN → REFACTOR). The LLM does the actual implementation via semantic tools (sages_replace_symbol, etc.); this tool validates test outcomes and auto-advances phases. First call: returns contract for current phase. Subsequent calls with `observation`: validate and advance.",
+    description: "Execute a single task with TDD methodology (RED → GREEN → REFACTOR). The LLM does the actual implementation via semantic tools (edit, read, write, etc.); this tool validates test outcomes and auto-advances phases. First call: returns contract for current phase. Subsequent calls with `observation`: validate and advance.",
     parameters: Type.Object({
       task_id: Type.String({ description: "Task ID (e.g., T1, T2)" }),
       task_description: Type.Optional(Type.String({ description: "Task description (required on first call)" })),

@@ -10,11 +10,9 @@
  *   - LuBan:    TDD-based task execution (`luban_execute_task`)
  *   - GaoYao:   Phase-guided quality audit (`gaoyao_audit`, `gaoyao_observe`, `gaoyao_finalize`)
  *
- * Semantic wrappers (sages_*) that route the sage workflow's file
- * operations through AFT are exposed via the package extension
- * entrypoint `src/extension.ts` (loaded by pi via package.json's
- * `pi.extensions`). They are NOT re-exported here on purpose —
- * they're consumed exclusively by the extension wiring.
+ * File operations (read/write/edit/grep) are provided by `@cortexkit/aft-pi`
+ * which hoists pi's built-ins to AFT-backed versions. This package does
+ * NOT register its own file tools.
  *
  * Outputs are persisted to `.sages/workspace/` (draft.md, plan.md,
  * execution.yaml, audit.md) via FileService and the per-tool state managers.
@@ -22,7 +20,7 @@
 
 // Re-export the package extension entrypoint so other pi packages can
 // compose it (e.g. for tests, or for downstream packages that want to
-// mount the four roles without the AFT-backed wrappers).
+// mount the four roles).
 export { default as default, default as registerSagesExtension } from "./extension.js";
 
 // Tools — the only public API for role-level consumers.
