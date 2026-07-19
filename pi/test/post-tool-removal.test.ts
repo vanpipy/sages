@@ -122,10 +122,9 @@ describe("Package config no longer references slash commands or workflow", () =>
 	});
 
 	it("package.json pi.extensions is REQUIRED and points at ./src/extension.ts", () => {
-		// Round 3 (2026-07-19): the wrapper layer was re-introduced to wire
-		// the AFT-backed sages_* tools into the pi runtime. Re-introducing
-		// pi.extensions is intentional — the role-tool/wrapper split needs
-		// a single entrypoint. Guard: it must NOT be removed again.
+		// Guard: pi.extensions is the only wiring entrypoint for the four
+		// role tools (Fuxi / QiaoChui / LuBan / GaoYao). Removing it would
+		// orphan every role tool — must NOT be removed again.
 		const pkg = JSON.parse(
 			fs.readFileSync(path.join(PI_ROOT, "package.json"), "utf-8"),
 		);

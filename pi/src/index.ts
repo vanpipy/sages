@@ -10,9 +10,9 @@
  *   - LuBan:    TDD-based task execution (`luban_execute_task`)
  *   - GaoYao:   Phase-guided quality audit (`gaoyao_audit`, `gaoyao_observe`, `gaoyao_finalize`)
  *
- * File operations (read/write/edit/grep) are provided by `@cortexkit/aft-pi`
- * which hoists pi's built-ins to AFT-backed versions. This package does
- * NOT register its own file tools.
+ * File operations (read/write/edit/grep/bash) are not provided here —
+ * they come from pi's built-ins (optionally AFT-backed via
+ * `@cortexkit/aft-pi`, installed separately by install.sh).
  *
  * Outputs are persisted to `.sages/workspace/` (draft.md, plan.md,
  * execution.yaml, audit.md) via FileService and the per-tool state managers.

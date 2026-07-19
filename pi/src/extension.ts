@@ -3,16 +3,14 @@
  * resolves the @sages/pi-four-sages package.
  *
  * Registers the four sage role tool surfaces:
- *   - Fuxi:    fuxi_design
+ *   - Fuxi:     fuxi_design
  *   - QiaoChui: qiaochui_review, qiaochui_decompose
  *   - LuBan:    luban_execute_task
  *   - GaoYao:   gaoyao_audit, gaoyao_observe, gaoyao_finalize
  *
- * AFT-backed file operations (read/write/edit/grep/bash) are provided by
- * `@cortexkit/aft-pi` (installed separately via `npx @cortexkit/aft@latest
- * setup --harness pi`). This extension intentionally does NOT re-register
- * those tools — the LLM should use the pi built-in names directly, which
- * aft-pi has already made AFT-backed.
+ * File operations (read/write/edit/grep/bash) are out of scope here —
+ * they come from pi's built-ins (or, for AFT-backed versions, from
+ * `@cortexkit/aft-pi`, installed separately by install.sh).
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";

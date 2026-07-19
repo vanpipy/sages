@@ -3,8 +3,8 @@
  *
  * Three role-tool files (fuxi-tools.ts, luban/index.ts, gaoyao/tools.ts)
  * previously open-coded the same loop: build a `stubs` array, iterate and
- * call `pi.registerTool({...})` with a JSON deprecation response. AFT's
- * inspect flagged this as a 3-way 88-line duplicate.
+ * call `pi.registerTool({...})` with a JSON deprecation response. This was
+ * a 3-way 88-line duplicate.
  *
  * This helper centralises the loop. New role modules should:
  *
