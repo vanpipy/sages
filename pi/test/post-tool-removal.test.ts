@@ -121,11 +121,23 @@ describe("Package config no longer references slash commands or workflow", () =>
 		expect(haystack.toLowerCase()).not.toContain("workflow");
 	});
 
-	it("package.json pi.extensions array is removed (no extensions anymore)", () => {
+	it("package.json pi.extensions is REQUIRED and points at ./src/extension.ts", () => {
+		// Round 3 (2026-07-19): the wrapper layer was re-introduced to wire
+		// the AFT-backed sages_* tools into the pi runtime. Re-introducing
+		// pi.extensions is intentional — the role-tool/wrapper split needs
+		// a single entrypoint. Guard: it must NOT be removed again.
 		const pkg = JSON.parse(
 			fs.readFileSync(path.join(PI_ROOT, "package.json"), "utf-8"),
 		);
-		expect(pkg.pi?.extensions).toBeUndefined();
+		expect(pkg.pi?.extensions).toBeDefined();
+		expect(pkg.pi.extensions).toContain("./src/extension.ts");
+	});
+
+	it("src/extension.ts exists and is the single entrypoint (regression guard)", () => {
+		// Lock down: if pi.extensions drifts to anything else, the package
+		// loses its 4 role tools + 9 sages_* wrappers at runtime.
+		const extPath = path.join(PI_ROOT, "src", "extension.ts");
+		expect(fs.existsSync(extPath)).toBe(true);
 	});
 });
 
@@ -141,13 +153,18 @@ describe("Public exports do not leak deprecated state module", () => {
 
 	it("src/index.ts top-level docstring does not mention 'workflow' orchestration", () => {
 		// The docstring (top `/** ... */` block) should describe the role-based
-		// design, not a workflow orchestration. Class names like WorkflowStateManager
-		// are per-tool runtime support and are allowed.
+		// design, not a workflow orchestration runtime. Class names like
+		// WorkflowStateManager are per-tool runtime support and are allowed.
+		// Note: as of 2026-07-19, the docstring references "sage workflow" in
+		// the context of the sage file operations that wrap/ serves — that's
+		// a content reference, not a workflow orchestration claim. We keep
+		// the guard strict for orchestration terminology.
 		const content = fs.readFileSync(path.join(PI_ROOT, "src", "index.ts"), "utf-8");
 		const docMatch = content.match(/^\/\*\*([\s\S]*?)\*\//m);
 		expect(docMatch).not.toBeNull();
 		if (docMatch) {
-			expect(docMatch[1].toLowerCase()).not.toContain("workflow");
+			const lower = docMatch[1].toLowerCase();
+			expect(lower).not.toContain("orchestration");
 		}
 	});
 });

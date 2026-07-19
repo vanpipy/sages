@@ -17,6 +17,9 @@
   ],
   "license": "MIT",
   "pi": {
+    "extensions": [
+      "./src/extension.ts"
+    ],
     "skills": [
       "./skills"
     ]

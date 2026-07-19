@@ -18,6 +18,7 @@ import { Type } from "typebox";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectAnalyzer } from "../../utils/analyzer";
+import { registerDeprecationStubs } from "../deprecation-stubs.js";
 
 import {
   AuditSessionManager,
@@ -532,11 +533,7 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
   // Deprecated stubs — keep old tool names alive with redirect hints
   // ───────────────────────────────────────────────────────────────────────
 
-  const stubs: Array<{
-    name: string;
-    hint: string;
-    deprecationNote: string;
-  }> = [
+  registerDeprecationStubs(pi, [
     { name: "gaoyao_init", hint: "Use gaoyao_audit instead.", deprecationNote: "merged into gaoyao_audit" },
     { name: "gaoyao_record_file_read", hint: "Use gaoyao_observe { file_read: {...} } instead.", deprecationNote: "merged into gaoyao_observe" },
     { name: "gaoyao_record_finding", hint: "Use gaoyao_observe { finding: {...} } instead.", deprecationNote: "merged into gaoyao_observe" },
@@ -546,29 +543,7 @@ export function registerGaoYaoTools(pi: ExtensionAPI): void {
     { name: "gaoyao_review", hint: "Use gaoyao_audit instead.", deprecationNote: "superseded by phase-guided gaoyao_audit" },
     { name: "gaoyao_quick_check", hint: "Use gaoyao_audit { review_mode: 'quick' } instead.", deprecationNote: "superseded by phase-guided gaoyao_audit" },
     { name: "gaoyao_check_security", hint: "Security is the CASTRATION phase in the phase-guided audit. Use gaoyao_audit then advance through phases to CASTRATION.", deprecationNote: "security is now CASTRATION phase" },
-  ];
-
-  for (const stub of stubs) {
-    pi.registerTool({
-      name: stub.name,
-      label: `[Deprecated] ${stub.name}`,
-      description: `DEPRECATED (${stub.deprecationNote}): ${stub.hint}`,
-      parameters: Type.Object({}),
-      async execute() {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            success: false,
-            error: `${stub.name} is deprecated. ${stub.hint}`,
-            hint: stub.hint,
-            deprecated: true,
-            replacement: stub.hint.match(/Use (\w+)/)?.[1] ?? null,
-          }) }],
-          isError: true,
-          details: { deprecated: true, replacement: stub.hint },
-        };
-      },
-    });
-  }
+  ]);
 }
 
 // ---------------------------------------------------------------------------

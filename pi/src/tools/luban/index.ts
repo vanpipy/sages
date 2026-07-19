@@ -25,6 +25,7 @@ import { FileService } from "../../services/file-service.js";
 import { deriveTestFiles } from "./conflict-detector.js";
 import { runTests, validateScope, TDD_GUIDE } from "./task-runner.js";
 import type { LubanTask, TDDPhase } from "./types.js";
+import { registerDeprecationStubs } from "../deprecation-stubs.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
 const TASK_STATE_FILE = ".luban-task-state.json";
@@ -426,7 +427,7 @@ export function registerLubanTools(pi: ExtensionAPI): void {
   });
 
   // ─── Deprecated stubs (keep old names alive with redirect hints) ──────
-  const stubs: Array<{ name: string; hint: string; deprecationNote: string }> = [
+  registerDeprecationStubs(pi, [
     {
       name: "luban_execute_all",
       hint: "Use luban_execute_task — iterate through tasks in execution.yaml.",
@@ -442,27 +443,5 @@ export function registerLubanTools(pi: ExtensionAPI): void {
       hint: "Status is included in every luban_execute_task response.",
       deprecationNote: "merged into luban_execute_task response",
     },
-  ];
-
-  for (const stub of stubs) {
-    pi.registerTool({
-      name: stub.name,
-      label: `[Deprecated] ${stub.name}`,
-      description: `DEPRECATED (${stub.deprecationNote}): ${stub.hint}`,
-      parameters: Type.Object({}),
-      async execute() {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            success: false,
-            error: `${stub.name} is deprecated. ${stub.hint}`,
-            hint: stub.hint,
-            deprecated: true,
-            replacement: stub.hint.match(/Use (\w+)/)?.[1] ?? null,
-          }) }],
-          isError: true,
-          details: { deprecated: true, replacement: stub.hint },
-        };
-      },
-    });
-  }
+  ]);
 }

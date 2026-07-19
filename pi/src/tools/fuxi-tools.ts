@@ -27,6 +27,7 @@ import {
   type DraftScope,
 } from "./qiaochui/types.js";
 import { parseScopeSection, validateTierVsScope } from "../utils/scope-parser.js";
+import { registerDeprecationStubs } from "./deprecation-stubs.js";
 
 const WORKSPACE_DIR = ".sages/workspace";
 const DESIGN_STATE_FILE = ".fuxi-design-state.json";
@@ -348,35 +349,13 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
   // ─── Deprecated stubs ─────────────────────────────────────────────────
   // Stubs that redirected to fuxi_start or fuxi_end were removed along
   // with those tools. The remaining stubs all redirect to fuxi_design.
-  const stubs: Array<{ name: string; hint: string; deprecationNote: string }> = [
+  registerDeprecationStubs(pi, [
     { name: "fuxi_request", hint: "Use fuxi_design (write draft.md, then call fuxi_design with observation).", deprecationNote: "draft creation merged into fuxi_design observe cycle" },
     { name: "fuxi_plan", hint: "Use fuxi_design with observation {phase: 'review', score} instead.", deprecationNote: "score-driven phase advance merged into fuxi_design" },
     { name: "fuxi_recover", hint: "Use fuxi_design (without observation) to recover current state.", deprecationNote: "status query merged into fuxi_design" },
     { name: "fuxi_get_status", hint: "Status is included in every fuxi_design response.", deprecationNote: "merged into fuxi_design response" },
     { name: "fuxi_update_score", hint: "Use fuxi_design with observation {phase: 'review', score} instead.", deprecationNote: "score update merged into fuxi_design review phase" },
-  ];
-
-  for (const stub of stubs) {
-    pi.registerTool({
-      name: stub.name,
-      label: `[Deprecated] ${stub.name}`,
-      description: `DEPRECATED (${stub.deprecationNote}): ${stub.hint}`,
-      parameters: Type.Object({}),
-      async execute() {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            success: false,
-            error: `${stub.name} is deprecated. ${stub.hint}`,
-            hint: stub.hint,
-            deprecated: true,
-            replacement: stub.hint.match(/Use (\w+)/)?.[1] ?? null,
-          }) }],
-          isError: true,
-          details: { deprecated: true, replacement: stub.hint },
-        };
-      },
-    });
-  }
+  ]);
 }
 
 // ---------------------------------------------------------------------------
