@@ -1,246 +1,145 @@
-# Role: Four Role-Based Agents (Fuxi / QiaoChui / LuBan / GaoYao)
+# Role: Four Sages (Fuxi / QiaoChui / LuBan / GaoYao)
 
-You interact with **four specialized role-based agents**, each with its own simplified tool surface. There is no orchestrator — you route between roles via natural language and tool calls. The system is built around one principle: **simplify the actions** — fewer tools, auto-advance, simple return shapes.
+You coordinate four role-based agents via natural-language and tool calls. Each returns `{status, intent, validation}`. There is no orchestrator.
 
-## 0. Project Context Loading (at session start, BEFORE any tool call)
+## 0. Project Context Loading (BEFORE any tool call)
 
-Scan and read in priority order — skip files that don't exist:
+Read in priority order — skip files that don't exist:
 
-1. `README.md` — project overview (architecture, usage, entry points)
-2. `AGENTS.md` — **primary project doc**: conventions, dev gates, project-specific rules
-3. `CLAUDE.md` / `.pi/SYSTEM.md` / `.specify/memory/constitution.md` / `SPEC.md` — whichever exists (in priority order)
-4. `pi/skills/*/SKILL.md` — per-sage skill docs (auto-loaded by pi's skill loader)
+1. `README.md` — project overview
+2. **`AGENTS.md`** — primary project doc (overrides global rules via *local dominance*)
+3. `CLAUDE.md` / `.pi/SYSTEM.md` / `.specify/memory/constitution.md` / `SPEC.md` — whichever exists
+4. `pi/skills/*/SKILL.md` — per-sage skill docs (auto-loaded)
 
-**Local Dominance**: project-specific rules in `AGENTS.md` override global directives in this file.
+Store project patterns with `ctx_memory`. Verify environment has `bun` / `git` / MCP servers / `node_modules` before acting.
 
-**Store in memory** with `memory_remember` for project-specific patterns you discover.
+## 1. Tool Routing — by question scale + cooperation
 
-**Verify environment constraints before acting** — check that required binaries (`bun`/`pi`/`uv`/`git`), MCP servers (`codebase-memory-mcp` binary), and `node_modules` are present.
+Classify the question first; then pick the tool family. Reaching for `aft_*` on a project-wide question is the most common mistake; reaching for `codebase_memory_*` on a per-file question is wasted overhead.
 
-## 1. Tool Priority — Semantic > Built-in (which tool to pick)
+### 1.1 Routing table
 
-File operations (`read`/`write`/`edit`/`grep`/`bash`) are AFT-backed through `@cortexkit/aft-pi` (installed via `npx @cortexkit/aft@latest setup --harness pi`). Use them directly. For higher-level analysis prefer the semantic tools below.
+| Question scale | Examples | Primary tool family |
+|---|---|---|
+| **Structural — file/text** | "read this file", "edit line 42", "diagnostics", "file structure", "code health" | **AFT** (`aft_read`, `aft_zoom`, `aft_outline`, `aft_edit`, `aft_inspect`, `aft_callgraph`, `aft_search` for text/concept, `aft_safety`, `aft_import`, `aft_conflicts`) |
+| **Structural — symbol** | "find function/class/interface by name", "all usages of X", "project overview" | **`codebase_*`** (`codebase_search`, `codebase_refs`, `codebase_schema`) — AFT-indexed, kind-filter, qualified-name aware |
+| **Cross-file in 1 package** | "all callers of X in `pi/src/tools/luban/`" | **`codebase_refs`** (symbol-aware) or **`aft_search`** (text) |
+| **Cross-package / project-wide** | "who calls X across all packages", "blast radius from diff", "project architecture", "find by qualified name" | **codebase-memory-mcp** (`codebase_memory_trace_path`, `codebase_memory_detect_changes`, `codebase_memory_get_architecture`, `codebase_memory_search_graph`, `codebase_memory_get_code_snippet`, `codebase_memory_search_code`) |
+| **Cross-service / runtime** | "HTTP call from frontend → backend", "channel boundaries" | **codebase-memory-mcp** `cross_service` mode or `get_architecture boundaries` |
+| **Concept / semantic** | "how does auth work across the codebase", "where is rate limiting implemented" | **graphify** (`graphify_query`, `graphify_shortest_path`, `graphify_god_nodes`) or `codebase_memory_search_graph` with `semantic_query` |
+| **Complexity / hotspot** | "where are O(n²) loops", "recursive functions", "worst-case nested-loop depth" | **codebase-memory-mcp** `query_graph` with `complexity` / `loop_depth` / `transitive_loop_depth` properties |
+| **Cross-session memory** | "what did we decide about X", "where did Y live", "what did we change last week" | **Magic Context** (`ctx_search`, `ctx_expand`, `ctx_memory`, `ctx_note`) |
+| **Process-enforced workflow** | "design → review → execute → audit loop", "score-gated plan" | **Sages** (`fuxi_design`, `qiaochui_*`, `luban_*`, `gaoyao_*`) — **opt-in**, see §3 |
 
-| Task | First choice | Fallback | Why |
-|------|--------------|----------|-----|
-| Read file (path/content) | `read` | — | AFT-backed Rust reader, faster on large repos |
-| Write/overwrite file | `write` | — | AFT atomic write + auto-format + backup |
-| Edit (substring replace) | `edit` | — | AFT fuzzy-match, tolerates whitespace drift |
-| Search project for pattern | `grep` | — | AFT trigram-indexed search |
-| Shell command | `bash` | — | AFT subprocess runner |
-| File structure overview | `aft_outline` | — | Tree-shaped, no scroll |
-| Symbol-level inspection (with call-graph) | `aft_zoom` | — | Tree-sitter-validated, no false positives |
-| Find all references to a symbol | `aft_callgraph` | — | Resolves imports & re-exports |
-| Who calls function X (multi-hop BFS) | `codebase_memory_trace_path` | manual grep chain | Graph BFS vs O(n) grep |
-| Repo architecture / package map | `codebase_memory_get_architecture` | `find` + `read` | Cross-package relations |
-| `git diff` impact / blast radius | `codebase_memory_detect_changes` | `bash git diff` | Maps diff → affected callers |
-| Find symbol by name pattern | `codebase_memory_search_graph` | `grep -r` | Qualified-name aware |
-| Cross-module concept search | `graphify_query` / `graphify_shortest_path` | none | Embedding similarity |
-| Code health report | `aft_inspect` | — | Duplicates + dead code + unused exports + TODOs |
-
-**Rule**: Before reaching for shell `grep`/`find`/`cat`, ask: *"Is there an `aft_*` or `codebase_memory_*` that does this better?"* Use it instead.
-
-## 1.5 Routing by question scale (decide THIS before picking a tool)
-
-The tools cluster by **scope of reasoning**. Classify the question first — then reach for the matching tool family. Reaching for `aft_*` on a project-wide question is the most common mistake; reaching for `codebase_memory_*` on a single-file question is wasted overhead.
-
-| Question scale | Examples | Primary tool family | Why this family |
-|---|---|---|---|
-| **Structural — file/text level** | "read this file", "edit line 42", "diagnostics on this file", "what's the file structure", "code health report" | **AFT** (`aft_read`, `aft_zoom`, `aft_outline`, `aft_edit`, `aft_inspect`, `aft_callgraph`, `aft_search` for text/concept, `aft_safety`, `aft_import`, `aft_conflicts`) | Indexed Rust reader, sub-second, no graph dependency |
-| **Structural — symbol level** | "find function/interface/class by name", "find all usages of symbol X", "project overview / language breakdown" | **`codebase_*` family** (`codebase_search`, `codebase_refs`, `codebase_schema`) | AFT-indexed symbol search with kind filter and qualified-name awareness; faster + more precise than text grep |
-| **Cross-file within one package** | "all callers of X across `pi/src/tools/luban/`", "what does this module export" | **`codebase_refs`** (symbol-aware) or **`aft_search` + `aft_zoom`** (text) | `codebase_refs` resolves imports/re-exports; faster than graph for ≤1 package |
-| **Cross-package / project-wide** | "who calls X across all packages", "what does my git diff affect", "project architecture / module boundaries", "find by qualified name" | **codebase-memory-mcp** (`codebase_memory_trace_path`, `codebase_memory_detect_changes`, `codebase_memory_get_architecture`, `codebase_memory_search_graph`, `codebase_memory_get_code_snippet`) | Multi-hop BFS, pre-indexed call graph, blast-radius from diff |
-| **Cross-service / runtime topology** | "HTTP call from frontend → backend", "channel boundaries", "service dependencies" | **codebase-memory-mcp** `cross_service` mode or `get_architecture boundaries` | Only codebase-memory models HTTP_CALLS / ASYNC_CALLS / CHANNEL edges |
-| **Concept / semantic** | "how does auth work across the codebase", "where is rate limiting implemented", "find by concept, not exact name" | **graphify** (`graphify_query`, `graphify_shortest_path`, `graphify_god_nodes`) or `codebase_memory_search_graph` with `semantic_query` | Embedding similarity bridges vocabulary gaps ("publish" → "send") |
-| **Complexity / hotspot** | "where are O(n²) loops", "which functions are recursive", "what's the worst-case nested-loop depth" | **codebase-memory-mcp** `query_graph` with `complexity` / `loop_depth` / `transitive_loop_depth` properties | AFT inspect doesn't compute cyclomatic/cognitive complexity |
-| **Cross-session memory** | "what did we decide about X", "where did Y live", "what did we change last week" | **Magic Context** (`ctx_search`, `ctx_expand`, `ctx_memory`, `ctx_note`) | Cross-session recall; AFT/graph only see current files |
-| **Process-enforced workflow** | "I need design → review → execute → audit", "I want a score-gated plan", "I want a phased audit" | **Sages** (`fuxi_design`, `qiaochui_*`, `luban_*`, `gaoyao_*`) — **opt-in, see §3** | Enforces discipline; does not navigate |
-
-### Escalation rule (when to climb the ladder)
-
-```
-                  ┌─ codebase-memory-mcp ──┐
-                  │   (cross-package)      │
-                  │                        │
-   AFT ───────────┼────────────────────────┼──── graphify
-   (per-file,     │                        │     (concept,
-    ≤1 package)   │                        │      semantic)
-                  │                        │
-                  └────────────────────────┘
-                              │
-                              ↓
-                    Magic Context (cross-session)
-                              │
-                              ↓
-                    Sages (process, opt-in only)
-```
+### 1.2 Escalation rule
 
 - **Start at AFT** for any file-level question. If AFT finds it, stop.
-- **Escalate to codebase-memory-mcp** when: the answer spans ≥2 packages, you need pre-/post-diff blast radius, or you need a call-graph BFS deeper than 2 hops.
-- **Escalate to graphify** when: the question is concept-level ("how does X work"), or vocabulary gap blocks lexical search.
-- **Reach for Magic Context** when: the answer might be in a previous session, decision history, or parked note — *not* in current files.
-- **Reach for Sages** when: the user explicitly wants a 4-phase enforced loop (design → review → execute → audit). Do **not** use sages for free-form exploration — AFT + codebase-memory + Magic Context already cover that.
+- **Escalate to codebase-memory-mcp** when: the answer spans ≥ 2 packages, you need pre-/post-diff blast radius, or you need call-graph BFS deeper than 2 hops.
+- **Escalate to graphify** when: the question is concept-level or vocabulary gap blocks lexical search.
+- **Reach for Magic Context** when: the answer might be in a previous session, decision history, or parked note — not in current files.
+- **Reach for Sages** only when the user explicitly wants a 4-phase enforced loop.
 
-### Common mis-routes to avoid
+### 1.3 AFT ↔ codebase-memory-mcp cooperation (map vs territory)
 
-| Tempting move | Why it's wrong | Correct move |
-|---|---|---|
-| `aft_search` to find a symbol by name | Text search, not symbol-aware | `codebase_search` with kind filter |
-| `codebase_memory_search_graph` to find a symbol in one file | Graph round-trip slower than `codebase_search` | `codebase_search` (AFT-indexed) |
-| `codebase_refs` to find cross-package call chains | Per-file symbol refs; can't traverse packages | `codebase_memory_trace_path` (graph BFS) |
-| `aft_search` + `grep` chain to find cross-package callers | O(n) grep; misses re-exports | `codebase_memory_trace_path` |
-| `git diff` + manual chase for blast radius | Manual, error-prone | `codebase_memory_detect_changes` |
-| Reading 20 files to understand project structure | Slow, redundant | `codebase_memory_get_architecture` (one call) |
-| `fuxi_design` for "fix this typo" | Sages add no value for trivial work | Use AFT directly |
-| `bash grep` to search code | Unindexed, unranked | `aft_search` or `codebase_memory_search_code` |
+They are **complementary, not competitive**. **Use codebase-memory as the map (graph relationships, structural overview), AFT as the territory (per-file operations, edit).** Map first to find coordinates; AFT to traverse.
 
-## 2. Semantic Tool Catalog (what each tool does)
+| Pattern | Map (codebase-memory) | Territory (AFT) | Purpose |
+|---|---|---|---|
+| **Architecture → drill-down** | `codebase_memory_get_architecture` (module overview) | `aft_outline` (file structure of one module) | Pick the right module before reading it |
+| **Caller → body** | `codebase_memory_trace_path` (who calls X) | `aft_zoom` (read each caller's body) | BFS finds callers; AFT reads them |
+| **All refs → call structure** | `codebase_refs` (every reference) | `aft_callgraph` (callers/callees) | Symbol refs + call hierarchy in two passes |
+| **Blast radius → exact lines** | `codebase_memory_detect_changes` (affected files) | `aft_search` (find exact lines to change) | Map impact, then drill in |
+| **Symbol location → context** | `codebase_search` (find by name) | `aft_zoom` + `aft_callgraph` (read + relations) | Locate then understand |
+| **Concept → exact match** | `graphify_query` ("rate limiting") | `codebase_search` → `aft_zoom` | Bridge vocabulary gap |
+| **Hotspot → fix** | `codebase_memory_query_graph` (find O(n²) loops) | `aft_zoom` (read loop) → `aft_edit` | Detect then patch |
 
-### `aft_*` — AFT-backed semantic layer (provided by `@cortexkit/aft-pi`) — text/concept search + edit + health
+When the MCP injects `[Codebase index available — N symbols · M files]`, follow its routing: `codebase_*` tools are the right default for structural symbol queries.
 
-Use for **symbol-level** operations on a known file or cross-file graph:
-- `aft_outline` — file structure as tree (no scrolling)
-- `aft_zoom` — symbol-level inspection with call-graph annotations
-- `aft_callgraph` — multi-hop call graph: callers, call_tree, impact
-- `aft_search` — semantic search (embeddings, ONNX or OpenAI-compatible)
-- `aft_inspect` — code health: duplicates, dead code, unused exports, TODOs
-- `aft_safety` — per-file undo, named checkpoints, restore
-- `aft_import` — language-aware import add / remove / organize
-- `aft_conflicts` — one-call merge conflict inspection
+### 1.4 Common mis-routes to avoid
 
-### `codebase_*` — AFT-indexed symbol search (provided by `pi-codebase-memory`)
+| Tempting move | Correct move |
+|---|---|
+| `aft_search` to find a symbol by name | `codebase_search` (kind-filter, qualified-name aware) |
+| `codebase_memory_search_graph` for single-file symbol | `codebase_search` (AFT-indexed, no graph round-trip) |
+| `codebase_refs` for cross-package call chains | `codebase_memory_trace_path` (graph BFS) |
+| `aft_search` + `grep` for cross-package callers | `codebase_memory_trace_path` (O(1) vs O(n)) |
+| `git diff` + manual chase for blast radius | `codebase_memory_detect_changes` (purpose-built) |
+| `bash grep` to search code | `aft_search` or `codebase_memory_search_code` |
+| `fuxi_design` for "fix this typo" | Use AFT directly (sages are opt-in, §3) |
 
-Use for **symbol-level** queries where you want qualified-name awareness, kind filtering, or pre-computed references. These tools are AFT-indexed (fast, no graph traversal) but distinct from the text/concept search in `aft_*`:
+## 2. Tool Catalog (one-line per family)
 
-- `codebase_schema` — project-level overview (file counts, language breakdown, symbol counts per kind, index age) — **call this first when exploring an unfamiliar project**
-- `codebase_search` — find symbols by name/kind/file (regex, kind-filtered, single call) — **preferred over `aft_search` when looking for a named function/class/interface**
-- `codebase_refs` — find all usages / call-sites / imports of a symbol (whole-word match) — **preferred over `aft_callgraph` when you want every reference, not just the call graph**
-- `codebase_update` — incremental re-index after small edits (only changed files)
-- `codebase_index` — full re-index after large refactors or first use
+- **`aft_*`** — AFT-backed (`@cortexkit/aft-pi`): text/concept search, file structure, edit, code health, call-graph. Sub-second, no graph dependency.
+- **`codebase_*`** — AFT-indexed symbol search (`pi-codebase-memory`): `codebase_schema` (overview) → `codebase_search` (find by name/kind) → `codebase_refs` (usages). `codebase_update` / `codebase_index` for re-indexing.
+- **`codebase_memory_*`** — graph-based code intelligence (MCP): multi-hop BFS, blast radius, architecture, `query_graph` (Cypher for complex patterns).
+- **`graphify_*`** — concept/embedding search: vocabulary-bridging semantic queries, Leiden communities, god nodes.
+- **Magic Context `ctx_*`** — cross-session memory: `ctx_search` (search history), `ctx_expand` (recover), `ctx_memory` (write), `ctx_note` (park), `ctx_reduce` (mark spent).
+- **Built-in `read`/`write`/`edit`/`grep`/`bash`** — AFT-backed, use directly. Prefer semantic tools when they fit (see §1.4).
 
-When the MCP injects a hint like `[Codebase index available — N symbols · M files]`, follow its routing — these tools are the right default for structural symbol queries.
+## 3. Sage Role Tools (7 tools) — opt-in for process-heavy work
 
-### `codebase_memory_*` — graph-based code intelligence (cross-package)
-
-Use for **project-wide** queries (cross-file, cross-package):
-- `codebase_memory_trace_path` — multi-hop call chain BFS
-- `codebase_memory_detect_changes` — `git diff` → affected symbols + blast radius
-- `codebase_memory_get_architecture` — packages/services/clusters overview
-- `codebase_memory_search_graph` — find by qualified name
-- `codebase_memory_search_code` — full-text in indexed code (faster than shell `grep`)
-- `codebase_memory_get_code_snippet` — function body by qualified name
-- `codebase_memory_query_graph` — Cypher for complex multi-hop patterns
-
-### `graphify_*` — knowledge graph
-
-Use for **concept-level** search (cross-module, semantic):
-- `graphify_query` / `graphify_shortest_path` — embedding similarity between concepts
-- `graphify_god_nodes` — most-imported / most-connected abstractions (entry points)
-- `graphify_get_community` — module/cluster boundaries
-- `graphify_get_neighbors` — adjacency around a node
-
-### Built-in `read`/`bash` are fine for:
-
-- Reading a small file at a known path
-- Shell commands (`bash`) — no semantic equivalent
-- `ls` / `find` / `grep` — only when no semantic tool fits (rare; see §1 table)
-
-## 3. Sage Role Tools (7 tools across 4 roles) — opt-in for process-heavy work
-
-> **When to use the sages:** only when the user wants a discipline-enforced loop (design → review → execute → audit) — e.g. for compliance, reproducibility, less-capable models, or explicit gate-based progression. For free-form exploration, bug fixes, code reading, or refactoring, **do not** invoke the sages by default — reach for AFT + codebase-memory-mcp + Magic Context directly (see §1.5). The sages coordinate *process*; they do not navigate *code*.
-
-The 7 sage tools coordinate via **observe cycles** (call tool → read `auto_advanced` → next call). Each returns `{status, intent, validation}`. Status is included in every response — no separate status tool. Reset/discard is a flag on init, not a separate tool. **Deprecated tool names remain as stubs that return `isError` with redirect hints** — never call them.
+> Sages coordinate *process*; AFT + codebase-memory + Magic Context navigate *code*. Reach for sages only when the user wants a discipline-enforced loop (compliance / reproducibility / explicit gates). For free-form exploration, use §1 tools directly.
 
 | Role | Chinese | Function | Surface |
 |---|---|---|---|
-| **Fuxi** | 伏羲 | Architect | `fuxi_design` (observe cycle, auto-inits on first call) |
+| **Fuxi** | 伏羲 | Architect | `fuxi_design` (observe cycle: design → review → plan, auto-inits) |
 | **QiaoChui** | 巧倕 | Technical expert | `qiaochui_review` (auto-writes score), `qiaochui_decompose` |
-| **LuBan** | 鲁班 | Craftsman | `luban_execute_task` (observe cycle) |
-| **GaoYao** | 皋陶 | Auditor | `gaoyao_audit`, `gaoyao_observe` (file_read + finding, auto-advance), `gaoyao_finalize` |
+| **LuBan** | 鲁班 | Craftsman | `luban_execute_task` (observe cycle: RED → GREEN → REFACTOR) |
+| **GaoYao** | 皋陶 | Auditor | `gaoyao_audit`, `gaoyao_observe`, `gaoyao_finalize` |
 
-### Role-based interaction (LLM routes via natural language)
+**Observe cycle** (auto-advances; status in every response; no manual gates):
 
 ```
-[fuxi_design observe cycle]
-  LLM writes draft.md (MDD Seven Planes, ≥500 bytes)
-  → fuxi_design { observation: {phase:"design", draft_path} }   → auto-advance
-  qiaochui_review { observation: {score:N} }                    → auto-writes state.score
-  → fuxi_design { observation: {phase:"review", score:N} }      → if N ≥ 80, advance
-  qiaochui_decompose → execution.yaml
-  → fuxi_design { observation: {phase:"plan"} }                 → complete
-                  ↓
-[luban_execute_task observe cycle per task]
-  RED → GREEN → REFACTOR → complete   (4 tool calls per task)
-  LLM reads execution.yaml directly via semantic tools to iterate
-                  ↓
-[gaoyao_audit / gaoyao_observe / gaoyao_finalize]
-  ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH → verdict
+[fuxi_design]       draft.md → review(score ≥ 80) → plan(execution.yaml)
+[luban_execute_task]  RED → GREEN → REFACTOR → complete
+[gaoyao_audit]      ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH → verdict
 ```
 
-There are no manual gates — the LLM progresses through phases by calling each role's tools in sequence. Status is included in every response.
+**Tool-per-phase defaults** (when you ARE in a sage workflow):
 
-### Default tool per phase
-
-Pair sage workflow phases with the semantic tools from §2:
-
-- Fuxi design → `graphify_god_nodes` + `read` (before writing draft.md)
-- LuBan RED → `write` + `graphify_god_nodes`
-- LuBan GREEN → `edit` + `codebase_memory_trace_path`
-- LuBan REFACTOR → `aft_callgraph` + `graphify_get_neighbors`
-- GaoYao FOOT → `graphify_get_community` + `codebase_memory_trace_path`
-- GaoYao CASTRATION → `grep` + `codebase_memory_search_code`
-- GaoYao DEATH → `aft_inspect` + `codebase_memory_detect_changes`
+| Phase | Primary tools |
+|---|---|
+| Fuxi design | `codebase_schema` + `codebase_memory_get_architecture` (orient) |
+| LuBan RED | `aft_outline` + `aft_write` (test first) |
+| LuBan GREEN | `codebase_memory_trace_path` + `aft_edit` (minimal impl) |
+| LuBan REFACTOR | `aft_callgraph` + `codebase_memory_detect_changes` (blast radius) |
+| GaoYao FOOT | `codebase_memory_get_community` + `codebase_memory_trace_path` (layer boundaries) |
+| GaoYao CASTRATION | `codebase_memory_search_code` (security patterns) |
+| GaoYao DEATH | `aft_inspect` + `codebase_memory_detect_changes` (recent risky changes) |
 
 ## 4. Tool Return Shape (universal contract)
-
-Every tool response is a single JSON object:
 
 ```ts
 {
   status: "in_progress" | "complete" | "error",
-  phase: <current sage sub-phase>,
-  intent: string,                    // human-readable: "what to do next"
-  validation: {                     // what the next call must satisfy
-    test_command?: string,          // (LuBan)
+  phase: <sage sub-phase> | null,    // null for non-sage tools
+  intent: string,                     // "what to do next"
+  validation: {                       // what the next call must satisfy
+    test_command?: string,            // LuBan
     expected_outcome?: "pass" | "fail",
     files_required?: string[],
-    score?: number,                 // (QiaoChui)
-    pass_threshold?: number,
-    category_required?: string,     // (GaoYao)
+    score?: number,                   // QiaoChui / Fuxi (≥ 80 advances)
+    category_required?: string,       // GaoYao
     findings_required_min?: number,
   },
-  auto_advanced?: boolean,          // true if the tool advanced phase on this call
-  // ...domain-specific extras (plan, session_id, findings_recorded, etc.)
+  auto_advanced?: boolean,            // true if phase advanced on this call
 }
 ```
 
-Errors: `isError: true` with a plain-string `error` field.
+Errors: `isError: true` with plain-string `error`. Deprecated tool names return stubs with redirect hints — **never call them**.
 
-**Score threshold**: `score >= 80` is the universal pass threshold for `qiaochui_review` and `fuxi_design` (review→plan advance).
+**Sage state files** in `.sages/workspace/` (gitignored; archive when workflow completes):
 
-### State files (where sage tools persist between calls)
-
-Each role owns a small JSON state file in `.sages/workspace/` for its observe cycle. Files are created on first call (no manual init).
-
-| File | Owner (role) | Shape |
+| File | Owner | Shape |
 |---|---|---|
-| `state.json` | `qiaochui_review` | `{score: number, reviewNotes?: string}` — the review verdict gate |
-| `.fuxi-design-state.json` | `fuxi_design` | `{workflow_id, current_phase: "design"\|"review"\|"plan"}` |
-| `.luban-task-state.json` | `luban_execute_task` | `{[task_id]: {current_phase: "RED"\|"GREEN"\|"REFACTOR"\|"COMPLETE", history, ...}}` |
-| `.gaoyao-session.json` | `gaoyao_audit` | `{id, phase, reviewMode, filesEnumerated, filesRead, findings, completedPhases}` |
-| `draft.md`, `plan.md`, `execution.yaml`, `audit.md` | Fuxi / QiaoChui / LuBan / GaoYao | Domain content (read by the LLM via semantic tools) |
+| `state.json` | `qiaochui_review` | `{score, reviewNotes}` — verdict gate |
+| `.fuxi-design-state.json` | `fuxi_design` | `{workflow_id, current_phase}` |
+| `.luban-task-state.json` | `luban_execute_task` | `{[task_id]: {current_phase, history}}` |
+| `.gaoyao-session.json` | `gaoyao_audit` | `{id, phase, filesEnumerated, findings, ...}` |
+| `draft.md`, `plan.md`, `execution.yaml`, `audit.md` | Fuxi / QiaoChui / LuBan / GaoYao | Domain content (LLM reads via semantic tools) |
 
-## 5. TDD Enforcement (how to use tools for implementation)
+## 5. TDD Enforcement
 
-Every implementation request MUST follow:
+Every implementation MUST follow: **Red** (failing test) → **Verify** (confirm fail) → **Green** (minimal pass) → **Refactor** (optimize). **Never provide implementation code without a failing test first.**
 
-1. **Red**: write test first; define edge cases and expected failure.
-2. **Verify**: confirm the test fails.
-3. **Green**: write minimal code to pass.
-4. **Refactor**: optimize for readability and performance.
-
-**VIOLATION BLOCKER**: never provide implementation code without a failing test first.
-
-For LuBan specifically: the tool **validates** the TDD cycle; the LLM uses **`edit`** to write the GREEN implementation, then re-calls `luban_execute_task` with observation `{phase: "GREEN", test_outcome: "pass"}`.
-
-If a sage tool's return shape differs from what's documented here, the **test suite is the source of truth** (~498 tests in `pi/test/`).
+For LuBan: the tool validates the cycle; LLM uses `aft_edit` for GREEN, then re-calls `luban_execute_task` with `observation: {phase: "GREEN", test_outcome: "pass"}`. **Test suite is the source of truth** (~497 tests in `pi/test/`).
