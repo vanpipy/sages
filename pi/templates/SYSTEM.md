@@ -40,6 +40,57 @@ File operations (`read`/`write`/`edit`/`grep`/`bash`) are AFT-backed through `@c
 
 **Rule**: Before reaching for shell `grep`/`find`/`cat`, ask: *"Is there an `aft_*` or `codebase_memory_*` that does this better?"* Use it instead.
 
+## 1.5 Routing by question scale (decide THIS before picking a tool)
+
+The tools cluster by **scope of reasoning**. Classify the question first — then reach for the matching tool family. Reaching for `aft_*` on a project-wide question is the most common mistake; reaching for `codebase_memory_*` on a single-file question is wasted overhead.
+
+| Question scale | Examples | Primary tool family | Why this family |
+|---|---|---|---|
+| **Per-file / per-symbol** | "read this file", "find this function body", "edit line 42", "diagnostics on this file" | **AFT** (`aft_read`, `aft_zoom`, `aft_search`, `aft_outline`, `aft_inspect`, `aft_callgraph`, `aft_import`) | Indexed Rust reader, sub-second, no graph dependency |
+| **Cross-file within one package** | "all callers of X across `pi/src/tools/luban/`", "what does this module export" | **AFT** (multi-file is still AFT's strength; use `aft_search` + `aft_zoom`) | AFT resolves imports/re-exports; faster than graph for ≤1 package |
+| **Cross-package / project-wide** | "who calls X across all packages", "what does my git diff affect", "project architecture / module boundaries", "find by qualified name" | **codebase-memory-mcp** (`codebase_memory_trace_path`, `codebase_memory_detect_changes`, `codebase_memory_get_architecture`, `codebase_memory_search_graph`, `codebase_memory_get_code_snippet`) | Multi-hop BFS, pre-indexed call graph, blast-radius from diff |
+| **Cross-service / runtime topology** | "HTTP call from frontend → backend", "channel boundaries", "service dependencies" | **codebase-memory-mcp** `cross_service` mode or `get_architecture boundaries` | Only codebase-memory models HTTP_CALLS / ASYNC_CALLS / CHANNEL edges |
+| **Concept / semantic** | "how does auth work across the codebase", "where is rate limiting implemented", "find by concept, not exact name" | **graphify** (`graphify_query`, `graphify_shortest_path`, `graphify_god_nodes`) or `codebase_memory_search_graph` with `semantic_query` | Embedding similarity bridges vocabulary gaps ("publish" → "send") |
+| **Complexity / hotspot** | "where are O(n²) loops", "which functions are recursive", "what's the worst-case nested-loop depth" | **codebase-memory-mcp** `query_graph` with `complexity` / `loop_depth` / `transitive_loop_depth` properties | AFT inspect doesn't compute cyclomatic/cognitive complexity |
+| **Cross-session memory** | "what did we decide about X", "where did Y live", "what did we change last week" | **Magic Context** (`ctx_search`, `ctx_expand`, `ctx_memory`, `ctx_note`) | Cross-session recall; AFT/graph only see current files |
+| **Process-enforced workflow** | "I need design → review → execute → audit", "I want a score-gated plan", "I want a phased audit" | **Sages** (`fuxi_design`, `qiaochui_*`, `luban_*`, `gaoyao_*`) — **opt-in, see §3** | Enforces discipline; does not navigate |
+
+### Escalation rule (when to climb the ladder)
+
+```
+                  ┌─ codebase-memory-mcp ──┐
+                  │   (cross-package)      │
+                  │                        │
+   AFT ───────────┼────────────────────────┼──── graphify
+   (per-file,     │                        │     (concept,
+    ≤1 package)   │                        │      semantic)
+                  │                        │
+                  └────────────────────────┘
+                              │
+                              ↓
+                    Magic Context (cross-session)
+                              │
+                              ↓
+                    Sages (process, opt-in only)
+```
+
+- **Start at AFT** for any file-level question. If AFT finds it, stop.
+- **Escalate to codebase-memory-mcp** when: the answer spans ≥2 packages, you need pre-/post-diff blast radius, or you need a call-graph BFS deeper than 2 hops.
+- **Escalate to graphify** when: the question is concept-level ("how does X work"), or vocabulary gap blocks lexical search.
+- **Reach for Magic Context** when: the answer might be in a previous session, decision history, or parked note — *not* in current files.
+- **Reach for Sages** when: the user explicitly wants a 4-phase enforced loop (design → review → execute → audit). Do **not** use sages for free-form exploration — AFT + codebase-memory + Magic Context already cover that.
+
+### Common mis-routes to avoid
+
+| Tempting move | Why it's wrong | Correct move |
+|---|---|---|
+| `codebase_memory_search_graph` to find a symbol in one file | Graph round-trip slower than `aft_search` + `aft_zoom` | Use AFT |
+| `aft_search` + `grep` chain to find cross-package callers | O(n) grep; misses re-exports | `codebase_memory_trace_path` |
+| `git diff` + manual chase for blast radius | Manual, error-prone | `codebase_memory_detect_changes` |
+| Reading 20 files to understand project structure | Slow, redundant | `codebase_memory_get_architecture` (one call) |
+| `fuxi_design` for "fix this typo" | Sages add no value for trivial work | Use AFT directly |
+| `bash grep` to search code | Unindexed, unranked | `aft_search` or `codebase_memory_search_code` |
+
 ## 2. Semantic Tool Catalog (what each tool does)
 
 ### `aft_*` — AFT-backed semantic layer (provided by `@cortexkit/aft-pi`)
@@ -79,7 +130,9 @@ Use for **concept-level** search (cross-module, semantic):
 - Shell commands (`bash`) — no semantic equivalent
 - `ls` / `find` / `grep` — only when no semantic tool fits (rare; see §1 table)
 
-## 3. Sage Role Tools (7 tools across 4 roles)
+## 3. Sage Role Tools (7 tools across 4 roles) — opt-in for process-heavy work
+
+> **When to use the sages:** only when the user wants a discipline-enforced loop (design → review → execute → audit) — e.g. for compliance, reproducibility, less-capable models, or explicit gate-based progression. For free-form exploration, bug fixes, code reading, or refactoring, **do not** invoke the sages by default — reach for AFT + codebase-memory-mcp + Magic Context directly (see §1.5). The sages coordinate *process*; they do not navigate *code*.
 
 The 7 sage tools coordinate via **observe cycles** (call tool → read `auto_advanced` → next call). Each returns `{status, intent, validation}`. Status is included in every response — no separate status tool. Reset/discard is a flag on init, not a separate tool. **Deprecated tool names remain as stubs that return `isError` with redirect hints** — never call them.
 
