@@ -1,0 +1,41 @@
+{
+	// ════════════════════════════════════════════════════════════════════════
+	// AFT (Agent File Tools) configuration template — installed by
+	// `pi/scripts/install.sh` to ~/.config/cortexkit/aft.jsonc on the
+	// user's machine. SAGES_TEMPLATE_V1 is the sentinel that
+	// uninstall_aft_config() uses to distinguish "our template" from a
+	// user's hand-edited config (so uninstall only removes the former).
+	//
+	// Per-session fields (harness, project_root) are set by the AFT
+	// bridge at session start (see pi/src/tools/aft/project.ts), so
+	// this template only carries persistent defaults + feature flags.
+	// ════════════════════════════════════════════════════════════════════════
+	"$schema": "https://raw.githubusercontent.com/cortexkit/aft/main/assets/aft.schema.json",
+	// SAGES_TEMPLATE_V1 — DO NOT REMOVE. Uninstall detects this to avoid clobbering
+	// users who have customized their config.
+	"_sages_template_marker": "SAGES_TEMPLATE_V1",
+
+	// ─── Feature flags ───────────────────────────────────────────────────────
+	// Without these, AFT runs in "degraded" mode (verified 2026-07-19):
+	//   - search_index: false → every grep is a full scan instead of trigram lookup
+	//   - semantic_search: false → no embedding-based concept search
+	//   - validate_on_edit: "off" → writes/edits skip syntax check (catches typos later)
+	// ─────────────────────────────────────────────────────────────────────────
+	"search_index": true,
+	"semantic_search": true,
+	"validate_on_edit": "syntax",
+
+	// ─── Safety ──────────────────────────────────────────────────────────────
+	// backup: true → aft_safety.snapshot() can undo writes/edits (used by
+	//                    sages_write_file, sages_replace_symbol).
+	// restrict_to_project_root: false → users may search/read outside their
+	//                    project (e.g., workspace peers in ~/.pi/packages/).
+	// ─────────────────────────────────────────────────────────────────────────
+	"backup": true,
+	"restrict_to_project_root": false
+
+	// ─── Per-session (NOT pinned here — bridge sets these on session_start) ──
+	// "harness": "pi"              // set by aft/project.ts ensureConfigured()
+	// "project_root": "<dynamic>"  // set by aft/project.ts ensureConfigured()
+	// ─────────────────────────────────────────────────────────────────────────
+}

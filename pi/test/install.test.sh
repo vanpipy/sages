@@ -394,3 +394,199 @@ echo "✅ PASS: uninstall() invokes uninstall_pi_aft"
 grep -q "pi-aft" "$SCRIPT" \
   || { echo "❌ FAIL: pi-aft not mentioned in install.sh help/comments"; exit 1; }
 echo "✅ PASS: pi-aft referenced in install.sh"
+
+# ────────────────────────────────────────────────────────────
+# T3: AFT config template (2026-07-19)
+# Validates: pi/templates/aft.jsonc exists + install.sh copies it to
+# ~/.config/cortexkit/aft.jsonc so AFT runs with feature flags enabled
+# (search_index, semantic_search, validate_on_edit) instead of degraded defaults.
+# ────────────────────────────────────────────────────────────
+
+AFT_TEMPLATE="$(cd "$(dirname "$SCRIPT")/.." && pwd)/templates/aft.jsonc"
+
+# Test T3.1: aft.jsonc template file exists
+test -f "$AFT_TEMPLATE" \
+  || { echo "❌ FAIL: aft.jsonc template missing at $AFT_TEMPLATE"; exit 1; }
+echo "✅ PASS: pi/templates/aft.jsonc exists"
+
+# Test T3.2: template is valid JSONC (parses with comment-stripping)
+python3 -c "
+import json, re
+with open('$AFT_TEMPLATE') as f:
+    raw = f.read()
+# Strip // comments and /* */ blocks (minimal JSONC support)
+raw = re.sub(r'/\*.*?\*/', '', raw, flags=re.DOTALL)
+raw = re.sub(r'(?m)^\s*//.*$', '', raw)
+try:
+    json.loads(raw)
+    print('✅ PASS: aft.jsonc parses as valid JSON')
+except Exception as e:
+    print(f'❌ FAIL: aft.jsonc invalid JSON: {e}')
+    exit(1)
+"
+
+# Test T3.3: template enables the three critical feature flags
+# (these are what we observed as missing in the broken default state)
+for flag in 'search_index' 'semantic_search' 'validate_on_edit'; do
+  grep -q "\"$flag\"" "$AFT_TEMPLATE" \
+    || { echo "❌ FAIL: feature flag '$flag' missing from template"; exit 1; }
+done
+echo "✅ PASS: template enables search_index + semantic_search + validate_on_edit"
+
+# Test T3.4: template uses harness=pi (only valid harness in pi extension context)
+grep -q '"harness".*"pi"' "$AFT_TEMPLATE" \
+  || { echo "❌ FAIL: harness not set to 'pi' in template"; exit 1; }
+echo "✅ PASS: template harness=pi"
+
+# Test T3.5: template does NOT pin project_root (per-session via ensureConfigured)
+# Pinning would break multi-project users (e.g., user runs sages in repo A, then repo B)
+# JSON-aware check: strip JSONC comments first, then parse and inspect keys.
+python3 -c "
+import json, re
+with open('$AFT_TEMPLATE') as f:
+    raw = f.read()
+raw = re.sub(r'/\*.*?\*/', '', raw, flags=re.DOTALL)
+raw = re.sub(r'(?m)^\s*//.*$', '', raw)
+parsed = json.loads(raw)
+if 'project_root' in parsed:
+    print('❌ FAIL: project_root pinned in template (should be per-session, not template)')
+    exit(1)
+print('✅ PASS: template does not pin project_root')
+"
+
+# Test T3.6: install_aft_config / uninstall_aft_config / is_aft_config_installed /
+# is_aft_config_degraded defined
+for fn in install_aft_config uninstall_aft_config is_aft_config_installed is_aft_config_degraded; do
+  grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
+    || { echo "❌ FAIL: function $fn not defined in install.sh"; exit 1; }
+done
+echo "✅ PASS: 4 AFT config functions defined"
+
+# Test T3.7: install() flow calls install_aft_config
+sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_aft_config" \
+  || { echo "❌ FAIL: install() does not call install_aft_config"; exit 1; }
+echo "✅ PASS: install() invokes install_aft_config"
+
+# Test T3.8: uninstall() flow calls uninstall_aft_config
+sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_aft_config" \
+  || { echo "❌ FAIL: uninstall() does not call uninstall_aft_config"; exit 1; }
+echo "✅ PASS: uninstall() invokes uninstall_aft_config"
+
+# Test T3.9: AFT_CONFIG_PATH / AFT_TEMPLATE constants defined
+grep -qE '^AFT_CONFIG_PATH=' "$SCRIPT" \
+  || { echo "❌ FAIL: AFT_CONFIG_PATH constant missing"; exit 1; }
+grep -qE '^AFT_TEMPLATE=' "$SCRIPT" \
+  || { echo "❌ FAIL: AFT_TEMPLATE constant missing"; exit 1; }
+echo "✅ PASS: AFT_CONFIG_PATH + AFT_TEMPLATE constants defined"
+
+# Test T3.10: behavioral — install_aft_config creates file when missing
+TMPDIR3="$(mktemp -d)"
+FAKE_HOME3="$TMPDIR3/home"
+mkdir -p "$FAKE_HOME3/.config/cortexkit"
+export HOME="$FAKE_HOME3"
+
+# Extract AFT config functions for behavioral test
+# Note: AFT_TEMPLATE constant in install.sh is defined as
+#   AFT_TEMPLATE="$SCRIPT_DIR/../templates/aft.jsonc"
+# where SCRIPT_DIR is the scripts/ directory. Set it accordingly here so
+# the extracted constant resolves correctly inside the test scope.
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+{
+  awk '/^AFT_CONFIG_PATH=/' "$SCRIPT"
+  awk '/^AFT_TEMPLATE=/' "$SCRIPT"
+  for fn in install_aft_config uninstall_aft_config is_aft_config_installed is_aft_config_degraded; do
+    extract_fn "$fn"
+  done
+} > "$TMPDIR3/aft-config-fns.sh"
+# shellcheck disable=SC1090
+source "$TMPDIR3/aft-config-fns.sh"
+
+# File doesn't exist yet — should install
+test ! -f "$HOME/.config/cortexkit/aft.jsonc" \
+  || { echo "❌ FAIL: pre-test state wrong (file should not exist)"; exit 1; }
+
+install_aft_config
+
+test -f "$HOME/.config/cortexkit/aft.jsonc" \
+  || { echo "❌ FAIL: install_aft_config did not create aft.jsonc"; exit 1; }
+echo "✅ PASS: install_aft_config creates ~/.config/cortexkit/aft.jsonc when missing"
+
+# Test T3.11: file content matches template
+diff -q "$AFT_TEMPLATE" "$HOME/.config/cortexkit/aft.jsonc" > /dev/null \
+  || { echo "❌ FAIL: installed file does not match template"; diff "$AFT_TEMPLATE" "$HOME/.config/cortexkit/aft.jsonc"; exit 1; }
+echo "✅ PASS: installed file matches template byte-for-byte"
+
+# Test T3.12: idempotent — second install without --force skips (no clobber)
+ORIGINAL_CONTENT="$(cat "$HOME/.config/cortexkit/aft.jsonc")"
+echo "// user customization" >> "$HOME/.config/cortexkit/aft.jsonc"
+install_aft_config  # should NOT overwrite without --force
+grep -q "// user customization" "$HOME/.config/cortexkit/aft.jsonc" \
+  || { echo "❌ FAIL: idempotent install clobbered user customization"; exit 1; }
+echo "✅ PASS: install_aft_config is idempotent (does not clobber existing file)"
+
+# Test T3.13: --force overwrites
+FORCE=true install_aft_config
+diff -q "$AFT_TEMPLATE" "$HOME/.config/cortexkit/aft.jsonc" > /dev/null \
+  || { echo "❌ FAIL: FORCE=true did not overwrite"; exit 1; }
+echo "✅ PASS: FORCE=true install_aft_config overwrites existing file"
+
+# Test T3.14: upgrade path — degraded empty file (only $schema) gets replaced
+cat > "$HOME/.config/cortexkit/aft.jsonc" <<'EOF'
+{
+  "$schema": "https://example.com/schema.json"
+}
+EOF
+install_aft_config
+# Degraded file (only $schema, no real config) should be upgraded
+diff -q "$AFT_TEMPLATE" "$HOME/.config/cortexkit/aft.jsonc" > /dev/null \
+  || { echo "❌ FAIL: degraded empty file not upgraded"; exit 1; }
+echo "✅ PASS: install_aft_config upgrades degraded empty file (only \$schema)"
+
+# Test T3.15: user-customized file (large, with custom flags) is NOT clobbered
+cat > "$HOME/.config/cortexkit/aft.jsonc" <<'EOF'
+{
+  "harness": "pi",
+  "search_index": false,
+  "semantic_search": false,
+  "validate_on_edit": "off",
+  "backup": false,
+  "custom_user_flag": "important_value",
+  "experimental_feature_x": true
+}
+EOF
+install_aft_config
+grep -q '"custom_user_flag"' "$HOME/.config/cortexkit/aft.jsonc" \
+  || { echo "❌ FAIL: user-customized file was clobbered (custom flag lost)"; exit 1; }
+echo "✅ PASS: install_aft_config respects user-customized files"
+
+# Test T3.16: uninstall removes the file (when it was our template)
+# Reset: remove leftover file, then run install_aft_config with --force so
+# it overwrites any leftover state from previous tests.
+rm -f "$HOME/.config/cortexkit/aft.jsonc"
+install_aft_config  # fresh install of our template
+test -f "$HOME/.config/cortexkit/aft.jsonc" \
+  || { echo "❌ FAIL: setup for uninstall test failed"; exit 1; }
+grep -q 'SAGES_TEMPLATE_V1' "$HOME/.config/cortexkit/aft.jsonc" \
+  || { echo "❌ FAIL: setup didn't install our template (no sentinel)"; cat "$HOME/.config/cortexkit/aft.jsonc"; exit 1; }
+uninstall_aft_config
+test ! -f "$HOME/.config/cortexkit/aft.jsonc" \
+  || { echo "❌ FAIL: uninstall_aft_config did not remove file"; exit 1; }
+echo "✅ PASS: uninstall_aft_config removes file (when our template)"
+
+# Test T3.17: uninstall leaves user-customized file alone
+cat > "$HOME/.config/cortexkit/aft.jsonc" <<'EOF'
+{
+  "harness": "pi",
+  "custom_user_flag": "keep_me"
+}
+EOF
+uninstall_aft_config
+test -f "$HOME/.config/cortexkit/aft.jsonc" \
+  || { echo "❌ FAIL: uninstall removed user-customized file"; exit 1; }
+grep -q "custom_user_flag" "$HOME/.config/cortexkit/aft.jsonc" \
+  || { echo "❌ FAIL: user-customized file content lost"; exit 1; }
+echo "✅ PASS: uninstall_aft_config leaves user-customized file alone"
+
+# Cleanup test 3
+rm -rf "$TMPDIR3"
+unset HOME

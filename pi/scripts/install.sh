@@ -8,8 +8,8 @@
 # pi-aft (via aft-pi extension) — AFT-backed code analysis (replaces serena, no LSP needed)
 #
 # Selective install options:
-#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-aft, pi-semantic-nudge and SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, pi-semantic-nudge)
+#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-semantic-nudge and SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-semantic-nudge)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -28,6 +28,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # SYSTEM.md template (single source of truth for all three install scripts: .sh / .ps1 / .bat)
 SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
+
+# AFT config template — copied to ~/.config/cortexkit/aft.jsonc so AFT
+# daemon starts with feature flags enabled (search_index, semantic_search,
+# validate_on_edit) instead of degraded defaults.
+# SAGES_TEMPLATE_V1 sentinel in the template lets uninstall_aft_config()
+# distinguish "our template" from a user's hand-edited config.
+AFT_TEMPLATE="$SCRIPT_DIR/../templates/aft.jsonc"
+AFT_CONFIG_PATH="$HOME/.config/cortexkit/aft.jsonc"
 
 # pi-memory package info
 PI_MEMORY_PKG="npm:@samfp/pi-memory"
@@ -83,8 +91,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-aft, pi-semantic-nudge, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, pi-semantic-nudge)"
+  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-semantic-nudge, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-semantic-nudge)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -917,6 +925,98 @@ except Exception as e:
   echo "  pi-aft uninstalled"
 }
 
+# ──────────────────────────────────────────────────────────────────
+# AFT config (~/.config/cortexkit/aft.jsonc) — feature flags template
+# ──────────────────────────────────────────────────────────────────
+
+# Returns true if $AFT_CONFIG_PATH exists and carries our SAGES_TEMPLATE_V1
+# sentinel. Used by uninstall_aft_config() to decide whether the file was
+# installed by us (safe to remove) or hand-edited by the user (leave alone).
+is_aft_config_installed() {
+  [[ -f "$AFT_CONFIG_PATH" ]] && \
+    grep -q 'SAGES_TEMPLATE_V1' "$AFT_CONFIG_PATH" 2>/dev/null
+}
+
+# Copy templates/aft.jsonc → ~/.config/cortexkit/aft.jsonc.
+#
+# Idempotency rules:
+#   1. File missing → install template.
+#   2. File exists, carries our SAGES_TEMPLATE_V1 sentinel → skip (already installed).
+#   3. File exists, "degraded" (only $schema key, no other config) →
+#      install template (upgrade path — user benefits from real feature flags).
+#   4. File exists, "user-customized" (has any other config keys) → skip unless --force.
+#
+# "Degraded" detection is JSON-aware (not byte-count based): we parse the
+# file and check whether it has any meaningful config keys beyond $schema.
+# This avoids both false positives (clobbering small-but-valid customizations)
+# and false negatives (missing truly-empty configs).
+#
+# Per-session fields (harness, project_root) are NOT in the template; the
+# AFT bridge sets them at session start via ensureConfigured(). Pinning them
+# here would break multi-project users (run sages in repo A, then repo B).
+install_aft_config() {
+  if [[ ! -f "$AFT_TEMPLATE" ]]; then
+    echo "  Warning: AFT template not found at $AFT_TEMPLATE"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$AFT_CONFIG_PATH")"
+
+  # Already installed by us → skip.
+  if is_aft_config_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  AFT config already installed (use --force to reinstall)"
+    return 0
+  fi
+
+  # Degraded file detection (JSON-aware): no meaningful config keys.
+  # This is the case we hit in production 2026-07-19: just $schema, no flags.
+  if [[ -f "$AFT_CONFIG_PATH" ]] && ! is_aft_config_degraded; then
+    # Has real config (user-customized) → preserve.
+    echo "  AFT config already exists with user customization (use --force to overwrite)"
+    return 0
+  fi
+
+  if [[ -f "$AFT_CONFIG_PATH" ]] && is_aft_config_degraded; then
+    echo "  Upgrading degraded AFT config (only \$schema, no feature flags)"
+  fi
+
+  # Fresh install, --force overwrite, or upgrade from degraded state.
+  cp "$AFT_TEMPLATE" "$AFT_CONFIG_PATH"
+  echo "  Installed AFT config from template (feature flags enabled)"
+}
+
+# Returns true if AFT_CONFIG_PATH exists but has no meaningful config —
+# only the $schema reference (or unparseable JSON). Used by install_aft_config
+# to detect the "degraded empty" state we observed in production 2026-07-19.
+is_aft_config_degraded() {
+  [[ ! -f "$AFT_CONFIG_PATH" ]] && return 0  # missing = trivially degraded
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$AFT_CONFIG_PATH'))
+    # 'Degraded' = no config keys beyond \$schema and our marker
+    meaningful = [k for k in d if k not in ('\$schema', '_sages_template_marker')]
+    sys.exit(0 if not meaningful else 1)
+except Exception:
+    # Unparseable JSON — treat as degraded (we'll overwrite)
+    sys.exit(0)
+" 2>/dev/null
+}
+
+# Remove $AFT_CONFIG_PATH ONLY if it carries our SAGES_TEMPLATE_V1 sentinel.
+# Hand-edited user configs are left untouched.
+uninstall_aft_config() {
+  if [[ ! -f "$AFT_CONFIG_PATH" ]]; then
+    return 0
+  fi
+  if is_aft_config_installed; then
+    rm -f "$AFT_CONFIG_PATH"
+    echo "  Removed AFT config (was our template)"
+  else
+    echo "  AFT config is user-customized, leaving alone"
+  fi
+}
+
 install_semantic_nudge_files() {
   local src_root="$TMP_DIR/$PI_SEMANTIC_NUDGE_SRC_REL"
   [[ ! -d "$src_root" ]] && {
@@ -1045,6 +1145,10 @@ install() {
   # Install pi-aft (replaces pi-serena; uses npm + npx setup)
   install_pi_aft || true
 
+  # Install AFT config template → ~/.config/cortexkit/aft.jsonc
+  # (must run AFTER install_pi_aft, since AFT setup creates the file as empty)
+  install_aft_config
+
   # Install pi-codebase-memory sage peer (file copy from TMP_DIR/pi-codebase-memory + settings.json register).
   # Old design had two steps (install_pi_codebase_memory + install_pi_codebase_memory_files); merged into one
   # after we dropped the npm:pi-codebase-memory (R-Dson) variant in favor of the local peer only.
@@ -1084,7 +1188,7 @@ install() {
 # 模式 2:仅更新 sages(跳过 pi-memory、pi-codebase-memory 和 SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-memory, pi-codebase-memory, pi-aft, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, skip SYSTEM.md)..."
 
   # Pre-flight: pi 仍然需要(sages 是 pi extension)
   install_pi_if_needed
@@ -1097,8 +1201,8 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_memory / install_pi_codebase_memory / install_pi_aft / install_system_prompt
-  echo "  (skipped: pi-memory, pi-codebase-memory, pi-aft, SYSTEM.md)"
+  # 显式不调用 install_pi_memory / install_pi_codebase_memory / install_pi_aft / install_aft_config / install_system_prompt
+  echo "  (skipped: pi-memory, pi-codebase-memory, pi-aft, AFT config, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1108,10 +1212,10 @@ install_sages_only() {
 # 模式 3:仅更新 SYSTEM.md(跳过 sages、pi-memory 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-memory, pi-codebase-memory, pi-aft)..."
+  echo "==> Installing SYSTEM.md only (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config)..."
   # 不需要 git / pi —— SYSTEM.md 是独立 markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-memory, pi-codebase-memory, pi-aft)"
+  echo "  (skipped: sages, pi-memory, pi-codebase-memory, pi-aft, AFT config)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1121,7 +1225,7 @@ install_system_only() {
 # 卸载(同时移除 sages、pi-memory 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-memory + pi-codebase-memory + pi-aft + pi-semantic-nudge..."
+  echo "==> Uninstalling sages + pi-memory + pi-codebase-memory + pi-aft + pi-semantic-nudge + AFT config..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1146,6 +1250,9 @@ uninstall() {
 
   # Uninstall pi-aft (replaces pi-serena)
   uninstall_pi_aft
+
+  # Uninstall AFT config template (only if it's our template, not user-edited)
+  uninstall_aft_config
 
   # Uninstall pi-semantic-nudge (sage peer)
   uninstall_pi_semantic_nudge
