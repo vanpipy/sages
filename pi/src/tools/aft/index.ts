@@ -21,7 +21,7 @@
 export { resolveAftBinary, AftBinaryNotFoundError, __resetAftBinaryCache } from "./binary.js";
 export { snapshot, restoreFromSnapshot } from "./safety.js";
 export { ensureConfigured, __clearSessionCache } from "./project.js";
-export { warmupCallgraph, __waitForWarmups, __clearWarmups } from "./warmup.js";
+export { warmupCallgraph, __waitForWarmups, __clearWarmups, ensureReady, __resetReadyState } from "./warmup.js";
 export { AftBridge, bridgeFor, __shutdownBridge } from "./bridge.js";
 export {
 	AftErrorBase,

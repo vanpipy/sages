@@ -6,7 +6,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { bridgeFor } from "../aft/index.js";
+import { bridgeFor, ensureReady } from "../aft/index.js";
 
 export function registerSagesSearch(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -20,6 +20,19 @@ export function registerSagesSearch(pi: ExtensionAPI): void {
 			max: Type.Optional(Type.Number({ description: "Max matches to return (default: 50)" })),
 		}),
 		async execute(_id, params) {
+			const projectRoot = params.path && params.path !== "." ? process.cwd() : process.cwd();
+			try {
+				await ensureReady(projectRoot);
+			} catch (err) {
+				return {
+					content: [{
+						type: "text",
+						text: `[AFT] not ready: ${(err as Error).message}. Run \`aft configure\` or check ~/.config/cortexkit/aft.jsonc.`,
+					}],
+					isError: true,
+					details: {},
+				};
+			}
 			const bridge = bridgeFor();
 			const result = await bridge.grep(params.pattern, params.path ?? ".", {
 				max: params.max,

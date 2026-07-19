@@ -7,7 +7,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { bridgeFor } from "../aft/index.js";
+import { bridgeFor, ensureReady } from "../aft/index.js";
 
 export function registerSagesReadFile(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -21,6 +21,18 @@ export function registerSagesReadFile(pi: ExtensionAPI): void {
 			limit: Type.Optional(Type.Number({ description: "Max lines to return" })),
 		}),
 		async execute(_id, params) {
+			try {
+				await ensureReady(process.cwd());
+			} catch (err) {
+				return {
+					content: [{
+						type: "text",
+						text: `[AFT] not ready: ${(err as Error).message}. Run \`aft configure\` or check ~/.config/cortexkit/aft.jsonc.`,
+					}],
+					isError: true,
+					details: {},
+				};
+			}
 			const bridge = bridgeFor();
 			const result = await bridge.read(params.path, {
 				offset: params.offset,
