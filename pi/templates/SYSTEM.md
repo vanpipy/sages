@@ -89,12 +89,12 @@ The 10 sage tools coordinate via **observe cycles** (call tool → read `auto_ad
 
 | Role | Chinese | Function | Surface |
 |---|---|---|---|
-| **Fuxi** | 伏羲 | Architect | `fuxi_start`, `fuxi_design` (observe cycle), `fuxi_end` |
+| **Fuxi** | 伏羲 | Architect | `fuxi_design` (observe cycle, auto-inits) |
 | **QiaoChui** | 巧倕 | Technical expert | `qiaochui_review` (auto-writes score), `qiaochui_decompose` |
-| **LuBan** | 鲁班 | Craftsman | `luban_execute_task` (observe cycle), `luban_run_batch` (planner) |
+| **LuBan** | 鲁班 | Craftsman | `luban_execute_task` (observe cycle) |
 | **GaoYao** | 皋陶 | Auditor | `gaoyao_audit`, `gaoyao_observe` (file_read + finding, auto-advance), `gaoyao_finalize` |
 
-### Workflow phases (auto-advance)
+### Role-based interaction (LLM routes via natural language)
 
 ```
 [fuxi_design observe cycle]
@@ -103,22 +103,17 @@ The 10 sage tools coordinate via **observe cycles** (call tool → read `auto_ad
   qiaochui_review { observation: {score:N} }                    → auto-writes state.score
   → fuxi_design { observation: {phase:"review", score:N} }      → if N ≥ 80, advance
   qiaochui_decompose → execution.yaml
-  → fuxi_design { observation: {phase:"plan", approved:true} }   → complete
+  → fuxi_design { observation: {phase:"plan"} }                 → complete
                   ↓
-[luban_run_batch → ordered plan + first task]
 [luban_execute_task observe cycle per task]
   RED → GREEN → REFACTOR → complete   (4 tool calls per task)
+  LLM reads execution.yaml directly via semantic tools to iterate
                   ↓
 [gaoyao_audit / gaoyao_observe / gaoyao_finalize]
   ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH → verdict
-                  ↓
-[fuxi_end]
-  PASS → archive | NEEDS_CHANGES → LuBan | REJECTED → Fuxi
 ```
 
-The only manual gates are:
-- **User**: `/sages-plan` (slash command) to approve plan after review
-- **User**: `/sages-init` (one-time setup), `/sages-plan` (the REQUIRED manual approval gate)
+There are no manual gates — the LLM progresses through phases by calling each role's tools in sequence. Status is included in every response.
 
 ### Default tool per phase
 

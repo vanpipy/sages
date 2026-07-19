@@ -1,10 +1,10 @@
-# Four Sages Workflow
+# Four Sages
 
-Four Sages Agents workflow for [pi coding agent](https://pi.dev) — a multi-agent system for software engineering tasks.
+Four role-based agents for [pi coding agent](https://pi.dev) — a multi-agent system for software engineering tasks where the LLM routes between roles via natural language.
 
 ## Overview
 
-Named after four sage figures from Chinese mythology, representing the complete software engineering lifecycle:
+Named after four sage figures from Chinese mythology, each representing a stage of the software engineering lifecycle:
 
 | Sage | Title | Responsibility | Output |
 |------|-------|---------------|--------|
@@ -48,107 +48,78 @@ cd sages
 .\pi\scripts\install.ps1
 ```
 
-## Commands
+## Tools (Simplified Surface)
 
-### Workflow Commands
+Each role exposes a small set of tools with observe-cycle semantics. The LLM calls each tool; the tool validates state and returns the next contract.
 
-#### Fuxi ( Design)
+### Fuxi (Design)
 
-| Command | Description |
-|---------|-------------|
-| `fuxi-start` | Start workflow, set design phase |
-| `fuxi-request` | Create draft.md |
-| `fuxi-plan <score>` | Transition to plan (only if score > 80) |
-| `fuxi-recover` | Recover from state.json |
-| `fuxi-end` | End workflow, archive |
-| `fuxi-get-status` | View current status |
+| Tool | Purpose |
+|------|---------|
+| `fuxi_design` | Observe cycle: `design → review → plan`. Auto-inits on first call. Validates `draft.md` (tier-aware byte floor + Scope), advances on `score ≥ 80`, marks plan complete. |
 
-#### QiaoChui ( Review)
+### QiaoChui (Review)
 
-| Command | Description |
-|---------|-------------|
-| `qiaochui-review` | Review draft, set score in state.json |
-| `qiaochui-decompose` | Create plan.md and execution.yaml |
+| Tool | Purpose |
+|------|---------|
+| `qiaochui_review` | Review `draft.md`. Without observation: returns heuristic hints + semantic-tool guidance. With `observation: { score }`: auto-writes the score to `state.json` and returns verdict (`APPROVED`/`REVISE`/`REJECTED`, threshold ≥ 80). |
+| `qiaochui_decompose` | Generate `plan.md` + `execution.yaml` from approved draft. Reads `draft.md` Scope section to size the task list. |
 
-#### LuBan ( Execute)
+### LuBan (Execute)
 
-| Command | Description |
-|---------|-------------|
-| `luban-execute-task` | Execute a single task using TDD |
-| `luban-execute-all` | Execute all tasks from execution.yaml |
-| `luban-get-status` | Get TDD execution status |
+| Tool | Purpose |
+|------|---------|
+| `luban_execute_task` | Single task with observe cycle `RED → GREEN → REFACTOR → complete`. Re-runs the test command to validate each phase. LLM does the actual coding via `serena_*` / `codebase_memory_*` / `graphify_*`; LuBan only validates outcomes. |
 
-#### GaoYao ( Audit)
+### GaoYao (Audit)
 
-| Command | Description |
-|---------|-------------|
-| `gaoyao-review` | Quality audit (phase-guided) |
-| `gaoyao-check-security` | Security scan |
+| Tool | Purpose |
+|------|---------|
+| `gaoyao_audit` | Initialize / reset / query the audit session. Auto-advances through `ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH → FINAL` as phase requirements are met. |
+| `gaoyao_observe` | Record a `file_read` or `finding` observation. Auto-advances when the current phase's requirement is satisfied (e.g., ≥ 5 file reads to exit ENUMERATE; ≥ 1 INK finding to enter NOSE). |
+| `gaoyao_finalize` | Write `audit.md` with the final verdict (`PASS`/`NEEDS_CHANGES`/`REJECTED`). Called when the session is in the FINAL phase. |
 
-## Workflow Flow
+## Role Interaction Flow
 
-### Approval Points
+The LLM drives the flow by calling each role's tools in sequence. There is no orchestrator runtime — the LLM is the router. Each tool returns its current phase, intent, and validation, so the LLM always knows what to do next.
 
-| Phase | Command | Description |
-|-------|---------|-------------|
-|  **Design** | `fuxi-plan <score>` | Transition to plan (only if score > 80) |
-|  **Review** | QiaoChui auto-proceeds | After review with score > 80 |
-| 📁 **Archive** | `fuxi-end` | End workflow and archive |
+```
+              ┌──────────────────┐
+              │   User Request   │
+              └────────┬─────────┘
+                       │
+                ┌──────▼──────┐
+                │ Fuxi Design │  fuxi_design (observe cycle)
+                │ 7 Planes    │  design → review → plan
+                └──────┬──────┘
+                       │
+                ┌──────▼──────┐
+                │QiaoChui     │  qiaochui_review (writes score)
+                │Review+Plan  │  qiaochui_decompose (execution.yaml)
+                └──────┬──────┘
+                       │
+                ┌──────▼──────┐
+                │LuBan        │  luban_execute_task per task
+                │TDD Cycle    │  RED → GREEN → REFACTOR
+                └──────┬──────┘
+                       │
+                ┌──────▼──────┐
+                │GaoYao       │  gaoyao_audit / observe / finalize
+                │Audit        │  ENUMERATE → … → DEATH → FINAL
+                └──────┬──────┘
+                       │
+                ┌──────▼──────┐
+                │ ✅ Verdict   │  PASS / NEEDS_CHANGES / REJECTED
+                └─────────────┘
+```
 
 ### Phase Progression
 
 ```
-idle → design → review → plan → execute → audit → complete
+design → review → plan → execute → audit
 ```
 
-## Complete Workflow
-
-```
-                    ┌─────────────┐
-                    │ User Request│
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │  Fuxi      │  Design
-                    │ MDD Design  │
-                    │ 7 Planes    │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │fuxi-request │     Create draft.md
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │  QiaoChui   │  Review
-                    │ qiaochui-   │
-                    │ review      │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │qiaochui-     │     Create tasks
-                    │decompose    │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │  LuBan      │  Execute
-                    │ luban-      │     (RED→GREEN→REFACTOR)
-                    │ execute-all │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │  GaoYao     │  Audit
-                    │ gaoyao-     │     (INK→NOSE→FOOT→CASTRATION→DEATH)
-                    │ review      │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │fuxi-end     │     Archive
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │   🎉 Complete│
-                    └─────────────┘
-```
+Each phase is owned by one role. There are no manual gates — the LLM progresses by reading the previous tool's response and calling the next role's tool.
 
 ## MDD Design Method
 
@@ -165,6 +136,23 @@ Four Sages uses **Multi-Dimensional Design (MDD)** for system architecture:
 | **Observation** | Data × Analysis | Monitoring |
 | **Security** | Identity × Permissions | Access control |
 | **Evolution** | Time × Change | Versioning & migration |
+
+### Scope & Tier
+
+For tasks that don't need all 7 planes, declare a Scope section in `draft.md`:
+
+```markdown
+## Scope
+- Tier: trivial | simple | standard
+- In scope: [Foundation, Business]
+- Out of scope (justified): Data, Control, Observation, Security, Evolution
+```
+
+| Tier | In-scope planes | Min draft bytes |
+|------|-----------------|-----------------|
+| `trivial` | 1 plane | 100 |
+| `simple`  | 2-3 planes | 250 |
+| `standard` | 4+ planes | 500 (default) |
 
 ## TDD Implementation
 
@@ -194,68 +182,19 @@ const formatted = TDD_GUIDE.formatError("GREEN", errorMsg);
 // Returns: Error + GREEN phase guidance
 ```
 
-## Execution Modes
-
-### 1. Subagent Mode (Default)
-
-Each task runs in an **isolated pi subprocess**:
-
-```
-┌─────────────────────────────────────────────────────┐
-│ Main Agent                                          │
-│                                                     │
-│   /qiaochui_decompose use_subagent=true           │
-│                      ↓                              │
-│   .sages/workspace/execution.yaml                    │
-│                      ↓                              │
-│ ┌─────────┬─────────┬─────────┐                     │
-│ │ LuBan #1│ LuBan #2│ LuBan #3│  ← maxParallel: 3│
-│ │   T1    │   T2    │   T3    │                   │
-│ └─────────┴─────────┴─────────┘                     │
-└─────────────────────────────────────────────────────┘
-```
-
-### 2. Shared Context Mode
-
-All tasks share the **same LLM context**:
-
-```
-┌─────────────────────────────────────────────────────┐
-│ Main Agent                                          │
-│                                                     │
-│   /qiaochui_decompose use_subagent=false          │
-│                      ↓                              │
-│ ┌─────────────────────────────────────────────┐   │
-│ │     Single LuBan (sequential)                │   │
-│ │     T1 → T2 → T3                            │   │
-│ └─────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────┘
-```
-
-## LuBan Module Architecture
-
-LuBan is modularized for maintainability:
-
-```
-src/tools/luban/
-├── index.ts          # Tool registration
-├── types.ts          # LubanTask, TDDConfig, TaskResult
-├── plan-parser.ts    # YAML parsing, dependency resolution
-└── task-runner.ts    # TDD execution + TDD_GUIDE
-```
-
-**Key Design**: `luban_execute_all` internally calls `luban_execute_task` (DRY principle)
-
 ## Execution Plan Configuration
+
+`qiaochui_decompose` writes `execution.yaml` based on the draft:
 
 ```yaml
 # Execution Plan
 name: user-management-api
 
 settings:
-  maxParallel: 3        # Max parallel subagents
-  useSubagent: true     # true = isolated, false = shared
-  maxRetry: 1           # Retry on failure
+  maxParallel: 3        # Max parallel iterations (used by LLM)
+  useSubagent: false    # Reserved for future subagent mode
+  maxRetry: 1           # Retry budget per task
+  autoCommit: false     # Commit on task complete
 
 tasks:
   - id: T1
@@ -269,12 +208,15 @@ tasks:
     dependsOn: [T1]
 ```
 
+The LLM reads this file via `serena_read_file` and iterates `luban_execute_task` per task in topological order.
+
 ## Audit Phases (GaoYao)
 
-Phase-guided auditing with 5 penalty categories:
+Phase-guided auditing with penalty categories:
 
 | Phase | Category | Focus | Penalty |
 |-------|----------|-------|---------|
+| ENUMERATE | 列刑 | File enumeration | (gate) |
 | INK | 墨刑 | Code style | Minor |
 | NOSE | 劓刑 | Naming/docs | Minor |
 | FOOT | 剕刑 | Architecture | Major |
@@ -284,26 +226,34 @@ Phase-guided auditing with 5 penalty categories:
 ## File Structure
 
 ```
-~/.pi/agent/
-├── npm/@sages/              # Installed package
-│   ├── dist/                # Built JavaScript
-│   ├── extensions/          # Extension config
-│   ├── skills/              # Fuxi, QiaoChui, LuBan, GaoYao
-│   └── prompts/             # Workflow templates
-│
-└── extensions/             # User extensions
-
 sages/pi/
 ├── src/
-│   ├── tools/               # Modular tools
-│   │   ├── fuxi/
-│   │   ├── qiaochui/
-│   │   ├── luban/
-│   │   └── gaoyao/
+│   ├── tools/               # Modular tools (one folder per role)
+│   │   ├── fuxi-tools.ts    # Fuxi: fuxi_design
+│   │   ├── qiaochui/        # QiaoChui: review + decompose
+│   │   ├── luban/           # LuBan: execute_task (TDD)
+│   │   └── gaoyao/          # GaoYao: audit + observe + finalize
 │   ├── services/            # FileService, WorkflowStateManager
-│   └── utils/               # model-helper, mode-checker
+│   └── utils/               # model-helper, mode-checker, scope-parser
+├── skills/                  # Per-role SKILL.md (5 files)
+├── templates/               # SYSTEM.md template
+├── scripts/                 # install.sh / install.ps1 / install.bat
 ├── test/                    # Unit tests (uses @/ alias)
 └── README.md
+```
+
+Runtime outputs are persisted to `.sages/workspace/` (created automatically on first tool call):
+
+```
+.sages/workspace/
+├── draft.md               # Fuxi design draft
+├── plan.md                # QiaoChui decomposition plan
+├── execution.yaml         # Task list
+├── audit.md               # GaoYao audit report
+├── state.json             # Review score + workflow state
+├── .fuxi-design-state.json
+├── .luban-task-state.json
+└── .gaoyao-session.json
 ```
 
 ## Security Practices
@@ -330,32 +280,35 @@ bun test ./test
 ## Examples
 
 ```
-You: fuxi-start user-api Create a REST API for user management
-pi: Workflow started: user-api
+You: design a user-management API
+pi: [Fuxi] Initializing design phase. Write draft.md to .sages/workspace/draft.md
+    using MDD Seven Planes (≥ 500 bytes for standard tier).
 
-You: fuxi-request Create a REST API for user management
-pi: Draft created: .sages/workspace/draft.md
+You: [write draft.md, then call fuxi_design with observation]
+pi: [Fuxi] Draft accepted (625 bytes). Advanced to review.
+    Run qiaochui_review to assess the draft.
 
-You: qiaochui-review
-pi: Score: 85 - APPROVED
+You: [call qiaochui_review with observation {score: 85}]
+pi: [QiaoChui] Score 85 → APPROVED. Plan can start.
 
-You: qiaochui-decompose
-pi: Tasks created: 4 tasks in execution.yaml
+You: [call fuxi_design with observation {phase:"review", score:85}]
+pi: [Fuxi] Advanced to plan. Run qiaochui_decompose to generate execution.yaml.
 
-You: fuxi-plan 85
-pi: Plan phase started
+You: [call qiaochui_decompose]
+pi: [QiaoChui] Wrote plan.md and execution.yaml (4 tasks).
 
-You: luban-execute-all
-pi: [LuBan] Executing 4 tasks...
+You: [call fuxi_design with observation {phase:"plan"}]
+pi: [Fuxi] Design complete. Iterate luban_execute_task per task in execution.yaml.
+
+You: [iterate luban_execute_task for T1, T2, T3, T4]
 pi: [LuBan] T1: RED → GREEN → REFACTOR ✓
-pi: [LuBan] T2, T3: Parallel execution...
-pi: [LuBan] All tasks complete! (4/4)
+    [LuBan] T2: RED → GREEN → REFACTOR ✓
+    [LuBan] T3: RED → GREEN → REFACTOR ✓
+    [LuBan] T4: RED → GREEN → REFACTOR ✓
 
-You: gaoyao-review
-pi: [GaoYao] Verdict: PASS (95%)
-
-You: fuxi-end
-pi: Workflow archived to .sages/archive/user-api/
+You: [call gaoyao_audit, then gaoyao_observe with file_read + finding, then gaoyao_finalize]
+pi: [GaoYao] Audit complete: ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH → FINAL
+    Verdict: PASS (95%)
 ```
 
 ## License

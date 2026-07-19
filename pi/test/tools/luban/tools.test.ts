@@ -1,15 +1,17 @@
 /**
- * LuBan Tools Tests — Simplified 2-tool surface
+ * LuBan Tools Tests — Single-tool surface
  *
  * Per the simplify-actions principle:
- *   - luban_execute_task: single task with observe cycle (RED → GREEN → REFACTOR → complete)
- *   - luban_run_batch: planner — reads execution.yaml, returns ordered plan + first contract
+ *   - luban_execute_task: single task with observe cycle (RED → GREEN → REFACTOR → complete).
+ *     The LLM reads execution.yaml directly via semantic tools to plan iteration order.
  *
  * The LLM does the actual implementation work via semantic tools
  * (serena_replace_symbol_body, etc.). LuBan only validates test outcomes.
  *
- * Removed: luban_get_status (status returned in every execute_task response).
- * Deprecated stub for luban_get_status returns isError with redirect hint.
+ * Removed: luban_run_batch (planner; LLM reads execution.yaml directly),
+ *          luban_get_status (status returned in every execute_task response).
+ * Deprecated stubs for luban_run_batch, luban_get_status, luban_execute_all,
+ * luban_execute_batch return isError with redirect hint to luban_execute_task.
  *
  * Removed: template stub generators (generateSourceTemplate, the
  * "export function xxx() { return {} }" GREEN-phase filler). The LLM
@@ -405,103 +407,16 @@ describe("luban_execute_task", () => {
 });
 
 // ---------------------------------------------------------------------------
-// luban_run_batch — planner (returns ordered plan + first contract)
+// Deprecated stubs — every old luban_* name returns isError with a redirect hint
+// pointing to luban_execute_task.
 // ---------------------------------------------------------------------------
 
-describe("luban_run_batch", () => {
+describe("deprecated LuBan stubs", () => {
   let cwd: string;
   let pi: ReturnType<typeof makePiStub>;
 
   beforeEach(async () => {
-    cwd = tmpDir("batch");
-    mkdirSync(join(cwd, ".sages/workspace"), { recursive: true });
-    // Write a sample execution.yaml
-    const executionYaml = `name: sample-plan
-settings:
-  maxParallel: 3
-  useSubagent: false
-  maxRetry: 1
-  autoCommit: true
-tasks:
-  - id: T1
-    description: "First task"
-    plane: Foundation
-    priority: 1
-    dependsOn: []
-    files: ["src/a.ts"]
-  - id: T2
-    description: "Second task depends on T1"
-    plane: Foundation
-    priority: 1
-    dependsOn: ["T1"]
-    files: ["src/b.ts"]
-  - id: T3
-    description: "Third task shares file with T2"
-    plane: Business
-    priority: 2
-    dependsOn: ["T2"]
-    files: ["src/b.ts"]
-`;
-    writeFileSync(join(cwd, ".sages/workspace/execution.yaml"), executionYaml);
-
-    const { registerLubanTools } = await import("../../../src/tools/luban/index.js");
-    pi = makePiStub();
-    registerLubanTools(pi as any);
-  });
-
-  afterEach(() => {
-    if (existsSync(cwd)) rmSync(cwd, { recursive: true, force: true });
-  });
-
-  it("reads execution.yaml and returns the plan", async () => {
-    const result = await pi.call("luban_run_batch", {}, cwd);
-
-    expect(result.isError).toBeFalsy();
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.status).toBe("in_progress");
-    expect(payload.plan).toBeDefined();
-    expect(payload.plan.task_ids).toHaveLength(3);
-    expect(payload.plan.task_ids).toEqual(["T1", "T2", "T3"]);
-  });
-
-  it("orders tasks topologically", async () => {
-    const result = await pi.call("luban_run_batch", {}, cwd);
-
-    const payload = JSON.parse(result.content[0].text);
-    const order = payload.plan.execution_order;
-    // T1 before T2, T2 before T3
-    expect(order.indexOf("T1")).toBeLessThan(order.indexOf("T2"));
-    expect(order.indexOf("T2")).toBeLessThan(order.indexOf("T3"));
-  });
-
-  it("detects file conflicts across batch", async () => {
-    const result = await pi.call("luban_run_batch", {}, cwd);
-
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.plan.conflicts).toBeDefined();
-    expect(payload.plan.conflicts).toContain("src/b.ts");
-  });
-
-  it("missing execution.yaml returns clear error", async () => {
-    rmSync(join(cwd, ".sages/workspace/execution.yaml"));
-    const result = await pi.call("luban_run_batch", {}, cwd);
-
-    expect(result.isError).toBe(true);
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.error.toLowerCase()).toContain("execution.yaml");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Deprecated: luban_get_status
-// ---------------------------------------------------------------------------
-
-describe("deprecated luban_get_status", () => {
-  let cwd: string;
-  let pi: ReturnType<typeof makePiStub>;
-
-  beforeEach(async () => {
-    cwd = tmpDir("status");
+    cwd = tmpDir("deprecated");
     mkdirSync(join(cwd, ".sages/workspace"), { recursive: true });
     const { registerLubanTools } = await import("../../../src/tools/luban/index.js");
     pi = makePiStub();
@@ -512,14 +427,22 @@ describe("deprecated luban_get_status", () => {
     if (existsSync(cwd)) rmSync(cwd, { recursive: true, force: true });
   });
 
-  it("returns isError with redirect hint", async () => {
-    const result = await pi.call("luban_get_status", { plan_name: "x" }, cwd);
+  const DEPRECATED = [
+    "luban_execute_all",
+    "luban_execute_batch",
+    "luban_get_status",
+  ];
 
-    expect(result.isError).toBe(true);
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.error.toLowerCase()).toContain("deprecated");
-    expect(payload.hint).toBeDefined();
-  });
+  for (const name of DEPRECATED) {
+    it(`${name} returns isError with redirect hint to luban_execute_task`, async () => {
+      const result = await pi.call(name, { plan_name: "x" }, cwd);
+      expect(result.isError).toBe(true);
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.error.toLowerCase()).toContain("deprecated");
+      expect(payload.hint).toBeDefined();
+      expect(payload.hint).toContain("luban_execute_task");
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

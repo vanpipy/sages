@@ -36,7 +36,7 @@ describe("AuditSessionManager", () => {
     it("should create a new session with default values", () => {
       const session = manager.create("full");
 
-      expect(session.id).toMatch(/^gaoyao-\d+$/);
+      expect(session.id).toMatch(/^gaoyao-\d+-[a-z0-9]+$/);
       expect(session.phase).toBe("INIT");
       expect(session.reviewMode).toBe("full");
       expect(session.filesEnumerated).toEqual([]);

@@ -241,7 +241,7 @@ export class AuditSessionManager {
     this.ensureWorkspace();
     
     const session: AuditSession = {
-      id: `gaoyao-${Date.now()}`,
+      id: `gaoyao-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       phase: "INIT",
       reviewMode,
       planName,

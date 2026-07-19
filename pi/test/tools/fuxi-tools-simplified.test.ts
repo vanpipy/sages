@@ -1,16 +1,15 @@
 /**
- * Fuxi Tools Tests — Simplified 3-tool surface
+ * Fuxi Tools Tests — Single-tool surface
  *
  * Per the simplify-actions principle:
- *   - fuxi_start: initialize workflow (state.json)
- *   - fuxi_design: observe cycle through design → review → plan
- *   - fuxi_end: verdict-driven end (PASS/NEEDS_CHANGES/REJECTED)
+ *   - fuxi_design: observe cycle through design → review → plan,
+ *     auto-inits design sub-phase on first call (absorbs old fuxi_start).
  *
  * Status returned in every response. No separate status tool.
  *
- * Deprecated stubs (6): fuxi_request, fuxi_plan, fuxi_recover,
- * fuxi_get_status, fuxi_update_score, fuxi_brainstorm_recovery.
- * All return isError with redirect hint to the new 3-tool surface.
+ * Deprecated stubs (5): fuxi_request, fuxi_plan, fuxi_recover,
+ * fuxi_get_status, fuxi_update_score.
+ * All return isError with redirect hint to fuxi_design.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -46,56 +45,7 @@ const tmpDir = (suffix: string) =>
   join("/tmp", `sages-fuxi-${suffix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
 
 // ---------------------------------------------------------------------------
-// fuxi_start
-// ---------------------------------------------------------------------------
-
-describe("fuxi_start", () => {
-  let cwd: string;
-  let pi: ReturnType<typeof makePiStub>;
-
-  beforeEach(async () => {
-    cwd = tmpDir("start");
-    mkdirSync(join(cwd, ".sages/workspace"), { recursive: true });
-    mkdirSync(join(cwd, ".sages/sessions"), { recursive: true });
-    const { registerFuxiTools } = await import("../../src/tools/fuxi-tools.js");
-    pi = makePiStub();
-    registerFuxiTools(pi as any);
-  });
-
-  afterEach(() => {
-    if (existsSync(cwd)) rmSync(cwd, { recursive: true, force: true });
-  });
-
-  it("initializes a new workflow and returns a design contract", async () => {
-    const result = await pi.call(
-      "fuxi_start",
-      { plan_name: "test-plan", request: "implement feature X" },
-      cwd,
-    );
-
-    expect(result.isError).toBeFalsy();
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.status).toBe("in_progress");
-    expect(payload.phase).toBe("design");
-    expect(payload.intent).toBeDefined();
-    expect(payload.validation).toBeDefined();
-    expect(payload.workflow_id).toBeDefined();
-    expect(payload.plan_name).toBe("test-plan");
-  });
-
-  it("persists state.json to .sages/workspace/", async () => {
-    await pi.call("fuxi_start", { plan_name: "test-plan", request: "implement feature X" }, cwd);
-
-    const statePath = join(cwd, ".sages/workspace/state.json");
-    expect(existsSync(statePath)).toBe(true);
-    const state = JSON.parse(readFileSync(statePath, "utf-8"));
-    expect(state.planName).toBe("test-plan");
-    expect(state.request).toBe("implement feature X");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// fuxi_design — observe cycle (design → review → plan)
+// fuxi_design — observe cycle (design → review → plan) with auto-init
 // ---------------------------------------------------------------------------
 
 describe("fuxi_design", () => {
@@ -109,7 +59,7 @@ describe("fuxi_design", () => {
     const { registerFuxiTools } = await import("../../src/tools/fuxi-tools.js");
     pi = makePiStub();
     registerFuxiTools(pi as any);
-    await pi.call("fuxi_start", { plan_name: "x", request: "y" }, cwd);
+    await pi.call("fuxi_design", { observation: { phase: "design", draft_path: "draft.md" } }, cwd);
   });
 
   afterEach(() => {
@@ -442,85 +392,6 @@ describe("fuxi_design", () => {
 });
 
 // ---------------------------------------------------------------------------
-// fuxi_end
-// ---------------------------------------------------------------------------
-
-describe("fuxi_end", () => {
-  let cwd: string;
-  let pi: ReturnType<typeof makePiStub>;
-
-  beforeEach(async () => {
-    cwd = tmpDir("end");
-    mkdirSync(join(cwd, ".sages/workspace"), { recursive: true });
-    mkdirSync(join(cwd, ".sages/sessions"), { recursive: true });
-    mkdirSync(join(cwd, ".sages/archive"), { recursive: true });
-    const { registerFuxiTools } = await import("../../src/tools/fuxi-tools.js");
-    pi = makePiStub();
-    registerFuxiTools(pi as any);
-    await pi.call("fuxi_start", { plan_name: "x", request: "y" }, cwd);
-  });
-
-  afterEach(() => {
-    if (existsSync(cwd)) rmSync(cwd, { recursive: true, force: true });
-  });
-
-  it("without audit.md returns error", async () => {
-    const result = await pi.call("fuxi_end", {}, cwd);
-    expect(result.isError).toBe(true);
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.error.toLowerCase()).toContain("audit");
-  });
-
-  it("observation {verdict: PASS} archives and returns complete", async () => {
-    // Write a minimal audit.md with PASS verdict
-    const auditContent = `# Audit\n\n**Verdict**: PASS (95%)\n`;
-    writeFileSync(join(cwd, ".sages/workspace/audit.md"), auditContent);
-
-    const result = await pi.call(
-      "fuxi_end",
-      { observation: { verdict: "PASS" } },
-      cwd,
-    );
-
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.status).toBe("complete");
-    expect(payload.verdict).toBe("PASS");
-    expect(payload.archive_path).toBeDefined();
-  });
-
-  it("observation {verdict: NEEDS_CHANGES} returns implement-phase routing", async () => {
-    const auditContent = `# Audit\n\n**Verdict**: NEEDS_CHANGES (60%)\n`;
-    writeFileSync(join(cwd, ".sages/workspace/audit.md"), auditContent);
-
-    const result = await pi.call(
-      "fuxi_end",
-      { observation: { verdict: "NEEDS_CHANGES" } },
-      cwd,
-    );
-
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.status).toBe("in_progress");
-    expect(payload.phase).toBe("implement");
-    expect(payload.intent.toLowerCase()).toContain("fix");
-  });
-
-  it("observation {verdict: REJECTED} returns design-phase routing", async () => {
-    const auditContent = `# Audit\n\n**Verdict**: REJECTED (30%)\n`;
-    writeFileSync(join(cwd, ".sages/workspace/audit.md"), auditContent);
-
-    const result = await pi.call(
-      "fuxi_end",
-      { observation: { verdict: "REJECTED" } },
-      cwd,
-    );
-
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.status).toBe("in_progress");
-    expect(payload.phase).toBe("design");
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Deprecated stubs return isError with redirect hint
 // ---------------------------------------------------------------------------
 
@@ -547,7 +418,6 @@ describe("deprecated Fuxi stubs", () => {
     "fuxi_recover",
     "fuxi_get_status",
     "fuxi_update_score",
-    "fuxi_brainstorm_recovery",
   ];
 
   for (const toolName of DEPRECATED) {

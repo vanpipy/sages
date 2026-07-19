@@ -1,7 +1,7 @@
 {
   "name": "@sages/pi-four-sages",
   "version": "1.0.0",
-  "description": "Four Sages Agents workflow for pi - Fuxi, QiaoChui, LuBan, GaoYao",
+  "description": "Four Sages role-based agents for pi - Fuxi (design), QiaoChui (review), LuBan (execute), GaoYao (audit)",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -13,18 +13,12 @@
     "agents",
     "sages",
     "four-sages",
-    "workflow"
+    "roles"
   ],
   "license": "MIT",
   "pi": {
-    "extensions": [
-      "./extensions"
-    ],
     "skills": [
       "./skills"
-    ],
-    "prompts": [
-      "./prompts"
     ]
   },
   "peerDependencies": {

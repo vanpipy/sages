@@ -1,5 +1,5 @@
 /**
- * ModeChecker - Phase-based file restrictions for Four Sages workflow
+ * ModeChecker - Phase-based file restrictions for Four Sages role-based agents
  * 
  * Phase modes based on skills:
  * - design: read-only, only draft.md (Fuxi)

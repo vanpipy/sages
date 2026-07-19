@@ -23,10 +23,9 @@ Show current mode in system prompt:
 
 | Tool | Purpose |
 |---|---|
-| `luban_execute_task` | Single task with **observe cycle** (RED → GREEN → REFACTOR → complete). Auto-advances when phase requirements are met. |
-| `luban_run_batch` | Planner — reads `execution.yaml`, returns ordered plan with file conflicts and topological layers. The LLM then iterates with `luban_execute_task`. |
+| `luban_execute_task` | Single task with **observe cycle** (RED → GREEN → REFACTOR → complete). Auto-advances when phase requirements are met. The LLM reads `execution.yaml` directly via semantic tools to iterate per task. |
 
-`luban_get_status` is **deprecated**. Status is included in every `luban_execute_task` response.
+`luban_get_status`, `luban_run_batch`, `luban_execute_all`, `luban_execute_batch` are **deprecated** stubs that return `isError` with redirect hints to `luban_execute_task`. **Do not call them.**
 
 ## Observe Cycle (per task)
 
@@ -101,13 +100,12 @@ When the tool returns an error, the embedded `TDD_GUIDE.formatError(phase, error
 - ❌ Skip RED phase (validation enforces it)
 - ❌ Write code without tests (RED must produce a real failing test)
 - ❌ Use template stubs (removed — LLM writes real implementations via semantic tools)
-- ❌ Call deprecated `luban_get_status` (status is in every `luban_execute_task` response)
+- ❌ Call deprecated `luban_get_status`, `luban_run_batch`, `luban_execute_all`, `luban_execute_batch` (status is in every `luban_execute_task` response)
 
 ## Example Flow
 
 ```
-> luban_run_batch
-← { plan: { task_ids: ["T1","T2"], execution_order: ["T1","T2"], conflicts: [] } }
+[LLM reads execution.yaml via `serena_read_file` to identify tasks T1, T2 in topological order]
 
 > luban_execute_task { task_id: "T1", task_description: "implement add(a,b)", files: ["src/math/add.ts"] }
 ← { status: "in_progress", phase: "RED", intent: "Write a failing test for: 'add(2,3) returns 5'...", validation: { test_command: "bun test src/math/add.test.ts", expected_outcome: "fail" } }

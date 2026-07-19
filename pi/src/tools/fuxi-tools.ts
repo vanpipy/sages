@@ -1,17 +1,15 @@
 /**
  * Fuxi Tools (伏羲) - Architect
  *
- * Simplified 3-tool surface (per the simplify-actions principle):
- *   - fuxi_start:   initialize workflow
- *   - fuxi_design:  observe cycle (design → review → plan)
- *   - fuxi_end:     verdict-driven end (PASS / NEEDS_CHANGES / REJECTED)
+ * Single-tool surface (per the simplify-actions principle):
+ *   - fuxi_design:  observe cycle (design → review → plan), auto-inits on first call
  *
  * Each tool returns the contract shape: {status, intent, validation}.
  * Status included in every response — no separate status tool.
  *
- * Deprecated stubs (6): fuxi_request, fuxi_plan, fuxi_recover,
- * fuxi_get_status, fuxi_update_score, fuxi_brainstorm_recovery.
- * All return isError with redirect hint to the new 3-tool surface.
+ * Deprecated stubs (5): fuxi_request, fuxi_plan, fuxi_recover,
+ * fuxi_get_status, fuxi_update_score.
+ * All return isError with redirect hint to fuxi_design.
  *
  * The LLM does the actual design / drafting work via semantic tools
  * (serena_replace_symbol_body, graphify_god_nodes, etc.). Fuxi only
@@ -23,7 +21,6 @@ import { Type } from "typebox";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { FileService } from "../services/file-service.js";
-import { WorkflowStateManager } from "../services/workflow-state-manager.js";
 import {
   MIN_DRAFT_BYTES_BY_TIER,
   type DesignTier,
@@ -48,7 +45,7 @@ interface DesignState {
 }
 
 // ---------------------------------------------------------------------------
-// DesignStateManager — per-workflow design sub-phase
+// DesignStateManager — per-workflow design sub-phase (replaces old fuxi_start)
 // ---------------------------------------------------------------------------
 
 class DesignStateManager {
@@ -91,9 +88,25 @@ class DesignStateManager {
       unlinkSync(path);
     }
   }
+
+  /**
+   * Load-or-init: returns existing design state, or creates a fresh one
+   * starting at the 'design' phase. This absorbs the old fuxi_start.
+   */
+  loadOrInit(): DesignState {
+    const existing = this.load();
+    if (existing) return existing;
+    const fresh: DesignState = {
+      workflow_id: `sages-${Date.now()}`,
+      current_phase: "design",
+      updated_at: new Date().toISOString(),
+    };
+    this.save(fresh);
+    return fresh;
+  }
 }
 
-function buildDesignIntent(phase: DesignPhase, score?: number, scope?: DraftScope | null): string {
+function buildDesignIntent(phase: DesignPhase, scope?: DraftScope | null): string {
   if (phase === "design") {
     if (scope) {
       const minBytes = MIN_DRAFT_BYTES_BY_TIER[scope.tier];
@@ -109,7 +122,7 @@ function buildDesignIntent(phase: DesignPhase, score?: number, scope?: DraftScop
     return `Get a review score for draft.md. Run qiaochui_review (which auto-writes the score to state.json).${scopeHint} Then call fuxi_design with observation {phase: "review", score: N} where N >= 80.`;
   }
   if (phase === "plan") {
-    return `Plan is approved. Run qiaochui_decompose to generate execution.yaml, then call luban_run_batch to start the batch. The /sages-plan slash command is the user-facing approval gate.`;
+    return `Plan is approved. Run qiaochui_decompose to generate execution.yaml, then iterate through tasks using luban_execute_task.`;
   }
   return `Design phase complete.`;
 }
@@ -118,7 +131,6 @@ function buildDesignValidation(
   phase: DesignPhase,
   draftExists: boolean,
   draftSize: number,
-  score?: number,
   scope?: DraftScope | null,
 ): Record<string, unknown> {
   const base = { current_phase: phase };
@@ -138,10 +150,10 @@ function buildDesignValidation(
     };
   }
   if (phase === "review") {
-    return { ...base, score_required: ">= 80", current_score: score, scope_aware: !!scope };
+    return { ...base, score_required: ">= 80", scope_aware: !!scope };
   }
   if (phase === "plan") {
-    return { ...base, next_step: "luban_run_batch" };
+    return { ...base, next_step: "luban_execute_task" };
   }
   return base;
 }
@@ -152,53 +164,11 @@ function buildDesignValidation(
 
 export function registerFuxiTools(pi: ExtensionAPI): void {
 
-  // ─── fuxi_start ────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "fuxi_start",
-    label: "Start Workflow",
-    description: "Initialize a new workflow: creates state.json and design sub-phase state. Returns the design contract.",
-    parameters: Type.Object({
-      plan_name: Type.String({ description: "Plan name (e.g., 'my-feature')" }),
-      request: Type.String({ description: "User's feature request or description" }),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const fileService = new FileService(ctx.cwd);
-      const stateManager = new WorkflowStateManager(ctx.cwd);
-      const designManager = new DesignStateManager(ctx.cwd);
-
-      const state = stateManager.create(params.plan_name, params.request);
-      state.phase = "design";
-      state.updatedAt = new Date().toISOString();
-      stateManager.save(state);
-
-      designManager.save({
-        workflow_id: state.id,
-        current_phase: "design",
-        updated_at: new Date().toISOString(),
-      });
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            status: "in_progress",
-            phase: "design",
-            workflow_id: state.id,
-            plan_name: params.plan_name,
-            intent: buildDesignIntent("design"),
-            validation: buildDesignValidation("design", false, 0),
-          }),
-        }],
-        details: { phase: "design", state, state_path: fileService.getFilePath("state.json") },
-      };
-    },
-  });
-
   // ─── fuxi_design ──────────────────────────────────────────────────────
   pi.registerTool({
     name: "fuxi_design",
     label: "Design (Observe)",
-    description: "Observe cycle through design → review → plan. First call: returns contract for current phase. Subsequent calls with observation: validate work and auto-advance. Status returned in every response.",
+    description: "Observe cycle through design → review → plan. First call: auto-inits design sub-phase and returns contract for the 'design' phase. Subsequent calls with observation: validate work and auto-advance. Status returned in every response.",
     parameters: Type.Object({
       observation: Type.Optional(Type.Object({
         phase: Type.Union([
@@ -207,28 +177,18 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
           Type.Literal("plan"),
         ], { description: "Phase being observed" }),
         draft_path: Type.Optional(Type.String({ description: "Path to draft.md (relative to workspace, e.g., 'draft.md')" })),
-        score: Type.Optional(Type.Number({ description: "Review score (must be > 80 to advance review → plan)" })),
+        score: Type.Optional(Type.Number({ description: "Review score (must be >= 80 to advance review → plan)" })),
       }, { description: "Observation of design/review work done" })),
     }),
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
       const fileService = new FileService(ctx.cwd);
-      const stateManager = new WorkflowStateManager(ctx.cwd);
       const designManager = new DesignStateManager(ctx.cwd);
+
+      // loadOrInit: absorbs the old fuxi_start. First call starts at 'design'.
+      const design = designManager.loadOrInit();
 
       // ── Init / status path ─────────────────────────────────────────
       if (!params.observation) {
-        const design = designManager.load();
-        if (!design) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({
-              status: "error",
-              error: "No active workflow. Call fuxi_start first.",
-            }) }],
-            isError: true,
-            details: { error: "no_workflow" },
-          };
-        }
-        const state = stateManager.loadLatest();
         const draftInfo = checkDraft(fileService, "draft.md");
         const scope = draftInfo.exists ? parseScopeSection(draftInfo.content ?? "") : null;
         return {
@@ -236,24 +196,11 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
             status: "in_progress",
             phase: design.current_phase,
             workflow_id: design.workflow_id,
-            plan_name: state?.planName,
-            intent: buildDesignIntent(design.current_phase, state?.score, scope),
-            validation: buildDesignValidation(design.current_phase, draftInfo.exists, draftInfo.size, state?.score, scope),
+            intent: buildDesignIntent(design.current_phase, scope),
+            validation: buildDesignValidation(design.current_phase, draftInfo.exists, draftInfo.size, scope),
             auto_advanced: false,
           }) }],
-          details: { design, draft: draftInfo, state },
-        };
-      }
-
-      const design = designManager.load();
-      if (!design) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            error: "No active workflow. Call fuxi_start first.",
-          }) }],
-          isError: true,
-          details: { error: "no_workflow" },
+          details: { design, draft: draftInfo },
         };
       }
 
@@ -322,8 +269,8 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
             status: "in_progress",
             phase: "review",
             workflow_id: design.workflow_id,
-            intent: buildDesignIntent("review", undefined, scope),
-            validation: buildDesignValidation("review", true, draftInfo.size, undefined, scope),
+            intent: buildDesignIntent("review", scope),
+            validation: buildDesignValidation("review", true, draftInfo.size, scope),
             auto_advanced: true,
             last_observation: obs,
             tier: scope?.tier ?? null,
@@ -357,15 +304,6 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
           };
         }
 
-        // Persist score to main state.
-        const state = stateManager.loadLatest();
-        if (state) {
-          state.score = obs.score;
-          state.phase = "plan";
-          state.updatedAt = new Date().toISOString();
-          stateManager.save(state);
-        }
-
         design.current_phase = "plan";
         designManager.save(design);
         return {
@@ -374,8 +312,8 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
             phase: "plan",
             workflow_id: design.workflow_id,
             score: obs.score,
-            intent: buildDesignIntent("plan", obs.score),
-            validation: buildDesignValidation("plan", true, 0, obs.score),
+            intent: buildDesignIntent("plan"),
+            validation: buildDesignValidation("plan", true, 0),
             auto_advanced: true,
             last_observation: obs,
           }) }],
@@ -385,14 +323,12 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
 
       // ── plan → complete (design portion done) ─────────────────────
       if (obs.phase === "plan") {
-        // Plan is already approved (via /sages-plan slash command or direct call).
-        // No-op acknowledge. The next stage is execute, handled by luban_*.
         return {
           content: [{ type: "text", text: JSON.stringify({
             status: "complete",
             phase: "plan",
             workflow_id: design.workflow_id,
-            summary: "Design phase complete. Run luban_run_batch to start the execute phase.",
+            summary: "Design phase complete. Iterate through tasks using luban_execute_task.",
           }) }],
           details: { design },
         };
@@ -409,167 +345,15 @@ export function registerFuxiTools(pi: ExtensionAPI): void {
     },
   });
 
-  // ─── fuxi_end ─────────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "fuxi_end",
-    label: "End Workflow",
-    description: "End workflow based on audit verdict. Observation {verdict: 'PASS'} archives the workflow and returns complete. NEEDS_CHANGES returns to implement (LuBan). REJECTED returns to design (Fuxi). Without observation, validates that audit.md exists.",
-    parameters: Type.Object({
-      observation: Type.Optional(Type.Object({
-        verdict: Type.Union([
-          Type.Literal("PASS"),
-          Type.Literal("NEEDS_CHANGES"),
-          Type.Literal("REJECTED"),
-        ], { description: "Audit verdict" }),
-        force: Type.Optional(Type.Boolean({ description: "Force archive even if verdict is not PASS" })),
-      }, { description: "Verdict observation (drives routing)" })),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const fileService = new FileService(ctx.cwd);
-      const stateManager = new WorkflowStateManager(ctx.cwd);
-      const designManager = new DesignStateManager(ctx.cwd);
-
-      const state = stateManager.loadLatest();
-      if (!state) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            error: "No active workflow to end.",
-          }) }],
-          isError: true,
-          details: { error: "no_active_workflow" },
-        };
-      }
-
-      // ── No observation: validate audit.md exists ──────────────────────
-      if (!params.observation) {
-        const auditInfo = fileService.readAuditVerdict();
-        if (!auditInfo.verdict) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({
-              status: "error",
-              error: "No audit verdict found. Run gaoyao_finalize first, then call fuxi_end with observation {verdict: 'PASS'}.",
-            }) }],
-            isError: true,
-            details: { error: "no_audit_verdict", phase: state.phase },
-          };
-        }
-        // Surface the verdict so the LLM knows what to pass.
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "in_progress",
-            phase: state.phase,
-            current_verdict: auditInfo.verdict,
-            current_score: auditInfo.score,
-            intent: `Call fuxi_end with observation {verdict: "${auditInfo.verdict}"} to route the workflow.`,
-            validation: { verdict_observed: auditInfo.verdict },
-          }) }],
-          details: { state, audit: auditInfo },
-        };
-      }
-
-      const verdict = params.observation.verdict;
-      const force = params.observation.force === true;
-      const auditInfo = fileService.readAuditVerdict();
-
-      // Update state with audit info.
-      state.auditVerdict = auditInfo.verdict ?? verdict;
-      state.auditScore = auditInfo.score;
-      state.auditAttempts = (state.auditAttempts || 0) + 1;
-      state.updatedAt = new Date().toISOString();
-
-      // ── PASS: archive ────────────────────────────────────────────────
-      if (verdict === "PASS" || force) {
-        state.phase = "complete";
-        stateManager.save(state);
-        const archivePath = stateManager.archive();
-        designManager.delete();
-
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "complete",
-            phase: "complete",
-            verdict,
-            score: auditInfo.score,
-            archive_path: archivePath,
-            summary: `Workflow archived: ${state.planName}`,
-          }) }],
-          details: { verdict, score: auditInfo.score, archivePath, phase: "complete" },
-        };
-      }
-
-      // ── NEEDS_CHANGES: route to implement ────────────────────────────
-      if (verdict === "NEEDS_CHANGES") {
-        if ((state.auditAttempts || 0) >= 3) {
-          state.phase = "design";
-          stateManager.save(state);
-          designManager.delete();
-          return {
-            content: [{ type: "text", text: JSON.stringify({
-              status: "in_progress",
-              phase: "design",
-              verdict,
-              score: auditInfo.score,
-              intent: `Too many iterations (${state.auditAttempts}). Returning to design phase — Fuxi must redesign the approach.`,
-              validation: { max_attempts_reached: true },
-            }) }],
-            details: { verdict, phase: "design", attempts: state.auditAttempts },
-          };
-        }
-
-        state.phase = "implement";
-        stateManager.save(state);
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "in_progress",
-            phase: "implement",
-            verdict,
-            score: auditInfo.score,
-            intent: `LuBan must fix the issues identified in audit.md. Run luban_run_batch to plan the remediation, then iterate through tasks.`,
-            validation: { audit_md_required: true },
-            attempts: state.auditAttempts,
-          }) }],
-          details: { verdict, phase: "implement", attempts: state.auditAttempts },
-        };
-      }
-
-      // ── REJECTED: route to design ───────────────────────────────────
-      if (verdict === "REJECTED") {
-        state.phase = "design";
-        stateManager.save(state);
-        designManager.delete();
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "in_progress",
-            phase: "design",
-            verdict,
-            score: auditInfo.score,
-            intent: `Critical issues detected. Returning to design phase — Fuxi must revisit the architecture. Call fuxi_design to start a new draft.`,
-            validation: { re_design_required: true },
-          }) }],
-          details: { verdict, phase: "design" },
-        };
-      }
-
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          status: "error",
-          error: `Unhandled verdict: ${verdict}`,
-        }) }],
-        isError: true,
-        details: { verdict },
-      };
-    },
-  });
-
   // ─── Deprecated stubs ─────────────────────────────────────────────────
+  // Stubs that redirected to fuxi_start or fuxi_end were removed along
+  // with those tools. The remaining stubs all redirect to fuxi_design.
   const stubs: Array<{ name: string; hint: string; deprecationNote: string }> = [
     { name: "fuxi_request", hint: "Use fuxi_design (write draft.md, then call fuxi_design with observation).", deprecationNote: "draft creation merged into fuxi_design observe cycle" },
     { name: "fuxi_plan", hint: "Use fuxi_design with observation {phase: 'review', score} instead.", deprecationNote: "score-driven phase advance merged into fuxi_design" },
     { name: "fuxi_recover", hint: "Use fuxi_design (without observation) to recover current state.", deprecationNote: "status query merged into fuxi_design" },
     { name: "fuxi_get_status", hint: "Status is included in every fuxi_design response.", deprecationNote: "merged into fuxi_design response" },
     { name: "fuxi_update_score", hint: "Use fuxi_design with observation {phase: 'review', score} instead.", deprecationNote: "score update merged into fuxi_design review phase" },
-    { name: "fuxi_brainstorm_recovery", hint: "Call fuxi_end with observation {verdict: 'NEEDS_CHANGES'}; it routes to implement phase with the recovery intent.", deprecationNote: "merged into fuxi_end NEEDS_CHANGES routing" },
   ];
 
   for (const stub of stubs) {

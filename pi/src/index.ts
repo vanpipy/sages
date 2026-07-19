@@ -1,11 +1,17 @@
 /**
- * Four Sages - pi Package
- * 
- * Provides multi-agent workflow system with four specialized agents:
- * - Fuxi: Architectural design using MDD Seven Planes
- * - QiaoChui: Design review and task decomposition
- * - LuBan: TDD-based task execution
- * - GaoYao: Phase-guided quality audit
+ * Four Sages - pi Package (role-based agents)
+ *
+ * Provides four specialized role-based agents, each with its own
+ * simplified tool surface. No orchestrator runtime — the LLM routes
+ * between agents via natural language and tool calls.
+ *
+ *   - Fuxi:     Architectural design using MDD Seven Planes (`fuxi_design`)
+ *   - QiaoChui: Design review and task decomposition (`qiaochui_review`, `qiaochui_decompose`)
+ *   - LuBan:    TDD-based task execution (`luban_execute_task`)
+ *   - GaoYao:   Phase-guided quality audit (`gaoyao_audit`, `gaoyao_observe`, `gaoyao_finalize`)
+ *
+ * Outputs are persisted to `.sages/workspace/` (draft.md, plan.md,
+ * execution.yaml, audit.md) via FileService and the per-tool state managers.
  */
 
 // Tools
@@ -14,14 +20,10 @@ export { registerQiaoChuiTools } from "./tools/qiaochui/index.js";
 export { registerLubanTools } from "./tools/luban/index.js";
 export { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
 
-// Services (NEW - refactored architecture)
+// Services (per-role runtime support — file I/O + per-tool state)
 export { FileService } from "./services/file-service.js";
 export { WorkflowStateManager } from "./services/workflow-state-manager.js";
 export type { WorkflowState, Task, AuditResult, FuxiPhase, ArchiveInfo } from "./services/workflow-state-manager.js";
-
-// State (DEPRECATED - use services instead)
-export { StateManager, WorkspaceManager } from "./state/index.js";
-export type { WorkflowState as LegacyWorkflowState, Task as LegacyTask, AuditResult as LegacyAuditResult } from "./state/index.js";
 
 // Executor (from luban module)
 export { runTask, runTDDCycle, parseExecutionYaml, resolveDependencies, sortByDependencies } from "./executor/index.js";

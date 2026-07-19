@@ -79,33 +79,7 @@ describe("Workflow YAML removed", () => {
 	});
 });
 
-describe("/sages-init is minimal", () => {
-	it("extensions/sages-tool.ts does NOT reference TEMPLATE_WORKFLOW_DIR", () => {
-		// No more copying of workflow templates — there's no workflow anymore.
-		const content = fs.readFileSync(
-			path.join(PI_ROOT, "extensions", "sages-tool.ts"),
-			"utf-8"
-		);
-		expect(content).not.toContain("TEMPLATE_WORKFLOW_DIR");
-		expect(content).not.toContain("TEMPLATE_PROMPTS_DIR");
-		expect(content).not.toContain("workflows");
-		expect(content).not.toContain("prompts/four-sages");
-		expect(content).not.toContain("prompts/bugfix");
-	});
-});
 
-describe("/sages-plan is no-op (no FSM consumer)", () => {
-	it("extensions/sages-tool.ts does NOT emit sages:plan-approved event", () => {
-		// Without the FSM listening, the event would be dropped.
-		// The slash command now just notifies — the LLM's "approval" is implicit
-		// in its next tool call (e.g., fuxi_design {observation: {phase: "plan", approved: true}}).
-		const content = fs.readFileSync(
-			path.join(PI_ROOT, "extensions", "sages-tool.ts"),
-			"utf-8"
-		);
-		expect(content).not.toContain("sages:plan-approved");
-	});
-});
 
 describe("Source code no longer references FSM", () => {
 	it("src/index.ts does NOT export WorkflowStateManager.create or similar FSM internals", () => {

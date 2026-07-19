@@ -116,7 +116,7 @@ Complete these items in order:
 6. **Write design doc** — Save to `.sages/designs/YYYY-MM-DD-<topic>.md`
 7. **Spec self-review** — 4-step inline check (see below)
 8. **User reviews written spec** — Wait for approval
-9. **Transition to implementation** — Can invoke `/fuxi-start` (optional)
+9. **Transition to implementation** — Can invoke `fuxi_design` (optional; auto-inits on first call)
 
 ## Key Principles
 

@@ -3,14 +3,14 @@
  *
  * Part of: src/tools/luban/
  *
- * Simplified surface (per the simplify-actions principle):
+ * Single-tool surface (per the simplify-actions principle):
  *   - luban_execute_task: single task, observe cycle (RED → GREEN → REFACTOR → complete)
- *   - luban_run_batch: planner — reads execution.yaml, returns ordered plan + first contract
  *
  * Removed:
+ *   - luban_run_batch (planner; LLM reads execution.yaml directly via semantic tools)
  *   - luban_get_status (status returned in every execute_task response)
  *   - luban_execute_all (already removed)
- *   - luban_execute_batch (renamed to luban_run_batch; old name kept as deprecated stub)
+ *   - luban_execute_batch (renamed, then removed with luban_run_batch)
  *
  * The LLM does the actual implementation via semantic tools
  * (serena_replace_symbol_body, serena_create_text_file, etc.).
@@ -22,8 +22,7 @@ import { Type } from "typebox";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { FileService } from "../../services/file-service.js";
-import { parseExecutionYaml } from "./plan-parser.js";
-import { detectFileConflicts, deriveTestFiles } from "./conflict-detector.js";
+import { deriveTestFiles } from "./conflict-detector.js";
 import { runTests, validateScope, TDD_GUIDE } from "./task-runner.js";
 import type { LubanTask, TDDPhase } from "./types.js";
 
@@ -375,99 +374,6 @@ async function executeTask(params: {
 }
 
 // ============================================================================
-// luban_run_batch — planner
-// ============================================================================
-
-async function runBatchPlanner(params: {
-  execution_yaml?: string;
-}, ctx: ToolContext): Promise<{ content: any[]; details?: unknown; isError?: boolean }> {
-  const path = params.execution_yaml || join(ctx.cwd, WORKSPACE_DIR, "execution.yaml");
-
-  if (!existsSync(path)) {
-    return {
-      content: [{ type: "text", text: JSON.stringify({
-        status: "error",
-        error: `execution.yaml not found at: ${path}`,
-      }) }],
-      isError: true,
-      details: { path },
-    };
-  }
-
-  try {
-    const content = readFileSync(path, "utf-8");
-    const plan = parseExecutionYaml(content);
-    if (!plan) {
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          status: "error",
-          error: "Failed to parse execution.yaml",
-        }) }],
-        isError: true,
-        details: { path },
-      };
-    }
-
-    const conflictReport = detectFileConflicts(plan.tasks);
-    const executionOrder = plan.tasks.map((t) => t.id); // plan-parser already sorts topologically
-    const layers: string[][] = [];
-    const remaining = new Set(plan.tasks.map((t) => t.id));
-    const completed = new Set<string>();
-    while (remaining.size > 0) {
-      const layer: string[] = [];
-      for (const task of plan.tasks) {
-        if (!remaining.has(task.id)) continue;
-        if (task.dependsOn.every((d) => completed.has(d))) {
-          layer.push(task.id);
-        }
-      }
-      if (layer.length === 0) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            error: "Circular dependency detected in execution.yaml",
-            remaining: [...remaining],
-          }) }],
-          isError: true,
-          details: { remaining: [...remaining] },
-        };
-      }
-      for (const id of layer) {
-        remaining.delete(id);
-        completed.add(id);
-      }
-      layers.push(layer);
-    }
-
-    return {
-      content: [{ type: "text", text: JSON.stringify({
-        status: "in_progress",
-        plan: {
-          name: plan.name,
-          task_ids: plan.tasks.map((t) => t.id),
-          execution_order: executionOrder,
-          layers,
-          conflicts: conflictReport.conflicts,
-          max_parallel: plan.settings.maxParallel,
-        },
-        next_action: "Iterate: call luban_execute_task for each task in execution_order, advancing through RED → GREEN → REFACTOR → complete.",
-      }) }],
-      details: { plan, conflicts: conflictReport },
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return {
-      content: [{ type: "text", text: JSON.stringify({
-        status: "error",
-        error: `Failed to read execution.yaml: ${msg}`,
-      }) }],
-      isError: true,
-      details: { error: msg },
-    };
-  }
-}
-
-// ============================================================================
 // Tool registration
 // ============================================================================
 
@@ -520,39 +426,17 @@ export function registerLubanTools(pi: ExtensionAPI): void {
     },
   });
 
-  // ─── luban_run_batch ───────────────────────────────────────────────────
-  pi.registerTool({
-    name: "luban_run_batch",
-    label: "Plan Batch (TDD)",
-    description: "Planner: reads execution.yaml and returns an ordered plan with file conflicts and topological layers. The LLM then iterates: call luban_execute_task for each task in execution_order, advancing through RED → GREEN → REFACTOR → complete.",
-    parameters: Type.Object({
-      execution_yaml: Type.Optional(Type.String({ description: "Path to execution.yaml (default: .sages/workspace/execution.yaml)" })),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const fileService = new FileService(ctx.cwd, WORKSPACE_DIR);
-      const toolCtx: ToolContext = { cwd: ctx.cwd, fileService };
-
-      const result = await runBatchPlanner(params, toolCtx);
-
-      return {
-        content: result.content,
-        details: result.details,
-        isError: result.isError,
-      };
-    },
-  });
-
   // ─── Deprecated stubs (keep old names alive with redirect hints) ──────
   const stubs: Array<{ name: string; hint: string; deprecationNote: string }> = [
     {
       name: "luban_execute_all",
-      hint: "Use luban_run_batch to plan, then iterate with luban_execute_task.",
-      deprecationNote: "removed in v1 — replaced by planner + observe cycle",
+      hint: "Use luban_execute_task — iterate through tasks in execution.yaml.",
+      deprecationNote: "removed in v1 — replaced by single-task observe cycle",
     },
     {
       name: "luban_execute_batch",
-      hint: "Use luban_run_batch instead.",
-      deprecationNote: "renamed to luban_run_batch",
+      hint: "Use luban_execute_task — iterate through tasks in execution.yaml.",
+      deprecationNote: "removed alongside the batch planner",
     },
     {
       name: "luban_get_status",

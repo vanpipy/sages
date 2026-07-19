@@ -1,12 +1,12 @@
 ---
-description: Architectural design with MDD Seven Planes (simplified 3-tool surface)
+description: Architectural design with MDD Seven Planes (single-tool surface with auto-init)
 ---
 
 # Fuxi (伏羲) - Architect
 
 ## Role
 
-Fuxi manages the design phase: create draft.md, get it reviewed, transition to plan. **Simplified 3-tool surface** with auto-advance on observation. The LLM uses **serena** / **graphify** to write the draft; Fuxi only validates.
+Fuxi manages the design phase: create draft.md, get it reviewed, transition to plan. **Single-tool surface** (`fuxi_design`) with auto-init on first call and auto-advance on observation. The LLM uses **serena** / **graphify** to write the draft; Fuxi only validates.
 
 ## Mode Indicator
 
@@ -20,11 +20,9 @@ Fuxi manages the design phase: create draft.md, get it reviewed, transition to p
 
 | Tool | Purpose |
 |---|---|
-| `fuxi_start` | Initialize workflow (creates `state.json` + design sub-state). Returns design contract. |
-| `fuxi_design` | Observe cycle through `design → review → plan`. First call returns contract; subsequent calls with `observation` validate and auto-advance. |
-| `fuxi_end` | End workflow based on audit verdict. `observation: { verdict }` routes PASS→archive, NEEDS_CHANGES→implement, REJECTED→design. |
+| `fuxi_design` | Observe cycle through `design → review → plan`. First call auto-inits the design sub-phase and returns the contract. Subsequent calls with `observation` validate and auto-advance. |
 
-The 6 deprecated stubs (`fuxi_request`, `fuxi_plan`, `fuxi_recover`, `fuxi_get_status`, `fuxi_update_score`, `fuxi_brainstorm_recovery`) return `isError` with redirect hints. **Do not call them.**
+The 5 deprecated stubs (`fuxi_request`, `fuxi_plan`, `fuxi_recover`, `fuxi_get_status`, `fuxi_update_score`) return `isError` with redirect hints to `fuxi_design`. **Do not call them.**
 
 ## fuxi_design Observe Cycle
 
@@ -33,6 +31,7 @@ Three sub-phases, auto-advance on observation:
 ```
 Call 1: fuxi_design {}
         → design contract { phase: "design", intent: "...", validation: { file: "draft.md", min_size: 100|250|500 } }
+        (design sub-state auto-created on first call)
 
         (LLM uses serena_read_file + graphify_query to understand project context,
          then writes draft.md — recommended: include ## Scope section declaring Tier + in-scope planes)
@@ -43,15 +42,15 @@ Call 2: fuxi_design { observation: { phase: "design", draft_path: "draft.md" } }
         (LLM runs qiaochui_review which auto-writes state.score; heuristic scores only in-scope planes)
 
 Call 3: fuxi_design { observation: { phase: "review", score: 85 } }
-        → validates score >= 80 → persists score → advances to plan
+        → validates score >= 80 → advances to plan
 
         (LLM runs qiaochui_decompose to generate execution.yaml)
 
-Call 4: fuxi_design { observation: { phase: "plan", approved: true } }
-        → status: "complete", next: luban_run_batch
+Call 4: fuxi_design { observation: { phase: "plan" } }
+        → status: "complete", next: luban_execute_task
 ```
 
-The score threshold is **≥ 80** (not `> 80`). Off-by-one fixed.
+The score threshold is **≥ 80** (not `> 80`).
 
 ## Per-Phase Validation
 
@@ -59,7 +58,7 @@ The score threshold is **≥ 80** (not `> 80`). Off-by-one fixed.
 |---|---|
 | `design` | `draft.md` exists + ≥ tier-specific byte floor (see Scope/Tier system below). Without Scope: legacy 500 bytes for all-7-plane coverage. |
 | `review` | `score >= 80` |
-| `plan` | acks; next stage is `luban_run_batch` |
+| `plan` | acks; next stage is iterating `luban_execute_task` per task in execution.yaml |
 
 ## Scope & Tier System (recommended)
 
@@ -93,20 +92,6 @@ Include this block at the top of `draft.md`:
 - **Missing Scope section** → falls back to legacy behavior (500 bytes, all 7 planes scored).
 - **The QiaoChui rubric gains a `scope_justification` dimension** when Scope is present — the reviewer judges whether the scope choice fits the task.
 
-## fuxi_end Verdict Routing
-
-`observation: { verdict: "PASS" \| "NEEDS_CHANGES" \| "REJECTED" }`:
-
-| Verdict | Phase after | What to do next |
-|---|---|---|
-| **PASS** | `complete` | Archive. Workflow ends. |
-| **NEEDS_CHANGES** | `implement` | Run `luban_run_batch` to plan remediation, then iterate via `luban_execute_task` |
-| **REJECTED** | `design` | Re-run `fuxi_design` from scratch (design sub-state cleared) |
-
-After 3× `NEEDS_CHANGES`, the tool auto-escalates to design phase.
-
-Without observation, `fuxi_end` validates that `audit.md` exists and surfaces the verdict so the LLM knows what to pass.
-
 ## MDD Seven Planes
 
 The Seven Planes remain the canonical model. With Scope & Tier:
@@ -133,24 +118,19 @@ The Seven Planes remain the canonical model. With Scope & Tier:
 
 ## State Files
 
-- `.sages/workspace/state.json` — main workflow state (planName, request, score, phase)
-- `.sages/workspace/.fuxi-design-state.json` — design sub-phase state (design → review → plan)
+- `.sages/workspace/.fuxi-design-state.json` — design sub-phase state (design → review → plan), auto-created on first call
 - `.sages/workspace/draft.md` — the design draft
 
 ## Prohibited
 
-- ❌ Call deprecated `fuxi_request`, `fuxi_plan`, `fuxi_recover`, `fuxi_get_status`, `fuxi_update_score`, `fuxi_brainstorm_recovery` (they all return `isError` with redirect hints)
+- ❌ Call deprecated `fuxi_request`, `fuxi_plan`, `fuxi_recover`, `fuxi_get_status`, `fuxi_update_score` (they all return `isError` with redirect hints)
 - ❌ Submit score < 80 in review observation
-- ❌ Submit `fuxi_end` observation without first running `gaoyao_finalize` (no audit verdict)
 
 ## Example Flow
 
 ```
-> fuxi_start { plan_name: "user-mgmt", request: "Build user CRUD API" }
-← { status: "in_progress", phase: "design", workflow_id: "sages-...", plan_name: "user-mgmt", intent: "Create draft.md...", validation: { file: "draft.md", min_size: 500 } }
-
 > fuxi_design {}
-← { status: "in_progress", phase: "design", intent: "Create draft.md using MDD Seven Planes...", validation: { file: "draft.md", min_size: 500 } }
+← { status: "in_progress", phase: "design", workflow_id: "sages-...", intent: "Create draft.md using MDD Seven Planes...", validation: { file: "draft.md", min_size: 500 } }
 
 [LLM uses graphify_god_nodes + serena_read_file to understand project, then writes draft.md covering all 7 planes, ≥ 500 bytes]
 
@@ -164,11 +144,8 @@ The Seven Planes remain the canonical model. With Scope & Tier:
 
 [LLM runs qiaochui_decompose to generate execution.yaml]
 
-> fuxi_design { observation: { phase: "plan", approved: true } }
-← { status: "complete", summary: "Design phase complete. Run luban_run_batch..." }
+> fuxi_design { observation: { phase: "plan" } }
+← { status: "complete", summary: "Design phase complete. Iterate through tasks using luban_execute_task." }
 
-[After LuBan + GaoYao complete]
-
-> fuxi_end { observation: { verdict: "PASS" } }
-← { status: "complete", archive_path: ".sages/archive/user-mgmt/..." }
+[LLM reads execution.yaml via semantic tools, then iterates luban_execute_task per task]
 ```

@@ -123,7 +123,7 @@ Tasks editing the same file are sorted by priority and chained with sequential d
 ```
 **Plan Mode** (Read-Only + execute.yaml writeable)
 - plan.md and execution.yaml are writeable
-- Run luban_run_batch to start execution
+- Iterate `luban_execute_task` per task; LLM reads execution.yaml directly
 ```
 
 ## Prohibited
@@ -146,6 +146,5 @@ Tasks editing the same file are sorted by priority and chained with sequential d
 > qiaochui_decompose
 ← { success: true, plan_path: ".sages/workspace/plan.md", execution_path: ".sages/workspace/execution.yaml", task_count: 5 }
 
-> luban_run_batch
-← { plan: { task_ids: [...], execution_order: [...], conflicts: [] } }
+[LLM reads execution.yaml via semantic tools and iterates luban_execute_task per task]
 ```

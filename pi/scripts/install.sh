@@ -756,7 +756,7 @@ install_sages_files() {
   }
 
   mkdir -p "$PKG_DIR"
-  for dir in prompts skills extensions src; do
+  for dir in skills src; do
     local src_dir="$TMP_DIR/pi/$dir"
     local dest_dir="$PKG_DIR/$dir"
 
@@ -1122,7 +1122,7 @@ install() {
   # Install codebase-memory-mcp binary (~50MB download from GitHub releases)
   install_codebase_memory_mcp_binary || {
     echo "  Note: codebase-memory-mcp binary install failed."
-    echo "  Sage workflow will work without it; MCP graph tools unavailable until manually installed."
+    echo "  Sage will work without it; MCP graph tools unavailable until manually installed."
     echo "  To retry: bash <(curl -fsSL https://raw.githubusercontent.com/${CBM_REPO}/main/install.sh)"
   }
 
