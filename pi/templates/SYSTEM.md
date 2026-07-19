@@ -46,8 +46,9 @@ The tools cluster by **scope of reasoning**. Classify the question first — the
 
 | Question scale | Examples | Primary tool family | Why this family |
 |---|---|---|---|
-| **Per-file / per-symbol** | "read this file", "find this function body", "edit line 42", "diagnostics on this file" | **AFT** (`aft_read`, `aft_zoom`, `aft_search`, `aft_outline`, `aft_inspect`, `aft_callgraph`, `aft_import`) | Indexed Rust reader, sub-second, no graph dependency |
-| **Cross-file within one package** | "all callers of X across `pi/src/tools/luban/`", "what does this module export" | **AFT** (multi-file is still AFT's strength; use `aft_search` + `aft_zoom`) | AFT resolves imports/re-exports; faster than graph for ≤1 package |
+| **Structural — file/text level** | "read this file", "edit line 42", "diagnostics on this file", "what's the file structure", "code health report" | **AFT** (`aft_read`, `aft_zoom`, `aft_outline`, `aft_edit`, `aft_inspect`, `aft_callgraph`, `aft_search` for text/concept, `aft_safety`, `aft_import`, `aft_conflicts`) | Indexed Rust reader, sub-second, no graph dependency |
+| **Structural — symbol level** | "find function/interface/class by name", "find all usages of symbol X", "project overview / language breakdown" | **`codebase_*` family** (`codebase_search`, `codebase_refs`, `codebase_schema`) | AFT-indexed symbol search with kind filter and qualified-name awareness; faster + more precise than text grep |
+| **Cross-file within one package** | "all callers of X across `pi/src/tools/luban/`", "what does this module export" | **`codebase_refs`** (symbol-aware) or **`aft_search` + `aft_zoom`** (text) | `codebase_refs` resolves imports/re-exports; faster than graph for ≤1 package |
 | **Cross-package / project-wide** | "who calls X across all packages", "what does my git diff affect", "project architecture / module boundaries", "find by qualified name" | **codebase-memory-mcp** (`codebase_memory_trace_path`, `codebase_memory_detect_changes`, `codebase_memory_get_architecture`, `codebase_memory_search_graph`, `codebase_memory_get_code_snippet`) | Multi-hop BFS, pre-indexed call graph, blast-radius from diff |
 | **Cross-service / runtime topology** | "HTTP call from frontend → backend", "channel boundaries", "service dependencies" | **codebase-memory-mcp** `cross_service` mode or `get_architecture boundaries` | Only codebase-memory models HTTP_CALLS / ASYNC_CALLS / CHANNEL edges |
 | **Concept / semantic** | "how does auth work across the codebase", "where is rate limiting implemented", "find by concept, not exact name" | **graphify** (`graphify_query`, `graphify_shortest_path`, `graphify_god_nodes`) or `codebase_memory_search_graph` with `semantic_query` | Embedding similarity bridges vocabulary gaps ("publish" → "send") |
@@ -84,7 +85,9 @@ The tools cluster by **scope of reasoning**. Classify the question first — the
 
 | Tempting move | Why it's wrong | Correct move |
 |---|---|---|
-| `codebase_memory_search_graph` to find a symbol in one file | Graph round-trip slower than `aft_search` + `aft_zoom` | Use AFT |
+| `aft_search` to find a symbol by name | Text search, not symbol-aware | `codebase_search` with kind filter |
+| `codebase_memory_search_graph` to find a symbol in one file | Graph round-trip slower than `codebase_search` | `codebase_search` (AFT-indexed) |
+| `codebase_refs` to find cross-package call chains | Per-file symbol refs; can't traverse packages | `codebase_memory_trace_path` (graph BFS) |
 | `aft_search` + `grep` chain to find cross-package callers | O(n) grep; misses re-exports | `codebase_memory_trace_path` |
 | `git diff` + manual chase for blast radius | Manual, error-prone | `codebase_memory_detect_changes` |
 | Reading 20 files to understand project structure | Slow, redundant | `codebase_memory_get_architecture` (one call) |
@@ -93,7 +96,7 @@ The tools cluster by **scope of reasoning**. Classify the question first — the
 
 ## 2. Semantic Tool Catalog (what each tool does)
 
-### `aft_*` — AFT-backed semantic layer (provided by `@cortexkit/aft-pi`)
+### `aft_*` — AFT-backed semantic layer (provided by `@cortexkit/aft-pi`) — text/concept search + edit + health
 
 Use for **symbol-level** operations on a known file or cross-file graph:
 - `aft_outline` — file structure as tree (no scrolling)
@@ -105,7 +108,19 @@ Use for **symbol-level** operations on a known file or cross-file graph:
 - `aft_import` — language-aware import add / remove / organize
 - `aft_conflicts` — one-call merge conflict inspection
 
-### `codebase_memory_*` — graph-based code intelligence
+### `codebase_*` — AFT-indexed symbol search (provided by `pi-codebase-memory`)
+
+Use for **symbol-level** queries where you want qualified-name awareness, kind filtering, or pre-computed references. These tools are AFT-indexed (fast, no graph traversal) but distinct from the text/concept search in `aft_*`:
+
+- `codebase_schema` — project-level overview (file counts, language breakdown, symbol counts per kind, index age) — **call this first when exploring an unfamiliar project**
+- `codebase_search` — find symbols by name/kind/file (regex, kind-filtered, single call) — **preferred over `aft_search` when looking for a named function/class/interface**
+- `codebase_refs` — find all usages / call-sites / imports of a symbol (whole-word match) — **preferred over `aft_callgraph` when you want every reference, not just the call graph**
+- `codebase_update` — incremental re-index after small edits (only changed files)
+- `codebase_index` — full re-index after large refactors or first use
+
+When the MCP injects a hint like `[Codebase index available — N symbols · M files]`, follow its routing — these tools are the right default for structural symbol queries.
+
+### `codebase_memory_*` — graph-based code intelligence (cross-package)
 
 Use for **project-wide** queries (cross-file, cross-package):
 - `codebase_memory_trace_path` — multi-hop call chain BFS
