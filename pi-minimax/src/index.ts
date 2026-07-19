@@ -14,6 +14,15 @@ export { findMmx, clearMmxCache, type MmxLocation, type MmxSource } from "./serv
 export { execMmx, EXEC_TIMEOUT_MS, type ExecMmxArgs, type ExecMmxResult, type FlatValue } from "./services/exec.js";
 export { parseAuthStatus, isAuthed, type AuthStatus } from "./services/auth-status.js";
 export { ensureAuth, clearAuthState, AUTH_CACHE_TTL_MS, NotAuthedError, BootstrapFailedError } from "./services/auth-bootstrap.js";
+export {
+    detectRegionFix,
+    clearRegionFixCache,
+    readMmxConfig,
+    CORRECTED_CN_BASE_URL,
+    type MmxConfigSnapshot,
+    type RegionFixReader,
+    type RegionFixState,
+} from "./services/region-fix.js";
 export type { ToolError, ToolErrorCode, ToolFailure } from "./services/result.js";
 export { runAuthStatusTool } from "./tools/auth.js";
 export { runSearchQuery } from "./tools/search.js";

@@ -15,6 +15,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { RegionFixState } from "./region-fix.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,6 +43,16 @@ export interface ExecMmxArgs {
     raw?: boolean;
     /** Extra env vars for the subprocess */
     env?: Record<string, string>;
+    /**
+     * Region-fix state from `detectRegionFix()`. When `needsBaseUrlOverride`
+     * is true AND the caller did NOT already pass `--base-url`, execMmx
+     * appends `--base-url <correctedBaseUrl>` to the argv. This transparently
+     * works around the mmx-cli 1.0.15/1.0.16 region=cn base_url double-prefix
+     * bug (see region-fix.ts for details).
+     *
+     * Undefined / null → no override (default behavior preserved).
+     */
+    regionFix?: RegionFixState | null;
 }
 
 export interface ExecMmxResult {
@@ -109,6 +120,20 @@ export async function execMmx(
     // 4. Per-call apiKey override
     if (args.apiKey) {
         cmdArgs.push("--api-key", args.apiKey);
+    }
+
+    // 5. Region-fix: auto-inject --base-url for mmx-cli region=cn base_url bug.
+    //    Only when: regionFix says override needed AND caller did NOT pass --base-url.
+    //    Placed LAST so it overrides any earlier value mmx-cli might honor
+    //    (verified: mmx-cli uses last --base-url when flag is repeated).
+    if (
+        args.regionFix &&
+        args.regionFix.needsBaseUrlOverride === true &&
+        typeof args.regionFix.correctedBaseUrl === "string" &&
+        args.regionFix.correctedBaseUrl.length > 0 &&
+        !hasFlag(cmdArgs, "--base-url")
+    ) {
+        cmdArgs.push("--base-url", args.regionFix.correctedBaseUrl);
     }
 
     // 5. Execute (with timeout detection in catch block)

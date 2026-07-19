@@ -13,6 +13,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { ensureAuth, NotAuthedError, type EnsureAuthOptions } from "../services/auth-bootstrap.js";
 import { execMmx, type ExecMmxArgs, type ExecMmxResult, type FlatValue } from "../services/exec.js";
+import { detectRegionFix } from "../services/region-fix.js";
 import type { ToolFailure } from "../services/result.js";
 
 type UpdateFn = NonNullable<EnsureAuthOptions["onUpdate"]>;
@@ -71,12 +72,20 @@ export async function runSearchQuery(deps: SearchToolDeps): Promise<SearchToolRe
             // mmx-cli flag is `--base-url` (kebab-case); our public API uses
             // camelCase `baseUrl`. The args Record keys are the literal mmx
             // flag names (see exec.ts `appendArg`).
+            // This is the explicit override; when omitted, execMmx auto-injects
+            // the workaround for the mmx-cli region=cn base_url bug (see
+            // services/region-fix.ts).
             execArgs["base-url"] = deps.input.baseUrl;
         }
+        // Region fix is cached at module level — safe to call per-invocation.
+        // Tests inject a regionFix directly via deps.execMmx if they need
+        // deterministic behavior; production callers always go through here.
+        const regionFix = await detectRegionFix();
         result = await run({
             command: "search query",
             args: execArgs,
             apiKey: deps.input.apiKey,
+            regionFix,
         });
     } catch (e) {
         const msg = (e as Error).message;
@@ -122,9 +131,12 @@ export function registerSearchTool(pi: ExtensionAPI): void {
             apiKey: Type.Optional(Type.String({ description: "Per-call token override" })),
             baseUrl: Type.Optional(Type.String({
                 description:
-                    "Override mmx-cli base URL. Set to 'https://api.minimaxi.com' " +
-                    "(no /anthropic/v1) to bypass the mmx-cli 1.0.15/1.0.16 region=cn " +
-                    "base_url resolver bug that returns HTTP 404 for search and text chat.",
+                    "Explicit mmx-cli base URL override. Normally NOT needed: " +
+                    "pi-minimax auto-injects the workaround for the mmx-cli " +
+                    "1.0.15/1.0.16 region=cn base_url double-prefix bug. " +
+                    "Pass only if you need to point at a non-default endpoint " +
+                    "(set to 'https://api.minimaxi.com' with no /anthropic/v1 " +
+                    "suffix to manually reproduce the auto-fix).",
             })),
         }),
         async execute(_toolCallId, params, _signal, onUpdate, _ctx) {

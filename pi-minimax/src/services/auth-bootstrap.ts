@@ -13,6 +13,7 @@
  */
 
 import { execMmx, type ExecMmxArgs, type ExecMmxResult } from "./exec.js";
+import { detectRegionFix } from "./region-fix.js";
 import { parseAuthStatus, InvalidAuthStatusError } from "./auth-status.js";
 
 /**
@@ -45,7 +46,9 @@ type UpdateFn = (msg: { content: UpdateContent[] }) => void | Promise<void>;
 export interface EnsureAuthOptions {
     onUpdate?: UpdateFn;
     /** Override execMmx (for tests). Accepts a partial ExecMmxArgs. */
-    execMmx?: (args: Pick<ExecMmxArgs, "command"> & Partial<Pick<ExecMmxArgs, "args" | "apiKey">>) => Promise<ExecMmxResult>;
+    execMmx?: (
+        args: Pick<ExecMmxArgs, "command"> & Partial<Pick<ExecMmxArgs, "args" | "apiKey" | "regionFix">>,
+    ) => Promise<ExecMmxResult>;
 }
 
 type AuthState =
@@ -92,7 +95,11 @@ export async function ensureAuth(opts: EnsureAuthOptions = {}): Promise<void> {
     // Step 1: check current auth status
     let statusResult: ExecMmxResult;
     try {
-        statusResult = await runExec(execFn, { command: "auth status" });
+        // Region fix is cached at module level — safe to call per-invocation.
+        // We pass it through so that mmx auth status, auth login, and any
+        // future bootstrap steps all hit the corrected endpoint under region=cn.
+        const regionFix = await detectRegionFix();
+        statusResult = await runExec(execFn, { command: "auth status", regionFix });
     } catch (e) {
         cachedState = { kind: "failed" };
         throw new BootstrapFailedError("Failed to run `mmx auth status`", e);
@@ -137,7 +144,8 @@ export async function ensureAuth(opts: EnsureAuthOptions = {}): Promise<void> {
 
     let loginResult: ExecMmxResult;
     try {
-        loginResult = await runExec(execFn, { command: "auth login", apiKey: envKey });
+        const regionFix = await detectRegionFix();
+        loginResult = await runExec(execFn, { command: "auth login", apiKey: envKey, regionFix });
     } catch (e) {
         cachedState = { kind: "failed" };
         throw new BootstrapFailedError("Failed to run `mmx auth login`", e);

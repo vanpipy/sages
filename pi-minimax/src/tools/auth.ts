@@ -12,6 +12,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { ensureAuth, NotAuthedError, type EnsureAuthOptions } from "../services/auth-bootstrap.js";
 import { execMmx, type ExecMmxResult } from "../services/exec.js";
+import { detectRegionFix } from "../services/region-fix.js";
 import { parseAuthStatus } from "../services/auth-status.js";
 import type { ToolError, ToolFailure } from "../services/result.js";
 
@@ -53,7 +54,8 @@ export async function runAuthStatusTool(deps: AuthToolDeps = {}): Promise<AuthTo
 
     let result: ExecMmxResult;
     try {
-        result = await run({ command: "auth status" });
+        const regionFix = await detectRegionFix();
+        result = await run({ command: "auth status", regionFix });
     } catch (e) {
         const msg = (e as Error).message;
         if (/ENOENT|no such file|not found/i.test(msg)) {

@@ -125,15 +125,17 @@ bun test ./test/binary-finder.test.ts
 6. **tsc 不检查 test/**：bun-types 的 `bun:test` 模块 tsc 不识别。test tsconfig exclude 掉，bun runtime 处理。
 7. **exec timeout (60s)**：`EXEC_TIMEOUT_MS = 60_000` hardcoded。Long-running mmx commands (e.g. `video generate` polling) will hit timeout. Use `mmx <cmd> --async` for long polls, or call mmx directly outside pi.
 8. **auth cache TTL (5min)**：`AUTH_CACHE_TTL_MS = 300_000` hardcoded. The `ok` cache expires after 5min; next ensureAuth() re-checks. Catches OAuth session expiry mid-session.
-9. **Process-global module-level cache**：`cachedState` (auth-bootstrap) and `cached` (binary-finder) are bare `let` at module level. Assumes single pi agent per process. If you ever embed pi-minimax in a multi-instance scenario, wrap caches in a class instance.
+9. **Process-global module-level cache**：`cachedState` (auth-bootstrap), `cached` (binary-finder), and `cachedState` (region-fix) are bare `let` at module level. Assumes single pi agent per process. If you ever embed pi-minimax in a multi-instance scenario, wrap caches in a class instance.
 10. **Env param injection risk**：`execMmx`'s `env` param merges arbitrary Record<string,string> into subprocess env. If LLM is prompt-injected, could override `PATH` etc. Acceptable risk: `env` param only reachable via `minimax_exec` escape hatch (LLM-controlled). Not exposed in any L2 tool's TypeBox schema.
 11. **`--api-key` visible in ps aux**: `execMmx` appends `--api-key <key>` to mmx argv; briefly visible in `ps aux | grep mmx`. mmx-cli processes it in-memory and never logs it, but the key is in the OS process table for ~ms. Acceptable for single-user local use; consider env-var passing for CI/multi-user.
+12. **mmx-cli region=cn base_url bug (auto-fixed via region-fix service)**：mmx-cli 1.0.15/1.0.16 在 region=cn 时解析的 base_url 含 `/anthropic/v1`，但 endpoint handler 又会 prepend `/v1/...`，结果 URL 变成 `.../anthropic/v1/v1/...` 触发 404。`region-fix.ts` 检测到 `region === "cn"` 时，execMmx 自动 append `--base-url https://api.minimaxi.com` 绕过 bug。如果用户改了 region 需要重启 pi（cache 无 TTL）；`clearRegionFixCache()` 仅给测试用。`baseUrl` 参数在 `minimax_search_query` 上变成"显式 override"语义（escape hatch）。
 
 ## 当前状态
 
-- 67 单元测试通过（binary-finder 8 + exec 11 + auth-status 6 + auth-bootstrap 8 + auth tool 5 + exec-tool 6 + search 11 + tools-index 10 + extension 2 = 67 tests）
+- 75 单元测试通过（binary-finder 8 + exec 11 + exec-region-fix 8 + auth-status 6 + auth-bootstrap 8 + auth tool 5 + search 11 + tools-index 10 + region-fix 9 + extension 2 = 78 个 it() cases）
+  - 实际：75 pass / 0 fail via `bun test ./test`
 - tsc clean
 - install.sh 部署到 ~/.pi/packages/minimax 验证通过
-- 21 个 git commits（T1-T22，最后一次 `31419a7 docs(pi-minimax): T22 fix tool description drift`）
-- 31 个 git-tracked 文件，~2972 LOC
+- 22 个 git commits（T1-T22 + region-fix fix）
+- 33 个 git-tracked 文件，~3100 LOC
 - Audit verdict: 94/100 PASS (7 findings: 5 minor addressed in T18-T20, 2 major addressed in T16-T17)

@@ -68,19 +68,23 @@ minimax_search_query({ query: "MiniMax AI latest release" })
 // → {success: true, query: "…", results: [{title, link, snippet, date}]}
 ```
 
-#### If you get HTTP 404 from search — region=cn workaround
+#### If you get HTTP 404 from search — region=cn (auto-fixed)
 
 mmx-cli 1.0.15/1.0.16 has a **base_url resolver bug for `region=cn`**:
 the search endpoint double-prepends `/anthropic/v1/` → HTTP 404.
 
-If you see `API error: HTTP 404`, pass `baseUrl: "https://api.minimaxi.com"`
-explicitly:
-```ts
-minimax_search_query({
-  query: "MiniMax AI",
-  baseUrl: "https://api.minimaxi.com",  // bypasses mmx-cli's auto-detection bug
-})
-```
+**pi-minimax auto-injects the workaround**: when `~/.mmx/config.json` has
+`region: "cn"`, every mmx call gets `--base-url https://api.minimaxi.com`
+(no `/anthropic/v1` suffix) appended transparently. You should NOT see 404
+from search anymore. If you do, the config is missing or `region` is set
+to something other than `"cn"`.
+
+The `baseUrl` parameter on `minimax_search_query` is now an **explicit
+override** (escape hatch) — only set it if you need a non-default endpoint.
+For the bug workaround, do nothing: it's automatic.
+
+Underlying: see `src/services/region-fix.ts` (auto-detection, cached) and
+the `--base-url` injection logic in `src/services/exec.ts`.
 
 ### Auth check (typed tool)
 ```ts
@@ -138,7 +142,7 @@ cd ~/Project/sages/pi-minimax
 | `MMX_NOT_FOUND` | mmx not installed | `npm install -g mmx-cli` |
 | `NOT_AUTHED` | No credentials | `mmx auth login` or `export MINIMAX_API_KEY=…` |
 | `TIMEOUT` (typed tool) | mmx subprocess exceeded 60s | Run via bash with `mmx <cmd> --async` |
-| `UNKNOWN` with `HTTP 404` | mmx-cli region=cn base_url bug | Pass `baseUrl: "https://api.minimaxi.com"` to `minimax_search_query` |
+| `UNKNOWN` with `HTTP 404` | mmx-cli region=cn base_url bug | **Auto-fixed** — verify `~/.mmx/config.json` has `region: "cn"`; if not, set it via `mmx config set --key region --value cn` |
 | LLM doesn't know mmx commands | mmxc-cli skill not installed | `npx skills add MiniMax-AI/cli -y -g` |
 | All calls slow (~150ms) | mmx spawn overhead per call | Expected; can't avoid without SDK import |
 | `OAuth session wiped` | — | Should not happen; bootstrap is gated by status check |
