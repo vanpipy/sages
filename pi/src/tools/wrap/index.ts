@@ -20,6 +20,7 @@ import { registerSagesReplaceSymbol } from "./replace-symbol.js";
 import { registerSagesInsertAfterSymbol } from "./insert-after-symbol.js";
 import { registerSagesFindReferences } from "./find-references.js";
 import { registerSagesDiagnostics } from "./diagnostics.js";
+import { registerHoistedTools, loadHoistConfig } from "./hoist.js";
 
 type SageWrapperRegistrar = (pi: ExtensionAPI) => void;
 
@@ -51,4 +52,8 @@ export function registerAllWrappers(pi: ExtensionAPI): void {
 	for (const reg of REGISTRARS) {
 		reg(pi);
 	}
+	// Hoist mode — when hoist_builtin_tools:true in AFT config, re-register
+	// read/write/edit/grep so they OVERRIDE pi's built-ins with AFT-backed
+	// versions. sages_* names stay registered for backward compat.
+	registerHoistedTools(pi, loadHoistConfig(process.cwd()));
 }
