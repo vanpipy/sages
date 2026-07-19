@@ -4,7 +4,13 @@
 
 ## 项目性质
 
-`pi-minimax` 是一个 **pi extension npm 包**，把 MiniMax AI 平台的官方 CLI (`mmx-cli`) 包装为 3 个 pi 工具。**与 pi-yunxiao 同模式**（独立包 + 拷贝部署），但架构更简单（**stateless shell-out**，无 daemon）。
+`pi-minimax` 是一个 **pi extension npm 包**，把 MiniMax AI 平台的官方 CLI (`mmx-cli`) 包装为 **2 个 pi 工具**（auth + search），并通过 `mmxc-cli` skill 让 LLM 直接用 `mmx` 二进制调用其他 modalities。**与 pi-yunxiao 同模式**（独立包 + 拷贝部署），但架构更简单（**stateless shell-out**，无 daemon）。
+
+2026-07-19 简化：移除了 `minimax_exec`（L1 逃生口）。LLM 现在通过 AFT-backed `bash` 工具 + `mmxc-cli` skill 直接运行其他 mmx 子命令。理由：
+
+- 移除后 pi-minimax 体积减半（10 → 7 测试文件，~1100 → ~700 LOC）
+- 不再与 mmx-cli's own SKILL.md 重复
+- bash 工具 + agent skill 已经提供完整 surface
 
 ## 关键约定
 
@@ -16,16 +22,18 @@
 - **scripts/ 不拷到运行时**（与 pi-yunxiao 相同的决策 C）
 - **RUNTIME_DIRS**：`prompts` `skills` `extensions` `src` + `package.json` + `tsconfig.json`
 - **mmx-cli 必须独立安装**：`npm install -g mmx-cli`（用户责任，不是我们打包）
+- **mmxc-cli skill 推荐安装**：`npx skills add MiniMax-AI/cli -y -g`（让 LLM 知道完整的 mmx 命令表面）
 
 ### 2. 工具分层（与 pi-yunxiao 的 L0/L1/L2 同名但语义不同）
 
 | 层 | 工具 | 用途 |
 |---|---|---|
 | L0 | `minimax_auth_status` | 检查 mmx 认证状态；自动从 `MINIMAX_API_KEY` env bootstrap |
-| L1 | `minimax_exec` | 逃生口 — 运行任何 mmx 子命令（覆盖 text/image/video/speech/music/vision/quota/file） |
 | L2 | `minimax_search_query` | Web 搜索（mmx search query --q） |
 
-**所有工具在 execute 之前必须调用 `ensureAuth()`**。这是 auth-bootstrap 服务的唯一入口。
+**之前有 L1 `minimax_exec`（逃生口）— 2026-07-19 移除**。现在所有其他 modalities（text/image/video/speech/music/vision/quota/file）通过 AFT-backed `bash` 工具调用 `mmx <resource> <command> [flags]`，LLM 通过 `mmxc-cli` skill 学会 surface。
+
+**剩余工具在 execute 之前仍必须调用 `ensureAuth()`**。这是 auth-bootstrap 服务的唯一入口。
 
 ### 3. 状态目录
 

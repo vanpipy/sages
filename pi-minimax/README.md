@@ -3,36 +3,34 @@
 > **MiniMax AI Platform CLI wrapper for [pi](https://pi.dev)** — thin shell-out
 > layer over the globally-installed [`mmx`](https://www.npmjs.com/package/mmx-cli) CLI.
 
-Exposes 3 pi tools (auth status, exec escape hatch, search) that delegate to `mmx`.
+Exposes **2 pi tools** (auth status, web search) that benefit from TypeBox-typed
+schemas and auto-auth. **All other mmx modalities** (text / image / video / speech
+/ music / vision / quota / file) are reached directly via the `mmx` binary — the
+LLM learns the full surface from the **`mmxc-cli` skill** installed at
+`~/.pi/agent/skills/mmxc-cli/SKILL.md` (the upstream mmx-cli skill, installed
+once by `npx skills add MiniMax-AI/cli -y -g`).
+
 **No daemon, no auth duplication, no SDK imports** — mmx-cli owns credentials,
 region detection, and the API surface.
 
-## ✨ 3 tools
+## ✨ 2 tools
 
 | Layer | Tool | Purpose |
 |---|---|---|
 | L0 | `minimax_auth_status` | Check mmx auth state; auto-bootstrap from `MINIMAX_API_KEY` env |
-| L1 | `minimax_exec` | Escape hatch — runs any mmx subcommand with structured args |
 | L2 | `minimax_search_query` | Web search via `mmx search query --q <query>` |
 
-**All other mmx modalities** (text / image / video / speech / music / vision /
-quota / file) are reachable via `minimax_exec`. Example:
+**All other mmx modalities** are reached via the AFT-backed `bash` tool
+(`mmx text/image/video/speech/music/vision/quota/file …`) — see the `mmxc-cli`
+skill for the full flag reference. Example:
 
-```ts
-minimax_exec({
-  command: "image generate",
-  args: { prompt: "A cat in a spacesuit", n: 1 },
-})
-
-minimax_exec({
-  command: "video generate",
-  args: { prompt: "Ocean waves at sunset", async: true },
-})
-
-minimax_exec({
-  command: "speech synthesize",
-  args: { text: "Hello!", out: "hello.mp3" },
-})
+```bash
+mmx image generate --prompt "A cat in a spacesuit" --n 1 \
+  --output json --quiet --non-interactive
+mmx video generate --prompt "Ocean waves at sunset" --async \
+  --output json --quiet --non-interactive
+mmx speech synthesize --text "Hello!" --out hello.mp3 \
+  --output json --quiet --non-interactive
 ```
 
 ## 📦 Install
@@ -69,13 +67,8 @@ In pi, say:
 ```
 "check mmx auth"
 "search the web for MiniMax AI"
-"show quota"
-```
-
-Or use the slash command:
-
-```
-/minimax-quickstart
+"show quota"          # via bash + mmx (not a typed tool)
+"generate an image of a cat"  # via bash + mmx image
 ```
 
 ## 🔧 Uninstall
@@ -91,16 +84,21 @@ pi agent
   ↓ LLM picks tool from SKILL.md routing
 extensions/minimax-extension.ts
   ↓ registerTool
-src/tools/{auth,exec,search}.ts
+src/tools/{auth,search}.ts
   ↓ calls ensureAuth() (cached)
 src/services/auth-bootstrap.ts
   ↓ if unauthed + MINIMAX_API_KEY env → mmx auth login --api-key $KEY
-src/services/exec.ts → execMmx({command, args, apiKey})
+src/services/exec.ts → execMmx({command, args, apiKey})  (low-level helper, used by both tools)
   ↓ node:child_process.execFile("mmx", ...)
 mmx-cli (already installed globally)
   ↓ HTTPS + ~/.mmx/{config,credentials}
 api.minimax.io | api.minimaxi.com
 ```
+
+For non-typed modalities, the LLM calls `mmx <resource> <command> [flags]`
+directly via the AFT-backed `bash` tool. The `mmxc-cli` skill
+(installed by `npx skills add MiniMax-AI/cli -y -g`) is the canonical
+reference for mmx flags and command shape.
 
 **Key design choices** (see `AGENTS.md` for full details):
 
@@ -116,7 +114,8 @@ api.minimax.io | api.minimaxi.com
 | `MMX_NOT_FOUND` | mmx not installed | `npm install -g mmx-cli` |
 | `NOT_AUTHED` | No credentials | `mmx auth login` or `export MINIMAX_API_KEY=…` |
 | `OAuth session wiped` | Shouldn't happen | Bootstrap only fires when status reports unauthed |
-| All calls slow (~150ms) | Expected subprocess overhead | Use `minimax_exec` to batch, or wait for v2 |
+| LLM doesn't know mmx flags | `mmxc-cli` skill not installed | `npx skills add MiniMax-AI/cli -y -g` |
+| All calls slow (~150ms) | Expected subprocess overhead | Use bash + mmx directly for non-typed tools |
 | Token leakage in logs | — | mmx-cli's `maskToken` prefixes only; we don't log full keys |
 | `AUTH_STATUS_PARSE_ERROR` | mmx-cli JSON format changed | Open issue; we'll adapt parser |
 
@@ -135,14 +134,13 @@ cd ~/Project/sages/pi-minimax && ./scripts/install.sh --force
 ```
 
 ## 🛠️ Development
-
 ```bash
 cd ~/Project/sages/pi-minimax
 
 # Type check
 ./node_modules/.bin/tsc --noEmit
 
-# Run all tests (46 tests)
+# Run all tests
 bun test
 
 # Run a single test file
@@ -154,26 +152,18 @@ bun test ./test/binary-finder.test.ts
 
 See `AGENTS.md` for project conventions, TDD discipline, and known traps.
 
-## 📊 Status
+## 📊 Status (post 2026-07-19 simplification)
 
-- **67 unit tests pass** (9 test files: auth-status 6 + search 11 + exec 11 + tools-index 10 + exec-tool 6 + auth 5 + binary-finder 8 + auth-bootstrap 8 + extension 2)
+- **Two tools**: `minimax_auth_status`, `minimax_search_query` (was three; `minimax_exec` removed — escape hatch no longer needed since the LLM uses bash + the `mmxc-cli` skill for all other modalities)
+- All non-exec tests pass (exec-tool test deleted)
 - **tsc clean** (`tsc --noEmit` exits 0)
 - **install.sh** verified deploys to `~/.pi/packages/minimax`
-- **21 git commits** (T1-T22) — atomic per task
-- **31 tracked files**, ~2972 LOC (vs pi-yunxiao's 24 files / ~2400 LOC)
 - **Real integration**: finds `mmx` via npm-global on this machine, runs the real auth-status JSON parser
-
-## 📚 Docs
-
-- `AGENTS.md` — conventions for future LLM agents
-- `skills/minimax/SKILL.md` — routing doc (defers flag reference to mmx-cli SKILL.md)
-- `.sages/designs/2026-06-14-minimax-pi-design.md` — original MDD design draft (in workspace archive)
-- `.sages/workspace/draft.md` — refined MDD Seven Planes analysis (QiaoChui score: 82/100)
 
 ## Related
 
 - **pi-yunxiao** (sibling) — Alibaba Cloud DevOps / Yunxiao MCP integration. Same pattern but with a long-running MCP sidecar.
-- **mmx-cli** (upstream) — the official MiniMax AI Platform CLI that we shell-out to.
+- **mmx-cli** (upstream) — the official MiniMax AI Platform CLI that we shell-out to. Its `skill/SKILL.md` is the canonical reference for the LLM.
 
 ## License
 

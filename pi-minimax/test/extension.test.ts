@@ -18,10 +18,9 @@ describe("extension entry", () => {
             registerCommand: (name: string) => calls.push({ kind: "command", name }),
         } as unknown as Parameters<typeof extension>[0];
         extension(pi);
-        // Tools
+        // Tools (post 2026-07-19 simplification: 2 tools, no exec)
         expect(calls.filter((c) => c.kind === "tool").map((c) => c.name).sort()).toEqual([
             "minimax_auth_status",
-            "minimax_exec",
             "minimax_search_query",
         ]);
         // Slash commands

@@ -1,5 +1,12 @@
 /**
  * index.ts — Public exports for @sages/pi-minimax.
+ *
+ * Post-2026-07-19 simplification: the L1 `minimax_exec` escape hatch was
+ * removed. The LLM now uses mmx directly via the AFT-backed `bash` tool
+ * (or the mmx-cli skill at ~/.pi/agent/skills/mmxc-cli/SKILL.md for command
+ * reference). pi-minimax retains only the two tools that benefit from
+ * TypeBox-typed schemas and auto-auth: `minimax_auth_status` and
+ * `minimax_search_query`.
  */
 
 export { registerMinimaxTools } from "./tools/index.js";
@@ -9,5 +16,4 @@ export { parseAuthStatus, isAuthed, type AuthStatus } from "./services/auth-stat
 export { ensureAuth, clearAuthState, AUTH_CACHE_TTL_MS, NotAuthedError, BootstrapFailedError } from "./services/auth-bootstrap.js";
 export type { ToolError, ToolErrorCode, ToolFailure } from "./services/result.js";
 export { runAuthStatusTool } from "./tools/auth.js";
-export { runExecTool } from "./tools/exec.js";
 export { runSearchQuery } from "./tools/search.js";

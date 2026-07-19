@@ -1,139 +1,113 @@
 ---
-description: pi-minimax - shell-out wrapper for mmx-cli (MiniMax AI Platform) - 3 tools for auth/exec/search
+description: pi-minimax - thin pi extension wrapping mmx-cli (MiniMax AI Platform); exposes 2 typed tools (auth status, web search) and delegates all other modalities to the upstream mmx-cli skill.
 ---
 
 # pi-minimax — mmx-cli integration for pi
 
-> Thin shell-out wrapper that exposes 3 pi tools over the globally-installed
-> `mmx` CLI. **No daemon, no auth duplication** — mmx-cli owns credentials,
-> region detection, and the API surface.
+> Thin shell-out wrapper that exposes **2 pi tools** over the globally-installed
+> `mmx` CLI: `minimax_auth_status` (L0) and `minimax_search_query` (L2). All
+> other mmx modalities (text/image/video/speech/music/vision/quota/file) are
+> reached **directly** via the `mmx` binary — the LLM learns the full surface
+> from the **`mmxc-cli` skill** installed at `~/.pi/agent/skills/mmxc-cli/SKILL.md`
+> (the upstream mmx-cli skill, installed once by `npx skills add MiniMax-AI/cli -y -g`).
 
 ## When to use which tool
 
-```
-User asks for:                                    → Tool to use:
-─────────────────────────────────────────────────────────────────────
-"check auth / am I logged in / auth status"       → minimax_auth_status
-"search the web for X"                            → minimax_search_query
-"send a chat message / generate image / …"        → minimax_exec
-                                                   (command: "text chat",
-                                                    args: {message: "…"})
-"trigger video gen / quota / speech / music / …"  → minimax_exec
-"create a file / upload / list files"             → minimax_exec
-```
+| User asks for                                          | Tool to use |
+|---|---|
+| "check auth / am I logged in / auth status"             | `minimax_auth_status` |
+| "search the web for X"                                  | `minimax_search_query` |
+| "generate an image / video / speech / music"            | `mmx image/video/speech/music …` (via bash) — see `mmxc-cli` skill |
+| "send a chat message to MiniMax"                          | `mmx text chat --message "…"` (via bash) — see `mmxc-cli` skill |
+| "show quota / list files / config"                       | `mmx quota/file/config …` (via bash) — see `mmxc-cli` skill |
 
-**Rule of thumb**: dedicated tool → escape hatch. If a dedicated tool exists
+**Rule of thumb**: dedicated tool → bash. If a typed tool exists
 (`minimax_auth_status`, `minimax_search_query`), use it (LLM gets TypeBox-typed
-params). Otherwise, route through `minimax_exec`.
+params). For everything else, run `mmx <resource> <command> [flags]` via the
+AFT-backed `bash` tool. The `mmxc-cli` skill (loaded automatically by pi) is
+the canonical reference for mmx flags and command shape.
 
-## 3 tools
+## 2 tools
 
 | Layer | Tool | Purpose |
 |---|---|---|
 | L0 | `minimax_auth_status` | Check mmx auth state; auto-bootstraps from `MINIMAX_API_KEY` env |
-| L1 | `minimax_exec` | Escape hatch — runs any mmx subcommand with structured args |
-| L2 | `minimax_search_query` | Web search via `mmx search query --q <query>` |
+| L2 | `minimax_search_query` | Web search via `mmx search query --q <query>` (returns parsed JSON) |
 
 ## Auto-auth behavior
 
-If `mmx auth status --output json` reports unauthenticated AND
-`MINIMAX_API_KEY` env var is set, **pi-minimax silently runs
-`mmx auth login --api-key $KEY` on the first tool call**. The bootstrap is
-announced via `onUpdate` so it's visible to the user.
+If `mmx auth status --output json` reports unauthenticated AND `MINIMAX_API_KEY`
+env var is set, **pi-minimax silently runs `mmx auth login --api-key $KEY` on the
+first tool call**. The bootstrap is announced via `onUpdate` so it's visible.
 
-Existing OAuth/api-key sessions are **never overwritten** — bootstrap only
-fires when status reports unauthenticated.
+Existing OAuth/api-key sessions are **never overwritten** — bootstrap only fires
+when status reports unauthenticated.
 
 ## Flag reference
 
 **For mmx flags** (`--output`, `--quiet`, `--non-interactive`, `--api-key`,
 modality-specific flags like `--q`, `--prompt`, `--model`): see the canonical
-mmx-cli skill:
+mmx-cli skill at `~/.pi/agent/skills/mmxc-cli/SKILL.md` (single source of truth).
 
-- If installed globally: `~/.pi/packages/mmx-cli/skill/SKILL.md` (path may vary)
-- Or run `mmx <command> --help` for in-CLI flag reference
-
-We do NOT duplicate mmx flag docs here (single source of truth).
+For in-CLI help, run `mmx <command> --help`.
 
 ## Error codes
-
-All tools return structured errors with these codes:
 
 | Code | Meaning | Action |
 |---|---|---|
 | `MMX_NOT_FOUND` | mmx binary not on PATH | Run `npm install -g mmx-cli` |
 | `NOT_AUTHED` | mmx has no credentials AND no `MINIMAX_API_KEY` env | Run `mmx auth login`, or `export MINIMAX_API_KEY=sk-…` |
-| `AUTH_STATUS_PARSE_ERROR` | mmx auth status JSON malformed | Open issue; mmx-cli regression |
-| `UNKNOWN` | Other failure (mmx exit non-zero, parse error, etc.) | Inspect `error.message` |
+| `TIMEOUT` | mmx subprocess exceeded 60s | Use `mmx <cmd> --async` for long polls |
+| `UNKNOWN` | Other failure (mmx exit non-zero, parse error) | Inspect `error.message` |
 
 ## Examples
 
-### Search
+### Search (typed tool)
 ```ts
 minimax_search_query({ query: "MiniMax AI latest release" })
-// → {success: true, query: "MiniMax AI latest release", results: [{title, link, snippet, date}]}
+// → {success: true, query: "…", results: [{title, link, snippet, date}]}
 ```
 
-#### If you get HTTP 404 from search (or text chat) — region=cn workaround
+#### If you get HTTP 404 from search — region=cn workaround
 
-mmx-cli 1.0.15 and 1.0.16 have a **base_url resolver bug for `region=cn`**:
-they auto-detect `base_url = https://api.minimaxi.com/anthropic/v1` but the
-endpoint functions append paths assuming a plain `https://api.minimaxi.com`
-base, causing **double `/anthropic/v1/` in the URL → HTTP 404**. This affects
-both `search query` and `text chat`. Only `quota show` is unaffected.
+mmx-cli 1.0.15/1.0.16 has a **base_url resolver bug for `region=cn`**:
+the search endpoint double-prepends `/anthropic/v1/` → HTTP 404.
 
-If you're on `region=cn` and see `API error: HTTP 404 (HTTP 404)`, pass
-`--base-url https://api.minimaxi.com` (without `/anthropic/v1`) explicitly:
-
+If you see `API error: HTTP 404`, pass `baseUrl: "https://api.minimaxi.com"`
+explicitly:
 ```ts
-// L2: dedicated search tool
 minimax_search_query({
-  query: "MiniMax AI latest release",
-  baseUrl: "https://api.minimaxi.com",
-})
-
-// L1: escape hatch (works for text chat too)
-minimax_exec({
-  command: "search query",
-  args: { q: "MiniMax AI", "base-url": "https://api.minimaxi.com" },
-})
-minimax_exec({
-  command: "text chat",
-  args: { message: "Hello", "base-url": "https://api.minimaxi.com" },
+  query: "MiniMax AI",
+  baseUrl: "https://api.minimaxi.com",  // bypasses mmx-cli's auto-detection bug
 })
 ```
 
-This is **temporary** until mmx-cli upstream fixes the resolver. Confirmed
-still broken in mmx-cli 1.0.16 (released 4 weeks ago).
-
-### Auth check
+### Auth check (typed tool)
 ```ts
 minimax_auth_status({})
 // → {success: true, method: "api-key", source: "config.json", key: "sk-xxxx…"}
-// or {success: false, error: {code: "NOT_AUTHED", message: "…"}}
 ```
 
-### Text chat (via escape hatch)
-```ts
-minimax_exec({
-  command: "text chat",
-  args: { message: "Write a haiku about Rust", model: "MiniMax-M2.7-highspeed" },
-})
+### Other modalities (via bash + mmxc-cli skill)
+```bash
+# Always use these agent-friendly flags:
+#   --output json  --quiet  --non-interactive
+mmx text chat --message "Write a haiku about Rust" --output json --quiet --non-interactive
+mmx image generate --prompt "A cat in a spacesuit" --n 1 --output json --quiet --non-interactive
+mmx video generate --prompt "Ocean waves at sunset" --async --output json --quiet --non-interactive
+mmx speech synthesize --text "Hello!" --out hello.mp3 --output json --quiet --non-interactive
+mmx quota show --output json --quiet --non-interactive
 ```
 
-### Video gen (async)
-```ts
-minimax_exec({
-  command: "video generate",
-  args: { prompt: "Ocean waves at sunset", async: true },
-})
-// → {success: true, exitCode: 0, parsed: {taskId: "…"}, …}
-```
+## Timeouts and auth cache
 
-### Per-call token override
-```ts
-minimax_exec({ command: "quota show", apiKey: "sk-alt-account" })
-```
+- **60s exec timeout**: every `minimax_*` tool call has a hard 60-second
+  timeout on the mmx subprocess. For long-running mmx commands (e.g.
+  `mmx video generate` polling), run directly via bash with `--async` and
+  poll separately.
+- **5min auth cache TTL**: after successful auth bootstrap, the "ok" state
+  is cached for 5 minutes. After expiry, the next tool call re-checks
+  `mmx auth status` (catches mid-session OAuth expiry).
 
 ## Install (for the user, not the LLM)
 
@@ -143,20 +117,19 @@ npm install -g mmx-cli
 
 # 2. Authenticate (one-time)
 mmx auth login --api-key sk-xxxxx
-# OR just export the env var (pi-minimax will auto-bootstrap on first call):
+# OR just export the env var (pi-minimax auto-bootstraps on first call):
 export MINIMAX_API_KEY=sk-xxxxx
 
-# 3. Install pi-minimax (this extension)
+# 3. Install the agent skill (gives the LLM the full mmx command reference)
+npx skills add MiniMax-AI/cli -y -g
+# This writes ~/.pi/agent/skills/mmxc-cli/SKILL.md (or similar) — the LLM
+# loads it automatically on next pi session start.
+
+# 4. Install pi-minimax (this extension)
 cd ~/Project/sages/pi-minimax
 ./scripts/install.sh --force
 # Then restart pi
 ```
-
-## Timeouts and auth cache
-
-- **60s exec timeout**: every `minimax_*` tool call has a hard 60-second timeout on the mmx subprocess. Long-running commands (e.g. `mmx video generate` polling) will hit the timeout. For long polls, use `minimax_exec({command: "video generate", args: {prompt: "...", async: true}})` and poll separately, or call mmx directly.
-- **5min auth cache TTL**: after a successful auth bootstrap, the "ok" state is cached for 5 minutes. After expiry, the next tool call re-checks `mmx auth status` (catches mid-session OAuth expiry).
-- Errors with code `TIMEOUT` indicate the 60s limit was hit.
 
 ## Troubleshooting
 
@@ -164,8 +137,8 @@ cd ~/Project/sages/pi-minimax
 |---|---|---|
 | `MMX_NOT_FOUND` | mmx not installed | `npm install -g mmx-cli` |
 | `NOT_AUTHED` | No credentials | `mmx auth login` or `export MINIMAX_API_KEY=…` |
-| `TIMEOUT` | mmx subprocess exceeded 60s | Use `mmx <cmd> --async` for long polls, or call mmx directly |
-| `UNKNOWN` with `HTTP 404` in message | mmx-cli 1.0.15/1.0.16 region=cn base_url bug | Pass `baseUrl: "https://api.minimaxi.com"` to `minimax_search_query`, or `--base-url` flag via `minimax_exec` — see "If you get HTTP 404" above |
+| `TIMEOUT` (typed tool) | mmx subprocess exceeded 60s | Run via bash with `mmx <cmd> --async` |
+| `UNKNOWN` with `HTTP 404` | mmx-cli region=cn base_url bug | Pass `baseUrl: "https://api.minimaxi.com"` to `minimax_search_query` |
+| LLM doesn't know mmx commands | mmxc-cli skill not installed | `npx skills add MiniMax-AI/cli -y -g` |
 | All calls slow (~150ms) | mmx spawn overhead per call | Expected; can't avoid without SDK import |
 | `OAuth session wiped` | — | Should not happen; bootstrap is gated by status check |
-| Token leakage in logs | — | mmx-cli's `maskToken` prefixes only (`sk-xxxx…`); we don't log full keys |
