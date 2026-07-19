@@ -10,6 +10,8 @@ The system implements four specialized agents that collaborate through a structu
 design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → audit (GaoYao) → archive
 ```
 
+> **Tool routing decisions** (which tool family to reach for first — AFT vs `codebase_*` vs `codebase_memory_*` vs Magic Context vs Sages): see `pi/templates/SYSTEM.md 1`. That section is the single source of truth for tool-family routing.
+
 ## The Four Sages Agents
 
 ### Fuxi (伏羲) - The Architect
@@ -137,13 +139,13 @@ sages/
 │   │   │   └── gaoyao/          # GaoYao (Audit)
 │   │   ├── services/            # Shared services
 │   │   │   ├── file-service.ts  # File operations
-│   │   │   └── workflow-state-manager.ts
+│   │   │   └── index.ts
 │   │   └── utils/               # Utilities
 │   │       ├── model-helper.ts  # Get default model
 │   │       └── mode-checker.ts
 │   ├── test/                    # Unit tests
 │   ├── skills/                  # Skill definitions
-│   └── prompts/                 # Workflow templates
+│   └── templates/               # Workflow templates (SYSTEM.md — installed to ~/.pi/agent/SYSTEM.md)
 │
 └── .sages/                      # Runtime workspace & archives
     ├── workspace/               # Current workflow
@@ -178,7 +180,6 @@ export { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
 
 // Services
 export { FileService } from "./services/file-service.js";
-export { WorkflowStateManager } from "./services/workflow-state-manager.js";
 
 // Executor (from luban module)
 export { runTask, runTDDCycle, parseExecutionYaml } from "./executor/index.js";

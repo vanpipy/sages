@@ -28,6 +28,8 @@ curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/insta
 ## Commands
 
 > **Note**: The tool surface was simplified in the simplify-actions refactor (18+ → 10 active tools). Each tool returns `{status, intent, validation}` and auto-advances on observation. Deprecated tool names remain as stubs that return `isError` with a redirect hint.
+>
+> **Tool routing** (which family to reach for: AFT / `codebase_*` / `codebase_memory_*` / Magic Context / Sages): see `pi/templates/SYSTEM.md 1`.
 
 ### Fuxi ( Design) — 3 tools
 | Tool | Description |
@@ -45,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/insta
 ### LuBan ( Execute) — 2 tools
 | Tool | Description |
 |------|-------------|
-| `luban_execute_task` | Single task observe cycle (RED → GREEN → REFACTOR → complete). The LLM uses **serena** / **codebase-memory** / **graphify** for implementation; LuBan validates. |
+| `luban_execute_task` | Single task observe cycle (RED → GREEN → REFACTOR → complete). The LLM uses **AFT-backed `read`/`write`/`edit`/`grep`** + **codebase-memory** + **graphify** for implementation; LuBan validates. |
 | `luban_run_batch` | Planner — reads `execution.yaml`, returns ordered plan with file conflicts and topological layers. |
 
 ### GaoYao ( Audit) — 3 tools
@@ -68,7 +70,7 @@ Request → fuxi_start
    ↓
 [luban_run_batch → plan]
 [luban_execute_task observe cycle per task]
-   RED → GREEN → REFACTOR → complete (LLM does work via serena/codebase-memory/graphify)
+   RED → GREEN → REFACTOR → complete (LLM does work via AFT-backed tools + codebase-memory + graphify)
    ↓
 [gaoyao_audit / gaoyao_observe / gaoyao_finalize]
    ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH → verdict
@@ -96,7 +98,7 @@ Four Sages supports resuming interrupted workflows via per-tool init/resume sema
 | Resume task | `luban_execute_task` (no observation) loads task state | Returns current sub-phase (RED/GREEN/REFACTOR) |
 | Fresh start | `reset: true` on `gaoyao_audit`, or delete `.sages/workspace/` | Init from scratch |
 
-State is stored in `.sages/workspace/state.json` (managed by `WorkflowStateManager`) with sub-state files for each sage:
+State is stored in `.sages/workspace/state.json` with sub-state files for each sage:
 - `.sages/workspace/.fuxi-design-state.json` (design sub-phase)
 - `.sages/workspace/.luban-task-state.json` (per-task TDD phase)
 - `.sages/workspace/.gaoyao-session.json` (audit session)
@@ -195,7 +197,7 @@ sages/
 │   │   │   └── gaoyao/       # GaoYao tools
 │   │   ├── services/         # Shared services
 │   │   │   ├── file-service.ts
-│   │   │   └── workflow-state-manager.ts
+│   │   │   └── index.ts
 │   │   └── utils/            # Utilities
 │   ├── test/                 # Unit tests
 │   ├── extensions/           # Extension config
@@ -220,7 +222,6 @@ export { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
 
 // Services
 export { FileService } from "./services/file-service.js";
-export { WorkflowStateManager } from "./services/workflow-state-manager.js";
 
 // Executor (from luban module)
 export { runTask, runTDDCycle, parseExecutionYaml } from "./executor/index.js";
