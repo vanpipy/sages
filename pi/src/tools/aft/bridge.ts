@@ -61,11 +61,117 @@ interface ProcessHandle {
 let singletonBridge: AftBridge | undefined;
 let singletonHandle: ProcessHandle | undefined;
 
+/**
+ * Default safety timeout for in-flight requests. Reduced from 60s → 15s on
+ * 2026-07-19: most hangs are configuration issues (not slow commands), and a
+ * 60s wait on every misconfigured call destroys agent responsiveness.
+ */
+export const SAFETY_TIMEOUT_MS = 15_000;
+
+/**
+ * Default timeout for `ping()` health checks. 2s is enough for an idle daemon
+ * to respond to a `version` command on localhost.
+ */
+export const PING_TIMEOUT_MS = 2_000;
+
 export class AftBridge {
 	private handle: ProcessHandle;
 
 	private constructor(handle: ProcessHandle) {
 		this.handle = handle;
+		this.wireProcessListeners(handle);
+	}
+
+	/**
+	 * Wire up stdout (NDJSON parser) and stdin ('error' listener for EPIPE)
+	 * on the bridge's process handle. Called from the constructor so both
+	 * `getInstance()` (real spawn) and `fromMockProcess()` (test injection)
+	 * get identical listener behavior.
+	 */
+	private wireProcessListeners(handle: ProcessHandle): void {
+		// EPIPE / write-error recovery: when the daemon's stdin pipe breaks
+		// (crashed, killed, disconnected), Node's Writable emits 'error' on
+		// the next write attempt — pending promises waiting for responses
+		// would hang until the safety timer. Catch it here, fail all pending
+		// requests with the error, kill the dead proc, and shut down the
+		// singleton so the next bridgeFor() respawns a fresh daemon.
+		handle.proc.stdin?.on("error", (err: Error) => {
+			for (const [id, cb] of handle.pending) {
+				handle.pending.delete(id);
+				cb({
+					id,
+					success: false,
+					code: "stdin_error",
+					message: `[AFT] daemon stdin error: ${err.message}`,
+				});
+			}
+			try {
+				handle.proc.kill();
+			} catch {
+				// already dead
+			}
+			__shutdownBridge();
+		});
+
+		// NDJSON stdout parser. Each newline is one response or notification.
+		// Force flowing mode so 'data' fires immediately on push() — without
+		// this, a paused Readable buffers silently (which is why mock-based
+		// tests were hanging before).
+		handle.proc.stdout?.setEncoding("utf-8");
+		handle.proc.stdout?.resume();
+		handle.proc.stdout?.on("data", (chunk: string) => {
+			handle.stdoutBuf += chunk;
+			let idx;
+			while ((idx = handle.stdoutBuf.indexOf("\n")) !== -1) {
+				const line = handle.stdoutBuf.slice(0, idx).trim();
+				handle.stdoutBuf = handle.stdoutBuf.slice(idx + 1);
+				if (!line) continue;
+				try {
+					const msg = JSON.parse(line) as AftResponse;
+					if (msg.id && handle.pending.has(msg.id)) {
+						const cb = handle.pending.get(msg.id);
+						if (cb) {
+							handle.pending.delete(msg.id);
+							cb(msg);
+						}
+					} else if (msg.id === undefined && msg.success === false) {
+						// Error response arrived without an id — AFT doesn't
+						// always echo the request id on async errors (e.g.,
+						// daemon_crash reported mid-stream). Route to the
+						// most-recent-pending request as a synthetic error
+						// response, so the caller fails fast instead of
+						// waiting for the 15s safety timeout.
+						const keys = Array.from(handle.pending.keys());
+						const mostRecentId = keys[keys.length - 1];
+						if (mostRecentId !== undefined) {
+							const cb = handle.pending.get(mostRecentId);
+							if (cb) {
+								handle.pending.delete(mostRecentId);
+								cb({
+									id: mostRecentId,
+									success: false,
+									code: (msg as { code?: string }).code ?? "daemon_error",
+									message:
+										(msg as { message?: string }).message ??
+										`[AFT] daemon reported error without request id: ${line.slice(0, 200)}`,
+								});
+							}
+						} else {
+							console.warn(
+								`[AFT] unhandled daemon error (no pending requests): ${line.slice(0, 200)}`,
+							);
+						}
+					} else if (
+						(msg as { type?: string }).type === "status_changed" ||
+						(msg as { type?: string }).type === "configure_warnings"
+					) {
+						for (const n of handle.notifications) n(msg);
+					}
+				} catch (e) {
+					console.warn(`[AFT] malformed NDJSON line: ${line.slice(0, 200)}`);
+				}
+			}
+		});
 	}
 
 	/**
@@ -73,6 +179,9 @@ export class AftBridge {
 	 * on first call.
 	 *
 	 * Throws AftBinaryNotFoundError if the binary can't be resolved.
+	 *
+	 * For self-healing behavior (auto-respawn on dead singleton), use
+	 * `await getHealthyBridge()` instead — it pings before returning.
 	 */
 	static getInstance(): AftBridge {
 		if (singletonBridge) return singletonBridge;
@@ -85,6 +194,33 @@ export class AftBridge {
 	/** Test-only: construct a bridge over a pre-built mock process. */
 	static fromMockProcess(handle: ProcessHandle): AftBridge {
 		return new AftBridge(handle);
+	}
+
+	/**
+	 * Health check: sends `version` and waits for a response. Returns true if
+	 * the daemon answered within `timeoutMs`, false otherwise.
+	 *
+	 * Use this from `getHealthyBridge()` to detect a stale singleton
+	 * (e.g., previous session died on kill -9 without firing `session_shutdown`).
+	 */
+	async ping(timeoutMs: number = PING_TIMEOUT_MS): Promise<boolean> {
+		try {
+			const result = await Promise.race([
+				this.call({
+					id: `ping-${Date.now()}`,
+					command: "version",
+				}),
+				new Promise<{ success: false; code: string }>((resolve) =>
+					setTimeout(
+						() => resolve({ success: false, code: "ping_timeout" }),
+						timeoutMs,
+					),
+				),
+			]);
+			return result.success === true;
+		} catch {
+			return false;
+		}
 	}
 
 	/** Send a raw request and await the typed response. */
@@ -250,17 +386,23 @@ export class AftBridge {
 		return new Promise<AftResponse>((resolve, reject) => {
 			const id = request.id;
 
-			// Safety: 60s timeout — capture the timer handle so we can cancel
-			// it when a response arrives. Without clearTimeout, completed
-			// requests leave the timer to fire 60s later as a no-op, which
-			// accumulates in the event loop (matches user-reported symptom
-			// of "tool runs always and can't cancel").
+			// Safety: 15s timeout — reduced from 60s on 2026-07-19. Most hangs
+			// are configuration issues, not slow commands, so failing fast
+			// gives the agent better feedback. Timer is captured so it can be
+			// cleared when a response arrives — otherwise completed requests
+			// leave the timer to fire later as a no-op, accumulating in the
+			// event loop (matches user-reported "tool runs always and can't
+			// cancel" symptom).
 			const timer = setTimeout(() => {
 				if (this.handle.pending.has(id)) {
 					this.handle.pending.delete(id);
-					reject(new Error(`[AFT] Request ${id} timed out`));
+					reject(
+						new Error(
+							`[AFT] Request ${id} timed out after ${SAFETY_TIMEOUT_MS}ms`,
+						),
+					);
 				}
-			}, 60_000);
+			}, SAFETY_TIMEOUT_MS);
 
 			this.handle.pending.set(id, (r: AftResponse) => {
 				clearTimeout(timer);
@@ -268,7 +410,21 @@ export class AftBridge {
 				else resolve(r); // never reject — let caller branch on success
 			});
 
-			this.handle.proc.stdin?.write(JSON.stringify(request) + "\n");
+			try {
+				this.handle.proc.stdin?.write(JSON.stringify(request) + "\n");
+			} catch (e) {
+				// EPIPE / write-failure means the daemon's stdin is closed.
+				// Reject this request, clear its timer, and mark the singleton
+				// dead so the next bridgeFor() respawns.
+				clearTimeout(timer);
+				this.handle.pending.delete(id);
+				__shutdownBridge();
+				reject(
+					e instanceof Error
+						? e
+						: new Error(`[AFT] stdin write failed: ${String(e)}`),
+				);
+			}
 		});
 	}
 
@@ -276,6 +432,32 @@ export class AftBridge {
 	_testHandle(): ProcessHandle {
 		return this.handle;
 	}
+
+	/**
+	 * Test-only accessor for the safety timeout constant. Lets tests assert
+	 * the timeout value without reaching into module scope.
+	 */
+	get _safetyTimeoutMs(): number {
+		return SAFETY_TIMEOUT_MS;
+	}
+}
+
+/**
+ * Self-healing bridge accessor. Pings the singleton before returning it;
+ * if the ping fails (dead proc, unconfigured daemon), shuts down and respawns.
+ *
+ * Use this from wrap/ tools instead of `bridgeFor()` for any session where
+ * the daemon might have died (long-lived sessions, sessions that resumed
+ * after a crash, etc.). The first call has ~10ms overhead from the ping;
+ * subsequent calls are O(1) via the singleton.
+ */
+export async function getHealthyBridge(): Promise<AftBridge> {
+	const existing = AftBridge.getInstance();
+	const healthy = await existing.ping();
+	if (healthy) return existing;
+	// Dead singleton — shutdown + respawn via the next getInstance() call
+	__shutdownBridge();
+	return AftBridge.getInstance();
 }
 
 /** Convenience: get-or-create the singleton bridge. */
@@ -306,30 +488,9 @@ function spawnAft(): ProcessHandle {
 		notifications: [],
 	};
 
-	proc.stdout?.setEncoding("utf-8");
-	proc.stdout?.on("data", (chunk: string) => {
-		handle.stdoutBuf += chunk;
-		let idx;
-		while ((idx = handle.stdoutBuf.indexOf("\n")) !== -1) {
-			const line = handle.stdoutBuf.slice(0, idx).trim();
-			handle.stdoutBuf = handle.stdoutBuf.slice(idx + 1);
-			if (!line) continue;
-			try {
-				const msg = JSON.parse(line) as AftResponse;
-				if (msg.id && handle.pending.has(msg.id)) {
-					const cb = handle.pending.get(msg.id);
-					if (cb) {
-						handle.pending.delete(msg.id);
-						cb(msg);
-					}
-				} else if ((msg as any).type === "status_changed" || (msg as any).type === "configure_warnings") {
-					for (const n of handle.notifications) n(msg);
-				}
-			} catch (e) {
-				console.warn(`[AFT] malformed NDJSON line: ${line.slice(0, 200)}`);
-			}
-		}
-	});
+	// Listeners (stdout NDJSON parser + stdin error recovery) are wired in
+	// the AftBridge constructor via wireProcessListeners(handle), so they're
+	// also attached when fromMockProcess() is used in tests.
 
 	proc.on("exit", (code) => {
 		for (const [, cb] of handle.pending) {
