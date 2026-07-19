@@ -2,9 +2,9 @@
  * pi-semantic-nudge
  *
  * Goal: in long-running tasks, the LLM defaults to builtin `grep`/`read` because
- * those descriptions match user task wording better than `serena_find_symbol` etc.
- * This extension injects a SHORT nudge into the system prompt when recent activity
- * has skewed toward builtins without any semantic-tool use.
+ * those descriptions match user task wording better than the semantic tools.
+ * This extension injects a SHORT nudge into the system prompt when recent
+ * activity has skewed toward builtins without any semantic-tool use.
  *
  * Mechanism:
  *   - Hook `tool_call` to track a sliding window of recent tool names
@@ -21,95 +21,28 @@
  *   - systemPrompt is re-read every turn by the LLM → high attention weight
  *   - Short tagged nudge (`<nudge>...</nudge>`) gets pattern-matched
  *   - Conditional trigger (only when drifting) avoids "reminder fatigue"
+ *
+ * Post-AFT migration (2026-07-19):
+ *   - serena_* entries removed from SEMANTIC (serena uninstalled)
+ *   - 9 sages_* tool names added to SEMANTIC (the new sage wrapper layer)
+ *   - codebase_memory_* + graphify_* kept as fallbacks
+ *   - the python patch_tool_descriptions.py script is gone — sages_* tools
+ *     are registered directly via pi.registerTool with rich descriptions;
+ *     salience is carried by sage SKILL.md + SYSTEM.md context, not by
+ *     [PREFERRED] description prefixes.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
-import { homedir } from "node:os";
-import { join } from "node:path";
 
-// Built-in tools that have a semantic-tool equivalent (the "drift" set).
-// `bash` is intentionally excluded — many tasks need raw shell.
-const BUILTIN_DRIFT = new Set(["grep", "read", "find", "ls"]);
-
-// Semantic tools that should be preferred over builtins.
-// If any of these appear in the recent window, no nudge needed.
-const SEMANTIC = new Set<string>([
-	"serena_find_symbol",
-	"serena_find_referencing_symbols",
-	"serena_get_symbols_overview",
-	"serena_replace_symbol_body",
-	"serena_insert_after_symbol",
-	"serena_insert_before_symbol",
-	"serena_read_file",
-	"serena_create_text_file",
-	"serena_search_for_pattern",
-	"codebase_memory_trace_path",
-	"codebase_memory_detect_changes",
-	"codebase_memory_get_architecture",
-	"codebase_memory_search_graph",
-	"codebase_memory_search_code",
-	"codebase_memory_get_code_snippet",
-	"codebase_memory_query_graph",
-	"graphify_query",
-	"graphify_query_graph",
-	"graphify_shortest_path",
-	"graphify_god_nodes",
-	"graphify_get_community",
-	"graphify_get_neighbors",
-	"graphify_get_node",
-]);
-
-const WINDOW_SIZE = 5;
-const DRIFT_THRESHOLD = 3; // ≥3 builtin calls in window triggers nudge
-const SUPPRESS_TURNS = 5;  // don't nudge again for this many turns after a nudge
-
-interface State {
-	recentTools: string[];
-	turnsSinceLastNudge: number;
-}
+import {
+	WINDOW_SIZE,
+	type NudgeState,
+	buildNudgeText,
+	shouldNudge,
+} from "./nudge.js";
 
 export default function piSemanticNudge(pi: ExtensionAPI): void {
-	const state: State = { recentTools: [], turnsSinceLastNudge: SUPPRESS_TURNS };
-
-	// Re-patch mcp-cache.json on session_start so the [PREFERRED] tags survive
-	// cache regeneration (configHash change or 7-day TTL). The script is idempotent.
-	function ensurePatched(): void {
-		const cachePath = join(homedir(), ".pi/agent/mcp-cache.json");
-		if (!existsSync(cachePath)) return; // not yet bootstrapped
-		try {
-			const cache = JSON.parse(readFileSync(cachePath, "utf-8"));
-			let needsPatch = false;
-			for (const serverName of ["serena", "codebase-memory-mcp", "graphify"]) {
-				const tools = cache?.servers?.[serverName]?.tools ?? [];
-				for (const t of tools) {
-					if (!String(t.description ?? "").startsWith("[PREFERRED")) {
-						needsPatch = true;
-						break;
-					}
-				}
-				if (needsPatch) break;
-			}
-			if (!needsPatch) return;
-			// Run the patch script (idempotent)
-			const scriptPath = join(homedir(), ".pi/packages/pi-semantic-nudge/scripts/patch_tool_descriptions.py");
-			if (!existsSync(scriptPath)) return;
-			const result = spawnSync("python3", [scriptPath], { stdio: "pipe" });
-			if (result.status !== 0) {
-				console.error("[pi-semantic-nudge] patch failed:", result.stderr?.toString().slice(0, 200));
-			}
-		} catch (e) {
-			// Silent failure — never block session start
-		}
-	}
-
-	// Run on session_start to ensure cache is patched before pi registers tools.
-	// pi-mcp-adapter registers direct tools at module-load time using the cached
-	// descriptions, so we patch BEFORE the first registration.
-	// Since pi extensions are loaded in order, and pi-semantic-nudge is registered
-	// in settings.json, we patch on import.
-	ensurePatched();
+	const state: NudgeState = { turnsSinceLastNudge: 5, recentTools: [] }; // start ready-to-nudge
 
 	function recordTool(name: string): void {
 		state.recentTools.push(name);
@@ -118,41 +51,22 @@ export default function piSemanticNudge(pi: ExtensionAPI): void {
 		}
 	}
 
-	function shouldNudge(): boolean {
-		if (state.turnsSinceLastNudge < SUPPRESS_TURNS) return false;
-		if (state.recentTools.length < DRIFT_THRESHOLD) return false;
-		const driftCount = state.recentTools.filter((t) => BUILTIN_DRIFT.has(t)).length;
-		const semanticCount = state.recentTools.filter((t) => SEMANTIC.has(t)).length;
-		return driftCount >= DRIFT_THRESHOLD && semanticCount === 0;
-	}
-
-	// Hook tool calls to track usage.
-	// pi-mcp-adapter registers tools with `pi.registerTool`; builtins (`grep`/`read`/
-	// `find`/`ls`) emit `GrepToolCallEvent`/`ReadToolCallEvent`/etc. We listen to
-	// the generic `tool_call` event and filter by toolName.
-	pi.on("tool_call", (event: any) => {
+	// Hook tool calls to track usage. Every tool (builtins + extension tools +
+	// MCP direct tools) flows through here as `tool_call`, so we get a single
+	// canonical name regardless of source.
+	pi.on("tool_call", (event: { toolName?: string; tool?: { name?: string } }) => {
 		const name = event.toolName ?? event.tool?.name ?? "";
 		if (!name) return;
 		recordTool(name);
 	});
 
 	// Inject nudge into system prompt when drift detected.
-	pi.on("before_agent_start", (event: any) => {
+	pi.on("before_agent_start", (event: { systemPrompt?: string }) => {
 		state.turnsSinceLastNudge += 1;
 
-		if (!shouldNudge()) return;
+		if (!shouldNudge(state.recentTools, state)) return;
 
-		// Build a short, pattern-matchable nudge. Tagged with `<nudge>` so the
-		// LLM can recognize it as a soft system hint (vs main system content).
-		const nudge = [
-			"",
-			"<nudge>",
-			"Your last few tool calls have been builtins (`grep`/`read`/`find`/`ls`).",
-			"For code navigation/editing, prefer `serena_*` (LSP) or `codebase_memory_*` (graph).",
-			"Cold-start cost is 3-5s and worth it. See §0 of SYSTEM.md for the priority table.",
-			"</nudge>",
-			"",
-		].join("\n");
+		const nudge = buildNudgeText();
 
 		state.turnsSinceLastNudge = 0;
 		state.recentTools = [];
@@ -160,3 +74,17 @@ export default function piSemanticNudge(pi: ExtensionAPI): void {
 		return { systemPrompt: (event.systemPrompt ?? "") + nudge };
 	});
 }
+
+// Re-export the pure helpers so consumers (tests, downstream packages)
+// can import them from the same place as the extension entrypoint.
+export {
+	BUILTIN_DRIFT,
+	SEMANTIC,
+	SAGE_TOOL_NAMES,
+	WINDOW_SIZE,
+	DRIFT_THRESHOLD,
+	SUPPRESS_TURNS,
+	buildNudgeText,
+	shouldNudge,
+	type NudgeState,
+} from "./nudge.js";

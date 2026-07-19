@@ -1,7 +1,7 @@
 {
   "name": "@sages/pi-semantic-nudge",
   "version": "0.1.0",
-  "description": "Soft reminder to prefer serena/codebase-memory/graphify over builtin grep/read — solves the 'LLM forgets semantic tools in long tasks' problem",
+  "description": "Soft reminder to prefer sages_*/codebase_memory_*/graphify_* over builtin grep/read — solves the 'LLM forgets semantic tools in long tasks' problem",
   "type": "module",
   "license": "MIT",
   "author": "vanpipy@gmail.com",
@@ -31,7 +31,6 @@
   },
   "files": [
     "src",
-    "scripts",
     "skills",
     "README.md"
   ],
@@ -42,7 +41,7 @@
     "@mariozechner/pi-coding-agent": "^0.70.5"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
+    "@types/node": "^26.1.1",
     "typescript": "^6.0.3"
   }
 }
