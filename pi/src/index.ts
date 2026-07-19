@@ -14,20 +14,15 @@
  * execution.yaml, audit.md) via FileService and the per-tool state managers.
  */
 
-// Tools
+// Tools — the only public API
 export { registerFuxiTools } from "./tools/fuxi-tools.js";
 export { registerQiaoChuiTools } from "./tools/qiaochui/index.js";
 export { registerLubanTools } from "./tools/luban/index.js";
 export { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
 
-// Services (per-role runtime support — file I/O + per-tool state)
+// Per-role runtime support — file I/O with security validation.
+// FileService is the only cross-tool utility; each role also maintains
+// its own state manager internally (DesignStateManager, TaskStateManager,
+// AuditSessionManager).
 export { FileService } from "./services/file-service.js";
-export { WorkflowStateManager } from "./services/workflow-state-manager.js";
-export type { WorkflowState, Task, AuditResult, FuxiPhase, ArchiveInfo } from "./services/workflow-state-manager.js";
-
-// Executor (from luban module)
-export { runTask, runTDDCycle, parseExecutionYaml, resolveDependencies, sortByDependencies } from "./executor/index.js";
-export type { LubanTask, TDDConfig, TaskResult, TDDPhase, ExecutionSettings, ExecutionPlan } from "./executor/index.js";
-
-// Utils
-export { checkWritePermission, getModeInfo, getModeIndicator, getAccessDeniedMessage } from "./utils/mode-checker.js";
+export { createFileService } from "./services/file-service.js";

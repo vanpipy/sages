@@ -1,17 +1,18 @@
 /**
- * Conflict Detector — Pure function for detecting file conflicts across tasks
+ * Conflict Detector — Path helpers for luban_execute_task
  *
  * Part of: src/tools/luban/
- * Purpose: S6 contract — pure, no I/O, deterministic
+ * Purpose: shared helpers used by luban_execute_task for file path
+ * normalization and test-file derivation.
  *
- * Used by scheduler.ts to decide whether a batch can run in parallel
- * or must auto-degrade to serial (KD-2).
+ * Batch-level conflict detection (detectFileConflicts) was removed when
+ * luban_run_batch was deleted — the LLM now reads execution.yaml directly
+ * via semantic tools and iterates per task, so batch scheduling is no
+ * longer performed by the tool runtime.
  */
 
-import type { ConflictReport, LubanTask } from "./types.js";
-
 /**
- * Normalize a file path for conflict comparison.
+ * Normalize a file path for comparison.
  *
  * Rules:
  * - Convert backslashes to forward slashes (Windows compat).
@@ -20,72 +21,25 @@ import type { ConflictReport, LubanTask } from "./types.js";
  * - Lowercase (case-insensitive filesystems).
  *
  * This matches qiaochui's `normalizeFilePath` (qiaochui/decompose-service.ts) so
- * that conflict detection stays consistent with task decomposition. Sharing the
- * helper avoids the drift seen in earlier revisions.
+ * that path handling stays consistent across roles. Sharing the helper avoids
+ * drift between decomposition and execution.
  */
 export function normalizeFilePath(filePath: string): string {
-  return filePath
-    .replace(/\\/g, "/")
-    .replace(/\/+$/, "")
-    .replace(/^\.\//, "")
-    .toLowerCase();
+	return filePath
+		.replace(/\\/g, "/")
+		.replace(/\/+$/, "")
+		.replace(/^\.\//, "")
+		.toLowerCase();
 }
 
 /**
- * Derive test file paths from source files. Used as fallback when
- * `LubanTask.testFiles` is not explicitly provided.
+ * Derive test file paths from source files. Used as the default when
+ * `LubanTask.testFiles` is not explicitly provided to luban_execute_task.
  *
  * Rule: `*.ts → *.test.ts`, `*.js → *.test.js`, others unchanged.
- * Centralized to avoid DRY violations across index.ts / scheduler.ts.
  */
 export function deriveTestFiles(sourceFiles: string[]): string[] {
-  // \.(ts|js)$ captures the extension WITHOUT the leading dot;
-  // replacement adds both the leading "." and "test." prefix.
-  return sourceFiles.map((f) => f.replace(/\.(ts|js)$/, ".test.$1"));
-}
-
-/**
- * Scan a list of tasks and report files that appear in more than one task.
- *
- * Conflict surface = task.files ∪ task.testFiles (when testFiles is provided).
- * Empty/whitespace-only inputs return an empty report.
- *
- * @param tasks - Tasks to scan. Empty array returns {conflicts: [], owners: new Map()}.
- * @returns ConflictReport with `conflicts` (sorted by first-seen order) and
- *          `owners` (file → list of task IDs that reference it).
- *
- * @example
- * detectFileConflicts([
- *   { id: 'T1', files: ['a.ts'], ... },
- *   { id: 'T2', files: ['a.ts', 'b.ts'], ... },
- * ])
- * // → { conflicts: ['a.ts'], owners: Map { 'a.ts' => ['T1','T2'], 'b.ts' => ['T2'] } }
- */
-export function detectFileConflicts(tasks: LubanTask[]): ConflictReport {
-  const owners = new Map<string, string[]>();
-
-  for (const task of tasks) {
-    // Surface = sourceFiles ∪ testFiles (S5: tests count as conflict surface)
-    // Normalize paths so "./src/a.ts" === "src/a.ts" (consistent with qiaochui).
-    const surface: string[] = [...task.files, ...(task.testFiles ?? [])].map(normalizeFilePath);
-
-    for (const file of surface) {
-      const existing = owners.get(file);
-      if (existing) {
-        existing.push(task.id);
-      } else {
-        owners.set(file, [task.id]);
-      }
-    }
-  }
-
-  // conflicts = files with more than one owner
-  const conflicts: string[] = [];
-  for (const [file, ids] of owners.entries()) {
-    if (ids.length > 1) {
-      conflicts.push(file);
-    }
-  }
-
-  return { conflicts, owners };
+	// \.(ts|js)$ captures the extension WITHOUT the leading dot;
+	// replacement adds both the leading "." and "test." prefix.
+	return sourceFiles.map((f) => f.replace(/\.(ts|js)$/, ".test.$1"));
 }

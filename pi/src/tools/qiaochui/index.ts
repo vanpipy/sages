@@ -15,7 +15,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { FileService } from "../../services/file-service.js";
 import { performDeepReview, generateDeepFeasibilityReport } from "./review-service.js";
 import { generateMDDTasks, resolveFileConflicts } from "./decompose-service.js";
-import { getUserDefaultModel } from "../../utils/model-helper.js";
 import { parseScopeSection } from "../../utils/scope-parser.js";
 import type { MDDTask } from "./types.js";
 

@@ -1,133 +1,157 @@
 /**
- * Tests for task-runner
- * TDD RED Phase: Tests should FAIL until task-runner is implemented
+ * Tests for task-runner — TDD phase validators used by luban_execute_task
+ *
+ * Contract under test (live helpers after simplify-actions):
+ *   - runTests:        shell out to a test command and parse pass/fail counts
+ *   - validateScope:   enforce the deny_files scope guard
+ *   - TDD_GUIDE:       phase-specific error-message helper
+ *
+ * runTask, runTDDCycle, generateTestFromScenarios were removed when
+ * luban_run_batch was deleted — batch-style phase running is no longer
+ * performed at the tool runtime; the observe cycle inside luban_execute_task
+ * drives the LLM phase by phase.
  */
 
 import { describe, it, expect } from "bun:test";
-import { runTask, runTDDCycle } from "@/tools/luban/task-runner.js";
-import type { TDDConfig, TaskResult } from "@/tools/luban/types.js";
+import { runTests, validateScope, TDD_GUIDE } from "@/tools/luban/task-runner.js";
 
-describe("runTask", () => {
-  it("should exist and be a function", () => {
-    expect(typeof runTask).toBe("function");
+// ---------------------------------------------------------------------------
+// TDD_GUIDE — phase-specific error-message helper
+// ---------------------------------------------------------------------------
+
+describe("TDD_GUIDE", () => {
+  describe("getPhaseGuidance", () => {
+    it("should be a function", () => {
+      expect(typeof TDD_GUIDE.getPhaseGuidance).toBe("function");
+    });
+
+    it("returns RED guidance for RED phase", () => {
+      const msg = TDD_GUIDE.getPhaseGuidance("RED");
+      expect(msg.toLowerCase()).toContain("red");
+      expect(msg).toMatch(/fail|test/i);
+    });
+
+    it("returns GREEN guidance for GREEN phase", () => {
+      const msg = TDD_GUIDE.getPhaseGuidance("GREEN");
+      expect(msg.toLowerCase()).toContain("green");
+      expect(msg).toMatch(/minimal|implement/i);
+    });
+
+    it("returns REFACTOR guidance for REFACTOR phase", () => {
+      const msg = TDD_GUIDE.getPhaseGuidance("REFACTOR");
+      expect(msg.toLowerCase()).toContain("refactor");
+      expect(msg).toMatch(/behavior|structure/i);
+    });
+
+    it("returns general guidance for unknown phase", () => {
+      const msg = TDD_GUIDE.getPhaseGuidance("UNKNOWN");
+      expect(msg).toBeTruthy();
+    });
+  });
+
+  describe("getGeneralGuidance", () => {
+    it("should be a function", () => {
+      expect(typeof TDD_GUIDE.getGeneralGuidance).toBe("function");
+    });
+
+    it("includes error message if provided", () => {
+      const msg = TDD_GUIDE.getGeneralGuidance("boom");
+      expect(msg).toContain("boom");
+    });
+
+    it("mentions RED → GREEN → REFACTOR cycle", () => {
+      const msg = TDD_GUIDE.getGeneralGuidance();
+      expect(msg).toContain("RED");
+      expect(msg).toContain("GREEN");
+      expect(msg).toContain("REFACTOR");
+    });
+  });
+
+  describe("formatError", () => {
+    it("should be a function", () => {
+      expect(typeof TDD_GUIDE.formatError).toBe("function");
+    });
+
+    it("includes error and guidance", () => {
+      const msg = TDD_GUIDE.formatError("RED", "test failed");
+      expect(msg).toContain("test failed");
+      expect(msg.toLowerCase()).toContain("red");
+    });
   });
 });
 
-describe("runTDDCycle", () => {
-  it("should exist and be a function", () => {
-    expect(typeof runTDDCycle).toBe("function");
+// ---------------------------------------------------------------------------
+// runTests — shell out to the test command
+// ---------------------------------------------------------------------------
+
+describe("runTests", () => {
+  it("returns non-zero exit code when the test command fails", () => {
+    const result = runTests({ testCommand: "false", cwd: "/tmp" });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.failed).toBeGreaterThanOrEqual(0);
+  });
+
+  it("returns zero exit code when the test command succeeds", () => {
+    const result = runTests({ testCommand: "true", cwd: "/tmp" });
+    expect(result.exitCode).toBe(0);
+    expect(result.passed).toBe(0);
+    expect(result.failed).toBe(0);
   });
 });
 
-describe("Scenarios → TDD Red phase integration", () => {
-  it("generates a test file with one it() per scenario", () => {
-    const { generateTestFromScenarios } = require("@/tools/luban/task-runner.js") as any;
-    const scenarios = [
-      { name: "valid login", given: "user exists", when: "user submits correct creds", then: "user is logged in" },
-      { name: "invalid login", given: "user exists", when: "user submits wrong creds", then: "error is shown" },
-    ];
-    const content = generateTestFromScenarios("auth", scenarios);
-    expect(content).toContain("it(\"valid login\"");
-    expect(content).toContain("it(\"invalid login\"");
-  });
+// ---------------------------------------------------------------------------
+// validateScope — enforce deny_files
+// ---------------------------------------------------------------------------
 
-  it("includes Given/When/Then as comments in each test block", () => {
-    const { generateTestFromScenarios } = require("@/tools/luban/task-runner.js") as any;
-    const scenarios = [
-      { name: "test1", given: "precondition", when: "action", then: "result" },
-    ];
-    const content = generateTestFromScenarios("module", scenarios);
-    expect(content).toContain("// Given: precondition");
-    expect(content).toContain("// When: action");
-    expect(content).toContain("// Then: result");
-  });
-
-  it("includes But clause when present", () => {
-    const { generateTestFromScenarios } = require("@/tools/luban/task-runner.js") as any;
-    const scenarios = [
-      { name: "edge", given: "G", when: "W", then: "T", but: "B" },
-    ];
-    const content = generateTestFromScenarios("module", scenarios);
-    expect(content).toContain("// But: B");
-  });
-
-  it("falls back to generic template when no scenarios provided", () => {
-    const { generateTestFromScenarios } = require("@/tools/luban/task-runner.js") as any;
-    const content = generateTestFromScenarios("module", []);
-    expect(content).toContain("should be implemented");
-    // The generic template has no scenario-specific it() blocks
-    expect(content).not.toContain("// Given:");
-  });
-});
-
-describe("validateScope (denyFiles guard)", () => {
-  it("should exist and be a function", () => {
-    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
-    expect(typeof validateScope).toBe("function");
-  });
-
-  it("returns ok when no files are denied", () => {
-    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+describe("validateScope (deny_files guard)", () => {
+  it("returns valid=true when no files are denied", () => {
     const result = validateScope({
-      sourceFiles: ["src/auth.ts"],
-      testFiles: ["src/auth.test.ts"],
-      denyFiles: [],
+      files: ["src/auth.ts"],
+      deny_files: [],
     });
-    expect(result.ok).toBe(true);
-    expect(result.violations).toEqual([]);
+    expect(result.valid).toBe(true);
+    expect(result.violation).toBeUndefined();
   });
 
-  it("detects a sourceFile in denyFiles", () => {
-    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+  it("returns valid=true when deny_files is undefined", () => {
     const result = validateScope({
-      sourceFiles: ["src/auth.ts", "src/utils.ts"],
-      testFiles: ["src/auth.test.ts"],
-      denyFiles: ["src/auth.ts"],
+      files: ["src/auth.ts"],
     });
-    expect(result.ok).toBe(false);
-    expect(result.violations).toContain("src/auth.ts");
+    expect(result.valid).toBe(true);
   });
 
-  it("detects a testFile in denyFiles", () => {
-    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+  it("detects an exact-match violation", () => {
     const result = validateScope({
-      sourceFiles: ["src/auth.ts"],
-      testFiles: ["src/auth.test.ts"],
-      denyFiles: ["src/auth.test.ts"],
+      files: ["src/auth.ts", "src/utils.ts"],
+      deny_files: ["src/auth.ts"],
     });
-    expect(result.ok).toBe(false);
-    expect(result.violations).toContain("src/auth.test.ts");
+    expect(result.valid).toBe(false);
+    expect(result.violation?.file).toBe("src/auth.ts");
+    expect(result.violation?.matched_deny).toBe("src/auth.ts");
   });
 
-  it("reports multiple violations at once", () => {
-    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+  it("matches relative path (subdirectory paths)", () => {
     const result = validateScope({
-      sourceFiles: ["src/a.ts", "src/b.ts"],
-      testFiles: ["src/c.test.ts"],
-      denyFiles: ["src/a.ts", "src/b.ts", "src/c.test.ts"],
+      files: ["packages/core/src/index.ts"],
+      deny_files: ["src/index.ts"],
     });
-    expect(result.ok).toBe(false);
-    expect(result.violations.length).toBe(3);
+    expect(result.valid).toBe(false);
   });
 
   it("uses exact match, not substring (auth.ts vs auth.test.ts)", () => {
-    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
     const result = validateScope({
-      sourceFiles: ["src/auth.test.ts"],
-      testFiles: [],
-      denyFiles: ["src/auth.ts"],
+      files: ["src/auth.test.ts"],
+      deny_files: ["src/auth.ts"],
     });
-    expect(result.ok).toBe(true);
+    expect(result.valid).toBe(true);
   });
 
-  it("includes a human-readable message in the result", () => {
-    const { validateScope } = require("@/tools/luban/task-runner.js") as any;
+  it("returns first violation found", () => {
     const result = validateScope({
-      sourceFiles: ["src/auth.ts"],
-      testFiles: [],
-      denyFiles: ["src/auth.ts"],
+      files: ["src/a.ts", "src/b.ts"],
+      deny_files: ["src/b.ts", "src/a.ts"],
     });
-    expect(result.message).toContain("src/auth.ts");
-    expect(result.message.toLowerCase()).toMatch(/scope|denied|out.of.scope/);
+    expect(result.valid).toBe(false);
+    expect(result.violation).toBeDefined();
   });
 });

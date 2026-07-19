@@ -5,7 +5,16 @@
  * Per simplify-actions: only the seven role-based tools remain
  * (fuxi_design, qiaochui_review, qiaochui_decompose, luban_execute_task,
  *  gaoyao_audit, gaoyao_observe, gaoyao_finalize). No fsm, no slash
- * commands, no deprecated state module.
+ * commands, no deprecated state module, no batch executor, no
+ * workflow-state-manager, no mode-checker, no draft helpers.
+ *
+ * Round 1 (commit 9673465): slash commands, fuxi_start, fuxi_end,
+ *   luban_run_batch, deprecated src/state module.
+ * Round 2 (this commit): workflow-state-manager, mode-checker, scheduler,
+ *   executor shim, draft-generator/draft-parser/request-classifier,
+ *   partial helpers in conflict-detector + task-runner.
+ *
+ * Brainstorming module and skills/ docs are intentionally retained.
  *
  * These tests catch accidental resurrection of the deleted pieces.
  */
@@ -18,6 +27,10 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PI_ROOT = path.resolve(__dirname, "..");
+
+// ────────────────────────────────────────────────────────────────────────────
+// Round 1: workflow machinery removed
+// ────────────────────────────────────────────────────────────────────────────
 
 describe("Slash commands removed (no /sages-init, /sages-plan)", () => {
 	it("extensions/sages-tool.ts no longer exists", () => {
@@ -149,4 +162,141 @@ describe("No test residue for removed tools", () => {
 		const dir = path.join(PI_ROOT, "test", "state");
 		expect(fs.existsSync(dir)).toBe(false);
 	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Round 2: deep dead-code sweep
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("Round 2: dead files removed", () => {
+	const deleted = [
+		"src/services/workflow-state-manager.ts",
+		"src/utils/mode-checker.ts",
+		"src/tools/luban/scheduler.ts",
+		"src/executor/index.ts",
+		"src/utils/draft-generator.ts",
+		"src/utils/draft-parser.ts",
+		"src/utils/request-classifier.ts",
+		"src/utils/model-helper.ts",
+		"src/tools/luban/plan-parser.ts",
+	];
+	for (const rel of deleted) {
+		it(`${rel} no longer exists`, () => {
+			const p = path.join(PI_ROOT, rel);
+			expect(fs.existsSync(p)).toBe(false);
+		});
+	}
+
+	it("src/executor/ directory is empty/gone", () => {
+		const dir = path.join(PI_ROOT, "src", "executor");
+		// Either gone or empty
+		if (fs.existsSync(dir)) {
+			expect(fs.readdirSync(dir)).toEqual([]);
+		}
+	});
+
+	const deletedTests = [
+		"test/services/workflow-state-manager.test.ts",
+		"test/utils/mode-checker.test.ts",
+		"test/tools/luban/scheduler.test.ts",
+		"test/utils/draft-generator.test.ts",
+		"test/utils/draft-parser.test.ts",
+		"test/utils/request-classifier.test.ts",
+		"test/utils/model-helper.test.ts",
+		"test/tools/luban/plan-parser.test.ts",
+	];
+	for (const rel of deletedTests) {
+		it(`${rel} no longer exists`, () => {
+			const p = path.join(PI_ROOT, rel);
+			expect(fs.existsSync(p)).toBe(false);
+		});
+	}
+});
+
+describe("Round 2: partial files only export live helpers", () => {
+	it("src/tools/luban/conflict-detector.ts no longer exports detectFileConflicts", () => {
+		const content = fs.readFileSync(
+			path.join(PI_ROOT, "src", "tools", "luban", "conflict-detector.ts"),
+			"utf-8",
+		);
+		expect(content).not.toMatch(/export\s+function\s+detectFileConflicts\b/);
+		// deriveTestFiles is the live helper — must still be exported
+		expect(content).toMatch(/export\s+function\s+deriveTestFiles\b/);
+	});
+
+	it("src/tools/luban/task-runner.ts no longer exports runTask / runTDDCycle / generateTestFromScenarios", () => {
+		const content = fs.readFileSync(
+			path.join(PI_ROOT, "src", "tools", "luban", "task-runner.ts"),
+			"utf-8",
+		);
+		expect(content).not.toMatch(/export\s+(async\s+)?function\s+runTask\b/);
+		expect(content).not.toMatch(/export\s+(async\s+)?function\s+runTDDCycle\b/);
+		expect(content).not.toMatch(/export\s+function\s+generateTestFromScenarios\b/);
+		// Live helpers must still be exported
+		expect(content).toMatch(/export\s+function\s+runTests\b/);
+		expect(content).toMatch(/export\s+function\s+validateScope\b/);
+		expect(content).toMatch(/export\s+const\s+TDD_GUIDE\b/);
+	});
+});
+
+describe("Round 2: qiaochui no longer imports unused model-helper", () => {
+	it("src/tools/qiaochui/index.ts does not import getUserDefaultModel", () => {
+		const content = fs.readFileSync(
+			path.join(PI_ROOT, "src", "tools", "qiaochui", "index.ts"),
+			"utf-8",
+		);
+		expect(content).not.toMatch(/getUserDefaultModel/);
+		expect(content).not.toMatch(/model-helper/);
+	});
+});
+
+describe("Round 2: public API surface is minimal (only role tools + FileService)", () => {
+	it("src/index.ts does not export dead re-exports", () => {
+		const content = fs.readFileSync(path.join(PI_ROOT, "src", "index.ts"), "utf-8");
+		// workflow-state-manager types
+		expect(content).not.toMatch(/\bWorkflowState\b/);
+		expect(content).not.toMatch(/\bFuxiPhase\b/);
+		expect(content).not.toMatch(/\bArchiveInfo\b/);
+		// executor functions
+		expect(content).not.toMatch(/\brunTask\b/);
+		expect(content).not.toMatch(/\brunTDDCycle\b/);
+		expect(content).not.toMatch(/\bparseExecutionYaml\b/);
+		expect(content).not.toMatch(/\bresolveDependencies\b/);
+		expect(content).not.toMatch(/\bsortByDependencies\b/);
+		// executor types
+		expect(content).not.toMatch(/\bTDDConfig\b/);
+		expect(content).not.toMatch(/\bExecutionSettings\b/);
+		// mode-checker
+		expect(content).not.toMatch(/\bcheckWritePermission\b/);
+		expect(content).not.toMatch(/\bgetModeInfo\b/);
+		expect(content).not.toMatch(/\bgetModeIndicator\b/);
+		expect(content).not.toMatch(/\bgetAccessDeniedMessage\b/);
+		// WorkflowStateManager itself (now dead)
+		expect(content).not.toMatch(/\bWorkflowStateManager\b/);
+		expect(content).not.toMatch(/["']\.\/executor/);
+	});
+
+	it("src/index.ts keeps the role-tool registration exports", () => {
+		const content = fs.readFileSync(path.join(PI_ROOT, "src", "index.ts"), "utf-8");
+		expect(content).toContain("registerFuxiTools");
+		expect(content).toContain("registerQiaoChuiTools");
+		expect(content).toContain("registerLubanTools");
+		expect(content).toContain("registerGaoYaoTools");
+		expect(content).toContain("FileService");
+	});
+});
+
+describe("Round 2: brainstorming module and skills/ docs are preserved", () => {
+	it("src/tools/brainstorming/index.ts still exists", () => {
+		const p = path.join(PI_ROOT, "src", "tools", "brainstorming", "index.ts");
+		expect(fs.existsSync(p)).toBe(true);
+	});
+
+	const skills = ["fuxi", "qiaochui", "luban", "gaoyao", "brainstorming"];
+	for (const name of skills) {
+		it(`skills/${name}/SKILL.md still exists`, () => {
+			const p = path.join(PI_ROOT, "skills", name, "SKILL.md");
+			expect(fs.existsSync(p)).toBe(true);
+		});
+	}
 });

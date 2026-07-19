@@ -172,19 +172,18 @@ async function executeTask(params: {
   // ── Scope guard (only on init, before any state is created) ───────────
   if (!observation) {
     const scope = validateScope({
-      sourceFiles: files,
-      testFiles: effectiveTestFiles,
-      denyFiles: deny_files,
+      files,
+      deny_files,
     });
-    if (!scope.ok) {
+    if (!scope.valid) {
       return {
         content: [{ type: "text", text: JSON.stringify({
           status: "error",
-          error: scope.message,
-          violations: scope.violations,
+          error: `Out of scope: ${scope.violation?.file ?? "unknown"} matches ${scope.violation?.matched_deny ?? "deny_files"}`,
+          violation: scope.violation,
         }) }],
         isError: true,
-        details: { violations: scope.violations },
+        details: { violation: scope.violation },
       };
     }
   }
