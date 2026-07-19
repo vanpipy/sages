@@ -31,7 +31,7 @@ design (Fuxi) → review (QiaoChui) → approve (user) → execute (LuBan) → a
 - **Role**: Task execution with TDD methodology (RED → GREEN → REFACTOR)
 - **Tools** (simplified 2-tool surface): `luban_execute_task` (observe cycle, auto-advance), `luban_run_batch` (planner — reads execution.yaml, returns ordered plan + file conflicts)
 - **Deprecated stubs**: `luban_get_status` (status in every response), `luban_execute_batch` (renamed), `luban_execute_all` (removed)
-- **Focus**: Implementation via **serena** / **codebase-memory** / **graphify** — LuBan validates outcomes, the LLM does the semantic work
+- **Focus**: Implementation via **AFT-backed `read`/`write`/`edit`/`grep`** (replaces serena) + **codebase-memory** + **graphify** — LuBan validates outcomes, the LLM does the semantic work
 - **Module**: `src/tools/luban/` (index, types, plan-parser, task-runner, scheduler, conflict-detector)
 - **TDD Guide**: Built-in fallback guidance for exceptions
 
@@ -67,7 +67,7 @@ The simplified surface **auto-advances** on observation. The LLM calls each tool
 ### Phase 3: Execute (LuBan)
 - `luban_run_batch` reads execution.yaml, returns ordered plan + file conflicts
 - LLM iterates `luban_execute_task` per task: RED → GREEN → REFACTOR → complete (observe cycle, auto-advance)
-- LLM uses **serena** / **codebase-memory** / **graphify** for actual implementation; LuBan validates
+- LLM uses **AFT-backed `read`/`write`/`edit`/`grep`** (via `@cortexkit/aft-pi`) + **codebase-memory** + **graphify** for actual implementation; LuBan validates
 - Output: Implementation files
 
 ### Phase 4: Audit (GaoYao)
@@ -206,7 +206,7 @@ src/tools/luban/
 - **KD-1**: `luban_execute_all` removed (no backward-compat alias)
 - **KD-2**: optimistic concurrency with auto-serial degrade on intra-batch file conflicts
 - **KD-3**: black-box contract — `content.text` = summary, `details` = full BatchResult for GaoYao audit
-- **KD-4**: TDD optimization (real LLM implementation) deferred — current runner validates test outcomes, LLM does the semantic work via serena/codebase-memory/graphify
+- **KD-4**: TDD optimization (real LLM implementation) deferred — current runner validates test outcomes, LLM does the semantic work via AFT-backed file ops + codebase-memory + graphify
 - **DRY**: TDD logic lives in one place
 - **TDD_GUIDE**: Built-in fallback guidance for exceptions
 - **FileService**: All file operations use FileService (no direct node:fs)
