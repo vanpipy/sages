@@ -1,0 +1,42 @@
+{
+	// ════════════════════════════════════════════════════════════════════════
+	// Magic Context configuration template — installed by
+	// `pi/scripts/install.sh` to ~/.config/cortexkit/magic-context.jsonc so
+	// the extension boots with sensible defaults instead of schema fallbacks.
+	//
+	// Per-session fields (harness, project_root) are NOT pinned here; the
+	// magic-context pi-plugin sets them at session start.
+	// ════════════════════════════════════════════════════════════════════════
+	"$schema": "https://raw.githubusercontent.com/cortexkit/magic-context/master/assets/magic-context.schema.json",
+	"_sages_template_marker": "SAGES_TEMPLATE_V1",
+
+	"enabled": true,
+
+	// Historian — background subagent compresses old conversation into
+	// compartments + facts at threshold pressure or commit boundaries.
+	"historian": {
+		"enabled": true,
+		"model": "anthropic/claude-haiku-4-5",
+	},
+
+	// Dreamer — scheduled background subagent that consolidates, verifies,
+	// archives, and improves stored memories. Off by default to avoid
+	// surprise API usage; turn on after verifying the rest works.
+	"dreamer": {
+		"enabled": false,
+	},
+
+	// Sidekick — on-demand `/ctx-aug` augmentation.
+	"sidekick": {
+		"enabled": true,
+	},
+
+	// Embedding — disabled by default. Requires onnxruntime-node which
+	// may fail to install on networks with restricted CDN access. Turn on
+	// after `npx @cortexkit/magic-context@latest doctor` confirms ONNX is
+	// installed.
+	"embedding": {
+		"provider": "local",
+		"enabled": false,
+	},
+}

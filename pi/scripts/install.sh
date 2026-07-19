@@ -8,8 +8,8 @@
 # pi-aft (via aft-pi extension) — AFT-backed code analysis (replaces serena, no LSP needed)
 #
 # Selective install options:
-#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-semantic-nudge and SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-semantic-nudge)
+#   --sages-only   only update sages (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-semantic-nudge and SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-semantic-nudge)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -91,8 +91,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-semantic-nudge, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-semantic-nudge)"
+  echo "  --sages-only       Only install/update sages (skip pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-semantic-nudge, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-memory, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-semantic-nudge)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -926,6 +926,169 @@ except Exception as e:
 }
 
 # ──────────────────────────────────────────────────────────────────
+# pi-magic-context — CortexKit's persistent memory + context layer
+# (installs alongside pi-aft; both target @earendil-works/pi-coding-agent)
+# ──────────────────────────────────────────────────────────────────
+
+# pi-magic-context package info (npm-installed, same pattern as pi-aft)
+PI_MAGIC_CONTEXT_PKG="npm:@cortexkit/pi-magic-context"
+MAGIC_CONTEXT_TEMPLATE="$SCRIPT_DIR/../templates/magic-context.jsonc"
+MAGIC_CONTEXT_CONFIG_PATH="$HOME/.config/cortexkit/magic-context.jsonc"
+
+is_pi_magic_context_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    if any(p == 'npm:@cortexkit/pi-magic-context' or p == '$PI_MAGIC_CONTEXT_PKG' or p.endswith('/pi-magic-context') for p in pkgs):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+# Idempotency rules for ~/.config/cortexkit/magic-context.jsonc mirror the
+# AFT config pattern: only overwrite user-customized files when --force is
+# passed; degraded (empty) or missing files get the template.
+is_magic_context_config_degraded() {
+  [[ ! -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && return 0  # missing = trivially degraded
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$MAGIC_CONTEXT_CONFIG_PATH'))
+    meaningful = [k for k in d if k not in ('\$schema', '_sages_template_marker')]
+    sys.exit(0 if not meaningful else 1)
+except Exception:
+    sys.exit(0)
+" 2>/dev/null
+}
+
+install_magic_context_config() {
+  if [[ ! -f "$MAGIC_CONTEXT_TEMPLATE" ]]; then
+    echo "  Warning: magic-context template not found at $MAGIC_CONTEXT_TEMPLATE"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$MAGIC_CONTEXT_CONFIG_PATH")"
+
+  # Already installed by us → skip (matches install_aft_config behavior).
+  if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && grep -q 'SAGES_TEMPLATE_V1' "$MAGIC_CONTEXT_CONFIG_PATH" 2>/dev/null && [[ "${FORCE:-false}" != true ]]; then
+    echo "  magic-context config already installed (use --force to reinstall)"
+    return 0
+  fi
+
+  # User-customized → preserve (matches install_aft_config behavior).
+  if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && ! is_magic_context_config_degraded; then
+    echo "  magic-context config already exists with user customization (use --force to overwrite)"
+    return 0
+  fi
+
+  if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && is_magic_context_config_degraded; then
+    echo "  Upgrading degraded magic-context config (only \$schema, no feature flags)"
+  fi
+
+  cp "$MAGIC_CONTEXT_TEMPLATE" "$MAGIC_CONTEXT_CONFIG_PATH"
+  echo "  Installed magic-context config from template"
+}
+
+install_pi_magic_context() {
+  echo "==> Installing pi-magic-context..."
+
+  # Idempotent: skip if installed
+  if is_pi_magic_context_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-magic-context already installed (use --force to reinstall)"
+    install_magic_context_config
+    return 0
+  fi
+
+  # Force-install path: uninstall first
+  if [[ "${FORCE:-false}" == true ]] && is_pi_magic_context_installed; then
+    echo "  Force-reinstall: removing previous pi-magic-context first"
+    uninstall_pi_magic_context
+  fi
+
+  # 1) Install the npm package via pi. The interactive setup wizard
+  #    (`npx @cortexkit/magic-context@latest setup --harness pi`) prompts
+  #    for historian/dreamer/sidekick model choices and is meant for
+  #    first-time human installs. We skip the wizard and write the config
+  #    directly via install_magic_context_config below — the wizard can
+  #    still be run manually after install to refine the config.
+  #
+  #    The onnxruntime-node postinstall (used for embeddings) sometimes
+  #    fails on restricted CDN networks. Use --ignore-scripts to skip it
+  #    so semantic search stays off until ONNX can be installed manually.
+  if command -v pi &>/dev/null; then
+    echo "  Installing @cortexkit/pi-magic-context via pi (skipping onnx postinstall)..."
+    (cd "$TMP_DIR" && \
+      npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_MAGIC_CONTEXT_PKG" 2>&1 | tail -3) || {
+      echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_MAGIC_CONTEXT_PKG' manually"
+    }
+    # Register in settings.json (matches pi-aft/pi-graphify pattern).
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_MAGIC_CONTEXT_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+  else
+    echo "  'pi' command not found; user must install manually"
+  fi
+
+  # 2) Write the magic-context config template (idempotent — skips if
+  #    user-customized).
+  install_magic_context_config
+
+  echo "  pi-magic-context installed"
+}
+
+uninstall_pi_magic_context() {
+  echo "==> Uninstalling pi-magic-context..."
+
+  # Manual cleanup: strip from settings.json
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    new_pkgs = [p for p in pkgs if p != 'npm:@cortexkit/pi-magic-context' and not p.endswith('/pi-magic-context')]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open('$settings', 'w'), indent=2)
+        print('  Removed pi-magic-context from settings.json')
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null || true
+
+  # Remove installed package files (best-effort).
+  rm -rf "$PI_DIR/agent/npm/node_modules/@cortexkit/pi-magic-context" 2>/dev/null && \
+    echo "  Removed pi-magic-context package files"
+
+  # NEVER-TOUCH policy (mirrors install_aft_config): only remove config
+  # if it carries our SAGES_TEMPLATE_V1 sentinel.
+  if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && grep -q 'SAGES_TEMPLATE_V1' "$MAGIC_CONTEXT_CONFIG_PATH" 2>/dev/null; then
+    rm -f "$MAGIC_CONTEXT_CONFIG_PATH"
+    echo "  Removed magic-context config (was our template)"
+  else
+    echo "  magic-context config is user-customized, leaving alone"
+  fi
+
+  echo "  pi-magic-context uninstalled"
+}
+
+# ──────────────────────────────────────────────────────────────────
 # AFT config (~/.config/cortexkit/aft.jsonc) — feature flags template
 # ──────────────────────────────────────────────────────────────────
 
@@ -1149,6 +1312,9 @@ install() {
   # (must run AFTER install_pi_aft, since AFT setup creates the file as empty)
   install_aft_config
 
+  # Install pi-magic-context (cross-session memory + context layer)
+  install_pi_magic_context || true
+
   # Install pi-codebase-memory sage peer (file copy from TMP_DIR/pi-codebase-memory + settings.json register).
   # Old design had two steps (install_pi_codebase_memory + install_pi_codebase_memory_files); merged into one
   # after we dropped the npm:pi-codebase-memory (R-Dson) variant in favor of the local peer only.
@@ -1201,7 +1367,7 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_memory / install_pi_codebase_memory / install_pi_aft / install_aft_config / install_system_prompt
+  # 显式不调用 install_pi_memory / install_pi_codebase_memory / install_pi_aft / install_aft_config / install_pi_magic_context / install_system_prompt
   echo "  (skipped: pi-memory, pi-codebase-memory, pi-aft, AFT config, SYSTEM.md)"
 
   echo ""
@@ -1253,6 +1419,9 @@ uninstall() {
 
   # Uninstall AFT config template (only if it's our template, not user-edited)
   uninstall_aft_config
+
+  # Uninstall pi-magic-context (cross-session memory layer)
+  uninstall_pi_magic_context
 
   # Uninstall pi-semantic-nudge (sage peer)
   uninstall_pi_semantic_nudge
