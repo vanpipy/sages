@@ -90,6 +90,19 @@ export interface TaskNode extends Omit<MDDTask, "id" | "dependsOn"> {
   task_template?: string;
   /** Parameters passed to the task_template renderer (replaces or augments manual prompt) */
   task_params?: Record<string, unknown>;
+  /**
+   * Inputs from upstream tasks. At dispatch time, the dispatcher reads each
+   * upstream task's output_path and appends the content to the subagent's prompt
+   * under a "Context from upstream tasks" section.
+   */
+  inputs?: Array<{
+    /** The task id whose output to read */
+    from_task: string;
+    /** Logical field name (e.g. "findings", "design", "report") — used as section heading */
+    field: string;
+    /** How to embed the upstream output: "inline" (default) or "summary" (first 500 chars) */
+    embed?: "inline" | "summary";
+  }>;
   /** Structured output contract */
   output_schema: {
     kind: "file_list" | "design_doc" | "code_changes" | "test_results" | "verdict";

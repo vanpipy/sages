@@ -22,8 +22,10 @@
 import { Type, type Static } from "typebox";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import * as yaml from "js-yaml";
 import type { GoalContract, OrchestrationPlan, TaskNode } from "./types.js";
 import { ORCHESTRATOR_DIR, dagPath, goalContractPath } from "./types.js";
+import { renderTaskPrompt, validateTemplateParams } from "./template-loader.js";
 
 export const TaskNodeSchema = Type.Object({
   id: Type.String({ description: "Semantic id like 'P1', 'P2.a'", pattern: "^[A-Z][0-9]+(\\.[a-z])?$" }),
@@ -51,6 +53,15 @@ export const TaskNodeSchema = Type.Object({
   })),
   /** Parameters passed to the task_template renderer */
   task_params: Type.Optional(Type.Object({}, { additionalProperties: true })),
+  /**
+   * Upstream task inputs — at dispatch time, each upstream task's output is
+   * read and embedded in the subagent's prompt.
+   */
+  inputs: Type.Optional(Type.Array(Type.Object({
+    from_task: Type.String({ description: "Task id whose output to read" }),
+    field: Type.String({ description: "Logical field name (e.g. 'findings', 'design')" }),
+    embed: Type.Optional(Type.Union([Type.Literal("inline"), Type.Literal("summary")])),
+  }), { description: "Upstream task outputs to inject into this task's prompt" })),
   output_schema: Type.Object({
     kind: Type.Union([
       Type.Literal("file_list"),
@@ -153,6 +164,13 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
     if (t.task_template && !KNOWN_TEMPLATES.has(t.task_template)) {
       errors.push(`task '${t.id}': task_template '${t.task_template}' is not a known template (allowed: ${[...KNOWN_TEMPLATES].join(", ")})`);
     }
+    // Validate task_params if task_template is set
+    if (t.task_template && KNOWN_TEMPLATES.has(t.task_template)) {
+      const paramCheck = validateTemplateParams(t.task_template, t.task_params ?? {});
+      if (!paramCheck.valid) {
+        errors.push(`task '${t.id}': task_params invalid: ${paramCheck.errors.join("; ")}`);
+      }
+    }
   }
 
   // 6. Within-batch independence — no two tasks in the same batch can depend on each other
@@ -233,10 +251,6 @@ function hasCycle(adj: Map<string, string[]>): boolean {
 
 /** Build OrchestrationPlan from input + contract. Renders task_template prompts when set. */
 export function buildPlan(input: DAGInput, contract: GoalContract): OrchestrationPlan {
-  // Lazy import to avoid circular deps
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { renderTaskPrompt } = require("./template-loader.js") as typeof import("./template-loader.js");
-
   const now = new Date().toISOString();
   const tasks: TaskNode[] = (input.tasks as any[]).map((t: any) => {
     // If task_template is set, render the prompt from template + params.
@@ -273,41 +287,16 @@ export function buildPlan(input: DAGInput, contract: GoalContract): Orchestratio
   };
 }
 
-/** Serialize plan to YAML. */
+/** Serialize plan to YAML using js-yaml (proper escaping). */
 export function planToYaml(plan: OrchestrationPlan): string {
-  const lines: string[] = [];
-  lines.push("# Orchestration Plan");
-  lines.push(`id: ${plan.id}`);
-  lines.push(`goal_id: ${plan.goal_id}`);
-  lines.push(`title: "${escapeYaml(plan.title)}"`);
-  lines.push(`created_at: "${plan.created_at}"`);
-  lines.push(`updated_at: "${plan.updated_at}"`);
-  lines.push(`state: ${plan.state}`);
-  lines.push("");
-  lines.push("tasks:");
-  for (const t of plan.tasks) {
-    lines.push(`  - id: ${t.id}`);
-    lines.push(`    description: "${escapeYaml(t.description)}"`);
-    lines.push(`    subagent_type: ${t.subagent_type}`);
-    lines.push(`    batch: ${t.batch}`);
-    lines.push(`    depends_on: [${t.depends_on.join(", ")}]`);
-    lines.push(`    isolation: ${t.isolation}`);
-    lines.push(`    tdd: ${t.tdd}`);
-    lines.push(`    acceptance:`);
-    lines.push(`      covers: [${t.acceptance.covers.join(", ")}]`);
-    if (t.acceptance.self_check_cmd) lines.push(`      self_check_cmd: "${escapeYaml(t.acceptance.self_check_cmd)}"`);
-    lines.push(`    files: [${t.files.map(f => `"${escapeYaml(f)}"`).join(", ")}]`);
-    lines.push(`    status: ${t.status}`);
-    lines.push(`    retry_count: ${t.retry_count}`);
-    lines.push(`    max_retries: ${t.max_retries}`);
-    lines.push(`    prompt: |`);
-    for (const line of t.prompt.split("\n")) lines.push(`      ${line}`);
-  }
-  return lines.join("\n");
-}
-
-function escapeYaml(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  // js-yaml.dump handles all escaping (strings with ", :, #, newlines, etc.)
+  // Round-trip safe: dump → load → identical object.
+  return yaml.dump(plan, {
+    indent: 2,
+    lineWidth: 120,
+    noRefs: true,
+    sortKeys: false,  // preserve logical field order
+  });
 }
 
 /** Load a goal contract from disk. */
@@ -315,32 +304,28 @@ export function loadGoalContract(cwd: string, goalId: string): GoalContract | nu
   const path = goalContractPath(cwd, goalId);
   if (!existsSync(path)) return null;
   const raw = readFileSync(path, "utf-8");
-  return parseGoalContractYaml(raw, goalId);
+  return parseGoalContractYaml(raw);
 }
 
-/** Minimal YAML parser for goal contracts — sufficient for our generated YAML. */
-export function parseGoalContractYaml(raw: string, id: string): GoalContract {
-  // Lazy import to avoid pulling js-yaml at module top.
-  // We hand-roll a tiny parser here because we control the YAML format.
-  // For robustness, prefer using js-yaml if available.
-  // Fallback: try to load js-yaml.
+/** Parse a goal contract YAML, with a clean error if malformed. */
+export function parseGoalContractYaml(raw: string): GoalContract {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const yaml = require("js-yaml");
     return yaml.load(raw) as GoalContract;
-  } catch {
-    throw new Error("Cannot parse goal contract YAML — please install js-yaml or use the goal_contract_create tool to generate");
+  } catch (err) {
+    throw new Error(
+      `Failed to parse goal contract YAML. ` +
+      `Ensure the file was written by goal_contract_create. ` +
+      `Underlying error: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }
 
-/** Load a plan from disk (lazy js-yaml). */
+/** Load a plan from disk. Returns null if file is missing or malformed. */
 export function loadPlan(cwd: string, dagId: string): OrchestrationPlan | null {
   const path = dagPath(cwd, dagId);
   if (!existsSync(path)) return null;
   const raw = readFileSync(path, "utf-8");
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const yaml = require("js-yaml");
     return yaml.load(raw) as OrchestrationPlan;
   } catch {
     return null;
@@ -367,7 +352,7 @@ export function registerDAGSynthesizerTool(pi: any): void {
           content: [{ type: "text", text: JSON.stringify({
             status: "error",
             intent: `Goal contract ${params.goal_id} not found. Run goal_contract_create first.`,
-            validation: { errors: [`goal contract not found at ${goalContractPath(cwd, params.goal_id)}`] },
+            validation: { errors: ["goal contract not found — create it with goal_contract_create"] },
           }) }],
         };
       }
@@ -388,7 +373,7 @@ export function registerDAGSynthesizerTool(pi: any): void {
       const plan = buildPlan(params, contract);
       const path = dagPath(cwd, plan.id);
       const dir = join(cwd, ORCHESTRATOR_DIR);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
       writeFileSync(path, planToYaml(plan), "utf-8");
 

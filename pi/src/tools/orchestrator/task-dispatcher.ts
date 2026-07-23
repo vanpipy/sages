@@ -25,8 +25,9 @@
 import { Type, type Static } from "typebox";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import * as yaml from "js-yaml";
 import type { OrchestrationPlan, TaskNode } from "./types.js";
-import { ORCHESTRATOR_DIR, taskReportPath, dagPath } from "./types.js";
+import { ORCHESTRATOR_DIR, dagPath } from "./types.js";
 import { loadPlan } from "./dag-synthesizer.js";
 
 export const TaskDispatchParams = Type.Object({
@@ -77,7 +78,7 @@ export interface DispatchTask {
   report_path: string;
 }
 
-/** Build the dispatch plan from a loaded DAG. */
+/** Build the dispatch plan from a loaded DAG. Injects upstream task outputs into each task's prompt. */
 export function buildDispatchPlan(
   plan: OrchestrationPlan,
   strategy: "auto" | "step" | "review",
@@ -89,6 +90,10 @@ export function buildDispatchPlan(
     if (!byBatch.has(t.batch)) byBatch.set(t.batch, []);
     byBatch.get(t.batch)!.push(t);
   }
+
+  // Index tasks by id for input injection lookup
+  const taskById = new Map<string, TaskNode>();
+  for (const t of plan.tasks) taskById.set(t.id, t);
 
   const sortedBatches = [...byBatch.keys()].sort((a, b) => a - b);
   const totalTasks = plan.tasks.length;
@@ -102,22 +107,20 @@ export function buildDispatchPlan(
     const dispatchTasks: DispatchTask[] = tasks.map(t => ({
       task_id: t.id,
       subagent_type: t.subagent_type,
-      prompt: t.prompt,
+      // Inject upstream task outputs into the prompt
+      prompt: injectUpstreamOutputs(plan, taskById, t),
       isolation: t.isolation,
-      // Background when batch has >1 task and concurrency limit allows; otherwise foreground
-      run_in_background: tasks.length > 1,
+      run_in_background: true,
       wait_for: tasks.length > 1 ? "batch_completion" : "completion",
-      report_path: taskReportPath(plan.id, t.id).replace(plan.id + "/", ""),
+      report_path: `.pi/orchestrator/task-${t.id}-report.md`,
     }));
 
-    // Cap parallelism
     const parallelSafe = dispatchTasks.length <= maxConcurrent;
 
-    // Audit every batch in auto mode; only the last batch in step/review mode
     const auditAfter =
       strategy === "auto" ? true :
       strategy === "step" ? isLastBatch :
-      isLastBatch; // review = always audit before user approves next batch
+      isLastBatch;
 
     batches.push({
       batch: batchNum,
@@ -127,7 +130,6 @@ export function buildDispatchPlan(
     });
   }
 
-  // Estimate turns: 1 dispatch + 1 wait + 1 audit per batch, plus 1 final report
   const estimatedTotalTurns = batches.length * 3 + 1;
 
   return {
@@ -138,6 +140,61 @@ export function buildDispatchPlan(
     estimated_total_turns: estimatedTotalTurns,
     next_actions: buildNextActions(batches, strategy),
   };
+}
+
+/**
+ * Inject upstream task outputs into this task's prompt.
+ * For each `inputs[i]`:
+ *   - Find upstream task
+ *   - Read its `output_path` (if set) from disk
+ *   - Append a section to the prompt under "## Context from upstream: {field}"
+ *
+ * If upstream output is missing or unreadable, append a "[not yet available]" marker
+ * (don't silently drop — subagent should know).
+ */
+function injectUpstreamOutputs(
+  plan: OrchestrationPlan,
+  taskById: Map<string, TaskNode>,
+  task: TaskNode,
+): string {
+  const inputs = task.inputs;
+  if (!inputs || inputs.length === 0) return task.prompt;
+
+  const sections: string[] = [];
+  for (const input of inputs) {
+    const upstream = taskById.get(input.from_task);
+    if (!upstream) {
+      sections.push(`### Context from ${input.from_task} (${input.field})\n[upstream task not found in DAG]`);
+      continue;
+    }
+    const outputPath = upstream.output_path;
+    let content: string | null = null;
+    if (outputPath) {
+      // Try the path as-is first, then relative to the orchestrator dir.
+      try {
+        if (existsSync(outputPath)) {
+          content = readFileSync(outputPath, "utf-8");
+        } else if (existsSync(join(ORCHESTRATOR_DIR, outputPath))) {
+          content = readFileSync(join(ORCHESTRATOR_DIR, outputPath), "utf-8");
+        }
+      } catch {
+        content = null;
+      }
+    }
+
+    if (content === null) {
+      sections.push(`### Context from ${input.from_task} (${input.field})\n[upstream output not yet available at ${outputPath ?? "<no path>"}]`);
+      continue;
+    }
+
+    if (input.embed === "summary" && content.length > 500) {
+      content = content.slice(0, 500) + "\n... [truncated; full output at " + outputPath + "]";
+    }
+
+    sections.push(`### Context from ${input.from_task} (${input.field})\n\n${content}`);
+  }
+
+  return task.prompt + "\n\n---\n\n## Context from Upstream Tasks\n\n" + sections.join("\n\n");
 }
 
 function buildNextActions(batches: DispatchBatch[], strategy: string): string[] {
@@ -202,16 +259,9 @@ export function registerTaskDispatcherTool(pi: any): void {
       // Build dispatch plan
       const dispatch = buildDispatchPlan(plan, params.strategy, params.max_concurrent ?? 4);
 
-      // Persist updated plan
+      // Persist updated plan (unified YAML format — same as planToYaml)
       const planPath = dagPath(cwd, plan.id);
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const yaml = require("js-yaml");
-        writeFileSync(planPath, yaml.dump(plan), "utf-8");
-      } catch (e) {
-        // If js-yaml missing, write as JSON fallback
-        writeFileSync(planPath, JSON.stringify(plan, null, 2), "utf-8");
-      }
+      writeFileSync(planPath, yaml.dump(plan, { indent: 2, lineWidth: 120, noRefs: true }), "utf-8");
 
       return {
         content: [{ type: "text", text: JSON.stringify({

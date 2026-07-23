@@ -22,6 +22,7 @@
 import { Type, type Static } from "typebox";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import * as yaml from "js-yaml";
 import type { GoalContract, SuccessCriterion } from "./types.js";
 import { ORCHESTRATOR_DIR, goalContractPath } from "./types.js";
 
@@ -239,11 +240,11 @@ export function registerGoalContractTool(pi: any): void {
       const contract = buildGoalContract(params);
       const path = goalContractPath(cwd, contract.id);
 
-      // Ensure dir exists
+      // Ensure dir exists (restricted perms — contains acceptance criteria)
       const dir = join(cwd, ORCHESTRATOR_DIR);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-      writeFileSync(path, goalContractToYaml(contract), "utf-8");
+      writeFileSync(path, yaml.dump(contract, { indent: 2, lineWidth: 120, noRefs: true }), "utf-8");
 
       return {
         content: [{ type: "text", text: JSON.stringify({

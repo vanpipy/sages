@@ -65,6 +65,9 @@ export {
   listTemplates,
   renderTemplate,
   renderTaskPrompt,
+  validateTemplateParams,
+  getTemplateParamsSchema,
+  type TemplateParam,
 } from "./template-loader.js";
 
 export {
