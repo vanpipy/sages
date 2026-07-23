@@ -9,8 +9,8 @@
 # (replaces the older pi-memory + pi-semantic-nudge).
 #
 # Selective install options:
-#   --sages-only   only update sages (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents and SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents)
+#   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -30,6 +30,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # SYSTEM.md template (single source of truth for all three install scripts: .sh / .ps1 / .bat)
 SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 
+# Subagent template install info.
+# Source: pi/templates/agents/{software-auditor,software-developer}.md (git-tracked)
+# Target: $AGENT_DIR/agents/ — global agent definitions loaded by pi-subagents.
+# Used by sages orchestrator workflow to spawn sub-agents by name
+# (subagent_type="software-developer" / "software-auditor"). Without these,
+# the orchestrator's Agent tool calls fail with "unknown agent" errors.
+#
+# Each template body carries an HTML-comment sentinel (SAGES_TEMPLATE_V1) so
+# uninstall_subagent_templates can distinguish "we installed this" from
+# "user wrote their own agent or hand-edited ours".
+#
+# ── 4-agent subagent pipeline ─────────────────────────────────────
+# The full pipeline the orchestrator dispatches (see SUBAGENTS.md):
+#
+#   Stage 1  Explore              ← pi-subagents built-in (no install)
+#   Stage 2  Plan                 ← pi-subagents built-in (no install)
+#   Stage 3  software-developer   ← shipped via SUBAGENT_NAMES below
+#   Stage 4  software-auditor     ← shipped via SUBAGENT_NAMES below
+#
+# We ship ONLY the 2 custom agents (Stages 3-4). The 2 built-ins (Stages 1-2)
+# come from @tintinweb/pi-subagents and don't need installation. This keeps
+# the install lean and avoids overriding useful defaults — override Explore/
+# Plan only if a project needs custom research/planning rules.
+SUBAGENT_TEMPLATE_DIR="$SCRIPT_DIR/../templates/agents"
+SUBAGENT_TARGET_DIR="$AGENT_DIR/agents"
+SUBAGENT_NAMES=("software-auditor" "software-developer")
+
+# Subagent pipeline doc — installed to $AGENT_DIR/SUBAGENTS.md alongside
+# the agent .md files. Plain markdown, NOT parsed by pi-subagents (it only
+# scans $AGENT_DIR/agents/*.md for agent frontmatter), so the install target
+# is $AGENT_DIR/ (not $AGENT_DIR/agents/).
+SUBAGENTS_DOC_TEMPLATE="$SCRIPT_DIR/../templates/SUBAGENTS.md"
+SUBAGENTS_DOC_TARGET="$AGENT_DIR/SUBAGENTS.md"
+
 # AFT config template — copied to ~/.config/cortexkit/aft.jsonc so AFT
 # daemon starts with feature flags enabled (search_index, semantic_search,
 # validate_on_edit) instead of degraded defaults.
@@ -38,8 +72,6 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 AFT_TEMPLATE="$SCRIPT_DIR/../templates/aft.jsonc"
 AFT_CONFIG_PATH="$HOME/.config/cortexkit/aft.jsonc"
 
-# pi-mcp-adapter package info (provides the `mcp` proxy tool — optional for sages, AFT is the new layer)
-PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
 
 # pi-codebase-memory sage-peer (local package, installed by file-copy not `pi install npm:`)
 PI_CODEBASE_MEMORY_SRC_REL="pi-codebase-memory"
@@ -83,8 +115,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install/update sages (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents)"
+  echo "  --sages-only       Only install sages source files (still re-clones; skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -394,19 +426,6 @@ install_graphify_binary() {
   fi
 }
 
-uninstall_graphify_binary() {
-  echo "==> Uninstalling graphify..."
-  if ! command -v uv &>/dev/null; then
-    echo "  uv not found, cannot uninstall graphify"
-    return 0
-  fi
-  if uv tool uninstall graphifyy 2>&1 | tail -2; then
-    echo "  Removed graphify"
-  else
-    echo "  uv tool uninstall failed (may not be installed)"
-  fi
-}
-
 install_pi_graphify() {
   echo "==> Installing pi-graphify..."
   if is_pi_graphify_installed && [[ "${FORCE:-false}" != true ]]; then
@@ -450,124 +469,6 @@ if pkg not in d.get('packages', []):
   echo "  pi-graphify installed"
 }
 
-uninstall_pi_graphify() {
-  echo "==> Uninstalling pi-graphify..."
-  local settings="$PI_DIR/agent/settings.json"
-  [[ -f "$settings" ]] && python3 -c "
-import json
-f = '$settings'
-try:
-    d = json.load(open(f))
-    d['packages'] = [x for x in d.get('packages', []) if not (x == '$PI_GRAPHIFY_PKG' or x.endswith('/pi-graphify'))]
-    json.dump(d, open(f, 'w'), indent=2)
-    print('  Removed pi-graphify from settings.json')
-except Exception as e:
-    print('  Warning:', e)
-"
-  if [[ -d "$PI_GRAPHIFY_DEST_DIR" ]]; then
-    rm -rf "$PI_GRAPHIFY_DEST_DIR"
-    echo "  Removed $PI_GRAPHIFY_DEST_DIR"
-  fi
-  echo "  pi-graphify uninstalled (graphify mcp.json entry left in place)"
-}
-
-
-# ────────────────────────────────────────────────────────────
-# pi-mcp-adapter: provides the `mcp` proxy tool + direct tool registration
-# ────────────────────────────────────────────────────────────
-
-is_pi_mcp_adapter_installed() {
-  local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && return 1
-
-  python3 -c "
-import json, sys
-try:
-    d = json.load(open('$settings'))
-    packages = d.get('packages', [])
-    if '$PI_MCP_ADAPTER_PKG' in packages or 'pi-mcp-adapter' in packages:
-        sys.exit(0)
-    sys.exit(1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null
-}
-
-install_pi_mcp_adapter() {
-  echo "==> Installing pi-mcp-adapter..."
-
-  # Check if already installed
-  if is_pi_mcp_adapter_installed; then
-    echo "  pi-mcp-adapter already installed"
-    return 0
-  fi
-
-  # Try using pi install command first
-  if command -v pi &>/dev/null; then
-    echo "  Installing via 'pi install $PI_MCP_ADAPTER_PKG'..."
-    if pi install "$PI_MCP_ADAPTER_PKG"; then
-      echo "  Installed pi-mcp-adapter"
-      return 0
-    fi
-    echo "  pi install failed, trying manual..."
-  fi
-
-  # Fallback: manually add to settings.json
-  echo "  Adding to settings.json..."
-  local settings="$PI_DIR/agent/settings.json"
-  mkdir -p "$(dirname "$settings")"
-
-  if [[ ! -f "$settings" ]]; then
-    echo '{"packages": []}' > "$settings"
-  fi
-
-  python3 -c "
-import json, sys
-f, pkg = '$settings', '$PI_MCP_ADAPTER_PKG'
-try:
-    d = json.load(open(f))
-except (json.JSONDecodeError, FileNotFoundError):
-    d = {'packages': []}
-if pkg not in d.get('packages', []):
-    d['packages'] = d.get('packages', []) + [pkg]
-    json.dump(d, open(f, 'w'), indent=2)
-    print('  Added', pkg)
-"
-
-  echo "  Installed pi-mcp-adapter (note: npm package may not be physically installed; run 'pi install npm:pi-mcp-adapter' to fetch)"
-}
-
-uninstall_pi_mcp_adapter() {
-  echo "==> Uninstalling pi-mcp-adapter..."
-
-  local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && { echo "  No settings file"; return 0; }
-
-  python3 -c "
-import json, sys
-f, pkg = '$settings', '$PI_MCP_ADAPTER_PKG'
-try:
-    d = json.load(open(f))
-    pkgs = d.get('packages', [])
-    new_pkgs = [x for x in pkgs if x != pkg and x != 'pi-mcp-adapter']
-    if len(new_pkgs) < len(pkgs):
-        d['packages'] = new_pkgs
-        json.dump(d, open(f, 'w'), indent=2)
-        print('Removed', pkg)
-    else:
-        print('Not found in settings')
-except Exception as e:
-    print('Warning:', e, file=sys.stderr)
-    sys.exit(1)
-"
-
-  # Note: npm package is in /home/leroy/.pi/agent/npm/node_modules, NOT PI_DIR/packages,
-  # so we don't rm -rf any dir under PI_DIR/packages. User can manually uninstall via
-  # `pi remove npm:pi-mcp-adapter` if desired.
-
-  echo "  pi-mcp-adapter uninstalled (npm pkg left in place, run 'pi remove' to fully remove)"
-}
-
 install_system_prompt() {
   mkdir -p "$AGENT_DIR"
 
@@ -589,20 +490,164 @@ install_system_prompt() {
   echo "  Installed SYSTEM.md"
 }
 
-get_settings_packages() {
-  local settings="$PI_DIR/agent/settings.json"
-  python3 -c "
-import json, sys
-try:
-    d = json.load(open('$settings'))
-    print(json.dumps(d.get('packages', [])))
-except:
-    print('[]')
-" 2>/dev/null
+# ────────────────────────────────────────────────────────────
+# Subagent templates (pi-subagents' global agent definitions)
+# Source: pi/templates/agents/{software-auditor,software-developer}.md
+# Target: $SUBAGENT_TARGET_DIR/ — where pi-subagents loads agents by name.
+# ────────────────────────────────────────────────────────────
+
+# Sentinel marker stamped into every template body (see templates/agents/*.md).
+# HTML comment: invisible in markdown render, unknown to pi-subagents' YAML-only
+# frontmatter parser, but grep-detectable so uninstall can distinguish
+# template-installed files from user-written/edited ones.
+SUBAGENT_SENTINEL_TEXT='SAGES_TEMPLATE_V1'
+
+# True if $1 exists and carries the SAGES_TEMPLATE_V1 sentinel — i.e. we
+# installed it. Mirrors is_aft_config_installed() for the AFT config flow.
+is_subagent_template_installed() {
+  local file="$1"
+  [[ -f "$file" ]] && grep -q "$SUBAGENT_SENTINEL_TEXT" "$file" 2>/dev/null
 }
 
-is_sages_installed() {
-  [[ -d "$PKG_DIR" && -f "$PKG_DIR/package.json" ]]
+# Atomic file copy: write to "<target>.tmp.<pid>" then mv to target. On
+# Linux/POSIX, `mv` within the same filesystem is an atomic rename, so
+# concurrent readers (e.g., pi-subagents scanning $AGENT_DIR/agents/)
+# never see a half-written file. Cleans up the tmp file on failure.
+# Used by both install_subagent_templates and install_subagents_doc to
+# safely refresh user-visible files where partial writes would be
+# user-visible.
+_atomic_copy() {
+  local src="$1" target="$2"
+  local tmp="${target}.tmp.$$"
+  if cp "$src" "$tmp" 2>/dev/null; then
+    mv "$tmp" "$target"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+# Copy every $SUBAGENT_NAMES template from $SUBAGENT_TEMPLATE_DIR to
+# $SUBAGENT_TARGET_DIR. Idempotent rules (match install_aft_config):
+#   - missing → install from template
+#   - file exists with sentinel → skip (we installed it; --force to overwrite)
+#   - file exists without sentinel → user-customized; skip unless --force
+# Shell-quoted: array iteration is POSIX-portable bash.
+install_subagent_templates() {
+  if [[ ! -d "$SUBAGENT_TEMPLATE_DIR" ]]; then
+    echo "  Warning: subagent template dir not found at $SUBAGENT_TEMPLATE_DIR"
+    echo "  (Re-download the sages repo or restore templates/agents/)"
+    return 0
+  fi
+
+  mkdir -p "$SUBAGENT_TARGET_DIR"
+
+  local name template target
+  for name in "${SUBAGENT_NAMES[@]}"; do
+    template="$SUBAGENT_TEMPLATE_DIR/$name.md"
+    target="$SUBAGENT_TARGET_DIR/$name.md"
+
+    if [[ ! -f "$template" ]]; then
+      echo "  Warning: template not found: $template (skipping $name)"
+      continue
+    fi
+
+    if [[ -f "$target" ]] && is_subagent_template_installed "$target" && [[ "${FORCE:-false}" != true ]]; then
+      echo "  $name.md already installed (use --force to reinstall)"
+      continue
+    fi
+
+    if [[ -f "$target" ]] && ! is_subagent_template_installed "$target" && [[ "${FORCE:-false}" != true ]]; then
+      echo "  $name.md exists with user customization (use --force to overwrite)"
+      continue
+    fi
+
+    rm -f "$target"
+    _atomic_copy "$template" "$target"
+    echo "  Installed $name.md (subagent template)"
+  done
+}
+
+# Remove files in $SUBAGENT_TARGET_DIR ONLY if they carry our sentinel.
+# Globs $SUBAGENT_TARGET_DIR/*.md directly (not iterating $SUBAGENT_NAMES)
+# so user-added agent .md files in $AGENT_DIR/agents/ also get evaluated
+# against the NEVER-TOUCH policy. `shopt -s nullglob` makes an empty dir
+# produce a length-0 array, so the early-return skips cleanly. User-
+# written or hand-edited agent files (no sentinel) are left alone,
+# matching the uninstall_aft_config + uninstall_magic_context policy.
+#
+# Residual race: if a file's sentinel membership changes between the
+# is_subagent_template_installed check and the rm call below, the file's
+# state at moment-of-rm determines behaviour. Acceptable for this
+# installer (not designed to be reentrant).
+uninstall_subagent_templates() {
+  shopt -s nullglob 2>/dev/null || true
+  local candidates=("$SUBAGENT_TARGET_DIR"/*.md)
+  [[ ${#candidates[@]} -eq 0 ]] && return 0
+
+  local to_remove=()
+  local f name
+  for f in "${candidates[@]}"; do
+    name=$(basename "$f")
+    if is_subagent_template_installed "$f"; then
+      to_remove+=("$f")
+      echo "  Removed $name (was our template)"
+    else
+      echo "  $name is user-customized, leaving alone"
+    fi
+  done
+
+  # Use if (not && short-circuit): under `set -e`, `[[ ... ]] && cmd` would
+  # abort the script when the test is false but the && chain returns 1.
+  # if/fi constructors are exempt from set -e on the test itself.
+  if [[ ${#to_remove[@]} -gt 0 ]]; then
+    rm -f "${to_remove[@]}"
+  fi
+}
+
+# ────────────────────────────────────────────────────────────
+# SUBAGENTS.md — 4-agent pipeline doc
+# Lives at $AGENT_DIR/SUBAGENTS.md (next to agent .md files but NOT inside
+# agents/ — it's documentation, not an agent definition). pi-subagents only
+# loads *.md from agents/ as agent specs, so SUBAGENTS.md is safely ignored
+# as an agent even though YAML frontmatter is absent.
+# ────────────────────────────────────────────────────────────
+
+install_subagents_doc() {
+  if [[ ! -f "$SUBAGENTS_DOC_TEMPLATE" ]]; then
+    echo "  Warning: SUBAGENTS.md template not found at $SUBAGENTS_DOC_TEMPLATE"
+    echo "  (Re-download the sages repo or restore templates/SUBAGENTS.md)"
+    return 0
+  fi
+
+  if [[ -f "$SUBAGENTS_DOC_TARGET" ]] && [[ "${FORCE:-false}" != true ]]; then
+    echo "  SUBAGENTS.md already exists (use --force to overwrite)"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$SUBAGENTS_DOC_TARGET")"
+  _atomic_copy "$SUBAGENTS_DOC_TEMPLATE" "$SUBAGENTS_DOC_TARGET"
+  echo "  Installed SUBAGENTS.md (4-agent pipeline doc)"
+}
+
+# Uninstall SUBAGENTS.md only if it matches our template (byte-identical).
+# Unlike the agent .md files (which use a sentinel in-body), plain docs have
+# no hidden marker; diff is the trust signal. NEVER-TOUCH for any user-edited
+# doc, just like uninstall_aft_config's "user-customized → skip" policy.
+uninstall_subagents_doc() {
+  if [[ ! -f "$SUBAGENTS_DOC_TARGET" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$SUBAGENTS_DOC_TEMPLATE" ]]; then
+    echo "  SUBAGENTS.md comparison template missing, leaving alone"
+    return 0
+  fi
+  if diff -q "$SUBAGENTS_DOC_TEMPLATE" "$SUBAGENTS_DOC_TARGET" > /dev/null 2>&1; then
+    rm -f "$SUBAGENTS_DOC_TARGET"
+    echo "  Removed SUBAGENTS.md (was our template)"
+  else
+    echo "  SUBAGENTS.md is user-customized, leaving alone"
+  fi
 }
 
 register_settings() {
@@ -1187,7 +1232,7 @@ uninstall_aft_config() {
 # 模式 1:全量安装(默认)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-codebase-memory + pi-aft + pi-magic-context + pi-subagents..."
+  echo "==> Installing sages + pi-codebase-memory + pi-aft + pi-magic-context + pi-subagents + 4-agent subagent pipeline..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1198,8 +1243,6 @@ install() {
     exit 1
   fi
 
-  # Install pi-mcp-adapter (provides mcp proxy tool, optional for sages)
-  install_pi_mcp_adapter
 
   # Install sages first (git clone populates TMP_DIR)
   echo "==> Installing sages..."
@@ -1248,6 +1291,14 @@ install() {
   # Install system prompt
   install_system_prompt
 
+  # Install subagent templates (Agent tool requires software-{auditor,developer}
+  # to exist in $AGENT_DIR/agents/ for orchestrator to dispatch by name).
+  # Combine with the SUBAGENTS.md doc to ship the complete 4-agent pipeline:
+  # Stages 1-2 (Explore, Plan) are pi-subagents built-ins; Stages 3-4
+  # (software-{developer,auditor}) are the templates we ship.
+  install_subagent_templates
+  install_subagents_doc
+
   echo ""
   echo "Done! Restart pi: exit && pi"
 }
@@ -1256,7 +1307,7 @@ install() {
 # 模式 2:仅更新 sages(跳过 pi-codebase-memory 和 SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates, skip SYSTEM.md)..."
 
   # Pre-flight: pi 仍然需要(sages 是 pi extension)
   install_pi_if_needed
@@ -1270,7 +1321,7 @@ install_sages_only() {
   install_sages_files || exit 1
 
   # 显式不调用 install_pi_codebase_memory / install_pi_aft / install_aft_config / install_pi_magic_context / install_pi_subagents / install_system_prompt
-  echo "  (skipped: pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, SYSTEM.md)"
+  echo "  (skipped: pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1280,10 +1331,10 @@ install_sages_only() {
 # 模式 3:仅更新 SYSTEM.md(跳过 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-aft, AFT config)..."
+  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-aft, AFT config, subagent templates)..."
   # 不需要 git / pi —— SYSTEM.md 是独立 markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-codebase-memory, pi-aft, AFT config)"
+  echo "  (skipped: sages, pi-codebase-memory, pi-aft, AFT config, subagent templates)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1293,7 +1344,7 @@ install_system_only() {
 # 卸载(同时移除 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-codebase-memory + pi-aft + pi-magic-context + pi-subagents + AFT config..."
+  echo "==> Uninstalling sages + pi-codebase-memory + pi-aft + pi-magic-context + pi-subagents + AFT config + 4-agent subagent pipeline..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1310,8 +1361,6 @@ uninstall() {
   # Uninstall codebase-memory-mcp binary
   uninstall_codebase_memory_mcp_binary
 
-  # Uninstall pi-mcp-adapter
-  uninstall_pi_mcp_adapter
 
   # Uninstall pi-aft (replaces pi-serena)
   uninstall_pi_aft
@@ -1324,6 +1373,11 @@ uninstall() {
 
   # Uninstall pi-subagents (subagent extension)
   uninstall_pi_subagents
+
+  # Uninstall subagent templates we installed (leaves user-customized alone),
+  # plus the SUBAGENTS.md doc (only if byte-identical to our template)
+  uninstall_subagent_templates
+  uninstall_subagents_doc
 
   echo ""
   echo "Done. Restart pi: exit && pi"

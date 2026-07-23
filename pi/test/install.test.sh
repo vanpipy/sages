@@ -234,127 +234,402 @@ echo "$REMAINING" | grep -q "unrelated-pkg" \
   || { echo "❌ FAIL: uninstall removed unrelated package"; exit 1; }
 echo "✅ PASS: uninstall_pi_aft preserves unrelated packages"
 
-# 测试 23: PI_SEMANTIC_NUDGE 常量定义
-grep -q 'PI_SEMANTIC_NUDGE_PKG="$PI_SEMANTIC_NUDGE_DEST_DIR"' "$SCRIPT" \
-  || { echo "❌ FAIL: PI_SEMANTIC_NUDGE_PKG constant missing or wrong"; exit 1; }
-echo "✅ PASS: PI_SEMANTIC_NUDGE_PKG constant defined"
+# ──────────────────────────────────────────────────────────────────
+# T4: Subagent templates (pi/templates/agents/)
+# Validates: install.sh copies software-{auditor,developer}.md from
+# pi/templates/agents/ to $AGENT_DIR/agents/, with sentinel-based
+# idempotency matching the AFT config flow.
+# ──────────────────────────────────────────────────────────────────
 
-# 测试 24: pi-semantic-nudge 四个函数均已定义
-for fn in install_pi_semantic_nudge uninstall_pi_semantic_nudge install_semantic_nudge_files; do
+SUBAGENT_TEMPLATES_DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)/templates/agents"
+
+# Test T4.1: both template files exist
+for f in software-auditor.md software-developer.md; do
+  test -f "$SUBAGENT_TEMPLATES_DIR/$f" \
+    || { echo "❌ FAIL: template missing: $SUBAGENT_TEMPLATES_DIR/$f"; exit 1; }
+done
+echo "✅ PASS: templates/agents/{software-auditor,software-developer}.md exist"
+
+# Test T4.2: both templates carry SAGES_TEMPLATE_V1 sentinel
+for f in software-auditor.md software-developer.md; do
+  grep -q 'SAGES_TEMPLATE_V1' "$SUBAGENT_TEMPLATES_DIR/$f" \
+    || { echo "❌ FAIL: template $f missing sentinel"; exit 1; }
+done
+echo "✅ PASS: both templates carry SAGES_TEMPLATE_V1 sentinel"
+
+# Test T4.3: SUBAGENT_* constants defined
+for c in SUBAGENT_TEMPLATE_DIR SUBAGENT_TARGET_DIR SUBAGENT_NAMES SUBAGENT_SENTINEL_TEXT; do
+  grep -qE "^${c}=" "$SCRIPT" \
+    || { echo "❌ FAIL: constant $c not defined"; exit 1; }
+done
+echo "✅ PASS: 4 SUBAGENT_* constants defined"
+
+# Test T4.4: 3 subagent template functions defined
+for fn in is_subagent_template_installed install_subagent_templates uninstall_subagent_templates; do
   grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
     || { echo "❌ FAIL: function $fn not defined"; exit 1; }
 done
-echo "✅ PASS: 3 pi-semantic-nudge functions defined"
+echo "✅ PASS: 3 subagent template functions defined"
 
-# 测试 25: install() 流程包含 install_pi_semantic_nudge
-sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_pi_semantic_nudge" \
-  || { echo "❌ FAIL: install() does not call install_pi_semantic_nudge"; exit 1; }
-echo "✅ PASS: install() invokes install_pi_semantic_nudge"
+# Test T4.5: install() flow calls install_subagent_templates
+sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_subagent_templates" \
+  || { echo "❌ FAIL: install() does not call install_subagent_templates"; exit 1; }
+echo "✅ PASS: install() invokes install_subagent_templates"
 
-# 测试 26: uninstall() 流程包含 uninstall_pi_semantic_nudge
-sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_pi_semantic_nudge" \
-  || { echo "❌ FAIL: uninstall() does not call uninstall_pi_semantic_nudge"; exit 1; }
-echo "✅ PASS: uninstall() invokes uninstall_pi_semantic_nudge"
+# Test T4.6: uninstall() flow calls uninstall_subagent_templates
+sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_subagent_templates" \
+  || { echo "❌ FAIL: uninstall() does not call uninstall_subagent_templates"; exit 1; }
+echo "✅ PASS: uninstall() invokes uninstall_subagent_templates"
 
-# 测试 27: --sages-only 模式注释说明跳过 pi-semantic-nudge
-grep -q 'pi-semantic-nudge' "$SCRIPT" \
-  || { echo "❌ FAIL: pi-semantic-nudge not mentioned in install.sh"; exit 1; }
-echo "✅ PASS: pi-semantic-nudge referenced in install.sh"
+# Test T4.7: --sages-only does NOT call install_subagent_templates
+# (orchestrator agents are user-level global definitions, separate from
+# the sages source files --sages-only is scoped to)
+sed -n '/^install_sages_only() {/,/^}$/p' "$SCRIPT" | grep -q "install_subagent_templates" \
+  && { echo "❌ FAIL: install_sages_only() should NOT call install_subagent_templates"; exit 1; }
+echo "✅ PASS: --sages-only mode correctly skips install_subagent_templates"
 
-# ────────────────────────────────────────────────────────────
-# 加载并执行 pi-semantic-nudge 函数 (需要模拟 pi-semantic-nudge/ 已存在于 TMP)
-# ────────────────────────────────────────────────────────────
+# Test T4.8: install.sh references "subagent templates" so users see what
+# they're skipping in --sages-only / --system-only output
+grep -q "subagent templates" "$SCRIPT" \
+  || { echo "❌ FAIL: 'subagent templates' not mentioned in install.sh"; exit 1; }
+echo "✅ PASS: 'subagent templates' referenced in install.sh"
 
-# 测试 28: 初始状态 — is_pi_semantic_nudge_installed 是 inline shell helper
-# (语义 nudge 检查直接读 settings.json,无独立函数)
-test_for_pi_semantic_nudge_in_settings() {
-  grep -q "$PI_SEMANTIC_NUDGE_PKG" "$PI_DIR/agent/settings.json" 2>/dev/null
-}
+# ─────────────────────────────────────────────────────────────────
+# Behavioral tests for subagent template install/uninstall.
+# Use SCRIPT_DIR + extracted constants/functions, point at fake
+# $SUBAGENT_TARGET_DIR so we never touch the real ~/.pi/agent/agents/.
+# ─────────────────────────────────────────────────────────────────
 
-# Shim: install.sh doesn't define this as a function (it's inline grep),
-# but several tests call it. Provide an equivalent shim.
-is_pi_semantic_nudge_installed() {
-  grep -q "$PI_SEMANTIC_NUDGE_PKG" "$PI_DIR/agent/settings.json" 2>/dev/null
-}
-unset -f uninstall_pi_semantic_nudge 2>/dev/null || true
+TMPDIR4="$(mktemp -d)"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
 
-# is_pi_semantic_nudge_installed 返回 false (substring 安全)
-TMPDIR="$(mktemp -d)"
-export PI_DIR="$TMPDIR"
-FAKE_PATH="$(mktemp -d)"
-export PATH="$FAKE_PATH:/usr/bin:/bin"
+# The extracted SUBAGENT_TARGET_DIR constant expands to $AGENT_DIR/agents.
+# Set AGENT_DIR + PI_DIR so the expansion resolves to a temp dir, not
+# the real ~/.pi/agent/agents (which would clobber live agent files).
+PI_DIR="$TMPDIR4"
+AGENT_DIR="$PI_DIR/agent"
 
-mkdir -p "$PI_DIR/agent"
-echo '{"packages": []}' > "$PI_DIR/agent/settings.json"
-
-# 提取 pi-semantic-nudge 相关常量 + 函数
+# Extract constants + functions for behavioral test
 {
-  awk '/^PI_SEMANTIC_NUDGE_.*=/,/^$/' "$SCRIPT"
-  for fn in install_pi_semantic_nudge uninstall_pi_semantic_nudge install_semantic_nudge_files; do
+  awk '/^SUBAGENT_TEMPLATE_DIR=/' "$SCRIPT"
+  awk '/^SUBAGENT_TARGET_DIR=/' "$SCRIPT"
+  awk '/^SUBAGENT_NAMES=/' "$SCRIPT"
+  awk '/^SUBAGENT_SENTINEL_TEXT=/' "$SCRIPT"
+  for fn in is_subagent_template_installed _atomic_copy install_subagent_templates uninstall_subagent_templates; do
     extract_fn "$fn"
   done
-} > "$TMPDIR/pi-semantic-nudge-fns.sh"
+} > "$TMPDIR4/subagent-fns.sh"
 # shellcheck disable=SC1090
-source "$TMPDIR/pi-semantic-nudge-fns.sh"
+source "$TMPDIR4/subagent-fns.sh"
 
-is_pi_semantic_nudge_installed \
-  && { echo "❌ FAIL: reported installed when settings.json has no package"; exit 1; }
-echo "✅ PASS: is_pi_semantic_nudge_installed returns false on empty settings"
+# Test T4.9: SUBAGENT_TEMPLATE_DIR resolves to the real templates dir
+# Compare via canonical paths (realpath-style) — SUBAGENT_TEMPLATE_DIR
+# literally contains "..", so string-comparison would fail even when both
+# refer to the same physical directory.
+test -d "$SUBAGENT_TEMPLATE_DIR" \
+  || { echo "❌ FAIL: SUBAGENT_TEMPLATE_DIR not found at $SUBAGENT_TEMPLATE_DIR"; exit 1; }
+SUBAGENT_TEMPLATE_DIR_CANONICAL=$(cd "$SUBAGENT_TEMPLATE_DIR" && pwd)
+SUBAGENT_TEMPLATES_DIR_CANONICAL=$(cd "$SUBAGENT_TEMPLATES_DIR" && pwd)
+test "$SUBAGENT_TEMPLATE_DIR_CANONICAL" = "$SUBAGENT_TEMPLATES_DIR_CANONICAL" \
+  || { echo "❌ FAIL: SUBAGENT_TEMPLATE_DIR (canonical=$SUBAGENT_TEMPLATE_DIR_CANONICAL) != $SUBAGENT_TEMPLATES_DIR_CANONICAL"; exit 1; }
+echo "✅ PASS: SUBAGENT_TEMPLATE_DIR resolves to pi/templates/agents"
 
-# 测试 29: substring 安全 — "pi-semantic-nudge-extra" 不被误判为已安装
-python3 -c "
-import json
-f = '$PI_DIR/agent/settings.json'
-d = {'packages': ['npm:pi-semantic-nudge-extra', 'pi-semantic-nudge-fork']}
-json.dump(d, open(f, 'w'))
-"
-is_pi_semantic_nudge_installed \
-  && { echo "❌ FAIL: substring name 'pi-semantic-nudge-extra' misdetected"; exit 1; } \
-  || echo "✅ PASS: is_pi_semantic_nudge_installed does not match substring names"
+# Test T4.10: SUBAGENT_NAMES has the 2 expected agents in canonical order
+[[ "${#SUBAGENT_NAMES[@]}" -eq 2 ]] \
+  || { echo "❌ FAIL: SUBAGENT_NAMES has ${#SUBAGENT_NAMES[@]} entries, expected 2"; exit 1; }
+[[ "${SUBAGENT_NAMES[0]}" = "software-auditor" ]] \
+  && [[ "${SUBAGENT_NAMES[1]}" = "software-developer" ]] \
+  || { echo "❌ FAIL: SUBAGENT_NAMES = (${SUBAGENT_NAMES[*]}), expected (software-auditor software-developer)"; exit 1; }
+echo "✅ PASS: SUBAGENT_NAMES = (software-auditor software-developer)"
 
-# 测试 30: exact match — 绝对路径正确识别
-python3 -c "
-import json
-f = '$PI_DIR/agent/settings.json'
-d = {'packages': ['$PI_SEMANTIC_NUDGE_PKG']}
-json.dump(d, open(f, 'w'))
-"
-is_pi_semantic_nudge_installed \
-  && echo "✅ PASS: is_pi_semantic_nudge_installed matches absolute path" \
-  || { echo "❌ FAIL: should match absolute path"; exit 1; }
+# Test T4.11: behavioral — install_subagent_templates creates both files
+mkdir -p "$SUBAGENT_TARGET_DIR"
+test ! -e "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: pre-test: target already has software-auditor.md"; exit 1; }
 
-# 测试 31: install_pi_semantic_nudge 函数存在 — 不会因 PI_SERENA 路径不存在而崩溃
-# 此处不调 install_pi_semantic_nudge 本身 (需要 TMP_DIR 完整 chain),
-# 只验证函数定义无语法错误 (已由 source 保证)
-echo "✅ PASS: install_pi_semantic_nudge function loaded cleanly (no parse errors)"
+install_subagent_templates
 
-# 测试 32: uninstall 不误伤 substring name
-python3 -c "
-import json
-f = '$PI_DIR/agent/settings.json'
-d = {'packages': ['$PI_SEMANTIC_NUDGE_PKG', 'npm:pi-semantic-nudge-extra', 'pi-semantic-nudge-fork']}
-json.dump(d, open(f, 'w'))
-"
-uninstall_pi_semantic_nudge
-REMAINING=$(python3 -c "import json; d=json.load(open('$PI_DIR/agent/settings.json')); print(','.join(d.get('packages',[])))")
-echo "  After uninstall, packages: $REMAINING"
-echo "$REMAINING" | grep -q "pi-semantic-nudge-extra" \
-  && echo "✅ PASS: uninstall did not remove pi-semantic-nudge-extra" \
-  || { echo "❌ FAIL: uninstall incorrectly removed substring names"; exit 1; }
-echo "$REMAINING" | grep -q "pi-semantic-nudge-fork" \
-  && echo "✅ PASS: uninstall did not remove pi-semantic-nudge-fork" \
-  || { echo "❌ FAIL: uninstall incorrectly removed substring names"; exit 1; }
-echo "$REMAINING" | grep -qF "$PI_SEMANTIC_NUDGE_PKG" \
-  && { echo "❌ FAIL: uninstall did not remove pi-semantic-nudge itself"; exit 1; } \
-  || echo "✅ PASS: uninstall correctly removed pi-semantic-nudge"
+for name in software-auditor software-developer; do
+  test -f "$SUBAGENT_TARGET_DIR/$name.md" \
+    || { echo "❌ FAIL: install did not create $name.md"; exit 1; }
+done
+echo "✅ PASS: install_subagent_templates creates both agent files when missing"
 
-# 清理
-rm -rf "$TMPDIR" "$FAKE_PATH"
+# Test T4.12: installed files match templates byte-for-byte
+for name in software-auditor software-developer; do
+  diff -q "$SUBAGENT_TEMPLATE_DIR/$name.md" "$SUBAGENT_TARGET_DIR/$name.md" > /dev/null \
+    || { echo "❌ FAIL: $name.md content mismatch with template"; diff "$SUBAGENT_TEMPLATE_DIR/$name.md" "$SUBAGENT_TARGET_DIR/$name.md"; exit 1; }
+done
+echo "✅ PASS: installed files match templates byte-for-byte"
 
-echo ""
-echo "════════════════════════════════════"
-echo "  All install.test.sh checks passed"
-echo "════════════════════════════════════"
+# Test T4.13: installed files carry the sentinel
+for name in software-auditor software-developer; do
+  is_subagent_template_installed "$SUBAGENT_TARGET_DIR/$name.md" \
+    || { echo "❌ FAIL: $name.md doesn't carry sentinel"; exit 1; }
+done
+echo "✅ PASS: installed files carry SAGES_TEMPLATE_V1 sentinel"
+
+# Test T4.14: idempotent — re-install doesn't change our installed file
+install_subagent_templates  # no --force, sentinel present → should skip
+diff -q "$SUBAGENT_TEMPLATE_DIR/software-auditor.md" "$SUBAGENT_TARGET_DIR/software-auditor.md" > /dev/null \
+  || { echo "❌ FAIL: re-install changed content (should be no-op)"; exit 1; }
+echo "✅ PASS: install_subagent_templates is idempotent (no --force)"
+
+# Test T4.15: user-customized file (no sentinel) is preserved on re-install.
+# NOTE: must NOT contain the literal sentinel string or the test itself
+# becomes self-defeating.
+cat > "$SUBAGENT_TARGET_DIR/software-auditor.md" <<'CUSTOM_EOF'
+---
+name: My Custom Auditor
+description: User-customized — must be preserved across no-FORCE re-installs.
+---
+# My Custom Auditor
+(custom body content; deliberately lacks the install-template marker)
+CUSTOM_EOF
+
+install_subagent_templates  # no --force → must NOT overwrite user file
+
+grep -q "My Custom Auditor" "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: user-customized software-auditor.md was clobbered"; cat "$SUBAGENT_TARGET_DIR/software-auditor.md"; exit 1; }
+is_subagent_template_installed "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  && { echo "❌ FAIL: user-customized file got sentinel from re-install"; exit 1; \
+} || echo "✅ PASS: user-customized agent preserved on no-FORCE install"
+
+# Test T4.16: FORCE=true overwrites user-customized file
+FORCE=true install_subagent_templates
+diff -q "$SUBAGENT_TEMPLATE_DIR/software-auditor.md" "$SUBAGENT_TARGET_DIR/software-auditor.md" > /dev/null \
+  || { echo "❌ FAIL: FORCE=true did not restore template"; exit 1; }
+is_subagent_template_installed "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: FORCE=true install didn't add sentinel"; exit 1; }
+echo "✅ PASS: FORCE=true install overwrites user-customized file"
+
+# Test T4.17: uninstall removes files WE installed (sentinel present)
+uninstall_subagent_templates
+for name in software-auditor software-developer; do
+  test ! -f "$SUBAGENT_TARGET_DIR/$name.md" \
+    || { echo "❌ FAIL: uninstall did not remove $name.md"; exit 1; }
+done
+echo "✅ PASS: uninstall_subagent_templates removes our installed templates"
+
+# Test T4.18: uninstall leaves user-customized files alone
+cat > "$SUBAGENT_TARGET_DIR/software-developer.md" <<'CUSTOM_EOF'
+---
+name: Custom Developer
+description: User-written agent — uninstall must NOT touch.
+---
+# Custom Developer
+CUSTOM_EOF
+
+uninstall_subagent_templates
+
+test -f "$SUBAGENT_TARGET_DIR/software-developer.md" \
+  || { echo "❌ FAIL: uninstall removed user-customized software-developer.md"; exit 1; }
+grep -q "Custom Developer" "$SUBAGENT_TARGET_DIR/software-developer.md" \
+  || { echo "❌ FAIL: user-written content lost"; exit 1; }
+echo "✅ PASS: uninstall_subagent_templates preserves user-customized files"
+
+# Test T4.19: mixed state — install (no FORCE) on partial state installs
+# only the missing template, leaves user-customized untouched
+# Setup: software-developer.md is user-customized (from T4.18 above),
+# software-auditor.md does NOT exist (was uninstalled in T4.17)
+test ! -e "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: pre-test: software-auditor.md unexpectedly present"; exit 1; }
+
+install_subagent_templates  # no FORCE → install missing auditor, skip user developer
+
+test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: install didn't add missing software-auditor.md"; exit 1; }
+is_subagent_template_installed "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: newly-installed auditor lacks sentinel"; exit 1; }
+grep -q "Custom Developer" "$SUBAGENT_TARGET_DIR/software-developer.md" \
+  || { echo "❌ FAIL: mixed-state install overwrote user developer"; exit 1; }
+echo "✅ PASS: mixed-state install installs only missing; user file untouched"
+
+# Test T4.20: mixed-state uninstall removes only our installed file
+# (auditor was installed by us in T4.19; developer is user-customized)
+uninstall_subagent_templates
+test ! -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: mixed uninstall did not remove our auditor"; exit 1; }
+test -f "$SUBAGENT_TARGET_DIR/software-developer.md" \
+  || { echo "❌ FAIL: mixed uninstall clobbered user developer"; exit 1; }
+grep -q "Custom Developer" "$SUBAGENT_TARGET_DIR/software-developer.md" \
+  || { echo "❌ FAIL: user content lost in mixed uninstall"; exit 1; }
+echo "✅ PASS: mixed-state uninstall only removes our installed file"
+
+# Cleanup test 4
+rm -rf "$TMPDIR4"
+unset PI_DIR AGENT_DIR
+
+# ──────────────────────────────────────────────────────────────────
+# T5: SUBAGENTS.md — 4-agent pipeline doc
+# Validates: install.sh ships templates/SUBAGENTS.md to $AGENT_DIR/SUBAGENTS.md,
+# complementing install_subagent_templates() so the full 4-agent pipeline
+# (Explore + Plan + software-developer + software-auditor) is documented
+# in one discoverable place.
+# ──────────────────────────────────────────────────────────────────
+
+SUBAGENTS_TEMPLATE="$(cd "$(dirname "$SCRIPT")/.." && pwd)/templates/SUBAGENTS.md"
+
+# Test T5.1: templates/SUBAGENTS.md exists
+test -f "$SUBAGENTS_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS.md template missing at $SUBAGENTS_TEMPLATE"; exit 1; }
+echo "✅ PASS: templates/SUBAGENTS.md exists"
+
+# Test T5.2: SUBAGENTS.md documents all 4 pipeline agents by name
+for agent in Explore Plan software-developer software-auditor; do
+  grep -q "$agent" "$SUBAGENTS_TEMPLATE" \
+    || { echo "❌ FAIL: SUBAGENTS.md missing agent '$agent'"; exit 1; }
+done
+echo "✅ PASS: SUBAGENTS.md documents all 4 pipeline agents"
+
+# Test T5.3: SUBAGENTS.md distinguishes built-in vs custom (the install
+# optimization story — only ship the 2 custom agents)
+grep -q "built-in" "$SUBAGENTS_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS.md should mark pi-subagents built-ins"; exit 1; }
+grep -q "shipped" "$SUBAGENTS_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS.md should mark which agents sages ships"; exit 1; }
+echo "✅ PASS: SUBAGENTS.md distinguishes built-in vs custom-shipped agents"
+
+# Test T5.4: SUBAGENTS.md contains concrete Agent(...) invocation recipes
+grep -q "Agent({" "$SUBAGENTS_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS.md should include Agent({ ... }) invocation examples"; exit 1; }
+echo "✅ PASS: SUBAGENTS.md includes Agent({ ... }) invocation recipes"
+
+# Test T5.5: SUBAGENTS_DOC_* constants defined in install.sh
+for c in SUBAGENTS_DOC_TEMPLATE SUBAGENTS_DOC_TARGET; do
+  grep -qE "^${c}=" "$SCRIPT" \
+    || { echo "❌ FAIL: constant $c not defined in install.sh"; exit 1; }
+done
+echo "✅ PASS: 2 SUBAGENTS_DOC_* constants defined"
+
+# Test T5.6: install_subagents_doc / uninstall_subagents_doc functions defined
+for fn in install_subagents_doc uninstall_subagents_doc; do
+  grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
+    || { echo "❌ FAIL: function $fn not defined"; exit 1; }
+done
+echo "✅ PASS: 2 subagents_doc functions defined"
+
+# Test T5.7: install() flow calls install_subagents_doc
+sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_subagents_doc" \
+  || { echo "❌ FAIL: install() does not call install_subagents_doc"; exit 1; }
+echo "✅ PASS: install() invokes install_subagents_doc"
+
+# Test T5.8: uninstall() flow calls uninstall_subagents_doc
+sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_subagents_doc" \
+  || { echo "❌ FAIL: uninstall() does not call uninstall_subagents_doc"; exit 1; }
+echo "✅ PASS: uninstall() invokes uninstall_subagents_doc"
+
+# Test T5.9: install summary header mentions "4-agent subagent pipeline"
+# (the user-facing message that ties the 4 agents together)
+grep -q "4-agent subagent pipeline" "$SCRIPT" \
+  || { echo "❌ FAIL: install header doesn't mention 4-agent pipeline"; exit 1; }
+echo "✅ PASS: install header advertises the 4-agent pipeline"
+
+# ─────────────────────────────────────────────────────────────────
+# Behavioral tests — install_subagents_doc / uninstall_subagents_doc.
+# Use a fresh TMPDIR5 + same PI_DIR/AGENT_DIR pattern as T4 so the
+# extracted $SUBAGENTS_DOC_TARGET resolves to a temp dir, not the
+# real ~/.pi/agent/agents/.
+# ─────────────────────────────────────────────────────────────────
+
+TMPDIR5="$(mktemp -d)"
+PI_DIR="$TMPDIR5"
+AGENT_DIR="$PI_DIR/agent"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+
+# Extract constants + functions for behavioral test
+{
+  awk '/^SUBAGENTS_DOC_TEMPLATE=/' "$SCRIPT"
+  awk '/^SUBAGENTS_DOC_TARGET=/' "$SCRIPT"
+  for fn in _atomic_copy install_subagents_doc uninstall_subagents_doc; do
+    extract_fn "$fn"
+  done
+} > "$TMPDIR5/subagents-doc-fns.sh"
+# shellcheck disable=SC1090
+source "$TMPDIR5/subagents-doc-fns.sh"
+
+# Test T5.10: SUBAGENTS_DOC_TEMPLATE resolves to the real template
+test -f "$SUBAGENTS_DOC_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS_DOC_TEMPLATE not found"; exit 1; }
+echo "✅ PASS: SUBAGENTS_DOC_TEMPLATE resolves to pi/templates/SUBAGENTS.md"
+
+# Test T5.11: SUBAGENTS_DOC_TARGET resolves under our fake AGENT_DIR
+# (not the real ~/.pi/agent/, which would clobber live state)
+test "$SUBAGENTS_DOC_TARGET" = "$TMPDIR5/agent/SUBAGENTS.md" \
+  || { echo "❌ FAIL: SUBAGENTS_DOC_TARGET=$SUBAGENTS_DOC_TARGET, expected $TMPDIR5/agent/SUBAGENTS.md"; exit 1; }
+echo "✅ PASS: SUBAGENTS_DOC_TARGET resolves to fake agent dir (no clobber)"
+
+# Test T5.12: install_subagents_doc creates SUBAGENTS.md when missing
+test ! -e "$SUBAGENTS_DOC_TARGET" \
+  || { echo "❌ FAIL: pre-test: SUBAGENTS.md already exists at $SUBAGENTS_DOC_TARGET"; exit 1; }
+
+install_subagents_doc
+
+test -f "$SUBAGENTS_DOC_TARGET" \
+  || { echo "❌ FAIL: install did not create SUBAGENTS.md"; exit 1; }
+echo "✅ PASS: install_subagents_doc creates SUBAGENTS.md when missing"
+
+# Test T5.13: content matches template byte-for-byte
+diff -q "$SUBAGENTS_DOC_TEMPLATE" "$SUBAGENTS_DOC_TARGET" > /dev/null \
+  || { echo "❌ FAIL: installed SUBAGENTS.md content mismatch"; diff "$SUBAGENTS_DOC_TEMPLATE" "$SUBAGENTS_DOC_TARGET" | head -10; exit 1; }
+echo "✅ PASS: installed SUBAGENTS.md matches template byte-for-byte"
+
+# Test T5.14: idempotent on re-install — file untouched
+# (use byte hash of leading chunk so the assertion holds regardless of which
+# phrases appear in any future revision of the doc)
+INSTALL_HASH_PRE="$(head -c 1024 "$SUBAGENTS_DOC_TARGET" | md5sum)"
+install_subagents_doc  # no FORCE → should skip
+INSTALL_HASH_POST="$(head -c 1024 "$SUBAGENTS_DOC_TARGET" | md5sum)"
+test "$INSTALL_HASH_PRE" = "$INSTALL_HASH_POST" \
+  || { echo "❌ FAIL: re-install changed content (should be no-op)"; exit 1; }
+echo "✅ PASS: install_subagents_doc is idempotent (no --force)"
+
+# Test T5.15: FORCE overwrites our installed file (so install --force
+# cleanly resets the doc)
+FORCE=true install_subagents_doc
+diff -q "$SUBAGENTS_DOC_TEMPLATE" "$SUBAGENTS_DOC_TARGET" > /dev/null \
+  || { echo "❌ FAIL: FORCE=true did not restore template"; exit 1; }
+echo "✅ PASS: FORCE=true install_subagents_doc overwrites our installed file"
+
+# Test T5.16: uninstall removes file matching template (byte-identical)
+uninstall_subagents_doc
+test ! -f "$SUBAGENTS_DOC_TARGET" \
+  || { echo "❌ FAIL: uninstall did not remove our-installed SUBAGENTS.md"; exit 1; }
+echo "✅ PASS: uninstall_subagents_doc removes our-installed SUBAGENTS.md"
+
+# Test T5.17: uninstall leaves user-customized SUBAGENTS.md alone
+# Re-install via FORCE, then user customizes, then uninstall
+FORCE=true install_subagents_doc
+cat >> "$SUBAGENTS_DOC_TARGET" <<'USER_EOF'
+
+<!-- user notes follow: ... -->
+USER_EOF
+
+uninstall_subagents_doc
+
+test -f "$SUBAGENTS_DOC_TARGET" \
+  || { echo "❌ FAIL: uninstall removed user-customized SUBAGENTS.md"; exit 1; }
+grep -q "user notes follow" "$SUBAGENTS_DOC_TARGET" \
+  || { echo "❌ FAIL: user content lost"; exit 1; }
+echo "✅ PASS: uninstall_subagents_doc preserves user-customized SUBAGENTS.md"
+
+# Cleanup test 5
+rm -rf "$TMPDIR5"
+unset PI_DIR AGENT_DIR
+# ────────────────────────────────────────────────────────────
+# Pi-semantic-nudge test block removed
+#
+# This block previously tested install/uninstall of `pi-semantic-nudge`,
+# which was a local-peer npm package. It was removed from install.sh and
+# replaced by `pi-magic-context` (npm:@cortexkit/pi-magic-context) — see
+# the install.sh header comments and the structural + behavioral
+# coverage of pi-magic-context's replacement (`install_pi_magic_context`,
+# `install_magic_context_config`, etc.) higher up in this file.
+#
+# If pi-semantic-nudge ever returns, restore the block from git history
+# (commit pre-magic-context migration).
+# ────────────────────────────────────────────────────────────
+
 # ────────────────────────────────────────────────────────────
 # T2: AFT migration — serena must be absent, aft must be present
 # ────────────────────────────────────────────────────────────
@@ -590,3 +865,10 @@ echo "✅ PASS: uninstall_aft_config leaves user-customized file alone"
 # Cleanup test 3
 rm -rf "$TMPDIR3"
 unset HOME
+
+
+# Final summary (printed only on the success path — failures abort above)
+echo ""
+echo "═════════════════════════════════════════════════════"
+echo "  All install.test.sh checks passed"
+echo "═════════════════════════════════════════════════════"
