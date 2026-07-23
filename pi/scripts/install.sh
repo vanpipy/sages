@@ -9,8 +9,8 @@
 # (replaces the older pi-memory + pi-semantic-nudge).
 #
 # Selective install options:
-#   --sages-only   only update sages (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context and SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context)
+#   --sages-only   only update sages (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents and SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -83,8 +83,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install/update sages (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context)"
+  echo "  --sages-only       Only install/update sages (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -821,6 +821,114 @@ except Exception as e:
 }
 
 # ──────────────────────────────────────────────────────────────────
+# pi-subagents — npm-installed subagent extension for pi
+#
+# Complements sages — the orchestrator tool surface uses pi-subagents'
+# `Agent` tool to actually spawn subagents for the 4-stage workflow.
+# Install via `pi install npm:@tintinweb/pi-subagents` (the standard
+# mechanism, same shape as pi-aft and pi-magic-context). The pi CLI
+# handles downloading, peer-dep resolution, and settings.json registration
+# in one step.
+# ──────────────────────────────────────────────────────────────────
+
+PI_SUBAGENTS_PKG="npm:@tintinweb/pi-subagents"
+
+is_pi_subagents_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    # Accept the canonical npm form, or any path-form (for forward/backward compat).
+    if any(p == '$PI_SUBAGENTS_PKG' or p.endswith('/pi-subagents') or p.endswith('@tintinweb/pi-subagents') for p in pkgs):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_subagents() {
+  echo "==> Installing pi-subagents..."
+
+  # Idempotent: skip if installed
+  if is_pi_subagents_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-subagents already installed (use --force to reinstall)"
+    return 0
+  fi
+
+  # Force-install path: uninstall first
+  if [[ "${FORCE:-false}" == true ]] && is_pi_subagents_installed; then
+    echo "  Force-reinstall: removing previous pi-subagents"
+    uninstall_pi_subagents
+  fi
+
+  # Prefer `pi install` — it handles npm fetch, peer-dep resolution,
+  # and settings.json registration in one step.
+  if command -v pi &>/dev/null; then
+    echo "  Installing via 'pi install $PI_SUBAGENTS_PKG'..."
+    if pi install "$PI_SUBAGENTS_PKG" 2>&1 | tail -5; then
+      echo "  pi-subagents installed via pi install"
+      return 0
+    fi
+    echo "  pi install failed, falling back to manual registration"
+  else
+    echo "  'pi' command not found; falling back to manual registration"
+  fi
+
+  # Fallback: ensure npm package dir is present, then register in settings.json
+  if [[ ! -d "$PI_DIR/agent/npm/node_modules/@tintinweb/pi-subagents" ]] && command -v npm &>/dev/null; then
+    echo "  Fetching npm package..."
+    (cd "$PI_DIR/agent/npm" && npm install --legacy-peer-deps "$PI_SUBAGENTS_PKG" 2>&1 | tail -3) || {
+      echo "  Warning: npm install failed; user must run 'pi install $PI_SUBAGENTS_PKG' manually"
+      return 1
+    }
+  fi
+
+  local settings="$PI_DIR/agent/settings.json"
+  mkdir -p "$(dirname "$settings")"
+  [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+  python3 -c "
+import json
+f, pkg = '$settings', '$PI_SUBAGENTS_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+# Remove any previous pi-subagents entry, then add canonical npm form
+d['packages'] = [x for x in d.get('packages', []) if not (x.endswith('/pi-subagents') or x.endswith('@tintinweb/pi-subagents'))]
+if pkg not in d['packages']:
+    d['packages'].append(pkg)
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+
+  echo "  pi-subagents installed"
+}
+
+uninstall_pi_subagents() {
+  echo "==> Uninstalling pi-subagents..."
+
+  # Strip from settings.json (handles both npm: form and any path form)
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    new_pkgs = [p for p in pkgs if not (p.endswith('/pi-subagents') or p.endswith('@tintinweb/pi-subagents'))]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open(f, 'w'), indent=2)
+        print('  Removed pi-subagents from settings.json')
+except Exception as e:
+    print('  Warning:', e, file=sys.stderr)
+" 2>/dev/null || true
+
+  echo "  pi-subagents uninstalled (use 'pi remove $PI_SUBAGENTS_PKG' to also remove npm package files)"
+}
+
+# ──────────────────────────────────────────────────────────────────
 # pi-magic-context — CortexKit's persistent memory + context layer
 # (installs alongside pi-aft; both target @earendil-works/pi-coding-agent)
 # ──────────────────────────────────────────────────────────────────
@@ -1079,7 +1187,7 @@ uninstall_aft_config() {
 # 模式 1:全量安装(默认)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-codebase-memory + pi-aft + pi-magic-context..."
+  echo "==> Installing sages + pi-codebase-memory + pi-aft + pi-magic-context + pi-subagents..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1128,6 +1236,11 @@ install() {
     echo "  Note: graphify CLI install failed. To retry: uv tool install 'graphifyy[mcp]'"
   }
 
+  # Install pi-subagents (npm-installed via 'pi install npm:@tintinweb/pi-subagents').
+  # Complements sages — the orchestrator tool surface uses pi-subagents' Agent tool
+  # to actually spawn subagents for the 4-stage workflow.
+  install_pi_subagents || true
+
   # After ALL peer file copies are done, set up node_modules symlinks pointing
   # at sages' shared deps (idempotent — skipped if peers already have node_modules).
   setup_peer_node_modules_symlinks
@@ -1143,7 +1256,7 @@ install() {
 # 模式 2:仅更新 sages(跳过 pi-codebase-memory 和 SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-codebase-memory, pi-aft, AFT config, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, skip SYSTEM.md)..."
 
   # Pre-flight: pi 仍然需要(sages 是 pi extension)
   install_pi_if_needed
@@ -1156,8 +1269,8 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_codebase_memory / install_pi_aft / install_aft_config / install_pi_magic_context / install_system_prompt
-  echo "  (skipped: pi-codebase-memory, pi-aft, AFT config, SYSTEM.md)"
+  # 显式不调用 install_pi_codebase_memory / install_pi_aft / install_aft_config / install_pi_magic_context / install_pi_subagents / install_system_prompt
+  echo "  (skipped: pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1180,7 +1293,7 @@ install_system_only() {
 # 卸载(同时移除 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-codebase-memory + pi-aft + pi-magic-context + AFT config..."
+  echo "==> Uninstalling sages + pi-codebase-memory + pi-aft + pi-magic-context + pi-subagents + AFT config..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1208,6 +1321,9 @@ uninstall() {
 
   # Uninstall pi-magic-context (cross-session memory layer)
   uninstall_pi_magic_context
+
+  # Uninstall pi-subagents (subagent extension)
+  uninstall_pi_subagents
 
   echo ""
   echo "Done. Restart pi: exit && pi"
