@@ -45,6 +45,12 @@ export const TaskNodeSchema = Type.Object({
   isolation: Type.Union([Type.Literal("worktree"), Type.Literal("none")]),
   tdd: Type.Union([Type.Literal("strict"), Type.Literal("none")]),
   prompt: Type.String({ description: "Detailed prompt for subagent", minLength: 20 }),
+  /** Optional: reference to a template under skills/orchestrator/templates/prompts/ */
+  task_template: Type.Optional(Type.String({
+    description: "Template name (e.g. 'subagent-software-developer') — when set, dag_synthesizer renders prompt from template + task_params instead of using the prompt field directly",
+  })),
+  /** Parameters passed to the task_template renderer */
+  task_params: Type.Optional(Type.Object({}, { additionalProperties: true })),
   output_schema: Type.Object({
     kind: Type.Union([
       Type.Literal("file_list"),
@@ -136,6 +142,19 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
     }
   }
 
+  // 5b. Validate task_template references (if set, must be a known template)
+  const KNOWN_TEMPLATES = new Set([
+    "subagent-software-developer",
+    "subagent-software-auditor",
+    "subagent-general-purpose",
+    "subagent-explore",
+  ]);
+  for (const t of input.tasks as any[]) {
+    if (t.task_template && !KNOWN_TEMPLATES.has(t.task_template)) {
+      errors.push(`task '${t.id}': task_template '${t.task_template}' is not a known template (allowed: ${[...KNOWN_TEMPLATES].join(", ")})`);
+    }
+  }
+
   // 6. Within-batch independence — no two tasks in the same batch can depend on each other
   const byBatch = new Map<number, TaskNode[]>();
   for (const t of input.tasks as any[]) {
@@ -212,15 +231,33 @@ function hasCycle(adj: Map<string, string[]>): boolean {
   return false;
 }
 
-/** Build OrchestrationPlan from input + contract. */
+/** Build OrchestrationPlan from input + contract. Renders task_template prompts when set. */
 export function buildPlan(input: DAGInput, contract: GoalContract): OrchestrationPlan {
+  // Lazy import to avoid circular deps
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { renderTaskPrompt } = require("./template-loader.js") as typeof import("./template-loader.js");
+
   const now = new Date().toISOString();
-  const tasks: TaskNode[] = (input.tasks as any[]).map((t: any) => ({
-    ...t,
-    status: "pending",
-    retry_count: 0,
-    max_retries: 2,
-  }));
+  const tasks: TaskNode[] = (input.tasks as any[]).map((t: any) => {
+    // If task_template is set, render the prompt from template + params.
+    // Otherwise use the LLM-written prompt field as-is.
+    let prompt = t.prompt;
+    if (t.task_template) {
+      const rendered = renderTaskPrompt(t.task_template, t.task_params ?? {});
+      if (rendered) {
+        prompt = rendered;
+      }
+      // If template not found, fall back to LLM-written prompt with a warning
+      // logged at validation time (see dag_synthesizer tool handler).
+    }
+    return {
+      ...t,
+      prompt,
+      status: "pending",
+      retry_count: 0,
+      max_retries: 2,
+    };
+  });
   const prompts: Record<string, string> = {};
   for (const t of tasks) prompts[t.id] = t.prompt;
 

@@ -1,0 +1,48 @@
+# Goal Template: fix-bug
+#
+# Use when: user reports a bug with reproduction steps
+
+id: GC-{date}-{short}
+title: "Fix [bug summary, ≤120 chars]"
+rationale: |
+  [what the user observed + business impact]
+
+success_criteria:
+  - id: SC1
+    criterion: "Reproduction test fails BEFORE the fix and passes AFTER (RED → GREEN)"
+    verification_cmd: "npm test -- --grep '[reproduction test name]'"
+  - id: SC2
+    criterion: "All existing tests still pass (no regression)"
+    verification_cmd: "npm test 2>&1 | tail -5"
+  - id: SC3
+    criterion: "Root cause identified and documented in code comment or commit message"
+    verification_cmd: "git log --format='%B' -1 | grep -i 'root cause\\|fixes #'"
+  - id: SC4
+    criterion: "Edge cases nearby covered by additional tests"
+    verification_cmd: "npm test -- --grep '[bug area]'"
+  - id: SC5
+    criterion: "Typecheck + lint pass"
+    verification_cmd: "npm run typecheck && npm run lint"
+
+anti_goals:
+  - "Do not 'fix' by suppressing the symptom (e.g. catching and ignoring)"
+  - "Do not change unrelated modules"
+  - "Do not add new dependencies for the fix"
+  - "Do not skip writing the reproduction test (RED is non-negotiable)"
+
+scope:
+  include:
+    - "[file/area with bug]"
+    - "[test file for reproduction]"
+  exclude:
+    - "[unrelated areas]"
+
+constraints:
+  must_use_existing_patterns: true
+  max_dependency_additions: 0
+  test_coverage_min: 80
+  typecheck_required: true
+  lint_required: true
+
+done_definition: |
+  Reproduction test exists + SC1-SC5 verified + bug verified fixed (manual if needed)

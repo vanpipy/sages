@@ -29,19 +29,40 @@ For single trivial tasks (one-line edit, single function), do NOT use this skill
 - Stage 4: final orchestrator_audit → .pi/orchestrator/audit-workflow.md
 ```
 
-## Subagent Contract
+## Subagent Contract — The 4-Agent Pipeline
 
-You have access to 2 custom subagent roles (defined in `~/.pi/agent/agents/`):
+The orchestrator dispatches a **single canonical pipeline of 4 subagents**, one per stage. Stages 1-2 come from pi-subagents built-ins; Stages 3-4 are shipped by sages (installed to `~/.pi/agent/agents/` by `install.sh`). Full deployment reference + invocation recipes live in `~/.pi/agent/SUBAGENTS.md` (also installed by sages).
 
-| Subagent | When to dispatch | Capabilities |
-|----------|-----------------|--------------|
-| `software-developer` | Implementation tasks (write code + tests, strict TDD) | edit/write, worktree, aft_search, todowrite |
-| `software-auditor` | Verification tasks (re-run commands, check evidence) | read/bash only, no edit/write |
+```
+┌─────────┐     ┌──────┐     ┌────────────────────┐     ┌────────────────────┐
+│ Stage 1 │ ──▶ │  S2  │ ──▶ │       Stage 3      │ ──▶ │       Stage 4      │
+│ Explore │     │ Plan │     │ software-developer │     │ software-auditor   │
+│ (find)  │     │(design)    │ (RED→GREEN→REFACTOR)  │   (evidence verify) │
+└─────────┘     └──────┘     └────────────────────┘     └────────────────────┘
+  read-only       read-only       worktree + edit              read-only
+  haiku           sonnet          sonnet + thinking           sonnet + thinking
+```
 
-You also have access to pi-subagents' built-in roles:
-- `Explore` — fast read-only search
-- `Plan` — software architect planning (read-only)
-- `general-purpose` — fallback when no specific role fits
+| Stage | `subagent_type`     | Source                              | When to dispatch                                                                 |
+|-------|----------------------|--------------------------------------|----------------------------------------------------------------------------------|
+| 1     | `Explore`            | **pi-subagents built-in**            | "Where is X?" / "find all callers of Y" / pure codebase search                    |
+| 2     | `Plan`               | **pi-subagents built-in**            | Need a step-by-step implementation strategy before coding (architect concerns)   |
+| 3     | `software-developer` | **shipped** (this repo)              | Write production code + tests in a worktree, strict TDD                          |
+| 4     | `software-auditor`   | **shipped** (this repo)              | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
+
+Fallback: `general-purpose` (built-in, full toolset) is for ad-hoc research that doesn't fit any specific role. Never use it as the implementation or verification path — Stages 3-4 are specialised on purpose.
+
+### When each stage is required
+
+| Task shape                                  | Required stages              |
+|----------------------------------------------|------------------------------|
+| Single trivial edit (one-line fix, typo)     | none — edit directly         |
+| Pure research question ("where is X?")       | 1 (`Explore`)                |
+| Architectural decision, no code change       | 1 → 2                        |
+| Refactor with existing plan                  | 3 (skip 1+2)                 |
+| New feature / multi-file / multi-decision    | 1 → 2 → 3 → 4                |
+
+**Shortcuts** (skipping research/planning): only when the user provides explicit concrete requirements (file paths, exact change) — never guess what "the user means" in stage 1's place.
 
 ## 4-Stage Process
 
@@ -100,6 +121,24 @@ For each batch (1 → N):
 6. If PASS → proceed to next batch
 ```
 
+#### Subagent per task role — canonical mapping
+
+Map each DAG task to the right `subagent_type` from the 4-agent pipeline (see Subagent Contract above). Role selection by *purpose*, not convenience:
+
+| Task purpose                           | `subagent_type`       | `isolation` | Notes                                                             |
+|----------------------------------------|-----------------------|-------------|-------------------------------------------------------------------|
+| Codebase research ("where is X?")      | `Explore`             | none        | Read-only. Haiku — cheap.                                         |
+| Architecture / step-by-step plan       | `Plan`                | none        | Read-only. Returns plan + Critical Files.                         |
+| Edit production code (TDD: RED→GREEN)  | `software-developer`  | `worktree`  | Strict TDD discipline. Sonnet + high thinking.                    |
+| Verify / certify prior work            | `software-auditor`    | none        | Read-only. Independent of implementer — fresh eyes.               |
+| Catch-all fallback (use sparingly)     | `general-purpose`     | n/a         | Last resort. Don't use for plan/dev/audit — specialised roles win. |
+
+The DAG's batch numbers should *roughly* follow the pipeline order, but batching is for parallelism within a stage, not across:
+- Batch 1 (research): one or more `Explore` tasks in parallel — discover all the things you'll need before planning
+- Batch 2 (planning): one or more `Plan` tasks, each consuming research outputs from Batch 1
+- Batches 3+ (implementation): one or more `software-developer` tasks per batch (worktree-isolated, TDD)
+- Final batch (verification): one or more `software-auditor` tasks, each auditing a discrete chunk of implementation
+
 **For batch 1 specifically**:
 ```
 Turn N:   Call task_dispatch({ dag_id, strategy: "auto" }) to get the plan
@@ -137,7 +176,7 @@ After all batches complete:
 
 **Orchestrator (always allowed)**:
 - `goal_contract_create`
-- `dag_synthesize`
+- `dag_synthesize`    ← supports `task_template` field for auto-rendered prompts
 - `task_dispatch`
 - `orchestrator_audit`
 
@@ -155,6 +194,60 @@ After all batches complete:
 **Write (delegated only — do NOT edit production code directly)**:
 - `edit`, `write` — only for orchestrator metadata in .pi/orchestrator/
 - Everything else → delegate to software-developer subagent
+
+## Prompt Templates (auto-rendered)
+
+The orchestrator can reference reusable prompt templates instead of writing every task prompt from scratch. Located at:
+
+```
+~/.pi/packages/sages/skills/orchestrator/templates/
+├── prompts/    ← per-subagent-type task prompts
+├── goals/      ← pre-filled goal-contract templates
+├── dag/        ← pre-built DAG templates
+└── responses/  ← orchestrator-to-user response templates
+```
+
+### Task prompt templates (used by `dag_synthesize`)
+
+| Template | Subagent type | Notes |
+|----------|--------------|-------|
+| `subagent-software-developer` | software-developer | Includes First Action Protocol + STRICT TDD guidance + output contract |
+| `subagent-software-auditor` | software-auditor | Default NEEDS WORK + 6-step audit + 5/3-phase depth |
+| `subagent-explore` | Explore | Read-only enforcement + findings.json output schema |
+| `subagent-general-purpose` | general-purpose | Fallback for tasks without a specific role |
+
+### Goal templates (copy fields into `goal_contract_create`)
+
+| Template | Use for |
+|----------|---------|
+| `goal-refactor` | Restructure existing code (no behavior change) |
+| `goal-new-feature` | Add new module/endpoint |
+| `goal-fix-bug` | Reproduce + fix bug with regression test |
+| `goal-add-tests` | Add tests only (no production changes) |
+
+### DAG templates (copy + edit tasks into `dag_synthesize`)
+
+| Template | Workflow |
+|----------|----------|
+| `dag-tdd-refactor` | 7-task refactor pipeline: explore × 2 → plan → implement × 2 → test → audit |
+| `dag-bug-fix` | 4-task bug-fix: explore × 2 → fix (RED+GREEN) → audit |
+
+### Response templates (use when responding to user)
+
+| Template | When |
+|----------|------|
+| `goal-intake` | User gave a vague goal — confirm understanding before Stage 1 |
+| `progress-update` | Reporting batch completion to user |
+
+### Using task_template in DAG
+
+When defining a task in `dag_synthesize`, you can either:
+- Write `prompt` directly (LLM composes)
+- OR set `task_template: "subagent-software-developer"` + `task_params: {...}` → tool auto-renders
+
+The auto-render path is preferred — templates encode the discipline (TDD, First Action Protocol, output contract) that the orchestrator wants every subagent to follow.
+
+Template substitution uses `{{var}}` for variables and `{{#if var}}...{{else}}...{{/if}}` for conditionals. Variables not provided are rendered as `[varname]` placeholders.
 
 ## Subagent Boundaries
 
@@ -215,7 +308,12 @@ User: "Refactor src/auth/ to use repository pattern + add tests"
 USE orchestrator:
 ```
 Stage 1: goal_contract_create with SC1-SC6 (import checks, typecheck, tests, coverage)
-Stage 2: dag_synthesize with ~6 tasks (P1 explore DB calls, P2 explore patterns, P3 plan, P4-P5 implement, P6 tests, P7 verify)
-Stage 3: 5 batches dispatched in parallel where possible
-Stage 4: orchestrator_audit
+Stage 2: dag_synthesize with ~6 tasks, mapped to 4-agent subagent pipeline:
+        - Batch 1 (Explore):  P1 find DB call sites,  P2 find existing repo patterns
+        - Batch 2 (Plan):     P3 design repo interface + migration steps
+        - Batch 3 (developer): P4 scaffold repo module,  P5 port auth-service
+        - Batch 4 (developer): P6 add integration tests
+        - Batch 5 (auditor):   P7 certify: typecheck + lint + tests + SC re-verify
+Stage 3: dispatch 5 batches, with Batches 3-4 in worktree isolation
+Stage 4: orchestrator_audit (5 phases)
 ```

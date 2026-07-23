@@ -3,9 +3,17 @@
  *
  * The orchestrator adds 4 tools to the sages package:
  *   - goal_contract_create: Stage 1 (turn user intent into verifiable contract)
- *   - dag_synthesize:       Stage 2 (decompose into task DAG)
+ *   - dag_synthesize:       Stage 2 (decompose into task DAG; supports task_template rendering)
  *   - task_dispatch:        Stage 3 (build dispatch plan, return for LLM to execute)
  *   - orchestrator_audit:   Stage 4 (5-phase audit of completed tasks)
+ *
+ * Plus template helpers (from template-loader.ts):
+ *   - loadPromptTemplate, loadGoalTemplate, loadDagTemplate
+ *   - renderTemplate (substitutes {{var}} + handles {{#if}} blocks)
+ *   - renderTaskPrompt (resolves task_template name to rendered prompt)
+ *
+ * Templates live at skills/orchestrator/templates/{prompts,goals,dag,responses}/
+ * and are installed automatically alongside skills/ via install_sages_files().
  *
  * These complement (don't replace) the existing sages tools:
  *   - fuxi_design:     main agent design workflow
@@ -48,6 +56,18 @@ export {
 } from "./orchestrator-audit.js";
 
 export {
+  findSagesRoot,
+  findTemplatesRoot,
+  loadPromptTemplate,
+  loadResponseTemplate,
+  loadGoalTemplate,
+  loadDagTemplate,
+  listTemplates,
+  renderTemplate,
+  renderTaskPrompt,
+} from "./template-loader.js";
+
+export {
   type GoalContract,
   type SuccessCriterion,
   type TaskNode,
@@ -55,6 +75,7 @@ export {
   type OrchestratorAuditResult,
   type OrchestratorFinding,
   type AuditVerdict,
+  type TaskTemplate,
   ORCHESTRATOR_DIR,
   goalContractPath,
   dagPath,

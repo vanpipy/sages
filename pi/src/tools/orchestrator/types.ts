@@ -84,8 +84,12 @@ export interface TaskNode extends Omit<MDDTask, "id" | "dependsOn"> {
   isolation: "worktree" | "none";
   /** Whether this task requires strict TDD (LuBan-sage-enforced RED → GREEN → REFACTOR) */
   tdd: "strict" | "none";
-  /** Detailed prompt given to the subagent (assembled by orchestrator from MDD outputs) */
+  /** Detailed prompt given to the subagent (assembled by orchestrator from MDD outputs, or rendered from task_template) */
   prompt: string;
+  /** Optional template reference — if set, dag_synthesizer renders prompt from template + task_params */
+  task_template?: string;
+  /** Parameters passed to the task_template renderer (replaces or augments manual prompt) */
+  task_params?: Record<string, unknown>;
   /** Structured output contract */
   output_schema: {
     kind: "file_list" | "design_doc" | "code_changes" | "test_results" | "verdict";
@@ -158,6 +162,21 @@ export interface OrchestratorAuditResult {
   report_path: string;
   /** Summary text */
   summary: string;
+}
+
+/**
+ * Template reference — points to a template file under
+ * skills/orchestrator/templates/{prompts,goals,dag,responses}/
+ *
+ * When task_template is set, dag_synthesizer renders the prompt
+ * automatically from task_params. When omitted, the LLM-written
+ * prompt field is used as-is.
+ */
+export interface TaskTemplate {
+  /** Template name (without extension). E.g. "subagent-software-developer" */
+  name: string;
+  /** Parameters passed to the template renderer */
+  params: Record<string, unknown>;
 }
 
 /** Path conventions — single source of truth for the orchestrator directory layout. */

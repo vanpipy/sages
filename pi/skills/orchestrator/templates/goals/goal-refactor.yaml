@@ -1,0 +1,54 @@
+# Goal Template: refactor
+#
+# Use when: user asks to refactor / restructure / reorganize existing code
+# Apply via: copy fields into goal_contract_create call, edit to fit
+
+id: GC-{date}-{short}                 # e.g. GC-2025-001-auth-repo
+title: "[specific refactor, ≤120 chars]"  # e.g. "Refactor src/auth/ to use repository pattern"
+rationale: |
+  [why this refactor matters — pain point, tech debt, future work blocked by current shape]
+
+success_criteria:
+  - id: SC1
+    criterion: "[module/file] no longer imports/uses [old pattern]"
+    verification_cmd: "! grep -l '[old-pattern]' [path/to/file]"
+  - id: SC2
+    criterion: "All existing tests still pass after refactor"
+    verification_cmd: "npm test 2>&1 | tail -5"   # adjust to project
+  - id: SC3
+    criterion: "New tests cover the refactored boundary"
+    verification_cmd: "[project test command] --reporter=verbose"
+  - id: SC4
+    criterion: "Typecheck passes"
+    verification_cmd: "npm run typecheck && echo OK"
+  - id: SC5
+    criterion: "Lint passes with no new warnings"
+    verification_cmd: "npm run lint"
+  - id: SC6
+    criterion: "Coverage on refactored module ≥ [N]%"
+    verification_cmd: "npm run coverage -- --json && jq '.total.lines.pct'"
+
+anti_goals:
+  - "Do not introduce new dependencies"
+  - "Do not change [external API contract / public interface]"
+  - "Do not refactor unrelated modules (stay in scope)"
+  - "Do not change test framework or test patterns"
+
+scope:
+  include:
+    - "[path/to/module/]"
+    - "[path/to/tests/]"
+  exclude:
+    - "[unrelated module]"
+    - "[public API consumers]"
+    - "[package.json — no dep changes]"
+
+constraints:
+  must_use_existing_patterns: true
+  max_dependency_additions: 0
+  test_coverage_min: 80
+  typecheck_required: true
+  lint_required: true
+
+done_definition: |
+  All SC1-SC6 verified + orchestrator_audit PASS ≥ 90 + no drive-by changes outside scope

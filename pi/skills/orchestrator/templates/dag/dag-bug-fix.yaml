@@ -1,0 +1,89 @@
+# DAG Template: bug-fix
+#
+# TDD-driven bug fix: reproduction test → fix → regression check.
+# 3 batches, smallest viable workflow.
+
+tasks:
+  # ────────────────────────────────────────────────────────────
+  # Batch 1: parallel investigation
+  # ────────────────────────────────────────────────────────────
+  - id: P1
+    description: "Locate the buggy code area + related call sites"
+    subagent_type: Explore
+    task_template: subagent-explore
+    task_params:
+      search_for: "[bug-related symbol/feature]"
+    batch: 1
+    depends_on: []
+    isolation: none
+    tdd: none
+    files: ["src/[bug-area]/"]
+    acceptance:
+      covers: []
+    output_schema:
+      kind: file_list
+      path: ".pi/orchestrator/task-P1-findings.json"
+
+  - id: P2
+    description: "Confirm reproduction steps + gather any user-reported edge cases"
+    subagent_type: Explore
+    task_template: subagent-explore
+    task_params:
+      search_for: "[test files related to bug area]"
+    batch: 1
+    depends_on: []
+    isolation: none
+    tdd: none
+    files: ["test/[bug-area]/"]
+    acceptance:
+      covers: []
+    output_schema:
+      kind: file_list
+      path: ".pi/orchestrator/task-P2-findings.json"
+
+  # ────────────────────────────────────────────────────────────
+  # Batch 2: RED + GREEN (single developer task — fix includes its own test)
+  # ────────────────────────────────────────────────────────────
+  - id: P3
+    description: "Write reproduction test (RED), then implement minimal fix (GREEN)"
+    subagent_type: software-developer
+    task_template: subagent-software-developer
+    task_params:
+      inputs:
+        - from_task: P1
+          field: findings
+        - from_task: P2
+          field: findings
+      bug_summary: "[user's bug description]"
+      reproduction_steps: "[how to reproduce]"
+    batch: 2
+    depends_on: [P1, P2]
+    isolation: worktree
+    tdd: strict
+    files: ["src/[bug-area]/[buggy-file].ts", "test/[bug-area]/[reproduction-test].ts"]
+    acceptance:
+      covers: [SC1, SC2]   # reproduction test exists + all tests pass
+      self_check_cmd: "npm test"
+    output_schema:
+      kind: code_changes
+
+  # ────────────────────────────────────────────────────────────
+  # Batch 3: audit
+  # ────────────────────────────────────────────────────────────
+  - id: P4
+    description: "Audit fix against acceptance criteria + check no regressions"
+    subagent_type: software-auditor
+    task_template: subagent-software-auditor
+    task_params:
+      task_report_paths:
+        - .pi/orchestrator/task-P3-report.md
+    batch: 3
+    depends_on: [P3]
+    isolation: none
+    tdd: none
+    files: []
+    acceptance:
+      covers: [SC1, SC2, SC3, SC4, SC5]
+    output_schema:
+      kind: verdict
+      path: ".pi/orchestrator/audit-P4.md"

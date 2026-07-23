@@ -1,0 +1,161 @@
+# DAG Template: tdd-refactor
+#
+# 5-batch pipeline for TDD-driven refactor.
+# Tasks reference subagent types from ~/.pi/agent/agents/ + pi-subagents built-ins.
+#
+# Use: dag_synthesize({ goal_id: "GC-...", tasks: [<tasks below, edited>] })
+
+tasks:
+  # ────────────────────────────────────────────────────────────
+  # Batch 1: parallel reconnaissance (read-only)
+  # ────────────────────────────────────────────────────────────
+  - id: P1
+    description: "Find all sites of [old pattern] in scope"
+    subagent_type: Explore
+    task_template: subagent-explore
+    task_params:
+      search_for: "[old pattern symbol/import name]"
+    batch: 1
+    depends_on: []
+    isolation: none
+    tdd: none
+    files: ["src/[scope]/"]
+    acceptance:
+      covers: []   # explore tasks don't satisfy SCs directly
+      self_check_cmd: "ls .pi/orchestrator/task-P1-findings.json"
+    output_schema:
+      kind: file_list
+      path: ".pi/orchestrator/task-P1-findings.json"
+
+  - id: P2
+    description: "Find existing [good pattern] examples in codebase to mirror"
+    subagent_type: Explore
+    task_template: subagent-explore
+    task_params:
+      search_for: "[good pattern reference]"
+    batch: 1
+    depends_on: []
+    isolation: none
+    tdd: none
+    files: ["src/[similar-module]/"]
+    acceptance:
+      covers: []
+      self_check_cmd: "ls .pi/orchestrator/task-P2-findings.json"
+    output_schema:
+      kind: file_list
+      path: ".pi/orchestrator/task-P2-findings.json"
+
+  # ────────────────────────────────────────────────────────────
+  # Batch 2: design (sequential, depends on Batch 1)
+  # ────────────────────────────────────────────────────────────
+  - id: P3
+    description: "Design new [interface/API/structure]"
+    subagent_type: Plan
+    task_template: subagent-general-purpose
+    task_params:
+      inputs:
+        - from_task: P1
+          field: findings
+        - from_task: P2
+          field: findings
+    batch: 2
+    depends_on: [P1, P2]
+    isolation: none
+    tdd: none
+    files: []
+    acceptance:
+      covers: []   # Plan contributes to all SCs indirectly
+    output_schema:
+      kind: design_doc
+      path: ".pi/orchestrator/task-P3-design.md"
+
+  # ────────────────────────────────────────────────────────────
+  # Batch 3: implementation (parallel, worktree isolation)
+  # ────────────────────────────────────────────────────────────
+  - id: P4
+    description: "Implement new [module/class] per design"
+    subagent_type: software-developer
+    task_template: subagent-software-developer
+    task_params:
+      inputs:
+        - from_task: P3
+          field: design_doc
+    batch: 3
+    depends_on: [P3]
+    isolation: worktree
+    tdd: strict
+    files: ["src/[scope]/[new-file].ts"]
+    acceptance:
+      covers: [SC3]   # adjust to which SC this task satisfies
+      self_check_cmd: "npm run typecheck"
+    output_schema:
+      kind: code_changes
+      path: "src/[scope]/[new-file].ts"
+
+  - id: P5
+    description: "Refactor existing call sites to use new [module/class]"
+    subagent_type: software-developer
+    task_template: subagent-software-developer
+    task_params:
+      inputs:
+        - from_task: P3
+          field: design_doc
+        - from_task: P4
+          field: code_changes
+    batch: 3
+    depends_on: [P3, P4]
+    isolation: worktree
+    tdd: strict
+    files: ["src/[scope]/[caller-file].ts"]
+    acceptance:
+      covers: [SC1, SC2]   # e.g. "no longer imports old pattern" + "tests pass"
+      self_check_cmd: "! grep '[old-pattern]' src/[scope]/[caller-file].ts"
+    output_schema:
+      kind: code_changes
+      path: "src/[scope]/[caller-file].ts"
+
+  # ────────────────────────────────────────────────────────────
+  # Batch 4: tests + verify (sequential)
+  # ────────────────────────────────────────────────────────────
+  - id: P6
+    description: "Add unit tests for refactored boundary"
+    subagent_type: software-developer
+    task_template: subagent-software-developer
+    task_params:
+      inputs:
+        - from_task: P5
+          field: code_changes
+    batch: 4
+    depends_on: [P5]
+    isolation: worktree
+    tdd: strict
+    files: ["test/[scope]/"]
+    acceptance:
+      covers: [SC2, SC3]   # tests cover + tests pass
+      self_check_cmd: "npm test"
+    output_schema:
+      kind: code_changes
+      path: "test/[scope]/"
+
+  # ────────────────────────────────────────────────────────────
+  # Batch 5: audit + verify (sequential)
+  # ────────────────────────────────────────────────────────────
+  - id: P7
+    description: "Audit refactor result against acceptance criteria"
+    subagent_type: software-auditor
+    task_template: subagent-software-auditor
+    task_params:
+      task_report_paths:
+        - .pi/orchestrator/task-P4-report.md
+        - .pi/orchestrator/task-P5-report.md
+        - .pi/orchestrator/task-P6-report.md
+    batch: 5
+    depends_on: [P6]
+    isolation: none
+    tdd: none
+    files: []
+    acceptance:
+      covers: [SC1, SC2, SC3, SC4, SC5]   # all SCs verified by auditor
+    output_schema:
+      kind: verdict
+      path: ".pi/orchestrator/audit-P7.md"

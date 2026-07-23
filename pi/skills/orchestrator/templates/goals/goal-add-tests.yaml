@@ -1,0 +1,48 @@
+# Goal Template: add-tests
+#
+# Use when: user asks to add tests for existing code (no behavior change)
+
+id: GC-{date}-{short}
+title: "Add tests for [module/area, ≤120 chars]"
+rationale: |
+  [why tests are missing — coverage gap, regression risk, refactor prep]
+
+success_criteria:
+  - id: SC1
+    criterion: "Test file exists at [path] covering [list of functions/classes]"
+    verification_cmd: "[file exists] && grep -c 'describe\\|it(' [test file] >= [N]"
+  - id: SC2
+    criterion: "Coverage on [module] ≥ [N]%"
+    verification_cmd: "npm run coverage -- --json | jq '.[\"module path\"].lines.pct'"
+  - id: SC3
+    criterion: "Each test follows project's test pattern (describe/it/expect vs project convention)"
+    verification_cmd: "aft_search('[test pattern]') | grep [test file]"
+  - id: SC4
+    criterion: "All tests pass"
+    verification_cmd: "npm test"
+  - id: SC5
+    criterion: "No production code modified (only test files)"
+    verification_cmd: "git diff main..HEAD --name-only | grep -v 'test\\|spec' | wc -l == 0"
+
+anti_goals:
+  - "Do not modify production code (this is tests-only)"
+  - "Do not write tests that don't actually test anything (e.g. only construct objects)"
+  - "Do not skip error-path tests"
+  - "Do not introduce test framework changes"
+
+scope:
+  include:
+    - "[path/to/tests/]"
+  exclude:
+    - "[path/to/production/code/]"
+    - "[package.json]"
+
+constraints:
+  must_use_existing_patterns: true   # match existing test style
+  max_dependency_additions: 0
+  test_coverage_min: [target]
+  typecheck_required: true
+  lint_required: true
+
+done_definition: |
+  All SC1-SC5 verified + coverage target met + no production changes
