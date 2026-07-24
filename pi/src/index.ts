@@ -17,7 +17,7 @@
  * `@cortexkit/aft-pi`, installed separately by install.sh).
  *
  * Workflow outputs are persisted to `.pi/orchestrator/`
- * (goal-{id}.yaml, dag-{id}.yaml, {task_id}-audit.md) and consumed by
+ * (goal-{id}.yaml, dag-{id}.yaml, audit-{task_id}.md) and consumed by
  * the user-level subagent sessions.
  */
 

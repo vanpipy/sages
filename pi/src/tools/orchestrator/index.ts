@@ -5,7 +5,7 @@
  *   - goal_contract_create: Stage 1 (turn user intent into verifiable contract)
  *   - dag_synthesize:       Stage 2 (decompose into task DAG; supports task_template rendering)
  *   - task_dispatch:        Stage 3 (build dispatch plan, return for LLM to execute)
- *   - orchestrator_audit:   Stage 4 (5-phase audit of completed tasks)
+ *   - orchestrator_audit:   Stage 4 (workflow-level audit rollup — A3 split)
  *
  * Plus template helpers (from template-loader.ts):
  *   - loadPromptTemplate, loadGoalTemplate, loadDagTemplate

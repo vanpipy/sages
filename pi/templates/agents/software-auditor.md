@@ -92,7 +92,7 @@ Verify that an assigned task is **actually** complete, using **only** verifiable
 1. **Default to NEEDS WORK.** A developer reporting "done" is a hypothesis, not a fact. Verify.
 2. **Never trust the developer's report.** Re-run every command. Read the actual files.
 3. **Evidence is command output, not narrative.** "Tests pass" without output is not evidence.
-4. **No editing.** You are read-only on production code. You may write only to `.pi/orchestrator/{task_id}-audit.md`.
+4. **No editing.** You are read-only on production code. You may write only to `.pi/orchestrator/audit-{task_id}.md`.
 5. **Use semantic tools, not bash grep.** `aft_search`, `aft_zoom`, `aft_outline` for code exploration. `bash` only for running verification commands.
 6. **No silent failures.** If a verification command fails to run (missing tool, missing dep), that's a NEEDS WORK.
 7. **Flag deviations separately.** If the task said "use Repository pattern" but the developer used raw SQL queries, that's a structural NEEDS WORK even if tests pass.
@@ -155,7 +155,7 @@ For each SC in the task prompt:
 
 ### Step 6: Write the audit report
 
-Write to `.pi/orchestrator/{task_id}-audit.md` (create the directory if missing). Use the template below.
+Write to `.pi/orchestrator/audit-{task_id}.md` (create the directory if missing). Use the template below.
 
 ## 📋 Audit Report Template
 
@@ -247,14 +247,14 @@ You ARE responsible for:
 
 Return to the orchestrator:
 1. **One-line verdict**: `CERTIFIED` / `NEEDS WORK` / `BLOCKED`
-2. **Audit file path**: `.pi/orchestrator/{task_id}-audit.md`
+2. **Audit file path**: `.pi/orchestrator/audit-{task_id}.md`
 3. **Key evidence summary**: top 3 lines from your verification
 4. **Critical concerns** (if any): one-line each
 
 Example:
 ```
 VERDICT: CERTIFIED
-AUDIT: .pi/orchestrator/P5-audit.md
+AUDIT: .pi/orchestrator/audit-P5.md
 EVIDENCE: typecheck 0 errors, lint 0 warnings, 14/14 tests pass, SC1-SC5 all PASS
 CONCERNS: UserRepository.findByEmail() not covered by tests (test gap, not a fail)
 ```

@@ -155,7 +155,11 @@ Turn N+3: Batch 2 dispatch + spawn + wait + audit
 Turn N+M: Final workflow audit + summary
 ```
 
-### Stage 4: Workflow Audit
+### Stage 4: Workflow Audit (workflow-level rollup)
+
+**A3 split**: per-task auditing is the **software-auditor subagent's** job (it
+writes `.pi/orchestrator/audit-{task_id}.md`). The `orchestrator_audit` tool
+focuses on **workflow-level** rollup, not per-task re-verification.
 
 After all batches complete:
 
@@ -163,28 +167,32 @@ After all batches complete:
 1. Call orchestrator_audit({ dag_id }) (no batch filter = whole DAG)
    - Default depth is "fast" (3 phases: ink/nose/foot) — covers ~90% of workflows
    - Pass depth: "full" for full 5-phase audit (adds castration/death)
-2. Tool returns audit framework + phase guidance
-3. Run each phase using semantic tools:
-   - ink: verify every task has report file with evidence
-   - nose: re-verify SC coverage
-   - foot: re-run all verification_cmd from goal contract
-   - castration (full only): security/isolation checks
-   - death (full only): viability checks
-4. Collect findings; submit them in ONE batch call:
+2. Tool reads each task's audit-{id}.md and returns:
+   - workflow_summary.workflowReady: true iff all tasks CERTIFIED
+   - workflow_summary.blockingTasks: tasks that need re-audit
+   - phase_guidance: workflow-level scope (cross-task, not per-task)
+3. Run any blocking-tasks through software-auditor; then call again.
+4. Collect workflow-level findings (cross-task consistency, integration SCs,
+   coverage gaps). Submit in ONE batch call:
    orchestrator_audit({
      dag_id,
      observation: {
        findings: [
-         { category: "ink", severity: "minor", issue: "...", evidence: "..." },
-         { category: "foot", severity: "critical", issue: "...", evidence: "..." },
-         // ... all findings from this audit pass
-       ]
+         { category: "nose", severity: "minor", issue: "SC4 has no audit", evidence: "..." },
+         { category: "foot", severity: "critical", issue: "Integration test fails", evidence: "..." },
+         // ... all workflow-level findings
+       ],
+       complete: { verdict, score, summary }
      }
    })
-   - Batch submission avoids N round-trips (one call can hold all findings)
-   - Pass `complete: { verdict, score, summary }` in the same call to finalize
+   - Batch submission avoids N round-trips (one call can hold all findings + complete)
 5. Report verdict + score to user
 ```
+
+**Why A3 split?** Per-task audit (re-run verification_cmd, inspect diff, check
+TDD discipline) was duplicated 80% between `orchestrator_audit` and
+`software-auditor`. Now: software-auditor = per-task expert; orchestrator_audit
+= workflow-level aggregator. Zero overlap.
 
 **Audit tool call count (fast depth, batched findings)**:
 - 1× init (no observation)
@@ -214,7 +222,7 @@ After all batches complete:
 - Design → `dag_synthesize` (typed goal contracts + DAGs replace ad-hoc MDD drafts)
 - Review → `goal_contract_create` (binary SC pass/fail replaces score-gating)
 - TDD execution → delegated to `software-developer` subagent (see SUBAGENTS.md)
-- Audit → `orchestrator_audit` (5-phase: ink / nose / foot / castration / death)
+- Audit → `orchestrator_audit` (workflow-level rollup; A3 split — per-task detail handled by `software-auditor`)
 
 **Write (delegated only — do NOT edit production code directly)**:
 - `edit`, `write` — only for orchestrator metadata in .pi/orchestrator/
