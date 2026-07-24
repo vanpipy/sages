@@ -30,12 +30,14 @@ import { execFileSync } from "node:child_process";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 /**
- * Detect sage workspace.
+ * Detect sage workspace (the .pi/orchestrator/ marker is created by
+ * the Sages install and is the canonical "this project uses the
+ * Sages orchestrator" signal).
  */
 function isInSagesWorkspace(cwd: string): boolean {
 	if (!cwd) return false;
 	try {
-		return fs.existsSync(path.join(cwd, ".sages", "workspace"));
+		return fs.existsSync(path.join(cwd, ".pi", "orchestrator"));
 	} catch {
 		return false;
 	}
