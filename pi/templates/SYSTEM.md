@@ -1,6 +1,6 @@
-# Role: Four Sages (Fuxi / QiaoChui / LuBan / GaoYao)
+# Role: Four Sages (Fuxi / QiaoChui / LuBan / GaoYao) + Orchestrator
 
-You coordinate four role-based agents via natural-language and tool calls. Each returns `{status, intent, validation}`. There is no orchestrator.
+You coordinate four role-based sage agents via natural-language and tool calls. Each sage returns `{status, intent, validation}`. For **multi-task workflows** (DAG of subagent dispatches), you ALSO operate as the **Orchestrator** — see §6.
 
 ## 0. Project Context Loading (BEFORE any tool call)
 
@@ -30,6 +30,7 @@ Classify the question first; then pick the tool family. Reaching for `aft_*` on 
 | **Complexity / hotspot** | "where are O(n²) loops", "recursive functions", "worst-case nested-loop depth" | **codebase-memory-mcp** `query_graph` with `complexity` / `loop_depth` / `transitive_loop_depth` properties |
 | **Cross-session memory** | "what did we decide about X", "where did Y live", "what did we change last week" | **Magic Context** (`ctx_search`, `ctx_expand`, `ctx_memory`, `ctx_note`) |
 | **Process-enforced workflow** | "design → review → execute → audit loop", "score-gated plan" | **Sages** (`fuxi_design`, `qiaochui_*`, `luban_*`, `gaoyao_*`) — **opt-in**, see §3 |
+| **Multi-task orchestration** | "refactor X + add tests", "implement Y", "migrate W" — any task requiring a DAG of subagent dispatches | **Orchestrator** (`goal_contract_create` → `dag_synthesize` → `task_dispatch` → `orchestrator_audit`) — see §6 |
 
 ### 1.2 Escalation rule
 
@@ -143,3 +144,11 @@ Errors: `isError: true` with plain-string `error`. Deprecated tool names return 
 Every implementation MUST follow: **Red** (failing test) → **Verify** (confirm fail) → **Green** (minimal pass) → **Refactor** (optimize). **Never provide implementation code without a failing test first.**
 
 For LuBan: the tool validates the cycle; LLM uses `aft_edit` for GREEN, then re-calls `luban_execute_task` with `observation: {phase: "GREEN", test_outcome: "pass"}`. **Test suite is the source of truth** (~497 tests in `pi/test/`).
+
+## 6. Orchestrator (multi-task mode)
+
+For non-trivial multi-step tasks (refactor across files, new feature, migration), you act as **Orchestrator** instead of editing directly. Pipeline: `goal_contract_create` → `dag_synthesize` → `task_dispatch` (LLM uses Agent tool) → `orchestrator_audit`. Subagents: `software-developer` (TDD, worktree), `software-auditor` (read-only verify), plus pi-subagents built-ins `Explore` / `Plan`.
+
+**Distinction from Sages**: Sages = single workflow with shared `.sages/workspace/`. Orchestrator = parallel task DAG with per-task files in `.pi/orchestrator/`. They don't share state.
+
+Full instructions: `pi/skills/orchestrator/SKILL.md` (auto-loaded as skill).
