@@ -24,12 +24,13 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 /**
  * Detect whether the current working directory is a sages workspace
- * (i.e., has a `.sages/workspace/` sibling).
+ * (i.e., has a `.pi/orchestrator/` sibling — the orchestrator state
+ * directory created by the Sages install).
  */
 function isInSagesWorkspace(cwd: string): boolean {
 	if (!cwd) return false;
 	try {
-		return fs.existsSync(path.join(cwd, ".sages", "workspace"));
+		return fs.existsSync(path.join(cwd, ".pi", "orchestrator"));
 	} catch {
 		return false;
 	}
