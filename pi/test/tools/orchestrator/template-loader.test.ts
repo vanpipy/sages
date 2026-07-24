@@ -135,6 +135,24 @@ describe("template-loader", () => {
       const out = renderTemplate("Files: {{files}}", { files: ["a.ts", "b.ts"] });
       expect(out).toBe("Files: a.ts,b.ts");
     });
+
+    it("handles {{#each items}}...{{/each}} for string arrays", () => {
+      const tpl = "Reports:\n{{#each reports}}- {{this}}\n{{/each}}";
+      const out = renderTemplate(tpl, {
+        reports: [".pi/r1.md", ".pi/r2.md", ".pi/r3.md"],
+      });
+      expect(out).toBe("Reports:\n- .pi/r1.md\n- .pi/r2.md\n- .pi/r3.md\n");
+    });
+
+    it("{{#each}} with no value renders empty", () => {
+      const tpl = "X{{#each missing}}Y{{/each}}Z";
+      expect(renderTemplate(tpl, {})).toBe("XZ");
+    });
+
+    it("{{#each}} handles mixed conditionals inside (verifies render order)", () => {
+      const tpl = "{{#if items}}count={{#each items}}{{this}} {{/each}}{{/if}}";
+      expect(renderTemplate(tpl, { items: ["a", "b"] })).toBe("count=a b ");
+    });
   });
 
   describe("renderTaskPrompt", () => {

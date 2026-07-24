@@ -119,10 +119,11 @@ export function listTemplates(kind: "prompts" | "responses" | "goals" | "dag"): 
 
 /**
  * Render a template by substituting {{var}} placeholders with values.
- * Supports conditional forms:
+ * Supports conditional forms and iteration:
  *   - {{#if var}}...{{/if}}                  (truthiness check)
  *   - {{#if var == "value"}}A{{else}}B{{/if}} (string equality with else)
  *   - {{#if var}}A{{else}}B{{/if}}         (truthiness with else)
+ *   - {{#each var}}...{{/each}}              (iterate over string[]; body can reference {{this}})
  *
  * Intentionally tiny — no external deps. Easy to audit.
  */
@@ -132,9 +133,30 @@ export function renderTemplate(
 ): string {
   let out = template;
 
+  // Handle {{#each var}}...{{/each}} first (innermost, like {{#if}}).
+  // Body can use {{this}} (or {{.}}) to refer to the current element.
+  const eachRe = /\{\{#each\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}([\s\S]*?)\{\{\/each\}\}/g;
+  let prev = "";
+  while (prev !== out) {
+    prev = out;
+    out = out.replace(eachRe, (_match, varName: string, body: string) => {
+      const val = params[varName];
+      if (val === undefined || val === null) return "";
+      if (!Array.isArray(val)) return String(val);
+      return val
+        .map((item) => {
+          if (item === null || item === undefined) return "";
+          return body
+            .replace(/\{\{\s*this\s*\}\}/g, String(item))
+            .replace(/\{\{\s*\.\s*\}\}/g, String(item));
+        })
+        .join("");
+    });
+  }
+
   // Handle {{#if cond}}A{{else}}B{{/if}} or {{#if cond}}A{{/if}}
   // Process from inside-out (deepest nesting first) using a loop.
-  let prev = "";
+  prev = "";
   while (prev !== out) {
     prev = out;
     out = processIfBlocksOnce(out, params);
@@ -300,7 +322,8 @@ const TEMPLATE_PARAM_SCHEMAS: Record<string, TemplateParam[]> = {
     { name: "sc_ids", type: "string", required: false, description: "Optional formatted SC id list" },
     { name: "sc_list", type: "string", required: true, description: "Formatted SC list" },
     { name: "depth", type: "string", required: true, description: "'fast' or 'full'" },
-    { name: "task_report_path", type: "string", required: true, description: "Path to developer's report" },
+    { name: "task_report_path", type: "string", required: false, description: "Path to a single developer's report" },
+    { name: "task_report_paths", type: "string[]", required: false, description: "Paths to multiple developer reports (rolled up into one audit)" },
     { name: "isolation", type: "string", required: true, description: "'worktree' or 'none'" },
   ],
   "subagent-explore": [

@@ -82,7 +82,14 @@ export const TaskNodeSchema = Type.Object({
     fields: Type.Optional(Type.Array(Type.String())),
   }),
   acceptance: Type.Object({
-    covers: Type.Array(Type.String(), { description: "SC ids this task covers", minItems: 1 }),
+    /**
+     * SC ids this task covers. Required for tasks that satisfy goal
+     * contract SCs (developer, auditor); Explore/Plan/research tasks
+     * can omit this — they contribute to the workflow but don't
+     * directly satisfy any SC. validateDAG still requires every SC
+     * to be covered by at least one task that DOES declare covers.
+     */
+    covers: Type.Optional(Type.Array(Type.String(), { description: "SC ids this task covers" })),
     self_check_cmd: Type.Optional(Type.String()),
     auditor_check_cmd: Type.Optional(Type.String()),
   }),
@@ -130,11 +137,15 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
     }
   }
 
-  // 3. Every SC must be covered
+  // 3. Every SC must be covered by at least one task that declares
+  //    acceptance.covers (tasks that omit covers are research-only and
+  //    don't directly satisfy any SC).
   const coveredSCs = new Set<string>();
   for (const t of input.tasks as any[]) {
-    for (const sc of t.acceptance.covers) {
-      coveredSCs.add(sc);
+    if (Array.isArray(t.acceptance?.covers)) {
+      for (const sc of t.acceptance.covers) {
+        coveredSCs.add(sc);
+      }
     }
   }
   for (const sc of contract.success_criteria) {
