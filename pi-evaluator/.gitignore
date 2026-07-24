@@ -12,5 +12,6 @@ __pycache__/
 # Node modules (too large)
 evaluations/*/codes/*/node_modules/
 
-# Four Sages workspace
-evaluations/*/codes/.sages/
+# Sages orchestrator state (the active 4-tool orchestrator writes
+# goal/dag/audit files into this directory).
+evaluations/*/codes/.pi/orchestrator/
