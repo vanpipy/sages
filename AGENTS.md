@@ -119,8 +119,15 @@ The path the tool **returns** is the path the tool **writes**.
 └── audit-workflow.md           # workflow rollup (0o600)
 ```
 
-`.sages/workspace/` is **legacy**; new state goes under
-`.pi/orchestrator/`.
+All **runtime state** lives under `.pi/orchestrator/`. The only
+remaining `.sages/` paths are:
+
+- `.sages/workspace/` — an **empty marker directory**. Read by
+  `pi-graphify/templates/start-mcp.sh` and
+  `pi-codebase-memory`'s `isSageWorkspace` heuristic to detect
+  "is this a sages project?". Not state storage.
+- `.sages/designs/` — brainstorming's `writeDesignDoc` writes
+  deferred design drafts here when the user says "save for later".
 
 ## Design Decisions (KD-1..8)
 
