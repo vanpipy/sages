@@ -136,9 +136,9 @@ describe("pi-codebase-memory: lifecycle hooks", () => {
 	});
 
 	it("session_start in sage workspace WITH binary + index emits info", async () => {
-		// Setup: sage workspace + fake binary + fake .pi-codebase.json
+		// Setup: sage workspace (detected via .pi/orchestrator/ marker) + fake binary + fake .pi-codebase.json
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-codebase-mem-test-"));
-		fs.mkdirSync(path.join(tmpDir, ".sages", "workspace"), { recursive: true });
+		fs.mkdirSync(path.join(tmpDir, ".pi", "orchestrator"), { recursive: true });
 		fs.writeFileSync(path.join(tmpDir, ".pi-codebase.json"), "{}");
 
 		// Inject fake binary path via $HOME override
@@ -169,7 +169,7 @@ describe("pi-codebase-memory: lifecycle hooks", () => {
 
 	it("session_start in sage workspace WITHOUT index emits warning", async () => {
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-codebase-mem-test-"));
-		fs.mkdirSync(path.join(tmpDir, ".sages", "workspace"), { recursive: true });
+		fs.mkdirSync(path.join(tmpDir, ".pi", "orchestrator"), { recursive: true });
 
 		// Fake binary present
 		const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "fake-home-"));
@@ -196,7 +196,7 @@ describe("pi-codebase-memory: lifecycle hooks", () => {
 
 	it("session_start WITHOUT binary emits warning to install", async () => {
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-codebase-mem-test-"));
-		fs.mkdirSync(path.join(tmpDir, ".sages", "workspace"), { recursive: true });
+		fs.mkdirSync(path.join(tmpDir, ".pi", "orchestrator"), { recursive: true });
 
 		// Fake $HOME with no binary
 		const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "fake-home-empty-"));
@@ -220,7 +220,7 @@ describe("pi-codebase-memory: lifecycle hooks", () => {
 
 	it("session_start in non-sage workspace is silent", async () => {
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-codebase-mem-test-"));
-		// No .sages/workspace/
+		// No .pi/orchestrator/ marker
 
 		extModule.default(mockPi as any);
 		await mockPi.trigger("session_start", {}, { cwd: tmpDir, ui: mockPi.ui });
