@@ -13,9 +13,9 @@ The `pi/` subpackage of the [Sages monorepo](../). Implements the
 ```
 pi/
 ├── src/
-│   ├── extension.ts              # pi entrypoint → registerOrchestratorTools
+│   ├── extension.ts              # pi entrypoint → registerOrchestratorTools + registerFileGate
 │   ├── index.ts                  # re-exports
-│   ├── services/file-service.ts  # centralized file ops with path validation
+│   ├── services/file-service.ts  # @deprecated — sandboxed file utility, unused
 │   └── tools/
 │       ├── orchestrator/         # 4-tool surface + types + template renderer
 │       │   ├── index.ts          # registerOrchestratorTools
@@ -26,6 +26,7 @@ pi/
 │       │   ├── task-dispatcher.ts # Stage 3
 │       │   ├── orchestrator-audit.ts # Stage 4 (A3 split)
 │       │   └── template-loader.ts  # {{var}} / {{#if}} / {{#each}}
+│       ├── file-gate.ts          # path-gated sages_edit / sages_write (meta-files only)
 │       └── brainstorming/        # pre-design intent clarification (slash command)
 ├── test/                         # 343 Bun tests
 ├── skills/                        # orchestrator + brainstorming SKILL.md

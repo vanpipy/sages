@@ -36,11 +36,31 @@ Before editing ANY file, follow in order — **do NOT skip**:
   1. **Explore** — `Explore` subagent or `aft_search` to map existing patterns
   2. **Plan** — `Plan` subagent or `dag_synthesize` to design the change
   3. **Dispatch** — `task_dispatch` to specialized subagents
-  4. **Direct edit** — only for trivial changes (rename, typo, one-liner)
+  4. **Direct edit** — for **Sages meta-files only**, use `sages_edit` / `sages_write`
+     (path-gated, allowlisted). For **production code**, dispatch a
+     `software-developer` subagent via the `Agent` tool — see §1.1 below.
 
 **Rationale**: subagents see code from fresh perspective (no carried assumptions)
 and parallelize work. First instinct should NOT be "let me just edit this".
 If task complexity is unclear, run `brainstorming` first.
+
+### 1.1 Write-tool policy (path gate)
+
+Use the Sages path-gated write tools in this priority order:
+
+| Target | Tool |
+|---|---|
+| `.pi/orchestrator/*` (goal, dag, audit, state, designs) | `sages_write(path, content)` or `sages_edit(path, oldText, newText)` |
+| `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/` | same — Sages own code |
+| `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json` | same — root meta |
+| `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/` | same — config |
+| **Anything else** (user `src/`, `test/`, `lib/`, `app/`, `*.ts`, `*.py`, …) | **FORBIDDEN**. Dispatch a `software-developer` subagent: `Agent({ subagent_type: "software-developer", prompt: "…", run_in_background: true })`. Then `orchestrator_audit` to verify. |
+
+The gate rejects paths outside the allowlist with `{ isError: true }` and
+a message pointing at the Agent tool. This protects the audit gate
+(software-auditor independently re-runs verification_cmd on the developer's
+work) and the DAG-attribution invariant (every production change has a
+goal contract + task + subagent + audit verdict).
 
 ### 1.1 Orchestration dashboard — use `todowrite`
 

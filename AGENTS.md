@@ -44,6 +44,7 @@ orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
 | `dag_synthesize` | 2 | Validate + persist a TaskNode DAG; render `task_template` from `task_params` |
 | `task_dispatch` | 3 | Return Agent-call plan grouped by batch; LLM executes via the external `Agent` tool |
 | `orchestrator_audit` | 4 | Read per-task `audit-{id}.md`; aggregate verdicts; enforce evidence gate; write `audit-workflow.md` |
+| `sages_write` / `sages_edit` | — | **Path-gated** writes to Sages meta-files (`.pi/orchestrator/`, `pi/`, root docs). Rejects production code — see §“Write policy” below |
 
 Plus shared helpers in
 `pi/src/tools/orchestrator/template-loader.ts`:
@@ -106,6 +107,30 @@ surfaces the failure in `validation.errors`. Cannot be bypassed.
 | no filter | `.pi/orchestrator/audit-workflow.md` |
 
 The path the tool **returns** is the path the tool **writes**.
+
+## Write policy (main agent)
+
+The main orchestrator agent can write **directly** to Sages meta-files
+only. For everything else, dispatch a `software-developer` subagent
+via the Agent tool.
+
+**Allowlisted for direct write** (via `sages_write` / `sages_edit`):
+
+- `.pi/orchestrator/**` — goal / dag / audit / state / designs
+- `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`
+- `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`
+- `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/`
+
+**Production code** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …) is
+**rejected by the gate** with `{ isError: true }` and a message pointing
+at the Agent tool. The gate's job is to protect the audit invariant
+(software-auditor independently re-runs `verification_cmd` on the
+developer's work) and DAG-attribution (every production change has
+a goal contract + task + subagent + audit verdict).
+
+**Read tools remain unrestricted** (`read`, `aft_read`, `aft_search`,
+`codebase_*`, `graphify_*`, `bash` for read-only commands) — the main
+agent still needs to read user code to understand context.
 
 ## File Layout
 

@@ -67,6 +67,17 @@ export {
 } from "./template-loader.js";
 
 export {
+  canMainAgentWrite,
+  policyMessage,
+  executeSagesWrite,
+  executeSagesEdit,
+  registerFileGate,
+  SagesWriteParams,
+  SagesEditParams,
+  type ToolResponse,
+} from "../file-gate.js";
+
+export {
   type GoalContract,
   type SuccessCriterion,
   type TaskNode,
