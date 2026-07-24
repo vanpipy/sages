@@ -13,6 +13,16 @@
  *   - sages_write(path, content)
  *   - sages_edit(path, oldText, newText)
  *
+ * Plus two main-agent gates (GC-2026-001 — brain-vs-limb hard threshold):
+ *   - Layer 1 (session_start): drop raw `edit` / `write` from main agent's
+ *     active toolset so it cannot bypass the file-gate. The LLM literally
+ *     does not see those tools — only `sages_write` / `sages_edit` (which
+ *     are already path-gated) and `Agent` (dispatch to subagents).
+ *   - Layer 2 (tool_call): block bash commands whose write intent targets
+ *     production code paths, via the same `canMainAgentWrite()` policy as
+ *     the file-gate. Defense-in-depth — even if some extension re-enables
+ *     `edit`/`write`, bash is gated.
+ *
  * Subagents (`software-developer`, `software-auditor`) are NOT registered
  * here — they are installed as user-level agents by `pi/scripts/install.sh`
  * and invoked via the Agent tool. See `pi/templates/SUBAGENTS.md` for the
@@ -30,6 +40,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import { registerOrchestratorTools } from "./tools/orchestrator/index.js";
 import { registerFileGate } from "./tools/file-gate.js";
+import { shouldBlockBashCommand } from "./tools/bash-guard.js";
 
 /**
  * Default pi extension entrypoint. pi calls this once on package load.
@@ -42,4 +53,27 @@ import { registerFileGate } from "./tools/file-gate.js";
 export default function registerSagesExtension(pi: ExtensionAPI): void {
 	registerOrchestratorTools(pi);
 	registerFileGate(pi);
+
+	// ── Layer 1: drop raw edit/write from main agent's active tools ───────
+	// (brain-vs-limb: main agent has no raw write tool — only sages_* +
+	//  dispatch via Agent)
+	pi.on("session_start", () => {
+		const active = pi.getActiveTools();
+		pi.setActiveTools(
+			active.filter((t: string) => t !== "edit" && t !== "write"),
+		);
+	});
+
+	// ── Layer 2: bash write-intent gate ────────────────────────────────────
+	// (defense-in-depth: even if some extension re-enables edit/write, bash
+	//  is gated by the same canMainAgentWrite() policy as the file-gate)
+	pi.on("tool_call", (event: any, ctx: any) => {
+		if (event.toolName !== "bash") return;
+		const decision = shouldBlockBashCommand(event.input.command, {
+			cwd: ctx.cwd,
+		});
+		if (decision.block) {
+			return { block: true, reason: decision.reason };
+		}
+	});
 }
