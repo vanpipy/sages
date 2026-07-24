@@ -47,3 +47,27 @@ constraints:
 
 done_definition: |
   All SC1-SC5 verified + audit PASS ≥ 90 + user-facing behavior documented
+
+parallelism_notes: |
+  # Background-default for implement + audit (verified 2026-07-24).
+  #
+  # "Implementation" (software-developer) and "audit" (software-auditor)
+  # are long-running, high-latency phases. The orchestrator MUST spawn
+  # them with `run_in_background: true` so the parent agent can
+  # continue work (e.g. review other diffs, run steer_subagent) while
+  # the subagent runs. Without this, the orchestrator's main context
+  # is blocked for the entire implementation + audit duration.
+  #
+  # Frontend phases (Explore / Plan) remain foreground — they are
+  # short, dependency-ordered, and their result feeds directly into
+  # the next batch's prompt. See pi/templates/SUBAGENTS.md for the
+  # full rule and rationale.
+  phases:
+    - id: explore
+      run_in_background: false
+    - id: plan
+      run_in_background: false
+    - id: implement
+      run_in_background: true
+    - id: audit
+      run_in_background: true

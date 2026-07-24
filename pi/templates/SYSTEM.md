@@ -61,3 +61,20 @@ Every implementation follows: **RED** (failing test) → **Verify** (confirm fai
 ## 5. Output Contract (universal)
 
 All tools return: `{ status: "in_progress"|"complete"|"error", intent, validation: { ... }, auto_advanced? }`. Errors carry plain-string `error`. **Never call deprecated tool names** — return `isError` with redirect hint.
+
+## 6. Foreground vs Background — when to spawn with `run_in_background: true`
+
+**Default rule (verified 2026-07-24)** — the parent agent's context is finite, so long-running subagents must be backgrounded:
+
+| Subagent type | `run_in_background` | Why |
+|---|---|---|
+| `Explore` | `false` | Short, read-only, result feeds next stage |
+| `Plan` | `false` | Short, output is the next stage's prompt |
+| `software-developer` | **`true`** | TDD RED→GREEN→REFACTOR is 1–10 min, can be steered |
+| `software-auditor` | **`true`** | Verifies the whole diff (typecheck + tests + lint), 30s–3 min |
+
+**Foreground = block parent until result is back.** Foreground calls run serially — one at a time. The parent's main context is locked for the entire subagent duration.
+
+**Background = parent gets the agent id immediately and keeps working.** Use `get_subagent_result(agent_id)` to collect the result later, or `steer_subagent(agent_id, "...")` to send mid-run messages. Max concurrent background agents defaults to 4 (configurable via `/agents`).
+
+**Always set `run_in_background: true` for `software-developer` and `software-auditor`** unless the task is short enough to ignore (and even then, parallelism is free). See `pi/templates/SUBAGENTS.md` for the full rule, code examples, and reasoning.

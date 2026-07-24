@@ -41,14 +41,20 @@ The orchestrator dispatches a **single canonical pipeline of 4 subagents**, one 
 └─────────┘     └──────┘     └────────────────────┘     └────────────────────┘
   read-only       read-only       worktree + edit              read-only
   haiku           sonnet          sonnet + thinking           sonnet + thinking
+  foreground      foreground      BACKGROUND                  BACKGROUND
 ```
 
-| Stage | `subagent_type`     | Source                              | When to dispatch                                                                 |
-|-------|----------------------|--------------------------------------|----------------------------------------------------------------------------------|
-| 1     | `Explore`            | **pi-subagents built-in**            | "Where is X?" / "find all callers of Y" / pure codebase search                    |
-| 2     | `Plan`               | **pi-subagents built-in**            | Need a step-by-step implementation strategy before coding (architect concerns)   |
-| 3     | `software-developer` | **shipped** (this repo)              | Write production code + tests in a worktree, strict TDD                          |
-| 4     | `software-auditor`   | **shipped** (this repo)              | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
+| Stage | `subagent_type`     | Source                              | `run_in_background` | When to dispatch                                                                 |
+|-------|----------------------|--------------------------------------|---------------------|----------------------------------------------------------------------------------|
+| 1     | `Explore`            | **pi-subagents built-in**            | `false`             | "Where is X?" / "find all callers of Y" / pure codebase search                    |
+| 2     | `Plan`               | **pi-subagents built-in**            | `false`             | Need a step-by-step implementation strategy before coding (architect concerns)   |
+| 3     | `software-developer` | **shipped** (this repo)              | **`true`**          | Write production code + tests in a worktree, strict TDD                          |
+| 4     | `software-auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
+
+**Foreground vs background — verified 2026-07-24 default:**
+- **Foreground** (Stages 1–2): the orchestrator's main context is locked for the subagent's duration. Used when the next stage's prompt depends on this one's output.
+- **Background** (Stages 3–4): the orchestrator receives an agent id and keeps working. Use `get_subagent_result(agent_id)` to collect, `steer_subagent(agent_id, "...")` to redirect mid-run. Up to 4 concurrent default. Long-running TDD + verify work would serialize the entire pipeline if run synchronously.
+- See `pi/templates/SUBAGENTS.md` for full rationale, code examples, and the "Don't duplicate work" rule.
 
 Fallback: `general-purpose` (built-in, full toolset) is for ad-hoc research that doesn't fit any specific role. Never use it as the implementation or verification path — Stages 3-4 are specialised on purpose.
 

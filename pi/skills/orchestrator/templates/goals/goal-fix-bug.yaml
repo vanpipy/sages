@@ -46,3 +46,18 @@ constraints:
 
 done_definition: |
   Reproduction test exists + SC1-SC5 verified + bug verified fixed (manual if needed)
+
+parallelism_notes: |
+  # Background-default for implement + audit (verified 2026-07-24).
+  #
+  # Even in a small bug-fix flow (3 batches), the implement step
+  # (RED reproduction + GREEN fix) and the audit step are long enough
+  # to be worth backgrounding. See pi/templates/SUBAGENTS.md for the
+  # full rule and rationale.
+  phases:
+    - id: explore
+      run_in_background: false
+    - id: implement
+      run_in_background: true
+    - id: audit
+      run_in_background: true

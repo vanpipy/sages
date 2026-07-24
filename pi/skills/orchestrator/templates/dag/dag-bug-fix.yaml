@@ -60,6 +60,11 @@ tasks:
     depends_on: [P1, P2]
     isolation: worktree
     tdd: strict
+    # Background-default for implement/audit (verified 2026-07-24).
+    # Spawns the developer subagent and returns its agent id immediately;
+    # the orchestrator can then `get_subagent_result` or `steer_subagent`
+    # instead of blocking. See pi/templates/SUBAGENTS.md.
+    run_in_background: true
     files: ["src/[bug-area]/[buggy-file].ts", "test/[bug-area]/[reproduction-test].ts"]
     acceptance:
       covers: [SC1, SC2]   # reproduction test exists + all tests pass
@@ -81,6 +86,10 @@ tasks:
     depends_on: [P3]
     isolation: none
     tdd: none
+    # Background-default for implement/audit (verified 2026-07-24).
+    # Auditor runs while the orchestrator can do other prep work;
+    # `get_subagent_result` collects the verdict when needed.
+    run_in_background: true
     files: []
     acceptance:
       covers: [SC1, SC2, SC3, SC4, SC5]

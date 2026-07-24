@@ -18,6 +18,15 @@ Parameters (filled by dag_synthesizer at render time):
 **Task ID**: {{task_id}}
 **Title**: {{task_title}}
 
+## Spawn Mode: BACKGROUND (default — verified 2026-07-24)
+
+You are typically spawned with `run_in_background: true`. The orchestrator's main context is free while you work. Concretely:
+
+- **You do NOT block the orchestrator.** It receives your agent id immediately and may inspect progress, call `steer_subagent` to redirect you mid-run, or use `get_subagent_result` when it needs your verdict.
+- **Stay self-contained.** No synchronous user interaction. Steers are the only mid-run input channel.
+- **Multiple instances may be live.** Up to 4 default. Your `isolation: worktree` keeps you from stepping on parallel implementers.
+- **Final assistant turn = the verdict the orchestrator reads.** Be precise: paths changed, test commands run, RED→GREEN evidence.
+
 ## Acceptance Criteria (you must satisfy ALL)
 
 {{sc_list}}

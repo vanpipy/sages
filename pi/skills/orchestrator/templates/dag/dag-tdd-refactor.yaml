@@ -84,6 +84,11 @@ tasks:
     depends_on: [P3]
     isolation: worktree
     tdd: strict
+    # Background-default for implement/audit (verified 2026-07-24).
+    # All software-developer / software-auditor tasks in this DAG run in
+    # background so the orchestrator can steer / track multiple at once.
+    # See pi/templates/SUBAGENTS.md for the rule.
+    run_in_background: true
     files: ["src/[scope]/[new-file].ts"]
     acceptance:
       covers: [SC3]   # adjust to which SC this task satisfies
@@ -106,6 +111,8 @@ tasks:
     depends_on: [P3, P4]
     isolation: worktree
     tdd: strict
+    # Background-default — see P4 comment.
+    run_in_background: true
     files: ["src/[scope]/[caller-file].ts"]
     acceptance:
       covers: [SC1, SC2]   # e.g. "no longer imports old pattern" + "tests pass"
@@ -129,6 +136,8 @@ tasks:
     depends_on: [P5]
     isolation: worktree
     tdd: strict
+    # Background-default — see P4 comment.
+    run_in_background: true
     files: ["test/[scope]/"]
     acceptance:
       covers: [SC2, SC3]   # tests cover + tests pass
@@ -153,6 +162,10 @@ tasks:
     depends_on: [P6]
     isolation: none
     tdd: none
+    # Background-default for implement/audit (verified 2026-07-24).
+    # Auditor runs while the orchestrator can do other prep work;
+    # `get_subagent_result` collects the verdict when needed.
+    run_in_background: true
     files: []
     acceptance:
       covers: [SC1, SC2, SC3, SC4, SC5]   # all SCs verified by auditor
