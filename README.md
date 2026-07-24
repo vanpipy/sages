@@ -1,258 +1,123 @@
 # Sages
 
-A multi-agent workflow system for [pi](https://pi.dev), inspired by Chinese mythology.
+Multi-agent workflow system for [pi](https://pi.dev). A 4-tool
+orchestrator drives a Goal → DAG → Dispatch → Audit pipeline; TDD
+implementation and per-task auditing are delegated to
+`software-developer` and `software-auditor` subagents spawned via
+the Agent tool from `@tintinweb/pi-subagents`. See [History](#history)
+for the project's Four-Sages mythology.
 
-## Overview
+## Architecture
 
-Sages implements a Four Sages workflow where each agent has a specialized role:
+```
+goal_contract_create  →  .pi/orchestrator/goal-{id}.yaml
+        ↓
+dag_synthesize        →  .pi/orchestrator/dag-{id}.yaml
+        ↓
+task_dispatch         →  Agent-call plan (LLM spawns)
+        ↓
+software-developer    →  .pi/orchestrator/task-{id}-report.md
+software-auditor      →  .pi/orchestrator/audit-{task_id}.md
+        ↓
+orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
+```
 
-| Agent | Role | Focus |
-|-------|------|-------|
-| **Fuxi (伏羲)** | Architect | MDD System Design |
-| **QiaoChui (巧倕)** | Expert | Technical Review & Decomposition |
-| **LuBan (鲁班)** | Craftsman | TDD Implementation |
-| **GaoYao (皋陶)** | Auditor | Quality Audit & Security |
+Sages owns the 4 orchestrator tools and all `.pi/orchestrator/*`
+files. Subagent spawning, worktree creation, background queueing, and
+result collection are owned by `@tintinweb/pi-subagents` (deliberate
+delegation boundary — Sages does not re-implement the Agent tool).
+
+`software-developer` (TDD: RED → GREEN → REFACTOR) and
+`software-auditor` (per-task certifier) are user-level agents shipped
+to `~/.pi/agent/agents/` by `pi/scripts/install.sh`. `Explore`,
+`Plan`, `general-purpose` are built-in.
 
 ## Installation
 
-### pi
-
 ```bash
-# Quick Install (Recommended)
-curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | sh
+# Quick install
+curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | bash
 
-# Manual Install
-./pi/scripts/install.sh
+# Manual
+git clone https://github.com/vanpipy/sages.git
+cd sages && ./pi/scripts/install.sh
 ```
 
-## Commands
-
-> **Note**: The tool surface was simplified in the simplify-actions refactor (18+ → 10 active tools). Each tool returns `{status, intent, validation}` and auto-advances on observation. Deprecated tool names remain as stubs that return `isError` with a redirect hint.
->
-> **Tool routing** (which family to reach for: AFT / `codebase_*` / `codebase_memory_*` / Magic Context / Sages): see `pi/templates/SYSTEM.md 1`.
-
-### Fuxi ( Design) — 3 tools
-| Tool | Description |
-|------|-------------|
-| `fuxi_start` | Initialize workflow (`state.json` + design sub-state) |
-| `fuxi_design` | Observe cycle: `design` (write draft) → `review` (validate score >= 80) → `plan` |
-| `fuxi_end` | End workflow based on audit verdict (PASS / NEEDS_CHANGES / REJECTED) |
-
-### QiaoChui ( Review) — 2 tools
-| Tool | Description |
-|------|-------------|
-| `qiaochui_review` | Review draft. Without observation: returns heuristic hints + semantic-tool guidance. With `observation: { score, notes? }`: validates 0-100, persists to `state.json`, returns verdict (APPROVED >= 80, REVISE 50-79, REJECTED < 50). |
-| `qiaochui_decompose` | Decompose approved design into `plan.md` + `execution.yaml`. Requires `state.score >= 80`. |
-
-### LuBan ( Execute) — 2 tools
-| Tool | Description |
-|------|-------------|
-| `luban_execute_task` | Single task observe cycle (RED → GREEN → REFACTOR → complete). The LLM uses **AFT-backed `read`/`write`/`edit`/`grep`** + **codebase-memory** + **graphify** for implementation; LuBan validates. |
-| `luban_run_batch` | Planner — reads `execution.yaml`, returns ordered plan with file conflicts and topological layers. |
-
-### GaoYao ( Audit) — 3 tools
-| Tool | Description |
-|------|-------------|
-| `gaoyao_audit` | Init / resume / reset / status (one tool). `reset: true` clears existing session. |
-| `gaoyao_observe` | Discriminated union: `file_read: {...}` or `finding: {...}`. Auto-advances when phase requirements are met. |
-| `gaoyao_finalize` | Generate `audit.md` with verdict. |
+The installer registers the 4 orchestrator tools, installs the
+orchestrator skill + system prompt, ships the two custom subagent
+templates, and adds the `@tintinweb/pi-subagents` npm dependency.
 
 ## Workflow
 
-```
-Request → fuxi_start
-   ↓
-[fuxi_design observe cycle]
-   LLM writes draft.md → fuxi_design { observation: {phase:"design"} }
-   qiaochui_review { observation: {score: N} } auto-writes state.score
-   fuxi_design { observation: {phase:"review", score: N} } → advances if >= 80
-   qiaochui_decompose → execution.yaml
-   ↓
-[luban_run_batch → plan]
-[luban_execute_task observe cycle per task]
-   RED → GREEN → REFACTOR → complete (LLM does work via AFT-backed tools + codebase-memory + graphify)
-   ↓
-[gaoyao_audit / gaoyao_observe / gaoyao_finalize]
-   ENUMERATE → INK → NOSE → FOOT → CASTRATION → DEATH → verdict
-   ↓
-fuxi_end { observation: {verdict: "PASS|NEEDS_CHANGES|REJECTED"} }
-   PASS → archive | NEEDS_CHANGES → LuBan | REJECTED → Fuxi
-```
+| Stage | Tool | Output |
+|---|---|---|
+| 1 | `goal_contract_create({ id, success_criteria, anti_goals, scope, constraints, done_definition })` | `.pi/orchestrator/goal-{id}.yaml` |
+| 2 | `dag_synthesize({ goal_id, tasks: [...] })` | `.pi/orchestrator/dag-{id}.yaml` |
+| 3 | `task_dispatch({ dag_id, strategy })` | Agent-call plan (LLM spawns) |
+| 4 | `orchestrator_audit({ dag_id, batch?, task_id?, depth?, observation })` | `.pi/orchestrator/audit-workflow.md` |
 
-**Phase Details:**
-1. **Design Phase** (Fuxi): write `draft.md` via `fuxi_design` observe cycle (MDD Seven Planes, ≥ 500 bytes)
-2. **Review Phase** (QiaoChui): `qiaochui_review { observation: {score} }` auto-writes; threshold ≥ 80
-3. **Plan Phase**: `qiaochui_decompose` generates `execution.yaml`
-4. **Execute Phase** (LuBan): `luban_run_batch` plans, `luban_execute_task` runs observe cycle per task
-5. **Audit Phase** (GaoYao): `gaoyao_audit / observe / finalize` walks 5 audit categories
-6. **End**: `fuxi_end` archives on PASS, routes NEEDS_CHANGES back to LuBan, REJECTED back to Fuxi
+**Defaults**: `depth: "fast"` (3 phases ink/nose/foot; `full` adds
+castration/death). `run_in_background` is derived from
+`subagent_type` — Explore/Plan/general-purpose foreground,
+software-developer/software-auditor background. Override per task via
+`TaskNode.run_in_background`.
 
-## Workflow Recovery
+**Evidence gate** (cannot be bypassed): `verdict: "PASS"` requires
+`findings.length ≥ findings_required_min` (1 fast / 3 full) AND
+`workflowReady === true`; otherwise the tool auto-downgrades to
+`REVISE`.
 
-Four Sages supports resuming interrupted workflows via per-tool init/resume semantics:
+## MDD Plane
 
-| Scenario | Detection | Recovery Action |
-|----------|----------|----------------|
-| Resume workflow | `fuxi_design` (no observation) loads state | Returns current sub-phase (design/review/plan) |
-| Resume audit | `gaoyao_audit` (no params) loads session | Returns current phase + remaining work |
-| Resume task | `luban_execute_task` (no observation) loads task state | Returns current sub-phase (RED/GREEN/REFACTOR) |
-| Fresh start | `reset: true` on `gaoyao_audit`, or delete `.sages/workspace/` | Init from scratch |
-
-State is stored in `.sages/workspace/state.json` with sub-state files for each sage:
-- `.sages/workspace/.fuxi-design-state.json` (design sub-phase)
-- `.sages/workspace/.luban-task-state.json` (per-task TDD phase)
-- `.sages/workspace/.gaoyao-session.json` (audit session)
-
-Phase progression: `design → review → plan → execute → audit → complete`
-
-## MDD Design
-
-Each design draft follows the **Multi-Dimensional Design (MDD)** framework with Seven Planes:
-
-| Plane | Elements | Focus |
-|---------|----------|-------|
-| Business | Process × Rules | Business value delivery |
-| Data | Logic × State | Data processing |
-| Control | Strategy × Distribution | Decision execution |
-| Foundation | Resource × Abstraction | Infrastructure |
-| Observation | Data × Analysis | Monitoring |
-| Security | Identity × Permissions | Access control |
-| Evolution | Time × Change | Versioning & migration |
-
-## TDD Implementation
-
-LuBan implements tasks using **Test-Driven Development**:
-
-```
-RED → GREEN → REFACTOR
-```
-
-1. **RED**: Write a failing test first
-2. **GREEN**: Write minimal code to pass
-3. **REFACTOR**: Improve structure while keeping tests passing
-
-### TDD Fallback Guide
-
-When exceptions occur, LuBan provides built-in guidance:
-
-```typescript
-import { TDD_GUIDE } from "@/tools/luban/task-runner.js";
-
-// Get phase-specific guidance
-TDD_GUIDE.getPhaseGuidance("RED");  // How to write failing tests
-TDD_GUIDE.getPhaseGuidance("GREEN"); // How to write minimal code
-TDD_GUIDE.getPhaseGuidance("REFACTOR"); // How to refactor
-```
-
-## Execution Modes
-
-LuBan supports two execution modes:
-
-### Subagent Mode (Default)
-
-Each task runs in an **isolated pi subprocess**:
-
-```
-┌─────────────────────────────────────────────────────┐
-│ Main Agent (Fuxi/QiaoChui context)                  │
-│                                                     │
-│   qiaochui-decompose use_subagent=true            │
-│                      ↓                              │
-│   .sages/workspace/execution.yaml                   │
-│                      ↓                              │
-│ ┌─────────┬─────────┬─────────┐                   │
-│ │ LuBan #1│ LuBan #2│ LuBan #3│  ← maxParallel: 3│
-│ │   T1    │   T2    │   T3    │                   │
-│ └─────────┴─────────┴─────────┘                   │
-└─────────────────────────────────────────────────────┘
-```
-
-### Shared Context Mode
-
-All tasks share the **same LLM context**:
-
-```
-┌─────────────────────────────────────────────────────┐
-│ Main Agent (Fuxi/QiaoChui context)                  │
-│                                                     │
-│   qiaochui-decompose use_subagent=false           │
-│                      ↓                              │
-│ ┌─────────────────────────────────────────────┐   │
-│ │     Single LuBan (shared context)             │   │
-│ │     T1 → T2 → T3 (sequential)               │   │
-│ └─────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────┘
-```
+Each `TaskNode` carries an MDD `plane` (Business / Data / Control /
+Foundation / Observation / Security / Evolution) and `priority` for
+DAG auditing. The original four-sage workflow that authored
+`draft.md` files is gone.
 
 ## Project Structure
 
 ```
 sages/
-├── pi/                         # pi plugin
+├── pi/
 │   ├── src/
-│   │   ├── tools/             # Modular tools
-│   │   │   ├── fuxi/         # Fuxi tools
-│   │   │   ├── qiaochui/     # QiaoChui tools
-│   │   │   ├── luban/        # LuBan tools
-│   │   │   └── gaoyao/       # GaoYao tools
-│   │   ├── services/         # Shared services
-│   │   │   ├── file-service.ts
-│   │   │   └── index.ts
-│   │   └── utils/            # Utilities
-│   ├── test/                 # Unit tests
-│   ├── extensions/           # Extension config
-│   ├── skills/               # Skill definitions
-│   └── prompts/              # Workflow templates
-│
-├── .sages/                   # Workflow state & plans
-│   ├── workspace/            # Current workflow
-│   └── archive/              # Completed workflows
-├── AGENTS.md                  # Architecture documentation
-└── README.md                  # This file
-```
-
-## pi Package Exports
-
-```typescript
-// Tools
-export { registerFuxiTools } from "./tools/fuxi-tools.js";
-export { registerQiaoChuiTools } from "./tools/qiaochui/index.js";
-export { registerLubanTools } from "./tools/luban/index.js";
-export { registerGaoYaoTools } from "./tools/gaoyao-tools.js";
-
-// Services
-export { FileService } from "./services/file-service.js";
-
-// Executor (from luban module)
-export { runTask, runTDDCycle, parseExecutionYaml } from "./executor/index.js";
-export type { LubanTask, TDDConfig, TaskResult, TDDPhase } from "./executor/index.js";
-
-// Orchestrator / FSM 已删除 — sage 工具通过自然语言路由工作
+│   │   ├── extension.ts                  # entrypoint → registerOrchestratorTools
+│   │   ├── index.ts
+│   │   └── tools/
+│   │       ├── orchestrator/             # 4-tool surface + types + template renderer
+│   │       └── brainstorming/            # pre-design intent clarification
+│   ├── test/                              # 343 tests
+│   ├── skills/                            # orchestrator + brainstorming
+│   └── templates/                         # installed by install.sh to ~/.pi/agent/
+└── .pi/orchestrator/                      # runtime workspace (ephemeral)
 ```
 
 ## Development
 
 ```bash
-# Install dependencies
-bun install
-
-# Type-check (run before committing)
-cd pi && bun run typecheck
-
-# Run tests
-cd pi && bun test ./test
+cd pi
+bun run typecheck       # 0 errors
+bun test ./test         # 343 pass
+bash test/install.test.sh  # all pass
 ```
 
-> **⚠️ Reminder**: Before committing, always run `bun run typecheck` to verify no TypeScript errors, and `bun test ./test` to ensure all tests pass.
+All three must pass before committing. Imports: use `@/...` in
+`pi/test/`, relative paths in `pi/src/`.
 
-## Security Practices
+## Security
 
-| Practice | Implementation |
-|----------|---------------|
-| No direct node:fs | Use `FileService` from `@/services/file-service.js` |
-| Path validation | `validatePath()` prevents traversal attacks |
-| No hardcoded models | Use `getUserDefaultModel()` from `@/utils/model-helper.js` |
-| No API keys | Configuration via `~/.pi/agent/settings.json` |
+- No direct `node:fs` in production code — use `FileService`.
+- `.pi/orchestrator/` directory is `0o700`; audit state and report
+  files are `0o600`.
+- No hardcoded models, no API keys in code.
+
+## History
+
+The project name and agent-titles reference Chinese mythology
+(Fuxi / QiaoChui / LuBan / GaoYao). The current runtime is the
+4-tool DAG-based orchestrator documented above; the legacy role-named
+tools and `.sages/workspace/` storage were removed in a
+`simplify-actions` refactor. Regression-guarded by
+`pi/test/post-tool-removal.test.ts`.
 
 ## License
 

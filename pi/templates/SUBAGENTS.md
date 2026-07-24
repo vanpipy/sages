@@ -104,7 +104,7 @@ Agent({
           "called from install(). " +
           "Re-run all verification_cmd from the task prompt. " +
           "Inspect git diff in <worktree-path>. " +
-          "Write report to .pi/orchestrator/T3-audit.md.",
+          "Write report to .pi/orchestrator/audit-T3.md.",
   description: "Audit install_subagents_doc",
 })
 ```
