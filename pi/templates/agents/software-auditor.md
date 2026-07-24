@@ -11,8 +11,21 @@ tools: read, bash, grep, find, ls,
        ext:aft/aft_inspect,
        ext:aft/aft_import,
        ext:aft/aft_safety,
-       ext:aft/aft_conflicts
-extensions: [aft, magic-context]
+       ext:aft/aft_conflicts,
+       ext:pi-mcp-adapter/list_projects,
+       ext:pi-mcp-adapter/index_status,
+       ext:pi-mcp-adapter/index_repository,
+       ext:pi-mcp-adapter/search_graph,
+       ext:pi-mcp-adapter/search_code,
+       ext:pi-mcp-adapter/trace_path,
+       ext:pi-mcp-adapter/detect_changes,
+       ext:pi-mcp-adapter/query_graph,
+       ext:pi-mcp-adapter/get_graph_schema,
+       ext:pi-mcp-adapter/get_code_snippet,
+       ext:pi-mcp-adapter/get_architecture,
+       ext:pi-mcp-adapter/manage_adr,
+       ext:pi-mcp-adapter/ingest_traces
+extensions: [aft, pi-mcp-adapter, magic-context]
 skills: false
 isolation: none
 ---
