@@ -13,6 +13,22 @@ Read in priority order — skip files that don't exist:
 3. `CLAUDE.md` / `.pi/SYSTEM.md` / `.specify/memory/constitution.md` / `SPEC.md` — whichever exists
 4. `pi/skills/*/SKILL.md` — per-tool skill docs (orchestrator + brainstorming, auto-loaded)
 
+## 0.1 Tool Backend Warmup (parallel, after context load)
+
+After reading project context, **pre-spawn MCP server processes** so subsequent
+subagent calls are zero-latency. Call these in ONE message (parallel):
+
+- `codebase_memory_list_projects` — starts codebase-memory-mcp (~1-2s cold start)
+- `graphify_graph_stats` — starts graphify MCP (~1-2s cold start)
+
+Both return ~1 row of metadata but pre-spawn the 270MB Go binary.
+**Subagents share the same MCP server process** — once warmed, they get
+zero-cold-start access for the rest of the session. Skipping this means the
+first subagent's first codebase_memory_* or graphify_* call pays the cold-start
+penalty (1-3s) and may stall the orchestrator's perceived latency.
+
+The warmup is cheap and idempotent — call it once at session start.
+
 ## 1. Action Priority (default for ANY modification)
 
 Before editing ANY file, follow in order — **do NOT skip**:
