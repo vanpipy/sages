@@ -166,10 +166,10 @@ describe("FileService", () => {
 
 Details...`;
 
-      service.write("audit.md", content);
-      
+      await service.write("audit.md", content);
+
       const result = service.readAuditVerdict();
-      
+
       expect(result.verdict).toBe("PASS");
       expect(result.score).toBe(95);
     });
@@ -178,8 +178,8 @@ Details...`;
       const { FileService } = await import("../../src/services/file-service.js");
       const service = new FileService(testDir, workspaceDir);
       
-      service.write("not-audit.md", "# Just a document");
-      
+      await service.write("not-audit.md", "# Just a document");
+
       const result = service.readAuditVerdict();
       
       expect(result.verdict).toBeNull();
