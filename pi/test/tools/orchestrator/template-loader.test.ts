@@ -93,18 +93,11 @@ describe("template-loader", () => {
       expect(content).toContain("tdd: strict");
     });
 
-    it("loads response goal-intake.md", () => {
+    it("returns null for response templates (removed in v2 — patterns inlined in SKILL.md)", () => {
+      // Response templates were removed: prompts/ are the only file-based templates now.
+      // LLM composes response patterns inline from SKILL.md §6.4.
       const content = loadResponseTemplate("goal-intake");
-      expect(content).not.toBeNull();
-      expect(content).toContain("I understand you want to");
-      expect(content).toContain("My draft goal");
-      expect(content).toContain("Proposed Success Criteria");
-    });
-
-    it("loads response progress-update.md", () => {
-      const content = loadResponseTemplate("progress-update");
-      expect(content).not.toBeNull();
-      expect(content).toContain("Progress Update");
+      expect(content).toBeNull();
     });
   });
 
@@ -209,10 +202,11 @@ describe("template-loader", () => {
       expect(names).toContain("dag-bug-fix");
     });
 
-    it("returns the 2 known response templates", () => {
+    it("returns empty for responses (templates/responses/ removed in v2)", () => {
+      // v2: response patterns are inlined in SKILL.md §6.4
+      // listTemplates still works for prompts/goals/dag, just not responses
       const names = listTemplates("responses");
-      expect(names).toContain("goal-intake");
-      expect(names).toContain("progress-update");
+      expect(names).toEqual([]);
     });
   });
 });

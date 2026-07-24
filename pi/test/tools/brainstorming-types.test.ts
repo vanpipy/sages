@@ -214,7 +214,7 @@ describe('BrainstormResult', () => {
     const result: BrainstormResult = {
       success: true,
       phase: 'approved',
-      transitionedTo: 'fuxi',
+      transitionedTo: 'orchestrator',
       metrics: {
         questionsAsked: 0,
         approachesProposed: 0,
@@ -226,7 +226,7 @@ describe('BrainstormResult', () => {
       },
     };
     
-    expect(result.transitionedTo).toBe('fuxi');
+    expect(result.transitionedTo).toBe('orchestrator');
   });
 });
 

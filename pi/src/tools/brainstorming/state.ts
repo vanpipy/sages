@@ -99,8 +99,8 @@ export class BrainstormStateMachine {
         return this.handleWriteDesignDoc();
       case 'USER_REVIEW_COMPLETE':
         return this.handleUserReviewComplete(event);
-      case 'TRANSITION_TO_FUXI':
-        return this.handleTransitionToFuxi();
+      case 'TRANSITION_TO_ORCHESTRATOR':
+        return this.handleTransitionToOrchestrator();
       case 'DEFER_TRANSITION':
         return this.handleDeferTransition();
       case 'CANCEL':
@@ -113,7 +113,7 @@ export class BrainstormStateMachine {
   /**
    * Build result from current state
    */
-  buildResult(success: boolean, transitionedTo?: 'fuxi' | 'deferred'): BrainstormResult {
+  buildResult(success: boolean, transitionedTo?: 'orchestrator' | 'deferred'): BrainstormResult {
     const endTime = new Date();
     const metrics: BrainstormMetrics = {
       questionsAsked: this.context.questionsAsked,
@@ -291,11 +291,11 @@ export class BrainstormStateMachine {
     }
   }
   
-  private handleTransitionToFuxi(): { success: boolean; error?: string } {
+  private handleTransitionToOrchestrator(): { success: boolean; error?: string } {
     if (this.context.phase !== 'approved') {
-      return { success: false, error: 'Can only transition to Fuxi from approved phase' };
+      return { success: false, error: 'Can only transition to orchestrator from approved phase' };
     }
-    
+
     return { success: true };
   }
   

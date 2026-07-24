@@ -230,7 +230,7 @@ exit 0
 		// Reproduce the pi/.sages/workspace bug: subdir also has .sages/workspace
 		// The wrapper should find the git toplevel's .sages/workspace, NOT the nearest one
 		const tmp = makeSagesWorkspace({ git: true, graphMtime: "after-commit" });
-		// Add a fake nested .sages/workspace (mimics pi/.sages/workspace from LuBan tests)
+		// Add a fake nested .sages/workspace (test-only sandbox)
 		const nestedDir = path.join(tmp, "pi");
 		fs.mkdirSync(path.join(nestedDir, ".sages", "workspace"), { recursive: true });
 		fs.writeFileSync(path.join(nestedDir, ".sages", "workspace", "marker.txt"), "nested");

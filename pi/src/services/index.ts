@@ -1,5 +1,5 @@
 /**
- * Services Index - Unified service layer for Four Sages role-based agents
+ * Services Index — shared utilities for the orchestrator + brainstorming tools.
  *
  * Provides:
  * - FileService: Centralized file operations with security validation

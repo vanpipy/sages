@@ -15,14 +15,10 @@
  * Templates live at skills/orchestrator/templates/{prompts,goals,dag,responses}/
  * and are installed automatically alongside skills/ via install_sages_files().
  *
- * These complement (don't replace) the existing sages tools:
- *   - fuxi_design:     main agent design workflow
- *   - qiaochui_review: reviews design drafts (process-level)
- *   - luban_execute_task: TDD enforcement per task
- *   - gaoyao_audit:    process-level audit on .sages/workspace/
- *
- * Orchestrator is for orchestrator-managed multi-task workflows;
- * sages is for single-workflow process governance.
+ * Subagent execution (TDD implementer, auditor) is delegated to the Agent
+ * tool with `subagent_type: "software-developer"` / `"software-auditor"`.
+ * See `pi/templates/SUBAGENTS.md` for the 4-stage pipeline
+ * (Explore → Plan → software-developer → software-auditor).
  */
 
 import { registerGoalContractTool } from "./goal-contract.js";

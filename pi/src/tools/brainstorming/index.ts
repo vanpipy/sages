@@ -538,7 +538,7 @@ export function finalizeDesign(
     message: `Design document written to: \`${designPath}\`\n\n` +
       `**Next Steps:**\n` +
       `- Review the design document\n` +
-      `- To start implementation, use: \`/fuxi-start <plan-name>\`\n` +
+      `- To start implementation, use: \`/orchestrate <plan-name>\`\n` +
       `- Or say "proceed with implementation" to auto-transition`,
     designPath,
   };
@@ -558,14 +558,15 @@ export type TransitionAction = 'proceed' | 'defer' | 'exit';
  */
 export interface TransitionResult {
   action: TransitionAction;
-  fuxiContext?: FuxiPlanContext;
+  orchestratorContext?: OrchestratorPlanContext;
   designPath?: string;
 }
 
 /**
- * Context for Fuxi workflow transition
+ * Context for orchestrator workflow transition — the brainstorming
+ * design becomes the rationale for a GoalContract.
  */
-export interface FuxiPlanContext {
+export interface OrchestratorPlanContext {
   planName: string;
   request: string;
   designDoc: DesignDoc;
@@ -603,8 +604,8 @@ export function generateApprovalMessage(
 
 **Next Steps:**
 
-1. **Proceed** → Start Fuxi workflow to create MDD draft
-2. **Defer** → Save design, start later with \`/fuxi-start <plan>\`
+1. **Proceed** → Start orchestrator workflow to create GoalContract
+2. **Defer** → Save design, start later with \`/orchestrate <plan>\`
 3. **Exit** → Save nothing, end session
 
 ---
@@ -647,13 +648,17 @@ export function parseTransitionResponse(response: string): TransitionResult {
 }
 
 /**
- * Create Fuxi context from brainstorm design
+ * Create orchestrator context from brainstorm design.
+ *
+ * The design becomes the rationale for a goal contract — callers feed
+ * `designDoc`, `projectContext`, and the original `request` into
+ * `goal_contract_create` to seed the orchestrator workflow.
  */
-export function createFuxiContext(
+export function createOrchestratorContext(
   request: string,
   designDoc: DesignDoc,
   projectContext: BrainstormContextResult
-): FuxiPlanContext {
+): OrchestratorPlanContext {
   // Generate safe plan name from request
   const planName = request
     .toLowerCase()
@@ -697,5 +702,5 @@ export default {
   finalizeDesign,
   generateApprovalMessage,
   parseTransitionResponse,
-  createFuxiContext,
+  createOrchestratorContext,
 };

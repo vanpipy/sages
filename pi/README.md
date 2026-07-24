@@ -231,13 +231,11 @@ Phase-guided auditing with penalty categories:
 sages/pi/
 ├── src/
 │   ├── tools/               # Modular tools (one folder per role)
-│   │   ├── fuxi-tools.ts    # Fuxi: fuxi_design
-│   │   ├── qiaochui/        # QiaoChui: review + decompose
-│   │   ├── luban/           # LuBan: execute_task (TDD)
-│   │   └── gaoyao/          # GaoYao: audit + observe + finalize
-│   ├── services/            # FileService, WorkflowStateManager
-│   └── utils/               # model-helper, mode-checker, scope-parser
-├── skills/                  # Per-role SKILL.md (5 files)
+│   │   ├── orchestrator/    # Orchestrator: goal + DAG + dispatch + audit
+│   │   └── brainstorming/   # Brainstorming: design exploration
+│   ├── services/            # FileService
+│   └── utils/               # (utility helpers)
+├── skills/                  # Per-tool SKILL.md (orchestrator + brainstorming)
 ├── templates/               # SYSTEM.md template
 ├── scripts/                 # install.sh / install.ps1 / install.bat
 ├── test/                    # Unit tests (uses @/ alias)

@@ -214,7 +214,7 @@ export function registerGoalContractTool(pi: any): void {
   pi.registerTool({
     name: "goal_contract_create",
     label: "Goal Contract",
-    description: "Create a goal contract for an orchestrator workflow. Hard-validates that every success criterion has a verification_cmd. Writes to .pi/orchestrator/goal-{id}.yaml.",
+    description: "Stage 1: turn user intent into a verifiable contract. Every success_criterion MUST have a runnable verification_cmd. Writes .pi/orchestrator/goal-{id}.yaml.",
     parameters: GoalContractParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {

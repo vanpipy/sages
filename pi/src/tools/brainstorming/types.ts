@@ -199,7 +199,7 @@ export interface BrainstormResult {
   /** Error message if failed */
   error?: string;
   /** Transition decision */
-  transitionedTo?: "fuxi" | "deferred" | "none";
+  transitionedTo?: "orchestrator" | "deferred" | "none";
   /** Session metrics */
   metrics: BrainstormMetrics;
 }
@@ -273,7 +273,7 @@ export type BrainstormEvent =
   | { type: "REVISE_SECTION"; sectionId: string; revision: string }
   | { type: "WRITE_DESIGN_DOC" }
   | { type: "USER_REVIEW_COMPLETE"; approved: boolean }
-  | { type: "TRANSITION_TO_FUXI" }
+  | { type: "TRANSITION_TO_ORCHESTRATOR" }
   | { type: "DEFER_TRANSITION" }
   | { type: "CANCEL" };
 

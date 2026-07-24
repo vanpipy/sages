@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Orchestrate multi-task workflows via 4-stage DAG (goal → decompose → dispatch → audit). Coordinates software-developer + software-auditor subagents. Uses sages (Fuxi/QiaoChui/Luban/GaoYao) for process governance, subagents for execution.
+description: Orchestrate multi-task workflows via 4-stage DAG (goal → decompose → dispatch → audit). Coordinates software-developer + software-auditor subagents for execution.
 ---
 
 # Orchestrator - Multi-Task Workflow Coordinator
@@ -185,11 +185,11 @@ After all batches complete:
 - `get_subagent_result` — wait for completion
 - `steer_subagent` — mid-run steering
 
-**Sages (process governance, allowed)**:
-- `fuxi_design` — design work pre-Stage 1 if needed
-- `qiaochui_review` — review design draft if needed
-- `luban_execute_task` — TDD enforcement per task
-- `gaoyao_audit` — process-level audit (different from orchestrator_audit)
+**Process governance (built into orchestrator — no separate sage tools)**:
+- Design → `dag_synthesize` (typed goal contracts + DAGs replace ad-hoc MDD drafts)
+- Review → `goal_contract_create` (binary SC pass/fail replaces score-gating)
+- TDD execution → delegated to `software-developer` subagent (see SUBAGENTS.md)
+- Audit → `orchestrator_audit` (5-phase: ink / nose / foot / castration / death)
 
 **Write (delegated only — do NOT edit production code directly)**:
 - `edit`, `write` — only for orchestrator metadata in .pi/orchestrator/
@@ -232,12 +232,29 @@ The orchestrator can reference reusable prompt templates instead of writing ever
 | `dag-tdd-refactor` | 7-task refactor pipeline: explore × 2 → plan → implement × 2 → test → audit |
 | `dag-bug-fix` | 4-task bug-fix: explore × 2 → fix (RED+GREEN) → audit |
 
-### Response templates (use when responding to user)
+### Response patterns (LLM composes inline, not from file)
 
-| Template | When |
-|----------|------|
-| `goal-intake` | User gave a vague goal — confirm understanding before Stage 1 |
-| `progress-update` | Reporting batch completion to user |
+For vague-goal confirmation, follow this structure:
+1. Reframe the user's intent in one sentence
+2. Propose draft goal with SCs (use `goal-{type}.yaml` for SC suggestions)
+3. List anti-goals + clarifying questions
+4. Ask user to confirm before Stage 1
+
+For progress reports, follow this structure:
+```
+## Progress — Batch N/M
+[✓/◐/⏸] tasks completed | tokens used | time elapsed
+
+### Completed
+| task | status | outcome |
+
+### Audit (if just ran)
+- Verdict: PASS/REVISE/REJECT
+- Score: N/100
+
+### Next
+- Batches N+1..M ready to dispatch
+```
 
 ### Using task_template in DAG
 

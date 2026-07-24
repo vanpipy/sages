@@ -43,9 +43,9 @@ delegate instead of running `aft_search` / `grep` inline.
 ```ts
 Agent({
   subagent_type: "Explore",
-  prompt: "Find all places in pi/src/ that import luban_execute_task. " +
+  prompt: "Find all places in pi/src/ that import registerOrchestratorTools. " +
           "Report file paths, line numbers, and a one-line context for each.",
-  description: "Find luban call sites",
+  description: "Find orchestrator call sites",
 })
 ```
 

@@ -29,9 +29,9 @@ export function findSagesRoot(): string | null {
  * Dev/test fallback: cwd itself (e.g. when running tests from the source repo).
  *
  * SECURITY: only enabled when SAGES_DEV=1 is set, or NODE_ENV !== "production",
- * or the cwd contains a package.json that lists @sages/pi-four-sages as a dep
- * (i.e. the user is in the sages source tree). Otherwise, production callers
- * must use SAGES_PATH or the default install location.
+ * or the cwd contains a `pi/package.json` (i.e. the user is in the sages
+ * source tree). Otherwise, production callers must use SAGES_PATH or the
+ * default install location.
  */
 function cwdFallbackSagesRoot(): string | null {
   const isDev = process.env.SAGES_DEV === "1" || process.env.NODE_ENV !== "production";

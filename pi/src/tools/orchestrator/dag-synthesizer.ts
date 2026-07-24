@@ -339,7 +339,7 @@ export function registerDAGSynthesizerTool(pi: any): void {
   pi.registerTool({
     name: "dag_synthesize",
     label: "DAG Synthesize",
-    description: "Decompose a goal contract into a TaskNode DAG. Hard-validates: every SC must be covered, no cycles, batches contiguous, cross-batch dependencies only. Writes to .pi/orchestrator/dag-{id}.yaml.",
+    description: "Stage 2: decompose goal into TaskNode DAG. Hard-validates: every SC covered, no cycles, batches contiguous, cross-batch deps only. Writes .pi/orchestrator/dag-{id}.yaml.",
     parameters: DAGParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {

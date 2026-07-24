@@ -1,20 +1,28 @@
 /**
- * Post-tool-removal regression tests
+ * Post-tool-removal regression tests (Round 3 — four-sage workflow stripped).
  *
- * Pins down that the four-sages workflow machinery has been fully removed.
- * Per simplify-actions: only the seven role-based tools remain
- * (fuxi_design, qiaochui_review, qiaochui_decompose, luban_execute_task,
- *  gaoyao_audit, gaoyao_observe, gaoyao_finalize). No fsm, no slash
- * commands, no deprecated state module, no batch executor, no
- * workflow-state-manager, no mode-checker, no draft helpers.
+ * Pins down that the four-sage role-tool machinery (Fuxi, QiaoChui, LuBan,
+ * GaoYao) has been fully removed from the pi package and replaced by the
+ * orchestrator + subagent workflow.
  *
- * Round 1 (commit 9673465): slash commands, fuxi_start, fuxi_end,
- *   luban_run_batch, deprecated src/state module.
- * Round 2 (this commit): workflow-state-manager, mode-checker, scheduler,
- *   executor shim, draft-generator/draft-parser/request-classifier,
- *   partial helpers in conflict-detector + task-runner.
+ * What was removed (round 1 + 2 + 3):
+ *   - src/tools/fuxi-tools.ts
+ *   - src/tools/qiaochui/ (entire directory)
+ *   - src/tools/luban/   (entire directory)
+ *   - src/tools/gaoyao-tools.ts
+ *   - src/tools/gaoyao/  (entire directory)
+ *   - src/tools/deprecation-stubs.ts (was only used by the four sages)
+ *   - skills/{fuxi,qiaochui,luban,gaoyao}/SKILL.md (entire dirs)
+ *   - test/tools/{qiaochui,luban,gaoyao}/ (entire dirs)
+ *   - test/tools/{fuxi,qiaochui,luban}-tools*.test.ts
+ *   - test/tools/{fuxi,qiaochui,luban,gaoyao}-*.test.ts (deep tests)
+ *   - test/deprecation-stubs.test.ts
+ *   - src/utils/scope-parser.ts (orphaned — parsed Fuxi draft.md format)
  *
- * Brainstorming module and skills/ docs are intentionally retained.
+ * What was kept:
+ *   - src/tools/orchestrator/ (goal + DAG + dispatch + audit)
+ *   - src/tools/brainstorming/ (design exploration + orchestrator handoff)
+ *   - skills/{orchestrator,brainstorming}/SKILL.md
  *
  * These tests catch accidental resurrection of the deleted pieces.
  */
@@ -29,197 +37,77 @@ const __dirname = path.dirname(__filename);
 const PI_ROOT = path.resolve(__dirname, "..");
 
 // ────────────────────────────────────────────────────────────────────────────
-// Round 1: workflow machinery removed
+// Round 3: four-sage role tools fully removed
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("Slash commands removed (no /sages-init, /sages-plan)", () => {
-	it("extensions/sages-tool.ts no longer exists", () => {
-		const p = path.join(PI_ROOT, "extensions", "sages-tool.ts");
-		expect(fs.existsSync(p)).toBe(false);
-	});
-
-	it("extensions/ directory is gone (no other extensions either)", () => {
-		const dir = path.join(PI_ROOT, "extensions");
-		expect(fs.existsSync(dir)).toBe(false);
-	});
-});
-
-describe("Deprecated state module removed", () => {
-	it("src/state/state-manager.ts no longer exists", () => {
-		const p = path.join(PI_ROOT, "src", "state", "state-manager.ts");
-		expect(fs.existsSync(p)).toBe(false);
-	});
-
-	it("src/state/workspace-manager.ts no longer exists", () => {
-		const p = path.join(PI_ROOT, "src", "state", "workspace-manager.ts");
-		expect(fs.existsSync(p)).toBe(false);
-	});
-
-	it("src/state/index.ts no longer exists", () => {
-		const p = path.join(PI_ROOT, "src", "state", "index.ts");
-		expect(fs.existsSync(p)).toBe(false);
-	});
-
-	it("src/state/ directory is gone", () => {
-		const dir = path.join(PI_ROOT, "src", "state");
-		expect(fs.existsSync(dir)).toBe(false);
-	});
-});
-
-describe("Workflow-level tools removed from registration", () => {
-	function sourceFiles() {
-		const tools = [
-			"fuxi-tools.ts",
-			"luban/index.ts",
-			"gaoyao/tools.ts",
-			"gaoyao/index.ts",
-			"qiaochui/index.ts",
-		];
-		return tools
-			.map((rel) => path.join(PI_ROOT, "src", "tools", rel))
-			.filter((p) => fs.existsSync(p))
-			.map((p) => ({ name: path.basename(p), content: fs.readFileSync(p, "utf-8") }));
-	}
-
-	const removed = ["fuxi_start", "fuxi_end", "luban_run_batch"];
-	for (const tool of removed) {
-		it(`${tool} is NOT registered in any tool source file`, () => {
-			const sources = sourceFiles();
-			const offenders = sources.filter((s) =>
-				new RegExp(`name:\\s*["']${tool}["']`).test(s.content),
-			);
-			expect(offenders).toEqual([]);
-		});
-	}
-
-	const kept = [
-		"fuxi_design",
-		"qiaochui_review",
-		"qiaochui_decompose",
-		"luban_execute_task",
-		"gaoyao_audit",
-		"gaoyao_observe",
-		"gaoyao_finalize",
+describe("Four-sage role tools removed (Round 3)", () => {
+	const deletedSources = [
+		"src/tools/fuxi-tools.ts",
+		"src/tools/qiaochui/index.ts",
+		"src/tools/qiaochui/decompose-service.ts",
+		"src/tools/qiaochui/review-service.ts",
+		"src/tools/qiaochui/types.ts",
+		"src/tools/luban/index.ts",
+		"src/tools/luban/types.ts",
+		"src/tools/luban/task-runner.ts",
+		"src/tools/luban/conflict-detector.ts",
+		"src/tools/gaoyao-tools.ts",
+		"src/tools/gaoyao/index.ts",
+		"src/tools/gaoyao/phases.ts",
+		"src/tools/gaoyao/session.ts",
+		"src/tools/gaoyao/tools.ts",
+		"src/tools/deprecation-stubs.ts",
 	];
-	for (const tool of kept) {
-		it(`${tool} IS still registered (regression guard)`, () => {
-			const sources = sourceFiles();
-			const matches = sources.filter((s) =>
-				new RegExp(`name:\\s*["']${tool}["']`).test(s.content),
-			);
-			expect(matches.length).toBeGreaterThan(0);
-		});
-	}
-});
-
-describe("Package config no longer references slash commands or workflow", () => {
-	it("package.json does not mention 'workflow' in description or keywords", () => {
-		const pkg = JSON.parse(
-			fs.readFileSync(path.join(PI_ROOT, "package.json"), "utf-8"),
-		);
-		const haystack = `${pkg.description ?? ""} ${(pkg.keywords ?? []).join(" ")}`;
-		expect(haystack.toLowerCase()).not.toContain("workflow");
-	});
-
-	it("package.json pi.extensions is REQUIRED and points at ./src/extension.ts", () => {
-		// Guard: pi.extensions is the only wiring entrypoint for the four
-		// role tools (Fuxi / QiaoChui / LuBan / GaoYao). Removing it would
-		// orphan every role tool — must NOT be removed again.
-		const pkg = JSON.parse(
-			fs.readFileSync(path.join(PI_ROOT, "package.json"), "utf-8"),
-		);
-		expect(pkg.pi?.extensions).toBeDefined();
-		expect(pkg.pi.extensions).toContain("./src/extension.ts");
-	});
-
-	it("src/extension.ts exists and is the single entrypoint (regression guard)", () => {
-		// Lock down: if pi.extensions drifts to anything else, the package
-		// loses its 4 role tools + 9 sages_* wrappers at runtime.
-		const extPath = path.join(PI_ROOT, "src", "extension.ts");
-		expect(fs.existsSync(extPath)).toBe(true);
-	});
-});
-
-describe("Public exports do not leak deprecated state module", () => {
-	it("src/index.ts does not export StateManager / WorkspaceManager", () => {
-		const content = fs.readFileSync(path.join(PI_ROOT, "src", "index.ts"), "utf-8");
-		expect(content).not.toMatch(/export\s*\{[^}]*\bStateManager\b/);
-		expect(content).not.toMatch(/export\s*\{[^}]*\bWorkspaceManager\b/);
-		expect(content).not.toMatch(/\bLegacyWorkflowState\b/);
-		expect(content).not.toMatch(/\bLegacyTask\b/);
-		expect(content).not.toMatch(/\bLegacyAuditResult\b/);
-	});
-
-	it("src/index.ts top-level docstring does not mention 'workflow' orchestration", () => {
-		// The docstring (top `/** ... */` block) should describe the role-based
-		// design, not a workflow orchestration runtime. Class names like
-		// WorkflowStateManager are per-tool runtime support and are allowed.
-		// Note: as of 2026-07-19, the docstring references "sage workflow" in
-		// the context of the sage file operations that wrap/ serves — that's
-		// a content reference, not a workflow orchestration claim. We keep
-		// the guard strict for orchestration terminology.
-		const content = fs.readFileSync(path.join(PI_ROOT, "src", "index.ts"), "utf-8");
-		const docMatch = content.match(/^\/\*\*([\s\S]*?)\*\//m);
-		expect(docMatch).not.toBeNull();
-		if (docMatch) {
-			const lower = docMatch[1].toLowerCase();
-			expect(lower).not.toContain("orchestration");
-		}
-	});
-});
-
-describe("No test residue for removed tools", () => {
-	it("test/sages-tool.test.ts no longer exists", () => {
-		const p = path.join(PI_ROOT, "test", "sages-tool.test.ts");
-		expect(fs.existsSync(p)).toBe(false);
-	});
-
-	it("test/state/ directory is gone", () => {
-		const dir = path.join(PI_ROOT, "test", "state");
-		expect(fs.existsSync(dir)).toBe(false);
-	});
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// Round 2: deep dead-code sweep
-// ────────────────────────────────────────────────────────────────────────────
-
-describe("Round 2: dead files removed", () => {
-	const deleted = [
-		"src/services/workflow-state-manager.ts",
-		"src/utils/mode-checker.ts",
-		"src/tools/luban/scheduler.ts",
-		"src/executor/index.ts",
-		"src/utils/draft-generator.ts",
-		"src/utils/draft-parser.ts",
-		"src/utils/request-classifier.ts",
-		"src/utils/model-helper.ts",
-		"src/tools/luban/plan-parser.ts",
-	];
-	for (const rel of deleted) {
+	for (const rel of deletedSources) {
 		it(`${rel} no longer exists`, () => {
 			const p = path.join(PI_ROOT, rel);
 			expect(fs.existsSync(p)).toBe(false);
 		});
 	}
 
-	it("src/executor/ directory is empty/gone", () => {
-		const dir = path.join(PI_ROOT, "src", "executor");
-		// Either gone or empty
-		if (fs.existsSync(dir)) {
-			expect(fs.readdirSync(dir)).toEqual([]);
-		}
-	});
+	const deletedDirs = [
+		"src/tools/qiaochui",
+		"src/tools/luban",
+		"src/tools/gaoyao",
+	];
+	for (const dir of deletedDirs) {
+		it(`${dir}/ directory is gone`, () => {
+			const p = path.join(PI_ROOT, dir);
+			expect(fs.existsSync(p)).toBe(false);
+		});
+	}
+
+	const deletedSkills = [
+		"skills/fuxi/SKILL.md",
+		"skills/qiaochui/SKILL.md",
+		"skills/luban/SKILL.md",
+		"skills/gaoyao/SKILL.md",
+	];
+	for (const rel of deletedSkills) {
+		it(`${rel} no longer exists`, () => {
+			const p = path.join(PI_ROOT, rel);
+			expect(fs.existsSync(p)).toBe(false);
+		});
+	}
 
 	const deletedTests = [
-		"test/services/workflow-state-manager.test.ts",
-		"test/utils/mode-checker.test.ts",
-		"test/tools/luban/scheduler.test.ts",
-		"test/utils/draft-generator.test.ts",
-		"test/utils/draft-parser.test.ts",
-		"test/utils/request-classifier.test.ts",
-		"test/utils/model-helper.test.ts",
-		"test/tools/luban/plan-parser.test.ts",
+		"test/tools/fuxi-tools.test.ts",
+		"test/tools/fuxi-tools-simplified.test.ts",
+		"test/tools/fuxi-request-deep.test.ts",
+		"test/tools/qiaochui-tools.test.ts",
+		"test/tools/qiaochui-tools-simplified.test.ts",
+		"test/tools/luban-tools.test.ts",
+		"test/tools/qiaochui/decompose-service.test.ts",
+		"test/tools/qiaochui/review-service.test.ts",
+		"test/tools/qiaochui/types.test.ts",
+		"test/tools/luban/conflict-detector.test.ts",
+		"test/tools/luban/task-runner.test.ts",
+		"test/tools/luban/tdd-guide.test.ts",
+		"test/tools/luban/tools.test.ts",
+		"test/tools/luban/types.test.ts",
+		"test/tools/gaoyao/session.test.ts",
+		"test/tools/gaoyao/tools.test.ts",
+		"test/deprecation-stubs.test.ts",
 	];
 	for (const rel of deletedTests) {
 		it(`${rel} no longer exists`, () => {
@@ -227,92 +115,174 @@ describe("Round 2: dead files removed", () => {
 			expect(fs.existsSync(p)).toBe(false);
 		});
 	}
+
+	const deletedTestDirs = [
+		"test/tools/qiaochui",
+		"test/tools/luban",
+		"test/tools/gaoyao",
+	];
+	for (const dir of deletedTestDirs) {
+		it(`test/tools/${dir}/ directory is gone`, () => {
+			const p = path.join(PI_ROOT, "test", "tools", dir);
+			expect(fs.existsSync(p)).toBe(false);
+		});
+	}
+
+	// Orphaned utility — parsed Fuxi's MDD draft.md, which no longer exists.
+	const orphanedUtility = ["src/utils/scope-parser.ts", "test/utils/scope-parser.test.ts"];
+	for (const rel of orphanedUtility) {
+		it(`orphan ${rel} removed`, () => {
+			const p = path.join(PI_ROOT, rel);
+			expect(fs.existsSync(p)).toBe(false);
+		});
+	}
 });
 
-describe("Round 2: partial files only export live helpers", () => {
-	it("src/tools/luban/conflict-detector.ts no longer exports detectFileConflicts", () => {
-		const content = fs.readFileSync(
-			path.join(PI_ROOT, "src", "tools", "luban", "conflict-detector.ts"),
-			"utf-8",
-		);
-		expect(content).not.toMatch(/export\s+function\s+detectFileConflicts\b/);
-		// deriveTestFiles is the live helper — must still be exported
-		expect(content).toMatch(/export\s+function\s+deriveTestFiles\b/);
+// ────────────────────────────────────────────────────────────────────────────
+// Round 3: entry points no longer reference the four sages
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("Entry points no longer reference the four sages", () => {
+	it("src/extension.ts does not import any four-sage registrars", () => {
+		const content = fs.readFileSync(path.join(PI_ROOT, "src", "extension.ts"), "utf-8");
+		expect(content).not.toMatch(/registerFuxiTools/);
+		expect(content).not.toMatch(/registerQiaoChuiTools/);
+		expect(content).not.toMatch(/registerLubanTools/);
+		expect(content).not.toMatch(/registerGaoYaoTools/);
+		// Orchestrator must remain.
+		expect(content).toContain("registerOrchestratorTools");
 	});
 
-	it("src/tools/luban/task-runner.ts no longer exports runTask / runTDDCycle / generateTestFromScenarios", () => {
-		const content = fs.readFileSync(
-			path.join(PI_ROOT, "src", "tools", "luban", "task-runner.ts"),
-			"utf-8",
-		);
-		expect(content).not.toMatch(/export\s+(async\s+)?function\s+runTask\b/);
-		expect(content).not.toMatch(/export\s+(async\s+)?function\s+runTDDCycle\b/);
-		expect(content).not.toMatch(/export\s+function\s+generateTestFromScenarios\b/);
-		// Live helpers must still be exported
-		expect(content).toMatch(/export\s+function\s+runTests\b/);
-		expect(content).toMatch(/export\s+function\s+validateScope\b/);
-		expect(content).toMatch(/export\s+const\s+TDD_GUIDE\b/);
-	});
-});
-
-describe("Round 2: qiaochui no longer imports unused model-helper", () => {
-	it("src/tools/qiaochui/index.ts does not import getUserDefaultModel", () => {
-		const content = fs.readFileSync(
-			path.join(PI_ROOT, "src", "tools", "qiaochui", "index.ts"),
-			"utf-8",
-		);
-		expect(content).not.toMatch(/getUserDefaultModel/);
-		expect(content).not.toMatch(/model-helper/);
-	});
-});
-
-describe("Round 2: public API surface is minimal (only role tools + FileService)", () => {
-	it("src/index.ts does not export dead re-exports", () => {
+	it("src/index.ts does not export any four-sage registrars", () => {
 		const content = fs.readFileSync(path.join(PI_ROOT, "src", "index.ts"), "utf-8");
-		// workflow-state-manager types
-		expect(content).not.toMatch(/\bWorkflowState\b/);
-		expect(content).not.toMatch(/\bFuxiPhase\b/);
-		expect(content).not.toMatch(/\bArchiveInfo\b/);
-		// executor functions
-		expect(content).not.toMatch(/\brunTask\b/);
-		expect(content).not.toMatch(/\brunTDDCycle\b/);
-		expect(content).not.toMatch(/\bparseExecutionYaml\b/);
-		expect(content).not.toMatch(/\bresolveDependencies\b/);
-		expect(content).not.toMatch(/\bsortByDependencies\b/);
-		// executor types
-		expect(content).not.toMatch(/\bTDDConfig\b/);
-		expect(content).not.toMatch(/\bExecutionSettings\b/);
-		// mode-checker
-		expect(content).not.toMatch(/\bcheckWritePermission\b/);
-		expect(content).not.toMatch(/\bgetModeInfo\b/);
-		expect(content).not.toMatch(/\bgetModeIndicator\b/);
-		expect(content).not.toMatch(/\bgetAccessDeniedMessage\b/);
-		// WorkflowStateManager itself (now dead)
-		expect(content).not.toMatch(/\bWorkflowStateManager\b/);
-		expect(content).not.toMatch(/["']\.\/executor/);
-	});
-
-	it("src/index.ts keeps the role-tool registration exports", () => {
-		const content = fs.readFileSync(path.join(PI_ROOT, "src", "index.ts"), "utf-8");
-		expect(content).toContain("registerFuxiTools");
-		expect(content).toContain("registerQiaoChuiTools");
-		expect(content).toContain("registerLubanTools");
-		expect(content).toContain("registerGaoYaoTools");
+		expect(content).not.toMatch(/registerFuxiTools/);
+		expect(content).not.toMatch(/registerQiaoChuiTools/);
+		expect(content).not.toMatch(/registerLubanTools/);
+		expect(content).not.toMatch(/registerGaoYaoTools/);
+		// FileService (the only cross-tool utility) must remain.
 		expect(content).toContain("FileService");
 	});
+
+	it("src/tools/index.ts does not export any four-sage registrars", () => {
+		const content = fs.readFileSync(path.join(PI_ROOT, "src", "tools", "index.ts"), "utf-8");
+		expect(content).not.toMatch(/registerFuxiTools/);
+		expect(content).not.toMatch(/registerQiaoChuiTools/);
+		expect(content).not.toMatch(/registerLubanTools/);
+		expect(content).not.toMatch(/registerGaoYaoTools/);
+		expect(content).toContain("registerOrchestratorTools");
+	});
 });
 
-describe("Round 2: brainstorming module and skills/ docs are preserved", () => {
-	it("src/tools/brainstorming/index.ts still exists", () => {
-		const p = path.join(PI_ROOT, "src", "tools", "brainstorming", "index.ts");
-		expect(fs.existsSync(p)).toBe(true);
+// ────────────────────────────────────────────────────────────────────────────
+// Round 3: orchestrator + brainstorming module preserved
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("Orchestrator + brainstorming preserved", () => {
+	it("src/tools/orchestrator/ exists with all 5 module files", () => {
+		const dir = path.join(PI_ROOT, "src", "tools", "orchestrator");
+		expect(fs.existsSync(dir)).toBe(true);
+		const files = fs.readdirSync(dir);
+		for (const required of [
+			"index.ts",
+			"types.ts",
+			"planes.ts",
+			"goal-contract.ts",
+			"dag-synthesizer.ts",
+			"task-dispatcher.ts",
+			"orchestrator-audit.ts",
+			"template-loader.ts",
+		]) {
+			expect(files).toContain(required);
+		}
 	});
 
-	const skills = ["fuxi", "qiaochui", "luban", "gaoyao", "brainstorming"];
-	for (const name of skills) {
+	it("src/tools/brainstorming/ exists", () => {
+		const dir = path.join(PI_ROOT, "src", "tools", "brainstorming");
+		expect(fs.existsSync(dir)).toBe(true);
+	});
+
+	const keptSkills = ["orchestrator", "brainstorming"];
+	for (const name of keptSkills) {
 		it(`skills/${name}/SKILL.md still exists`, () => {
 			const p = path.join(PI_ROOT, "skills", name, "SKILL.md");
 			expect(fs.existsSync(p)).toBe(true);
 		});
 	}
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Round 3: brainstorming source no longer references Fuxi
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("Brainstorming source uses orchestrator handoff (not Fuxi)", () => {
+	it("src/tools/brainstorming/index.ts exports createOrchestratorContext, not createFuxiContext", () => {
+		const content = fs.readFileSync(
+			path.join(PI_ROOT, "src", "tools", "brainstorming", "index.ts"),
+			"utf-8",
+		);
+		expect(content).toContain("createOrchestratorContext");
+		expect(content).not.toMatch(/createFuxiContext\b/);
+		expect(content).not.toMatch(/FuxiPlanContext\b/);
+	});
+
+	it("src/tools/brainstorming/types.ts uses 'orchestrator' as transition target", () => {
+		const content = fs.readFileSync(
+			path.join(PI_ROOT, "src", "tools", "brainstorming", "types.ts"),
+			"utf-8",
+		);
+		expect(content).toContain('"orchestrator"');
+		expect(content).not.toMatch(/["']fuxi["']/);
+		expect(content).not.toContain("TRANSITION_TO_FUXI");
+	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Round 3: orchestrator types no longer import from qiaochui
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("Orchestrator types inlined the MDD plane classification (no qiaochui import)", () => {
+	it("src/tools/orchestrator/types.ts does not import from qiaochui", () => {
+		const content = fs.readFileSync(
+			path.join(PI_ROOT, "src", "tools", "orchestrator", "types.ts"),
+			"utf-8",
+		);
+		expect(content).not.toMatch(/from\s+["']\.\.\/qiaochui/);
+		expect(content).not.toMatch(/from\s+["']\.\.\/\.\.\/qiaochui/);
+	});
+
+	it("src/tools/orchestrator/types.ts no longer extends MDDTask", () => {
+		const content = fs.readFileSync(
+			path.join(PI_ROOT, "src", "tools", "orchestrator", "types.ts"),
+			"utf-8",
+		);
+		expect(content).not.toMatch(/MDDTask/);
+	});
+
+	it("src/tools/orchestrator/planes.ts defines the MDD plane vocabulary", () => {
+		const content = fs.readFileSync(
+			path.join(PI_ROOT, "src", "tools", "orchestrator", "planes.ts"),
+			"utf-8",
+		);
+		expect(content).toContain("MDDPlane");
+		expect(content).toContain("MDD_PLANES");
+	});
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Round 3: package extensions entrypoint still wires orchestrator
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("Package config still wires the orchestrator (regression guard)", () => {
+	it("src/extension.ts exists and is the single entrypoint", () => {
+		const extPath = path.join(PI_ROOT, "src", "extension.ts");
+		expect(fs.existsSync(extPath)).toBe(true);
+	});
+
+	it("package.json pi.extensions still points at ./src/extension.ts", () => {
+		const pkg = JSON.parse(
+			fs.readFileSync(path.join(PI_ROOT, "package.json"), "utf-8"),
+		);
+		expect(pkg.pi?.extensions).toBeDefined();
+		expect(pkg.pi.extensions).toContain("./src/extension.ts");
+	});
 });

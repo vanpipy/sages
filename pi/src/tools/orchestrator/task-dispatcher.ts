@@ -223,7 +223,7 @@ export function registerTaskDispatcherTool(pi: any): void {
   pi.registerTool({
     name: "task_dispatch",
     label: "Task Dispatch",
-    description: "Build a dispatch plan from an approved DAG. Returns structured Agent tool calls per batch — the LLM then executes them with the Agent tool. Does NOT spawn subagents directly.",
+    description: "Stage 3: build dispatch plan from approved DAG. Returns Agent tool calls per batch — LLM executes them. Does NOT spawn subagents directly.",
     parameters: TaskDispatchParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {

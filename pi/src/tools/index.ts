@@ -1,9 +1,9 @@
 /**
- * Tools Index - Export all agent tools
+ * Tools Index — re-exports the orchestrator tool registrar.
+ *
+ * The legacy four-sage role tools (Fuxi / QiaoChui / LuBan / GaoYao) were
+ * removed; the orchestrator is now the sole in-process workflow surface.
+ * Subagent execution is delegated to the Agent tool.
  */
 
-export { registerFuxiTools } from "./fuxi-tools.js";
-export { registerQiaoChuiTools } from "./qiaochui/index.js";
-export { registerLubanTools } from "./luban/index.js";
-export { registerGaoYaoTools } from "./gaoyao-tools.js";
 export { registerOrchestratorTools } from "./orchestrator/index.js";

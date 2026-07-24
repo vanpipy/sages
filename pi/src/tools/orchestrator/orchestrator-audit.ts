@@ -1,12 +1,13 @@
 /**
  * Orchestrator Audit Tool
  *
- * Stage 4 of orchestrator workflow: GaoYao-style 5-phase audit on a single task
- * or the whole DAG. Complements (does not replace) the sages gaoyao_audit tool:
- *   - gaoyao_audit: audits ONE workflow (process-level, uses .sages/workspace/audit.md)
- *   - orchestrator_audit: audits orchestrator-managed tasks (uses .pi/orchestrator/audit-*.md)
+ * Stage 4 of orchestrator workflow: 5-phase audit on a single task or the
+ * whole DAG. The phase vocabulary (ink / nose / foot / castration / death)
+ * is the legacy inherited from the now-removed GaoYao role tool — kept
+ * because it remains a useful audit discipline, but the tool itself is
+ * the only auditor in the package now.
  *
- * Phases (mirror gaoyao's INK/NOSE/FOOT/CASTRATION/DEATH):
+ * Phases:
  *   - ink:       every claim has evidence (file paths, command output)
  *   - nose:      alignment with goal-contract.success_criteria
  *   - foot:      actually runs (typecheck / lint / test) — re-executes verification_cmd
@@ -134,7 +135,7 @@ export function registerOrchestratorAuditTool(pi: any): void {
   pi.registerTool({
     name: "orchestrator_audit",
     label: "Orchestrator Audit",
-    description: "5-phase audit (ink/nose/foot/castration/death) on orchestrator-managed tasks. State persists between calls. Verdict: PASS/REVISE/REJECT with score.",
+    description: "Stage 4: 5-phase audit (ink/nose/foot/castration/death). State persists between calls. Verdict: PASS/REVISE/REJECT with score.",
     parameters: OrchestratorAuditParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {

@@ -116,7 +116,7 @@ Complete these items in order:
 6. **Write design doc** — Save to `.sages/designs/YYYY-MM-DD-<topic>.md`
 7. **Spec self-review** — 4-step inline check (see below)
 8. **User reviews written spec** — Wait for approval
-9. **Transition to implementation** — Can invoke `fuxi_design` (optional; auto-inits on first call)
+9. **Transition to implementation** — Can invoke `goal_contract_create` to seed the orchestrator workflow (optional; auto-synthesizes a DAG from the design)
 
 ## Key Principles
 
@@ -312,18 +312,18 @@ When **Fuxi workflow is running** and design is approved:
 
 | Condition | Action |
 |----------|--------|
-| No Fuxi workflow + design approved | Suggest `/brainstorm` or auto-transition if user consents |
-| Fuxi workflow active + design approved | Auto-invoke `fuxi_start` with design context |
-| User says "defer"/"save"/"later" | Save to `.sages/designs/`, don't start Fuxi |
+| No orchestrator + design approved | Suggest `/orchestrate` or auto-transition to `goal_contract_create` if user consents |
+| Orchestrator active + design approved | Auto-invoke `goal_contract_create` with design context |
+| User says "defer"/"save"/"later" | Save to `.sages/designs/`, don't start orchestrator |
 | User says "exit"/"cancel" | End without proceeding |
 
-## Fuxi Integration
+## Orchestrator Integration
 
 On auto-transition:
-1. System creates Fuxi context from approved design
-2. Invokes `fuxi_start` with design context
-3. Fuxi creates MDD draft using Seven Planes analysis
-4. **User is notified**: "Fuxi workflow started. Use `/fuxi-plan <score>` to proceed after review."
+1. System extracts success criteria from approved design
+2. Invokes `goal_contract_create` with the design as rationale
+3. Orchestrator synthesizes a DAG via `dag_synthesize` for the design's tasks
+4. **User is notified**: "Orchestrator workflow started. Use `task_dispatch` to execute the DAG."
 
 ## Scope Detection & Decomposition
 
@@ -377,15 +377,12 @@ Track these for analysis:
 - Approaches proposed
 - Approval iterations per section
 - Time from start to approved
-- Transition rate to Fuxi
+- Transition rate to orchestrator
 
 ## Related Skills
 
 - **Grill-Me**: Standalone decision tree resolver (embedded in brainstorming)
-- **Fuxi**: MDD design draft creation (after brainstorming approval)
-- **QiaoChui**: Task decomposition (implementation planning)
-- **LuBan**: TDD execution (implementation)
-- **GaoYao**: Quality audit (review)
+- **Orchestrator**: Goal contract + DAG synthesis + dispatch + audit (after brainstorming approval, auto-invoked via `goal_contract_create`)
 
 ## Examples
 
@@ -462,6 +459,6 @@ Recommendation: A because [isolation principle]
 
 ---
 
-*Brainstorming skill for Four Sages workflow*
+*Brainstorming skill for the orchestrator workflow*
 *Integrates Grill-Me protocol for decision tree resolution*
-*Integrates with Fuxi, QiaoChui, LuBan, GaoYao*
+*Hands off approved designs to `goal_contract_create` to seed the orchestrator*

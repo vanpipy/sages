@@ -1,9 +1,9 @@
 /**
- * Post-FSM-removal tests
+ * Post-FSM-removal tests (Round 1 — kept for history).
  *
- * Per simplify-actions principle, this round removes the FSM orchestrator
- * and all stage prompts. The four sages work standalone via natural-language
- * routing. These tests pin down what was removed.
+ * Pins down that the legacy FSM-based orchestrator and its stage prompts
+ * were removed. The orchestrator was later replaced again in Round 3 by
+ * the current DAG-based workflow — see `post-tool-removal.test.ts`.
  */
 
 import { describe, it, expect } from "bun:test";
