@@ -297,6 +297,7 @@ const TEMPLATE_PARAM_SCHEMAS: Record<string, TemplateParam[]> = {
   "subagent-software-auditor": [
     { name: "task_id", type: "string", required: true, description: "Task id being audited" },
     { name: "task_title", type: "string", required: true, description: "Short title" },
+    { name: "sc_ids", type: "string", required: false, description: "Optional formatted SC id list" },
     { name: "sc_list", type: "string", required: true, description: "Formatted SC list" },
     { name: "depth", type: "string", required: true, description: "'fast' or 'full'" },
     { name: "task_report_path", type: "string", required: true, description: "Path to developer's report" },

@@ -78,6 +78,30 @@ export interface DispatchTask {
   report_path: string;
 }
 
+/**
+ * Default `run_in_background` policy by subagent type. The rule mirrors
+ * `pi/templates/SUBAGENTS.md` and the SKILL.md Stage 1-2 / 3-4 split:
+ *   - Explore, Plan, general-purpose  → foreground (short, blocking)
+ *   - software-developer, software-auditor → background (long, steerable)
+ *
+ * Tasks may override per-task via `TaskNode.run_in_background`.
+ */
+export function defaultRunInBackground(subagentType: string): boolean {
+  switch (subagentType) {
+    case "Explore":
+    case "Plan":
+    case "general-purpose":
+      return false;
+    case "software-developer":
+    case "software-auditor":
+      return true;
+    default:
+      // Unknown subagent: default to background to avoid surprises;
+      // the LLM can always set run_in_background:false on the task.
+      return true;
+  }
+}
+
 /** Build the dispatch plan from a loaded DAG. Injects upstream task outputs into each task's prompt. */
 export function buildDispatchPlan(
   plan: OrchestrationPlan,
@@ -110,7 +134,7 @@ export function buildDispatchPlan(
       // Inject upstream task outputs into the prompt
       prompt: injectUpstreamOutputs(plan, taskById, t),
       isolation: t.isolation,
-      run_in_background: true,
+      run_in_background: t.run_in_background ?? defaultRunInBackground(t.subagent_type),
       wait_for: tasks.length > 1 ? "batch_completion" : "completion",
       report_path: `.pi/orchestrator/task-${t.id}-report.md`,
     }));

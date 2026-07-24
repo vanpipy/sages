@@ -23,7 +23,7 @@
  */
 
 import { Type, type Static } from "typebox";
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import * as yaml from "js-yaml";
 import type {
@@ -120,8 +120,15 @@ export interface AuditState {
   findings: OrchestratorFinding[];
   score: number;
   depth: "fast" | "full";
+  /** Lifecycle: "init" right after first call, "recording" while accumulating findings, "complete" after the final call. */
+  status: "init" | "recording" | "complete";
   created_at: string;
   updated_at: string;
+}
+
+/** Default minimum findings required for verdict=PASS at each depth. */
+export function findingsRequiredMin(depth: "fast" | "full"): number {
+  return depth === "fast" ? 1 : 3;
 }
 
 function loadAuditState(cwd: string, dagId: string): AuditState | null {
@@ -137,14 +144,14 @@ function loadAuditState(cwd: string, dagId: string): AuditState | null {
 function saveAuditState(cwd: string, state: AuditState): void {
   const dir = join(cwd, ORCHESTRATOR_DIR);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const statePath = auditStatePath(cwd, state.dag_id);
   writeFileSync(
-    auditStatePath(cwd, state.dag_id),
+    statePath,
     yaml.dump(state, { indent: 2, lineWidth: 120, noRefs: true }),
     "utf-8",
   );
   // Lock down file permissions too (state file may contain SC details)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  try { require("node:fs").chmodSync(auditStatePath(cwd, state.dag_id), 0o600); } catch { /* best-effort */ }
+  try { chmodSync(statePath, 0o600); } catch { /* best-effort on platforms without POSIX perms */ }
 }
 
 /**
@@ -154,7 +161,7 @@ function saveAuditState(cwd: string, state: AuditState): void {
  *
  * Lifecycle:
  *   1. First call (no observation): init AuditState, persist, return phase guidance
- *   2. Subsequent calls with observation.finding: append finding, persist
+ *   2. Subsequent calls with observation.finding(s): append finding(s), persist
  *   3. Final call with observation.complete: write report, return verdict
  *
  * State is persisted to .pi/orchestrator/audit-state-{dag_id}.yaml between
@@ -168,57 +175,83 @@ export function registerOrchestratorAuditTool(pi: any): void {
     parameters: OrchestratorAuditParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      const cwd: string = ctx.cwd;
-      // Default to "fast" depth (3 phases: ink/nose/foot). The full 5-phase
-      // audit is opt-in via depth: "full" — saves 40% audit time on routine
-      // workflows where castration/death aren't relevant.
-      const depth = params.depth ?? "fast";
-
-      // Load plan
-      const plan = loadPlan(cwd, params.dag_id);
-      if (!plan) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            intent: `DAG ${params.dag_id} not found. Run dag_synthesize first.`,
-            validation: { errors: ["DAG not found"] },
-          }) }],
-        };
-      }
-
-      // Filter tasks to audit
-      const tasks = params.task_id
-        ? plan.tasks.filter(t => t.id === params.task_id)
-        : params.batch !== undefined
-        ? plan.tasks.filter(t => t.batch === params.batch)
-        : plan.tasks;
-
-      if (tasks.length === 0) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            intent: "No tasks match the filter.",
-            validation: { errors: ["empty task filter"] },
-          }) }],
-        };
-      }
-
-      // ── Path 1: Complete the audit ────────────────────────────────
-      if (params.observation?.complete) {
-        return await completeAudit(cwd, plan, params, tasks);
-      }
-
-      // ── Path 2: Record findings (single `finding` OR batch `findings[]`) ──
-      const singleFinding = params.observation?.finding;
-      const batchFindings = params.observation?.findings;
-      if (singleFinding || (batchFindings && batchFindings.length > 0)) {
-        return await recordFindings(cwd, plan, params, tasks, depth);
-      }
-
-      // ── Path 3: Init the audit (first call, no observation) ───────
-      return await initAudit(cwd, plan, params, tasks, depth);
+      return await executeOrchestratorAudit(params, { cwd: ctx.cwd });
     },
   });
+}
+
+/**
+ * Pure (well — file I/O only) entry point for orchestrator_audit. Extracted
+ * from the registered tool so it can be unit-tested directly without going
+ * through pi.registerTool.
+ */
+export async function executeOrchestratorAudit(
+  params: Static<typeof OrchestratorAuditParams>,
+  ctx: { cwd: string },
+): Promise<{ content: { type: "text"; text: string }[] }> {
+  const cwd = ctx.cwd;
+  // Default to "fast" depth (3 phases: ink/nose/foot). The full 5-phase
+  // audit is opt-in via depth: "full" — saves 40% audit time on routine
+  // workflows where castration/death aren't relevant.
+  const depth = (params.depth ?? "fast") as "fast" | "full";
+
+  // Load plan
+  const plan = loadPlan(cwd, params.dag_id);
+  if (!plan) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        intent: `DAG ${params.dag_id} not found. Run dag_synthesize first.`,
+        validation: { errors: ["DAG not found"] },
+      }) }],
+    };
+  }
+
+  // Filter tasks to audit
+  const tasks = params.task_id
+    ? plan.tasks.filter(t => t.id === params.task_id)
+    : params.batch !== undefined
+    ? plan.tasks.filter(t => t.batch === params.batch)
+    : plan.tasks;
+
+  if (tasks.length === 0) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        intent: "No tasks match the filter.",
+        validation: { errors: ["empty task filter"] },
+      }) }],
+    };
+  }
+
+  const obs = params.observation ?? ({} as any);
+  const hasFindings = !!(obs.finding || (obs.findings && obs.findings.length > 0));
+  const hasComplete = !!obs.complete;
+
+  // ── Path 1: Complete (with optional findings merged in first) ─────
+  // When both `findings` and `complete` are present in the SAME call,
+  // persist the findings first so completeAudit's `state.findings`
+  // reflects them (otherwise the findings are silently dropped — the
+  // previous 2-tool-call SKILL.md pattern relied on this).
+  if (hasComplete) {
+    if (hasFindings) {
+      const rec = await recordFindings(cwd, plan, params, tasks, depth);
+      // If recordFindings errored, surface it directly.
+      try {
+        const recJson = JSON.parse(rec.content[0].text);
+        if (recJson.status === "error") return rec;
+      } catch { /* fall through */ }
+    }
+    return await completeAudit(cwd, plan, params, tasks);
+  }
+
+  // ── Path 2: Record findings only ─────────────────────────────────
+  if (hasFindings) {
+    return await recordFindings(cwd, plan, params, tasks, depth);
+  }
+
+  // ── Path 3: Init the audit (first call, no observation) ──────────
+  return await initAudit(cwd, plan, params, tasks, depth);
 }
 
 /** Init: create state file + read per-task audit reports + return workflow-level view. */
@@ -237,6 +270,7 @@ async function initAudit(
     findings: [],
     score: 100,
     depth,
+    status: "init",
     created_at: now,
     updated_at: now,
   };
@@ -253,12 +287,12 @@ async function initAudit(
     content: [{ type: "text", text: JSON.stringify({
       status: "in_progress",
       phase: "audit-init",
-      intent: `Audit initialized for ${tasks.length} task(s). workflowReady=${workflowSummary.workflowReady}. ${workflowSummary.blockingTasks.length > 0 ? `Blocking: ${workflowSummary.blockingTasks.join(", ")}. Run any remaining tasks + audits, then record findings in a single batch call to finalize.` : "All tasks certified — submit your workflow-level findings (or pass with 0 findings) and complete."}`,
+      intent: `Audit initialized for ${tasks.length} task(s). workflowReady=${workflowSummary.workflowReady}. ${workflowSummary.blockingTasks.length > 0 ? `Blocking: ${workflowSummary.blockingTasks.join(", ")}. Run any remaining tasks + audits, then record findings (≥${findingsRequiredMin(depth)} required) and complete.` : "All tasks certified — record findings (≥" + findingsRequiredMin(depth) + " required for fast depth) and complete."}`,
       validation: {
         errors: workflowSummary.workflowReady ? [] : [`tasks not yet certified: ${workflowSummary.blockingTasks.join(", ")}`],
         warnings: [],
         files_required: [auditStatePath(cwd, plan.id)],
-        findings_required_min: depth === "fast" ? 1 : 3,
+        findings_required_min: findingsRequiredMin(depth),
       },
       phases,
       phase_guidance: phaseGuidance,
@@ -304,6 +338,17 @@ async function recordFindings(
     };
   }
 
+  // Reject post-finalize appends (would silently mutate a sealed state).
+  if (state.status === "complete") {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        intent: "Audit is already finalized. Re-run init to start a new audit (or pass force: true on complete to overwrite).",
+        validation: { errors: ["audit is finalized; cannot append findings"] },
+      }) }],
+    };
+  }
+
   // Normalize: accept either `finding` (single) or `findings` (array)
   const obs = params.observation;
   const newFindings: OrchestratorFinding[] = [];
@@ -322,6 +367,7 @@ async function recordFindings(
 
   // Single recompute via pure function — no per-finding disk churn
   const next = appendFindings(state, newFindings);
+  next.status = "recording";
   saveAuditState(cwd, next);
 
   return {
@@ -359,44 +405,84 @@ async function completeAudit(
     };
   }
 
-  const { verdict, score, summary } = params.observation.complete;
+  const requested = params.observation.complete as {
+    verdict: "PASS" | "REVISE" | "REJECT";
+    score: number;
+    summary: string;
+  };
+  let { verdict } = requested;
+  const { score, summary } = requested;
+  const errors: string[] = [];
+
+  // Evidence gate (C3): verdict=PASS requires both
+  //   (a) findings.length >= findingsRequiredMin(depth)
+  //   (b) workflowReady === true (every task's audit is CERTIFIED)
+  // If either fails, downgrade to REVISE so the LLM can react explicitly
+  // rather than rubber-stamp a passing verdict.
+  const minRequired = findingsRequiredMin(state.depth);
+  if (state.findings.length < minRequired) {
+    errors.push(
+      `verdict:PASS requires >= ${minRequired} finding(s) for ${state.depth} depth; got ${state.findings.length}`,
+    );
+  }
+
+  // Re-read the per-task reports to compute workflowReady (always fresh
+  // — a downstream re-audit may have flipped a task from NEEDS WORK to
+  // CERTIFIED between init and complete).
+  const reports = readAuditReports(cwd, state.tasks);
+  const workflowSummary = aggregateTaskAudits(state.tasks, reports);
+  if (!workflowSummary.workflowReady) {
+    errors.push(
+      `verdict:PASS requires all tasks certified; blocking: ${workflowSummary.blockingTasks.join(", ")}`,
+    );
+  }
+
+  if (verdict === "PASS" && errors.length > 0) {
+    verdict = "REVISE";
+  }
 
   // Recompute score from findings (don't trust the LLM-supplied score blindly)
   const computedScore = computeScore(state.findings);
   const finalScore = Math.min(score, computedScore);
 
   // Build the result + write the report
+  // Resolve scope: task_id wins, then batch, then "workflow" (default).
+  // The path the tool returns MUST match the path the tool actually writes to.
+  const scope = params.task_id ?? params.batch?.toString() ?? "workflow";
+  const reportPath = taskAuditPath(cwd, scope);
   const result: OrchestratorAuditResult = {
     verdict,
     score: finalScore,
     findings: state.findings,
-    report_path: taskAuditPath(cwd, params.task_id ?? params.batch?.toString() ?? "workflow"),
+    report_path: reportPath,
     summary,
   };
 
   // Update state to finalized
   state.score = finalScore;
+  state.status = "complete";
   state.updated_at = new Date().toISOString();
   saveAuditState(cwd, state);
 
-  // Write the markdown report (separate from state file)
-  writeAuditReport(cwd, result);
+  // Write the markdown report (separate from state file) at the resolved path
+  writeAuditReport(cwd, result, reportPath);
 
   return {
     content: [{ type: "text", text: JSON.stringify({
       status: "complete",
       phase: "audit-complete",
-      intent: `Audit complete. Verdict: ${verdict}, score: ${finalScore}/100. Report at ${result.report_path}.`,
+      intent: `Audit complete. Verdict: ${verdict}, score: ${finalScore}/100. Report at ${reportPath}.`,
       validation: {
-        errors: [],
+        errors,
         warnings: [],
-        files_required: [result.report_path, auditStatePath(cwd, plan.id)],
+        files_required: [reportPath, auditStatePath(cwd, plan.id)],
       },
       verdict,
       score: finalScore,
       findings: state.findings,
       summary,
-      report_path: result.report_path,
+      report_path: reportPath,
+      workflow_summary: workflowSummary,
     }) }],
   };
 }
@@ -580,40 +666,22 @@ function buildWorkflowPhaseGuidance(phases: string[]): Record<string, string> {
   return g;
 }
 
-export function buildPhaseGuidance(tasks: TaskNode[], phases: string[]): Record<string, string> {
-  const guidance: Record<string, string> = {};
-
-  if (phases.includes("ink")) {
-    guidance.ink = "INK — verify each task has evidence: a report file at .pi/orchestrator/task-{id}-report.md with file paths and command output. No narrative without evidence. Each missing report = 1 minor finding.";
-  }
-  if (phases.includes("nose")) {
-    guidance.nose = `NOSE — verify alignment with goal-contract. For each task, check its acceptance.covers SC ids match what was actually delivered. Re-read the goal contract at .pi/orchestrator/goal-*.yaml.`;
-  }
-  if (phases.includes("foot")) {
-    guidance.foot = `FOOT — re-run verification_cmd for every success_criterion the tasks cover. Capture exit codes + output. Any failure = critical finding.`;
-  }
-  if (phases.includes("castration")) {
-    guidance.castration = "CASTRATION — security check. Use grep/aft_search for: hardcoded secrets, raw SQL with concatenation, eval/exec, missing input validation, prompt-injection sinks, unsafe worktree merge patterns.";
-  }
-  if (phases.includes("death")) {
-    guidance.death = "DEATH — long-term viability. Check: new tests added (not just modifications), no drive-by refactoring outside scope, dependencies actually used, worktree branches not polluted with stale commits.";
-  }
-
-  return guidance;
-}
-
 /**
- * Helper for the LLM to write the final audit report.
- * Called when the LLM passes observation.audit_complete=true.
+ * Helper for the LLM to write the final audit report. Called when the LLM
+ * passes `observation.complete` (the `complete` field, NOT `audit_complete`).
+ *
+ * The report is written at the caller-supplied path. When the LLM does not
+ * specify scope, the report lands at the canonical `audit-workflow.md`.
  */
 export function writeAuditReport(
   cwd: string,
   result: OrchestratorAuditResult,
+  reportPath?: string,
 ): string {
   const dir = join(cwd, ORCHESTRATOR_DIR);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  const path = join(cwd, ORCHESTRATOR_DIR, WORKFLOW_AUDIT);
+  const path = reportPath ?? join(cwd, ORCHESTRATOR_DIR, WORKFLOW_AUDIT);
   const lines: string[] = [];
   lines.push(`# Orchestrator Audit — ${new Date().toISOString()}`);
   lines.push("");
@@ -632,5 +700,7 @@ export function writeAuditReport(
   }
 
   writeFileSync(path, lines.join("\n"), "utf-8");
+  // Lock down file permissions (report may contain SC details / verdict summary)
+  try { chmodSync(path, 0o600); } catch { /* best-effort on non-POSIX */ }
   return path;
 }

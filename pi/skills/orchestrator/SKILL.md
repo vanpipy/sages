@@ -171,23 +171,51 @@ After all batches complete:
    - workflow_summary.workflowReady: true iff all tasks CERTIFIED
    - workflow_summary.blockingTasks: tasks that need re-audit
    - phase_guidance: workflow-level scope (cross-task, not per-task)
+   - validation.findings_required_min: 1 (fast) or 3 (full) — minimum
+     findings you must submit before `complete` is accepted
 3. Run any blocking-tasks through software-auditor; then call again.
 4. Collect workflow-level findings (cross-task consistency, integration SCs,
-   coverage gaps). Submit in ONE batch call:
+   coverage gaps) and submit them, then complete — either in one call or two:
+
+   // ── 2-call pattern (explicit, recommended) ─────────────────────
+   orchestrator_audit({
+     dag_id,
+     observation: { findings: [
+       { category: "nose", severity: "minor", issue: "SC4 has no audit", evidence: "..." },
+       { category: "foot", severity: "critical", issue: "Integration test fails", evidence: "..." },
+     ] }
+   })
+   orchestrator_audit({
+     dag_id,
+     observation: { complete: { verdict, score, summary } }
+   })
+
+   // ── 1-call pattern (also supported) ─────────────────────────────
    orchestrator_audit({
      dag_id,
      observation: {
-       findings: [
-         { category: "nose", severity: "minor", issue: "SC4 has no audit", evidence: "..." },
-         { category: "foot", severity: "critical", issue: "Integration test fails", evidence: "..." },
-         // ... all workflow-level findings
-       ],
-       complete: { verdict, score, summary }
+       findings: [/* ... */],
+       complete: { verdict, score, summary },
      }
    })
-   - Batch submission avoids N round-trips (one call can hold all findings + complete)
+
 5. Report verdict + score to user
 ```
+
+**Evidence gate (cannot be bypassed)**: when the LLM calls `complete` with
+`verdict: "PASS"`, the tool auto-downgrades to `REVISE` if either:
+- `findings.length < validation.findings_required_min` (so a "PASS with no
+  findings" rubber-stamp is rejected), or
+- `workflowReady === false` (so un-certified blocking tasks force a REVISE
+  even when the LLM claims PASS).
+
+The error message identifies which condition failed.
+
+**Path contract**: when you call with `task_id: "P1"`, the tool writes
+`audit-P1.md` and returns its path. With `batch: 1`, it writes `audit-1.md`.
+With no filter, it writes `audit-workflow.md`. The path returned in
+`report_path` is the path the file was actually written to — no longer
+diverges from the result.
 
 **Why A3 split?** Per-task audit (re-run verification_cmd, inspect diff, check
 TDD discipline) was duplicated 80% between `orchestrator_audit` and
@@ -196,8 +224,9 @@ TDD discipline) was duplicated 80% between `orchestrator_audit` and
 
 **Audit tool call count (fast depth, batched findings)**:
 - 1× init (no observation)
-- 1× record + complete (single call with `findings[]` + `complete`)
-- Total: **2 tool calls** (was 5+ in the one-finding-per-call pattern)
+- 1× record (batched findings)
+- 1× complete
+- Total: **3 tool calls** (one-finding-per-call was 5+)
 
 ## Tool Roster (when in orchestrator mode)
 

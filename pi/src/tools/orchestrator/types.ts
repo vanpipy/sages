@@ -86,6 +86,13 @@ export interface TaskNode {
 	isolation: "worktree" | "none";
 	/** Whether this task requires strict TDD (delegated to software-developer subagent's RED → GREEN → REFACTOR) */
 	tdd: "strict" | "none";
+	/**
+	 * Optional per-task override for the dispatcher's `run_in_background`
+	 * policy. When omitted, the dispatcher derives a default from
+	 * `subagent_type` (Explore/Plan/general-purpose = foreground,
+	 * software-developer/software-auditor = background).
+	 */
+	run_in_background?: boolean;
 	/** Detailed prompt given to the subagent (assembled by orchestrator from MDD outputs, or rendered from task_template) */
 	prompt: string;
 	/** Optional template reference — if set, dag_synthesizer renders prompt from template + task_params */
