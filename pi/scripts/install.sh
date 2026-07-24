@@ -4,9 +4,8 @@
 # Installs to ~/.pi/packages/sages
 #
 # Also installs pi-codebase-memory for codebase indexing/search,
-# pi-aft (via aft-pi extension) — AFT-backed code analysis (replaces serena, no LSP needed),
-# and pi-magic-context — CortexKit's persistent memory + context layer
-# (replaces the older pi-memory + pi-semantic-nudge).
+# pi-aft (via aft-pi extension) — AFT-backed code analysis (no LSP needed),
+# and pi-magic-context — CortexKit's persistent memory + context layer.
 #
 # Selective install options:
 #   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)
@@ -93,13 +92,10 @@ PI_GRAPHIFY_PKG="$PI_GRAPHIFY_DEST_DIR"
 # graphify CLI install info
 GRAPHIFY_BIN_PATH="$HOME/.local/bin/graphify"
 
-# pi-aft (via @cortexkit/aft-pi npm extension — replaces pi-serena entirely)
+# pi-aft (via @cortexkit/aft-pi npm extension)
 # pi-aft is npm-installed; setup command registers automatically
 # The setup command (npx @cortexkit/aft@latest setup) registers it AND downloads the platform binary.
-# REMOVED: pi-serena no longer shipped (replaced by @cortexkit/aft-pi from npm)
-# REMOVED
-# REMOVED
-# REMOVED: AFT does not need a separate mcp.json (the setup command handles it)
+# AFT does not need a separate mcp.json (the setup command handles it)
 
 # Cleanup trap
 TMP_DIR=""
@@ -766,12 +762,12 @@ setup_peer_node_modules_symlinks() {
   done
 }
 # ──────────────────────────────────────────────────────────────────
-# pi-aft (replaces pi-serena) — installed via npx + npm
+# pi-aft — installed via npx + npm
 # Uses @cortexkit/aft-pi for the Pi extension and @cortexkit/aft-linux-x64 (or
 # similar) for the binary that the extension loads.
 # ──────────────────────────────────────────────────────────────────
 
-# pi-aft package info (npm-installed, replaces pi-serena entirely)
+# pi-aft package info (npm-installed)
 PI_AFT_PKG="npm:@cortexkit/aft-pi"
 
 is_pi_aft_installed() {
@@ -793,7 +789,7 @@ except Exception:
 }
 
 install_pi_aft() {
-  echo "==> Installing pi-aft (replaces pi-serena)..."
+  echo "==> Installing pi-aft..."
 
   # Idempotent: skip if installed
   if is_pi_aft_installed && [[ "${FORCE:-false}" != true ]]; then
@@ -1248,7 +1244,7 @@ install() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # Install pi-aft (replaces pi-serena; uses npm + npx setup)
+  # Install pi-aft (uses npm + npx setup)
   install_pi_aft || true
 
   # Install AFT config template → ~/.config/cortexkit/aft.jsonc
@@ -1362,7 +1358,7 @@ uninstall() {
   uninstall_codebase_memory_mcp_binary
 
 
-  # Uninstall pi-aft (replaces pi-serena)
+  # Uninstall pi-aft
   uninstall_pi_aft
 
   # Uninstall AFT config template (only if it's our template, not user-edited)
