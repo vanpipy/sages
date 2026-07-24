@@ -85,6 +85,63 @@ Update statuses as results arrive. The todowrite is the dashboard the user
 
 For non-modification tasks (reading, answering, exploring): use §2 routing directly.
 
+## 1.2 Hard threshold — brain vs limb (enforced by the extension)
+
+The path gate (§1.1) is a **convention with a reject fallback**. Two
+**mechanical** enforcements are also active — they fire regardless of
+what you do, no matter how the prompt is framed:
+
+### Layer 1 — Toolset drop on `session_start`
+
+Your visible toolset is filtered on every session start. The
+`tool_calls` list the model sees **does not include raw `edit` or
+`write`**. To modify any file, you have exactly two paths:
+
+- **Meta-files** (`.pi/`, `pi/`, root docs, etc.) → `sages_write` /
+  `sages_edit` (path-gated; production code rejected with a clear
+  redirect message).
+- **Production code** → `Agent` dispatch to `software-developer`
+  subagent with `run_in_background: true`.
+
+There is no third option. You cannot "just edit this once" because the
+tool isn't in your hand.
+
+### Layer 2 — Bash write-intent gate on `tool_call`
+
+`bash` is gated because we can't drop it (you need it for `ls`, `cat`,
+`git status`, `bun test`, etc.). Every bash command you invoke goes
+through `shouldBlockBashCommand()` in `pi/src/tools/bash-guard.ts`:
+
+| Command | Result |
+|---|---|
+| `cat src/foo.ts` | allowed (read-only) |
+| `ls -la` | allowed (read-only) |
+| `bun test` | allowed (read-only) |
+| `rm src/foo.ts` | **blocked** — target denied by `canMainAgentWrite` |
+| `echo x > src/foo.ts` | **blocked** — redirect target denied |
+| `git checkout -- src/foo.ts` | **blocked** — git write-intent denied |
+| `python3 -c "import os; os.remove('src/x.ts')"` | **blocked** — unknown + no extractable target |
+| `# sages:safe\n<anything>` | allowed (escape hatch — declare explicit safe) |
+
+When blocked, the response names the offending targets and points at
+the `Agent` dispatch template. Do not bypass by paraphrasing
+(`rm  ../src/foo.ts`, `rm sr``c/foo.ts`, etc.) — the gate operates on
+extracted paths, not surface strings, and common evasion patterns are
+covered by the test matrix in `pi/test/tools/bash-guard.test.ts`.
+
+**Known limitation**: command chaining (`echo done && rm src/foo.ts`)
+is not parsed — first word `echo` is read-only, so the chain passes
+through. Use `# sages:safe` if you genuinely need a chained write to
+non-production paths.
+
+### Why this matters
+
+Without these layers, every "I just want to make this one small
+production change" prompt becomes a bypass path. With them, the bypass
+is **not possible** — the tool isn't visible, and bash can't write
+production code. Brain-vs-limb is mechanically true, not a convention
+the LLM has to remember.
+
 ## 2. Tool Routing (by question scale + intent)
 
 | Intent / scale | Primary tool | Notes |
@@ -105,7 +162,7 @@ For non-modification tasks (reading, answering, exploring): use §2 routing dire
 
 Every implementation follows: **RED** (failing test) → **Verify** (confirm fail) → **GREEN** (minimal pass) → **REFACTOR** (optimize). **No code without a failing test first.**
 
-`software-developer` subagent enforces this automatically. Tests are source of truth (~497 tests in `pi/test/`). For TDD exceptions (PoC, config), document why in commit message.
+`software-developer` subagent enforces this automatically. Tests are source of truth (444 tests in `pi/test/` as of 2026-07-24: 404 baseline + 33 `bash-guard.test.ts` + 7 `main-agent-toolset.test.ts`). For TDD exceptions (PoC, config), document why in commit message.
 
 ## 4. Workflow References (on-demand — load when entering mode)
 
