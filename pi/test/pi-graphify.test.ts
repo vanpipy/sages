@@ -52,11 +52,12 @@ function makeSagesWorkspace(opts: {
 	dirtyFile?: boolean;
 }): string {
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pi-graphify-test-"));
-	// The `.sages/workspace/` directory is a marker (read by `start-mcp.sh`
-	// and `pi-codebase-memory`'s `isSageWorkspace` heuristic), not state
-	// storage — the orchestrator writes all runtime state to
-	// `.pi/orchestrator/`. No `state.json` is needed.
-	fs.mkdirSync(path.join(tmp, ".sages", "workspace"), { recursive: true });
+	// The `.pi/orchestrator/` directory is the Sages "is this a sages
+	// project?" marker — read by `start-mcp.sh` and
+	// `pi-codebase-memory`'s `isInSagesWorkspace`. It is created by the
+	// Sages install; the orchestrator then writes its goal / dag / audit
+	// state inside it.
+	fs.mkdirSync(path.join(tmp, ".pi", "orchestrator"), { recursive: true });
 
 	if (opts.git) {
 		execFileSync("git", ["init", "-q"], { cwd: tmp });
@@ -229,14 +230,14 @@ exit 0
 		}
 	});
 
-	it("start-mcp.sh: git toplevel detection finds sage root from subdir (not nearest .sages/workspace)", () => {
-		// Reproduce the pi/.sages/workspace bug: subdir also has .sages/workspace
-		// The wrapper should find the git toplevel's .sages/workspace, NOT the nearest one
+	it("start-mcp.sh: git toplevel detection finds sage root from subdir (not nearest .pi/orchestrator)", () => {
+		// Reproduce the bug: subdir also has .pi/orchestrator/
+		// The wrapper should find the git toplevel's .pi/orchestrator, NOT the nearest one
 		const tmp = makeSagesWorkspace({ git: true, graphMtime: "after-commit" });
-		// Add a fake nested .sages/workspace (test-only sandbox)
+		// Add a fake nested .pi/orchestrator (test-only sandbox)
 		const nestedDir = path.join(tmp, "pi");
-		fs.mkdirSync(path.join(nestedDir, ".sages", "workspace"), { recursive: true });
-		fs.writeFileSync(path.join(nestedDir, ".sages", "workspace", "marker.txt"), "nested");
+		fs.mkdirSync(path.join(nestedDir, ".pi", "orchestrator"), { recursive: true });
+		fs.writeFileSync(path.join(nestedDir, ".pi", "orchestrator", "marker.txt"), "nested");
 		// Also create a decoy graphify-out in nested dir (wrong location)
 		fs.mkdirSync(path.join(nestedDir, "graphify-out"), { recursive: true });
 		fs.writeFileSync(path.join(nestedDir, "graphify-out", "graph.json"), '{"decoy":true}');
@@ -365,7 +366,7 @@ describe("pi-graphify: lifecycle hooks", () => {
 
 	it("session_start in sage workspace WITHOUT binary emits install warning", async () => {
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-graphify-test-"));
-		fs.mkdirSync(path.join(tmpDir, ".sages", "workspace"), { recursive: true });
+		fs.mkdirSync(path.join(tmpDir, ".pi", "orchestrator"), { recursive: true });
 		const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "fake-home-"));
 		const origHome = process.env.HOME;
 		process.env.HOME = fakeHome;

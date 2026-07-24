@@ -2,14 +2,14 @@
 # pi-graphify start-mcp.sh
 #
 # Wrapper for the graphify MCP server. Runs BEFORE the server starts:
-#   1. Auto-detects the sage workspace root via git toplevel + .sages/workspace marker
+#   1. Auto-detects the sage workspace root via git toplevel + .pi/orchestrator marker
 #   2. If graphify-out/graph.json is missing there, runs `graphify . --no-viz` (~3-5 min)
 #   3. Launches the graphify MCP server with uv run
 #
-# Why git toplevel + .sages/workspace marker:
+# Why git toplevel + .pi/orchestrator marker:
 # - pi-mcp-adapter defaults MCP server cwd to pi session cwd (which can be a subdirectory)
-# - Walking up to the NEAREST `.sages/workspace` would match pi/.sages/workspace (created
-#   by LuBan tests during sage workflow), which is wrong
+# - Walking up to the NEAREST `.pi/orchestrator` would match a nested
+#   sub-project that also has the Sages orchestrator installed, which is wrong
 # - Using git toplevel finds the actual sage workspace root (sage workflow only runs in
 #   git repos by convention)
 #
@@ -26,21 +26,21 @@ set -euo pipefail
 # ─── Step 1: find sage workspace root ────────────────────────────────────────
 SAGE_ROOT=""
 
-# Strategy 1: git toplevel + .sages/workspace marker
+# Strategy 1: git toplevel + .pi/orchestrator marker
 CWD="$(pwd)"
 if command -v git >/dev/null 2>&1; then
   if GIT_TOP=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null); then
-    if [[ -d "$GIT_TOP/.sages/workspace" ]]; then
+    if [[ -d "$GIT_TOP/.pi/orchestrator" ]]; then
       SAGE_ROOT="$GIT_TOP"
     fi
   fi
 fi
 
-# Strategy 2: walk up to nearest .sages/workspace (fallback for non-git dirs)
+# Strategy 2: walk up to nearest .pi/orchestrator (fallback for non-git dirs)
 if [[ -z "$SAGE_ROOT" ]]; then
   DIR="$CWD"
   while [[ "$DIR" != "/" ]]; do
-    if [[ -d "$DIR/.sages/workspace" ]]; then
+    if [[ -d "$DIR/.pi/orchestrator" ]]; then
       SAGE_ROOT="$DIR"
       break
     fi
