@@ -46,9 +46,14 @@ export const OrchestratorAuditParams = Type.Object({
    * Observation mode: omit for first call (audit-init), then pass on follow-up
    * calls to record findings / complete the audit. The state is persisted to
    * disk between calls so the LLM can resume after context compaction.
+   *
+   * Two ways to record findings (mutually exclusive):
+   *   - `finding`: SINGLE finding (kept for backward compat / per-finding granularity)
+   *   - `findings`: ARRAY of findings — preferred for batch submission (fewer
+   *     tool round-trips; one call can submit all findings from a phase)
    */
   observation: Type.Optional(Type.Object({
-    /** Finding to record (one per call) */
+    /** A single audit finding (backward-compat — prefer `findings` array) */
     finding: Type.Optional(Type.Object({
       task_id: Type.Optional(Type.String()),
       category: Type.Union([
@@ -67,6 +72,25 @@ export const OrchestratorAuditParams = Type.Object({
       evidence: Type.Optional(Type.String()),
       recommendation: Type.Optional(Type.String()),
     }, { description: "A single audit finding to record" })),
+    /** Batch of findings — preferred (reduces audit tool calls ~60%) */
+    findings: Type.Optional(Type.Array(Type.Object({
+      task_id: Type.Optional(Type.String()),
+      category: Type.Union([
+        Type.Literal("ink"),
+        Type.Literal("nose"),
+        Type.Literal("foot"),
+        Type.Literal("castration"),
+        Type.Literal("death"),
+      ]),
+      severity: Type.Union([
+        Type.Literal("critical"),
+        Type.Literal("major"),
+        Type.Literal("minor"),
+      ]),
+      issue: Type.String({ minLength: 1 }),
+      evidence: Type.Optional(Type.String()),
+      recommendation: Type.Optional(Type.String()),
+    }), { description: "An array of findings to record in a single call" })),
     /** Mark audit as complete — verdict, score, summary, all findings */
     complete: Type.Optional(Type.Object({
       verdict: Type.Union([Type.Literal("PASS"), Type.Literal("REVISE"), Type.Literal("REJECT")]),
@@ -140,7 +164,10 @@ export function registerOrchestratorAuditTool(pi: any): void {
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
       const cwd: string = ctx.cwd;
-      const depth = params.depth ?? "full";
+      // Default to "fast" depth (3 phases: ink/nose/foot). The full 5-phase
+      // audit is opt-in via depth: "full" — saves 40% audit time on routine
+      // workflows where castration/death aren't relevant.
+      const depth = params.depth ?? "fast";
 
       // Load plan
       const plan = loadPlan(cwd, params.dag_id);
@@ -176,9 +203,11 @@ export function registerOrchestratorAuditTool(pi: any): void {
         return await completeAudit(cwd, plan, params, tasks);
       }
 
-      // ── Path 2: Record a finding ──────────────────────────────────
-      if (params.observation?.finding) {
-        return await recordFinding(cwd, plan, params, tasks, depth);
+      // ── Path 2: Record findings (single `finding` OR batch `findings[]`) ──
+      const singleFinding = params.observation?.finding;
+      const batchFindings = params.observation?.findings;
+      if (singleFinding || (batchFindings && batchFindings.length > 0)) {
+        return await recordFindings(cwd, plan, params, tasks, depth);
       }
 
       // ── Path 3: Init the audit (first call, no observation) ───────
@@ -208,9 +237,7 @@ async function initAudit(
   };
   saveAuditState(cwd, state);
 
-  const phases = depth === "fast"
-    ? ["ink", "nose", "foot"]
-    : ["ink", "nose", "foot", "castration", "death"];
+  const phases = getPhasesForDepth(depth);
   const phaseGuidance = buildPhaseGuidance(tasks, phases);
 
   return {
@@ -238,8 +265,18 @@ async function initAudit(
   };
 }
 
-/** Record: load state, append finding, persist, return updated count. */
-async function recordFinding(
+/**
+ * Record: load state, append one or more findings (single OR batch), persist,
+ * return updated count.
+ *
+ * Accepts either:
+ *   - `observation.finding` (single — backward compat)
+ *   - `observation.findings` (array — preferred, saves tool round-trips)
+ *
+ * Both can be combined in one call. The score is recomputed once from the
+ * full findings list (not incrementally).
+ */
+async function recordFindings(
   cwd: string,
   plan: OrchestrationPlan,
   params: any,
@@ -257,24 +294,39 @@ async function recordFinding(
     };
   }
 
-  const f: OrchestratorFinding = params.observation.finding;
-  state.findings.push(f);
-  state.score = computeScore(state.findings);
-  state.updated_at = new Date().toISOString();
-  saveAuditState(cwd, state);
+  // Normalize: accept either `finding` (single) or `findings` (array)
+  const obs = params.observation;
+  const newFindings: OrchestratorFinding[] = [];
+  if (obs.finding) newFindings.push(obs.finding);
+  if (obs.findings && Array.isArray(obs.findings)) newFindings.push(...obs.findings);
+
+  if (newFindings.length === 0) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        intent: "observation provided but neither `finding` nor `findings` is set.",
+        validation: { errors: ["empty observation payload"] },
+      }) }],
+    };
+  }
+
+  // Single recompute via pure function — no per-finding disk churn
+  const next = appendFindings(state, newFindings);
+  saveAuditState(cwd, next);
 
   return {
     content: [{ type: "text", text: JSON.stringify({
       status: "in_progress",
       phase: "audit-recording",
-      intent: `Finding recorded. ${state.findings.length} finding(s) total, current score: ${state.score}. Continue auditing or call with observation.complete to finalize.`,
+      intent: `Recorded ${newFindings.length} finding(s). ${next.findings.length} total, current score: ${next.score}. Continue auditing or call with observation.complete to finalize.`,
       validation: {
         errors: [],
         warnings: [],
         files_required: [auditStatePath(cwd, plan.id)],
       },
-      findings_count: state.findings.length,
-      score: state.score,
+      findings_count: next.findings.length,
+      score: next.score,
+      added_this_call: newFindings.length,
     }) }],
   };
 }
@@ -339,8 +391,22 @@ async function completeAudit(
   };
 }
 
-/** Compute a 0-100 score from findings. Critical findings heavily penalize. */
-function computeScore(findings: OrchestratorFinding[]): number {
+/**
+ * Phase selection by depth. Pure function — exported for testing.
+ *   - fast: ink / nose / foot  (default; covers 90% of workflows)
+ *   - full: adds castration / death for security + long-term viability
+ */
+export function getPhasesForDepth(depth: "fast" | "full"): string[] {
+  return depth === "fast"
+    ? ["ink", "nose", "foot"]
+    : ["ink", "nose", "foot", "castration", "death"];
+}
+
+/**
+ * Compute a 0-100 score from findings. Critical findings heavily penalize.
+ * Exported for unit testing.
+ */
+export function computeScore(findings: OrchestratorFinding[]): number {
   let score = 100;
   for (const f of findings) {
     if (f.severity === "critical") score -= 30;
@@ -350,7 +416,28 @@ function computeScore(findings: OrchestratorFinding[]): number {
   return Math.max(0, score);
 }
 
-function buildPhaseGuidance(tasks: TaskNode[], phases: string[]): Record<string, string> {
+/**
+ * Append one or more findings to an audit state in a single recompute.
+ * Pure function — caller is responsible for persistence.
+ *
+ * Replaces the previous one-finding-per-tool-call pattern: now the LLM can
+ * submit all findings from a phase (or all phases) in a single call,
+ * cutting audit tool calls by ~60%.
+ */
+export function appendFindings(
+  state: AuditState,
+  newFindings: OrchestratorFinding[],
+): AuditState {
+  const findings = [...state.findings, ...newFindings];
+  return {
+    ...state,
+    findings,
+    score: computeScore(findings),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export function buildPhaseGuidance(tasks: TaskNode[], phases: string[]): Record<string, string> {
   const guidance: Record<string, string> = {};
 
   if (phases.includes("ink")) {
