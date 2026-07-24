@@ -4,6 +4,15 @@
 # Tasks reference subagent types from ~/.pi/agent/agents/ + pi-subagents built-ins.
 #
 # Use: dag_synthesize({ goal_id: "GC-...", tasks: [<tasks below, edited>] })
+#
+# Every task declares a `prompt:` that satisfies the schema's minLength=20.
+# Treat the bracketed `[...]` placeholders as edit-me markers before
+# dispatching — they are required for the subagent to know what to do.
+#
+# Plan note: P5 (refactor call sites) was originally in batch 3 with
+# `depends_on: [P3, P4]`, but P4 is also in batch 3 — same-batch deps
+# are rejected by validateDAG. P5 now lives in batch 4 with deps
+# [P3, P4], so it parallelizes with P6 (tests).
 
 tasks:
   # ────────────────────────────────────────────────────────────
@@ -11,36 +20,44 @@ tasks:
   # ────────────────────────────────────────────────────────────
   - id: P1
     description: "Find all sites of [old pattern] in scope"
+    plane: Observation
+    priority: high
     subagent_type: Explore
     task_template: subagent-explore
     task_params:
+      task_id: P1
+      task_title: "Find old-pattern sites"
+      sc_list: "SC1 (no old pattern), SC2 (tests still pass), SC3 (new API exists)"
       search_for: "[old pattern symbol/import name]"
+      files_to_touch: "src/[scope]/"
     batch: 1
     depends_on: []
     isolation: none
     tdd: none
     files: ["src/[scope]/"]
-    acceptance:
-      covers: []   # explore tasks don't satisfy SCs directly
-      self_check_cmd: "ls .pi/orchestrator/task-P1-findings.json"
+    acceptance: {}
     output_schema:
       kind: file_list
       path: ".pi/orchestrator/task-P1-findings.json"
 
   - id: P2
     description: "Find existing [good pattern] examples in codebase to mirror"
+    plane: Observation
+    priority: high
     subagent_type: Explore
     task_template: subagent-explore
     task_params:
+      task_id: P2
+      task_title: "Find good-pattern examples"
+      sc_list: "SC1 (no old pattern), SC2 (tests still pass), SC3 (new API exists)"
       search_for: "[good pattern reference]"
+      files_to_touch: "src/[similar-module]/"
     batch: 1
     depends_on: []
     isolation: none
     tdd: none
     files: ["src/[similar-module]/"]
-    acceptance:
-      covers: []
-      self_check_cmd: "ls .pi/orchestrator/task-P2-findings.json"
+    acceptance: {}
     output_schema:
       kind: file_list
       path: ".pi/orchestrator/task-P2-findings.json"
@@ -50,9 +67,16 @@ tasks:
   # ────────────────────────────────────────────────────────────
   - id: P3
     description: "Design new [interface/API/structure]"
+    plane: Foundation
+    priority: high
     subagent_type: Plan
     task_template: subagent-general-purpose
     task_params:
+      task_id: P3
+      task_title: "Design new structure"
+      sc_list: "SC1 (no old pattern), SC2 (tests still pass), SC3 (new API exists)"
+      upstream_outputs: "P1 (old-pattern sites), P2 (good-pattern examples) — both informational"
+      files_to_touch: ""
       inputs:
         - from_task: P1
           field: findings
@@ -63,20 +87,29 @@ tasks:
     isolation: none
     tdd: none
     files: []
-    acceptance:
-      covers: []   # Plan contributes to all SCs indirectly
+    prompt: "Design a new [interface/API/structure] that replaces [old pattern]. Read the P1 + P2 findings (paths: .pi/orchestrator/task-P1-findings.json, task-P2-findings.json) and use them as input. Write the design to .pi/orchestrator/task-P3-design.md. The design must (a) cover all SCs, (b) mirror the patterns in P2, (c) prescribe the exact module boundary so P4+P5 can implement it independently."
+    acceptance: {}
     output_schema:
       kind: design_doc
       path: ".pi/orchestrator/task-P3-design.md"
 
   # ────────────────────────────────────────────────────────────
-  # Batch 3: implementation (parallel, worktree isolation)
+  # Batch 3: implementation (parallel, worktree isolation) — P4 only
+  # (P5 moved to batch 4 to avoid same-batch dep on P4)
   # ────────────────────────────────────────────────────────────
   - id: P4
     description: "Implement new [module/class] per design"
+    plane: Foundation
+    priority: high
     subagent_type: software-developer
     task_template: subagent-software-developer
     task_params:
+      task_id: P4
+      task_title: "Implement new module"
+      sc_list: "SC3 (new API exists)"
+      tdd_mode: strict
+      upstream_outputs: "P3 design at .pi/orchestrator/task-P3-design.md"
+      files_to_touch: "src/[scope]/[new-file].ts"
       inputs:
         - from_task: P3
           field: design_doc
@@ -91,55 +124,77 @@ tasks:
     # the explicit annotation documents intent at the call site.
     run_in_background: true
     files: ["src/[scope]/[new-file].ts"]
+    prompt: "Implement the new [module/class] per P3's design. Read .pi/orchestrator/task-P3-design.md first. Use strict TDD: write a test for the public surface, then implement. Do not touch any file outside src/[scope]/[new-file].ts. Self-check: `npm run typecheck`."
     acceptance:
-      covers: [SC3]   # adjust to which SC this task satisfies
+      covers: [SC3]   # new module exists
       self_check_cmd: "npm run typecheck"
     output_schema:
       kind: code_changes
       path: "src/[scope]/[new-file].ts"
 
+  # ────────────────────────────────────────────────────────────
+  # Batch 4: refactor call sites (depends on P3 design + P4 new module)
+  # ────────────────────────────────────────────────────────────
   - id: P5
     description: "Refactor existing call sites to use new [module/class]"
+    plane: Evolution
+    priority: high
     subagent_type: software-developer
     task_template: subagent-software-developer
     task_params:
+      task_id: P5
+      task_title: "Refactor call sites"
+      sc_list: "SC1 (no old pattern remains), SC2 (tests still pass)"
+      tdd_mode: strict
+      upstream_outputs: "P3 design + P4 new module"
+      files_to_touch: "src/[scope]/[caller-file].ts"
       inputs:
         - from_task: P3
           field: design_doc
         - from_task: P4
           field: code_changes
-    batch: 3
+    batch: 4
     depends_on: [P3, P4]
     isolation: worktree
     tdd: strict
     # Background default — see P4 comment.
     run_in_background: true
     files: ["src/[scope]/[caller-file].ts"]
+    prompt: "Refactor existing call sites of [old pattern] in src/[scope]/[caller-file].ts to use the new module from P4. Read P3's design + P4's new module first. Self-check: `! grep '[old-pattern]' src/[scope]/[caller-file].ts` (no old-pattern references) AND `npm test` (existing tests still pass)."
     acceptance:
-      covers: [SC1, SC2]   # e.g. "no longer imports old pattern" + "tests pass"
+      covers: [SC1, SC2]
       self_check_cmd: "! grep '[old-pattern]' src/[scope]/[caller-file].ts"
     output_schema:
       kind: code_changes
       path: "src/[scope]/[caller-file].ts"
 
   # ────────────────────────────────────────────────────────────
-  # Batch 4: tests + verify (sequential)
+  # Batch 5: tests (depends on P5 refactor)
   # ────────────────────────────────────────────────────────────
   - id: P6
     description: "Add unit tests for refactored boundary"
+    plane: Observation
+    priority: medium
     subagent_type: software-developer
     task_template: subagent-software-developer
     task_params:
+      task_id: P6
+      task_title: "Add boundary tests"
+      sc_list: "SC2 (all tests pass), SC3 (new API exists)"
+      tdd_mode: strict
+      upstream_outputs: "P5 refactor"
+      files_to_touch: "test/[scope]/"
       inputs:
         - from_task: P5
           field: code_changes
-    batch: 4
+    batch: 5
     depends_on: [P5]
     isolation: worktree
     tdd: strict
     # Background default — see P4 comment.
     run_in_background: true
     files: ["test/[scope]/"]
+    prompt: "Add boundary tests for the refactor. Read P5's diff. Cover (a) the new module's public surface, (b) the caller-file's new shape. Self-check: `npm test`."
     acceptance:
       covers: [SC2, SC3]   # tests cover + tests pass
       self_check_cmd: "npm test"
@@ -148,20 +203,29 @@ tasks:
       path: "test/[scope]/"
 
   # ────────────────────────────────────────────────────────────
-  # Batch 5: audit + verify (sequential)
+  # Batch 6: audit + verify (sequential)
   # ────────────────────────────────────────────────────────────
   - id: P7
     description: "Audit refactor result against acceptance criteria"
+    plane: Security
+    priority: high
     subagent_type: software-auditor
     task_template: subagent-software-auditor
     task_params:
-      # `task_report_path` is a single string per the auditor template's
-      # schema; pass multiple paths as one newline-separated string.
-      task_report_path: |
-        .pi/orchestrator/task-P4-report.md
-        .pi/orchestrator/task-P5-report.md
-        .pi/orchestrator/task-P6-report.md
-    batch: 5
+      task_id: P7
+      task_title: "Audit refactor"
+      sc_list: "SC1 (no old pattern), SC2 (tests pass), SC3 (new API exists), SC4 (no regressions), SC5 (coverage maintained)"
+      depth: fast
+      # Multiple reports to audit — the auditor reads each one and rolls
+      # up. `task_report_paths` is the multi-path form; `task_report_path`
+      # is the single-path form. The auditor template accepts either.
+      task_report_path: ".pi/orchestrator/task-P4-report.md"
+      task_report_paths:
+        - .pi/orchestrator/task-P4-report.md
+        - .pi/orchestrator/task-P5-report.md
+        - .pi/orchestrator/task-P6-report.md
+      isolation: none
+    batch: 6
     depends_on: [P6]
     isolation: none
     tdd: none
@@ -171,6 +235,7 @@ tasks:
     # The dispatcher would default this to true based on subagent_type.
     run_in_background: true
     files: []
+    prompt: "Audit the refactor across P4, P5, P6. For each developer report listed in `task_report_paths`, verify the corresponding SCs. Then re-run `npm test` to confirm no regressions (SC4) and `npm run typecheck` (SC3). Default verdict is NEEDS WORK; only CERTIFIED with overwhelming evidence."
     acceptance:
       covers: [SC1, SC2, SC3, SC4, SC5]   # all SCs verified by auditor
     output_schema:

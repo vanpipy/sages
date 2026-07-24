@@ -3,13 +3,14 @@ Task Prompt Template: subagent-software-auditor
 
 Used by: orchestrator when task.subagent_type == "software-auditor"
 Parameters:
-  - task_id           : string  — task being audited
-  - task_title        : string
-  - sc_ids            : string[] — SC ids to verify
-  - sc_list           : string  — formatted SC list with verification_cmd
-  - depth             : string  — "fast" | "full" (5 phases vs 3)
-  - task_report_path  : string  — where to read developer's report
-  - isolation         : string  — "worktree" | "none"
+  - task_id            : string     — task being audited
+  - task_title         : string
+  - sc_ids             : string[]   — SC ids to verify
+  - sc_list            : string     — formatted SC list with verification_cmd
+  - depth              : string     — "fast" | "full" (5 phases vs 3)
+  - task_report_path   : string     — where to read the (single) developer's report
+  - task_report_paths  : string[]   — where to read multiple developer reports (one per preceding task); preferred for multi-developer audits
+  - isolation          : string     — "worktree" | "none"
 -->
 
 ## Audit Task
@@ -42,7 +43,8 @@ For each SC above:
 
 ## Inspection Steps
 
-1. **Read developer's report**: {{task_report_path}}
+1. **Read developer's report(s)**: {{#if task_report_paths}}{{#each task_report_paths}}- {{this}}
+   {{/each}}{{else}}{{task_report_path}}{{/if}}
 2. **Inspect the diff**: `git diff main..HEAD --stat` — what files actually changed
 3. **Verify TDD discipline** (if mode was strict):
    - Were tests added BEFORE code? (look at git history)

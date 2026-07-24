@@ -331,6 +331,106 @@ describe("validateDAG", () => {
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
     });
+
+    it("accepts tasks with no acceptance.covers (Explore / Plan research tasks)", () => {
+      // Build a task that omits acceptance.covers (research-only).
+      const result = validateDAG(
+        {
+          goal_id: "GC-2025-test",
+          tasks: [
+            {
+              id: "P1",
+              description: "find things",
+              plane: "Observation",
+              priority: "medium",
+              depends_on: [],
+              files: [],
+              subagent_type: "Explore",
+              batch: 1,
+              isolation: "none",
+              tdd: "none",
+              prompt: "find all the things (long enough prompt)",
+              acceptance: {},
+              output_schema: { kind: "file_list" },
+            },
+            {
+              id: "P2",
+              description: "satisfy SC1",
+              plane: "Business",
+              priority: "high",
+              depends_on: ["P1"],
+              files: [],
+              subagent_type: "software-developer",
+              batch: 2,
+              isolation: "worktree",
+              tdd: "strict",
+              prompt: "implement the things (long enough prompt)",
+              acceptance: { covers: ["SC1", "SC2"] },
+              output_schema: { kind: "code_changes" },
+            },
+          ],
+        },
+        baseContract,
+      );
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+  });
+
+  describe("shipped DAG templates validate as-is", () => {
+    // These two tests guard against the C4 regression: shipped templates
+    // MUST validate without manual edit. The TDD test is RED if a future
+    // commit removes `plane` / `priority` / `prompt` from a task.
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const yaml = require("js-yaml");
+
+    function loadDag(rel: string) {
+      const raw = fs.readFileSync(
+        path.join(__dirname, "..", "..", "..", rel),
+        "utf-8",
+      );
+      return yaml.load(raw) as any;
+    }
+
+    function goalContract(scIds: string[]) {
+      return {
+        id: "GC-shipped-test",
+        title: "t",
+        success_criteria: scIds.map((id) => ({ id, criterion: "ok", verification_cmd: "true" })),
+        anti_goals: [],
+        scope: { include: [], exclude: [] },
+        constraints: {},
+        done_definition: "ok",
+        created_at: "2025-01-01T00:00:00Z",
+      };
+    }
+
+    it("dag-bug-fix.yaml passes validateDAG", () => {
+      const dag = loadDag("skills/orchestrator/templates/dag/dag-bug-fix.yaml");
+      // Normalize: templates use a string for acceptance (sometimes empty
+      // object). validateDAG already handles that.
+      const result = validateDAG(
+        { goal_id: "GC-shipped-test", tasks: dag.tasks },
+        goalContract(["SC1", "SC2", "SC3", "SC4", "SC5"]),
+      );
+      if (!result.valid) {
+        throw new Error("dag-bug-fix.yaml must validate as-shipped: " + JSON.stringify(result.errors));
+      }
+      expect(result.valid).toBe(true);
+    });
+
+    it("dag-tdd-refactor.yaml passes validateDAG", () => {
+      const dag = loadDag("skills/orchestrator/templates/dag/dag-tdd-refactor.yaml");
+      const result = validateDAG(
+        { goal_id: "GC-shipped-test", tasks: dag.tasks },
+        goalContract(["SC1", "SC2", "SC3", "SC4", "SC5"]),
+      );
+      if (!result.valid) {
+        throw new Error("dag-tdd-refactor.yaml must validate as-shipped: " + JSON.stringify(result.errors));
+      }
+      expect(result.valid).toBe(true);
+    });
   });
 });
 
