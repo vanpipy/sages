@@ -1,0 +1,5 @@
+{
+  "_comment": "SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. pi-subagents reads toolDescriptionMode and looks up {{agentDir}}/agent-tool-description.md (installed by install.sh from pi/templates/agent-tool-description.md). Project-level .pi/subagents.json overrides this global; leave existing user keys intact — merge, don't replace. _sages_template_marker is a hidden key checked by uninstall_subagents_config to detect 'our install'.",
+  "toolDescriptionMode": "custom",
+  "_sages_template_marker": "SAGES_TEMPLATE_V1"
+}

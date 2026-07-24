@@ -26,6 +26,27 @@ Before editing ANY file, follow in order — **do NOT skip**:
 and parallelize work. First instinct should NOT be "let me just edit this".
 If task complexity is unclear, run `brainstorming` first.
 
+### 1.1 Orchestration dashboard — use `todowrite`
+
+For any multi-step task (≥ 3 sub-tasks) the **main agent maintains its own
+`todowrite`** — the list IS the orchestration state:
+
+- Each todo = one step: either a subagent dispatch OR a coordination move
+- `in_progress` = a dispatched subagent (foreground waiting OR background
+  in-flight)
+- `pending` = next dispatch, blocked on a dependency
+- `completed` = subagent returned; orchestrator verified the result
+
+**Dispatch decision per todo** (mark in the `content` field):
+- `[serial]` — must wait for prior step's result before dispatching
+- `[parallel]` — independent of other in-flight items → dispatch together,
+  `run_in_background: true`
+
+Concretely: a batch of independent todos gets dispatched in **one message
+with multiple `Agent` tool calls, each with `run_in_background: true`**.
+Update statuses as results arrive. The todowrite is the dashboard the user
+(and you) read to see orchestration state.
+
 For non-modification tasks (reading, answering, exploring): use §2 routing directly.
 
 ## 2. Tool Routing (by question scale + intent)
@@ -78,3 +99,15 @@ All tools return: `{ status: "in_progress"|"complete"|"error", intent, validatio
 **Background = parent gets the agent id immediately and keeps working.** Use `get_subagent_result(agent_id)` to collect the result later, or `steer_subagent(agent_id, "...")` to send mid-run messages. Max concurrent background agents defaults to 4 (configurable via `/agents`).
 
 **Always set `run_in_background: true` for `software-developer` and `software-auditor`** unless the task is short enough to ignore (and even then, parallelism is free). See `pi/templates/SUBAGENTS.md` for the full rule, code examples, and reasoning.
+
+### 6.1 Override the Agent tool's foreground default
+
+The pi-subagents `Agent` tool description defaults to foreground ("use
+foreground when you need the results to proceed"). **This default does
+NOT apply to `software-developer` or `software-auditor`** — those must
+ALWAYS be spawned with `run_in_background: true`, even when you would
+otherwise wait synchronously. The point isn't parallelism; it's freeing
+the parent context from being blocked. Use `get_subagent_result(agent_id)`
+when you actually need the verdict, or react to the background
+notification. See `pi/templates/SUBAGENTS.md` Foreground vs Background
+section for the full rationale.

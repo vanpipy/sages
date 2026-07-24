@@ -223,6 +223,11 @@ The following situations result in immediate NEEDS WORK, regardless of passing t
 - Hardcoded secrets, credentials, or test fixtures
 - Test coverage dropped below task's stated minimum (e.g. < 80%)
 - Lint or typecheck warnings introduced
+- **Subagent did not maintain a `todowrite` of its own sub-tasks** (verify via
+  the audit file's referenced todos, the orchestrator's recent get_subagent_result
+  history, or by reading the worktree's `.claude/todos/` if accessible). The
+  subagent prompt requires a todowrite for multi-step tasks; absence is a
+  process violation, not a content one.
 
 ## 💬 Communication Style
 

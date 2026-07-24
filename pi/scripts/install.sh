@@ -71,6 +71,20 @@ SUBAGENTS_DOC_TARGET="$AGENT_DIR/SUBAGENTS.md"
 AFT_TEMPLATE="$SCRIPT_DIR/../templates/aft.jsonc"
 AFT_CONFIG_PATH="$HOME/.config/cortexkit/aft.jsonc"
 
+# pi-subagents config (toolDescriptionMode: "custom") + agent-tool-description.md
+# override. pi-subagents reads toolDescriptionMode from $AGENT_DIR/subagents.json
+# and the description template from $AGENT_DIR/agent-tool-description.md (see
+# pi-subagents/dist/index.js#loadCustomToolDescription, ~line 791). This pair
+# lets sages replace the upstream default Agent tool description with a
+# sage-tuned one — specifically, inverting the foreground default for
+# software-developer/auditor and adding a todowrite-driven orchestration hint.
+# SAGES_TEMPLATE_V1 sentinel in the description template lets uninstall_agent_tool_description
+# distinguish "our template" from a user's hand-edited version.
+AGENT_TOOL_DESCRIPTION_TEMPLATE="$SCRIPT_DIR/../templates/agent-tool-description.md"
+AGENT_TOOL_DESCRIPTION_TARGET="$AGENT_DIR/agent-tool-description.md"
+SUBAGENTS_CONFIG_TEMPLATE="$SCRIPT_DIR/../templates/subagents.json"
+SUBAGENTS_CONFIG_TARGET="$AGENT_DIR/subagents.json"
+
 
 # pi-codebase-memory sage-peer (local package, installed by file-copy not `pi install npm:`)
 PI_CODEBASE_MEMORY_SRC_REL="pi-codebase-memory"
@@ -644,6 +658,178 @@ uninstall_subagents_doc() {
   else
     echo "  SUBAGENTS.md is user-customized, leaving alone"
   fi
+}
+
+# ────────────────────────────────────────────────────────────
+# agent-tool-description.md — sage-tuned Agent tool description override
+#
+# pi-subagents looks up $AGENT_DIR/agent-tool-description.md when
+# toolDescriptionMode is "custom" (pi-subagents/dist/index.js#loadCustomToolDescription,
+# ~line 791). The file is read once at tool registration; re-installing
+# refreshes the file for the next pi session.
+#
+# Idempotency rules (match install_subagent_templates):
+#   - missing → install from template
+#   - file exists with sentinel → skip (we installed it; --force to overwrite)
+#   - file exists without sentinel → user-customized; skip unless --force
+# ────────────────────────────────────────────────────────────
+
+is_agent_tool_description_installed() {
+  [[ -f "$AGENT_TOOL_DESCRIPTION_TARGET" ]] && \
+    grep -q "$SUBAGENT_SENTINEL_TEXT" "$AGENT_TOOL_DESCRIPTION_TARGET" 2>/dev/null
+}
+
+install_agent_tool_description() {
+  if [[ ! -f "$AGENT_TOOL_DESCRIPTION_TEMPLATE" ]]; then
+    echo "  Warning: agent-tool-description.md template not found at $AGENT_TOOL_DESCRIPTION_TEMPLATE"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$AGENT_TOOL_DESCRIPTION_TARGET")"
+
+  if is_agent_tool_description_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  agent-tool-description.md already installed (use --force to reinstall)"
+    return 0
+  fi
+
+  if [[ -f "$AGENT_TOOL_DESCRIPTION_TARGET" ]] && ! is_agent_tool_description_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  agent-tool-description.md exists with user customization (use --force to overwrite)"
+    return 0
+  fi
+
+  rm -f "$AGENT_TOOL_DESCRIPTION_TARGET"
+  _atomic_copy "$AGENT_TOOL_DESCRIPTION_TEMPLATE" "$AGENT_TOOL_DESCRIPTION_TARGET"
+  echo "  Installed agent-tool-description.md (sage-tuned Agent tool description)"
+}
+
+uninstall_agent_tool_description() {
+  if [[ ! -f "$AGENT_TOOL_DESCRIPTION_TARGET" ]]; then
+    return 0
+  fi
+  if is_agent_tool_description_installed; then
+    rm -f "$AGENT_TOOL_DESCRIPTION_TARGET"
+    echo "  Removed agent-tool-description.md (was our template)"
+  else
+    echo "  agent-tool-description.md is user-customized, leaving alone"
+  fi
+}
+
+# ────────────────────────────────────────────────────────────
+# subagents.json — pi-subagents settings (toolDescriptionMode: "custom")
+#
+# pi-subagents reads $AGENT_DIR/subagents.json for toolDescriptionMode and
+# other operational settings (pi-subagents/dist/settings.js). We write
+# {"toolDescriptionMode": "custom"} so the description override above is
+# activated on next pi session.
+#
+# MERGE semantics (not replace): if the file exists with other keys
+# (maxConcurrent, defaultMaxTurns, defaultJoinMode, fleetView, ...),
+# we preserve those and just ensure toolDescriptionMode is set. User
+# settings survive an install.sh re-run.
+# ────────────────────────────────────────────────────────────
+
+install_subagents_config() {
+  if [[ ! -f "$SUBAGENTS_CONFIG_TEMPLATE" ]]; then
+    echo "  Warning: subagents.json template not found at $SUBAGENTS_CONFIG_TEMPLATE"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$SUBAGENTS_CONFIG_TARGET")"
+
+  # Fresh install: write template verbatim (minus _comment). _sages_template_marker
+  # is a hidden key that lets uninstall identify files we installed.
+  if [[ ! -f "$SUBAGENTS_CONFIG_TARGET" ]]; then
+    python3 -c "
+import json, sys
+try:
+    t = json.load(open('$SUBAGENTS_CONFIG_TEMPLATE'))
+    # Drop _comment (template-only documentation); keep _sages_template_marker
+    # so uninstall_agent_tool_description-style sentinel detection works.
+    out = {k: v for k, v in t.items() if k != '_comment'}
+    with open('$SUBAGENTS_CONFIG_TARGET', 'w') as f:
+        json.dump(out, f, indent=2)
+        f.write('\n')
+    sys.exit(0)
+except Exception as e:
+    print('  Warning: failed to install subagents.json:', e, file=sys.stderr)
+    sys.exit(1)
+" || return 1
+    echo "  Installed subagents.json (toolDescriptionMode=custom)"
+    return 0
+  fi
+
+  # Existing file: MERGE — only ensure toolDescriptionMode is set; leave
+  # every other key (maxConcurrent, defaultMaxTurns, ...) alone. If the user
+  # has set toolDescriptionMode to something else, leave it (NEVER-TOUCH for
+  # explicit user choices).
+  python3 -c "
+import json, sys
+path = '$SUBAGENTS_CONFIG_TARGET'
+try:
+    d = json.load(open(path))
+except Exception:
+    # Unparseable existing file: leave it alone, warn.
+    print('  Warning: existing subagents.json is unparseable, leaving alone (use --force to overwrite)', file=sys.stderr)
+    sys.exit(2)
+
+# Idempotent guard: already set to what we want.
+if d.get('toolDescriptionMode') == 'custom':
+    print('  subagents.json already has toolDescriptionMode=custom')
+    sys.exit(0)
+
+# Skip if user explicitly chose a different mode (don't override).
+if 'toolDescriptionMode' in d:
+    print('  subagents.json has user-set toolDescriptionMode=\\\"' + str(d['toolDescriptionMode']) + '\\\", leaving alone')
+    sys.exit(0)
+
+# Safe to add: user hasn't expressed a preference for this key.
+d['toolDescriptionMode'] = 'custom'
+with open(path, 'w') as f:
+    json.dump(d, f, indent=2)
+    f.write('\n')
+print('  Added toolDescriptionMode=custom to existing subagents.json')
+" || return 0  # python exit code 2 = unparseable; treat as warning, not failure
+}
+
+# Uninstall subagents.json only if it's our handiwork:
+#   1. file missing → skip
+#   2. file has toolDescriptionMode != 'custom' → user explicitly chose a
+#      different mode; leave it alone
+#   3. file has any keys besides toolDescriptionMode + _sages_template_marker
+#      → user has added other settings; leave it alone
+#   4. file is exactly {toolDescriptionMode: 'custom', _sages_template_marker:
+#      'SAGES_TEMPLATE_V1'} (or missing _sages_template_marker) → safe to
+#      remove (was purely our install)
+uninstall_subagents_config() {
+  if [[ ! -f "$SUBAGENTS_CONFIG_TARGET" ]]; then
+    return 0
+  fi
+  python3 -c "
+import json, sys, os
+path = '$SUBAGENTS_CONFIG_TARGET'
+try:
+    d = json.load(open(path))
+except Exception:
+    # Unparseable — not ours, leave it.
+    print('  subagents.json is unparseable, leaving alone')
+    sys.exit(0)
+
+# Rule 2: user explicitly chose a non-custom mode.
+if d.get('toolDescriptionMode') not in (None, 'custom'):
+    print('  subagents.json has user-set toolDescriptionMode=' + repr(d.get('toolDescriptionMode')) + ', leaving alone')
+    sys.exit(0)
+
+# Rule 3: user has added other settings.
+keys_we_may_have_added = {'toolDescriptionMode', '_sages_template_marker'}
+user_keys = {k: v for k, v in d.items() if k not in keys_we_may_have_added}
+if user_keys:
+    print('  subagents.json has user settings, leaving alone')
+    sys.exit(0)
+
+# Rule 4: empty or only our keys — safe to remove.
+os.remove(path)
+print('  Removed subagents.json (was our install)')
+" || return 0
 }
 
 register_settings() {
@@ -1295,6 +1481,12 @@ install() {
   install_subagent_templates
   install_subagents_doc
 
+  # Install agent-tool-description.md override + subagents.json setting
+  # (toolDescriptionMode=custom). pi-subagents reads these at next session
+  # start — see pi-subagents/dist/index.js#loadCustomToolDescription.
+  install_agent_tool_description
+  install_subagents_config
+
   echo ""
   echo "Done! Restart pi: exit && pi"
 }
@@ -1374,6 +1566,10 @@ uninstall() {
   # plus the SUBAGENTS.md doc (only if byte-identical to our template)
   uninstall_subagent_templates
   uninstall_subagents_doc
+
+  # Uninstall agent-tool-description.md override + subagents.json setting.
+  uninstall_agent_tool_description
+  uninstall_subagents_config
 
   echo ""
   echo "Done. Restart pi: exit && pi"
