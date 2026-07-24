@@ -26,6 +26,14 @@
  * governed by the OS layer instead. This is the only place this
  * convention is encoded; `canMainAgentWrite` itself returns false
  * for absolute paths defensively.
+ *
+ * Chained-command handling (added 2026-07-25): `shouldBlockBashCommand`
+ * splits the input on top-level `&&` / `||` / `;` (respecting quotes
+ * and paren/brace nesting) via `splitChainedCommands` and walks each
+ * segment independently. This defeats the original first-word bypass
+ * (`echo done && rm src/foo.ts` no longer slips through because the
+ * first word is `echo`). Test coverage: T16–T22 + T23b + T24 in
+ * `pi/test/tools/bash-guard.test.ts`.
  */
 
 import { isAbsolute } from "node:path";
@@ -303,13 +311,18 @@ export function extractBashTargets(command: string): string[] {
  *
  * Rules (in order):
  *   1. `# sages:safe` prefix (after trim) → never block (escape hatch).
- *   2. Classification `read-only`        → never block.
- *   3. Any extracted target is a production-code path → block with
- *      the long reason message naming the targets.
- *   4. Classification `unknown` and no targets → block with the
- *      short "Unknown bash command; prefix with '# sages:safe'…"
+ *   2. Split into chained segments on top-level `&&` / `||` / `;`.
+ *      Walk each segment independently: a write-intent command chained
+ *      after a read-only command (e.g. `echo done && rm src/foo.ts`)
+ *      still trips the gate. See `splitChainedCommands` for the
+ *      segmenter and T16–T22 in `bash-guard.test.ts` for coverage.
+ *   3. If ANY segment is write-intent with a denied target → block
+ *      with the long reason naming the union of denied targets.
+ *   4. If ANY segment is `unknown` with no extractable targets → block
+ *      with the short "Unknown bash command; prefix with '# sages:safe'"
  *      reason (forces the LLM to opt in explicitly).
- *   5. Otherwise → allow.
+ *   5. Otherwise → allow (all segments read-only OR write-intent to
+ *      non-production paths).
  *
  * The `ctx` parameter is accepted for symmetry with the file-gate
  * `execute*` signatures and to give the wiring a future place to
@@ -326,37 +339,169 @@ export function shouldBlockBashCommand(
 		return { block: false };
 	}
 
-	// 2. Read-only → allow unconditionally.
-	const classification = classifyBashCommand(command);
-	if (classification === "read-only") {
-		return { block: false };
-	}
+	// 2. Split into top-level chained segments (handles &&, ||, ;
+	//    respecting quotes + paren/brace nesting).
+	const segments = splitChainedCommands(trimmed);
 
-	// 3. Check extracted targets against the file-gate policy.
-	const targets = extractBashTargets(command);
-	for (const target of targets) {
-		if (isProductionTarget(target)) {
-			return { block: true, reason: formatBlockReason(targets) };
+	const deniedTargets: string[] = [];
+	const seenDenied = new Set<string>();
+	let sawUnknown = false;
+
+	for (const seg of segments) {
+		const trimmedSeg = seg.trimStart();
+		if (!trimmedSeg) continue;
+
+		const classification = classifyBashCommand(seg);
+
+		// Read-only segment is unconditionally safe — skip.
+		if (classification === "read-only") continue;
+
+		// Write-intent segment — check its extracted targets.
+		if (classification === "write-intent") {
+			for (const t of extractBashTargets(seg)) {
+				if (isProductionTarget(t) && !seenDenied.has(t)) {
+					seenDenied.add(t);
+					deniedTargets.push(t);
+				}
+			}
+			continue;
+		}
+
+		// Unknown segment — extract targets and check; also flag
+		// sawUnknown so we can force opt-in below if no denied
+		// targets surface from any segment.
+		const segTargets = extractBashTargets(seg);
+		if (segTargets.length === 0) {
+			sawUnknown = true;
+			continue;
+		}
+		for (const t of segTargets) {
+			if (isProductionTarget(t) && !seenDenied.has(t)) {
+				seenDenied.add(t);
+				deniedTargets.push(t);
+			}
 		}
 	}
 
-	// 4. Unknown + no identifiable targets → block and force explicit
-	//    opt-in via the escape hatch (LLM must assert "this is safe").
-	if (classification === "unknown" && targets.length === 0) {
+	// 3. Any denied target → block with the long reason.
+	if (deniedTargets.length > 0) {
+		return { block: true, reason: formatBlockReason(deniedTargets) };
+	}
+
+	// 4. Any unknown-no-target segment → force opt-in via escape hatch.
+	if (sawUnknown) {
 		return {
 			block: true,
 			reason: "Unknown bash command; prefix with '# sages:safe' to bypass",
 		};
 	}
 
-	// 5. Write-intent but all targets are outside the project (e.g.
-	//    `/tmp/...`) or somehow acceptable → allow.
+	// 5. All segments either read-only or write-intent to non-production
+	//    paths (e.g. `/tmp/...`) → allow.
 	return { block: false };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // Internals
 // ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Split a shell command into top-level segments separated by `&&`,
+ * `||`, or `;`. Respects single quotes, double quotes, backslash
+ * escapes, and paren / brace nesting. Empty segments are dropped.
+ *
+ * Used by `shouldBlockBashCommand` to defeat the chaining bypass where
+ * a write-intent command (`rm src/foo.ts`) follows a read-only prefix
+ * (`echo done`) and the first-word classifier alone would have let it
+ * through.
+ *
+ * Behaviour:
+ *   - `echo a && rm b`             → `["echo a", "rm b"]`
+ *   - `rm a || echo b`             → `["rm a", "echo b"]`
+ *   - `rm a; echo b`               → `["rm a", "echo b"]`
+ *   - `echo "a && b" && c`         → `["echo \"a && b\"", "c"]`
+ *     (the `&&` inside double quotes is data, not a separator)
+ *   - `(echo done) && rm b`        → `["(echo done)", "rm b"]`
+ *     (paren group counts as one segment)
+ *   - `rm a\nrm b`                 → `["rm a\\nrm b"]`
+ *     (newlines are NOT separators here — bash treats them as such but
+ *      it's rare in tool calls; add if needed)
+ *
+ * Exported for unit testing; the gate calls it via
+ * `shouldBlockBashCommand`.
+ */
+export function splitChainedCommands(command: string): string[] {
+	const segments: string[] = [];
+	let current = "";
+	let i = 0;
+	let inSingle = false;
+	let inDouble = false;
+	let escape = false;
+	let parenDepth = 0;
+	let braceDepth = 0;
+
+	while (i < command.length) {
+		const c = command[i];
+
+		if (escape) {
+			current += c;
+			escape = false;
+			i++;
+			continue;
+		}
+		if (c === "\\") {
+			escape = true;
+			current += c;
+			i++;
+			continue;
+		}
+		// Quotes toggle; content is appended verbatim.
+		if (!inSingle && c === '"') {
+			inDouble = !inDouble;
+			current += c;
+			i++;
+			continue;
+		}
+		if (!inDouble && c === "'") {
+			inSingle = !inSingle;
+			current += c;
+			i++;
+			continue;
+		}
+
+		// Outside quotes: track paren/brace depth + detect separators.
+		if (!inSingle && !inDouble) {
+			if (c === "(") parenDepth++;
+			else if (c === ")") parenDepth--;
+			else if (c === "{") braceDepth++;
+			else if (c === "}") braceDepth--;
+
+			// Top-level separators only — depth must be 0.
+			if (parenDepth === 0 && braceDepth === 0) {
+				if (c === ";") {
+					if (current.trim()) segments.push(current.trim());
+					current = "";
+					i++;
+					continue;
+				}
+				if (
+					(c === "&" && command[i + 1] === "&") ||
+					(c === "|" && command[i + 1] === "|")
+				) {
+					if (current.trim()) segments.push(current.trim());
+					current = "";
+					i += 2; // skip the second char of `&&` or `||`
+					continue;
+				}
+			}
+		}
+
+		current += c;
+		i++;
+	}
+	if (current.trim()) segments.push(current.trim());
+	return segments;
+}
 
 /**
  * True iff `target` is a path the main agent should not write to.

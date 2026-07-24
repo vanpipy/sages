@@ -306,10 +306,12 @@ relative paths in `pi/src/`.
   without a realpath / project-prefix check. Threat model currently
   assumes developer/auditor agents are trusted; harden before
   exposing the audit tool to untrusted DAGs.
-- **Pending hardening**: bash-guard command-chain bypass (`echo done
-  && rm src/...`) — extend `extractBashTargets` to look past `&&`/`||`/`;`.
-  Documented in `bash-guard.ts` header; tracked in audit-workflow
-  minor-finding §2.
+- **Pending hardening**: ~~bash-guard command-chain bypass (`echo done
+  && rm src/...`)~~ — **resolved 2026-07-25** by adding
+  `splitChainedCommands` (splits on top-level `&&`/`||`/`;` respecting
+  quotes + parens) and rewriting `shouldBlockBashCommand` to walk each
+  segment independently. T16–T24 in `pi/test/tools/bash-guard.test.ts`.
+  No remaining command-chain gaps in the gate.
 
 ## History
 
