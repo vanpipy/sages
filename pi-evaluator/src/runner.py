@@ -201,7 +201,11 @@ Show progress and summary at the end. Be concise but complete all phases."""
                     print(f"Stderr: {stderr[:200]}")
                 print(f"Generated files in: {codes_dir}")
                 for f in codes_dir.rglob("*"):
-                    if f.is_file() and f.name not in ["session.jsonl"] and ".sages" not in f.parts:
+                    # Skip the session log and the Sages orchestrator
+                    # state dir (goal/dag/audit reports; the user
+                    # typically wants to see the generated code, not
+                    # the orchestrator's bookkeeping).
+                    if f.is_file() and f.name not in ["session.jsonl"] and ".pi/orchestrator" not in f.parts:
                         print(f"  - {f.relative_to(codes_dir)}")
 
         except OSError as e:

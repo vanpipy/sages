@@ -74,7 +74,7 @@ alibabacloud-devops-mcp-server --streamable-http (port 3000)
 codeup.aliyun.com API
 ```
 
-**关键设计**（详见 [设计文档](../../.sages/designs/2026-06-11-yunxiao-pi-design.md)）：
+**关键设计**（详见 [设计文档](../../.pi/orchestrator/designs/2026-06-11-yunxiao-pi-design.md) — *注：链接已迁移到 `.pi/orchestrator/designs/`；该设计文件未提交到仓库*）：
 
 - **按需启停**：第一个 tool 触发 spawn，闲置 10 分钟自动 kill
 - **flock 并发保护**：多 pi 进程共享同一 server
@@ -136,7 +136,7 @@ exit && pi
 
 ## 📚 文档
 
-- 设计文档：`~/.sages/designs/2026-06-11-yunxiao-pi-design.md`（13 章节，1130 行）
+- 设计文档：`~/.pi/orchestrator/designs/2026-06-11-yunxiao-pi-design.md`（13 章节，1130 行）
 - SKILL.md：`skills/yunxiao/SKILL.md`（LLM 读这个决策）
 - 53 工具简表：`skills/yunxiao/references/tool-catalog.md`
 - 工作流模式：`skills/yunxiao/references/patterns.md`

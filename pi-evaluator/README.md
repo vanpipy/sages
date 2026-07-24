@@ -45,7 +45,7 @@ evaluations/
     │   ├── src/
     │   ├── tests/
     │   ├── package.json
-    │   └── .sages/         # Four Sages workflow artifacts
+    │   └── .pi/orchestrator/   # Sages orchestrator state (goal/dag/audit reports)
     ├── sessions/           # Session logs (gitignored)
     │   └── session.jsonl
     └── report/             # Evaluation results (gitignored)
