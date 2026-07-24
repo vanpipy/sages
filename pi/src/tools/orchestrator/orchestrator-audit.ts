@@ -1,18 +1,23 @@
 /**
  * Orchestrator Audit Tool
  *
- * Stage 4 of orchestrator workflow: 5-phase audit on a single task or the
- * whole DAG. The phase vocabulary (ink / nose / foot / castration / death)
- * is the legacy inherited from the now-removed GaoYao role tool — kept
- * because it remains a useful audit discipline, but the tool itself is
- * the only auditor in the package now.
+ * Stage 4 of orchestrator workflow: workflow-level audit rollup.
  *
- * Phases:
- *   - ink:       every claim has evidence (file paths, command output)
- *   - nose:      alignment with goal-contract.success_criteria
- *   - foot:      actually runs (typecheck / lint / test) — re-executes verification_cmd
- *   - castration: security / isolation (no hardcoded secrets, no risky patterns)
- *   - death:     long-term viability (tests added, no new tech debt, worktree clean)
+ * A3 split: per-task audit (re-run verification_cmd, inspect diff, check TDD
+ * discipline) is delegated to the `software-auditor` subagent, which writes
+ * `.pi/orchestrator/audit-{task_id}.md`. This tool pools those per-task
+ * reports and aggregates them into a workflow-level view — focusing on
+ * cross-task consistency, SC coverage, and integration-level concerns.
+ *
+ * Phases (A3 scope — workflow-level unless noted):
+ *   - ink:       verify each task has a software-auditor report AND it's CERTIFIED
+ *   - nose:      cross-check SC coverage across all tasks (goal contract)
+ *   - foot:      OPTIONAL re-run of cross-cutting verification_cmd (per-task
+ *                verification is software-auditor's job)
+ *   - castration: workflow-level security (full only) — orphaned worktrees,
+ *                shared secrets across tasks
+ *   - death:     long-term viability (full only) — orphaned branches, drive-by
+ *                refactoring across task boundaries
  *
  * Output: writes markdown report + returns verdict + score + findings.
  */
@@ -159,7 +164,7 @@ export function registerOrchestratorAuditTool(pi: any): void {
   pi.registerTool({
     name: "orchestrator_audit",
     label: "Orchestrator Audit",
-    description: "Stage 4: 5-phase audit (ink/nose/foot/castration/death). State persists between calls. Verdict: PASS/REVISE/REJECT with score.",
+    description: "Stage 4: workflow-level audit rollup (A3). Reads software-auditor reports, aggregates verdicts, surfaces cross-task findings. Default depth fast (3 phases: ink/nose/foot); pass depth:full for castration/death. State persists between calls. Verdict: PASS/REVISE/REJECT with score.",
     parameters: OrchestratorAuditParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
@@ -216,7 +221,7 @@ export function registerOrchestratorAuditTool(pi: any): void {
   });
 }
 
-/** Init: create state file + return phase guidance. */
+/** Init: create state file + read per-task audit reports + return workflow-level view. */
 async function initAudit(
   cwd: string,
   plan: OrchestrationPlan,
@@ -238,21 +243,26 @@ async function initAudit(
   saveAuditState(cwd, state);
 
   const phases = getPhasesForDepth(depth);
-  const phaseGuidance = buildPhaseGuidance(tasks, phases);
+  const phaseGuidance = buildWorkflowPhaseGuidance(phases);
+
+  // A3 — read software-auditor's per-task reports and aggregate
+  const reports = readAuditReports(cwd, tasks);
+  const workflowSummary = aggregateTaskAudits(tasks, reports);
 
   return {
     content: [{ type: "text", text: JSON.stringify({
       status: "in_progress",
       phase: "audit-init",
-      intent: `Audit initialized for ${tasks.length} task(s). Run each phase, calling orchestrator_audit({ observation: { finding: {...} } }) to record findings. When done, pass observation: { complete: { verdict, score, summary } } to finalize.`,
+      intent: `Audit initialized for ${tasks.length} task(s). workflowReady=${workflowSummary.workflowReady}. ${workflowSummary.blockingTasks.length > 0 ? `Blocking: ${workflowSummary.blockingTasks.join(", ")}. Run any remaining tasks + audits, then record findings in a single batch call to finalize.` : "All tasks certified — submit your workflow-level findings (or pass with 0 findings) and complete."}`,
       validation: {
-        errors: [],
+        errors: workflowSummary.workflowReady ? [] : [`tasks not yet certified: ${workflowSummary.blockingTasks.join(", ")}`],
         warnings: [],
         files_required: [auditStatePath(cwd, plan.id)],
         findings_required_min: depth === "fast" ? 1 : 3,
       },
       phases,
       phase_guidance: phaseGuidance,
+      workflow_summary: workflowSummary,
       tasks_to_audit: tasks.map(t => ({
         id: t.id,
         description: t.description,
@@ -435,6 +445,139 @@ export function appendFindings(
     score: computeScore(findings),
     updated_at: new Date().toISOString(),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A3 — workflow-level audit aggregation (read software-auditor's reports)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Verdict strings emitted by software-auditor subagent (per SUBAGENTS.md). */
+export type SubagentVerdict = "CERTIFIED" | "NEEDS WORK" | "BLOCKED" | "UNKNOWN";
+
+/** Per-task summary extracted from a software-auditor audit report. */
+export interface TaskAuditSummary {
+  task_id: string;
+  has_report: boolean;
+  verdict?: SubagentVerdict;
+  findings_total: number;
+}
+
+/** Workflow-level rollup across all task audits. */
+export interface WorkflowAuditSummary {
+  tasks: TaskAuditSummary[];
+  /** True iff every task has a report AND every report is CERTIFIED. */
+  workflowReady: boolean;
+  /** Tasks whose audit is missing or non-passing (NEEDS WORK / BLOCKED). */
+  blockingTasks: string[];
+}
+
+/**
+ * Parse a software-auditor report (markdown) into a structured summary.
+ * Pure function — caller handles file I/O.
+ *
+ * Recognizes:
+ *   - "**CERTIFIED**" / "**NEEDS WORK**" / "**BLOCKED**" under
+ *     "## Final Verdict" (or directly after "**Verdict**")
+ *   - Findings as bullet lines under "## Concerns" section
+ */
+export function parseAuditReport(
+  taskId: string,
+  content: string | null,
+): TaskAuditSummary {
+  if (content === null) {
+    return { task_id: taskId, has_report: false, findings_total: 0 };
+  }
+
+  // Verdict: first match after "Final Verdict" heading, else anywhere.
+  const verdictMatch = content.match(
+    /\*\*Final\s+Verdict\*\*[\s\S]*?\*\*(CERTIFIED|NEEDS WORK|BLOCKED)\*\*/i,
+  ) ?? content.match(/\*\*(CERTIFIED|NEEDS WORK|BLOCKED)\*\*/i);
+  const verdict: SubagentVerdict = (verdictMatch?.[1] as SubagentVerdict) ?? "UNKNOWN";
+
+  // Findings: count bullet lines under "## Concerns" if present, else 0.
+  const concernsMatch = content.match(/##\s+Concerns\s*\n([\s\S]*?)(?=\n##\s|\n*$)/i);
+  const findingsTotal = concernsMatch
+    ? (concernsMatch[1].match(/^\s*-\s+/gm) ?? []).length
+    : 0;
+
+  return {
+    task_id: taskId,
+    has_report: true,
+    verdict,
+    findings_total: findingsTotal,
+  };
+}
+
+/**
+ * Roll up per-task audit reports into a workflow-level summary.
+ * Pure function — caller supplies the report contents map.
+ *
+ * Use this in `initAudit` to compute `workflowReady` / `blockingTasks` so the
+ * LLM can see at a glance whether the workflow is ready to finalize.
+ */
+export function aggregateTaskAudits(
+  tasks: TaskNode[],
+  reports: Map<string, string | null>,
+): WorkflowAuditSummary {
+  const summaries: TaskAuditSummary[] = tasks.map((t) =>
+    parseAuditReport(t.id, reports.get(t.id) ?? null),
+  );
+  const blockingTasks = summaries
+    .filter((s) => !s.has_report || s.verdict !== "CERTIFIED")
+    .map((s) => s.task_id);
+  return {
+    tasks: summaries,
+    workflowReady: blockingTasks.length === 0,
+    blockingTasks,
+  };
+}
+
+/**
+ * Read each task's audit-*.md report from disk. Returns a map keyed by task
+ * id; missing or unreadable files map to null.
+ *
+ * This is the A3 glue: the orchestrator_audit tool at workflow level reads
+ * software-auditor's per-task reports rather than re-running the audit.
+ */
+function readAuditReports(cwd: string, tasks: TaskNode[]): Map<string, string | null> {
+  const reports = new Map<string, string | null>();
+  for (const t of tasks) {
+    const path = taskAuditPath(cwd, t.id);
+    if (existsSync(path)) {
+      try {
+        reports.set(t.id, readFileSync(path, "utf-8"));
+      } catch {
+        reports.set(t.id, null);
+      }
+    } else {
+      reports.set(t.id, null);
+    }
+  }
+  return reports;
+}
+
+/**
+ * Build workflow-level phase guidance (A3 — the per-task details are now
+ * handled by software-auditor; this tool focuses on cross-task concerns).
+ */
+function buildWorkflowPhaseGuidance(phases: string[]): Record<string, string> {
+  const g: Record<string, string> = {};
+  if (phases.includes("ink")) {
+    g.ink = "INK — verify each task has a software-auditor report at .pi/orchestrator/audit-{id}.md. `workflowReady=true` means all tasks are certified. Missing/blocked reports are listed in `blockingTasks`.";
+  }
+  if (phases.includes("nose")) {
+    g.nose = "NOSE — cross-check SC coverage across all tasks. Goal contract at .pi/orchestrator/goal-{id}.yaml. Each SC must be covered by at least one task's acceptance.covers AND that task's audit must be CERTIFIED.";
+  }
+  if (phases.includes("foot")) {
+    g.foot = "FOOT — OPTIONAL re-run of goal-contract verification_cmd (software-auditor already ran them per-task). Use only for cross-cutting SCs that span multiple tasks (e.g., end-to-end integration tests).";
+  }
+  if (phases.includes("castration")) {
+    g.castration = "CASTRATION — workflow-level security: no orphaned worktrees, no shared secrets across tasks, no inconsistent auth patterns across the codebase.";
+  }
+  if (phases.includes("death")) {
+    g.death = "DEATH — long-term viability: no orphaned branches, no drive-by refactoring across task boundaries, dependencies actually used.";
+  }
+  return g;
 }
 
 export function buildPhaseGuidance(tasks: TaskNode[], phases: string[]): Record<string, string> {
