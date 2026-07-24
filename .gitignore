@@ -32,8 +32,8 @@ Thumbs.db
 # Sages workflow directory (generated)
 # - .sages/workspace/   marker only (read by start-mcp.sh + pi-codebase-memory
 #                       isSageWorkspace heuristic). No state stored.
-# - .sages/designs/    brainstorming's writeDesignDoc target (defer-to-later).
-# All other runtime state lives under .pi/orchestrator/.
+# All other runtime state (incl. brainstorming designs) lives under
+# .pi/orchestrator/.
 .sages/
 
 # Plan files (generated)

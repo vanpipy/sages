@@ -113,7 +113,7 @@ Complete these items in order:
 3. **Grill: Resolve decision branches** — One question at a time with recommendations
 4. **Propose 2-3 approaches** — With tradeoffs and recommendation
 5. **Present design sections** — Get approval after each section
-6. **Write design doc** — Save to `.sages/designs/YYYY-MM-DD-<topic>.md`
+6. **Write design doc** — Save to `.pi/orchestrator/designs/YYYY-MM-DD-<topic>.md`
 7. **Spec self-review** — 4-step inline check (see below)
 8. **User reviews written spec** — Wait for approval
 9. **Transition to implementation** — Can invoke `goal_contract_create` to seed the orchestrator workflow (optional; auto-synthesizes a DAG from the design)
@@ -303,7 +303,7 @@ When **Fuxi workflow is running** and design is approved:
 **Request:** {request}
 **Approach:** {chosen approach}
 **Decisions Resolved:** {summary}
-**Design:** .sages/designs/{date}-{topic}.md
+**Design:** .pi/orchestrator/designs/{date}-{topic}.md
 
 → Starting Fuxi workflow with design context...
 ```
@@ -314,7 +314,7 @@ When **Fuxi workflow is running** and design is approved:
 |----------|--------|
 | No orchestrator + design approved | Suggest `/orchestrate` or auto-transition to `goal_contract_create` if user consents |
 | Orchestrator active + design approved | Auto-invoke `goal_contract_create` with design context |
-| User says "defer"/"save"/"later" | Save to `.sages/designs/`, don't start orchestrator |
+| User says "defer"/"save"/"later" | Save to `.pi/orchestrator/designs/`, don't start orchestrator |
 | User says "exit"/"cancel" | End without proceeding |
 
 ## Orchestrator Integration

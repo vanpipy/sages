@@ -126,8 +126,10 @@ remaining `.sages/` paths are:
   `pi-graphify/templates/start-mcp.sh` and
   `pi-codebase-memory`'s `isSageWorkspace` heuristic to detect
   "is this a sages project?". Not state storage.
-- `.sages/designs/` — brainstorming's `writeDesignDoc` writes
-  deferred design drafts here when the user says "save for later".
+- `.sages/designs/` — historical path; brainstorming's `writeDesignDoc`
+  now writes deferred design drafts to
+  `.pi/orchestrator/designs/` to keep all runtime state under one
+  prefix.
 
 ## Design Decisions (KD-1..8)
 
