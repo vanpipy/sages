@@ -29,11 +29,15 @@ Thumbs.db
 .env
 .env.local
 
-# Sages workflow directory (generated)
-# - .sages/workspace/   marker only (read by start-mcp.sh + pi-codebase-memory
-#                       isSageWorkspace heuristic). No state stored.
-# All other runtime state (incl. brainstorming designs) lives under
-# .pi/orchestrator/.
+# Runtime state lives under .pi/orchestrator/.
+#
+# `.sages/` is kept gitignored as a working area for in-flight design
+# work (e.g. `pi/.sages/designs/<date>-<topic>.md` brainstorming
+# drafts, `pi/.sages/workspace/execution.yaml` legacy qiaochui
+# decomposition output, `.sages/snapshots/<id>.bak` from the planned
+# AFT migration's `aft/safety.ts` T7 task). The active 4-tool
+# orchestrator writes ONLY to `.pi/orchestrator/` — see
+# `pi/src/tools/orchestrator/types.ts:198` for `ORCHESTRATOR_DIR`.
 .sages/
 
 # Plan files (generated)
