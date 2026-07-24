@@ -87,7 +87,8 @@ tasks:
     # Background-default for implement/audit (verified 2026-07-24).
     # All software-developer / software-auditor tasks in this DAG run in
     # background so the orchestrator can steer / track multiple at once.
-    # See pi/templates/SUBAGENTS.md for the rule.
+    # The dispatcher would default this to true based on subagent_type;
+    # the explicit annotation documents intent at the call site.
     run_in_background: true
     files: ["src/[scope]/[new-file].ts"]
     acceptance:
@@ -111,7 +112,7 @@ tasks:
     depends_on: [P3, P4]
     isolation: worktree
     tdd: strict
-    # Background-default — see P4 comment.
+    # Background default — see P4 comment.
     run_in_background: true
     files: ["src/[scope]/[caller-file].ts"]
     acceptance:
@@ -136,7 +137,7 @@ tasks:
     depends_on: [P5]
     isolation: worktree
     tdd: strict
-    # Background-default — see P4 comment.
+    # Background default — see P4 comment.
     run_in_background: true
     files: ["test/[scope]/"]
     acceptance:
@@ -154,17 +155,20 @@ tasks:
     subagent_type: software-auditor
     task_template: subagent-software-auditor
     task_params:
-      task_report_paths:
-        - .pi/orchestrator/task-P4-report.md
-        - .pi/orchestrator/task-P5-report.md
-        - .pi/orchestrator/task-P6-report.md
+      # `task_report_path` is a single string per the auditor template's
+      # schema; pass multiple paths as one newline-separated string.
+      task_report_path: |
+        .pi/orchestrator/task-P4-report.md
+        .pi/orchestrator/task-P5-report.md
+        .pi/orchestrator/task-P6-report.md
     batch: 5
     depends_on: [P6]
     isolation: none
     tdd: none
-    # Background-default for implement/audit (verified 2026-07-24).
+    # Background default for implement/audit (verified 2026-07-24).
     # Auditor runs while the orchestrator can do other prep work;
     # `get_subagent_result` collects the verdict when needed.
+    # The dispatcher would default this to true based on subagent_type.
     run_in_background: true
     files: []
     acceptance:

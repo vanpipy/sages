@@ -46,6 +46,14 @@ export const TaskNodeSchema = Type.Object({
   batch: Type.Number({ description: "Concurrency group (1-based, contiguous)", minimum: 1 }),
   isolation: Type.Union([Type.Literal("worktree"), Type.Literal("none")]),
   tdd: Type.Union([Type.Literal("strict"), Type.Literal("none")]),
+  /**
+   * Optional per-task override for the dispatcher's `run_in_background`
+   * policy. When omitted, the dispatcher derives a default from
+   * `subagent_type` (Explore/Plan/general-purpose = foreground,
+   * software-developer/software-auditor = background). Set this when
+   * a specific task needs the opposite of its subagent-type default.
+   */
+  run_in_background: Type.Optional(Type.Boolean({ description: "Override the subagent-type default for run_in_background" })),
   prompt: Type.String({ description: "Detailed prompt for subagent", minLength: 20 }),
   /** Optional: reference to a template under skills/orchestrator/templates/prompts/ */
   task_template: Type.Optional(Type.String({

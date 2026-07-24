@@ -16,10 +16,10 @@ import { describe, it, expect } from "bun:test";
 import {
 	computeScore,
 	getPhasesForDepth,
-	buildPhaseGuidance,
 	appendFindings,
 	parseAuditReport,
 	aggregateTaskAudits,
+	findingsRequiredMin,
 } from "@/tools/orchestrator/orchestrator-audit.js";
 import type { OrchestratorFinding, TaskNode } from "@/tools/orchestrator/types.js";
 
@@ -86,55 +86,12 @@ describe("orchestrator-audit", () => {
 		});
 	});
 
-	describe("buildPhaseGuidance", () => {
-		const tasks: TaskNode[] = [
-			{
-				id: "P1",
-				description: "demo",
-				plane: "Business",
-				priority: "medium",
-				depends_on: [],
-				files: [],
-				subagent_type: "Explore",
-				batch: 1,
-				isolation: "none",
-				tdd: "none",
-				prompt: "x",
-				acceptance: { covers: ["SC1"] },
-				output_schema: { kind: "file_list" },
-				status: "pending",
-				retry_count: 0,
-				max_retries: 0,
-			},
-		];
-
-		it("includes only ink/nose/foot for fast depth", () => {
-			const g = buildPhaseGuidance(tasks, ["ink", "nose", "foot"]);
-			expect(Object.keys(g).sort()).toEqual(["foot", "ink", "nose"]);
-			expect(g.castration).toBeUndefined();
-			expect(g.death).toBeUndefined();
+	describe("findingsRequiredMin", () => {
+		it("returns 1 for fast depth", () => {
+			expect(findingsRequiredMin("fast")).toBe(1);
 		});
-
-		it("includes all 5 phases for full depth", () => {
-			const g = buildPhaseGuidance(tasks, [
-				"ink",
-				"nose",
-				"foot",
-				"castration",
-				"death",
-			]);
-			expect(Object.keys(g).sort()).toEqual([
-				"castration",
-				"death",
-				"foot",
-				"ink",
-				"nose",
-			]);
-		});
-
-		it("foot phase guidance names verification_cmd", () => {
-			const g = buildPhaseGuidance(tasks, ["foot"]);
-			expect(g.foot).toContain("verification_cmd");
+		it("returns 3 for full depth", () => {
+			expect(findingsRequiredMin("full")).toBe(3);
 		});
 	});
 
@@ -147,6 +104,7 @@ describe("orchestrator-audit", () => {
 			findings: [] as OrchestratorFinding[],
 			score: 100,
 			depth: "fast" as const,
+			status: "init" as const,
 			created_at: "2025-01-01T00:00:00Z",
 			updated_at: "2025-01-01T00:00:00Z",
 		};

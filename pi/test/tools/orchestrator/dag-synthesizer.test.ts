@@ -316,6 +316,22 @@ describe("validateDAG", () => {
       expect(result.warnings.some(w => w.includes("made-up-agent-xxx"))).toBe(true);
     });
   });
+
+  describe("optional fields accepted", () => {
+    it("accepts run_in_background at the task level (per-task override)", () => {
+      const result = validateDAG(
+        {
+          goal_id: "GC-2025-test",
+          tasks: [
+            makeTask("P1", 1, [], { covers: ["SC1", "SC2"], run_in_background: false }),
+          ],
+        },
+        baseContract,
+      );
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+  });
 });
 
 describe("buildPlan", () => {
