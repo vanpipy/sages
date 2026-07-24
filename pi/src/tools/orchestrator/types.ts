@@ -122,8 +122,14 @@ export interface TaskNode {
 	};
 	/** How to verify completion — maps to GoalContract.success_criteria */
 	acceptance: {
-		/** SC ids this task covers */
-		covers: string[];
+		/**
+		 * SC ids this task covers. Required for tasks that satisfy goal
+		 * contract SCs (developer, auditor); Explore/Plan/research tasks
+		 * can omit this — they contribute to the workflow but don't
+		 * directly satisfy any SC. validateDAG still requires every SC
+		 * to be covered by at least one task that DOES declare covers.
+		 */
+		covers?: string[];
 		/** Optional automated verification command (run by subagent itself) */
 		self_check_cmd?: string;
 		/** Optional automated verification command (run by auditor) */
