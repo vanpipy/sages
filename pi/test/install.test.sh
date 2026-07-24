@@ -862,6 +862,122 @@ grep -q "custom_user_flag" "$HOME/.config/cortexkit/aft.jsonc" \
   || { echo "❌ FAIL: user-customized file content lost"; exit 1; }
 echo "✅ PASS: uninstall_aft_config leaves user-customized file alone"
 
+# ────────────────────────────────────────────────────────────
+# T3.18–T3.23: AFT config template must satisfy AFT's JSON schema
+# (validates the template at pi/templates/aft.jsonc — the file
+# install.sh copies into ~/.config/cortexkit/aft.jsonc). Each
+# mismatch produces a `WARN [aft-pi] Config validation error`
+# in the plugin log every session start (verified 2026-07-24 on
+# the current session). Catches:
+#   1. `backup` written as boolean (schema wants object)
+#   2. `_sages_template_marker` written as JSON key (schema rejects
+#      unknown keys; sentinel should live in a `//` comment instead)
+# ────────────────────────────────────────────────────────────
+
+# JSONC parser: strip // line comments outside string literals, then
+# hand the result to stdlib json. Plain `sed 's|//.*$||'` would corrupt
+# the `$schema` URL value (it contains `//`); a tiny stateful parser
+# is required.
+strip_jsonc_comments() {
+  python3 -c "
+import sys, json
+src = open(sys.argv[1]).read()
+out = []
+i, n = 0, len(src)
+in_string = False
+escape = False
+while i < n:
+    c = src[i]
+    if in_string:
+        out.append(c)
+        if escape:
+            escape = False
+        elif c == '\\\\':
+            escape = True
+        elif c == '\"':
+            in_string = False
+        i += 1
+        continue
+    if c == '\"':
+        in_string = True
+        out.append(c)
+        i += 1
+        continue
+    if c == '/' and i + 1 < n and src[i+1] == '/':
+        # line comment — skip to end of line
+        while i < n and src[i] != '\n':
+            i += 1
+        continue
+    out.append(c)
+    i += 1
+sys.stdout.write(''.join(out))
+" "$1"
+}
+
+# Test T3.18: AFT_TEMPLATE exists and parses as valid JSONC
+# (JSONC parser accepts both `//` comments and bare JSON.)
+test -f "$AFT_TEMPLATE" \
+  || { echo "❌ FAIL: AFT template missing at $AFT_TEMPLATE"; exit 1; }
+strip_jsonc_comments "$AFT_TEMPLATE" | python3 -c "import json, sys; json.load(sys.stdin)" 2>/dev/null \
+  || { echo "❌ FAIL: AFT template is not valid JSONC"; exit 1; }
+echo "✅ PASS: AFT_TEMPLATE exists and parses as valid JSONC"
+
+# Test T3.19: `backup` is an object (schema: { enabled?, max_depth?, max_file_size? })
+# The earlier boolean form (backup: true) generated this every session:
+#   WARN [aft-pi] Config validation error ... backup: Invalid input:
+#   expected object, received boolean
+strip_jsonc_comments "$AFT_TEMPLATE" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+b = d.get('backup', None)
+if not isinstance(b, dict):
+    print(f'❌ FAIL: backup must be object, got {type(b).__name__}: {b!r}')
+    sys.exit(1)
+print('✅ PASS: backup is an object')
+"
+
+# Test T3.20: _sages_template_marker is NOT a JSON key (it must be a comment)
+# Schema rejects unknown keys; the marker should live in a `//` comment so
+# is_aft_config_installed() can still detect our template, but AFT
+# schema validation passes.
+strip_jsonc_comments "$AFT_TEMPLATE" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if '_sages_template_marker' in d:
+    print('❌ FAIL: _sages_template_marker must not be a JSON key (schema rejects unknown keys)')
+    sys.exit(1)
+print('✅ PASS: _sages_template_marker is not a JSON key')
+"
+
+# Test T3.21: SAGES_TEMPLATE_V1 sentinel still present in the file
+# (as a `//` comment now, not a JSON key) so is_aft_config_installed() works
+grep -q 'SAGES_TEMPLATE_V1' "$AFT_TEMPLATE" \
+  || { echo "❌ FAIL: AFT_TEMPLATE lost SAGES_TEMPLATE_V1 sentinel"; exit 1; }
+echo "✅ PASS: AFT_TEMPLATE still carries SAGES_TEMPLATE_V1 sentinel (as comment)"
+
+# Test T3.22: backup.enabled is true (preserves the original boolean=true
+# semantic; we just moved from boolean to object)
+strip_jsonc_comments "$AFT_TEMPLATE" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+b = d.get('backup', {})
+if b.get('enabled') is not True:
+    print(f'❌ FAIL: backup.enabled must be true, got {b.get('enabled')!r}')
+    sys.exit(1)
+print('✅ PASS: backup.enabled is true')
+"
+
+# Test T3.23: SENTINEL_TEXT in install.sh matches the new comment format
+# is_aft_config_installed() greps for the literal "SAGES_TEMPLATE_V1" string,
+# which still works whether the marker is a JSON key OR a `//` comment.
+grep -q "^is_aft_config_installed() {" "$SCRIPT" \
+  || { echo "❌ FAIL: is_aft_config_installed() function missing"; exit 1; }
+# is_aft_config_installed uses grep -q 'SAGES_TEMPLATE_V1' — must remain a
+# plain string match (not a JSON-key search), so the comment form works.
+sed -n '/^is_aft_config_installed() {/,/^}$/p' "$SCRIPT" | grep -q "grep -q 'SAGES_TEMPLATE_V1'" \
+  || { echo "❌ FAIL: is_aft_config_installed() must grep for the SAGES_TEMPLATE_V1 string literal"; exit 1; }
+echo "✅ PASS: is_aft_config_installed() still uses plain string grep (comment-safe)"
+
 # Cleanup test 3
 rm -rf "$TMPDIR3"
 unset HOME
