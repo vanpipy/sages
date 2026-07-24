@@ -52,8 +52,11 @@ function makeSagesWorkspace(opts: {
 	dirtyFile?: boolean;
 }): string {
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pi-graphify-test-"));
+	// The `.sages/workspace/` directory is a marker (read by `start-mcp.sh`
+	// and `pi-codebase-memory`'s `isSageWorkspace` heuristic), not state
+	// storage — the orchestrator writes all runtime state to
+	// `.pi/orchestrator/`. No `state.json` is needed.
 	fs.mkdirSync(path.join(tmp, ".sages", "workspace"), { recursive: true });
-	fs.writeFileSync(path.join(tmp, ".sages", "workspace", "state.json"), "{}");
 
 	if (opts.git) {
 		execFileSync("git", ["init", "-q"], { cwd: tmp });

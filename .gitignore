@@ -29,11 +29,11 @@ Thumbs.db
 .env
 .env.local
 
-# Session/lock files (local only)
-.sages-session.json
-.sages-filelocks/
-
 # Sages workflow directory (generated)
+# - .sages/workspace/   marker only (read by start-mcp.sh + pi-codebase-memory
+#                       isSageWorkspace heuristic). No state stored.
+# - .sages/designs/    brainstorming's writeDesignDoc target (defer-to-later).
+# All other runtime state lives under .pi/orchestrator/.
 .sages/
 
 # Plan files (generated)
