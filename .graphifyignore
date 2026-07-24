@@ -37,9 +37,6 @@ node_modules/
 .graphify-out/
 graphify-out/
 .serena/
-# Sage workflow noise (YAML state files)
-.sages/
-.pi/.sages/
 
 # claude/ codex agent scratch
 .claude/

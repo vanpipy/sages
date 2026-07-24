@@ -144,17 +144,15 @@ agent still needs to read user code to understand context.
 └── audit-workflow.md           # workflow rollup (0o600)
 ```
 
-All **runtime state** lives under `.pi/orchestrator/`. The only
-remaining `.sages/` paths are:
+All **runtime state** lives under `.pi/orchestrator/`. The
+`.sages/` directory has been fully retired:
 
-- `.sages/workspace/` — an **empty marker directory**. Read by
-  `pi-graphify/templates/start-mcp.sh` and
-  `pi-codebase-memory`'s `isSageWorkspace` heuristic to detect
-  "is this a sages project?". Not state storage.
-- `.sages/designs/` — historical path; brainstorming's `writeDesignDoc`
-  now writes deferred design drafts to
-  `.pi/orchestrator/designs/` to keep all runtime state under one
-  prefix.
+- `.sages/workspace/` — was an empty marker directory (read by
+  `pi-codebase-memory` and `pi-graphify`'s `isInSagesWorkspace`,
+  and by `pi-graphify/templates/start-mcp.sh`). Detection now uses
+  `.pi/orchestrator/` — the real orchestrator state directory.
+- `.sages/designs/` — brainstorming's `writeDesignDoc` deferral
+  path. Moved to `.pi/orchestrator/designs/`.
 
 ## Design Decisions (KD-1..8)
 

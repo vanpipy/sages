@@ -19,8 +19,5 @@ Thumbs.db
 # IDE
 .idea/
 
-# Sages workflow runtime artifacts
-.sages/workspace/
-
 # AFT install side-effects (the colon in dir name comes from npm: specifiers)
 pi/npm:@cortexkit/
