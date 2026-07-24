@@ -161,16 +161,35 @@ After all batches complete:
 
 ```
 1. Call orchestrator_audit({ dag_id }) (no batch filter = whole DAG)
-2. Tool returns audit framework (5 phases: ink/nose/foot/castration/death)
+   - Default depth is "fast" (3 phases: ink/nose/foot) — covers ~90% of workflows
+   - Pass depth: "full" for full 5-phase audit (adds castration/death)
+2. Tool returns audit framework + phase guidance
 3. Run each phase using semantic tools:
    - ink: verify every task has report file with evidence
    - nose: re-verify SC coverage
    - foot: re-run all verification_cmd from goal contract
-   - castration: security/isolation checks
-   - death: viability checks
-4. Re-call orchestrator_audit with observation.audit_complete=true and final findings
+   - castration (full only): security/isolation checks
+   - death (full only): viability checks
+4. Collect findings; submit them in ONE batch call:
+   orchestrator_audit({
+     dag_id,
+     observation: {
+       findings: [
+         { category: "ink", severity: "minor", issue: "...", evidence: "..." },
+         { category: "foot", severity: "critical", issue: "...", evidence: "..." },
+         // ... all findings from this audit pass
+       ]
+     }
+   })
+   - Batch submission avoids N round-trips (one call can hold all findings)
+   - Pass `complete: { verdict, score, summary }` in the same call to finalize
 5. Report verdict + score to user
 ```
+
+**Audit tool call count (fast depth, batched findings)**:
+- 1× init (no observation)
+- 1× record + complete (single call with `findings[]` + `complete`)
+- Total: **2 tool calls** (was 5+ in the one-finding-per-call pattern)
 
 ## Tool Roster (when in orchestrator mode)
 
