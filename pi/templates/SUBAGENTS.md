@@ -111,6 +111,61 @@ Agent({
 
 **Returns**: `CERTIFIED | NEEDS WORK | BLOCKED` + evidence-based report.
 
+## Foreground vs Background — when to set `run_in_background: true`
+
+The orchestrator's main agent context is a finite resource. Long-running
+phases should run in background; short-lived ones stay in foreground so
+the orchestrator can use the result directly. **Default convention
+(verified 2026-07-24)**:
+
+| Stage | Subagent type | `run_in_background` | Why |
+|-------|---------------|---------------------|-----|
+| 1 — Research | `Explore` | `false` (foreground) | Short, read-only, result feeds Batch 2 |
+| 2 — Design | `Plan` | `false` (foreground) | Short, its output is the next prompt |
+| 3 — Implement | `software-developer` | **`true` (background)** | Long (1–10 min for TDD), can be steered mid-run |
+| 4 — Audit | `software-auditor` | **`true` (background)** | Long (30s–3 min for verify), can be steered |
+
+Concretely:
+
+```ts
+// Stage 1 + 2 — synchronous, results feed the next stage
+Agent({ subagent_type: "Explore", prompt: "..." })               // foreground
+Agent({ subagent_type: "Plan", prompt: "..." })                  // foreground
+
+// Stage 3 + 4 — async, returns agent id; you keep working
+Agent({
+  subagent_type: "software-developer",
+  prompt: "...",
+  run_in_background: true,                                        // ★ background
+})
+Agent({
+  subagent_type: "software-auditor",
+  prompt: "...",
+  run_in_background: true,                                        // ★ background
+})
+```
+
+**Why background for implement + audit?**
+
+- software-developer runs RED→GREEN→REFACTOR (1–10 min) and may iterate
+  on user steer messages — `steer_subagent(agent_id, "drop X, use Y")`
+  is only available to background agents.
+- software-auditor re-runs every verification command and inspects the
+  diff — long enough that synchronous blocking serializes the entire
+  DAG through one subagent at a time.
+- Max concurrent background agents defaults to 4 (see `/agents` →
+  Settings). Above that, additional agents queue until a slot frees.
+- Concurrency > 1 lets multiple independent implementer tasks run in
+  parallel worktrees (e.g. region A, B, C, D). The DAG's `batch: N`
+  already encodes dependency order; `run_in_background: true` lets the
+  orchestrator dispatch and continue.
+
+**What stays foreground?** Only Explore and Plan. Their results are
+the prompts for the next stage, so the parent must wait.
+
+**Don't duplicate work.** When a background agent is running, the
+orchestrator receives its result on completion. Don't re-spawn.
+
 ## Composing the Pipeline
 
 The orchestrator stitches all four into a DAG:

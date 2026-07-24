@@ -460,6 +460,177 @@ echo "✅ PASS: mixed-state uninstall only removes our installed file"
 rm -rf "$TMPDIR4"
 unset PI_DIR AGENT_DIR
 
+# ─────────────────────────────────────────────────────────────────
+# T4.21 (continued): subagent frontmatter must NOT hard-limit
+# (T4.* behavioral tests above mutate TMPDIR4 PI_DIR/AGENT_DIR; this
+# block re-reads the on-disk templates, so it lives outside the
+# behavioral section.)
+#
+# Goal: each shipped subagent inherits the orchestrator's parent model,
+# thinking level, and turn count instead of forcing Anthropic Sonnet 4.6
+# with `thinking: high` and an absolute max_turns cap.
+# ─────────────────────────────────────────────────────────────────
+
+# Test T4.21: neither template pins a model
+for f in software-auditor.md software-developer.md; do
+  grep -qE '^model:' "$SUBAGENT_TEMPLATES_DIR/$f" \
+    && { echo "❌ FAIL: template $f declares 'model:' (must inherit parent)"; exit 1; \
+  } || echo "✅ PASS: $f has no hard-coded model — inherits parent"
+done
+
+# Test T4.22: neither template pins thinking level
+for f in software-auditor.md software-developer.md; do
+  grep -qE '^thinking:' "$SUBAGENT_TEMPLATES_DIR/$f" \
+    && { echo "❌ FAIL: template $f declares 'thinking:' (must inherit parent)"; exit 1; \
+  } || echo "✅ PASS: $f has no hard-coded thinking level — inherits parent"
+done
+
+# Test T4.23: neither template pins max_turns
+for f in software-auditor.md software-developer.md; do
+  grep -qE '^max_turns:' "$SUBAGENT_TEMPLATES_DIR/$f" \
+    && { echo "❌ FAIL: template $f declares 'max_turns:' (must inherit parent)"; exit 1; \
+  } || echo "✅ PASS: $f has no hard-coded max_turns — inherits parent"
+done
+
+# Test T4.24: templates authorize AFT semantic tools via ext: selectors
+# (resolve the routing gap documented in pi/templates/SYSTEM.md §2 — the
+# orchestrator's tool table used to require aft_*/codebase_*/graphify_*,
+# but the shipped subagents only listed read/grep/find/edit/bash/write.)
+for f in software-developer.md software-auditor.md; do
+  grep -qE 'ext:aft/aft_search' "$SUBAGENT_TEMPLATES_DIR/$f" \
+    || { echo "❌ FAIL: $f must include 'ext:aft/aft_search' selector"; exit 1; }
+done
+echo "✅ PASS: both templates opt into ext:aft/aft_search"
+
+for f in software-developer.md software-auditor.md; do
+  grep -qE 'ext:aft/aft_outline' "$SUBAGENT_TEMPLATES_DIR/$f" \
+    || { echo "❌ FAIL: $f must include 'ext:aft/aft_outline' selector"; exit 1; }
+done
+echo "✅ PASS: both templates opt into ext:aft/aft_outline"
+
+for f in software-developer.md software-auditor.md; do
+  grep -qE 'ext:aft/aft_zoom' "$SUBAGENT_TEMPLATES_DIR/$f" \
+    || { echo "❌ FAIL: $f must include 'ext:aft/aft_zoom' selector"; exit 1; }
+done
+echo "✅ PASS: both templates opt into ext:aft/aft_zoom"
+
+# Test T4.25: software-developer.md also needs codebase-memory MCP tools
+# (auditor is read-only — no need to expose indexing/index_status to it.)
+grep -qE 'ext:pi-mcp-adapter/search_graph' "$SUBAGENT_TEMPLATES_DIR/software-developer.md" \
+  || { echo "❌ FAIL: software-developer.md must include 'ext:pi-mcp-adapter/search_graph'"; exit 1; }
+grep -qE 'ext:pi-mcp-adapter/get_code_snippet' "$SUBAGENT_TEMPLATES_DIR/software-developer.md" \
+  || { echo "❌ FAIL: software-developer.md must include 'ext:pi-mcp-adapter/get_code_snippet'"; exit 1; }
+grep -qE 'ext:pi-mcp-adapter/trace_path' "$SUBAGENT_TEMPLATES_DIR/software-developer.md" \
+  || { echo "❌ FAIL: software-developer.md must include 'ext:pi-mcp-adapter/trace_path'"; exit 1; }
+echo "✅ PASS: software-developer.md opts into codebase-memory MCP tools"
+
+# Test T4.26: templates list the extensions they actually consume
+# (otherwise the ext: selectors are orphans and pi-subagents warns at
+# load time per agent-runner.ts:709-716).
+for ext in aft pi-mcp-adapter magic-context; do
+  grep -qE "^extensions:.*\b${ext}\b" "$SUBAGENT_TEMPLATES_DIR/software-developer.md" \
+    || { echo "❌ FAIL: software-developer.md must list '${ext}' in extensions:"; exit 1; }
+done
+echo "✅ PASS: software-developer.md declares aft / pi-mcp-adapter / magic-context in extensions:"
+
+# ──────────────────────────────────────────────────────────────────
+# T6.x: background-default contract for "implement" + "audit" phases
+# Verifies the orchestrator skill's templates + agent prompts declare
+# the "foreground = explore/plan, background = implement/audit" split
+# explicitly. Each test reads one or more files and grep-grep-greps for
+# the contractual phrase or annotation.
+# ──────────────────────────────────────────────────────────────────
+
+ORCH_SKILL_DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)/skills/orchestrator"
+GOALS_DIR="$ORCH_SKILL_DIR/templates/goals"
+DAGS_DIR="$ORCH_SKILL_DIR/templates/dag"
+PROMPTS_DIR="$ORCH_SKILL_DIR/templates/prompts"
+
+# Test T6.1: every goal template carries a `parallelism_notes` field
+# (or equivalent) and explicitly marks implement/audit as `run_in_background: true`).
+# Goal templates don't include the subagent task directly — the DAG does. So
+# the goal template's job is to flag WHICH phases are safe to background.
+for goal in goal-new-feature goal-fix-bug goal-refactor goal-add-tests; do
+  f="$GOALS_DIR/$goal.yaml"
+  test -f "$f" || { echo "❌ FAIL: $goal.yaml missing"; exit 1; }
+  grep -qE 'run_in_background:\s*true' "$f" \
+    || { echo "❌ FAIL: $goal.yaml must declare 'run_in_background: true' for implement/audit"; exit 1; }
+done
+echo "✅ PASS: all 4 goal templates declare run_in_background: true for implement/audit"
+
+# Test T6.2: every DAG template marks software-developer and software-auditor
+# subagent tasks with `run_in_background: true`.
+for dag in dag-bug-fix dag-tdd-refactor; do
+  f="$DAGS_DIR/$dag.yaml"
+  test -f "$f" || { echo "❌ FAIL: $dag.yaml missing"; exit 1; }
+  # Each software-developer/software-auditor task must be backgrounded
+  python3 -c "
+import re, sys
+text = open('$f').read()
+# Find all top-level task blocks (lines starting with '  - id:')
+# and check each task that uses software-developer/software-auditor
+# has run_in_background: true somewhere in its block.
+task_blocks = re.split(r'\n(?=\s*-\s+id:\s)', text)
+ok = True
+for blk in task_blocks:
+    if 'subagent_type: software-developer' in blk or 'subagent_type: software-auditor' in blk:
+        if not re.search(r'run_in_background:\s*true', blk):
+            ok = False
+            print(f'❌ FAIL: $dag.yaml has implement/audit task without run_in_background: true', file=sys.stderr)
+            sys.exit(1)
+if ok:
+    print('✅ PASS: $dag.yaml backgrounds all implement/audit tasks')
+"
+done
+
+# Test T6.3: SUBAGENTS.md documents the foreground/background split
+# (the user-facing doc that explains WHEN to use background).
+SUBAGENTS_TEMPLATE="$(cd "$(dirname "$SCRIPT")/.." && pwd)/templates/SUBAGENTS.md"
+test -f "$SUBAGENTS_TEMPLATE" || { echo "❌ FAIL: SUBAGENTS.md template missing"; exit 1; }
+grep -qE 'run_in_background|background' "$SUBAGENTS_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS.md must discuss run_in_background / background execution"; exit 1; }
+# Specific contract: SUBAGENTS.md must explicitly state developer+auditor are background-default
+grep -qE 'software-developer.*background|background.*software-developer' "$SUBAGENTS_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS.md must state software-developer runs in background by default"; exit 1; }
+grep -qE 'software-auditor.*background|background.*software-auditor' "$SUBAGENTS_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS.md must state software-auditor runs in background by default"; exit 1; }
+echo "✅ PASS: SUBAGENTS.md documents developer+auditor as background-default"
+
+# Test T6.4: software-developer system prompt accepts being spawned in background
+# (the agent's job is to behave well under background — acknowledge steers,
+# do not block on stdin, etc.)
+for agent in software-developer software-auditor; do
+  f="$SUBAGENT_TEMPLATES_DIR/$agent.md"
+  grep -qiE 'background' "$f" \
+    || { echo "❌ FAIL: $agent.md must mention 'background' (acknowledges the spawn mode)"; exit 1; }
+done
+echo "✅ PASS: software-developer + software-auditor system prompts acknowledge background mode"
+
+# Test T6.5: orchestrator SKILL.md has a parallelism_notes section
+test -f "$ORCH_SKILL_DIR/SKILL.md" || { echo "❌ FAIL: orchestrator SKILL.md missing"; exit 1; }
+grep -qE 'parallelism_notes|run_in_background' "$ORCH_SKILL_DIR/SKILL.md" \
+  || { echo "❌ FAIL: orchestrator SKILL.md must document parallelism_notes or run_in_background"; exit 1; }
+echo "✅ PASS: orchestrator SKILL.md documents parallelism / run_in_background"
+
+# Test T6.6: pi/templates/SYSTEM.md (orchestrator system prompt) references
+# the foreground/background split, so the orchestrator LLM knows the rule.
+SYSTEM_TEMPLATE="$(cd "$(dirname "$SCRIPT")/.." && pwd)/templates/SYSTEM.md"
+test -f "$SYSTEM_TEMPLATE" || { echo "❌ FAIL: SYSTEM.md template missing"; exit 1; }
+grep -qiE 'background|run_in_background' "$SYSTEM_TEMPLATE" \
+  || { echo "❌ FAIL: SYSTEM.md must mention background execution for implement/audit"; exit 1; }
+echo "✅ PASS: SYSTEM.md references background execution"
+
+# Test T6.7: subagent prompt templates (subagent-software-*.md) include
+# the "you may be spawned in background" guidance. Without it, subagents
+# might not behave well when called with run_in_background: true.
+for prompt in subagent-software-developer.md subagent-software-auditor.md; do
+  f="$PROMPTS_DIR/$prompt"
+  test -f "$f" || { echo "❌ FAIL: $prompt missing in $PROMPTS_DIR"; exit 1; }
+  grep -qiE 'background' "$f" \
+    || { echo "❌ FAIL: $prompt must mention background mode (subagent context)"; exit 1; }
+done
+echo "✅ PASS: subagent-software-{developer,auditor} prompts mention background mode"
+
 # ──────────────────────────────────────────────────────────────────
 # T5: SUBAGENTS.md — 4-agent pipeline doc
 # Validates: install.sh ships templates/SUBAGENTS.md to $AGENT_DIR/SUBAGENTS.md,

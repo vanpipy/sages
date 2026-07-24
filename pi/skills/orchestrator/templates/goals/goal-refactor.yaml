@@ -52,3 +52,20 @@ constraints:
 
 done_definition: |
   All SC1-SC6 verified + orchestrator_audit PASS ≥ 90 + no drive-by changes outside scope
+
+parallelism_notes: |
+  # Background-default for implement + audit (verified 2026-07-24).
+  #
+  # Refactor flows have multiple implementer tasks (often worktree-
+  # parallel). All of them plus the final audit MUST run in
+  # background so the orchestrator can steer mid-run if scope
+  # shifts. See pi/templates/SUBAGENTS.md.
+  phases:
+    - id: explore
+      run_in_background: false
+    - id: plan
+      run_in_background: false
+    - id: implement
+      run_in_background: true
+    - id: audit
+      run_in_background: true
