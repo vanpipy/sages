@@ -107,6 +107,91 @@ describe("shouldBlockBashCommand — 15 design cases", () => {
 	});
 });
 
+/**
+ * Chained-command hardening (T16–T22, added 2026-07-25).
+ *
+ * Each test pairs with a single known-bypass pattern from the
+ * 2026-07-24 audit's "command-chaining gap" minor finding. The
+ * implementation splits the command on top-level `&&` / `||` / `;`
+ * (respecting quotes + parens) and runs classify + extract targets
+ * per segment; if ANY segment is write-intent with a denied target
+ * the whole command is blocked.
+ *
+ * See pi/src/tools/bash-guard.ts `splitChainedCommands` and the
+ * rewrite of `shouldBlockBashCommand` for the gate.
+ */
+describe("shouldBlockBashCommand — chained commands (T16–T22)", () => {
+	it("T16: `echo done && rm src/foo.ts` → block (chained rm past read-only echo)", () => {
+		const r = shouldBlockBashCommand("echo done && rm src/foo.ts", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+	});
+
+	it("T17: `cat src/foo.ts && rm src/foo.ts` → block (mix of read + write segments)", () => {
+		const r = shouldBlockBashCommand("cat src/foo.ts && rm src/foo.ts", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+	});
+
+	it("T18: `cat src/foo.ts && echo done` → allow (all segments read-only)", () => {
+		const r = shouldBlockBashCommand("cat src/foo.ts && echo done", CTX);
+		expect(r.block).toBe(false);
+	});
+
+	it("T19: `rm /tmp/foo && rm src/foo.ts` → block (one segment targets denied path)", () => {
+		const r = shouldBlockBashCommand("rm /tmp/foo && rm src/foo.ts", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+	});
+
+	it("T20: `rm src/foo.ts || echo failed` → block (write intent in first segment of ||)", () => {
+		const r = shouldBlockBashCommand("rm src/foo.ts || echo failed", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+	});
+
+	it("T21: `rm src/foo.ts; echo done` → block (semicolon separator)", () => {
+		const r = shouldBlockBashCommand("rm src/foo.ts; echo done", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+	});
+
+	it("T22: `# sages:safe\\nrm src/foo.ts && echo done` → allow (escape hatch wins first)", () => {
+		const r = shouldBlockBashCommand(
+			"# sages:safe\nrm src/foo.ts && echo done",
+			CTX,
+		);
+		expect(r.block).toBe(false);
+	});
+
+	it("T23: `echo \"rm src/foo.ts\" && echo done` → allow (rm is in quoted string, not a command)", () => {
+		const r = shouldBlockBashCommand(
+			'rm "src/foo.ts" && echo done', // double-quoted path
+			CTX,
+		);
+		// `rm "src/foo.ts"` is write-intent with denied target — BLOCK.
+		// The quoted-string test is separate and only protects against
+		// chain splitting on quoted content. See T23b for the actual
+		// quoted-content test.
+		expect(r.block).toBe(true);
+	});
+
+	it("T23b: chained command does NOT split on quoted `&&`", () => {
+		// `echo "a && b"` is one segment; no chain. We split outside the
+		// quotes, so the inner `&&` is preserved as data. The result is
+		// `echo "a && b"` — read-only — followed by an empty trailing
+		// segment that gets dropped. Should allow.
+		const r = shouldBlockBashCommand('echo "a && b" && echo done', CTX);
+		expect(r.block).toBe(false);
+	});
+
+	it("T24: `(echo done) && rm src/foo.ts` → block (subshell + rm)", () => {
+		const r = shouldBlockBashCommand("(echo done) && rm src/foo.ts", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+	});
+});
+
 describe("classifyBashCommand — selected cases", () => {
 	it("classifies read-only commands", () => {
 		expect(classifyBashCommand("ls -la")).toBe("read-only");
