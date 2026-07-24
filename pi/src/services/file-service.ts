@@ -1,18 +1,23 @@
 /**
  * FileService - Centralized file operations with security validation
- * 
+ *
  * Purpose:
  * - Wraps node:fs operations with path validation
  * - Prevents path traversal attacks
  * - Sanitizes regex patterns
  * - Provides consistent error handling
- * 
+ *
  * Usage:
  * ```typescript
  * const fileService = new FileService(cwd);
- * const content = fileService.read("draft.md");
- * fileService.write("output.md", "content");
+ * const content = fileService.read("goal-GC-1.yaml");
+ * fileService.write("audit-P1.md", "...");
  * ```
+ *
+ * @deprecated Not used by the 4-tool orchestrator (which writes directly
+ * via node:fs under `.pi/orchestrator/`). Kept as a utility for future
+ * tools that want a sandboxed file API. New code should prefer the
+ * `sages_edit` / `sages_write` path-gated tools (see `file-gate.ts`).
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, statSync } from "node:fs";
@@ -24,7 +29,10 @@ export class FileService {
   private readonly workspaceDir: string;
   private readonly allowedDir: string;
 
-  constructor(cwd: string, workspaceDir: string = ".sages/workspace") {
+  constructor(
+    cwd: string,
+    workspaceDir: string = ".pi/orchestrator",
+  ) {
     this.cwd = cwd;
     this.workspaceDir = workspaceDir;
     this.allowedDir = resolve(cwd, workspaceDir);
