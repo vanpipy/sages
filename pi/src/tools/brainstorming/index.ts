@@ -24,7 +24,7 @@ import type {
 // Configuration
 // ============================================================================
 
-const DESIGNS_DIR = ".sages/designs";
+const DESIGNS_DIR = ".pi/orchestrator/designs";
 
 // ============================================================================
 // Main Brainstorming Function
