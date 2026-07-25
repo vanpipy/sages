@@ -58,11 +58,24 @@ describe("worktree-managed: path containment", () => {
 
   it("worktreePath normalizes realpath on both sides (symlinks, ./, ../)", () => {
     // `<repo>/nested/../` resolves to `<repo>`; the inserted path is still
-    // strictly contained.
+    // strictly contained. Trailing slashes in `<repoRoot>` must not produce
+    // `//.pi/worktree/...`, and the joined path must remain under
+    // `<repoRoot>/` after normalization.
     const repo = "/repos/sages/";
     const got = worktreePath(repo, "GC-2026-008", "P1");
-    const resolved = realpathSync(got); // existence is not required; use a real path
+    // `realpathSync` requires the path to exist; the test path doesn't.
+    // We only care about NORMALIZED containment, so use a tolerant
+    // realpath that falls back to the input on ENOENT.
+    const resolved = (() => {
+      try {
+        return realpathSync(got);
+      } catch {
+        return got;
+      }
+    })();
     expect(resolved.startsWith("/repos/sages/")).toBe(true);
+    expect(got).not.toContain("//");
+    expect(got.endsWith("/.pi/worktree/GC-2026-008/P1")).toBe(true);
   });
 
   it("createManagedWorktree refuses to provision outside the repo root", () => {
