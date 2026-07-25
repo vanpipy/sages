@@ -1,17 +1,61 @@
-# Keep generated code for inspection
-evaluations/*/codes/
+# Node / TypeScript
+node_modules/
+dist/
+bun.lock
+package-lock.json
+yarn.lock
 
-# Ignore sessions and report outputs
-evaluations/*/sessions/
-evaluations/*/report/
+# Build output
+.tmp/
+tmp/
 
-# Python
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Python leftovers (until P1.e deletes them)
 __pycache__/
-*.pyc
+*.py[cod]
+*.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Node modules (too large)
-evaluations/*/codes/*/node_modules/
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
 
-# Sages orchestrator state (the active 4-tool orchestrator writes
-# goal/dag/audit files into this directory).
-evaluations/*/codes/.pi/orchestrator/
+# Worktrees (isolated development)
+.worktrees/
+tool/

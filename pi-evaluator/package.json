@@ -1,0 +1,30 @@
+{
+	"name": "pi-evaluator",
+	"version": "0.2.0",
+	"description": "pi extension: TypeScript evaluator for Four Sages workflows (replaces Python 0.1.0)",
+	"type": "module",
+	"main": "src/extension.ts",
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": [
+		"pi",
+		"pi-package",
+		"sages",
+		"evaluator",
+		"workflow",
+		"four-sages"
+	],
+	"license": "MIT",
+	"pi": {
+		"extensions": [
+			"./src/extension.ts"
+		]
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"bun-types": "latest",
+		"typescript": "^5.0.0"
+	}
+}
