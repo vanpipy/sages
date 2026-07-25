@@ -32,6 +32,8 @@ Parameters (filled by dag_synthesizer at render time):
 **Depth**: {{depth}}
 **Audited Isolation**: {{isolation}}
 
+> **Note**: you may be running in background — the orchestrator gets your agent id immediately and may `steer_subagent` to add new SCs or rerun a specific check. No synchronous user interaction.
+
 ## Success Criteria to Verify
 
 {{sc_list}}

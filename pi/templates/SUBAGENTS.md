@@ -65,6 +65,8 @@ Agent({
 
 ### Stage 3 — Implement (`software-developer`)
 
+`software-developer` runs in the **background by default** (TDD cycles are 1–10 min, can be steered mid-run — see `task-dispatcher.ts:defaultRunInBackground()` for the canonical rule).
+
 ```ts
 Agent({
   subagent_type: "software-developer",
@@ -79,6 +81,8 @@ Agent({
 **Returns**: file paths changed + test output + verification evidence.
 
 ### Stage 4 — Verify (`software-auditor`)
+
+`software-auditor` runs in the **background by default** (verifies the whole diff, can be steered to add new SCs — same canonical rule via `task-dispatcher.ts:defaultRunInBackground()`).
 
 ```ts
 Agent({

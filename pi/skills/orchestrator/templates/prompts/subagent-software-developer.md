@@ -29,6 +29,8 @@ Parameters (filled by dag_synthesizer at render time):
 **ID**: {{task_id}}
 **Title**: {{task_title}}
 
+> **Note**: you may be running in background — the orchestrator gets your agent id immediately and may `steer_subagent` to redirect you mid-run. No synchronous user interaction.
+
 ## Success Criteria (all must pass)
 
 {{sc_list}}
