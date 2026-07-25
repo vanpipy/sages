@@ -214,6 +214,20 @@ fallback `git log -1`). Never `--author=…` or `GIT_AUTHOR_*` env overrides.
 Audit gate rejects fabricated authors. Resolve script at
 `pi/templates/agents/software-developer.md` §Author.
 
+### What's not committed
+
+`.pi/` contains runtime state (`.pi/orchestrator/*`), ephemeral worktrees
+(`.pi/worktree/*`), and design drafts — none belong in git history.
+**Never `git add` paths under `.pi/`.** Both rules apply:
+
+- **Subagents** (Phase 2): commits must not include any `.pi/` file. The
+  worktree is for code, not orchestrator artifacts.
+- **Main agent** (Phase 4): before `git merge`, verify the branch's
+  `git diff origin/main..HEAD --name-only` does not contain `.pi/`.
+
+Other exclusions (already in `.gitignore`, listed for completeness):
+`node_modules/`, `dist/`, `*.log`, `.sages/`, `.worktrees/`, `tool/`.
+
 ---
 
 ## Subagent Dispatch Workflow
