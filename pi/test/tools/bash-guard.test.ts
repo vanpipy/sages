@@ -190,6 +190,57 @@ describe("shouldBlockBashCommand — chained commands (T16–T22)", () => {
 		expect(r.block).toBe(true);
 		expect(r.reason).toContain("src/foo.ts");
 	});
+
+	it("T25: `perl -e \"unlink 'src/foo.ts'\"` → block (script unlink targets production)", () => {
+		// F4-1: perl -e "code" with a path literal in the code was not
+		// blocked because `extractBashTargets` had no `perl` case (the
+		// switch fell through to default, returning no targets). The
+		// fix extracts path-like strings from quoted content.
+		const r = shouldBlockBashCommand(
+			`perl -e "unlink 'src/foo.ts'"`,
+			CTX,
+		);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+	});
+
+	it("T26: `echo x 2> src/foo.ts` → block (fd 2 redirect to production)", () => {
+		// F4-2: `2>file` is a write-redirect (stderr → file) but the
+		// existing regex `(?<![\d&])>(?!>)` excluded any `>` preceded
+		// by a digit, treating all fd-redirects as non-write-targets.
+		// Only fd-duplications (`N>&M`) are not write-targets. The
+		// fix distinguishes the two.
+		const r = shouldBlockBashCommand("echo x 2> src/foo.ts", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+	});
+
+	it("T25b: `# sages:safe\\nperl -e \"unlink 'src/foo.ts'\"` → allow (escape hatch wins first)", () => {
+		// Regression guard: the new perl case must not bypass the
+		// `# sages:safe` escape hatch — it runs before classification.
+		const r = shouldBlockBashCommand(
+			`# sages:safe\nperl -e "unlink 'src/foo.ts'"`,
+			CTX,
+		);
+		expect(r.block).toBe(false);
+	});
+
+	it("T26b: `# sages:safe\\necho x 2> src/foo.ts` → allow (escape hatch wins first)", () => {
+		// Regression guard: the new fd-redirect handling must not
+		// bypass the `# sages:safe` escape hatch.
+		const r = shouldBlockBashCommand(
+			`# sages:safe\necho x 2> src/foo.ts`,
+			CTX,
+		);
+		expect(r.block).toBe(false);
+	});
+
+	it("T26c: `echo x 2>&1` → allow (fd duplication, not a file redirect)", () => {
+		// Regression guard: fd duplication (stderr → stdout) must NOT
+		// trip the new fd-redirect handling.
+		const r = shouldBlockBashCommand("echo x 2>&1", CTX);
+		expect(r.block).toBe(false);
+	});
 });
 
 describe("classifyBashCommand — selected cases", () => {

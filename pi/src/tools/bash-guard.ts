@@ -73,6 +73,17 @@ const READ_ONLY_GIT_SUBCOMMANDS = new Set([
 /** Escape hatch prefix; the entire command bypasses the guard. */
 const ESCAPE_HATCH = "# sages:safe";
 
+/**
+ * Shared redirect-detector prefix. Matches any file-redirect:
+ *   `>`, `>>`, `N>`, `N>>`, `&>`, `&>>`
+ * Excludes fd duplications (`N>&M`, `>&M`) by requiring `>` to
+ * NOT be followed by `&`. Used by both `hasWriteRedirect` (boolean
+ * classification) and the target-extraction regex below. Keeping
+ * them as a shared prefix prevents the two sites from drifting
+ * (F4-2 hardening — `2>file` is a stderr-to-file redirect).
+ */
+const WRITE_REDIRECT_PREFIX = /\d*&?(?:>>|>(?!&))/;
+
 export type BashClassification = "read-only" | "write-intent" | "unknown";
 
 export interface BashGuardDecision {
@@ -212,6 +223,49 @@ export function extractBashTargets(command: string): string[] {
 			}
 			break;
 		}
+		case "perl": {
+			// F4-1 hardening: perl [-pi] [-e 'code'] [file...] was a
+			// write-intent bypass because the switch fell through to
+			// default, returning no targets. Without parsing perl, we
+			// extract paths using a two-pronged heuristic:
+			//
+			//   1. Plain non-flag, non-quoted args (e.g., `perl -pi -e
+			//      's/a/b/' x.ts` → `x.ts`).
+			//   2. Quoted strings that look like file paths (have `/`
+			//      and a basename with `.`, or start with `./`, `../`,
+			//      `/`). We match single-quoted strings before
+			//      double-quoted ones so a path literal inside the
+			//      perl code (e.g., `unlink 'src/foo.ts'` inside
+			//      `"..."`) is captured independently of the wrapping
+			//      double quotes. Double-quoted strings that contain
+			//      inner single quotes are skipped (likely code wrapping
+			//      a path literal; the path is captured by the
+			//      single-quote pass).
+			for (const t of tokens.slice(1)) {
+				if (t.startsWith("-") || t.startsWith("'") || t.startsWith('"')) continue;
+				targets.push(t);
+			}
+			const isPathLike = (s: string): boolean => {
+				if (!s.includes("/")) return false;
+				if (s.startsWith("./") || s.startsWith("../") || s.startsWith("/")) return true;
+				const lastSlash = s.lastIndexOf("/");
+				const basename = s.slice(lastSlash + 1);
+				return basename.includes(".");
+			};
+			const singleQ = /'([^']+)'/g;
+			let sm: RegExpExecArray | null;
+			while ((sm = singleQ.exec(trimmed)) !== null) {
+				const c = sm[1];
+				if (c && !c.includes('"') && isPathLike(c)) targets.push(c);
+			}
+			const doubleQ = /"([^"]+)"/g;
+			let dm: RegExpExecArray | null;
+			while ((dm = doubleQ.exec(trimmed)) !== null) {
+				const c = dm[1];
+				if (c && !c.includes("'") && isPathLike(c)) targets.push(c);
+			}
+			break;
+		}
 		case "sed": {
 			// sed -i<SUFFIX>? '<expr>' <path> [<path>...]
 			// Path is the last non-flag token after the expression.
@@ -286,9 +340,12 @@ export function extractBashTargets(command: string): string[] {
 	}
 
 	// Redirect patterns: `> <path>` and `>> <path>` anywhere in the
-	// command. `>` must not be preceded by a digit (fd redirect like
-	// `2>file`) or `&` (`2>&1`, `&>file`); these are not write-targets.
-	const redirectRegex = /(?<![\d&])(?:>>|>(?!>))\s*(\S+)/g;
+	// command. We also accept `N>` and `&>` fd-prefixed forms (F4-2
+	// hardening — `2>file` is a stderr-to-file redirect, NOT an fd
+	// duplication). Only `>&` (i.e. `>` immediately followed by `&`)
+	// indicates fd duplication (`2>&1`) and is excluded. Optional
+	// `\d*` / `&?` prefix allows `2>`, `&>`, `2>>`, `&>>`.
+	const redirectRegex = new RegExp(WRITE_REDIRECT_PREFIX.source + "\\s*(\\S+)", "g");
 	let match: RegExpExecArray | null;
 	while ((match = redirectRegex.exec(trimmed)) !== null) {
 		targets.push(match[1]);
@@ -516,16 +573,17 @@ function isProductionTarget(target: string): boolean {
 }
 
 /**
- * Detect a write-targeting redirect: `> <path>` or `>> <path>`,
- * excluding fd-redirects (`2>file`) and fd-duplications (`2>&1`,
- * `&>file`).
+ * Detect a write-targeting redirect: `> <path>`, `>> <path>`, and
+ * the fd-prefixed forms `N>file`, `N>>file`, `&>file`, `&>>file`.
+ *
+ * Excludes fd duplications (`N>&M`, `>&M`) where `>` is immediately
+ * followed by `&` — those are fd-redirects between file descriptors,
+ * not writes to files.
  */
 function hasWriteRedirect(cmd: string): boolean {
-	// Single `>` not preceded by digit/&, not followed by another `>`.
-	// (The latter excludes `>>` and `2>&1` &mdash; `&` precedes, not follows.)
-	const singleGt = /(?<![\d&])>(?!>)/;
-	// Append `>>` anywhere (already ruled out fd-prefix above).
-	return singleGt.test(cmd) || />>/.test(cmd);
+	// Use the shared prefix constant — keeps the two redirect sites
+	// (classification + extraction) in lockstep.
+	return WRITE_REDIRECT_PREFIX.test(cmd);
 }
 
 /** Long-form reason for production-target blocks. */
