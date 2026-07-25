@@ -154,30 +154,26 @@ sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_pi_aft" \
   || { echo "❌ FAIL: uninstall() does not call uninstall_pi_aft"; exit 1; }
 echo "✅ PASS: uninstall() invokes uninstall_pi_aft"
 
-# 测试 17-bis: install_pi_aft prints a user-facing hint for the recurring
-# '[HIGH] AFT binary: No aft binary matching CLI <version> was detected'
-# warning. We intentionally do NOT auto-run 'doctor --fix' from the
-# install — the AFT team controls binary provisioning and the user
-# has full visibility into when version drift happens. The install
-# script's job is to make the user aware of the issue + the fix
-# command, not to silently patch it.
+# 测试 17-bis: AFT behavior — only prompt when AFT is NOT installed;
+# never auto-run 'doctor --fix' (binary provisioning owned by AFT team);
+# silent on re-runs when AFT is already installed.
 #
 # Locks in:
-#   1. install_pi_aft does NOT auto-call `npx ... doctor --fix` (the
-#      literal 'doctor --fix' word in a comment is fine — what we
-#      forbid is the runtime invocation pattern)
-#   2. install_pi_aft DOES emit a hint that mentions both
-#      'doctor --fix' and the [HIGH] warning text
-if sed -n '/^install_pi_aft() {/,/^}$/p' "$SCRIPT" | grep -qE 'npx.*doctor --fix|npx@.*doctor'; then
+#   1. install_pi_aft does NOT auto-call 'npx ... doctor --fix'
+#   2. install.sh has a "not installed" hint that mentions AFT install
+# Strip comment lines (start with #) from the function body, then check
+# for the runtime invocation pattern. This allows the word
+# 'doctor --fix' to appear in comments (rationale) without tripping
+# the test, while still flagging actual `npx ... doctor --fix` calls.
+install_pi_aft_body=$(sed -n '/^install_pi_aft() {/,/^}$/p' "$SCRIPT" | grep -v '^[[:space:]]*#')
+if echo "$install_pi_aft_body" | grep -qE 'npx[^&|;]*doctor --fix'; then
   echo "❌ FAIL: install_pi_aft should NOT auto-call 'npx ... doctor --fix' (user controls AFT install)"; exit 1
 else
   echo "✅ PASS: install_pi_aft does NOT auto-call 'npx ... doctor --fix'"
 fi
-grep -q 'doctor --fix' "$SCRIPT" \
-  || { echo "❌ FAIL: install.sh must mention 'doctor --fix' somewhere (user hint)"; exit 1; }
-grep -qE '\[HIGH\] AFT binary' "$SCRIPT" \
-  || { echo "❌ FAIL: user hint must mention '[HIGH] AFT binary' so user can recognize the warning"; exit 1; }
-echo "✅ PASS: install_pi_aft prints user hint with 'doctor --fix' + '[HIGH] AFT binary'"
+grep -q 'setup --harness pi' "$SCRIPT" \
+  || { echo "❌ FAIL: install.sh should mention AFT install command ('setup --harness pi') for the not-installed case"; exit 1; }
+echo "✅ PASS: install.sh prompts AFT install when not installed"
 
 # 测试 17b: is_pi_aft_installed 对 substring 名字(如 aft-pi-extras)不误判
 # 模拟用户装了 pi-serena-extras(虚构包),应仍返回 false
@@ -861,30 +857,26 @@ sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_pi_aft" \
   || { echo "❌ FAIL: uninstall() does not call uninstall_pi_aft"; exit 1; }
 echo "✅ PASS: uninstall() invokes uninstall_pi_aft"
 
-# 测试 17-bis: install_pi_aft prints a user-facing hint for the recurring
-# '[HIGH] AFT binary: No aft binary matching CLI <version> was detected'
-# warning. We intentionally do NOT auto-run 'doctor --fix' from the
-# install — the AFT team controls binary provisioning and the user
-# has full visibility into when version drift happens. The install
-# script's job is to make the user aware of the issue + the fix
-# command, not to silently patch it.
+# 测试 17-bis: AFT behavior — only prompt when AFT is NOT installed;
+# never auto-run 'doctor --fix' (binary provisioning owned by AFT team);
+# silent on re-runs when AFT is already installed.
 #
 # Locks in:
-#   1. install_pi_aft does NOT auto-call `npx ... doctor --fix` (the
-#      literal 'doctor --fix' word in a comment is fine — what we
-#      forbid is the runtime invocation pattern)
-#   2. install_pi_aft DOES emit a hint that mentions both
-#      'doctor --fix' and the [HIGH] warning text
-if sed -n '/^install_pi_aft() {/,/^}$/p' "$SCRIPT" | grep -qE 'npx.*doctor --fix|npx@.*doctor'; then
+#   1. install_pi_aft does NOT auto-call 'npx ... doctor --fix'
+#   2. install.sh has a "not installed" hint that mentions AFT install
+# Strip comment lines (start with #) from the function body, then check
+# for the runtime invocation pattern. This allows the word
+# 'doctor --fix' to appear in comments (rationale) without tripping
+# the test, while still flagging actual `npx ... doctor --fix` calls.
+install_pi_aft_body=$(sed -n '/^install_pi_aft() {/,/^}$/p' "$SCRIPT" | grep -v '^[[:space:]]*#')
+if echo "$install_pi_aft_body" | grep -qE 'npx[^&|;]*doctor --fix'; then
   echo "❌ FAIL: install_pi_aft should NOT auto-call 'npx ... doctor --fix' (user controls AFT install)"; exit 1
 else
   echo "✅ PASS: install_pi_aft does NOT auto-call 'npx ... doctor --fix'"
 fi
-grep -q 'doctor --fix' "$SCRIPT" \
-  || { echo "❌ FAIL: install.sh must mention 'doctor --fix' somewhere (user hint)"; exit 1; }
-grep -qE '\[HIGH\] AFT binary' "$SCRIPT" \
-  || { echo "❌ FAIL: user hint must mention '[HIGH] AFT binary' so user can recognize the warning"; exit 1; }
-echo "✅ PASS: install_pi_aft prints user hint with 'doctor --fix' + '[HIGH] AFT binary'"
+grep -q 'setup --harness pi' "$SCRIPT" \
+  || { echo "❌ FAIL: install.sh should mention AFT install command ('setup --harness pi') for the not-installed case"; exit 1; }
+echo "✅ PASS: install.sh prompts AFT install when not installed"
 
 # Test: the comment headers say aft, not serena
 grep -q "pi-aft" "$SCRIPT" \
