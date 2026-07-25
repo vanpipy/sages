@@ -33,17 +33,6 @@ For single trivial tasks (one-line edit, single function), do NOT use this skill
 
 The orchestrator dispatches a **single canonical pipeline of 4 subagents**, one per stage. Stages 1-2 come from pi-subagents built-ins; Stages 3-4 are shipped by sages (installed to `~/.pi/agent/agents/` by `install.sh`). Full deployment reference + invocation recipes live in `~/.pi/agent/SUBAGENTS.md` (also installed by sages).
 
-```
-┌─────────┐     ┌──────┐     ┌────────────────────┐     ┌────────────────────┐
-│ Stage 1 │ ──▶ │  S2  │ ──▶ │       Stage 3      │ ──▶ │       Stage 4      │
-│ Explore │     │ Plan │     │ software-developer │     │ software-auditor   │
-│ (find)  │     │(design)    │ (RED→GREEN→REFACTOR)  │   (evidence verify) │
-└─────────┘     └──────┘     └────────────────────┘     └────────────────────┘
-  read-only       read-only       worktree + edit              read-only
-  haiku           sonnet          sonnet + thinking           sonnet + thinking
-  foreground      foreground      BACKGROUND                  BACKGROUND
-```
-
 | Stage | `subagent_type`     | Source                              | `run_in_background` | When to dispatch                                                                 |
 |-------|----------------------|--------------------------------------|---------------------|----------------------------------------------------------------------------------|
 | 1     | `Explore`            | **pi-subagents built-in**            | `false`             | "Where is X?" / "find all callers of Y" / pure codebase search                    |
@@ -51,10 +40,7 @@ The orchestrator dispatches a **single canonical pipeline of 4 subagents**, one 
 | 3     | `software-developer` | **shipped** (this repo)              | **`true`**          | Write production code + tests in a worktree, strict TDD                          |
 | 4     | `software-auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
 
-**Foreground vs background — verified 2026-07-24 default:**
-- **Foreground** (Stages 1–2): the orchestrator's main context is locked for the subagent's duration. Used when the next stage's prompt depends on this one's output.
-- **Background** (Stages 3–4): the orchestrator receives an agent id and keeps working. Use `get_subagent_result(agent_id)` to collect, `steer_subagent(agent_id, "...")` to redirect mid-run. Up to 4 concurrent default. Long-running TDD + verify work would serialize the entire pipeline if run synchronously.
-- See `pi/templates/SUBAGENTS.md` for full rationale, code examples, and the "Don't duplicate work" rule.
+`run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table is the canonical reference; see `pi/templates/SUBAGENTS.md` for full rationale and code examples.
 
 Fallback: `general-purpose` (built-in, full toolset) is for ad-hoc research that doesn't fit any specific role. Never use it as the implementation or verification path — Stages 3-4 are specialised on purpose.
 
@@ -380,136 +366,6 @@ User: "Rename `db` to `database` in src/auth/"
 
 Single trivial task — DO NOT use orchestrator. Just edit directly.
 
-## Example: Multi-File Refactor (complete, with template rendering)
+## Examples
 
-User: "Refactor src/auth/ to use repository pattern + add tests"
-
-USE orchestrator. This example shows full templates, params, and inputs:
-
-```typescript
-// ── Stage 1: goal_contract_create ──
-goal_contract_create({
-  id: "GC-2025-001",
-  title: "Refactor src/auth/ to use repository pattern",
-  success_criteria: [
-    { id: "SC1", criterion: "src/auth/service.ts no longer imports database",
-      verification_cmd: "! grep -q 'from.*database' src/auth/service.ts" },
-    { id: "SC2", criterion: "src/auth/login.ts no longer imports database",
-      verification_cmd: "! grep -q 'from.*database' src/auth/login.ts" },
-    { id: "SC3", criterion: "New UserRepository class exists",
-      verification_cmd: "test -f src/auth/repository/UserRepository.ts" },
-    { id: "SC4", criterion: "typecheck passes",
-      verification_cmd: "npm run typecheck && echo OK" },
-    { id: "SC5", criterion: "tests pass",
-      verification_cmd: "npm test" },
-    { id: "SC6", criterion: "coverage on src/auth/ >= 80%",
-      verification_cmd: "npm run coverage -- --json | jq '.total.lines.pct'" },
-  ],
-  anti_goals: [
-    "Do not introduce new dependencies",
-    "Do not change login.ts business logic (only data layer)",
-    "Do not modify src/users/ (reference pattern)",
-  ],
-  scope: { include: ["src/auth/", "test/auth/"], exclude: ["src/users/", "package.json"] },
-  constraints: { must_use_existing_patterns: true, max_dependency_additions: 0, test_coverage_min: 80 },
-  done_definition: "SC1-SC6 verified + orchestrator_audit PASS >= 90",
-});
-
-// ── Stage 2: dag_synthesize (uses task_template for auto-rendered prompts) ──
-dag_synthesize({
-  goal_id: "GC-2025-001",
-  tasks: [
-    {
-      id: "P1", description: "Find all DB calls in src/auth/",
-      subagent_type: "Explore", batch: 1, depends_on: [], isolation: "none", tdd: "none",
-      task_template: "subagent-explore",
-      task_params: { task_id: "P1", task_title: "Find DB calls in src/auth/",
-                     sc_list: "Find sites that directly call db/query/exec/pool",
-                     files_to_touch: "src/auth/" },
-      acceptance: { covers: [] },
-      output_schema: { kind: "file_list", path: ".pi/orchestrator/task-P1-findings.json" },
-    },
-    {
-      id: "P2", description: "Find existing repository pattern to mirror",
-      subagent_type: "Explore", batch: 1, depends_on: [], isolation: "none", tdd: "none",
-      task_template: "subagent-explore",
-      task_params: { task_id: "P2", task_title: "Find existing repository pattern",
-                     sc_list: "Find existing Repository class + test patterns",
-                     files_to_touch: "src/users/" },
-      acceptance: { covers: [] },
-      output_schema: { kind: "file_list", path: ".pi/orchestrator/task-P2-findings.json" },
-    },
-    {
-      id: "P3", description: "Design new repository interface",
-      subagent_type: "Plan", batch: 2, depends_on: ["P1", "P2"], isolation: "none", tdd: "none",
-      task_template: "subagent-general-purpose",
-      task_params: { task_id: "P3", task_title: "Design new repository interface",
-                     sc_list: "(design task)", upstream_outputs: "(from P1, P2)",
-                     files_to_touch: "" },
-      inputs: [
-        { from_task: "P1", field: "findings", embed: "summary" },
-        { from_task: "P2", field: "findings", embed: "inline" },
-      ],
-      acceptance: { covers: [] },
-      output_schema: { kind: "design_doc", path: ".pi/orchestrator/task-P3-design.md" },
-    },
-    {
-      id: "P4", description: "Implement UserRepository per design",
-      subagent_type: "software-developer", batch: 3, depends_on: ["P3"], isolation: "worktree", tdd: "strict",
-      task_template: "subagent-software-developer",
-      task_params: { task_id: "P4", task_title: "Implement UserRepository",
-                     sc_list: "- SC3: UserRepository class exists",
-                     tdd_mode: "strict", upstream_outputs: "(from P3 design)",
-                     files_to_touch: "src/auth/repository/UserRepository.ts" },
-      inputs: [{ from_task: "P3", field: "design", embed: "inline" }],
-      acceptance: { covers: ["SC3"], self_check_cmd: "npm run typecheck" },
-      output_schema: { kind: "code_changes", path: "src/auth/repository/UserRepository.ts" },
-    },
-    {
-      id: "P5", description: "Refactor service.ts to use UserRepository",
-      subagent_type: "software-developer", batch: 3, depends_on: ["P3"], isolation: "worktree", tdd: "strict",
-      task_template: "subagent-software-developer",
-      task_params: { task_id: "P5", task_title: "Refactor service.ts",
-                     sc_list: "- SC1: no database import\n- SC2: no database import",
-                     tdd_mode: "strict", upstream_outputs: "(from P3 design + P4 code)",
-                     files_to_touch: "src/auth/service.ts" },
-      inputs: [
-        { from_task: "P3", field: "design", embed: "summary" },
-        { from_task: "P4", field: "code", embed: "summary" },
-      ],
-      acceptance: { covers: ["SC1", "SC2"], self_check_cmd: "! grep -q 'from.*database' src/auth/service.ts" },
-      output_schema: { kind: "code_changes", path: "src/auth/service.ts" },
-    },
-    {
-      id: "P6", description: "Add unit tests for refactored boundary",
-      subagent_type: "software-developer", batch: 4, depends_on: ["P5"], isolation: "worktree", tdd: "strict",
-      task_template: "subagent-software-developer",
-      task_params: { task_id: "P6", task_title: "Add unit tests",
-                     sc_list: "- SC5: tests pass\n- SC6: coverage >= 80%",
-                     tdd_mode: "strict", upstream_outputs: "(from P5 refactor)",
-                     files_to_touch: "test/auth/" },
-      inputs: [{ from_task: "P5", field: "code", embed: "summary" }],
-      acceptance: { covers: ["SC5", "SC6"], self_check_cmd: "npm test" },
-      output_schema: { kind: "code_changes", path: "test/auth/" },
-    },
-    {
-      id: "P7", description: "Audit full refactor",
-      subagent_type: "software-auditor", batch: 5, depends_on: ["P6"], isolation: "none", tdd: "none",
-      task_template: "subagent-software-auditor",
-      task_params: { task_id: "P7", task_title: "Audit refactor result",
-                     sc_list: "(all 6 SCs)", depth: "full",
-                     task_report_path: ".pi/orchestrator/task-P6-report.md",
-                     isolation: "worktree" },
-      acceptance: { covers: ["SC1", "SC2", "SC3", "SC4", "SC5", "SC6"] },
-      output_schema: { kind: "verdict", path: ".pi/orchestrator/audit-P7.md" },
-    },
-  ],
-});
-
-// ── Stage 3: task_dispatch({ dag_id: "DAG-2025-001", strategy: "auto" }) ──
-//   (LLM receives 5 batches of Agent tool calls to execute in order)
-
-// ── Stage 4: orchestrator_audit({ dag_id: "DAG-2025-001" }) ──
-```
-
-Each `task_template` field auto-renders the prompt at `dag_synthesize` time, injecting TDD discipline + First Action Protocol + output contract. The `inputs` field tells `task_dispatch` to read upstream task outputs from disk and append them as context.
+For full end-to-end examples (multi-file refactor, new feature, etc.) see the DAG templates under `~/.pi/packages/sages/skills/orchestrator/templates/dag/` (`dag-tdd-refactor.yaml`, `dag-bug-fix.yaml`). They are the canonical reference and are regression-guarded against drift by `pi/test/tools/orchestrator/template-loader.test.ts`.
