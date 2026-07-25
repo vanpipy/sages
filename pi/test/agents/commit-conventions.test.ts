@@ -1,5 +1,5 @@
 /**
- * Tests for the Commit Conventions section in software-developer.md.
+ * Tests for the Commit Conventions section in developer.md.
  *
  * The section encodes two non-negotiable constraints:
  *   1. Every commit MUST follow Conventional Commits 1.0.0
@@ -22,11 +22,11 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const AGENT_PATH = join(__dirname, "..", "..", "templates", "agents", "software-developer.md");
+const AGENT_PATH = join(__dirname, "..", "..", "templates", "agents", "developer.md");
 
 const TEXT = readFileSync(AGENT_PATH, "utf-8");
 
-describe("software-developer.md — Conventional Commits format (rule 1)", () => {
+describe("developer.md — Conventional Commits format (rule 1)", () => {
 	it("references the Conventional Commits 1.0.0 spec", () => {
 		// Match any version of the URL — spec page is at conventionalcommits.org
 		// and the spec allows URL fragments (e.g. #specification).
@@ -65,7 +65,7 @@ describe("software-developer.md — Conventional Commits format (rule 1)", () =>
 	});
 });
 
-describe("software-developer.md — author derivation (rule 2)", () => {
+describe("developer.md — author derivation (rule 2)", () => {
 	it("instructs to read author from `git config user.name`", () => {
 		expect(TEXT).toMatch(/git\s+config\s+user\.name/);
 	});
@@ -101,7 +101,7 @@ describe("software-developer.md — author derivation (rule 2)", () => {
 	});
 });
 
-describe("software-developer.md — section structure", () => {
+describe("developer.md — section structure", () => {
 	it("has a dedicated 'Commit Conventions' section (heading near 'Commit')", () => {
 		// Match a markdown heading that includes "commit" + "convention"
 		// (case-insensitive, emoji-optional). Allows either 📤 Commit

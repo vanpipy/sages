@@ -6,7 +6,7 @@
  * under `pi/`, root docs, package metadata, ignore files). It CANNOT
  * directly write to **production code** (user `src/`, `test/`, `lib/`,
  * any other user code); those must go through the `Agent` tool with
- * a `software-developer` subagent so the audit gate stays intact.
+ * a `developer` subagent (with an explicit managed-worktree isolation object) so the audit gate stays intact.
  *
  * Two tools are exposed:
  *   - `sages_write(path, content)`  full overwrite of a meta-file
@@ -15,7 +15,7 @@
  * Both share `canMainAgentWrite(path)` for the allowlist check. A
  * rejected path returns `{ isError: true, content: [{ text: policyMessage(...) }] }`
  * so the LLM can see exactly why and what to do instead (dispatch
- * a software-developer task via the Agent tool).
+ * a `developer` task via the Agent tool — pass `isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }` for managed worktrees.
  *
  * Read tools (`read`, `aft_read`, `aft_search`, `codebase_*`, `graphify_*`,
  * `bash` for read-only commands) are intentionally NOT gated — the
@@ -100,10 +100,10 @@ export function policyMessage(path: string): string {
 		`main agent cannot directly edit "${path}".`,
 		``,
 		`Production code and user source files must be modified via the Agent tool —`,
-		`dispatch a software-developer subagent with run_in_background: true.`,
+		`dispatch a developer subagent with run_in_background: true. Pass isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" } for managed worktrees — the legacy isolation: "worktree" string literal is no longer accepted.`,
 		`Example:`,
 		`  Agent({`,
-		`    subagent_type: "software-developer",`,
+		`    subagent_type: "developer",`,
 		`    prompt: "Implement <change> in <path>. <context>...",`,
 		`    run_in_background: true,`,
 		`  })`,
@@ -224,7 +224,7 @@ export function registerFileGate(pi: any): void {
 			"  - README.md, AGENTS.md, package.json, tsconfig.json",
 			"  - .gitignore, .graphifyignore, .aft.jsonc, .claude/, .codex/",
 			"Production code (src/, test/, lib/, *.ts, *.py, ...) is REJECTED.",
-			"Use the Agent tool with subagent_type=software-developer for those.",
+			"Use the Agent tool with subagent_type=developer for those. Pass `isolation: { dag_id, task_id, worktree_id?, mode: \"create\" | \"reuse\" }` for managed worktrees.",
 		].join("\n"),
 		parameters: SagesWriteParams,
 		async execute(
@@ -244,7 +244,7 @@ export function registerFileGate(pi: any): void {
 		description: [
 			"Replace oldText with newText in a Sages meta-file.",
 			"Allowlisted paths only (see sages_write description).",
-			"Production code is REJECTED — use Agent + software-developer.",
+			"Production code is REJECTED — use Agent + developer subagent (with explicit managed-worktree isolation). ",
 		].join("\n"),
 		parameters: SagesEditParams,
 		async execute(

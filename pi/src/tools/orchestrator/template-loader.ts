@@ -42,18 +42,32 @@ function cwdFallbackSagesRoot(): string | null {
   if (!isDev && !cwdIsSagesSrc) return null;
 
   const cwdTemplates = join(process.cwd(), "skills", "orchestrator", "templates");
-  return existsSync(cwdTemplates) ? process.cwd() : null;
+  if (existsSync(cwdTemplates)) return process.cwd();
+  // Phase A P3 (DAG-2026-011): also accept the source-repo layout
+  // `pi/skills/orchestrator/templates/` so worktree tests find the
+  // renamed prompt file (`subagent-developer.md`) without requiring
+  // a fresh install. The installed package still has `skills/` at
+  // root; only the dev source tree uses `pi/skills/`.
+  const cwdTemplatesPi = join(process.cwd(), "pi", "skills", "orchestrator", "templates");
+  return existsSync(cwdTemplatesPi) ? process.cwd() : null;
 }
 
 /** Resolve the orchestrator templates root. Falls back to cwd only in dev. */
 export function findTemplatesRoot(): string | null {
   // Try each candidate sages root — return the first one that actually has templates.
-  const candidates = [findSagesRoot(), cwdFallbackSagesRoot()].filter(
+  // In development, prefer the active source worktree over any stale package
+  // installed under ~/.pi. Production has no cwd fallback, so SAGES_PATH and
+  // the normal install locations retain their existing priority.
+  const candidates = [cwdFallbackSagesRoot(), findSagesRoot()].filter(
     (r): r is string => r !== null,
   );
   for (const root of candidates) {
-    const templates = join(root, "skills", "orchestrator", "templates");
-    if (existsSync(templates)) return templates;
+    const installedTemplates = join(root, "skills", "orchestrator", "templates");
+    if (existsSync(installedTemplates)) return installedTemplates;
+
+    // Source worktrees keep the package under `pi/`; installed packages do not.
+    const sourceTemplates = join(root, "pi", "skills", "orchestrator", "templates");
+    if (existsSync(sourceTemplates)) return sourceTemplates;
   }
   return null;
 }
@@ -307,6 +321,21 @@ function typeMatches(actual: string, expected: string): boolean {
  * When adding a new template, add its schema here for validation.
  */
 const TEMPLATE_PARAM_SCHEMAS: Record<string, TemplateParam[]> = {
+  // Phase A P3 (DAG-2026-011): canonical template name is
+  // `subagent-developer`. The legacy key `subagent-software-developer`
+  // is preserved as a fallback that returns the same schema; persisted
+  // DAGs continue to validate, but new authoring MUST use the
+  // canonical key. The dispatcher separately surfaces a deprecation
+  // warning when the alias is invoked.
+  "subagent-developer": [
+    { name: "task_id", type: "string", required: true, description: "Task id (e.g. 'P4')" },
+    { name: "task_title", type: "string", required: true, description: "Short title" },
+    { name: "sc_list", type: "string", required: true, description: "Formatted SC list with verification_cmd" },
+    { name: "upstream_outputs", type: "string", required: true, description: "Formatted upstream task outputs (or '(none)')" },
+    { name: "files_to_touch", type: "string", required: true, description: "Files this task touches (joined string)" },
+    { name: "acceptance_cmd", type: "string", required: false, description: "Optional self_check_cmd" },
+  ],
+  // Phase A alias — same schema; the dispatcher warns at validation time.
   "subagent-software-developer": [
     { name: "task_id", type: "string", required: true, description: "Task id (e.g. 'P4')" },
     { name: "task_title", type: "string", required: true, description: "Short title" },

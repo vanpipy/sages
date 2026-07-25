@@ -38,6 +38,8 @@ import {
 	releaseManagedWorktreeLease,
 	worktreePath,
 } from "./worktree.js";
+import { resolveAgentType } from "./agent-types.js";
+import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
 import type { ManagedWorktreeRequest } from "./worktree-contract.js";
 import {
 	parseManagedWorktreeRequest,
@@ -213,11 +215,31 @@ export class AgentManager {
 		// can fix and retry; the RPC layer converts throws into error envelopes.
 		assertValidSpawnCwd(options.cwd);
 
+		// Phase A P2 (DAG-2026-011): resolve alias + enforce managed-isolation
+		// policy at the spawn boundary. The Agent tool's dispatcher also runs
+		// this check, but spawn() is the safety net for any direct caller —
+		// cross-extension RPC, the scheduler, or tests — that bypasses the
+		// dispatcher. Without this, the legacy developer alias with no
+		// managed-worktree object would silently spawn against the host repo.
+		const aliasResolved = resolveAgentType(type);
+		const canonicalType = aliasResolved?.canonical ?? type;
+		if (canonicalType === "developer") {
+			const policyError = enforceDeveloperManagedIsolationPolicy(
+				canonicalType,
+				options.managedWorktree ?? options.isolation,
+			);
+			if (policyError) {
+				throw new Error(policyError);
+			}
+		}
+
 		const id = randomUUID().slice(0, 17);
 		const abortController = new AbortController();
 		const record: AgentRecord = {
 			id,
-			type,
+			type: canonicalType,
+			aliasUsed: aliasResolved?.alias === true,
+			requestedName: aliasResolved?.requested ?? type,
 			description: options.description,
 			status: options.isBackground ? "queued" : "running",
 			toolUses: 0,

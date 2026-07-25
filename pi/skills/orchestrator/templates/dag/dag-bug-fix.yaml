@@ -3,6 +3,11 @@
 # TDD-driven bug fix: reproduction test → fix → regression check.
 # 3 batches, smallest viable workflow.
 #
+# Phase A P3 (DAG-2026-011): the developer subagent is canonical
+# `developer`. The managed-worktree
+# isolation is the explicit object form — never the legacy
+# `isolation: worktree` string literal.
+#
 # Use: dag_synthesize({ goal_id: "GC-...", tasks: [<tasks below, edited>] })
 #
 # Every task declares a `prompt:` that satisfies the schema's minLength=20.
@@ -65,8 +70,9 @@ tasks:
     description: "Write reproduction test (RED), then implement minimal fix (GREEN)"
     plane: Data
     priority: high
-    subagent_type: software-developer
-    task_template: subagent-software-developer
+    # Phase A P3 (DAG-2026-011): canonical subagent name is `developer`.
+    subagent_type: developer
+    task_template: subagent-developer
     task_params:
       task_id: P3
       task_title: "Fix the bug"
@@ -77,13 +83,20 @@ tasks:
       reproduction_steps: "[how to reproduce]"
     batch: 2
     depends_on: [P1, P2]
-    isolation: worktree
+    # Phase A P3: the explicit managed-worktree object is the canonical
+    # isolation shape. The legacy `isolation: worktree` literal is no
+    # longer accepted by the Agent tool; `dag_id` / `task_id` are
+    # required so the worktree lives at <repoRoot>/.pi/worktree/<dag>/<task>.
+    isolation:
+      dag_id: "[DAG-ID]"
+      task_id: P3
+      mode: create
     tdd: strict
     # Background-default for implement/audit (verified 2026-07-24).
     # Spawns the developer subagent and returns its agent id immediately;
     # the orchestrator can then `get_subagent_result` or `steer_subagent`
     # instead of blocking. The dispatcher would also default this to true
-    # because subagent_type=software-developer, but the explicit annotation
+    # because subagent_type=developer, but the explicit annotation
     # documents intent at the call site.
     run_in_background: true
     files: ["src/[bug-area]/[buggy-file].ts", "test/[bug-area]/[reproduction-test].ts"]
@@ -117,7 +130,8 @@ tasks:
     # Background default for implement/audit (verified 2026-07-24).
     # Auditor runs while the orchestrator can do other prep work;
     # `get_subagent_result` collects the verdict when needed.
-    # The dispatcher would default this to true based on subagent_type.
+    # The dispatcher would default this to true based on
+    # subagent_type=software-auditor (Phase B will rename to `auditor`).
     run_in_background: true
     files: []
     prompt: "Audit the bug fix in P3 against SC1/SC2/SC3. Read the developer's report at .pi/orchestrator/task-P3-report.md, re-run `npm test` to verify SC2, inspect the diff vs main to confirm SC3 (no drive-by refactor). Default verdict is NEEDS WORK; only flip to CERTIFIED with overwhelming evidence."

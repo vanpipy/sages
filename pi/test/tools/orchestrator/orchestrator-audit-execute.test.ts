@@ -43,7 +43,7 @@ function makeTask(id: string, opts: Partial<TaskNode> = {}): TaskNode {
 		priority: "medium",
 		depends_on: [],
 		files: [],
-		subagent_type: "software-developer",
+		subagent_type: "developer",
 		batch: 1,
 		isolation: "worktree",
 		tdd: "strict",
@@ -123,7 +123,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 	describe("happy path", () => {
 		it("init returns workflow_summary + phase_guidance", async () => {
 			const t1 = makeTask("P1", { subagent_type: "Explore", batch: 1 });
-			const t2 = makeTask("P2", { subagent_type: "software-developer", batch: 2, depends_on: ["P1"] });
+			const t2 = makeTask("P2", { subagent_type: "developer", batch: 2, depends_on: ["P1"] });
 			const plan = makePlan([t1, t2]);
 			writePlan(plan);
 			writeTaskReport("P1", "CERTIFIED");

@@ -1,11 +1,15 @@
 <!--
-Task Prompt Template: subagent-software-developer
+Task Prompt Template: subagent-developer
 
-Renders into the subagent's task prompt at dispatch time. The agent
-identity (TDD discipline, spawn mode, First Action Protocol, Output
-Contract, Sub-Agent Boundaries, Commit Conventions) lives in
-templates/agents/software-developer.md and is loaded by pi-subagents
-as the subagent's identity body — DO NOT duplicate it here.
+Renders into the subagent's task prompt at dispatch time. The canonical
+agent identity (TDD discipline, spawn mode, First Action Protocol, Output
+Contract, Sub-Agent Boundaries, Commit Conventions) is embedded by
+pi-subagents and is loaded as the subagent's identity body — DO NOT
+duplicate it here.
+
+Phase A alias context: the deprecated `subagent-software-developer` key may
+still resolve for persisted DAG compatibility, but new authoring uses
+`subagent-developer`.
 
 This template carries ONLY the per-task data the subagent cannot derive
 from its identity + the worktree state:

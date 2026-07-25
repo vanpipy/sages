@@ -259,7 +259,7 @@ No verdict here.
 				priority: "medium",
 				depends_on: ["P1"],
 				files: [],
-				subagent_type: "software-developer",
+				subagent_type: "developer",
 				batch: 2,
 				isolation: "worktree",
 				tdd: "strict",

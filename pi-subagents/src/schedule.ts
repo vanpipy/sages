@@ -34,6 +34,8 @@ import type {
 	ManagedWorktreeRequest,
 	ParsedManagedWorktreeRequest,
 } from "./worktree-contract.js";
+import { resolveAgentType } from "./agent-types.js";
+import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
 
 /** Event emitted on `pi.events` for cross-extension consumers. */
 export type ScheduleChangeEvent =
@@ -110,9 +112,51 @@ export class SubagentScheduler {
 	/**
 	 * Build a `ScheduledSubagent` from user input. Validates the schedule
 	 * format and tags `scheduleType`. Throws on invalid input.
+	 *
+	 * Phase A P2 (DAG-2026-011): the developer-managed-isolation policy
+	 * is also enforced at schedule creation time. The schedule store
+	 * persists the isolation object verbatim and re-applies the policy
+	 * at every fire time. Recurring `developer` schedules are rejected
+	 * outright: the dispatcher can't guarantee the policy holds across
+	 * every interval / cron tick without compile-time knowledge of the
+	 * isolation shape, so the only safe lifecycle is one-shot.
 	 */
 	buildJob(input: NewJobInput): ScheduledSubagent {
 		const detected = SubagentScheduler.detectSchedule(input.schedule);
+		// Phase A P2: resolve alias + apply the developer policy before
+		// persisting. The legacy developer alias canonicalizes to
+		// `developer` here so the same enforcement applies regardless of
+		// which spelling the caller used.
+		const aliasResolved = resolveAgentType(input.subagent_type);
+		const canonical = aliasResolved?.canonical ?? input.subagent_type;
+		if (canonical === "developer") {
+			// Reject recurring developer schedules outright — the
+			// fire-time policy check can't recover from a malformed
+			// isolation object on a recurring schedule because the
+			// store persists the isolation verbatim and we don't have
+			// per-tick validation hooks. One-shot developer is fine
+			// because the policy fires synchronously at the single
+			// scheduled fire time.
+			if (detected.type !== "once") {
+				throw new Error(
+					`developer agent: recurring schedules are not supported ` +
+						`(got scheduleType "${detected.type}"). Use a one-shot ` +
+						`("+10m" or ISO timestamp) — the dispatcher cannot ` +
+						`guarantee the managed-isolation policy across recurring ticks.`,
+				);
+			}
+			// Reject missing / malformed / legacy-string isolation for
+			// one-shot developer schedules. The same message family
+			// as the dispatcher / spawn-time path so callers see one
+			// consistent diagnostic.
+			const policyError = enforceDeveloperManagedIsolationPolicy(
+				canonical,
+				input.isolation,
+			);
+			if (policyError) {
+				throw new Error(policyError);
+			}
+		}
 		return {
 			id: nanoid(10),
 			name: input.name,

@@ -3,7 +3,7 @@
  * operations that target production code paths.
  *
  * The main orchestrator agent must not be able to bypass the
- * `software-developer` / `software-auditor` audit gate by issuing
+ * `developer` / `software-auditor` audit gate by issuing
  * raw `bash` commands (`rm`, `mv`, `cp`, `sed -i`, `find -delete`,
  * `git checkout --`, `tar -xf`, redirects, …). The `Agent` tool is
  * the only legitimate path for production-code changes.
@@ -593,9 +593,9 @@ function formatBlockReason(targets: string[]): string {
 		`bash command targets production code: ${listed}`,
 		"",
 		"Main agent cannot directly modify production code.",
-		"Use the Agent tool to dispatch a software-developer subagent:",
+		"Use the Agent tool to dispatch a developer subagent (with an explicit managed-worktree isolation object):",
 		"  Agent({",
-		'    subagent_type: "software-developer",',
+		'    subagent_type: "developer",',
 		'    prompt: "Implement <change> in <files>. <context>...",',
 		"    run_in_background: true,",
 		"  })",

@@ -5,7 +5,7 @@
  * to `true` for every task in `buildDispatchPlan`, ignoring the
  * per-stage rule documented in `pi/templates/SUBAGENTS.md`:
  *   - Explore, Plan       → foreground
- *   - software-developer  → background
+ *   - developer           → background
  *   - software-auditor    → background
  *   - general-purpose     → foreground (ad-hoc / planning)
  *
@@ -64,8 +64,8 @@ describe("buildDispatchPlan — run_in_background policy", () => {
 		expect(d.batches[0].tasks[0].run_in_background).toBe(false);
 	});
 
-	it("software-developer tasks default to background", () => {
-		const plan = makePlan([makeTask("P1", "software-developer", 1)]);
+	it("developer tasks default to background (canonical)", () => {
+		const plan = makePlan([makeTask("P1", "developer", 1)]);
 		const d = buildDispatchPlan(plan, "auto", 4);
 		expect(d.batches[0].tasks[0].run_in_background).toBe(true);
 	});
@@ -92,7 +92,7 @@ describe("buildDispatchPlan — run_in_background policy", () => {
 
 	it("per-task run_in_background=false override beats background default", () => {
 		const plan = makePlan([
-			makeTask("P1", "software-developer", 1, { run_in_background: false }),
+			makeTask("P1", "developer", 1, { run_in_background: false }),
 		]);
 		const d = buildDispatchPlan(plan, "auto", 4);
 		expect(d.batches[0].tasks[0].run_in_background).toBe(false);
@@ -101,7 +101,7 @@ describe("buildDispatchPlan — run_in_background policy", () => {
 	it("mixed batch respects per-task rules", () => {
 		const plan = makePlan([
 			makeTask("P1", "Explore", 1),
-			makeTask("P2", "software-developer", 1),
+			makeTask("P2", "developer", 1),
 		]);
 		const d = buildDispatchPlan(plan, "auto", 4);
 		const flags = d.batches[0].tasks.map((t) => [t.task_id, t.run_in_background]).sort();
@@ -113,7 +113,7 @@ describe("buildDispatchPlan — batch metadata", () => {
 	it("audit_after is true on every batch under auto strategy", () => {
 		const plan = makePlan([
 			makeTask("P1", "Explore", 1),
-			makeTask("P2", "software-developer", 2, { depends_on: ["P1"] }),
+			makeTask("P2", "developer", 2, { depends_on: ["P1"] }),
 		]);
 		const d = buildDispatchPlan(plan, "auto", 4);
 		expect(d.batches.every((b) => b.audit_after)).toBe(true);

@@ -169,30 +169,70 @@ powershell -Command "$d = Get-Content '%AGENT_DIR%\settings.json' -Raw ^| Conver
 REM ─── Subagent templates (Stages 3+4 of 4-agent pipeline) ───
 echo ==^> Installing subagent templates...
 if not exist "%AGENT_DIR%\agents" mkdir "%AGENT_DIR%\agents" >nul 2>&1
-for %%N in (software-auditor software-developer) do (
+
+REM Phase A migration: classify and preserve the previous developer filename.
+REM User-customized content remains in place; a Sages-managed legacy file is
+REM removed after backup so canonical developer alias resolution is not shadowed.
+set "PHASE_A_BACKUP_DIR=%AGENT_DIR%\agents\.phase-a-migration"
+set "LEGACY_DEVELOPER=%AGENT_DIR%\agents\software-developer.md"
+if exist "!LEGACY_DEVELOPER!" (
+    if not exist "!PHASE_A_BACKUP_DIR!" mkdir "!PHASE_A_BACKUP_DIR!" >nul 2>&1
+    for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddTHHmmssfff"') do set "PHASE_A_TS=%%T"
+    set "PHASE_A_CLASSIFICATION=user-customized"
+    findstr /C:"SAGES_TEMPLATE_V1" "!LEGACY_DEVELOPER!" >nul 2>&1
+    if not errorlevel 1 set "PHASE_A_CLASSIFICATION=sages-managed"
+    copy /Y "!LEGACY_DEVELOPER!" "!PHASE_A_BACKUP_DIR!\software-developer.!PHASE_A_TS!.md" >nul
+    (
+        echo classification: !PHASE_A_CLASSIFICATION!
+        echo install_time: !PHASE_A_TS!
+        echo subagent_name: software-developer
+        echo canonical_name: developer
+        echo phase: A
+        echo reason: previous developer-agent filename preserved before canonical template install
+    ) > "!PHASE_A_BACKUP_DIR!\software-developer.!PHASE_A_TS!.md.meta"
+    if "!PHASE_A_CLASSIFICATION!"=="sages-managed" (
+        del /Q "!LEGACY_DEVELOPER!"
+        echo   Migrated software-developer.md to developer.md; backup saved under .phase-a-migration
+    ) else (
+        echo   software-developer.md user-customized; backup saved under .phase-a-migration and original left in place
+    )
+)
+
+for %%N in (software-auditor developer) do (
     set "TPL_NAME=%%N"
     set "TEMPLATE=%TMP_DIR%\pi\templates\agents\%%N.md"
     set "TARGET=%AGENT_DIR%\agents\%%N.md"
 
-    if exist "%TEMPLATE%" (
-        if exist "%TARGET%" (
-            findstr /C:"SAGES_TEMPLATE_V1" "%TARGET%" >nul 2>&1
+    if exist "!TEMPLATE!" (
+        if exist "!TARGET!" (
+            findstr /C:"SAGES_TEMPLATE_V1" "!TARGET!" >nul 2>&1
             if not errorlevel 1 (
                 if "%FORCE%"=="true" (
-                    copy /Y "%TEMPLATE%" "%TARGET%" >nul
+                    copy /Y "!TEMPLATE!" "!TARGET!" >nul
                     echo   Installed %%N.md (--force)
                 ) else (
                     echo   %%N.md already installed (use --force to reinstall)
                 )
             ) else (
-                echo   %%N.md user-customized (use --force to overwrite)
+                if not exist "!PHASE_A_BACKUP_DIR!" mkdir "!PHASE_A_BACKUP_DIR!" >nul 2>&1
+                for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddTHHmmssfff"') do set "PHASE_A_TS=%%T"
+                copy /Y "!TARGET!" "!PHASE_A_BACKUP_DIR!\%%N.!PHASE_A_TS!.md" >nul
+                (
+                    echo classification: user-customized
+                    echo install_time: !PHASE_A_TS!
+                    echo subagent_name: %%N
+                    echo canonical_name: developer
+                    echo phase: A
+                    echo reason: existing canonical target lacks SAGES_TEMPLATE_V1 sentinel; skipped install
+                ) > "!PHASE_A_BACKUP_DIR!\%%N.!PHASE_A_TS!.md.meta"
+                echo   %%N.md user-customized; backed up under .phase-a-migration (use --force to overwrite)
             )
         ) else (
-            copy /Y "%TEMPLATE%" "%TARGET%" >nul
+            copy /Y "!TEMPLATE!" "!TARGET!" >nul
             echo   Installed %%N.md
         )
     ) else (
-        echo   Warning: template missing: %TEMPLATE%
+        echo   Warning: template missing: !TEMPLATE!
     )
 )
 
@@ -392,12 +432,12 @@ if exist "%AGENT_DIR%\settings.json" (
 )
 
 REM Remove subagent templates (only if our sentinel)
-for %%N in (software-auditor software-developer) do (
+for %%N in (software-auditor developer) do (
     set "TARGET=%AGENT_DIR%\agents\%%N.md"
-    if exist "%TARGET%" (
-        findstr /C:"SAGES_TEMPLATE_V1" "%TARGET%" >nul 2>&1
+    if exist "!TARGET!" (
+        findstr /C:"SAGES_TEMPLATE_V1" "!TARGET!" >nul 2>&1
         if not errorlevel 1 (
-            del /Q "%TARGET%"
+            del /Q "!TARGET!"
             echo   Removed %%N.md (was our template)
         ) else (
             echo   %%N.md user-customized, leaving alone

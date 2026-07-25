@@ -16,8 +16,6 @@
 # user can copy to $env:USERPROFILE\.config\cortexkit\aft.jsonc after installation.
 #
 
-$ErrorActionPreference = 'Stop'
-
 param(
     [string]$Prefix,
     [switch]$Force,
@@ -27,6 +25,8 @@ param(
     [switch]$Help
 )
 
+$ErrorActionPreference = 'Stop'
+
 # Core paths
 $PI_DIR = if ($Prefix) { $Prefix } else { "$env:USERPROFILE\.pi" }
 $PKG_NAME = "sages"
@@ -35,14 +35,14 @@ $REPO_URL = "https://github.com/vanpipy/sages.git"
 $AGENT_DIR = "$PI_DIR\agent"
 
 # Subagent template install info (mirrors install.sh).
-# Source: pi/templates/agents/{software-auditor,software-developer}.md
+# Source: pi/templates/agents/{developer,software-auditor}.md
 # Target: $AGENT_DIR\agents\ — global agent definitions loaded by pi-subagents.
-# Without these, sages' orchestrator can't dispatch software-{auditor,developer}
+# Without these, sages' orchestrator can't dispatch developer / software-auditor
 # subagents by name. The 2 built-in agents (Explore, Plan) come from pi-subagents
 # and need no install — see also SUBAGENTS.md for the full 4-agent pipeline.
 $SUBAGENT_TEMPLATE_DIR = Join-Path (Split-Path -Parent $PSCommandPath) "..\templates\agents"
 $SUBAGENT_TARGET_DIR = "$AGENT_DIR\agents"
-$SUBAGENT_NAMES = @("software-auditor", "software-developer")
+$SUBAGENT_NAMES = @("software-auditor", "developer")
 $SUBAGENT_SENTINEL = "SAGES_TEMPLATE_V1"
 
 # Subagent pipeline doc — installed alongside agent .md files. Plain markdown,
@@ -107,6 +107,55 @@ function IsSubagentTemplateInstalled {
     return $content.Contains($SUBAGENT_SENTINEL)
 }
 
+# Preserve and classify a previous template before Phase A skips or migrates it.
+# The metadata sidecar keeps rollback possible without consulting git.
+function Backup-PhaseASubagentTemplate {
+    param(
+        [string]$File,
+        [string]$Name,
+        [string]$Classification,
+        [string]$Reason
+    )
+    $backupRoot = Join-Path $SUBAGENT_TARGET_DIR ".phase-a-migration"
+    $null = New-Item -ItemType Directory -Path $backupRoot -Force -ErrorAction SilentlyContinue
+    $timestamp = Get-Date -Format "yyyyMMddTHHmmssfff"
+    $backupName = "$Name.$timestamp.md"
+    Copy-Item $File (Join-Path $backupRoot $backupName) -Force
+    @(
+        "classification: $Classification",
+        "install_time: $timestamp",
+        "subagent_name: $Name",
+        "canonical_name: developer",
+        "phase: A",
+        "reason: $Reason"
+    ) | Set-Content (Join-Path $backupRoot "$backupName.meta") -Encoding UTF8
+    return $backupName
+}
+
+# Migrate the previous developer filename. User customizations remain in place;
+# Sages-managed legacy content is removed after the backup so the canonical
+# `developer` alias path cannot be shadowed by an obsolete roster entry.
+function Backup-LegacyDeveloperTemplate {
+    $legacyName = "software-developer"
+    $legacy = Join-Path $SUBAGENT_TARGET_DIR "$legacyName.md"
+    if (-not (Test-Path $legacy)) { return }
+
+    $managed = IsSubagentTemplateInstalled $legacy
+    $classification = if ($managed) { "sages-managed" } else { "user-customized" }
+    $backupName = Backup-PhaseASubagentTemplate `
+        -File $legacy `
+        -Name $legacyName `
+        -Classification $classification `
+        -Reason "previous developer-agent filename preserved before canonical template install"
+
+    if ($managed) {
+        Remove-Item -Force $legacy
+        Write-Host "  Migrated $legacyName.md to developer.md (backup: .phase-a-migration/$backupName)"
+    } else {
+        Write-Host "  $legacyName.md is user-customized — backed up to .phase-a-migration/$backupName and left in place"
+    }
+}
+
 # Copy each $SUBAGENT_NAMES template to $SUBAGENT_TARGET_DIR. Idempotent:
 #   - missing → install from template
 #   - file exists with sentinel → skip (already installed by us)
@@ -119,6 +168,7 @@ function Install-SubagentTemplates {
     }
 
     $null = New-Item -ItemType Directory -Path $SUBAGENT_TARGET_DIR -Force -ErrorAction SilentlyContinue
+    Backup-LegacyDeveloperTemplate
 
     foreach ($name in $SUBAGENT_NAMES) {
         $template = Join-Path $SUBAGENT_TEMPLATE_DIR "$name.md"
@@ -134,7 +184,12 @@ function Install-SubagentTemplates {
             continue
         }
         if ((Test-Path $target) -and -not (IsSubagentTemplateInstalled $target) -and -not $Force) {
-            Write-Host "  $name.md exists with user customization (use -Force to overwrite)"
+            $backupName = Backup-PhaseASubagentTemplate `
+                -File $target `
+                -Name $name `
+                -Classification "user-customized" `
+                -Reason "existing canonical target lacks SAGES_TEMPLATE_V1 sentinel; skipped install"
+            Write-Host "  $name.md exists with user customization — backed up to .phase-a-migration/$backupName (use -Force to overwrite)"
             continue
         }
 
