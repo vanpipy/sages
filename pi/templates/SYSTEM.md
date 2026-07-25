@@ -131,6 +131,70 @@ Every implementation follows: **RED** (failing test) → **Verify** (confirm fai
 
 `software-developer` subagent enforces this automatically. Tests are source of truth (444 tests in `pi/test/` as of 2026-07-24: 404 baseline + 33 `bash-guard.test.ts` + 7 `main-agent-toolset.test.ts`). For TDD exceptions (PoC, config), document why in commit message.
 
+## 3.5 Commit Conventions — orchestrator commits also follow Conventional Commits
+
+You (the L3 orchestrator) produce commits too — primarily **merge commits** integrating developer branches, plus occasional manual fix-ups. You MUST follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) the same way `software-developer` does. Release tooling (release-please, changelog generators, semver calculators), the audit gate, and downstream consumers all parse the `<type>` prefix — a free-form commit breaks that pipeline silently.
+
+### Format
+
+```
+<type>(<scope>): <description>
+
+[optional body — wrap at 72 chars; explain WHAT and WHY]
+
+[optional footer — Refs: <goal-id>, Closes: <issue-id>]
+```
+
+Allowed `<type>` values (same as `software-developer`):
+
+| type | orchestrator use case |
+|---|---|
+| `feat` | New capability visible to users/callers |
+| `fix` | Bug fix in orchestrator code or workflow |
+| `docs` | Documentation-only (AGENTS.md, SKILL.md, README) |
+| `refactor` | Production-code change with no behavior delta |
+| `test` | Tests only |
+| `perf` | Performance improvement |
+| `chore` | Build / CI / tooling / housekeeping |
+| `style` | Formatting only |
+
+### Merge commits — your most common case
+
+When integrating a developer branch:
+
+```
+<type>(<scope>): merge <branch-scope> <feature-name>
+```
+
+Examples:
+
+```
+feat(pi-evaluator): merge P1.b artifact + jsonl readers
+fix(bash-guard): merge F4 perl + 2> redirect bypass fixes
+refactor(orchestrator): merge GC-2026-004 subagent persistence refactor
+```
+
+The `<scope>` matches the area being merged so the changelog groups all `feat(pi-evaluator):` entries together.
+
+### Description rules
+
+- **Lowercase, imperative mood, no trailing period** — `feat: add plugin loader` not `feat: Added plugin loader.`
+- Body wraps at 72 chars. Explain motivation, not mechanics.
+- Footer for cross-references: `Refs: GC-2026-004` / `Refs: T1`.
+
+### Forbidden formats
+
+| Format | Why it fails |
+|---|---|
+| `GC-XXXX-XXX T1: ...` | Mixes workflow IDs into subject — move them to `Refs:` footer |
+| `pi-agent: ...` | Non-standard prefix — use `chore(orchestrator):` instead |
+| `merge: <thing>` without `<type>(<scope>)` prefix | Default git-merge style — Conventional Commits requires `<type>` |
+| `update stuff`, `wip`, free-form prose | Breaks release-please parsing |
+
+### Author
+
+Always commit as the resolved git author (`git config user.{name,email}`, falling back to `git log -1` author if config is empty). Never `git commit --author=…`, never `GIT_AUTHOR_NAME=…` env overrides. The audit gate rejects fabricated authors — see `pi/templates/agents/software-developer.md` §Author for the resolve script.
+
 ## 4. Workflow References (on-demand — load when entering mode)
 
 - **Multi-task orchestrator**: `pi/skills/orchestrator/SKILL.md` — load when user gives a non-trivial multi-step task
