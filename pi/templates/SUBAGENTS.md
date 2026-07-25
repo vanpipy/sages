@@ -20,7 +20,7 @@ identity from `~/.pi/agent/agents/<name>.md`).
 |-------|----------------------|--------------------------------------|----------------------|------------------------------------------------------------------------|
 | 1     | `Explore`            | pi-subagents built-in                | read, bash, grep, find, ls | Fast codebase search. Haiku — cheap, fast, **read-only**.        |
 | 2     | `Plan`               | pi-subagents built-in                | read, bash, grep, find, ls | Software architect. Sonnet. **Read-only** — returns a step-by-step plan, never edits. |
-| 3     | `software-developer` | **shipped** (this repo)              | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. `isolation: worktree`. |
+| 3     | `software-developer` | **shipped** (this repo)              | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. Host-managed worktree. |
 | 4     | `software-auditor`   | **shipped** (this repo)              | read, bash, grep, find, ls, aft_* | Evidence-based certifier. **Read-only** — re-runs commands, never modifies production code. |
 
 **3 built-ins + 2 shipped.** The 3 built-ins (`Explore`, `Plan`,
@@ -73,10 +73,25 @@ Agent({
   prompt: "RED: write a failing test for X. GREEN: implement. REFACTOR: tighten. " +
           "Verification: `cd pi && bun test test/foo.test.ts` passes.",
   description: "Implement feature X",
-  isolation: "worktree",         // ★ always for code edits
+  isolation: {
+    dag_id: "GC-2026-008",
+    task_id: "I1",
+    mode: "create",
+  },                            // ★ host provisions before child startup
   run_in_background: true,        // ★ see task-dispatcher.ts:defaultRunInBackground
 })
 ```
+
+The pi-subagents host creates
+`<repo>/.pi/worktree/<dag>/<worktree>` from `origin/main` on
+`sages/<dag>/<worktree>`, leases the slot, and returns worktree handoff
+metadata. The main agent coordinates only: it does not run Git provisioning.
+Use the same optional `worktree_id` with `mode: "reuse"` for serial work;
+concurrent reuse is rejected. There is no auto-merge. After validation and
+any requested integration, release explicitly through
+`AgentManager.releaseManagedWorktree(...)`; set `deleteBranch: true` only
+when branch deletion is intended. Subagents must never write
+`.pi/orchestrator/`.
 
 **Returns**: file paths changed + test output + verification evidence.
 
@@ -120,7 +135,10 @@ tasks:
     subagent_type: software-developer
     batch: 3
     depends_on: [D1]
-    isolation: worktree
+    isolation:
+      dag_id: GC-2025-001
+      task_id: I1
+      mode: create
     prompt: "Implement per the plan: RED→GREEN→REFACTOR for install_subagents_doc"
   - id: V1     # Stage 4
     subagent_type: software-auditor
