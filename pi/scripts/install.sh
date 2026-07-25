@@ -977,64 +977,77 @@ except Exception:
 install_pi_aft() {
   echo "==> Installing pi-aft..."
 
-  # Idempotent: skip install (but always run doctor --fix at the end to
-  # align the binary with the current CLI — see below).
-  local needs_setup=true
+  # Idempotent: skip if installed (only re-run on --force)
   if is_pi_aft_installed && [[ "${FORCE:-false}" != true ]]; then
     echo "  pi-aft already installed (skipping setup)"
-    needs_setup=false
+    print_aft_user_hint
+    return 0
   fi
 
   # Force-install path: uninstall first
   if [[ "${FORCE:-false}" == true ]] && is_pi_aft_installed; then
     echo "  Force-reinstall: removing previous aft-pi first"
     uninstall_pi_aft
-    needs_setup=true
   fi
 
-  if [[ "$needs_setup" == true ]]; then
-    # 1) Install the npm package via pi
-    if command -v pi &>/dev/null; then
-      echo "  Installing @cortexkit/aft-pi via pi..."
-      (cd "$TMP_DIR" && pi install npm:@cortexkit/aft-pi --approve 2>&1 | tail -5) || {
-        echo "  Warning: pi install failed; try 'npx @cortexkit/aft@latest setup --harness pi' manually"
-      }
-    else
-      echo "  'pi' command not found; skipping npm install (user must install manually)"
-    fi
-
-    # 2) Run the AFT setup wizard, which:
-    #    - Downloads the platform binary (linux-x64, darwin-arm64, etc.) to ~/.cache/aft
-    #    - Registers the binary path for the extension
-    #    - Creates ~/.config/cortexkit/aft.jsonc with the recommended surface
-    #
-    # NOTE: setup is NOT sufficient on its own. It registers the extension
-    # but does NOT always download a binary matching the latest CLI — the
-    # cached binary (e.g. ~/.cache/aft/bin/v0.48.1) may be from an older
-    # CLI version. The 'doctor --fix' step below is what reconciles that.
-    if command -v npx &>/dev/null; then
-      echo "  Running AFT setup (downloads platform binary + registers extension)..."
-      npx --yes @cortexkit/aft@latest setup --harness pi 2>&1 | tail -10 || {
-        echo "  Warning: AFT setup returned non-zero. Run 'npx @cortexkit/aft@latest doctor' to diagnose."
-      }
-    else
-      echo "  npx not available; user must run AFT setup manually"
-    fi
-  fi
-
-  # 3) Always align the AFT binary with the current CLI version. This is
-  # the step that fixes the recurring '[HIGH] AFT binary: No aft binary
-  # matching CLI 0.49.0 was detected' warning on reinstalls. The
-  # 'setup' step above is not idempotent across CLI version bumps; this
-  # step is. Safe to run on every install.
-  if command -v npx &>/dev/null; then
-    echo "  Aligning AFT binary with CLI version (doctor --fix)..."
-    npx --yes @cortexkit/aft@latest doctor --fix 2>&1 | tail -10 || {
-      echo "  Warning: AFT doctor --fix returned non-zero. Binary may not match CLI."
+  # 1) Install the npm package via pi
+  if command -v pi &>/dev/null; then
+    echo "  Installing @cortexkit/aft-pi via pi..."
+    (cd "$TMP_DIR" && pi install npm:@cortexkit/aft-pi --approve 2>&1 | tail -5) || {
+      echo "  Warning: pi install failed; try 'npx @cortexkit/aft@latest setup --harness pi' manually"
     }
+  else
+    echo "  'pi' command not found; skipping npm install (user must install manually)"
   fi
+
+  # 2) Run the AFT setup wizard, which:
+  #    - Downloads the platform binary (linux-x64, darwin-arm64, etc.) to ~/.cache/aft
+  #    - Registers the binary path for the extension
+  #    - Creates ~/.config/cortexkit/aft.jsonc with the recommended surface
+  #
+  # NOTE: setup is NOT sufficient on its own. It registers the extension
+  # but does NOT always download a binary matching the latest CLI — the
+  # cached binary (e.g. ~/.cache/aft/bin/v0.48.1) may be from an older
+  # CLI version. We intentionally do NOT auto-run 'doctor --fix' from
+  # here — the AFT team owns binary provisioning and the user can fix
+  # version drift themselves when they see the [HIGH] warning.
+  if command -v npx &>/dev/null; then
+    echo "  Running AFT setup (downloads platform binary + registers extension)..."
+    npx --yes @cortexkit/aft@latest setup --harness pi 2>&1 | tail -10 || {
+      echo "  Warning: AFT setup returned non-zero. Run 'npx @cortexkit/aft@latest doctor' to diagnose."
+    }
+  else
+    echo "  npx not available; user must run AFT setup manually"
+  fi
+
+  print_aft_user_hint
 
   echo "  pi-aft installed"
+}
+
+# User-facing hint for the recurring '[HIGH] AFT binary: No aft binary
+# matching CLI <version> was detected' warning. The setup command above
+# does NOT guarantee the cached binary matches the latest CLI (the
+# AFT team controls binary provisioning). When the user sees this
+# warning in `npx @cortexkit/aft@latest doctor`, the fix is one
+# command: `npx @cortexkit/aft@latest doctor --fix`. We intentionally
+# do NOT auto-run it during install — the user is in control.
+print_aft_user_hint() {
+  cat <<'HINT'
+
+  ─────────────────────────────────────────────────────────────
+  AFT note (if you see [HIGH] AFT binary ... in 'aft doctor'):
+
+    The cached binary at ~/.cache/aft/bin/ may be from an older CLI
+    version than the one shipped via npx @cortexkit/aft@latest.
+    The setup command above doesn't reconcile that.
+
+    To align binary with current CLI, run manually:
+        npx @cortexkit/aft@latest doctor --fix
+
+    (Re-run is safe: only downloads when binary version drift detected.)
+  ─────────────────────────────────────────────────────────────
+HINT
 }
 
 uninstall_pi_aft() {
