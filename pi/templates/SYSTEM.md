@@ -244,18 +244,40 @@ Decide topology from `depends_on` + `batch`:
 | Same batch (T1 ‖ T2 ‖ T3) | one per task |
 | Cross-batch serial (T1 → T2 → T3) | one shared worktree |
 
-### Phase 1 — Worktree Provisioning
+### Phase 1 — Host-managed Worktree Provisioning
 
-```bash
-WT="$REPO/.pi/worktree/${DAG_ID}/${TASK_ID}"
-git -C "$REPO" fetch origin main
-git -C "$REPO" worktree add --detach "$WT" origin/main
-git -C "$WT" checkout -b "sages/${DAG_ID}/${TASK_ID}"
+The vendored `@sages/pi-subagents` host provisions the worktree before
+starting the child. The main agent only coordinates; it MUST NOT run Git
+commands to create, reuse, or remove worktrees.
+
+Dispatch with the explicit isolation object:
+
+```ts
+Agent({
+  subagent_type: "software-developer",
+  prompt: "...",
+  isolation: {
+    dag_id: DAG_ID,
+    task_id: TASK_ID,
+    // worktree_id: SHARED_ID, // optional; defaults to task_id
+    mode: "create",           // use "reuse" to re-enter an existing slot
+  },
+  run_in_background: true,
+})
 ```
 
-Base ref is `origin/main` (not local `HEAD`). Branch name carries the
-goal/task provenance. **No fallback**: if `worktree add` fails, surface
-the error; do not edit the main checkout.
+The host creates `<repo>/.pi/worktree/<dag>/<worktree>` from
+`origin/main` on branch `sages/<dag>/<worktree>`. It leases the slot while
+the child runs, rejects concurrent reuse, and returns
+`path`, `branch`, `baseSha`, `baseRef`, `head`, `dirty`, and `leaseToken`
+in result details. Provisioning failures are surfaced; managed Sages
+dispatch never falls back to `/tmp` or the main checkout.
+
+Use `mode: "reuse"` explicitly for a serial task sharing the same
+`worktree_id`. Release is also explicit through the pi-subagents host
+`AgentManager.releaseManagedWorktree(...)`; `deleteBranch: true` opts into
+branch deletion. Release is performed only after the host has finished
+validation and any integration operation requested by the user.
 
 ### Phase 2 — Subagent Execution
 
@@ -283,21 +305,20 @@ Before merging, run mechanical checks on the subagent's commit:
 Failed check → steering message: "Your commit on branch X was rejected
 because `<reason>`. Amend and report back."
 
-### Phase 4 — Merge Back
+### Phase 4 — Integration Decision
 
-```bash
-git merge --no-ff "sages/${DAG_ID}/${TASK_ID}" \
-    -m "feat(<scope>): merge <branch-scope> <feature-name>"
-```
+The Agent host does **not** auto-merge and appends no `git merge`
+instruction. The main agent reviews the returned branch and evidence and
+coordinates whatever integration the user requests; it does not provision
+or mutate worktrees itself. For serial chains, continue with explicit
+`mode: "reuse"` and merge once at the end if requested.
 
-Merge commit subject follows Commit Conventions' merge format. For serial
-chains (shared worktree), merge once at end of chain.
+### Phase 5 — Explicit Release
 
-### Phase 5 — Cleanup
-
-```bash
-git -C "$REPO" worktree remove --force "$WT"
-git -C "$REPO" branch -d "sages/${DAG_ID}/${TASK_ID}"
+After validation and any requested integration, invoke the pi-subagents
+host release API for the returned managed worktree. Set
+`deleteBranch: true` only when branch deletion is intended. There is no
+automatic cleanup of changed managed worktrees.
 ```
 
 Orphaned worktrees can be pruned later with `git worktree prune`.

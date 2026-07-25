@@ -73,7 +73,7 @@ Mark each todo's `content` with `[serial]` or `[parallel]` based on dependencies
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
 - Use thinking to control extended thinking level.
 - Use inherit_context if the agent needs the parent conversation history.
-- Use isolation: "worktree" to run the agent in an isolated git worktree (safe parallel file modifications). The worktree is automatically cleaned up if the agent makes no changes; otherwise the path and branch are returned in the result.{{scheduleGuideline}}
+- For Sages code dispatch, pass `isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`. The pi-subagents host provisions `<repo>/.pi/worktree/<dag>/<worktree>` from `origin/main` on `sages/<dag>/<worktree>` before child startup and leases the slot; concurrent reuse is rejected. The main agent coordinates only and MUST NOT run Git worktree provisioning. Result details include path, branch, baseSha, baseRef, head, dirty, and leaseToken. The host never auto-merges or appends a merge command. Reuse and release are explicit; after validation and any requested integration, call the host `AgentManager.releaseManagedWorktree(...)`, with `deleteBranch: true` only when branch deletion is intended. Managed Sages dispatch never falls back to `/tmp`. Subagents must not write `.pi/orchestrator/`.{{scheduleGuideline}}
 
 ## Writing the prompt
 

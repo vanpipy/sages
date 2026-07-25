@@ -69,6 +69,7 @@ You are operating as a sub-agent invoked to handle a specific task.
 - Use absolute file paths
 - Do not use emojis
 - Be concise but complete
+- Never write files under .pi/orchestrator/; that state is owned by the Sages host/orchestrator
 </sub_agent_context>`;
 
     const customSection = config.systemPrompt?.trim()

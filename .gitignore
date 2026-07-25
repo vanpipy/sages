@@ -29,8 +29,10 @@ Thumbs.db
 .env
 .env.local
 
-# Runtime state lives under .pi/orchestrator/.
-#
+# Runtime state and host-managed worktrees
+.pi/orchestrator/
+.pi/worktree/
+.pi/worktree-state/
 # `.sages/` is kept gitignored as a working area for in-flight design
 # work (e.g. `pi/.sages/designs/<date>-<topic>.md` brainstorming
 # drafts, `pi/.sages/workspace/execution.yaml` legacy qiaochui
