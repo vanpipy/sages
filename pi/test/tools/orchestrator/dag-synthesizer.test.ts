@@ -261,7 +261,7 @@ describe("validateDAG", () => {
           tasks: [
             makeTask("P1", 1, [], {
               covers: ["SC1"],
-              task_template: "subagent-software-developer",
+              task_template: "subagent-developer",
               task_params: {
                 task_id: "P1",
                 task_title: "test",
@@ -285,7 +285,7 @@ describe("validateDAG", () => {
           tasks: [
             makeTask("P1", 1, [], {
               covers: ["SC1"],
-              task_template: "subagent-software-developer",
+              task_template: "subagent-developer",
               task_params: { task_id: "P1" },  // missing most required
             }),
           ],
@@ -359,7 +359,7 @@ describe("validateDAG", () => {
               priority: "high",
               depends_on: ["P1"],
               files: [],
-              subagent_type: "software-developer",
+              subagent_type: "developer",
               batch: 2,
               isolation: "worktree",
               tdd: "strict",
@@ -441,7 +441,7 @@ describe("buildPlan", () => {
         tasks: [
           makeTask("P1", 1, [], {
             covers: ["SC1"],
-            task_template: "subagent-software-developer",
+            task_template: "subagent-developer",
             task_params: {
               task_id: "P1",
               task_title: "Implement X",

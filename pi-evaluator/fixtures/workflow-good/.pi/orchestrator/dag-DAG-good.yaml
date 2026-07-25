@@ -15,7 +15,7 @@ tasks:
       - pi-evaluator/src/parser.py
     subagent_type: Explore
     batch: 1
-    isolation: worktree
+    isolation: "none"
     tdd: none
     run_in_background: false
     acceptance:
@@ -39,7 +39,7 @@ tasks:
       - pi-evaluator/src/lib/jsonl-reader.ts
     subagent_type: Plan
     batch: 2
-    isolation: worktree
+    isolation: "none"
     tdd: strict
     run_in_background: false
     acceptance:
@@ -61,9 +61,15 @@ tasks:
       - pi-evaluator/src/lib/jsonl-reader.ts
       - pi-evaluator/test/lib/artifact-reader.test.ts
       - pi-evaluator/test/lib/jsonl-reader.test.ts
-    subagent_type: software-developer
+    # Phase A P3 (DAG-2026-011): canonical subagent name is `developer`.
+    subagent_type: developer
     batch: 3
-    isolation: worktree
+    # Phase A P3: the explicit managed-worktree object is the canonical
+    # isolation shape — never the legacy `isolation: worktree` literal.
+    isolation:
+      dag_id: DAG-good
+      task_id: P1.impl
+      mode: create
     tdd: strict
     run_in_background: true
     acceptance:
@@ -90,7 +96,10 @@ tasks:
       - pi-evaluator/fixtures/workflow-good/
     subagent_type: software-auditor
     batch: 4
-    isolation: worktree
+    # Phase A P3: only the canonical `developer` uses the managed-worktree
+    # object. software-auditor still uses `isolation: none`; Phase B
+    # migrates the auditor role the same way.
+    isolation: "none"
     tdd: none
     run_in_background: true
     acceptance:
@@ -100,4 +109,6 @@ tasks:
         - SC3
 created_at: '2026-07-25T11:00:00.000Z'
 state: executing
-isolation_default: worktree
+# Phase A P3: there is no `worktree` literal anymore — non-developer
+# tasks use `isolation: none`, developer tasks use the managed-worktree object.
+isolation_default: none

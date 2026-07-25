@@ -14,7 +14,7 @@ dag_synthesize        →  .pi/orchestrator/dag-{id}.yaml
         ↓
 task_dispatch         →  Agent-call plan (LLM spawns)
         ↓
-software-developer    →  .pi/orchestrator/task-{id}-report.md
+developer             →  .pi/orchestrator/task-{id}-report.md
 software-auditor      →  .pi/orchestrator/audit-{task_id}.md
         ↓
 orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
@@ -28,7 +28,7 @@ orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
   subagent spawning, worktree creation, background queueing, result
   collection, steering. Sages does not re-implement this.
 - **User-level agents** (installed to `~/.pi/agent/agents/` by
-  `pi/scripts/install.sh`): `software-developer`, `software-auditor`.
+  `pi/scripts/install.sh`): `developer` (canonical; legacy alias `software-developer` resolves to it) and `software-auditor`.
 - **Built-in agents** (from pi-subagents): `Explore`, `Plan`,
   `general-purpose`.
 
@@ -84,7 +84,7 @@ The path the tool **returns** is the path the tool **writes**.
 ## Write policy (main agent)
 
 The main orchestrator agent can write **directly** to Sages meta-files
-only. For everything else, dispatch a `software-developer` subagent
+only. For everything else, dispatch a `developer` subagent
 via the Agent tool.
 
 **Allowlisted for direct write** (via `sages_write` / `sages_edit`):
@@ -131,7 +131,7 @@ only paths to modify any file are:
 | Target | Allowed path |
 |---|---|
 | Meta-files (`.pi/`, `pi/`, root docs, …) | `sages_write` / `sages_edit` (path-gated) |
-| Production code | `Agent` dispatch to `software-developer` (TDD + worktree + audit) |
+| Production code | `Agent` dispatch to `developer` (TDD + managed-worktree + audit) |
 
 If the LLM tries to call raw `edit`/`write`, the tool isn't in the
 visible list — the model has to take one of the two allowed paths.
@@ -174,11 +174,11 @@ independently, defeating the original first-word bypass).
 | Tier | Who | Write tools | Safety mechanism |
 |---|---|---|---|
 | **L1 — read-only** | `Explore`, `Plan`, `software-auditor` | **none** (frontmatter `tools:` allowlist) | LLM physically cannot call write |
-| **L2 — write-in-worktree** | `software-developer` | `edit`, `write` | `isolation: "worktree"` + `software-auditor` + merge gate |
+| **L2 — write-in-worktree** | `developer` (canonical, alias `software-developer`) | `edit`, `write` | managed-worktree object (`{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`) + `software-auditor` + merge gate |
 | **L3 — coordinator** | **main agent** | `sages_write` / `sages_edit` only (raw `edit`/`write` filtered out) | Layer 1 + Layer 2 hard threshold |
 
 Each tier uses the safety mechanism that fits its role. The asymmetry
-IS the design — `software-developer` keeps raw edit/write because
+IS the design — `developer` keeps raw edit/write because
 that's its job; main agent gives them up because they were never its
 job.
 
@@ -212,7 +212,7 @@ All **runtime state** lives under `.pi/orchestrator/`. The
   instructions, LLM executes.
 - **KD-3**: black-box contract — `content.text` = summary,
   `details` = full `DispatchPlan` / audit result.
-- **KD-4**: TDD discipline lives in `software-developer`, not a
+- **KD-4**: TDD discipline lives in `developer`, not a
   wrapper.
 - **KD-5**: A3 split — per-task audit is `software-auditor`'s job;
   `orchestrator_audit` is workflow-level rollup. Zero overlap.

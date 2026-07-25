@@ -67,11 +67,20 @@ describe("artifact-reader", () => {
 	});
 
 	test("readDag flags correct isolation + run_in_background on implement task", async () => {
+		// Phase A P3 (DAG-2026-011): canonical developer isolation is the
+		// explicit managed-worktree object, NOT the legacy `worktree` literal.
 		const dag = await readDag(WORKFLOW_GOOD);
 		const impl = dag.tasks.find((t) => t.id === "P1.impl");
-		expect(impl?.isolation).toBe("worktree");
+		expect(impl?.subagent_type).toBe("developer");
+		expect(impl?.isolation).toEqual({
+			dag_id: "DAG-good",
+			task_id: "P1.impl",
+			mode: "create",
+		});
 		expect(impl?.run_in_background).toBe(true);
 		const audit = dag.tasks.find((t) => t.id === "P1.audit");
+		expect(audit?.subagent_type).toBe("software-auditor");
+		expect(audit?.isolation).toBe("none");
 		expect(audit?.run_in_background).toBe(true);
 	});
 

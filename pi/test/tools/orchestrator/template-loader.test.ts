@@ -31,8 +31,8 @@ describe("template-loader", () => {
   });
 
   describe("loadPromptTemplate", () => {
-    it("loads subagent-software-developer.md", () => {
-      const content = loadPromptTemplate("subagent-software-developer");
+    it("loads subagent-developer.md", () => {
+      const content = loadPromptTemplate("subagent-developer");
       expect(content).not.toBeNull();
       // Carries ONLY task-specific data (identity lives in agent definition)
       expect(content).toContain("{{task_id}}");
@@ -108,7 +108,7 @@ describe("template-loader", () => {
         return renderTaskPrompt(name, params) ?? "";
       };
       const templateNames = [
-        "subagent-software-developer",
+        "subagent-developer",
         "subagent-software-auditor",
         "subagent-explore",
         "subagent-general-purpose",
@@ -215,8 +215,8 @@ describe("template-loader", () => {
   });
 
   describe("renderTaskPrompt", () => {
-    it("renders a software-developer task prompt with params", () => {
-      const out = renderTaskPrompt("subagent-software-developer", {
+    it("renders a developer task prompt with params", () => {
+      const out = renderTaskPrompt("subagent-developer", {
         task_id: "P4",
         task_title: "Implement UserRepository",
         sc_list: "- SC1: typecheck passes\n- SC2: tests pass",
@@ -258,7 +258,7 @@ describe("template-loader", () => {
   describe("listTemplates", () => {
     it("returns the 4 known prompt templates", () => {
       const names = listTemplates("prompts");
-      expect(names).toContain("subagent-software-developer");
+      expect(names).toContain("subagent-developer");
       expect(names).toContain("subagent-software-auditor");
       expect(names).toContain("subagent-general-purpose");
       expect(names).toContain("subagent-explore");

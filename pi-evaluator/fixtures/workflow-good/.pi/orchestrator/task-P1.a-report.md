@@ -1,7 +1,7 @@
-# Task P1.a Report — workflow-good fixture (software-developer style)
+# Task P1.a Report — workflow-good fixture (developer style)
 
 **Task ID**: P1.a
-**Subagent**: software-developer (worktree, strict TDD)
+**Subagent**: developer (managed-worktree, strict TDD)
 **Branch**: pi-evaluator/p1-a-scaffold
 **Commit**: 166f8fd feat(pi-evaluator): scaffold TypeScript foundation (P1.a)
 

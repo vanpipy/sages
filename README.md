@@ -3,7 +3,7 @@
 Multi-agent workflow system for [pi](https://pi.dev). A 4-tool
 orchestrator drives a Goal → DAG → Dispatch → Audit pipeline; TDD
 implementation and per-task auditing are delegated to
-`software-developer` and `software-auditor` subagents spawned via
+`developer` (canonical) and `software-auditor` subagents spawned via
 the Agent tool from `@tintinweb/pi-subagents`. See [History](#history)
 for the project's Four-Sages mythology.
 
@@ -16,7 +16,7 @@ dag_synthesize        →  .pi/orchestrator/dag-{id}.yaml
         ↓
 task_dispatch         →  Agent-call plan (LLM spawns)
         ↓
-software-developer    →  .pi/orchestrator/task-{id}-report.md
+developer             →  .pi/orchestrator/task-{id}-report.md
 software-auditor      →  .pi/orchestrator/audit-{task_id}.md
         ↓
 orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
@@ -27,7 +27,7 @@ files. Subagent spawning, worktree creation, background queueing, and
 result collection are owned by `@tintinweb/pi-subagents` (deliberate
 delegation boundary — Sages does not re-implement the Agent tool).
 
-`software-developer` (TDD: RED → GREEN → REFACTOR) and
+`developer` (TDD: RED → GREEN → REFACTOR) and
 `software-auditor` (per-task certifier) are user-level agents shipped
 to `~/.pi/agent/agents/` by `pi/scripts/install.sh`. `Explore`,
 `Plan`, `general-purpose` are built-in.
@@ -59,7 +59,7 @@ templates, and adds the `@tintinweb/pi-subagents` npm dependency.
 **Defaults**: `depth: "fast"` (3 phases ink/nose/foot; `full` adds
 castration/death). `run_in_background` is derived from
 `subagent_type` — Explore/Plan/general-purpose foreground,
-software-developer/software-auditor background. Override per task via
+developer/software-auditor background. Override per task via
 `TaskNode.run_in_background`.
 
 **Evidence gate** (cannot be bypassed): `verdict: "PASS"` requires
