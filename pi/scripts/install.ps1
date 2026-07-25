@@ -3,11 +3,17 @@
 # Four Sages Installation Script for pi (PowerShell)
 # Installs to $env:USERPROFILE\.pi\packages\sages
 #
-# Also installs AFT config + magic-context config + subagent templates +
+# Also installs magic-context config + subagent templates +
 # the 4-agent subagent pipeline doc. Does NOT install npm-based peers
-# (pi-aft, pi-magic-context, pi-subagents, pi-codebase-memory, pi-graphify)
+# (pi-magic-context, pi-subagents, pi-codebase-memory, pi-graphify)
 # — those have Linux-specific deps (uv, onnxruntime) and require pi CLI;
 # install them with `pi install npm:@...` after this script completes.
+#
+# Note: AFT (pi-code-intel via @cortexkit/aft-pi) is NOT auto-installed.
+# Binary provisioning is owned by the AFT team; users run
+#     npx @cortexkit/aft@latest setup --harness pi
+# manually. pi/templates/aft.jsonc ships as a reference template the
+# user can copy to $env:USERPROFILE\.config\cortexkit\aft.jsonc after installation.
 #
 
 $ErrorActionPreference = 'Stop'
@@ -207,38 +213,6 @@ function install_system_prompt {
     Write-Host "  Installed SYSTEM.md (from template)"
 }
 
-function install_aft_config {
-    # AFT config (~/.config/cortexkit/aft.jsonc) — feature flags template.
-    # Best-effort copy: silently skipped if AFT user template is hand-edited
-    # (matches install.sh's NEVER-TOUCH policy via SAGES_TEMPLATE_V1 sentinel).
-    # We mirror that with the same sentinel string + content sanity check.
-    $aftHome = Join-Path $env:USERPROFILE ".config\cortexkit"
-    $aftConfig = Join-Path $aftHome "aft.jsonc"
-    $scriptDir = Split-Path -Parent $PSCommandPath
-    $aftTemplate = Join-Path $scriptDir "..\templates\aft.jsonc"
-
-    if (-not (Test-Path $aftTemplate)) {
-        Write-Host "  Warning: AFT template not found at $aftTemplate"
-        return
-    }
-
-    $null = New-Item -ItemType Directory -Path $aftHome -Force -ErrorAction SilentlyContinue
-
-    # Already installed by us → skip
-    if ((Test-Path $aftConfig) -and (Select-String -Path $aftConfig -Pattern "SAGES_TEMPLATE_V1" -Quiet) -and -not $Force) {
-        Write-Host "  AFT config already installed (use -Force to reinstall)"
-        return
-    }
-    # User-customized → preserve
-    if ((Test-Path $aftConfig) -and -not $Force) {
-        Write-Host "  AFT config already exists (user-customized; use -Force to overwrite)"
-        return
-    }
-
-    Copy-Item $aftTemplate $aftConfig -Force
-    Write-Host "  Installed AFT config from template (feature flags enabled)"
-}
-
 function register_settings {
     $settings = "$PI_DIR\agent\settings.json"
     $null = New-Item -ItemType Directory -Path (Split-Path $settings) -Force -ErrorAction SilentlyContinue
@@ -283,8 +257,8 @@ function unregister_settings {
 }
 
 function install {
-    Write-Host "==> Installing sages + AFT config + subagent templates + subagents doc + SYSTEM.md..."
-    Write-Host "    (npm peers: pi-aft, pi-magic-context, pi-subagents, pi-codebase-memory, pi-graphify" -NoNewline
+    Write-Host "==> Installing sages + subagent templates + subagents doc + SYSTEM.md..."
+    Write-Host "    (npm peers: pi-magic-context, pi-subagents, pi-codebase-memory, pi-graphify" -NoNewline
     Write-Host " — install those with 'pi install npm:...' after this script)"
 
     # Pre-flight checks
@@ -350,10 +324,6 @@ function install {
     # Register in settings
     register_settings
 
-    # Install AFT config (best-effort; user-customized preserved)
-    Write-Host "==> Installing AFT config template..."
-    install_aft_config
-
     # Install subagent templates (4-agent pipeline Stages 3-4)
     Write-Host "==> Installing subagent templates..."
     Install-SubagentTemplates
@@ -379,7 +349,7 @@ function install {
 function install_sages_only {
     # Mirrors install.sh's --sages-only: clones repo + installs sages source +
     # registers in settings.json, but skips all peers + templates + SYSTEM.md.
-    Write-Host "==> Installing sages only (skip AFT config, subagent templates, SUBAGENTS.md, SYSTEM.md)..."
+    Write-Host "==> Installing sages only (skip subagent templates, SUBAGENTS.md, SYSTEM.md)..."
 
     check_git
     install_pi_if_needed
@@ -433,14 +403,14 @@ function install_sages_only {
     register_settings
     cleanup
 
-    Write-Host "  (skipped: AFT config, subagent templates, SUBAGENTS.md, SYSTEM.md)"
+    Write-Host "  (skipped: subagent templates, SUBAGENTS.md, SYSTEM.md)"
     Write-Host ""
     Write-Host "Done! Restart pi: exit && pi" -ForegroundColor Green
 }
 
 function install_system_only {
     # Mirrors install.sh's --system-only: only install/update SYSTEM.md.
-    Write-Host "==> Installing SYSTEM.md only (skip sages, AFT config, subagent templates, SUBAGENTS.md)..."
+    Write-Host "==> Installing SYSTEM.md only (skip sages, subagent templates, SUBAGENTS.md)..."
 
     $systemMdPath = Join-Path $AGENT_DIR "SYSTEM.md"
     if ((-not (Test-Path $systemMdPath)) -or $Force) {
@@ -449,13 +419,13 @@ function install_system_only {
         Write-Host "  SYSTEM.md already exists (use -Force to overwrite)"
     }
 
-    Write-Host "  (skipped: sages, AFT config, subagent templates, SUBAGENTS.md)"
+    Write-Host "  (skipped: sages, subagent templates, SUBAGENTS.md)"
     Write-Host ""
     Write-Host "Done! Restart pi: exit && pi" -ForegroundColor Green
 }
 
 function uninstall {
-    Write-Host "==> Uninstalling sages + AFT config + subagent templates + SUBAGENTS.md + SYSTEM.md..."
+    Write-Host "==> Uninstalling sages + subagent templates + SUBAGENTS.md + SYSTEM.md..."
 
     # Remove sages
     if (Test-Path $PKG_DIR) {
@@ -465,15 +435,6 @@ function uninstall {
 
     # Unregister sages
     unregister_settings
-
-    # Remove AFT config (only if our SAGES_TEMPLATE_V1 sentinel)
-    $aftConfig = Join-Path $env:USERPROFILE ".config\cortexkit\aft.jsonc"
-    if ((Test-Path $aftConfig) -and (Select-String -Path $aftConfig -Pattern "SAGES_TEMPLATE_V1" -Quiet)) {
-        Remove-Item -Force $aftConfig
-        Write-Host "  Removed AFT config (was our template)"
-    } elseif (Test-Path $aftConfig) {
-        Write-Host "  AFT config is user-customized, leaving alone"
-    }
 
     # Remove subagent templates (only if our sentinel) + SUBAGENTS.md (only if matches template)
     Uninstall-SubagentTemplates

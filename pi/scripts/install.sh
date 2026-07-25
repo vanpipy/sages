@@ -6,6 +6,12 @@
 # Also installs pi-codebase-memory for codebase indexing/search,
 # and pi-magic-context — CortexKit's persistent memory + context layer.
 #
+# Note: AFT (pi-code-intel via @cortexkit/aft-pi) is NOT auto-installed.
+# Binary provisioning is owned by the AFT team; users run
+#     npx @cortexkit/aft@latest setup --harness pi
+# manually. pi/templates/aft.jsonc ships as a reference template the
+# user can copy to ~/.config/cortexkit/aft.jsonc after installation.
+#
 # Selective install options:
 #   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)
 #   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates)

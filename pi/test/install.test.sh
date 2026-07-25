@@ -606,6 +606,132 @@ unset PI_DIR AGENT_DIR
 
 
 
+# ──────────────────────────────────────────────────────────────────
+# T7: AFT install/uninstall fully removed from all 3 install scripts
+#
+# AFT (pi-code-intel via @cortexkit/aft-pi) is owned by the AFT team;
+# the AFT install is delegated to `npx @cortexkit/aft@latest setup
+# --harness pi` run manually by the user. None of the 3 install
+# scripts (install.sh / install.ps1 / install.bat) may write to
+# ~/.config/cortexkit/aft.jsonc or invoke an AFT installer — that
+# was removed and the regression guard lives here.
+#
+# install.sh, install.ps1, install.bat share the same SYSTEM.md
+# template (see header comment of each) and are expected to share
+# the same AFT-removal invariant. One script drifting from the others
+# is the regression we are guarding against.
+# ──────────────────────────────────────────────────────────────────
+
+SCRIPTS_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+INSTALL_SH="$SCRIPTS_DIR/install.sh"
+INSTALL_PS1="$SCRIPTS_DIR/install.ps1"
+INSTALL_BAT="$SCRIPTS_DIR/install.bat"
+
+# Helper: assert $1 (file) does NOT contain any AFT install/uninstall symbol
+# or AFT config-path reference. Symbols to forbid:
+#   - bash: install_aft_*, uninstall_aft_*, AFT_HOME, AFT_CONFIG, AFT_TEMPLATE
+#   - ps1:  install_aft_config (function name) + same path strings
+#   - bat:  AFT_HOME, AFT_CONFIG, AFT_TEMPLATE (uppercase vars are bat convention)
+assert_no_aft_install() {
+  local file="$1"
+  local label="$2"
+  [[ -f "$file" ]] || { echo "❌ FAIL: $label not found at $file"; exit 1; }
+
+  # Filter out pure comment lines (bash `#`, batch `REM`, jsonc `//`).
+  # Comments that mention AFT are intentional documentation telling the
+  # user that AFT is not auto-installed (see install.sh lines 9-13).
+  #
+  # Implementation: strip the `grep -n` line-number prefix first
+  # (so the comment-marker check operates on the actual content), then
+  # drop lines whose content starts with `#`, `REM`, or `//`. Using only
+  # `grep -v` against a line-numbered prefix would falsely filter ALL
+  # numbered lines (since `<digits>:` matches any line printed by `grep -n`).
+  filter_comments() {
+    sed -E 's/^[[:space:]]*[0-9]+[:-]//' | grep -viE '^[[:space:]]*(#|REM|//)'
+  }
+
+  # Forbidden function/symbol names (case-insensitive — AFT_HOME in .bat,
+  # install_aft_config in .ps1, etc.). Comments filtered out.
+  local hits
+  hits=$(grep -inE 'install_aft_|uninstall_aft_|AFT_HOME|AFT_CONFIG|AFT_TEMPLATE' "$file" \
+           | filter_comments || true)
+  [[ -z "$hits" ]] || {
+    echo "❌ FAIL: $label still has AFT install/uninstall symbols:"
+    echo "$hits" | sed 's/^/    /'
+    exit 1
+  }
+
+  # Forbidden: any literal copy/move/install action targeting aft.jsonc
+  # (catches e.g. `copy .* aft\.jsonc`, `Copy-Item .* aft\.jsonc`,
+  # `mv .* aft\.jsonc`, `del .* aft\.jsonc`, etc.). Comments filtered out.
+  hits=$(grep -inE '(copy|mv|del|remove-item|copy-item|xcopy|install)[^"]*aft\.jsonc' "$file" \
+           | filter_comments || true)
+  [[ -z "$hits" ]] || {
+    echo "❌ FAIL: $label still has a copy/delete target on aft.jsonc:"
+    echo "$hits" | sed 's/^/    /'
+    exit 1
+  }
+}
+
+# Test T7.1: install.sh has no AFT install/uninstall symbols
+assert_no_aft_install "$INSTALL_SH" "install.sh"
+echo "✅ PASS: install.sh has no AFT install/uninstall symbols"
+
+# Test T7.2: install.ps1 has no AFT install/uninstall symbols
+assert_no_aft_install "$INSTALL_PS1" "install.ps1"
+echo "✅ PASS: install.ps1 has no AFT install/uninstall symbols"
+
+# Test T7.3: install.bat has no AFT install/uninstall symbols
+assert_no_aft_install "$INSTALL_BAT" "install.bat"
+echo "✅ PASS: install.bat has no AFT install/uninstall symbols"
+
+# Test T7.4: all 3 scripts carry the "AFT is NOT auto-installed" rationale
+# (matches install.sh's existing lines 9-13; this guards against future
+# drift where one script accidentally re-introduces AFT logic without
+# the explanation that goes with it). Iterate over absolute paths since
+# the test may run from any cwd.
+for entry in "install.sh|$INSTALL_SH" "install.ps1|$INSTALL_PS1" "install.bat|$INSTALL_BAT"; do
+  label="${entry%|*}"
+  file="${entry#*|}"
+  grep -iq 'AFT.*NOT auto-installed\|NOT auto-installed.*AFT\|NOT.*auto-installed' "$file" \
+    || { echo "❌ FAIL: $label missing 'AFT is NOT auto-installed' rationale"; exit 1; }
+done
+echo "✅ PASS: all 3 install scripts document AFT as NOT auto-installed"
+
+# Test T7.5: none of the 3 scripts perform an executable action on
+# aft.jsonc (cp / Copy-Item / del / Remove-Item / mv / xcopy / findstr
+# targeting the AFT config file). Documentation comments telling the
+# user to "copy aft.jsonc manually" are fine and intentional (see
+# install.sh lines 9-13) — only *executable* references are forbidden.
+for entry in "install.sh|$INSTALL_SH" "install.ps1|$INSTALL_PS1" "install.bat|$INSTALL_BAT"; do
+  label="${entry%|*}"
+  file="${entry#*|}"
+  # Lines mentioning aft.jsonc, minus pure comments (`#…`, `REM …`, `//…`)
+  hits=$(grep -inE 'aft\.jsonc' "$file" \
+           | sed -E 's/^[[:space:]]*[0-9]+[:-]//' \
+           | grep -viE '^[[:space:]]*(#|REM|//)' \
+           | grep -iE '(^|[[:space:]])(cp |copy-item|remove-item|copy /y|xcopy|mv |del /q|del /f|findstr)' \
+           || true)
+  [[ -z "$hits" ]] || {
+    echo "❌ FAIL: $label has an executable action on aft.jsonc:"
+    echo "$hits" | sed 's/^/    /'
+    exit 1
+  }
+done
+echo "✅ PASS: no install script has an executable action on aft.jsonc"
+
+# Test T7.6: install.ps1 has no `function install_aft_config` (the exact
+# PowerShell function definition that must be gone)
+grep -qE '^function install_aft_config\b' "$INSTALL_PS1" \
+  && { echo "❌ FAIL: install.ps1 still defines install_aft_config function"; exit 1; \
+} || echo "✅ PASS: install.ps1 install_aft_config function removed"
+
+# Test T7.7: install.bat has no AFT_CONFIG variable declaration
+grep -qE '^set "AFT_CONFIG=' "$INSTALL_BAT" \
+  && { echo "❌ FAIL: install.bat still declares AFT_CONFIG variable"; exit 1; \
+} || echo "✅ PASS: install.bat AFT_CONFIG variable removed"
+
+
 # Final summary (printed only on the success path — failures abort above)
 echo ""
 echo "═════════════════════════════════════════════════════"

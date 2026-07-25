@@ -3,11 +3,17 @@ REM
 REM Four Sages Installation Script for pi (Batch)
 REM Installs to %USERPROFILE%\.pi\packages\sages
 REM
-REM Also installs AFT config + subagent templates + the 4-agent subagent
-REM pipeline doc. Does NOT install npm-based peers (pi-aft, pi-magic-context,
-REM pi-subagents, pi-codebase-memory, pi-graphify) — those have Linux-specific
-REM deps (uv, onnxruntime) and require pi CLI; install them with
+REM Also installs subagent templates + the 4-agent subagent pipeline doc.
+REM Does NOT install npm-based peers (pi-magic-context, pi-subagents,
+REM pi-codebase-memory, pi-graphify) — those have Linux-specific deps
+REM (uv, onnxruntime) and require pi CLI; install them with
 REM `pi install npm:@...` after this script completes.
+REM
+REM Note: AFT (pi-code-intel via @cortexkit/aft-pi) is NOT auto-installed.
+REM Binary provisioning is owned by the AFT team; users run
+REM     npx @cortexkit/aft@latest setup --harness pi
+REM manually. pi/templates/aft.jsonc ships as a reference template the
+REM user can copy to %USERPROFILE%\.config\cortexkit\aft.jsonc after installation.
 REM
 
 setlocal EnableDelayedExpansion
@@ -67,8 +73,8 @@ if defined SYSTEM_ONLY goto :system_only
 
 REM ──────────── DEFAULT INSTALL ────────────
 
-echo ==^> Installing sages + AFT config + subagent templates + subagents doc + SYSTEM.md...
-echo     (npm peers: pi-aft, pi-magic-context, pi-subagents, pi-codebase-memory, pi-graphify
+echo ==^> Installing sages + subagent templates + subagents doc + SYSTEM.md...
+echo     (npm peers: pi-magic-context, pi-subagents, pi-codebase-memory, pi-graphify
 echo      install those with 'pi install npm:...' after this script)
 
 REM Pre-flight checks
@@ -160,34 +166,6 @@ if not exist "%AGENT_DIR%\settings.json" (
 )
 powershell -Command "$d = Get-Content '%AGENT_DIR%\settings.json' -Raw ^| ConvertFrom-Json; if(-not $d.packages) { $d.packages = @() }; $d.packages = @($d.packages ^| Where-Object { $_ -ne '%PKG_DIR%' -and $_ -notmatch '%PKG_NAME%' }); if('%PKG_DIR%' -notin $d.packages) { $d.packages += '%PKG_DIR%' }; $d ^| ConvertTo-Json -Depth 10 ^| Set-Content '%AGENT_DIR%\settings.json' -Encoding UTF8"
 
-REM ─── AFT config (~/.config/cortexkit/aft.jsonc) ───
-echo ==^> Installing AFT config template...
-set "AFT_HOME=%USERPROFILE%\.config\cortexkit"
-set "AFT_CONFIG=%AFT_HOME%\aft.jsonc"
-set "AFT_TEMPLATE=%~dp0..\templates\aft.jsonc"
-if exist "%AFT_TEMPLATE%" (
-    if not exist "%AFT_HOME%" mkdir "%AFT_HOME%" >nul 2>&1
-    if exist "%AFT_CONFIG%" (
-        REM Sentinel check: SAGES_TEMPLATE_V1 means we installed it
-        findstr /C:"SAGES_TEMPLATE_V1" "%AFT_CONFIG%" >nul 2>&1
-        if not errorlevel 1 (
-            if "%FORCE%"=="true" (
-                copy /Y "%AFT_TEMPLATE%" "%AFT_CONFIG%" >nul
-                echo   Installed AFT config from template (--force)
-            ) else (
-                echo   AFT config already installed (use --force to reinstall)
-            )
-        ) else (
-            echo   AFT config user-customized (use --force to overwrite)
-        )
-    ) else (
-        copy /Y "%AFT_TEMPLATE%" "%AFT_CONFIG%" >nul
-        echo   Installed AFT config from template (feature flags enabled)
-    )
-) else (
-    echo   Warning: AFT template not found at %AFT_TEMPLATE%
-)
-
 REM ─── Subagent templates (Stages 3+4 of 4-agent pipeline) ───
 echo ==^> Installing subagent templates...
 if not exist "%AGENT_DIR%\agents" mkdir "%AGENT_DIR%\agents" >nul 2>&1
@@ -274,7 +252,7 @@ REM ──────────── --sages-only ────────�
 
 :sages_only
 
-echo ==^> Installing sages only (skip AFT config, subagent templates, SUBAGENTS.md, SYSTEM.md)...
+echo ==^> Installing sages only (skip subagent templates, SUBAGENTS.md, SYSTEM.md)...
 
 where git >nul 2>&1
 if errorlevel 1 (
@@ -345,7 +323,7 @@ echo   Registered sages
 
 rmdir /s /q "%TMP_DIR%" 2>nul
 
-echo   ^^(skipped: AFT config, subagent templates, SUBAGENTS.md, SYSTEM.md^^)
+echo   ^^(skipped: subagent templates, SUBAGENTS.md, SYSTEM.md^^)
 echo.
 echo Done! Restart pi: exit ^&^& pi
 exit /b 0
@@ -354,7 +332,7 @@ REM ──────────── --system-only ────────�
 
 :system_only
 
-echo ==^> Installing SYSTEM.md only (skip sages, AFT config, subagent templates, SUBAGENTS.md)...
+echo ==^> Installing SYSTEM.md only (skip sages, subagent templates, SUBAGENTS.md)...
 if not exist "%AGENT_DIR%" mkdir "%AGENT_DIR%" >nul 2>&1
 set "SYSTEM_MD=%AGENT_DIR%\SYSTEM.md"
 set "SYSTEM_TEMPLATE=%~dp0..\templates\SYSTEM.md"
@@ -376,7 +354,7 @@ if exist "%SYSTEM_MD%" (
     )
 )
 
-echo   ^^(skipped: sages, AFT config, subagent templates, SUBAGENTS.md^^)
+echo   ^^(skipped: sages, subagent templates, SUBAGENTS.md^^)
 echo.
 echo Done! Restart pi: exit ^&^& pi
 exit /b 0
@@ -399,7 +377,7 @@ REM ──────────── UNINSTALL ─────────�
 
 :uninstall
 
-echo ==^> Uninstalling sages + AFT config + subagent templates + SUBAGENTS.md...
+echo ==^> Uninstalling sages + subagent templates + SUBAGENTS.md...
 
 REM Remove sages package
 if exist "%PKG_DIR%" (
@@ -411,18 +389,6 @@ REM Unregister from settings.json
 if exist "%AGENT_DIR%\settings.json" (
     powershell -Command "$d = Get-Content '%AGENT_DIR%\settings.json' -Raw ^| ConvertFrom-Json; $d.packages = @($d.packages ^| Where-Object { $_ -ne '%PKG_DIR%' -and $_ -notmatch '%PKG_NAME%' }); $d ^| ConvertTo-Json -Depth 10 ^| Set-Content '%AGENT_DIR%\settings.json' -Encoding UTF8"
     echo   Unregistered sages
-)
-
-REM Remove AFT config (only if our SAGES_TEMPLATE_V1 sentinel)
-set "AFT_CONFIG=%USERPROFILE%\.config\cortexkit\aft.jsonc"
-if exist "%AFT_CONFIG%" (
-    findstr /C:"SAGES_TEMPLATE_V1" "%AFT_CONFIG%" >nul 2>&1
-    if not errorlevel 1 (
-        del /Q "%AFT_CONFIG%"
-        echo   Removed AFT config (was our template)
-    ) else (
-        echo   AFT config user-customized, leaving alone
-    )
 )
 
 REM Remove subagent templates (only if our sentinel)
