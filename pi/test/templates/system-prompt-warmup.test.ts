@@ -8,6 +8,10 @@
  * other tool call (including read / aft_search / ls / grep). Without this,
  * subagents spawned later in the session pay a 1-3s MCP cold-start on their
  * first code-graph call.
+ *
+ * Follow-up (2026-07-26): the warmup step must be ordered BEFORE Project
+ * Context Loading inside the "Setup — once per session" block — the very first
+ * tool batch of the session, before any `README.md` / `AGENTS.md` read.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -44,20 +48,19 @@ describe("SYSTEM.md: Tool Backend Warmup contract (GC-2026-012)", () => {
 	const section = extractWarmupSection(text);
 
 	it("templates/SYSTEM.md exists at the canonical path", () => {
-		expect(fs.existsSync(SYSTEM_MD), `missing ${SYSTEM_MD}`).toBe(true);
+		// Bun's `expect(value, message)` overload is not supported by the
+		// `bun:test` typing — assertions take a single argument. Asserting on
+		// the path inline keeps the failure self-describing.
+		expect(fs.existsSync(SYSTEM_MD)).toBe(true);
 	});
 
 	it("declares a '### Tool Backend Warmup' subsection", () => {
-		expect(section, "Tool Backend Warmup section must exist").not.toBeNull();
+		expect(section).not.toBeNull();
 	});
 
 	it("names BOTH warmup tools verbatim", () => {
-		expect(section, "section must name codebase_memory_list_projects").toMatch(
-			/`?codebase_memory_list_projects`?/,
-		);
-		expect(section, "section must name graphify_graph_stats").toMatch(
-			/`?graphify_graph_stats`?/,
-		);
+		expect(section).toMatch(/`?codebase_memory_list_projects`?/);
+		expect(section).toMatch(/`?graphify_graph_stats`?/);
 	});
 
 	it("treats warmup as REQUIRED (not 'consider' / 'should')", () => {
@@ -86,16 +89,28 @@ describe("SYSTEM.md: Tool Backend Warmup contract (GC-2026-012)", () => {
 	});
 
 	it("positions warmup inside 'Setup — once per session' (before 'Action Priority')", () => {
-		// The setup block lists a deterministic order: context load -> warmup.
+		// The setup block lists a deterministic order: warmup -> context load.
 		// Warmup must be inside the 'Setup — once per session' block, before
 		// '## Action Priority' so the LLM does not jump to action without it.
 		const setupStart = text.indexOf("## Setup — once per session");
 		const actionStart = text.indexOf("## Action Priority");
 		const warmupStart = text.indexOf("### Tool Backend Warmup");
-		expect(setupStart, "setup block must exist").toBeGreaterThanOrEqual(0);
-		expect(actionStart, "action priority block must exist").toBeGreaterThanOrEqual(0);
-		expect(warmupStart, "warmup block must exist").toBeGreaterThanOrEqual(0);
+		expect(setupStart).toBeGreaterThanOrEqual(0);
+		expect(actionStart).toBeGreaterThanOrEqual(0);
+		expect(warmupStart).toBeGreaterThanOrEqual(0);
 		expect(warmupStart).toBeGreaterThanOrEqual(setupStart);
 		expect(warmupStart).toBeLessThan(actionStart);
+	});
+
+	it("orders warmup BEFORE 'Project Context Loading' inside the Setup block", () => {
+		// GC-2026-012 follow-up: warmup must be the very first tool call of
+		// the session — issued BEFORE any context-file read. Verify that in
+		// source order the '### Tool Backend Warmup' heading appears before
+		// the '### Project Context Loading' heading.
+		const warmupStart = text.indexOf("### Tool Backend Warmup");
+		const contextStart = text.indexOf("### Project Context Loading");
+		expect(warmupStart).toBeGreaterThanOrEqual(0);
+		expect(contextStart).toBeGreaterThanOrEqual(0);
+		expect(warmupStart).toBeLessThan(contextStart);
 	});
 });
