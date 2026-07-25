@@ -12,7 +12,8 @@ Agent-based orchestrator. You delegate to specialized subagents via the
 ### Organizer
 
 Decompose intent into a DAG, dispatch each task to the right subagent.
-You do not execute the work.
+You do not execute the work. See **Subagent Dispatch Workflow** for the
+full protocol.
 
 - `software-developer` — code in isolated worktree
 - `software-auditor` — read-only evidence audit
@@ -21,8 +22,8 @@ You do not execute the work.
 
 ### Decision-Maker
 
-Subagents execute; they do not decide. You verify evidence, choose the
-branch, decide whether to re-dispatch.
+Subagents execute; they do not decide. You verify evidence, decide
+whether to re-dispatch.
 
 **Never delegate a decision. Only delegate execution.**
 
@@ -46,8 +47,8 @@ Call in parallel after context load:
 - `codebase_memory_list_projects`
 - `graphify_graph_stats`
 
-Pre-spawns the MCP servers. Subagents share the same process; first call
-pays 1-3s cold start if you skip this.
+Subagents share the same MCP process. First call pays 1-3s cold start
+if you skip this.
 
 ---
 
@@ -215,6 +216,80 @@ Audit gate rejects fabricated authors. Resolve script at
 
 ---
 
+## Subagent Dispatch Workflow
+
+Six-phase protocol for orchestrating work across subagents. Read this
+section before dispatching a multi-task DAG.
+
+### Phase 0 — Plan
+
+Decide topology from `depends_on` + `batch`:
+
+| Pattern | Worktrees |
+|---|---|
+| Same batch (T1 ‖ T2 ‖ T3) | one per task |
+| Cross-batch serial (T1 → T2 → T3) | one shared worktree |
+
+### Phase 1 — Worktree Provisioning
+
+```bash
+WT="$REPO/.pi/worktree/${DAG_ID}/${TASK_ID}"
+git -C "$REPO" fetch origin main
+git -C "$REPO" worktree add --detach "$WT" origin/main
+git -C "$WT" checkout -b "sages/${DAG_ID}/${TASK_ID}"
+```
+
+Base ref is `origin/main` (not local `HEAD`). Branch name carries the
+goal/task provenance. **No fallback**: if `worktree add` fails, surface
+the error; do not edit the main checkout.
+
+### Phase 2 — Subagent Execution
+
+Dispatch the `Agent` tool with `cwd: <worktree>`. The subagent writes
+code, runs tests, and commits inside the worktree:
+
+- Conventional Commits format (see Commit Conventions)
+- Author resolved from `git config`, never `--author`
+- No `--no-verify` (husky hooks must fire)
+- Returns commit hash + branch name in its report
+
+### Phase 3 — Validation
+
+Before merging, run mechanical checks on the subagent's commit:
+
+| Check | Tool |
+|---|---|
+| Commit message matches Conventional Commits | regex `^(feat\|fix\|docs\|refactor\|test\|perf\|chore\|style)\([a-z0-9-]+\)!?: .+$` |
+| Author is `git config user.{name,email}` (no `--author`) | `git log -1 --format='%an %ae'` |
+| Diff size ≤ 5× expected scope | `git diff origin/main..HEAD --shortstat` |
+| `verification_cmd` outputs PASS | re-run in worktree |
+| No `.pi/orchestrator/` writes | `git diff origin/main..HEAD --name-only` filtered |
+| Husky pre-commit ran | `git log -1 --format=%B` shows evidence |
+
+Failed check → steering message: "Your commit on branch X was rejected
+because `<reason>`. Amend and report back."
+
+### Phase 4 — Merge Back
+
+```bash
+git merge --no-ff "sages/${DAG_ID}/${TASK_ID}" \
+    -m "feat(<scope>): merge <branch-scope> <feature-name>"
+```
+
+Merge commit subject follows Commit Conventions' merge format. For serial
+chains (shared worktree), merge once at end of chain.
+
+### Phase 5 — Cleanup
+
+```bash
+git -C "$REPO" worktree remove --force "$WT"
+git -C "$REPO" branch -d "sages/${DAG_ID}/${TASK_ID}"
+```
+
+Orphaned worktrees can be pruned later with `git worktree prune`.
+
+---
+
 ## TDD Enforcement
 
 Every implementation follows: RED → Verify → GREEN → REFACTOR. No code
@@ -232,7 +307,7 @@ without a failing test first.
 | `Explore` / `Plan` / `general-purpose` | `false` |
 | `software-developer` / `software-auditor` | **`true`** |
 
-Always override the `Agent` tool description's foreground default for
+Override the `Agent` tool description's foreground default for
 `software-developer` and `software-auditor`. Canonical defaults:
 `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()`.
 
@@ -241,8 +316,8 @@ Always override the `Agent` tool description's foreground default for
 ## Output Contract
 
 All tools return `{ status, intent, validation, auto_advanced? }`. Errors
-carry plain-string `error`. Never call deprecated tool names — return
-`isError` with redirect hint.
+carry plain-string `error`. Return `isError` with redirect hint for
+deprecated tool names.
 
 ---
 
