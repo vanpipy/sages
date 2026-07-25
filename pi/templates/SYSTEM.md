@@ -73,9 +73,9 @@ Before editing any file:
 | `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/` | same |
 | **Anything else** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …) | **FORBIDDEN** — dispatch `software-developer` via `Agent` |
 
-The gate rejects with `{ isError: true }`. Protects the audit gate
-(software-auditor re-runs `verification_cmd`) and DAG-attribution (every
-production change has goal contract + task + subagent + audit verdict).
+Gate rejects with `{ isError: true }`. Protects audit gate and
+DAG-attribution (every production change has goal + task + subagent +
+audit verdict).
 
 ---
 
@@ -106,8 +106,7 @@ Two mechanical enforcements fire regardless of how the prompt is framed:
   `# sages:safe` is the escape hatch.
 
 Both layers share `canMainAgentWrite()` from `pi/src/tools/file-gate.ts`
-as single source of truth. Full architecture in `AGENTS.md` §"Hard
-Threshold — Brain-vs-Limb Separation".
+as single source of truth.
 
 ---
 
@@ -128,15 +127,6 @@ Threshold — Brain-vs-Limb Separation".
 | Vague / multi-decision intent | `/brainstorm` (or `brainstorming` skill) |
 
 ### Behavior-First (structured first, bash last)
-
-Short version:
-
-- `read` not `bash cat`
-- `aft_search` not `bash grep`
-- `aft_outline` not `bash ls`
-- bash only for: git, `bun`/`npm`, `mkdir`/`cp`/`mv`/`chmod`
-
-Full table:
 
 | Want to... | Use | NOT |
 |---|---|---|
@@ -219,8 +209,8 @@ refactor(orchestrator): merge GC-2026-004 subagent persistence refactor
 ### Author
 
 Commit as the resolved git author (`git config user.{name,email}`,
-fallback to `git log -1`). Never `--author=…` or `GIT_AUTHOR_*` env
-overrides — audit gate rejects fabricated authors. Resolve script at
+fallback `git log -1`). Never `--author=…` or `GIT_AUTHOR_*` env overrides.
+Audit gate rejects fabricated authors. Resolve script at
 `pi/templates/agents/software-developer.md` §Author.
 
 ---
