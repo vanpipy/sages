@@ -13,6 +13,11 @@
  * Invariant: every tool surface defined in PLAN §4 must have its
  * `Input` + `Validation` pair export here. Sub-shared types
  * (DecisionPoint, Verdict, etc.) are exported as well.
+ *
+ * P1.b additions: artifact + session types consumed by lib/artifact-reader.ts
+ * and lib/jsonl-reader.ts (GoalArtifact, DagArtifact, TaskReportArtifact,
+ * AuditReportArtifact, SessionEntry, Message, ContentBlock, ArtifactReadError,
+ * plus small structural helpers for MD parsing).
  */
 
 // ---------------------------------------------------------------------------
@@ -349,4 +354,168 @@ export interface EnvCheck {
 export interface EvalEnvValidation {
 	ready: boolean;
 	checks: EnvCheck[];
+}
+
+// ---------------------------------------------------------------------------
+// Artifact types (P1.b — consumed by src/lib/artifact-reader.ts)
+// ---------------------------------------------------------------------------
+
+/** A single success criterion inside a GoalContract's success_criteria array. */
+export interface SuccessCriterion {
+	id: string;
+	criterion: string;
+	verification_cmd?: string;
+	expected_output?: string;
+	severity?: Severity;
+}
+
+/** Scope block — declarative include / exclude path lists. */
+export interface Scope {
+	include: string[];
+	exclude: string[];
+}
+
+/** Constraints block — non-functional rules (max deps, lint, etc.). */
+export interface GoalConstraints {
+	max_dependency_additions?: number;
+	test_coverage_min?: number;
+	typecheck_required?: boolean;
+	lint_required?: boolean;
+	must_use_existing_patterns?: boolean;
+}
+
+/**
+ * Parsed GoalContract (from goal-{id}.yaml under .pi/orchestrator/).
+ * Mirrors the YAML schema used by GC-2026-* contracts.
+ */
+export interface GoalArtifact {
+	id: string;
+	title: string;
+	rationale?: string;
+	success_criteria: SuccessCriterion[];
+	anti_goals: string[];
+	scope: Scope;
+	constraints: GoalConstraints;
+	done_definition?: string;
+	created_at?: string;
+}
+
+/** Isolation mode declared by a DAG task. */
+export type IsolationMode = "worktree" | "none" | "branch" | string;
+
+/** A task node inside a DAG. */
+export interface DagTask {
+	id: string;
+	description: string;
+	plane?: string;
+	priority?: Priority;
+	depends_on: string[];
+	files?: string[];
+	subagent_type?: string;
+	batch?: number;
+	isolation?: IsolationMode;
+	tdd?: string;
+	run_in_background?: boolean;
+	acceptance?: {
+		covers: string[];
+		[key: string]: unknown;
+	};
+	[key: string]: unknown;
+}
+
+/**
+ * Parsed DAG (from dag-{id}.yaml under .pi/orchestrator/).
+ * Tasks may reference goal SCs via acceptance.covers.
+ */
+export interface DagArtifact {
+	id: string;
+	goal_id: string;
+	title: string;
+	tasks: DagTask[];
+	created_at?: string;
+	state?: string;
+	isolation_default?: IsolationMode;
+}
+
+/** Parsed task report (task-{id}-report.md). Free-form text, kept raw + first heading. */
+export interface TaskReportArtifact {
+	task_id: string;
+	file_path: string;
+	raw_markdown: string;
+}
+
+/** Parsed audit report (audit-{id}.md). Verdict + findings + workflowReady extracted. */
+export interface AuditReportArtifact {
+	audit_id: string;
+	file_path: string;
+	raw_markdown: string;
+	verdict: string;
+	findings: string[];
+	workflowReady: boolean;
+}
+
+/**
+ * Thrown by every artifact-reader function on read / parse failure.
+ * `file_path` is the absolute path of the file that could not be read or parsed.
+ *
+ * Subclasses Error so `err instanceof ArtifactReadError` works in callers.
+ * The original cause (if any) is captured via `Error.cause` (ES2022) — not
+ * re-declared here to avoid the `noImplicitOverride` clash with the base class.
+ */
+export class ArtifactReadError extends Error {
+	readonly file_path: string;
+	constructor(message: string, file_path: string, cause?: unknown) {
+		super(`${message}: ${file_path}`);
+		this.name = "ArtifactReadError";
+		this.file_path = file_path;
+		if (cause !== undefined) {
+			// ES2022 `Error.cause` is a writable field; assigning here is safe
+			// even though it's not declared on this class.
+			(this as { cause?: unknown }).cause = cause;
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Session JSONL types (P1.b — consumed by src/lib/jsonl-reader.ts)
+// ---------------------------------------------------------------------------
+
+/** A single content block inside a Message. */
+export type ContentBlock =
+	| { type: "text"; content: string }
+	| { type: "thinking"; content: string }
+	| { type: "toolCall"; name: string; arguments?: Record<string, unknown> }
+	| { type: "toolResult"; name: string; content: unknown; is_error?: boolean };
+
+/** Role of a Message in the session log. */
+export type SessionRole = "user" | "assistant" | "system";
+
+/** A message in the session log (user / assistant / system). */
+export interface Message {
+	role: SessionRole;
+	content: ContentBlock[];
+	usage?: Record<string, number>;
+}
+
+/**
+ * Single entry in session.jsonl. The discriminator is `type`.
+ *
+ * - `message` carries a `Message` in either pi-format (nested `message` field
+ *   in the raw JSONL) or legacy-format (top-level `content` field)
+ * - `session_start` / `session_end` mark session boundaries
+ * - `model_change` records provider / model switches
+ * - `thinking_level_change` records changes to the thinking level
+ */
+export type SessionEntry =
+	| { type: "message"; timestamp: string; message: Message | null; raw: Record<string, unknown> }
+	| { type: "session_start"; timestamp: string; session_id?: string; raw: Record<string, unknown> }
+	| { type: "session_end"; timestamp: string; session_id?: string; raw: Record<string, unknown> }
+	| { type: "model_change"; timestamp: string; provider?: string; model_id?: string; raw: Record<string, unknown> }
+	| { type: "thinking_level_change"; timestamp: string; raw: Record<string, unknown> };
+
+/** Aggregate readSession result: entries + parse statistics. */
+export interface SessionReadResult {
+	entries: SessionEntry[];
+	error_count: number;
+	line_count: number;
 }

@@ -1,0 +1,103 @@
+id: DAG-good
+goal_id: GC-good
+title: 'Workflow good fixture — DAG covering all SCs with clean isolation + background flags'
+tasks:
+  - id: P1.explore
+    description: >-
+      Explore the existing pi-evaluator Python implementation to confirm what
+      session.jsonl and artifact shapes the legacy code produced. This is the
+      coordination task that establishes what fixture data must look like.
+    plane: Discovery
+    priority: medium
+    depends_on: []
+    files:
+      - pi-evaluator/src/types.py
+      - pi-evaluator/src/parser.py
+    subagent_type: Explore
+    batch: 1
+    isolation: worktree
+    tdd: none
+    run_in_background: false
+    acceptance:
+      covers:
+        - SC1
+        - SC2
+        - SC3
+  - id: P1.plan
+    description: >-
+      Plan the YAML subset parser + JSONL dual-format reader. Document which
+      YAML constructs must be supported (mappings, sequences, block scalars,
+      quoted strings, numbers, booleans, null, comments) and which session
+      formats must be tolerated (pi session format with nested message, plus
+      legacy format with a top-level content field).
+    plane: Design
+    priority: medium
+    depends_on:
+      - P1.explore
+    files:
+      - pi-evaluator/src/lib/artifact-reader.ts
+      - pi-evaluator/src/lib/jsonl-reader.ts
+    subagent_type: Plan
+    batch: 2
+    isolation: worktree
+    tdd: strict
+    run_in_background: false
+    acceptance:
+      covers:
+        - SC1
+        - SC2
+        - SC3
+  - id: P1.impl
+    description: >-
+      Implement artifact-reader.ts and jsonl-reader.ts following strict TDD.
+      First write fixtures/workflow-good/ then tests, then implementation,
+      then refactor. Do not introduce any new npm dependency.
+    plane: Foundation
+    priority: high
+    depends_on:
+      - P1.plan
+    files:
+      - pi-evaluator/src/lib/artifact-reader.ts
+      - pi-evaluator/src/lib/jsonl-reader.ts
+      - pi-evaluator/test/lib/artifact-reader.test.ts
+      - pi-evaluator/test/lib/jsonl-reader.test.ts
+    subagent_type: software-developer
+    batch: 3
+    isolation: worktree
+    tdd: strict
+    run_in_background: true
+    acceptance:
+      covers:
+        - SC1
+        - SC2
+        - SC3
+  - id: P1.audit
+    description: >-
+      Audit the P1.b implementation. Verify both readers parse the fixture,
+      that tests cover all 6+ required cases, that no new npm dependency was
+      added, that the YAML subset parser handles the real Sages goal/dag
+      shapes, and that JSONL malformed lines are tolerated with error_count
+      exposed.
+    plane: Audit
+    priority: high
+    depends_on:
+      - P1.impl
+    files:
+      - pi-evaluator/src/lib/artifact-reader.ts
+      - pi-evaluator/src/lib/jsonl-reader.ts
+      - pi-evaluator/test/lib/artifact-reader.test.ts
+      - pi-evaluator/test/lib/jsonl-reader.test.ts
+      - pi-evaluator/fixtures/workflow-good/
+    subagent_type: software-auditor
+    batch: 4
+    isolation: worktree
+    tdd: none
+    run_in_background: true
+    acceptance:
+      covers:
+        - SC1
+        - SC2
+        - SC3
+created_at: '2026-07-25T11:00:00.000Z'
+state: executing
+isolation_default: worktree

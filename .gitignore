@@ -68,6 +68,11 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+# Negate Python's `lib/` ignore for pi-evaluator (P1.b introduced src/lib/ + test/lib/).
+# This is a TypeScript project; the Python `lib/` convention does not apply.
+!**/pi-evaluator/src/lib/
+!**/pi-evaluator/test/lib/
+!**/pi-evaluator/fixtures/**/lib/
 
 # Testing
 .pytest_cache/
