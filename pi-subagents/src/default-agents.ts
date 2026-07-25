@@ -43,7 +43,7 @@ const DEVELOPER_AGENT: AgentConfig = {
 		"The canonical replacement for the legacy Sages `software-developer` " +
 		"role; the legacy name is preserved as an alias for backwards compatibility.",
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
-	extensions: ["aft", "pi-mcp-adapter", "magic-context"],
+	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
 	skills: false,
 	systemPrompt: DEVELOPER_PROMPT,
 	promptMode: "replace",

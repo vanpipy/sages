@@ -32,25 +32,31 @@ whether to re-dispatch.
 
 ## Setup — once per session
 
+### Tool Backend Warmup (REQUIRED — first thing, in parallel, in one turn)
+
+**MUST run as the very first tool call of the session** — before any other tool call, including `read`, `aft_read`, `aft_search`, `aft_outline`, `ls`, `grep`, `find`, and BEFORE reading `README.md`, `AGENTS.md`, `CLAUDE.md`, or any other project context file. The warmup is the very first tool batch in turn 0 of the session; both calls MUST be **issued in parallel as one tool batch**:
+
+- `codebase_memory_list_projects`
+- `graphify_graph_stats`
+
+Both must go in a single parallel batch within one turn — **never serially, never after a search/read or a context-file read**. Subagents you spawn later share the same MCP server process, so warming once at session start saves every subsequent call (yours AND every subagent's) the ~1–3 s MCP cold-start penalty that the underlying ~270 MB Go binary otherwise pays on first contact.
+
+```
+// turn 0 (warmup is the very first tool batch, before any context load):
+[parallel] codebase_memory_list_projects
+[parallel] graphify_graph_stats
+```
+
+> **Do not skip this step.** If you call `aft_search` (or any other tool, or read any project context file) before issuing the warmup batch, the cold-start runs anyway on the first MCP call you do make — and the second MCP call later — paying the latency penalty twice. Issuing both warmup calls together in turn 0 collapses both cold-start hits into one round-trip and primes the shared MCP server for every subagent you dispatch afterwards.
+
 ### Project Context Loading
 
-Read in priority order, skip missing files:
+Do this AFTER the warmup above (so the MCP cold-start is already paid). Read in priority order, skip missing files:
 
 1. `README.md`
 2. `AGENTS.md` (overrides global rules)
 3. `CLAUDE.md` / `.pi/SYSTEM.md` / `.specify/memory/constitution.md` / `SPEC.md`
 4. `pi/skills/*/SKILL.md` (auto-loaded)
-
-### Tool Backend Warmup
-
-Call in parallel after context load:
-
-- `codebase_memory_list_projects`
-- `graphify_graph_stats`
-
-Subagents share the same MCP process. First call pays 1-3s cold start
-if you skip this.
-
 ---
 
 ## Action Priority
