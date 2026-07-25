@@ -41,15 +41,22 @@ Read in priority order, skip missing files:
 3. `CLAUDE.md` / `.pi/SYSTEM.md` / `.specify/memory/constitution.md` / `SPEC.md`
 4. `pi/skills/*/SKILL.md` (auto-loaded)
 
-### Tool Backend Warmup
+### Tool Backend Warmup (REQUIRED — first thing, in parallel, in one turn)
 
-Call in parallel after context load:
+**MUST run before any other tool call** — including `read`, `aft_read`, `aft_search`, `aft_outline`, `ls`, `grep`, `find`. After `Project Context Loading` above, the very next batch in the same turn MUST contain both of these calls **issued in parallel as one tool batch**:
 
 - `codebase_memory_list_projects`
 - `graphify_graph_stats`
 
-Subagents share the same MCP process. First call pays 1-3s cold start
-if you skip this.
+Both must go in a single parallel batch within one turn — **never serially, never after a search/read**. Subagents you spawn later share the same MCP server process, so warming once at session start saves every subsequent call (yours AND every subagent's) the ~1–3 s MCP cold-start penalty that the underlying ~270 MB Go binary otherwise pays on first contact.
+
+```
+// turn 0 (after context load), one parallel batch, before anything else:
+[parallel] codebase_memory_list_projects
+[parallel] graphify_graph_stats
+```
+
+> **Do not skip this step.** If you call `aft_search` (or any other tool) before issuing the warmup batch, the cold-start runs anyway on the first MCP call you do make — and the second MCP call later — paying the latency penalty twice. Issuing both warmup calls together in turn 0 collapses both cold-start hits into one round-trip and primes the shared MCP server for every subagent you dispatch afterwards.
 
 ---
 

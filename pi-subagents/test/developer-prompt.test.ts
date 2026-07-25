@@ -78,3 +78,91 @@ describe("developer-prompt: invariants", () => {
 		expect(DEVELOPER_PROMPT).toMatch(/branch/i);
 	});
 });
+
+describe("developer-prompt: tool preference order (GC-2026-012)", () => {
+	// The developer prompt must publish an explicit tool preference order so
+	// the subagent reaches for indexed semantic tools (AFT, MCP, Magic Context)
+	// and `todowrite` before falling back to bash / read. This pins the L2
+	// dispatch discipline into the prompt itself.
+
+	function sectionIndex(name: string): number {
+		// Section header is `## ... <name>` on its own line. Returns the byte
+		// offset of the heading line, or -1 if absent.
+		const re = new RegExp(`^##\\s+.*${name}.*$`, "m");
+		const m = DEVELOPER_PROMPT.match(re);
+		return m?.index ?? -1;
+	}
+
+	it("declares a 'Tool preference order' section", () => {
+		const idx = sectionIndex("Tool preference order");
+		expect(
+			idx,
+			"section 'Tool preference order' must exist",
+		).toBeGreaterThanOrEqual(0);
+	});
+
+	it("'Tool preference order' is positioned BEFORE 'First Action Protocol'", () => {
+		const toolIdx = sectionIndex("Tool preference order");
+		const protoIdx = sectionIndex("First Action Protocol");
+		expect(toolIdx).toBeGreaterThanOrEqual(0);
+		expect(protoIdx).toBeGreaterThanOrEqual(0);
+		expect(
+			toolIdx,
+			"'Tool preference order' must precede 'First Action Protocol'",
+		).toBeLessThan(protoIdx);
+	});
+
+	it("lists AFT, MCP, and todowrite in the preference order", () => {
+		const idx = sectionIndex("Tool preference order");
+		expect(idx).toBeGreaterThanOrEqual(0);
+		const after = DEVELOPER_PROMPT.slice(idx);
+		const nextMatch = after.slice(2).match(/^##\\s/m);
+		const endIdxInner =
+			nextMatch?.index === undefined ? after.length : nextMatch.index + 2;
+		const section = after.slice(0, endIdxInner);
+		// Each tool must be present in the section.
+		expect(section, "section must name AFT tools (aft_*)").toMatch(/aft_\\*/);
+		expect(section, "section must name codebase_memory MCP tools").toMatch(
+			/codebase_memory_\\*/,
+		);
+		expect(section, "section must name todowrite").toMatch(/todowrite/);
+		expect(
+			section,
+			"section must name bash as a lower-preference tool",
+		).toMatch(/bash/);
+		expect(
+			section,
+			"section must name read as a lower-preference file-read tool",
+		).toMatch(/read/);
+		// Numbered list ordering: AFT (1) -> MCP (2) -> ... -> bash (6).
+		// The list-item headings carry the priority semantics (AFT/MCP/
+		// todowrite precede bash and read).
+		const aftItem = section.match(/^1\.\s+\*\*AFT/m)?.index;
+		const mcpItem = section.match(/^2\.\s+\*\*MCP/m)?.index;
+		const todowriteItem = section.match(/^4\.\s+\*\*`?todowrite`?/m)?.index;
+		const readItem = section.match(/^5\.\s+\*\*`?read`?/m)?.index;
+		const bashItem = section.match(/^6\.\s+\*\*`?bash`?/m)?.index;
+		expect(typeof aftItem, "must start with AFT as list item 1").toBe("number");
+		expect(typeof mcpItem, "MCP must be list item 2").toBe("number");
+		expect(typeof todowriteItem, "todowrite must be list item 4").toBe(
+			"number",
+		);
+		expect(typeof readItem, "read must be list item 5").toBe("number");
+		expect(typeof bashItem, "bash must be list item 6").toBe("number");
+		// AFT (1) -> MCP (2) -> todowrite (4) -> read (5) -> bash (6). Use an
+		// ordering array to avoid non-null assertions (biome noNonNullAssertion).
+		const order: ReadonlyArray<number | undefined> = [
+			aftItem,
+			mcpItem,
+			todowriteItem,
+			readItem,
+			bashItem,
+		];
+		for (let i = 1; i < order.length; i++) {
+			expect(
+				(order[i - 1] ?? 0) < (order[i] ?? 0),
+				`priority ordering breaks at index ${i}`,
+			).toBe(true);
+		}
+	});
+});

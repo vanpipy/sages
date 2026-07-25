@@ -61,9 +61,12 @@ describe("default-agents: developer config", () => {
 		}
 	});
 
-	it("carries the required extensions: aft, pi-mcp-adapter, magic-context", () => {
+	it("carries the required extensions: aft, pi-mcp-adapter, pi-magic-context", () => {
 		// `extensions` is the loader-level selector; it must include all three
 		// required extensions by canonical name so they load into the agent.
+		// GC-2026-012: the magic-context selector was renamed to its package
+		// name `pi-magic-context` so it survives the migration off the bare
+		// `magic-context` identifier that previously resolved by accident.
 		const extensions = dev?.extensions;
 		expect(extensions).not.toBe(false);
 		const list =
@@ -71,7 +74,8 @@ describe("default-agents: developer config", () => {
 		expect(list, "developer must pin extensions to a list").not.toBeNull();
 		expect(list).toContain("aft");
 		expect(list).toContain("pi-mcp-adapter");
-		expect(list).toContain("magic-context");
+		expect(list).toContain("pi-magic-context");
+		expect(list).not.toContain("magic-context");
 	});
 
 	it("disables skills (false) — same posture as the legacy Sages role", () => {
