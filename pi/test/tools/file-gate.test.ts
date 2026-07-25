@@ -3,7 +3,7 @@
  * agent to write to Sages meta-files (`.pi/orchestrator/`, `pi/`,
  * `README.md`, `AGENTS.md`, `package.json`, etc.) but rejects writes
  * to production code (which must go through the Agent tool with a
- * software-developer subagent).
+ * `developer` subagent (with explicit managed-worktree isolation).
  *
  * RED phase: these tests fail until `file-gate.ts` is implemented.
  */
@@ -56,7 +56,7 @@ describe("canMainAgentWrite", () => {
 			"pi/skills/brainstorming/SKILL.md",
 			"pi/templates/SYSTEM.md",
 			"pi/templates/SUBAGENTS.md",
-			"pi/templates/agents/software-developer.md",
+			"pi/templates/agents/developer.md",
 			"pi/templates/agent-tool-description.md",
 			"pi/templates/subagents.json",
 			"pi/scripts/install.sh",
@@ -133,10 +133,10 @@ describe("policyMessage", () => {
 		expect(msg).toContain("src/foo.ts");
 	});
 
-	it("points at the Agent tool + software-developer subagent", () => {
+	it("points at the Agent tool + developer subagent", () => {
 		const msg = policyMessage("src/foo.ts");
 		expect(msg.toLowerCase()).toContain("agent");
-		expect(msg.toLowerCase()).toContain("software-developer");
+		expect(msg.toLowerCase()).toContain("developer");
 	});
 });
 
@@ -160,7 +160,7 @@ describe("executeSagesWrite", () => {
 		const r = parseResult(resp);
 		expect(resp.isError).toBe(true);
 		expect(r.text.toLowerCase()).toContain("agent");
-		expect(r.text.toLowerCase()).toContain("software-developer");
+		expect(r.text.toLowerCase()).toContain("developer");
 		expect(existsSync(join(cwd, "src/foo.ts"))).toBe(false);
 	});
 

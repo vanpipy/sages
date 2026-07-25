@@ -15,7 +15,8 @@ Decompose intent into a DAG, dispatch each task to the right subagent.
 You do not execute the work. See **Subagent Dispatch Workflow** for the
 full protocol.
 
-- `software-developer` — code in isolated worktree
+- `developer` (canonical) — code in isolated managed worktree
+- `software-developer` (Phase A alias, resolves to canonical `developer`)
 - `software-auditor` — read-only evidence audit
 - `Explore` (L1) — fast searches
 - `Plan` (L1) — implementation design
@@ -60,7 +61,7 @@ Before editing any file:
 2. **Plan** — `Plan` subagent or `dag_synthesize`
 3. **Dispatch** — `task_dispatch`
 4. **Direct edit** — `sages_edit` / `sages_write` for meta-files;
-   `software-developer` for production code
+   `developer` for production code
 
 ---
 
@@ -72,7 +73,7 @@ Before editing any file:
 | `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/` | same |
 | `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json` | same |
 | `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/` | same |
-| **Anything else** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …) | **FORBIDDEN** — dispatch `software-developer` via `Agent` |
+| **Anything else** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …) | **FORBIDDEN** — dispatch `developer` via `Agent` (legacy alias `software-developer` still resolves) |
 
 Gate rejects with `{ isError: true }`. Protects audit gate and
 DAG-attribution (every production change has goal + task + subagent +
@@ -143,7 +144,7 @@ as single source of truth.
 
 Anti-patterns:
 
-- "I'll just edit this line" → dispatch `software-developer`
+- "I'll just edit this line" → dispatch `developer`
 - "Let me quickly run tests" → dispatch `software-auditor`
 - "I'll grep for X" → `aft_search` or `grep` tool
 - "Developer says done, so I'll merge" → verify evidence first
@@ -212,7 +213,7 @@ refactor(orchestrator): merge GC-2026-004 subagent persistence refactor
 Commit as the resolved git author (`git config user.{name,email}`,
 fallback `git log -1`). Never `--author=…` or `GIT_AUTHOR_*` env overrides.
 Audit gate rejects fabricated authors. Resolve script at
-`pi/templates/agents/software-developer.md` §Author.
+`pi/templates/agents/developer.md` §Author (the canonical built-in content also lives in `pi-subagents/src/agent-prompts/developer.ts`).
 
 ### What's not committed
 
@@ -254,7 +255,7 @@ Dispatch with the explicit isolation object:
 
 ```ts
 Agent({
-  subagent_type: "software-developer",
+  subagent_type: "developer",
   prompt: "...",
   isolation: {
     dag_id: DAG_ID,
@@ -330,7 +331,7 @@ Orphaned worktrees can be pruned later with `git worktree prune`.
 Every implementation follows: RED → Verify → GREEN → REFACTOR. No code
 without a failing test first.
 
-`software-developer` enforces this automatically. For TDD exceptions
+`developer` enforces this automatically. For TDD exceptions
 (PoC, config), document why in the commit body.
 
 ---
@@ -340,10 +341,10 @@ without a failing test first.
 | Subagent type | `run_in_background` |
 |---|---|
 | `Explore` / `Plan` / `general-purpose` | `false` |
-| `software-developer` / `software-auditor` | **`true`** |
+| `developer` / `software-auditor` | **`true`** |
 
 Override the `Agent` tool description's foreground default for
-`software-developer` and `software-auditor`. Canonical defaults:
+`developer` and `software-auditor`. Canonical defaults:
 `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()`.
 
 ---

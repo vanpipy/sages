@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const TEMPLATES_DIR = join(__dirname, "..", "templates", "agents");
-const FILES = ["software-auditor.md", "software-developer.md"];
+const FILES = ["developer.md", "software-auditor.md"];
 
 // Minimal frontmatter parse matching pi's `--- YAML --- body` convention.
 function extractFrontmatter(text: string): string | null {
@@ -90,6 +90,6 @@ describe("shipped subagent frontmatter (no third-party deps)", () => {
 
   it("agents directory lists exactly the expected files", () => {
     const entries = readdirSync(TEMPLATES_DIR).sort();
-    expect(entries).toEqual(["software-auditor.md", "software-developer.md"]);
+    expect(entries).toEqual(["developer.md", "software-auditor.md"]);
   });
 });

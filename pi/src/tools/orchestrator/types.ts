@@ -78,19 +78,32 @@ export interface TaskNode {
 	depends_on: string[];
 	/** Files this task touches */
 	files: string[];
-	/** Subagent role to dispatch to (e.g. "software-developer", "software-auditor") */
+	/** Subagent role to dispatch to (e.g. "developer", "software-auditor") */
 	subagent_type: string;
 	/** Concurrency grouping — same batch runs in parallel */
 	batch: number;
-	/** Filesystem isolation: "worktree" = own git branch, "none" = shared */
-	isolation: "worktree" | "none";
-	/** Whether this task requires strict TDD (delegated to software-developer subagent's RED → GREEN → REFACTOR) */
+	/**
+	 * Phase A P3 (DAG-2026-011) — managed-worktree isolation shape.
+	 *
+	 * Canonical form is the explicit managed-worktree object
+	 * `{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`.
+	 * The legacy `"worktree"` string literal is no longer accepted by
+	 * the Agent tool (see `pi-subagents/src/worktree-contract.ts`) — it
+	 * is preserved here as `"none"` and the legacy string for backwards
+	 * compatibility with persisted DAGs, but new authoring MUST use the
+	 * object form. `task_id` MUST match `TaskNode.id` — the dispatcher
+	 * validates this at plan-load time and rejects mismatches.
+	 */
+	isolation:
+		| { dag_id: string; task_id: string; worktree_id?: string; mode: "create" | "reuse" }
+		| "none";
+	/** Whether this task requires strict TDD (delegated to the developer subagent's RED → GREEN → REFACTOR) */
 	tdd: "strict" | "none";
 	/**
 	 * Optional per-task override for the dispatcher's `run_in_background`
 	 * policy. When omitted, the dispatcher derives a default from
 	 * `subagent_type` (Explore/Plan/general-purpose = foreground,
-	 * software-developer/software-auditor = background).
+	 * developer/software-auditor = background).
 	 */
 	run_in_background?: boolean;
 	/** Detailed prompt given to the subagent (assembled by orchestrator from MDD outputs, or rendered from task_template) */
@@ -201,7 +214,7 @@ export interface OrchestratorAuditResult {
  * prompt field is used as-is.
  */
 export interface TaskTemplate {
-	/** Template name (without extension). E.g. "subagent-software-developer" */
+	/** Template name (without extension). E.g. "subagent-developer" */
 	name: string;
 	/** Parameters passed to the template renderer */
 	params: Record<string, unknown>;

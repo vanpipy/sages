@@ -20,12 +20,12 @@ identity from `~/.pi/agent/agents/<name>.md`).
 |-------|----------------------|--------------------------------------|----------------------|------------------------------------------------------------------------|
 | 1     | `Explore`            | pi-subagents built-in                | read, bash, grep, find, ls | Fast codebase search. Haiku — cheap, fast, **read-only**.        |
 | 2     | `Plan`               | pi-subagents built-in                | read, bash, grep, find, ls | Software architect. Sonnet. **Read-only** — returns a step-by-step plan, never edits. |
-| 3     | `software-developer` | **shipped** (this repo)              | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. Host-managed worktree. |
+| 3     | `developer`         | **shipped** (pi-subagents built-in) | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. Host-managed worktree. |
 | 4     | `software-auditor`   | **shipped** (this repo)              | read, bash, grep, find, ls, aft_* | Evidence-based certifier. **Read-only** — re-runs commands, never modifies production code. |
 
 **3 built-ins + 2 shipped.** The 3 built-ins (`Explore`, `Plan`,
 `general-purpose`) come from `@tintinweb/pi-subagents`. The 2 custom
-(`software-developer`, `software-auditor`) are installed by sages
+(`developer`, `software-auditor`) are installed by sages (`software-developer` is a Phase A alias)
 from `pi/templates/agents/` to `~/.pi/agent/agents/`. Don't re-ship
 `Explore` / `Plan` — overriding with a project-specific copy brings
 no behaviour change. Override them only when project-specific rules
@@ -63,13 +63,13 @@ Agent({
 
 **Returns**: ordered steps + critical files list. Never edits.
 
-### Stage 3 — Implement (`software-developer`)
+### Stage 3 — Implement (`developer`)
 
-`software-developer` runs in the **background by default** (TDD cycles are 1–10 min, can be steered mid-run — see `task-dispatcher.ts:defaultRunInBackground()` for the canonical rule).
+`developer` runs in the **background by default** (TDD cycles are 1–10 min, can be steered mid-run — see `task-dispatcher.ts:defaultRunInBackground()` for the canonical rule).
 
 ```ts
 Agent({
-  subagent_type: "software-developer",
+  subagent_type: "developer",
   prompt: "RED: write a failing test for X. GREEN: implement. REFACTOR: tighten. " +
           "Verification: `cd pi && bun test test/foo.test.ts` passes.",
   description: "Implement feature X",
@@ -132,7 +132,7 @@ tasks:
     depends_on: [R1]
     prompt: "Design the doc template + install hook"
   - id: I1     # Stage 3
-    subagent_type: software-developer
+    subagent_type: developer
     batch: 3
     depends_on: [D1]
     isolation:

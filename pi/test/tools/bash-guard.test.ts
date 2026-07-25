@@ -1,7 +1,7 @@
 /**
  * Tests for the bash-guard: path-aware policy that classifies bash
  * commands and blocks write-intent operations targeting production
- * code paths. The main agent must dispatch a software-developer
+ * code paths. The main agent must dispatch a developer
  * subagent for any change to user source — bash cannot bypass that.
  *
  * RED phase: these tests fail until `bash-guard.ts` is implemented.
@@ -355,10 +355,10 @@ describe("shouldBlockBashCommand — reason format", () => {
 		expect(r.reason).toContain("src/auth/service.ts");
 	});
 
-	it("points at the Agent tool + software-developer subagent", () => {
+	it("points at the Agent tool + developer subagent", () => {
 		const r = shouldBlockBashCommand("rm src/foo.ts", CTX);
 		expect(r.reason!.toLowerCase()).toContain("agent");
-		expect(r.reason!.toLowerCase()).toContain("software-developer");
+		expect(r.reason!.toLowerCase()).toContain("developer");
 	});
 
 	it("mentions the # sages:safe escape hatch in production-target case", () => {

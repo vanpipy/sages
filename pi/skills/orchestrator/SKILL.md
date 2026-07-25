@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Orchestrate multi-task workflows via 4-stage DAG (goal → decompose → dispatch → audit). Coordinates software-developer + software-auditor subagents for execution.
+description: Orchestrate multi-task workflows via 4-stage DAG (goal → decompose → dispatch → audit). Coordinates `developer` (canonical) and `software-auditor` subagents for execution.
 ---
 
 # Orchestrator - Multi-Task Workflow Coordinator
@@ -37,7 +37,7 @@ The orchestrator dispatches a **single canonical pipeline of 4 subagents**, one 
 |-------|----------------------|--------------------------------------|---------------------|----------------------------------------------------------------------------------|
 | 1     | `Explore`            | **pi-subagents built-in**            | `false`             | "Where is X?" / "find all callers of Y" / pure codebase search                    |
 | 2     | `Plan`               | **pi-subagents built-in**            | `false`             | Need a step-by-step implementation strategy before coding (architect concerns)   |
-| 3     | `software-developer` | **shipped** (this repo)              | **`true`**          | Write production code + tests in a worktree, strict TDD                          |
+| 3     | `developer`         | **shipped** (pi-subagents built-in) | **`true`**          | Write production code + tests in a managed worktree, strict TDD                    |
 | 4     | `software-auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
 
 `run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table is the canonical reference; see `pi/templates/SUBAGENTS.md` for full rationale and code examples.
@@ -121,14 +121,14 @@ Map each DAG task to the right `subagent_type` from the 4-agent pipeline (see Su
 |----------------------------------------|-----------------------|-------------|-------------------------------------------------------------------|
 | Codebase research ("where is X?")      | `Explore`             | none        | Read-only. Haiku — cheap.                                         |
 | Architecture / step-by-step plan       | `Plan`                | none        | Read-only. Returns plan + Critical Files.                         |
-| Edit production code (TDD: RED→GREEN)  | `software-developer`  | `worktree`  | Strict TDD discipline. Sonnet + high thinking.                    |
+| Edit production code (TDD: RED→GREEN)  | `developer`           | `worktree` (managed object) | Strict TDD discipline. Sonnet + high thinking.         |
 | Verify / certify prior work            | `software-auditor`    | none        | Read-only. Independent of implementer — fresh eyes.               |
 | Catch-all fallback (use sparingly)     | `general-purpose`     | n/a         | Last resort. Don't use for plan/dev/audit — specialised roles win. |
 
 The DAG's batch numbers should *roughly* follow the pipeline order, but batching is for parallelism within a stage, not across:
 - Batch 1 (research): one or more `Explore` tasks in parallel — discover all the things you'll need before planning
 - Batch 2 (planning): one or more `Plan` tasks, each consuming research outputs from Batch 1
-- Batches 3+ (implementation): one or more `software-developer` tasks per batch (worktree-isolated, TDD)
+- Batches 3+ (implementation): one or more `developer` tasks per batch (managed-worktree-isolated, TDD)
 - Final batch (verification): one or more `software-auditor` tasks, each auditing a discrete chunk of implementation
 
 **For batch 1 specifically**:
@@ -236,12 +236,12 @@ TDD discipline) was duplicated 80% between `orchestrator_audit` and
 **Process governance (built into orchestrator — no separate sage tools)**:
 - Design → `dag_synthesize` (typed goal contracts + DAGs replace ad-hoc MDD drafts)
 - Review → `goal_contract_create` (binary SC pass/fail replaces score-gating)
-- TDD execution → delegated to `software-developer` subagent (see SUBAGENTS.md)
+- TDD execution → delegated to `developer` subagent (see SUBAGENTS.md)
 - Audit → `orchestrator_audit` (workflow-level rollup; A3 split — per-task detail handled by `software-auditor`)
 
 **Write (delegated only — do NOT edit production code directly)**:
 - `edit`, `write` — only for orchestrator metadata in .pi/orchestrator/
-- Everything else → delegate to software-developer subagent
+- Everything else → delegate to `developer` subagent
 
 ## Prompt Templates (auto-rendered)
 
@@ -259,7 +259,8 @@ The orchestrator can reference reusable prompt templates instead of writing ever
 
 | Template | Subagent type | Notes |
 |----------|--------------|-------|
-| `subagent-software-developer` | software-developer | Includes First Action Protocol + STRICT TDD guidance + output contract |
+| `subagent-developer` (canonical) | developer | Includes First Action Protocol + STRICT TDD guidance + output contract |
+| `subagent-software-developer` (Phase A alias — warns) | developer | Same shape as canonical; use `subagent-developer` for new authoring |
 | `subagent-software-auditor` | software-auditor | Default NEEDS WORK + 6-step audit + 5/3-phase depth |
 | `subagent-explore` | Explore | Read-only enforcement + findings.json output schema |
 | `subagent-general-purpose` | general-purpose | Fallback for tasks without a specific role |
@@ -308,7 +309,7 @@ For progress reports, follow this structure:
 
 When defining a task in `dag_synthesize`, you can either:
 - Write `prompt` directly (LLM composes)
-- OR set `task_template: "subagent-software-developer"` + `task_params: {...}` → tool auto-renders
+- OR set `task_template: "subagent-developer"` + `task_params: {...}` → tool auto-renders (legacy `subagent-software-developer` still resolves with a deprecation warning)
 
 The auto-render path is preferred — templates encode the discipline (TDD, First Action Protocol, output contract) that the orchestrator wants every subagent to follow.
 
@@ -317,7 +318,7 @@ Template substitution uses `{{var}}` for variables and `{{#if var}}...{{else}}..
 ## Subagent Boundaries
 
 You do NOT:
-- Edit production code (delegate to software-developer)
+- Edit production code (delegate to `developer`)
 - Re-decompose after dispatch (use steer_subagent or re-run with force)
 - Override the goal contract without user re-prompt
 - Skip stages (always go 1 → 2 → 3 → 4)

@@ -101,8 +101,9 @@ tasks:
     description: "Implement new [module/class] per design"
     plane: Foundation
     priority: high
-    subagent_type: software-developer
-    task_template: subagent-software-developer
+    # Phase A P3 (DAG-2026-011): canonical subagent name is `developer`.
+    subagent_type: developer
+    task_template: subagent-developer
     task_params:
       task_id: P4
       task_title: "Implement new module"
@@ -114,10 +115,17 @@ tasks:
           field: design_doc
     batch: 3
     depends_on: [P3]
-    isolation: worktree
+    # Phase A P3: the explicit managed-worktree object is the canonical
+    # isolation shape. The legacy `isolation: worktree` literal is no
+    # longer accepted by the Agent tool; `dag_id` / `task_id` are
+    # required so the worktree lives at <repoRoot>/.pi/worktree/<dag>/<task>.
+    isolation:
+      dag_id: "[DAG-ID]"
+      task_id: P4
+      mode: create
     tdd: strict
     # Background-default for implement/audit (verified 2026-07-24).
-    # All software-developer / software-auditor tasks in this DAG run in
+    # All developer / software-auditor tasks in this DAG run in
     # background so the orchestrator can steer / track multiple at once.
     # The dispatcher would default this to true based on subagent_type;
     # the explicit annotation documents intent at the call site.
@@ -138,8 +146,9 @@ tasks:
     description: "Refactor existing call sites to use new [module/class]"
     plane: Evolution
     priority: high
-    subagent_type: software-developer
-    task_template: subagent-software-developer
+    # Phase A P3 (DAG-2026-011): canonical subagent name is `developer`.
+    subagent_type: developer
+    task_template: subagent-developer
     task_params:
       task_id: P5
       task_title: "Refactor call sites"
@@ -153,7 +162,11 @@ tasks:
           field: code_changes
     batch: 4
     depends_on: [P3, P4]
-    isolation: worktree
+    # Phase A P3: see P4 above — explicit managed-worktree object.
+    isolation:
+      dag_id: "[DAG-ID]"
+      task_id: P5
+      mode: create
     tdd: strict
     # Background default — see P4 comment.
     run_in_background: true
@@ -173,8 +186,9 @@ tasks:
     description: "Add unit tests for refactored boundary"
     plane: Observation
     priority: medium
-    subagent_type: software-developer
-    task_template: subagent-software-developer
+    # Phase A P3 (DAG-2026-011): canonical subagent name is `developer`.
+    subagent_type: developer
+    task_template: subagent-developer
     task_params:
       task_id: P6
       task_title: "Add boundary tests"
@@ -186,7 +200,11 @@ tasks:
           field: code_changes
     batch: 5
     depends_on: [P5]
-    isolation: worktree
+    # Phase A P3: see P4 above — explicit managed-worktree object.
+    isolation:
+      dag_id: "[DAG-ID]"
+      task_id: P6
+      mode: create
     tdd: strict
     # Background default — see P4 comment.
     run_in_background: true

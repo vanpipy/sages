@@ -35,11 +35,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 
 # Subagent template install info.
-# Source: pi/templates/agents/{software-auditor,software-developer}.md (git-tracked)
+# Source: pi/templates/agents/{developer,software-auditor}.md (git-tracked)
 # Target: $AGENT_DIR/agents/ — global agent definitions loaded by pi-subagents.
 # Used by sages orchestrator workflow to spawn sub-agents by name
-# (subagent_type="software-developer" / "software-auditor"). Without these,
+# (subagent_type="developer" / "software-auditor"). Without these,
 # the orchestrator's Agent tool calls fail with "unknown agent" errors.
+#
+# Phase A P3 (DAG-2026-011): `developer.md` is the canonical template.
+# Before installing it, an existing legacy `software-developer.md` is
+# classified and backed up under `$AGENT_DIR/agents/.phase-a-migration/`.
+# User-customized legacy files stay in place; Sages-managed legacy files are
+# removed after backup so alias resolution reaches canonical `developer`.
+# Phase B (out of scope) will migrate `software-auditor` to `auditor` with
+# the same playbook.
 #
 # Each template body carries an HTML-comment sentinel (SAGES_TEMPLATE_V1) so
 # uninstall_subagent_templates can distinguish "we installed this" from
@@ -50,16 +58,18 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 #
 #   Stage 1  Explore              ← pi-subagents built-in (no install)
 #   Stage 2  Plan                 ← pi-subagents built-in (no install)
-#   Stage 3  software-developer   ← shipped via SUBAGENT_NAMES below
+#   Stage 3  developer            ← canonical; pi-subagents built-in
+#                                   (legacy alias `software-developer`
+#                                    also accepted via the alias metadata)
 #   Stage 4  software-auditor     ← shipped via SUBAGENT_NAMES below
 #
-# We ship ONLY the 2 custom agents (Stages 3-4). The 2 built-ins (Stages 1-2)
-# come from @tintinweb/pi-subagents and don't need installation. This keeps
-# the install lean and avoids overriding useful defaults — override Explore/
-# Plan only if a project needs custom research/planning rules.
+# We ship canonical `developer.md` plus `software-auditor.md` (the auditor
+# rename is Phase B). The matching canonical developer identity also ships
+# inside pi-subagents; the user-level template remains available for explicit
+# customization without reviving the deprecated filename.
 SUBAGENT_TEMPLATE_DIR="$SCRIPT_DIR/../templates/agents"
 SUBAGENT_TARGET_DIR="$AGENT_DIR/agents"
-SUBAGENT_NAMES=("software-auditor" "software-developer")
+SUBAGENT_NAMES=("software-auditor" "developer")
 
 # Subagent pipeline doc — installed to $AGENT_DIR/SUBAGENTS.md alongside
 # the agent .md files. Plain markdown, NOT parsed by pi-subagents (it only
@@ -74,7 +84,7 @@ SUBAGENTS_DOC_TARGET="$AGENT_DIR/SUBAGENTS.md"
 # pi-subagents/dist/index.js#loadCustomToolDescription, ~line 791). This pair
 # lets sages replace the upstream default Agent tool description with a
 # sage-tuned one — specifically, inverting the foreground default for
-# software-developer/auditor and adding a todowrite-driven orchestration hint.
+# developer/auditor and adding a todowrite-driven orchestration hint.
 # SAGES_TEMPLATE_V1 sentinel in the description template lets uninstall_agent_tool_description
 # distinguish "our template" from a user's hand-edited version.
 AGENT_TOOL_DESCRIPTION_TEMPLATE="$SCRIPT_DIR/../templates/agent-tool-description.md"
@@ -495,7 +505,7 @@ install_system_prompt() {
 
 # ────────────────────────────────────────────────────────────
 # Subagent templates (pi-subagents' global agent definitions)
-# Source: pi/templates/agents/{software-auditor,software-developer}.md
+# Source: pi/templates/agents/{developer,software-auditor}.md
 # Target: $SUBAGENT_TARGET_DIR/ — where pi-subagents loads agents by name.
 # ────────────────────────────────────────────────────────────
 
@@ -510,6 +520,41 @@ SUBAGENT_SENTINEL_TEXT='SAGES_TEMPLATE_V1'
 is_subagent_template_installed() {
   local file="$1"
   [[ -f "$file" ]] && grep -q "$SUBAGENT_SENTINEL_TEXT" "$file" 2>/dev/null
+}
+
+# Phase A migration helper. Preserve the previous filename before canonical
+# `developer.md` is installed. A Sages-managed legacy file can be removed after
+# backup; a user-customized one remains authoritative and is only classified.
+backup_legacy_developer_template() {
+  local legacy_name="software-developer"
+  local legacy="$SUBAGENT_TARGET_DIR/$legacy_name.md"
+  [[ -f "$legacy" ]] || return 0
+
+  local backup_root="$SUBAGENT_TARGET_DIR/.phase-a-migration"
+  local ts classification
+  mkdir -p "$backup_root"
+  ts=$(date +%Y%m%dT%H%M%S)
+  classification="user-customized"
+  if is_subagent_template_installed "$legacy"; then
+    classification="sages-managed"
+  fi
+
+  cp "$legacy" "$backup_root/${legacy_name}.${ts}.md"
+  cat > "$backup_root/${legacy_name}.${ts}.md.meta" <<META_EOF
+classification: ${classification}
+install_time: ${ts}
+subagent_name: ${legacy_name}
+canonical_name: developer
+phase: A
+reason: previous developer-agent filename preserved before canonical template install
+META_EOF
+
+  if [[ "$classification" = "sages-managed" ]]; then
+    rm -f "$legacy"
+    echo "  Migrated $legacy_name.md to developer.md (backup: .phase-a-migration/${legacy_name}.${ts}.md)"
+  else
+    echo "  $legacy_name.md is user-customized — backed up to .phase-a-migration/${legacy_name}.${ts}.md and left in place"
+  fi
 }
 
 # Atomic file copy: write to "<target>.tmp.<pid>" then mv to target. On
@@ -544,6 +589,7 @@ install_subagent_templates() {
   fi
 
   mkdir -p "$SUBAGENT_TARGET_DIR"
+  backup_legacy_developer_template
 
   local name template target
   for name in "${SUBAGENT_NAMES[@]}"; do
@@ -561,7 +607,27 @@ install_subagent_templates() {
     fi
 
     if [[ -f "$target" ]] && ! is_subagent_template_installed "$target" && [[ "${FORCE:-false}" != true ]]; then
-      echo "  $name.md exists with user customization (use --force to overwrite)"
+      # Phase A P3 (DAG-2026-011): back up and classify user-customized
+      # subagent templates BEFORE skipping. The backup directory
+      # `$SUBAGENT_TARGET_DIR/.phase-a-migration/` carries:
+      #   - the original file (`<name>.md`)
+      #   - a metadata sidecar (`<name>.md.meta`) recording the install
+      #     time + the classification ("user-customized") so a rollback
+      #     is always possible without consulting git.
+      # Phase B (auditor migration) reuses this directory.
+      local backup_root="$SUBAGENT_TARGET_DIR/.phase-a-migration"
+      mkdir -p "$backup_root"
+      local ts
+      ts=$(date +%Y%m%dT%H%M%S)
+      cp "$target" "$backup_root/${name}.${ts}.md" 2>/dev/null || true
+      cat > "$backup_root/${name}.${ts}.md.meta" <<META_EOF
+classification: user-customized
+install_time: ${ts}
+subagent_name: ${name}
+phase: A
+reason: existing file lacks SAGES_TEMPLATE_V1 sentinel; skipped install to preserve customization
+META_EOF
+      echo "  $name.md exists with user customization — backed up to .phase-a-migration/${name}.${ts}.md (use --force to overwrite)"
       continue
     fi
 

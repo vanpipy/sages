@@ -36,7 +36,7 @@ pi/
 │   ├── agent-tool-description.md #   → Agent tool override
 │   ├── subagents.json            #   → {toolDescriptionMode: custom}
 │   └── agents/                    #   → custom subagent templates
-│       ├── software-developer.md
+│       ├── developer.md
 │       └── software-auditor.md
 └── scripts/                       # install.sh / install.bat / install.ps1
 ```
@@ -66,8 +66,10 @@ The installer:
    `agent-tool-description.md`, `subagents.json` (sentinel-protected;
    preserves user customizations).
 2. Ships the two custom subagent templates
-   (`software-developer`, `software-auditor`) to
-   `~/.pi/agent/agents/`.
+   (`developer`, `software-auditor`) to
+   `~/.pi/agent/agents/`. Calls to `developer` must pass an explicit
+   managed-worktree isolation object: `{ dag_id, task_id, worktree_id?,
+   mode: "create" | "reuse" }`.
 3. Installs peer extension npm packages
    (`@tintinweb/pi-subagents`, `@cortexkit/aft-pi`, etc.).
 4. Configures AFT and graphify for the host project.

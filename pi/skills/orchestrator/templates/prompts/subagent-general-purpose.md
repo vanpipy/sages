@@ -1,7 +1,7 @@
 <!--
 Task Prompt Template: subagent-general-purpose
 
-Fallback for tasks without a specialized role. Prefer software-developer /
+Fallback for tasks without a specialized role. Prefer developer /
 software-auditor / Explore / Plan when possible — those have focused
 toolsets + identity-level discipline.
 
@@ -34,6 +34,6 @@ Parameters:
 
 ## Note
 
-This task may overlap with software-developer / software-auditor
+This task may overlap with developer / software-auditor
 responsibilities. If unsure whether to write code vs verify existing
 code, prefer **verifying** and flag the gap to the orchestrator.

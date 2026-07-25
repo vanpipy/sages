@@ -50,14 +50,14 @@ export const TaskNodeSchema = Type.Object({
    * Optional per-task override for the dispatcher's `run_in_background`
    * policy. When omitted, the dispatcher derives a default from
    * `subagent_type` (Explore/Plan/general-purpose = foreground,
-   * software-developer/software-auditor = background). Set this when
+   * developer/software-auditor = background). Set this when
    * a specific task needs the opposite of its subagent-type default.
    */
   run_in_background: Type.Optional(Type.Boolean({ description: "Override the subagent-type default for run_in_background" })),
   prompt: Type.String({ description: "Detailed prompt for subagent", minLength: 20 }),
   /** Optional: reference to a template under skills/orchestrator/templates/prompts/ */
   task_template: Type.Optional(Type.String({
-    description: "Template name (e.g. 'subagent-software-developer') — when set, dag_synthesizer renders prompt from template + task_params instead of using the prompt field directly",
+    description: "Template name (e.g. 'subagent-developer') — when set, dag_synthesizer renders prompt from template + task_params instead of using the prompt field directly",
   })),
   /** Parameters passed to the task_template renderer */
   task_params: Type.Optional(Type.Object({}, { additionalProperties: true })),
@@ -172,9 +172,16 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
     }
   }
 
-  // 5b. Validate task_template references (if set, must be a known template)
+  // 5b. Validate task_template references (if set, must be a known template).
+  //
+  // Phase A P3 (DAG-2026-011): the canonical template name for the
+  // developer agent is `subagent-developer`. The legacy spelling
+  // `subagent-software-developer` is NOT advertised here — it is
+  // rejected as an unknown template. Persisted DAGs that still carry
+  // the legacy name fail validation; the dispatcher has a separate
+  // alias-resolution path that warns callers about the deprecation.
   const KNOWN_TEMPLATES = new Set([
-    "subagent-software-developer",
+    "subagent-developer",
     "subagent-software-auditor",
     "subagent-general-purpose",
     "subagent-explore",
@@ -222,10 +229,17 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
   }
 
   // 8. Subagent type referenced (soft check — warn if unknown)
+  //
+  // Phase A P3 (DAG-2026-011): the canonical subagent name is
+  // `developer`. The legacy `software-developer` alias is preserved
+  // here as a deprecation signal — a persisted DAG that uses the
+  // legacy spelling gets a warning, not an error. Phase A P4 does
+  // the same migration for `software-auditor` → `auditor`.
   const knownSubagents = new Set([
     "general-purpose",
     "Explore",
     "Plan",
+    "developer",
     "software-developer",
     "software-auditor",
   ]);

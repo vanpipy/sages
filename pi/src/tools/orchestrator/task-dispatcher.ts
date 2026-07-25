@@ -82,7 +82,12 @@ export interface DispatchTask {
  * Default `run_in_background` policy by subagent type. The rule mirrors
  * `pi/templates/SUBAGENTS.md` and the SKILL.md Stage 1-2 / 3-4 split:
  *   - Explore, Plan, general-purpose  → foreground (short, blocking)
- *   - software-developer, software-auditor → background (long, steerable)
+ *   - developer, software-auditor    → background (long, steerable)
+ *
+ * Phase A P3 (DAG-2026-011): the canonical name is `developer`. The
+ * legacy alias `software-developer` is preserved here as a defensive
+ * fallback for callers that haven't migrated yet — it maps to the same
+ * semantics. New authoring MUST use the canonical name.
  *
  * Tasks may override per-task via `TaskNode.run_in_background`.
  */
@@ -92,6 +97,7 @@ export function defaultRunInBackground(subagentType: string): boolean {
     case "Plan":
     case "general-purpose":
       return false;
+    case "developer":
     case "software-developer":
     case "software-auditor":
       return true;
