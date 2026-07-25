@@ -48,6 +48,7 @@ import {
 	getAvailableTypes,
 	isDefaultsDisabled,
 	registerAgents,
+	resolveAgentType,
 	resolveType,
 	setDefaultsDisabled,
 } from "./agent-types.js";
@@ -60,6 +61,7 @@ import {
 } from "./enabled-models.js";
 import { GroupJoinManager } from "./group-join.js";
 import {
+	enforceDeveloperManagedIsolationPolicy,
 	resolveAgentInvocationConfig,
 	resolveJoinMode,
 } from "./invocation-config.js";
@@ -1371,9 +1373,47 @@ Terse command-style prompts produce shallow, generic work.
 				reloadCustomAgents();
 
 				const rawType = params.subagent_type as SubagentType;
-				const resolved = resolveType(rawType);
+				// Phase A P2 (DAG-2026-011): resolve through the alias-aware lookup
+				// so `software-developer` maps to canonical `developer` and the
+				// request metadata (alias / deprecated) round-trips through the
+				// runtime. `resolveType` (legacy) only handles direct registry
+				// hits and would silently fall back to `general-purpose` for the
+				// alias — losing the managed-isolation policy enforcement below.
+				const aliasResolved = resolveAgentType(rawType);
+				const resolved = aliasResolved?.canonical;
 				const subagentType = resolved ?? "general-purpose";
 				const fellBack = resolved === undefined;
+				const aliasUsed = aliasResolved?.alias === true;
+				const requestedName = aliasResolved?.requested ?? rawType;
+
+				// Phase A P2 (DAG-2026-011): developer-managed-isolation policy.
+				// Applies when the resolved canonical agent is `developer` (i.e.
+				// the caller asked for `developer` or its Phase A alias
+				// `software-developer`). The legacy `isolation: "worktree"`
+				// string literal AND missing / malformed isolation are rejected
+				// here, BEFORE child execution. The error message names the
+				// agent and the explicit object form so callers can fix the
+				// request without consulting docs.
+				if (subagentType === "developer") {
+					const policyError = enforceDeveloperManagedIsolationPolicy(
+						"developer",
+						params.isolation,
+					);
+					if (policyError) {
+						return textResult(policyError);
+					}
+				}
+
+				// Phase A P2 (DAG-2026-011): surface a deprecation warning when
+				// the caller used the legacy alias name. The spawn still succeeds
+				// (the alias resolves to canonical `developer`) but the UI gets
+				// a non-blocking notice so callers can migrate at their own pace.
+				if (aliasUsed) {
+					ctx.ui.notify(
+						`Subagent "${requestedName}" is a deprecated alias for canonical "${subagentType}" — update your dispatch to use "${subagentType}" directly.`,
+						"warning",
+					);
+				}
 
 				const displayName = getDisplayName(subagentType);
 
@@ -1522,6 +1562,11 @@ Terse command-style prompts produce shallow, generic work.
 					subagentType,
 					modelName,
 					tags: agentTags.length > 0 ? agentTags : undefined,
+					// Phase A P2 (DAG-2026-011): alias metadata end-to-end. Programmatic
+					// callers read these to surface a deprecation warning when the
+					// caller used the legacy `software-developer` spelling.
+					requestedName: aliasUsed ? requestedName : undefined,
+					aliasUsed: aliasUsed ? true : undefined,
 				};
 
 				// ---- Schedule: register a job, don't spawn now ----
