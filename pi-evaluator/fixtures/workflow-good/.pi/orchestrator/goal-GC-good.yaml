@@ -1,0 +1,50 @@
+id: GC-good
+title: 'Workflow good fixture — fully compliant goal contract'
+rationale: >-
+  This fixture represents a known-good goal contract used as a positive test
+  case for pi-evaluator's artifact readers. It contains 3 success criteria,
+  each with a real verification_cmd, a non-trivial criterion text, declared
+  anti_goals, scope includes/excludes, and a meaningful done_definition.
+success_criteria:
+  - id: SC1
+    criterion: >-
+      The artifact-reader correctly parses this YAML fixture and returns a
+      GoalArtifact object with all three SCs populated.
+    verification_cmd: "echo 'test passes for SC1' && exit 0"
+    expected_output: SC1 verification_cmd exits 0 and emits the sentinel line
+    severity: blocker
+  - id: SC2
+    criterion: >-
+      The jsonl-reader correctly parses the workflow-good session.jsonl into
+      SessionEntry objects covering both pi-format and legacy-format lines.
+    verification_cmd: "echo 'test passes for SC2' && exit 0"
+    expected_output: SC2 verification_cmd exits 0 and emits the sentinel line
+    severity: blocker
+  - id: SC3
+    criterion: >-
+      Audit and task report markdown files in this fixture expose a CERTIFIED
+      verdict with workflowReady: true, parseable by the audit report reader.
+    verification_cmd: "echo 'test passes for SC3' && exit 0"
+    expected_output: SC3 verification_cmd exits 0 and emits the sentinel line
+    severity: blocker
+anti_goals:
+  - Do not introduce any new npm dependency in this fixture
+  - Do not couple parser logic to a specific LLM provider
+  - Do not regress the existing Python evaluator's externally observable behavior
+scope:
+  include:
+    - pi-evaluator/src/lib/artifact-reader.ts
+    - pi-evaluator/src/lib/jsonl-reader.ts
+    - pi-evaluator/fixtures/workflow-good/
+  exclude:
+    - pi-evaluator/src/types.ts
+    - pi-evaluator/src/signals/
+    - pi-evaluator/src/tools/
+    - pi-evaluator/src/extension.ts
+constraints:
+  max_dependency_additions: 0
+  test_coverage_min: 80
+done_definition: >-
+  P1.b is complete when artifact-reader.test.ts and jsonl-reader.test.ts pass,
+  fixtures/workflow-good is parseable end-to-end, and the branch is merged.
+created_at: '2026-07-25T11:00:00.000Z'

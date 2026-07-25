@@ -39,15 +39,17 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
 var/
 wheels/
 *.egg-info/
-.installed.cfg
+.installed.cfg/
 *.egg
+# Note: `lib/` is intentionally NOT ignored — P1.b introduces pi-evaluator/src/lib/
+# for artifact-reader + jsonl-reader. The Python `lib/` convention does not apply
+# to this TypeScript project.
 
 # Testing
 .pytest_cache/
