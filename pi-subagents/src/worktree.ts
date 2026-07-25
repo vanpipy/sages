@@ -20,9 +20,9 @@
 
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, normalize, relative, sep } from "node:path";
+import { dirname, join, normalize, relative, sep } from "node:path";
 
 export interface WorktreeInfo {
   /** Absolute path to the worktree directory (the copied repo's root). */
@@ -237,8 +237,24 @@ export interface ManagedWorktreeIdentity {
  * segment so both halves go through one constraint surface. */
 const IDENTITY_RE = /^[A-Za-z0-9_-]+$/;
 
-/** Marker file written at the worktree root for identity pinning + reuse detection. */
+/** Marker file RELATIVE PATH inside the marker directory. */
 export const MANAGED_WORKTREE_MARKER = ".pi-worktree.json";
+
+/**
+ * Build the marker path for a managed worktree. The marker MUST live OUTSIDE
+ * the worktree itself: writing it inside `<worktree>/.pi-worktree.json`
+ * would make the worktree dirty (`git status` would show it as untracked),
+ * which would corrupt `inspectManagedWorktree`'s hasChanges signal.
+ *
+ * Shape: `<repoRoot>/.pi/worktree-state/<dag>/<worktree>.json`
+ *
+ * Same `.pi/` containment rules as the worktree itself: structural identity
+ * is enforced by `validateIdentity` before any path is built.
+ */
+export function markerPath(repoRoot: string, dag: string, worktree: string): string {
+  validateIdentity(dag, worktree);
+  return join(repoRoot, ".pi", "worktree-state", dag, `${worktree}.json`);
+}
 
 /**
  * Persistent identity record. Written on first provision; read back at reuse
@@ -250,16 +266,24 @@ export interface ManagedWorktreeMarker {
   repoRoot: string;
   dag: string;
   worktree: string;
-  path: string;
+  path: string; // absolute worktree path (informational)
   branch: string;
   baseSha: string;
   baseRef: "origin/main";
   createdAt: number; // epoch ms
 }
 
-/** Read the marker if present, else null. */
-export function readManagedWorktreeMarker(path: string): ManagedWorktreeMarker | null {
-  const fp = join(path, MANAGED_WORKTREE_MARKER);
+/** Read the marker for a given (repoRoot, dag, worktree) tuple, else null.
+ *
+ * Returns null if any component of the marker path doesn't resolve or the
+ * JSON is missing/invalid. Callers must never silently fall back — a missing
+ * marker IS a "needs verification" signal at the API boundary. */
+export function readManagedWorktreeMarker(
+  repoRoot: string,
+  dag: string,
+  worktree: string,
+): ManagedWorktreeMarker | null {
+  const fp = markerPath(repoRoot, dag, worktree);
   if (!existsSync(fp)) return null;
   try {
     const raw = readFileSync(fp, "utf8");
@@ -272,8 +296,29 @@ export function readManagedWorktreeMarker(path: string): ManagedWorktreeMarker |
 }
 
 function writeManagedWorktreeMarker(marker: ManagedWorktreeMarker): void {
-  const fp = join(marker.path, MANAGED_WORKTREE_MARKER);
+  const fp = markerPath(marker.repoRoot, marker.dag, marker.worktree);
+  // The marker lives at `<repoRoot>/.pi/worktree-state/<dag>/<worktree>.json`;
+  // the intermediate directories are repo-level state and are NOT created by
+  // `git worktree add`. Create them on demand so the first provision on a
+  // fresh repo doesn't fail with ENOENT. Idempotent under `{ recursive: true }`.
+  mkdirSync(dirname(fp), { recursive: true });
   writeFileSync(fp, JSON.stringify(marker, null, 2), "utf8");
+}
+
+/** Remove the marker for a managed worktree. Idempotent. */
+export function deleteManagedWorktreeMarker(
+  repoRoot: string,
+  dag: string,
+  worktree: string,
+): void {
+  const fp = markerPath(repoRoot, dag, worktree);
+  try {
+    if (existsSync(fp)) {
+      unlinkSync(fp);
+    }
+  } catch {
+    // ignore — marker is a state-record; a leaked file is harmless
+  }
 }
 
 /** Validate the `(dag, worktree)` tuple. Throws on any structural problem. */
@@ -561,17 +606,17 @@ function reuseManagedWorktree(args: {
   worktree: string;
   path: string;
   branch: string;
-  /** The freshly-resolved origin/main sha. Used ONLY for the "stale identity" check:
-   * if the persisted marker says the branch was provisioned at a different
-   * base, throw — the persisted state and the current ref disagree. */
+  /** The freshly-resolved origin/main sha. Kept for parity with the create
+   *  call site; the reuse contract does NOT use it to refresh state. */
   recordedBaseSha: string;
 }): ManagedWorktree {
-  const { repoRoot, dag, worktree, path, branch, recordedBaseSha } = args;
+  const { repoRoot, dag, worktree, path, branch, recordedBaseSha: _recordedBaseSha } = args;
+  void _recordedBaseSha;
 
   // 1. Read the persisted marker. Mismatch on any of (repoRoot, dag,
   //    worktree, branch) is a refusal — a different managed worktree owns
   //    this slot.
-  const marker = readManagedWorktreeMarker(path);
+  const marker = readManagedWorktreeMarker(repoRoot, dag, worktree);
   if (!marker) {
     throw new Error(
       `managed-worktree: cannot reuse ${path} — no .pi-worktree.json marker was found. ` +
@@ -592,48 +637,81 @@ function reuseManagedWorktree(args: {
       );
     }
   }
-  // 2. Branch advance check. The branch must still point at the persisted
-  //    baseSha — if it's been rewritten (force-push or `push src:dst`) refuse.
-  const currentSha = runGitIn(["rev-parse", "HEAD"], path);
-  // The branch's tip may equal `marker.baseSha` (untouched) OR have moved
-  // FORWARD via a legitimate fast-forward. Force-push (rewriting history)
-  // is detected by checking ancestor: HEAD must be a descendant of
-  // marker.baseSha, otherwise the branch was rewritten.
-  let ancestorOk = false;
-  try {
-    runGitIn(["merge-base", "--is-ancestor", marker.baseSha, currentSha], path, true, false /* don't throw */);
-    ancestorOk = true;
-  } catch {
-    ancestorOk = false;
-  }
-  if (!ancestorOk) {
+
+  // 2. Reuse contract: the branch on disk MUST still point at the recorded
+  //    baseSha AND be on the recorded branch name. Any of the following is
+  //    a refusal:
+  //
+  //      a. HEAD is detached / on a different branch (parallel checkout)
+  //      b. The branch tip moved past baseSha (developer did work or a
+  //         stale caller force-pushed) — reuse is NOT for "re-enter my
+  //         in-progress worktree"; it's for "re-enter my untouched slot".
+  //         A branch advanced by the developer is still recoverable, but
+  //         only after an explicit decision the orchestrator makes — not
+  //         silently through `reuse: true`.
+  const currentBranch = runGitIn(["rev-parse", "--abbrev-ref", "HEAD"], path);
+  if (currentBranch !== branch) {
     throw new Error(
-      `managed-worktree: cannot reuse ${path} — branch tip ${currentSha} is not a descendant of ` +
-        `recorded baseSha ${marker.baseSha}. The branch has been rewritten; reject reuse and ` +
-        `audit before deciding to keep or restart.`,
+      `managed-worktree: cannot reuse ${path} — the worktree's HEAD branch is '${currentBranch}', ` +
+        `expected branch identity '${branch}'. Reuse refuses: a parallel checkout switched branch identity, ` +
+        `or the worktree was set up under a different branch identity. Switch back to '${branch}' ` +
+        `at '${marker.baseSha}' to reuse, or refuse reuse.`,
     );
   }
-  // 3. The branch may be a strict descendant (developer did work). That's
-  //    NOT a refusal condition in the orchestrator's serial-DAG model —
-  //    the developer commits are exactly why we re-enter. baseSha stays
-  //    pinned to its original value so the inspection API can compute
-  //    "commits ahead of baseSha" reproducibly.
-  // 4. Sanity: also refuse if the recorded baseSha disagrees with the
-  //    caller's freshly-resolved origin/main AND the worktree is at the
-  //    marker.baseSha tip (no work yet). That signals a parallel provision
-  //    tried to use a different base — abort for caller audit.
-  if (currentSha === marker.baseSha && marker.baseSha !== recordedBaseSha) {
+  const currentSha = runGitIn(["rev-parse", "HEAD"], path);
+  if (currentSha !== marker.baseSha) {
     throw new Error(
-      `managed-worktree: cannot reuse ${path} — worktree is untouched (HEAD = ${currentSha}) but persisted ` +
-        `baseSha (${marker.baseSha}) disagrees with origin/main (${recordedBaseSha}). ` +
-        `A parallel provision rewrote the base. Audit and reconcile before reusing.`,
+      `managed-worktree: cannot reuse ${path} — branch tip ${currentSha} moved past recorded baseSha ${marker.baseSha}. ` +
+        `The branch has been advanced or rewritten. Reuse refuses; audit the branch or remove the worktree and re-provision.`,
     );
   }
 
+  // 2b. Even when the LOCAL branch tip is untouched, the REMOTE branch
+  //     may have been force-pushed / rewritten by a parallel actor. Pull the
+  //     remote-tracking ref and refuse reuse if it has diverged ahead of
+  //     `marker.baseSha` (an unrelated history rewrite would also differ —
+  //     either way the worktree's branch identity no longer maps 1:1 to the
+  //     recorded base).
+  //
+  //     If the remote ref does not exist locally (the branch was never
+  //     pushed, or `git fetch` cannot resolve it) we treat the local copy
+  //     as the source of truth and skip the check. This keeps the contract
+  //     usable in pure-local workflow / test fixtures where the branch
+  //     lives only inside the worktree's gitdir link.
+  (() => {
+    let divergence: string | null = null;
+    try {
+      runGitIn(["fetch", "--no-tags", "origin", branch], repoRoot);
+      const remoteSha = runGitIn(
+        ["rev-parse", "--verify", `origin/${branch}`],
+        repoRoot,
+        false /* throw on empty */,
+        false /* don't throw on missing ref */,
+      );
+      if (remoteSha && remoteSha !== marker.baseSha) {
+        divergence = remoteSha;
+      }
+    } catch {
+      // Remote fetch failed / no tracking ref — local is source of truth.
+      // This is benign: branches that were never pushed simply have no
+      // `origin/<branch>` to compare against.
+    }
+    if (divergence !== null) {
+      throw new Error(
+        `managed-worktree: cannot reuse ${path} — remote branch origin/${branch} at ${divergence} ` +
+          `diverged from recorded baseSha ${marker.baseSha}. The branch has been rewritten upstream. ` +
+          `Reuse refuses; audit the branch or remove the worktree and re-provision.`,
+      );
+    }
+  })();
+
+  // 3. Reuse succeeds. baseSha is pinned at marker.baseSha so subsequent
+  //    inspections compute "commits ahead of baseSha" reproducibly,
+  //    regardless of how origin/main has moved in the meantime.
   return {
     path,
     branch,
-    baseSha: marker.baseSha, // unchanged from first provision
+    baseSha: marker.baseSha,
     baseRef: "origin/main",
     dag,
     worktree,
@@ -712,6 +790,11 @@ export function releaseManagedWorktree(
   // `git worktree remove` returns empty stdout on success — the default is
   // `allowEmptyStdout = true`, so we pass nothing else explicitly.
   runGitIn(["worktree", "remove", "--force", path], wt.repoRoot);
+  // Best-effort marker cleanup. A leaked marker file is harmless
+  // (subsequent reuse calls just throw "identity mismatch" because the
+  // on-disk worktree will be gone), but a clean release also tidies the
+  // repoRoot state directory.
+  deleteManagedWorktreeMarker(wt.repoRoot, wt.dag, wt.worktree);
   return {
     path,
     branch,
@@ -721,6 +804,13 @@ export function releaseManagedWorktree(
 }
 
 // ----- internal git runners -----
+
+/**
+ * Default per-call timeout for every `git` invocation. Bounded so a hung git
+ * (e.g. credential prompt, NFS hitch) can't hang the orchestrator's dispatch
+ * path; call sites that need different limits can wrap their own runner.
+ */
+const GIT_TIMEOUT_MS_DEFAULT = 15_000;
 
 /**
  * Run `git <args>` in `cwd`, returning the stdout string with leading/trailing
@@ -760,8 +850,6 @@ function runGitIn(
   }
   return str.trim();
 }
-
-const GIT_TIMEOUT_MS_DEFAULT = 15_000;
 
 function formatGitInvocationError(args: string[], cwd: string, err: unknown): Error {
   const anyErr = err as { stderr?: Buffer | string; stdout?: Buffer | string; message?: string };
