@@ -164,11 +164,10 @@ pi.on("tool_call", (event: any, ctx: any) => {
 
 15 design test cases (`pi/test/tools/bash-guard.test.ts` T1–T15) cover
 the matrix; the gate also classifies 18 supporting patterns
-(`find -exec`, `awk > file`, etc.).
-
-**Known limitation**: command chaining (`echo done && rm src/foo.ts`)
-bypes because the first word is `echo` (read-only). Documented future
-hardening — add T16 + extend `extractBashTargets` to look past `&&`/`||`/`;`.
+(`find -exec`, `awk > file`, etc.). **T16–T24 (added 2026-07-25)**
+additionally cover command chaining (`echo done && rm src/foo.ts` is
+correctly blocked — `splitChainedCommands` walks each top-level segment
+independently, defeating the original first-word bypass).
 
 ### Three-tier agent model (the design is asymmetric on purpose)
 

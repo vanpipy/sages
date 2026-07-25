@@ -360,12 +360,8 @@ After Stage 4 completes with PASS, deliver:
 - Tag/release?
 ```
 
-## Example: Quick Refactor
-
-User: "Rename `db` to `database` in src/auth/"
-
-Single trivial task — DO NOT use orchestrator. Just edit directly.
-
 ## Examples
 
 For full end-to-end examples (multi-file refactor, new feature, etc.) see the DAG templates under `~/.pi/packages/sages/skills/orchestrator/templates/dag/` (`dag-tdd-refactor.yaml`, `dag-bug-fix.yaml`). They are the canonical reference and are regression-guarded against drift by `pi/test/tools/orchestrator/template-loader.test.ts`.
+
+For single trivial tasks (e.g. "rename `db` to `database` in src/auth/"), do **not** use the orchestrator — edit directly.
