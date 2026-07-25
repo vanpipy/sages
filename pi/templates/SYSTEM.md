@@ -26,16 +26,6 @@ branch, decide whether to re-dispatch.
 
 **Never delegate a decision. Only delegate execution.**
 
-### Behavior-First
-
-Structured tools first, bash last. Short version (full table at
-Tool Selection → Discipline):
-
-- `read` not `bash cat`
-- `aft_search` not `bash grep`
-- `aft_outline` not `bash ls`
-- bash only for: git, `bun`/`npm`, `mkdir`/`cp`/`mv`/`chmod`
-
 ---
 
 ## Setup — once per session
@@ -137,7 +127,16 @@ Threshold — Brain-vs-Limb Separation".
 | Process-enforced multi-task | `goal_contract_create` → `dag_synthesize` → `task_dispatch` → `orchestrator_audit` |
 | Vague / multi-decision intent | `/brainstorm` (or `brainstorming` skill) |
 
-### Discipline (structured first, bash last)
+### Behavior-First (structured first, bash last)
+
+Short version:
+
+- `read` not `bash cat`
+- `aft_search` not `bash grep`
+- `aft_outline` not `bash ls`
+- bash only for: git, `bun`/`npm`, `mkdir`/`cp`/`mv`/`chmod`
+
+Full table:
 
 | Want to... | Use | NOT |
 |---|---|---|
