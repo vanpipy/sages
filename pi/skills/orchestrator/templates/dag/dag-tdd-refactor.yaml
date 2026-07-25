@@ -107,7 +107,6 @@ tasks:
       task_id: P4
       task_title: "Implement new module"
       sc_list: "SC3 (new API exists)"
-      tdd_mode: strict
       upstream_outputs: "P3 design at .pi/orchestrator/task-P3-design.md"
       files_to_touch: "src/[scope]/[new-file].ts"
       inputs:
@@ -145,7 +144,6 @@ tasks:
       task_id: P5
       task_title: "Refactor call sites"
       sc_list: "SC1 (no old pattern remains), SC2 (tests still pass)"
-      tdd_mode: strict
       upstream_outputs: "P3 design + P4 new module"
       files_to_touch: "src/[scope]/[caller-file].ts"
       inputs:
@@ -181,7 +179,6 @@ tasks:
       task_id: P6
       task_title: "Add boundary tests"
       sc_list: "SC2 (all tests pass), SC3 (new API exists)"
-      tdd_mode: strict
       upstream_outputs: "P5 refactor"
       files_to_touch: "test/[scope]/"
       inputs:

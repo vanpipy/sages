@@ -71,7 +71,6 @@ tasks:
       task_id: P3
       task_title: "Fix the bug"
       sc_list: "SC1 (reproduction test exists), SC2 (all tests pass)"
-      tdd_mode: strict
       upstream_outputs: "(none — no upstream tasks; discovery is informational only)"
       files_to_touch: "src/[bug-area]/[buggy-file].ts, test/[bug-area]/[reproduction-test].ts"
       bug_summary: "[user's bug description]"

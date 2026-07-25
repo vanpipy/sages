@@ -266,7 +266,6 @@ describe("validateDAG", () => {
                 task_id: "P1",
                 task_title: "test",
                 sc_list: "- SC1: x",
-                tdd_mode: "strict",
                 upstream_outputs: "(none)",
                 files_to_touch: "src/x.ts",
               },
