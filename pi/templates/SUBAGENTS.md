@@ -1,44 +1,42 @@
-# Subagent Pipeline — Four Agents, One Workflow
+# Subagent Pipeline — Reference for the Orchestrator
 
-The pi-subagents ecosystem, combined with sages' orchestrator, gives you a
-**four-stage DAG** for any non-trivial task:
+The orchestrator (main agent) dispatches work to subagents via the `Agent`
+tool. This file is the **deployment reference** for which subagents
+exist, what tools each one has, and how to invoke them. The
+**workflow** (when to use which stage, how to compose a DAG) lives in
+`pi/skills/orchestrator/SKILL.md`. The **run_in_background policy** lives
+in code — see `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()`
+(single source of truth).
 
-```
-┌─────────┐     ┌──────┐     ┌────────────────────┐     ┌────────────────────┐
-│ Stage 1 │ ──▶ │  S2  │ ──▶ │       Stage 3      │ ──▶ │       Stage 4      │
-│ Explore │     │ Plan │     │ software-developer │     │ software-auditor   │
-│ (find)  │     │(design)   │    (RED→GREEN→REFACTOR)  │   (evidence verify) │
-└─────────┘     └──────┘     └────────────────────┘     └────────────────────┘
-   read-only      read-only        worktree + edit             read-only
-   haiku          sonnet           sonnet + thinking           sonnet + thinking
-```
-
-Each agent has a single responsibility and a constrained tool set, so the
-orchestrator stays small and the audit trail stays clean.
+**Installation**: this file is installed to `~/.pi/agent/SUBAGENTS.md`
+by `pi/scripts/install.sh` and is referenced from the Agent tool
+description as "see `~/.pi/agent/SUBAGENTS.md` for the full rationale
+and code examples". Subagents themselves do NOT read it (they get their
+identity from `~/.pi/agent/agents/<name>.md`).
 
 ## Agent Roster
 
 | Stage | `subagent_type`     | Source                              | Tools                | Purpose                                                                |
 |-------|----------------------|--------------------------------------|----------------------|------------------------------------------------------------------------|
-| 1     | `Explore`            | **pi-subagents built-in** (always available) | read, bash, grep, find, ls | Fast codebase search. Haiku model — cheap, fast, **read-only**.        |
-| 2     | `Plan`               | **pi-subagents built-in** (always available) | read, bash, grep, find, ls | Software architect. Sonnet. **Read-only** — returns a step-by-step plan, never edits. |
+| 1     | `Explore`            | pi-subagents built-in                | read, bash, grep, find, ls | Fast codebase search. Haiku — cheap, fast, **read-only**.        |
+| 2     | `Plan`               | pi-subagents built-in                | read, bash, grep, find, ls | Software architect. Sonnet. **Read-only** — returns a step-by-step plan, never edits. |
 | 3     | `software-developer` | **shipped** (this repo)              | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. `isolation: worktree`. |
 | 4     | `software-auditor`   | **shipped** (this repo)              | read, bash, grep, find, ls, aft_* | Evidence-based certifier. **Read-only** — re-runs commands, never modifies production code. |
 
-The 3 built-ins (`Explore`, `Plan`, `general-purpose`) come from
-`@tintinweb/pi-subagents`. The 2 custom (`software-developer`,
-`software-auditor`) are installed by `pi/scripts/install.sh` from
-`pi/templates/agents/` to `~/.pi/agent/agents/`.
+**3 built-ins + 2 shipped.** The 3 built-ins (`Explore`, `Plan`,
+`general-purpose`) come from `@tintinweb/pi-subagents`. The 2 custom
+(`software-developer`, `software-auditor`) are installed by sages
+from `pi/templates/agents/` to `~/.pi/agent/agents/`. Don't re-ship
+`Explore` / `Plan` — overriding with a project-specific copy brings
+no behaviour change. Override them only when project-specific rules
+are needed (drop a `.md` of the same name into `agents/`).
 
-> **Why only 2 shipped?** Re-shipping `Explore`/`Plan` would override useful
-> defaults with no behaviour change. Override them only if you need
-> project-specific exploration/planning rules — drop a `.md` of the same
-> name into `~/.pi/agent/agents/` (project override pattern).
+## Dispatch Examples
 
-## Stage 1 — Research (Explore)
+One per stage. The orchestrator uses the `Agent` tool with
+`subagent_type` set to the desired agent.
 
-Use `Explore` when you need to *find* something. The orchestrator should
-delegate instead of running `aft_search` / `grep` inline.
+### Stage 1 — Research (`Explore`)
 
 ```ts
 Agent({
@@ -51,124 +49,56 @@ Agent({
 
 **Returns**: file/line list + 1-line context. Never edits.
 
-## Stage 2 — Design (Plan)
-
-Use `Plan` when you have research results and need an *implementation
-strategy*. Output is a step-by-step plan with `Critical Files for
-Implementation`.
+### Stage 2 — Design (`Plan`)
 
 ```ts
 Agent({
   subagent_type: "Plan",
   prompt: "Design a plan to add a `--dry-run` flag to pi/scripts/install.sh. " +
-          "The flag should: skip all side effects (settings.json writes, " +
-          "package.json creation, system prompt copy), but still validate " +
-          "templates and report what WOULD happen. Read pi/scripts/install.sh " +
-          "first to understand the structure.",
+          "The flag should: skip all side effects, but still validate " +
+          "templates and report what WOULD happen.",
   description: "Plan --dry-run flag",
 })
 ```
 
 **Returns**: ordered steps + critical files list. Never edits.
 
-## Stage 3 — Implement (software-developer)
-
-Use `software-developer` per implementation task. Always in worktree
-isolation. Always with a verification command in the prompt.
+### Stage 3 — Implement (`software-developer`)
 
 ```ts
 Agent({
   subagent_type: "software-developer",
-  prompt: "RED: write a failing test in pi/test/install.test.sh named " +
-          "'install_subagents_doc creates SUBAGENTS.md when missing'. " +
-          "GREEN: implement install_subagents_doc() in pi/scripts/install.sh " +
-          "and call it from install(). REFACTOR: tighten idempotency. " +
-          "Verification: `bash pi/test/install.test.sh` passes.",
-  description: "Implement install_subagents_doc",
-  isolation: "worktree",
+  prompt: "RED: write a failing test for X. GREEN: implement. REFACTOR: tighten. " +
+          "Verification: `cd pi && bun test test/foo.test.ts` passes.",
+  description: "Implement feature X",
+  isolation: "worktree",         // ★ always for code edits
+  run_in_background: true,        // ★ see task-dispatcher.ts:defaultRunInBackground
 })
 ```
 
 **Returns**: file paths changed + test output + verification evidence.
 
-## Stage 4 — Verify (software-auditor)
-
-Use `software-auditor` to certify Stage 3's work. Audit is **independent**
-of the implementer — fresh model/eyes re-run every verification command.
+### Stage 4 — Verify (`software-auditor`)
 
 ```ts
 Agent({
   subagent_type: "software-auditor",
-  prompt: "Audit task T3 against AC: SC1 = bash pi/test/install.test.sh " +
-          "exits 0 and reports all green. SC2 = install_subagents_doc is " +
-          "called from install(). " +
-          "Re-run all verification_cmd from the task prompt. " +
+  prompt: "Audit the implementer's report at .pi/orchestrator/task-T3-report.md. " +
+          "Re-run every verification_cmd from the task prompt. " +
           "Inspect git diff in <worktree-path>. " +
-          "Write report to .pi/orchestrator/audit-T3.md.",
-  description: "Audit install_subagents_doc",
+          "Write your report to .pi/orchestrator/audit-T3.md.",
+  description: "Audit T3",
+  run_in_background: true,
 })
 ```
 
 **Returns**: `CERTIFIED | NEEDS WORK | BLOCKED` + evidence-based report.
 
-## Foreground vs Background — when to set `run_in_background: true`
+### Composing a DAG
 
-The orchestrator's main agent context is a finite resource. Long-running
-phases should run in background; short-lived ones stay in foreground so
-the orchestrator can use the result directly. **Default convention
-(verified 2026-07-24)**:
-
-| Stage | Subagent type | `run_in_background` | Why |
-|-------|---------------|---------------------|-----|
-| 1 — Research | `Explore` | `false` (foreground) | Short, read-only, result feeds Batch 2 |
-| 2 — Design | `Plan` | `false` (foreground) | Short, its output is the next prompt |
-| 3 — Implement | `software-developer` | **`true` (background)** | Long (1–10 min for TDD), can be steered mid-run |
-| 4 — Audit | `software-auditor` | **`true` (background)** | Long (30s–3 min for verify), can be steered |
-
-Concretely:
-
-```ts
-// Stage 1 + 2 — synchronous, results feed the next stage
-Agent({ subagent_type: "Explore", prompt: "..." })               // foreground
-Agent({ subagent_type: "Plan", prompt: "..." })                  // foreground
-
-// Stage 3 + 4 — async, returns agent id; you keep working
-Agent({
-  subagent_type: "software-developer",
-  prompt: "...",
-  run_in_background: true,                                        // ★ background
-})
-Agent({
-  subagent_type: "software-auditor",
-  prompt: "...",
-  run_in_background: true,                                        // ★ background
-})
-```
-
-**Why background for implement + audit?**
-
-- software-developer runs RED→GREEN→REFACTOR (1–10 min) and may iterate
-  on user steer messages — `steer_subagent(agent_id, "drop X, use Y")`
-  is only available to background agents.
-- software-auditor re-runs every verification command and inspects the
-  diff — long enough that synchronous blocking serializes the entire
-  DAG through one subagent at a time.
-- Max concurrent background agents defaults to 4 (see `/agents` →
-  Settings). Above that, additional agents queue until a slot frees.
-- Concurrency > 1 lets multiple independent implementer tasks run in
-  parallel worktrees (e.g. region A, B, C, D). The DAG's `batch: N`
-  already encodes dependency order; `run_in_background: true` lets the
-  orchestrator dispatch and continue.
-
-**What stays foreground?** Only Explore and Plan. Their results are
-the prompts for the next stage, so the parent must wait.
-
-**Don't duplicate work.** When a background agent is running, the
-orchestrator receives its result on completion. Don't re-spawn.
-
-## Composing the Pipeline
-
-The orchestrator stitches all four into a DAG:
+The orchestrator stitches stages into a DAG via `goal_contract_create` →
+`dag_synthesize` → `task_dispatch`. The DAG is the structured form of
+"Compose the pipeline":
 
 ```yaml
 # .pi/orchestrator/dag-GC-2025-001.yaml (simplified)
@@ -195,22 +125,13 @@ tasks:
     prompt: "Certify I1: re-run install.test.sh, inspect worktree diff"
 ```
 
-Each stage gates the next via `depends_on`. Stage 4's verdict decides whether
-the DAG ends in `PASS` (merge) or loops back to Stage 3 (revise) /
-Stage 2 (replan).
-
-## When to Skip Stages
-
-- **Single trivial edit** (one-line fix, single typo): skip the whole
-  pipeline. Just edit directly.
-- **Pure research question** ("where is X?"): Stage 1 only.
-- **Architectural decision, no code change**: Stage 1 + Stage 2.
-- **Refactor with existing plan**: skip Stage 1+2, dispatch Stage 3 directly.
+Each stage gates the next via `depends_on`. The DAG's `batch: N`
+field encodes dependency order — for parallel work, multiple tasks
+share a batch number.
 
 ## Related
 
-- `~/.pi/agent/agents/software-developer.md` — full agent definition
-- `~/.pi/agent/agents/software-auditor.md` — full agent definition
-- `~/.pi/agent/agents/SUBAGENTS.md` — this file (installed by sages)
-- pi-subagents built-in source: `~/.pi/agent/npm/node_modules/@tintinweb/pi-subagents/src/default-agents.ts`
-- Orchestrator skill: `pi/skills/orchestrator/SKILL.md` (4-stage DAG)
+- **Workflow** (when to dispatch what, how to chain stages): `pi/skills/orchestrator/SKILL.md`
+- **Agent identity** (tools, isolation, output format): `~/.pi/agent/agents/<name>.md`
+- **Background policy** (which `run_in_background` for which type): `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()`
+- **Agent tool description** (text shown to the main agent for the `Agent` tool): `pi/templates/agent-tool-description.md`
