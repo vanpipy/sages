@@ -4,12 +4,11 @@
 # Installs to ~/.pi/packages/sages
 #
 # Also installs pi-codebase-memory for codebase indexing/search,
-# pi-aft (via aft-pi extension) — AFT-backed code analysis (no LSP needed),
 # and pi-magic-context — CortexKit's persistent memory + context layer.
 #
 # Selective install options:
-#   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates)
+#   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -63,14 +62,6 @@ SUBAGENT_NAMES=("software-auditor" "software-developer")
 SUBAGENTS_DOC_TEMPLATE="$SCRIPT_DIR/../templates/SUBAGENTS.md"
 SUBAGENTS_DOC_TARGET="$AGENT_DIR/SUBAGENTS.md"
 
-# AFT config template — copied to ~/.config/cortexkit/aft.jsonc so AFT
-# daemon starts with feature flags enabled (search_index, semantic_search,
-# validate_on_edit) instead of degraded defaults.
-# SAGES_TEMPLATE_V1 sentinel in the template lets uninstall_aft_config()
-# distinguish "our template" from a user's hand-edited config.
-AFT_TEMPLATE="$SCRIPT_DIR/../templates/aft.jsonc"
-AFT_CONFIG_PATH="$HOME/.config/cortexkit/aft.jsonc"
-
 # pi-subagents config (toolDescriptionMode: "custom") + agent-tool-description.md
 # override. pi-subagents reads toolDescriptionMode from $AGENT_DIR/subagents.json
 # and the description template from $AGENT_DIR/agent-tool-description.md (see
@@ -89,7 +80,7 @@ SUBAGENTS_CONFIG_TARGET="$AGENT_DIR/subagents.json"
 # pi-codebase-memory sage-peer (local package, installed by file-copy not `pi install npm:`)
 PI_CODEBASE_MEMORY_SRC_REL="pi-codebase-memory"
 PI_CODEBASE_MEMORY_DEST_DIR="$PI_DIR/packages/pi-codebase-memory"
-# Package identifier used everywhere (registered in settings.json like pi-aft/pi-graphify).
+# Package identifier used everywhere (registered in settings.json like pi-graphify).
 # Test contract: must be the dest-dir absolute path, NOT a `npm:` identifier.
 PI_CODEBASE_MEMORY_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"
 
@@ -106,10 +97,6 @@ PI_GRAPHIFY_PKG="$PI_GRAPHIFY_DEST_DIR"
 # graphify CLI install info
 GRAPHIFY_BIN_PATH="$HOME/.local/bin/graphify"
 
-# pi-aft (via @cortexkit/aft-pi npm extension)
-# pi-aft is npm-installed; setup command registers automatically
-# The setup command (npx @cortexkit/aft@latest setup) registers it AND downloads the platform binary.
-# AFT does not need a separate mcp.json (the setup command handles it)
 
 # Cleanup trap
 TMP_DIR=""
@@ -125,8 +112,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install sages source files (still re-clones; skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates)"
+  echo "  --sages-only       Only install sages source files (still re-clones; skip pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -194,7 +181,7 @@ install_pi_codebase_memory() {
     (cd "$PI_CODEBASE_MEMORY_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
   fi
 
-  # Register local-peer package in settings.json (matches pi-aft / pi-graphify pattern).
+  # Register local-peer package in settings.json (matches pi-graphify pattern).
   # Idempotent: skips if already present.
   local settings="$PI_DIR/agent/settings.json"
   mkdir -p "$(dirname "$settings")"
@@ -259,7 +246,7 @@ write_codebase_memory_mcp_config() {
     template="$TMP_DIR/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json"
   fi
   [[ -z "$template" ]] && { echo "  Warning: codebase-memory-mcp mcp.json template not found"; return 0; }
-  # NEVER-TOUCH policy (v3): see write_aft_setup_cmd for the matching
+  # NEVER-TOUCH policy (v3): NEVER-TOUCH comment in install_*_config for the matching
   # rationale + regression history. install.sh only writes mcp.json on first
   # install; afterwards, the file is user-owned and untouched on every rerun.
   if [[ -f "$PI_DIR/agent/mcp.json" ]]; then
@@ -383,7 +370,7 @@ write_graphify_mcp_config() {
   resolved_template=$(mktemp)
   sed "s|__PI_GRAPHIFY_START_MCP__|$PI_GRAPHIFY_DEST_DIR/templates/start-mcp.sh|g" "$template" > "$resolved_template"
 
-  # NEVER-TOUCH policy: see install_pi_aft for rationale (user owns AFT setup).
+  # NEVER-TOUCH policy: see the relevant install_* function for rationale.
   if [[ -f "$PI_DIR/agent/mcp.json" ]]; then
     echo "  Skipped mcp.json (already exists, user-customized — preserved as-is)"
     rm -f "$resolved_template"
@@ -513,7 +500,7 @@ install_system_prompt() {
 SUBAGENT_SENTINEL_TEXT='SAGES_TEMPLATE_V1'
 
 # True if $1 exists and carries the SAGES_TEMPLATE_V1 sentinel — i.e. we
-# installed it. Mirrors is_aft_config_installed() for the AFT config flow.
+# installed it. Mirrors is_*-config_installed patterns.
 is_subagent_template_installed() {
   local file="$1"
   [[ -f "$file" ]] && grep -q "$SUBAGENT_SENTINEL_TEXT" "$file" 2>/dev/null
@@ -538,7 +525,7 @@ _atomic_copy() {
 }
 
 # Copy every $SUBAGENT_NAMES template from $SUBAGENT_TEMPLATE_DIR to
-# $SUBAGENT_TARGET_DIR. Idempotent rules (match install_aft_config):
+# $SUBAGENT_TARGET_DIR. Idempotent rules (match *_config):
 #   - missing → install from template
 #   - file exists with sentinel → skip (we installed it; --force to overwrite)
 #   - file exists without sentinel → user-customized; skip unless --force
@@ -584,7 +571,7 @@ install_subagent_templates() {
 # against the NEVER-TOUCH policy. `shopt -s nullglob` makes an empty dir
 # produce a length-0 array, so the early-return skips cleanly. User-
 # written or hand-edited agent files (no sentinel) are left alone,
-# matching the uninstall_aft_config + uninstall_magic_context policy.
+# matching the uninstall_*_config + uninstall_magic_context policy.
 #
 # Residual race: if a file's sentinel membership changes between the
 # is_subagent_template_installed check and the rm call below, the file's
@@ -643,7 +630,7 @@ install_subagents_doc() {
 # Uninstall SUBAGENTS.md only if it matches our template (byte-identical).
 # Unlike the agent .md files (which use a sentinel in-body), plain docs have
 # no hidden marker; diff is the trust signal. NEVER-TOUCH for any user-edited
-# doc, just like uninstall_aft_config's "user-customized → skip" policy.
+# doc, just like the *_config "user-customized → skip" policy.
 uninstall_subagents_doc() {
   if [[ ! -f "$SUBAGENTS_DOC_TARGET" ]]; then
     return 0
@@ -937,7 +924,7 @@ install_sages_files() {
 # but `cp -r` then copied those symlinks into $PI_DIR/packages/, where the same
 # relative path resolves to a non-existent `~/.pi/packages/pi/node_modules`.
 setup_peer_node_modules_symlinks() {
-  for peer in pi-aft pi-graphify pi-codebase-memory; do
+  for peer in pi-graphify pi-codebase-memory; do
     local peer_dir="$PI_DIR/packages/$peer"
     [[ ! -d "$peer_dir" ]] && continue
     if [[ -L "$peer_dir/node_modules" || -e "$peer_dir/node_modules" ]]; then
@@ -946,127 +933,15 @@ setup_peer_node_modules_symlinks() {
     ln -s ../sages/node_modules "$peer_dir/node_modules"
     echo "  Linked $peer/node_modules → ../sages/node_modules"
   done
+
 }
-# ──────────────────────────────────────────────────────────────────
-# pi-aft — installed via npx + npm
-# Uses @cortexkit/aft-pi for the Pi extension and @cortexkit/aft-linux-x64 (or
-# similar) for the binary that the extension loads.
-# ──────────────────────────────────────────────────────────────────
-
-# pi-aft package info (npm-installed)
-PI_AFT_PKG="npm:@cortexkit/aft-pi"
-
-is_pi_aft_installed() {
-  local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && return 1
-
-  python3 -c "
-import json, sys
-try:
-    d = json.load(open('$settings'))
-    pkgs = d.get('packages', [])
-    # Exact match: avoid substring collision with hypothetical 'pi-aft-extras' etc.
-    if any(p == 'npm:@cortexkit/aft-pi' or p == '$PI_AFT_PKG' or p.endswith('/aft-pi') for p in pkgs):
-        sys.exit(0)
-    sys.exit(1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null
-}
-
-install_pi_aft() {
-  echo "==> Installing pi-aft..."
-
-  # Already installed? Silent — don't bother the user. The [HIGH] AFT
-  # binary warning they may see is their responsibility (run
-  # `npx @cortexkit/aft@latest doctor --fix` to reconcile).
-  if is_pi_aft_installed && [[ "${FORCE:-false}" != true ]]; then
-    echo "  pi-aft already installed (skipping setup)"
-    return 0
-  fi
-
-  # Force-install path: uninstall first
-  if [[ "${FORCE:-false}" == true ]] && is_pi_aft_installed; then
-    echo "  Force-reinstall: removing previous aft-pi first"
-    uninstall_pi_aft
-  fi
-
-  # 1) Install the npm package via pi
-  if command -v pi &>/dev/null; then
-    echo "  Installing @cortexkit/aft-pi via pi..."
-    (cd "$TMP_DIR" && pi install npm:@cortexkit/aft-pi --approve 2>&1 | tail -5) || {
-      print_aft_not_installed_hint
-      return 0
-    }
-  else
-    echo "  'pi' command not found; skipping npm install"
-    print_aft_not_installed_hint
-    return 0
-  fi
-
-  # 2) Run the AFT setup wizard
-  if command -v npx &>/dev/null; then
-    echo "  Running AFT setup (downloads platform binary + registers extension)..."
-    npx --yes @cortexkit/aft@latest setup --harness pi 2>&1 | tail -10 || {
-      echo "  AFT setup returned non-zero."
-      print_aft_not_installed_hint
-      return 0
-    }
-  else
-    echo "  npx not available; skipping AFT setup"
-    print_aft_not_installed_hint
-    return 0
-  fi
-
-  echo "  pi-aft installed"
-}
-
-# One-line prompt printed only when AFT isn't installed after the
-# install.sh run. User runs the command themselves; install.sh does
-# not auto-install AFT (binary provisioning is owned by the AFT team).
-print_aft_not_installed_hint() {
-  printf '\n  AFT not installed — to install: npx @cortexkit/aft@latest setup --harness pi\n\n'
-}
-
-uninstall_pi_aft() {
-  echo "==> Uninstalling pi-aft..."
-
-  # 1) Run AFT's own uninstall (removes binary + pi extension from settings.json)
-  if command -v npx &>/dev/null; then
-    npx --yes @cortexkit/aft@latest uninstall --harness pi 2>&1 | tail -5 || {
-      echo "  AFT uninstall non-zero; falling back to manual cleanup"
-    }
-  fi
-
-  # 2) Manual fallback: strip aft-pi from settings.json
-  local settings="$PI_DIR/agent/settings.json"
-  [[ -f "$settings" ]] && python3 -c "
-import json, sys
-try:
-    d = json.load(open('$settings'))
-    pkgs = d.get('packages', [])
-    new_pkgs = [p for p in pkgs if p != 'npm:@cortexkit/aft-pi' and not p.endswith('/aft-pi')]
-    if len(new_pkgs) != len(pkgs):
-        d['packages'] = new_pkgs
-        json.dump(d, open('$settings', 'w'), indent=2)
-        print('  Removed aft-pi from settings.json')
-except Exception as e:
-    sys.exit(1)
-" 2>/dev/null || true
-
-  # 3) Remove cached binary (best-effort)
-  rm -rf "$HOME/.cache/aft" 2>/dev/null && echo "  Removed ~/.cache/aft"
-
-  echo "  pi-aft uninstalled"
-}
-
 # ──────────────────────────────────────────────────────────────────
 # pi-subagents — npm-installed subagent extension for pi
 #
 # Complements sages — the orchestrator tool surface uses pi-subagents'
 # `Agent` tool to actually spawn subagents for the 4-stage workflow.
 # Install via `pi install npm:@tintinweb/pi-subagents` (the standard
-# mechanism, same shape as pi-aft and pi-magic-context). The pi CLI
+# mechanism, same shape as pi-magic-context). The pi CLI
 # handles downloading, peer-dep resolution, and settings.json registration
 # in one step.
 # ──────────────────────────────────────────────────────────────────
@@ -1170,10 +1045,10 @@ except Exception as e:
 
 # ──────────────────────────────────────────────────────────────────
 # pi-magic-context — CortexKit's persistent memory + context layer
-# (installs alongside pi-aft; both target @earendil-works/pi-coding-agent)
+# (installs via pi; uses @earendil-works/pi-coding-agent as a peer)
 # ──────────────────────────────────────────────────────────────────
 
-# pi-magic-context package info (npm-installed, same pattern as pi-aft)
+# pi-magic-context package info (npm-installed)
 PI_MAGIC_CONTEXT_PKG="npm:@cortexkit/pi-magic-context"
 MAGIC_CONTEXT_TEMPLATE="$SCRIPT_DIR/../templates/magic-context.jsonc"
 MAGIC_CONTEXT_CONFIG_PATH="$HOME/.config/cortexkit/magic-context.jsonc"
@@ -1196,7 +1071,7 @@ except Exception:
 }
 
 # Idempotency rules for ~/.config/cortexkit/magic-context.jsonc mirror the
-# AFT config pattern: only overwrite user-customized files when --force is
+# *_config pattern: only overwrite user-customized files when --force is
 # passed; degraded (empty) or missing files get the template.
 is_magic_context_config_degraded() {
   [[ ! -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && return 0  # missing = trivially degraded
@@ -1219,13 +1094,13 @@ install_magic_context_config() {
 
   mkdir -p "$(dirname "$MAGIC_CONTEXT_CONFIG_PATH")"
 
-  # Already installed by us → skip (matches install_aft_config behavior).
+  # Already installed by us → skip (matches *_config behavior).
   if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && grep -q 'SAGES_TEMPLATE_V1' "$MAGIC_CONTEXT_CONFIG_PATH" 2>/dev/null && [[ "${FORCE:-false}" != true ]]; then
     echo "  magic-context config already installed (use --force to reinstall)"
     return 0
   fi
 
-  # User-customized → preserve (matches install_aft_config behavior).
+  # User-customized → preserve (matches *_config behavior).
   if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && ! is_magic_context_config_degraded; then
     echo "  magic-context config already exists with user customization (use --force to overwrite)"
     return 0
@@ -1271,7 +1146,7 @@ install_pi_magic_context() {
       npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_MAGIC_CONTEXT_PKG" 2>&1 | tail -3) || {
       echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_MAGIC_CONTEXT_PKG' manually"
     }
-    # Register in settings.json (matches pi-aft/pi-graphify pattern).
+    # Register in settings.json (matches pi-graphify pattern).
     local settings="$PI_DIR/agent/settings.json"
     mkdir -p "$(dirname "$settings")"
     [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
@@ -1319,7 +1194,7 @@ except Exception as e:
   rm -rf "$PI_DIR/agent/npm/node_modules/@cortexkit/pi-magic-context" 2>/dev/null && \
     echo "  Removed pi-magic-context package files"
 
-  # NEVER-TOUCH policy (mirrors install_aft_config): only remove config
+  # NEVER-TOUCH policy (mirrors other *_config functions): only remove config
   # if it carries our SAGES_TEMPLATE_V1 sentinel.
   if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && grep -q 'SAGES_TEMPLATE_V1' "$MAGIC_CONTEXT_CONFIG_PATH" 2>/dev/null; then
     rm -f "$MAGIC_CONTEXT_CONFIG_PATH"
@@ -1331,103 +1206,11 @@ except Exception as e:
   echo "  pi-magic-context uninstalled"
 }
 
-# ──────────────────────────────────────────────────────────────────
-# AFT config (~/.config/cortexkit/aft.jsonc) — feature flags template
-# ──────────────────────────────────────────────────────────────────
-
-# Returns true if $AFT_CONFIG_PATH exists and carries our SAGES_TEMPLATE_V1
-# sentinel. Used by uninstall_aft_config() to decide whether the file was
-# installed by us (safe to remove) or hand-edited by the user (leave alone).
-is_aft_config_installed() {
-  [[ -f "$AFT_CONFIG_PATH" ]] && \
-    grep -q 'SAGES_TEMPLATE_V1' "$AFT_CONFIG_PATH" 2>/dev/null
-}
-
-# Copy templates/aft.jsonc → ~/.config/cortexkit/aft.jsonc.
-#
-# Idempotency rules:
-#   1. File missing → install template.
-#   2. File exists, carries our SAGES_TEMPLATE_V1 sentinel → skip (already installed).
-#   3. File exists, "degraded" (only $schema key, no other config) →
-#      install template (upgrade path — user benefits from real feature flags).
-#   4. File exists, "user-customized" (has any other config keys) → skip unless --force.
-#
-# "Degraded" detection is JSON-aware (not byte-count based): we parse the
-# file and check whether it has any meaningful config keys beyond $schema.
-# This avoids both false positives (clobbering small-but-valid customizations)
-# and false negatives (missing truly-empty configs).
-#
-# Per-session fields (harness, project_root) are NOT in the template; the
-# AFT bridge sets them at session start via ensureConfigured(). Pinning them
-# here would break multi-project users (run sages in repo A, then repo B).
-install_aft_config() {
-  if [[ ! -f "$AFT_TEMPLATE" ]]; then
-    echo "  Warning: AFT template not found at $AFT_TEMPLATE"
-    return 0
-  fi
-
-  mkdir -p "$(dirname "$AFT_CONFIG_PATH")"
-
-  # Already installed by us → skip.
-  if is_aft_config_installed && [[ "${FORCE:-false}" != true ]]; then
-    echo "  AFT config already installed (use --force to reinstall)"
-    return 0
-  fi
-
-  # Degraded file detection (JSON-aware): no meaningful config keys.
-  # This is the case we hit in production 2026-07-19: just $schema, no flags.
-  if [[ -f "$AFT_CONFIG_PATH" ]] && ! is_aft_config_degraded; then
-    # Has real config (user-customized) → preserve.
-    echo "  AFT config already exists with user customization (use --force to overwrite)"
-    return 0
-  fi
-
-  if [[ -f "$AFT_CONFIG_PATH" ]] && is_aft_config_degraded; then
-    echo "  Upgrading degraded AFT config (only \$schema, no feature flags)"
-  fi
-
-  # Fresh install, --force overwrite, or upgrade from degraded state.
-  cp "$AFT_TEMPLATE" "$AFT_CONFIG_PATH"
-  echo "  Installed AFT config from template (feature flags enabled)"
-}
-
-# Returns true if AFT_CONFIG_PATH exists but has no meaningful config —
-# only the $schema reference (or unparseable JSON). Used by install_aft_config
-# to detect the "degraded empty" state we observed in production 2026-07-19.
-is_aft_config_degraded() {
-  [[ ! -f "$AFT_CONFIG_PATH" ]] && return 0  # missing = trivially degraded
-  python3 -c "
-import json, sys
-try:
-    d = json.load(open('$AFT_CONFIG_PATH'))
-    # 'Degraded' = no config keys beyond \$schema and our marker
-    meaningful = [k for k in d if k not in ('\$schema', '_sages_template_marker')]
-    sys.exit(0 if not meaningful else 1)
-except Exception:
-    # Unparseable JSON — treat as degraded (we'll overwrite)
-    sys.exit(0)
-" 2>/dev/null
-}
-
-# Remove $AFT_CONFIG_PATH ONLY if it carries our SAGES_TEMPLATE_V1 sentinel.
-# Hand-edited user configs are left untouched.
-uninstall_aft_config() {
-  if [[ ! -f "$AFT_CONFIG_PATH" ]]; then
-    return 0
-  fi
-  if is_aft_config_installed; then
-    rm -f "$AFT_CONFIG_PATH"
-    echo "  Removed AFT config (was our template)"
-  else
-    echo "  AFT config is user-customized, leaving alone"
-  fi
-}
-
 # ────────────────────────────────────────────────────────────
 # 模式 1:全量安装(默认)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-codebase-memory + pi-aft + pi-magic-context + pi-subagents + 4-agent subagent pipeline..."
+  echo "==> Installing sages + pi-codebase-memory + pi-magic-context + pi-subagents + 4-agent subagent pipeline..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1442,13 +1225,6 @@ install() {
   # Install sages first (git clone populates TMP_DIR)
   echo "==> Installing sages..."
   install_sages_files || exit 1
-
-  # Install pi-aft (uses npm + npx setup)
-  install_pi_aft || true
-
-  # Install AFT config template → ~/.config/cortexkit/aft.jsonc
-  # (must run AFTER install_pi_aft, since AFT setup creates the file as empty)
-  install_aft_config
 
   # Install pi-magic-context (cross-session memory + context layer)
   install_pi_magic_context || true
@@ -1508,7 +1284,7 @@ install() {
 # 模式 2:仅更新 sages(跳过 pi-codebase-memory 和 SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates, skip SYSTEM.md)..."
 
   # Pre-flight: pi 仍然需要(sages 是 pi extension)
   install_pi_if_needed
@@ -1521,8 +1297,8 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_codebase_memory / install_pi_aft / install_aft_config / install_pi_magic_context / install_pi_subagents / install_system_prompt
-  echo "  (skipped: pi-codebase-memory, pi-aft, AFT config, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)"
+  # 显式不调用 install_pi_codebase_memory / install_pi_magic_context / install_pi_subagents / install_system_prompt
+  echo "  (skipped: pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1532,10 +1308,10 @@ install_sages_only() {
 # 模式 3:仅更新 SYSTEM.md(跳过 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-aft, AFT config, subagent templates)..."
+  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, subagent templates)..."
   # 不需要 git / pi —— SYSTEM.md 是独立 markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-codebase-memory, pi-aft, AFT config, subagent templates)"
+  echo "  (skipped: sages, pi-codebase-memory, subagent templates)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1545,7 +1321,7 @@ install_system_only() {
 # 卸载(同时移除 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-codebase-memory + pi-aft + pi-magic-context + pi-subagents + AFT config + 4-agent subagent pipeline..."
+  echo "==> Uninstalling sages + pi-codebase-memory + pi-magic-context + pi-subagents + 4-agent subagent pipeline..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1562,12 +1338,6 @@ uninstall() {
   # Uninstall codebase-memory-mcp binary
   uninstall_codebase_memory_mcp_binary
 
-
-  # Uninstall pi-aft
-  uninstall_pi_aft
-
-  # Uninstall AFT config template (only if it's our template, not user-edited)
-  uninstall_aft_config
 
   # Uninstall pi-magic-context (cross-session memory layer)
   uninstall_pi_magic_context
