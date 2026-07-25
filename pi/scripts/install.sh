@@ -1026,28 +1026,11 @@ install_pi_aft() {
 }
 
 # User-facing hint for the recurring '[HIGH] AFT binary: No aft binary
-# matching CLI <version> was detected' warning. The setup command above
-# does NOT guarantee the cached binary matches the latest CLI (the
-# AFT team controls binary provisioning). When the user sees this
-# warning in `npx @cortexkit/aft@latest doctor`, the fix is one
-# command: `npx @cortexkit/aft@latest doctor --fix`. We intentionally
-# do NOT auto-run it during install — the user is in control.
+# matching CLI <version> was detected' warning. We do NOT auto-run
+# 'doctor --fix' from install — the user runs it themselves when they
+# see the warning.
 print_aft_user_hint() {
-  cat <<'HINT'
-
-  ─────────────────────────────────────────────────────────────
-  AFT note (if you see [HIGH] AFT binary ... in 'aft doctor'):
-
-    The cached binary at ~/.cache/aft/bin/ may be from an older CLI
-    version than the one shipped via npx @cortexkit/aft@latest.
-    The setup command above doesn't reconcile that.
-
-    To align binary with current CLI, run manually:
-        npx @cortexkit/aft@latest doctor --fix
-
-    (Re-run is safe: only downloads when binary version drift detected.)
-  ─────────────────────────────────────────────────────────────
-HINT
+  printf '\n  AFT hint: if "aft doctor" shows [HIGH] AFT binary, run: npx @cortexkit/aft@latest doctor --fix\n\n'
 }
 
 uninstall_pi_aft() {
