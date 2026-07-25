@@ -311,7 +311,6 @@ const TEMPLATE_PARAM_SCHEMAS: Record<string, TemplateParam[]> = {
     { name: "task_id", type: "string", required: true, description: "Task id (e.g. 'P4')" },
     { name: "task_title", type: "string", required: true, description: "Short title" },
     { name: "sc_list", type: "string", required: true, description: "Formatted SC list with verification_cmd" },
-    { name: "tdd_mode", type: "string", required: true, description: "'strict' or 'none'" },
     { name: "upstream_outputs", type: "string", required: true, description: "Formatted upstream task outputs (or '(none)')" },
     { name: "files_to_touch", type: "string", required: true, description: "Files this task touches (joined string)" },
     { name: "acceptance_cmd", type: "string", required: false, description: "Optional self_check_cmd" },
@@ -319,7 +318,6 @@ const TEMPLATE_PARAM_SCHEMAS: Record<string, TemplateParam[]> = {
   "subagent-software-auditor": [
     { name: "task_id", type: "string", required: true, description: "Task id being audited" },
     { name: "task_title", type: "string", required: true, description: "Short title" },
-    { name: "sc_ids", type: "string", required: false, description: "Optional formatted SC id list" },
     { name: "sc_list", type: "string", required: true, description: "Formatted SC list" },
     { name: "depth", type: "string", required: true, description: "'fast' or 'full'" },
     { name: "task_report_path", type: "string", required: false, description: "Path to a single developer's report" },

@@ -447,9 +447,9 @@ describe("buildPlan", () => {
               task_id: "P1",
               task_title: "Implement X",
               sc_list: "- SC1: typecheck",
-              tdd_mode: "strict",
               upstream_outputs: "(none)",
               files_to_touch: "src/x.ts",
+              acceptance_cmd: "bun test",
             },
           }),
         ],
@@ -457,7 +457,10 @@ describe("buildPlan", () => {
       baseContract,
     );
     expect(plan.tasks[0].prompt).toContain("Implement X");
-    expect(plan.tasks[0].prompt).toContain("STRICT TDD");
+    expect(plan.tasks[0].prompt).toContain("- SC1: typecheck");
+    expect(plan.tasks[0].prompt).toContain("src/x.ts");
+    // TDD discipline lives in the agent identity, not the task prompt.
+    expect(plan.tasks[0].prompt).not.toContain("STRICT TDD");
   });
 
   it("falls back to LLM-written prompt when no task_template", () => {

@@ -34,33 +34,92 @@ describe("template-loader", () => {
     it("loads subagent-software-developer.md", () => {
       const content = loadPromptTemplate("subagent-software-developer");
       expect(content).not.toBeNull();
-      expect(content).toContain("Your Task");
-      expect(content).toContain("STRICT TDD");
+      // Carries ONLY task-specific data (identity lives in agent definition)
       expect(content).toContain("{{task_id}}");
+      expect(content).toContain("{{sc_list}}");
+      expect(content).toContain("{{files_to_touch}}");
+      expect(content).toContain("{{acceptance_cmd}}");
     });
 
     it("loads subagent-software-auditor.md", () => {
       const content = loadPromptTemplate("subagent-software-auditor");
       expect(content).not.toBeNull();
-      expect(content).toContain("NEEDS WORK");
-      expect(content).toContain("verification_cmd");
+      expect(content).toContain("{{task_id}}");
+      expect(content).toContain("{{depth}}");
+      expect(content).toContain("{{task_report_path}}");
     });
 
     it("loads subagent-explore.md", () => {
       const content = loadPromptTemplate("subagent-explore");
       expect(content).not.toBeNull();
       expect(content).toContain("READ-ONLY");
+      expect(content).toContain("{{task_id}}");
     });
 
     it("loads subagent-general-purpose.md", () => {
       const content = loadPromptTemplate("subagent-general-purpose");
       expect(content).not.toBeNull();
-      expect(content).toContain("First Action Protocol");
+      expect(content).toContain("{{task_id}}");
+      expect(content).toContain("{{acceptance_cmd}}");
     });
 
     it("returns null for unknown template", () => {
       const content = loadPromptTemplate("nonexistent-template-xxx");
       expect(content).toBeNull();
+    });
+
+    /**
+     * Skill prompt templates must NOT duplicate content that already lives
+     * in the agent definition (templates/agents/software-*.md). Identity
+     * content — TDD discipline, Spawn Mode, First Action Protocol, Output
+     * Contract, Sub-Agent Boundaries — is loaded by pi-subagents as the
+     * subagent's identity body; re-stating it in the task prompt wastes
+     * context and risks drift (the 2026-07-24 commit-conventions work
+     * already exposed drift between the two layers).
+     */
+    it("skill prompts do NOT duplicate agent identity content", () => {
+      // Render each prompt with minimal params, then assert the rendered
+      // body has no identity-section headings (those belong in the agent
+      // definition loaded by pi-subagents, not the task prompt).
+      const identitySections = [
+        /^##\s+.*Spawn Mode/im,
+        /^##\s+.*First Action Protocol/im,
+        /^##\s+.*Output Contract/im,
+        /^##\s+.*Sub-Agent Boundaries/im,
+        /^##\s+.*TDD Discipline/im,
+        /^###\s+RED/im,
+        /^###\s+GREEN/im,
+        /^###\s+REFACTOR/im,
+      ];
+      const renderWith = (name: string): string => {
+        const params: Record<string, unknown> = {
+          task_id: "P1",
+          task_title: "Test task",
+          sc_list: "- SC1: x",
+          upstream_outputs: "(none)",
+          files_to_touch: "src/foo.ts",
+          acceptance_cmd: "echo ok",
+        };
+        if (name === "subagent-software-auditor") {
+          params.depth = "full";
+          params.task_report_path = ".pi/orchestrator/task-P1-report.md";
+          params.isolation = "none";
+        }
+        return renderTaskPrompt(name, params) ?? "";
+      };
+      const templateNames = [
+        "subagent-software-developer",
+        "subagent-software-auditor",
+        "subagent-explore",
+        "subagent-general-purpose",
+      ];
+      for (const name of templateNames) {
+        const rendered = renderWith(name);
+        expect(rendered.length).toBeGreaterThan(0);
+        for (const re of identitySections) {
+          expect(rendered).not.toMatch(re);
+        }
+      }
     });
   });
 
@@ -161,21 +220,20 @@ describe("template-loader", () => {
         task_id: "P4",
         task_title: "Implement UserRepository",
         sc_list: "- SC1: typecheck passes\n- SC2: tests pass",
-        tdd_mode: "strict",
         upstream_outputs: "(none)",
         files_to_touch: "src/auth/repository/UserRepository.ts",
+        acceptance_cmd: "npm test",
       });
       expect(out).not.toBeNull();
-      // Markdown bold uses ** — be lenient
-      expect(out).toContain("Task ID");
-      expect(out).toContain("P4");
+      // Task-specific content rendered correctly
+      expect(out).toContain("**ID**: P4");
       expect(out).toContain("Implement UserRepository");
-      expect(out).toContain("STRICT TDD");
-      expect(out).toContain("First Action Protocol");
+      expect(out).toContain("- SC1: typecheck passes");
       expect(out).toContain("src/auth/repository/UserRepository.ts");
+      expect(out).toContain("npm test");
     });
 
-    it("renders auditor prompt with audit-specific guidance", () => {
+    it("renders auditor prompt with audit-specific data", () => {
       const out = renderTaskPrompt("subagent-software-auditor", {
         task_id: "P7",
         task_title: "Audit refactor",
@@ -185,9 +243,10 @@ describe("template-loader", () => {
         isolation: "none",
       });
       expect(out).not.toBeNull();
-      expect(out).toContain("Audit Task");
-      expect(out).toContain("NEEDS WORK");
-      expect(out).toContain("Full mode");
+      expect(out).toContain("**ID**: P7");
+      expect(out).toContain("**Depth**: full");
+      expect(out).toContain("**Audited Isolation**: none");
+      expect(out).toContain("task-P7-report.md");
     });
 
     it("returns null for unknown template name", () => {
