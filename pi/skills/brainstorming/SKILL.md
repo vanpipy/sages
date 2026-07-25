@@ -60,19 +60,11 @@ flowchart TD
     P --> Q[End - User proceeds]
 ```
 
-## Grill-Me Integration
+## Grill-Me Protocol (embedded in grilling phase)
 
-The **Grill-Me** protocol is now embedded in the questioning phase:
+Ask **one question per message** with a **recommendation**. If the answer can be found by reading the code, explore the codebase instead of asking. Track dependencies — some decisions constrain others. Don't move on until the current branch is locked.
 
-### Branch Resolution Protocol
-
-1. **One question at a time** — Don't overwhelm
-2. **Provide recommendation** — Lead with suggested answer
-3. **Explore codebase first** — If the answer can be found by reading code, do that instead
-4. **Resolve each branch** — Don't move on until the decision is locked
-5. **Track dependencies** — Some decisions constrain others
-
-### Question Template
+Question template:
 
 ```
 [Question about specific topic]
@@ -82,18 +74,6 @@ Option B: [description]
 Option C: [description]
 
 Your call — A, B, C, or something different?
-```
-
-### Example
-
-```
-What should be the scope of dark mode?
-
-A: Global toggle (simplest, applies to all users) — Recommended
-B: Per-user preference stored in database (syncs across devices)
-C: Per-user preference in LocalStorage (simpler, device-only)
-
-Recommendation: A for MVP because [reasoning]
 ```
 
 ## Hard Gate
@@ -159,71 +139,28 @@ If any answer is no, the boundaries need work. Smaller, well-bounded units are e
 
 **Don't propose unrelated refactoring.** Stay focused on what serves the current goal.
 
-## Phase Definitions
+## Phase Definitions (output of each)
 
-### 1. Exploring
-
-Understand the current project state:
-- Check project structure (files, directories)
-- Review recent commits
-- Read relevant documentation
-- Identify existing patterns
-
-**Output**: `ProjectContext` with structure, patterns, components
-
-### 2. Grilling
-
-Resolve each decision branch:
-- One question per message
-- Provide recommendation + reasoning
-- Explore codebase when applicable
-- Track dependencies between decisions
-- Continue until no unresolved branches
-
-**Output**: `DecisionTree` with all branches resolved
-
-### 3. Proposing
-
-Generate 2-3 approaches:
-- Option A, B, C with tradeoffs
-- Lead with recommendation
-- Explain reasoning
-
-**Output**: `Approach[]` with recommendation
-
-### 4. Designing
-
-Present design sections:
-- Scale to complexity (few sentences to 200-300 words)
-- Get approval after each section
-- Cover: architecture, components, data flow, error handling
-
-**Output**: `DesignSection[]` all approved
-
-### 5. Approved
-
-All design sections approved:
-- Write design document
-- Spec self-review inline
-- Ask user to review
-- Transition when approved
-
-**Output**: Approved design document, transition decision
+1. **Exploring** — project state (files, recent commits, patterns). Output: `ProjectContext`.
+2. **Grilling** — one question per message, recommend, explore code when possible. Output: `DecisionTree` (all branches resolved).
+3. **Proposing** — 2-3 approaches with tradeoffs; lead with recommendation. Output: `Approach[]`.
+4. **Designing** — present sections (architecture, components, data flow, error handling); approve each before next. Output: `DesignSection[]` all approved.
+5. **Approved** — write design doc, self-review, ask user to review, transition to orchestrator. Output: Approved design doc.
 
 ## Design Document Template
+
+Write the design doc to `.pi/orchestrator/designs/YYYY-MM-DD-<topic>.md` (see `pi/src/tools/brainstorming/index.ts:writeDesignDoc`):
 
 ```markdown
 # Design: <Topic>
 
 ## Overview
-[Brief description of what we're building]
+[Brief description]
 
 ## Context
-[Project context from exploration]
-[Why this change is needed]
+[Project context from exploration + why this change is needed]
 
 ## Decisions Resolved
-[Key decisions made during grilling phase]
 - [Decision 1]: [Resolution] — [Rationale]
 - [Decision 2]: [Resolution] — [Rationale]
 
@@ -234,34 +171,17 @@ All design sections approved:
 ## Approach
 [Chosen approach with reasoning]
 
-## Alternative Approaches Considered
-### Approach A: [Name]
-- Pros: ...
-- Cons: ...
-
-### Approach B: [Name]
-- ...
-
 ## Design Details
-
 ### Architecture
 [How components fit together]
-
 ### Components
-[Key components and their responsibilities]
-
+[Key components + responsibilities]
 ### Data Flow
-[How data moves through the system]
-
+[How data moves]
 ### Error Handling
 [How errors are handled]
-
 ### Testing Strategy
-[How to test this design]
-
-## Open Questions
-- [Question 1]
-- [Question 2]
+[How to test]
 
 ## Acceptance Criteria
 - [Criterion 1]
@@ -270,86 +190,28 @@ All design sections approved:
 
 ## Spec Self-Review
 
-After writing the spec document, perform this 4-step inline check:
+Before showing the spec to the user, scan inline for:
 
-| Step | Check | Action |
-|------|-------|--------|
-| 1 | **Placeholder scan** | Any "TBD", "TODO", incomplete sections, or vague requirements? Fix them. |
-| 2 | **Internal consistency** | Do any sections contradict each other? Does architecture match feature descriptions? Fix. |
-| 3 | **Scope check** | Is this focused enough for a single implementation plan, or does it need decomposition? |
-| 4 | **Ambiguity check** | Could any requirement be interpreted two different ways? Make it explicit. |
+1. **Placeholders** — "TBD", "TODO", vague requirements? Fix.
+2. **Internal consistency** — sections contradict each other? Architecture matches features? Fix.
+3. **Scope** — focused enough for a single implementation plan, or needs decomposition?
+4. **Ambiguity** — any requirement that could be interpreted two ways? Make it explicit.
 
 Fix any issues inline. No need to re-review — just fix and move on.
 
 ## Trigger Modes
 
-### Mode A: Standalone (No Fuxi Workflow Active)
+**Mode A — standalone (no orchestrator active)**: brainstorming is the **recommended first step** for any new feature/change. After approval, suggest `/orchestrate` or auto-transition to `goal_contract_create` if user consents.
 
-When **no Fuxi workflow is running**, brainstorming is the **recommended first step**:
+**Mode B — auto-transition (orchestrator active)**: when design is approved, auto-invoke `goal_contract_create` with the design as rationale. The orchestrator then synthesizes a DAG via `dag_synthesize` for the design's tasks and notifies the user.
 
-```
-User: I want to add a login feature
-Agent: 💡 Recommend brainstorming first: /brainstorm add login feature
-      This helps explore intent and propose the best approach.
-```
-
-### Mode B: Auto-Transition (Fuxi Workflow Active)
-
-When **Fuxi workflow is running** and design is approved:
-
-```
-✅ Design Approved!
-
-**Request:** {request}
-**Approach:** {chosen approach}
-**Decisions Resolved:** {summary}
-**Design:** .pi/orchestrator/designs/{date}-{topic}.md
-
-→ Starting Fuxi workflow with design context...
-```
-
-### Transition Behavior
-
-| Condition | Action |
-|----------|--------|
-| No orchestrator + design approved | Suggest `/orchestrate` or auto-transition to `goal_contract_create` if user consents |
-| Orchestrator active + design approved | Auto-invoke `goal_contract_create` with design context |
-| User says "defer"/"save"/"later" | Save to `.pi/orchestrator/designs/`, don't start orchestrator |
-| User says "exit"/"cancel" | End without proceeding |
-
-## Orchestrator Integration
-
-On auto-transition:
-1. System extracts success criteria from approved design
-2. Invokes `goal_contract_create` with the design as rationale
-3. Orchestrator synthesizes a DAG via `dag_synthesize` for the design's tasks
-4. **User is notified**: "Orchestrator workflow started. Use `task_dispatch` to execute the DAG."
+If user says "defer"/"save"/"later", save the design to `.pi/orchestrator/designs/` and don't start the orchestrator. "exit"/"cancel" ends without proceeding.
 
 ## Scope Detection & Decomposition
 
-### Step 1: Assess Scope
+Before grilling, assess if the project needs decomposition. **Too large if** it has multiple independent subsystems (e.g., "platform with chat, file storage, billing"), domains differ significantly, or the user expects multiple delivery milestones.
 
-Before asking detailed questions, assess if the project needs decomposition:
-
-**Too large if:**
-- Multiple independent subsystems (e.g., "build a platform with chat, file storage, billing")
-- Domains differ significantly
-- User expects multiple delivery milestones
-
-### Step 2: Decomposition Process
-
-If project is too large, help decompose:
-
-1. **Identify independent pieces** — What are the subsystems?
-2. **Map relationships** — How do they depend on each other?
-3. **Determine order** — Which should be built first?
-
-### Step 3: Choose First Sub-Project
-
-Help user choose which sub-project to brainstorm first:
-- Start with the foundation (what others depend on)
-- Or start with the highest value/use
-- Each sub-project gets its own: brainstorm → design → implement cycle
+If too large: identify independent pieces, map their dependencies, determine build order (foundation first or highest value first), and ask which sub-project to brainstorm first. Each sub-project gets its own `brainstorm → design → implement` cycle.
 
 ## Visual Companion (Optional)
 
@@ -370,29 +232,17 @@ When you anticipate visual questions (mockups, layouts, diagrams):
 | Move on without resolution | Stay until branch is resolved |
 | Too many questions (>10 before proposing) | Flag unclear requirements or simplify |
 
-## Metrics (for skill improvement)
-
-Track these for analysis:
-- Questions asked before proposing
-- Approaches proposed
-- Approval iterations per section
-- Time from start to approved
-- Transition rate to orchestrator
-
 ## Related Skills
 
 - **Grill-Me**: Standalone decision tree resolver (embedded in brainstorming)
 - **Orchestrator**: Goal contract + DAG synthesis + dispatch + audit (after brainstorming approval, auto-invoked via `goal_contract_create`)
 
-## Examples
-
-### Simple Feature Request
+## Example: Simple Feature
 
 ```
 User: /brainstorm add dark mode
 Agent: [MODE: brainstorming] (exploring)
-Agent: Exploring project context...
-Agent: I see this is a TypeScript web app with React.
+Agent: Exploring project context... I see this is a TypeScript web app with React.
 
 Agent: [MODE: brainstorming] (grilling)
 Agent: First question: what should be the scope of dark mode?
@@ -424,38 +274,8 @@ Agent: Presenting design section: Storage Layer...
 ### Complex Project (Decomposition)
 
 ```
-User: /brainstorm build a platform with chat, file storage, and billing
 
-Agent: This project has 3 independent subsystems that should be decomposed:
-       1. Chat system (foundation - other features may depend on it)
-       2. File storage (depends on user auth)
-       3. Billing system (depends on user accounts)
-
-       Recommended build order: 1 → 2 → 3
-       Which should we brainstorm first? Or create separate sessions for each?
-```
-
-### Working in Existing Codebase
-
-```
-User: /brainstorm add user notification preferences
-Agent: Exploring project context...
-Agent: I see the existing notification system in src/notifications/.
-       Current: monolithic NotificationService handling email, SMS, push.
-       I notice the file is 800+ lines with mixed responsibilities.
-
-       Design will include:
-       - Split notification service by channel (email/sms/push)
-       - Add UserPreferences model for per-user settings
-       - Keep backward compatibility during transition
-
-       First question: should preferences be per-channel or unified?
-
-A: Per-channel (email, SMS, push separate) — Recommended
-B: Unified (one toggle per notification type)
-
-Recommendation: A because [isolation principle]
-```
+For complex multi-subsystem projects, decompose first (see Scope Detection above) and brainstorm each sub-project in its own session.
 
 ---
 

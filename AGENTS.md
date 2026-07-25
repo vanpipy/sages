@@ -54,40 +54,14 @@ Plus shared helpers in
 
 ## Workflow
 
-1. **Goal** — `goal_contract_create` writes `.pi/orchestrator/goal-{id}.yaml`.
-   Hard-validates: unique SC ids, non-empty `verification_cmd`,
-   `criterion ≥ 10` chars, non-empty `done_definition`.
-2. **DAG** — `dag_synthesize` writes `.pi/orchestrator/dag-{id}.yaml`.
-   Hard-validates: SC coverage, no cycles, batch contiguity, `depends_on`
-   direction, within-batch independence, `task_template` whitelist,
-   `task_params` schema. The shipped templates
-   (`pi/skills/orchestrator/templates/dag/`) are regression-guarded
-   to validate as-is.
-3. **Dispatch** — `task_dispatch` returns a `DispatchPlan`; the LLM
-   spawns each task via the external `Agent` tool. The tool does
-   **not** spawn subagents itself.
-4. **Audit** — `software-auditor` writes per-task
-   `audit-{task_id}.md` with verdict `CERTIFIED | NEEDS WORK |
-   BLOCKED`. `orchestrator_audit` reads those reports, aggregates
-   workflow-level rollup, enforces the evidence gate, writes
-   `audit-workflow.md` with verdict `PASS | REVISE | REJECT`.
+1. **Goal** — `goal_contract_create` writes `.pi/orchestrator/goal-{id}.yaml`. Hard-validates unique SC ids, non-empty `verification_cmd`, `criterion ≥ 10` chars, non-empty `done_definition`.
+2. **DAG** — `dag_synthesize` writes `.pi/orchestrator/dag-{id}.yaml`. Hard-validates SC coverage, no cycles, batch contiguity, `depends_on` direction, within-batch independence, `task_template` whitelist, `task_params` schema.
+3. **Dispatch** — `task_dispatch` returns a `DispatchPlan`; the LLM spawns each task via the `Agent` tool.
+4. **Audit** — `software-auditor` writes per-task `audit-{task_id}.md`; `orchestrator_audit` aggregates into `audit-workflow.md`.
 
-State persists between calls (`audit-state-{dag_id}.yaml`,
-`chmod 0o600`) so the LLM can resume after context compaction.
-Lifecycle: `init → recording → complete`; recording after `complete`
-is rejected.
+State persists between calls (`audit-state-{dag_id}.yaml`, `chmod 0o600`) so the LLM can resume after context compaction. Lifecycle: `init → recording → complete`; recording after `complete` is rejected.
 
-### `run_in_background` policy
-
-Derived from `subagent_type` (per `defaultRunInBackground`):
-
-| `subagent_type` | Default | Why |
-|---|---|---|
-| `Explore`, `Plan`, `general-purpose` | `false` (foreground) | Short, read-only, output feeds next prompt |
-| `software-developer`, `software-auditor` | `true` (background) | Long (1–10 min), steerable mid-run |
-| unknown | `true` | Conservative default |
-
-Per-task override: `TaskNode.run_in_background?: boolean`.
+**Detailed workflow + run_in_background policy**: see `pi/skills/orchestrator/SKILL.md`. The orchestrator skill loads only when needed.
 
 ### Evidence gate
 
@@ -95,8 +69,7 @@ Per-task override: `TaskNode.run_in_background?: boolean`.
 - `findings.length ≥ findings_required_min` (`1` fast, `3` full)
 - `workflowReady === true` (every task's audit is CERTIFIED)
 
-Otherwise `orchestrator_audit` auto-downgrades to `REVISE` and
-surfaces the failure in `validation.errors`. Cannot be bypassed.
+Otherwise `orchestrator_audit` auto-downgrades to `REVISE` and surfaces the failure in `validation.errors`. **Cannot be bypassed.**
 
 ### Path contract
 
