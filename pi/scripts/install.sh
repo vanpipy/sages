@@ -151,17 +151,28 @@ install_pi_if_needed() {
 }
 
 is_pi_codebase_memory_installed() {
+  # Auto-recovery invariant: return true ONLY when both conditions hold —
+  # settings.json registers the package AND the dest dir exists on disk.
+  #
+  # Bug this guards: if the package dir was deleted out-of-band (manual cleanup,
+  # interrupted install, etc.), a settings.json-only check returns true and the
+  # installer's "already installed" early-return skips re-copying files. Result:
+  # settings says installed, but the extension's session_start never fires and
+  # the user sees MCP servers "0/2" with no error feedback. Requiring both
+  # conditions means the next install run sees the missing dir, falls through
+  # the early-return, and re-runs the file-copy + settings.json registration path.
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && return 1
 
   python3 -c "
-import json, sys
+import json, os, sys
 try:
     d = json.load(open('$settings'))
-    packages = d.get('packages', [])
+    pkg = '$PI_CODEBASE_MEMORY_PKG'
     # Exact match only — substring 'pi-codebase-memory' would false-positive on
-    # unrelated forks like 'pi-codebase-memory-extra'.
-    if '$PI_CODEBASE_MEMORY_PKG' in packages:
+    # unrelated forks like 'pi-codebase-memory-extra'. Pair the settings.json
+    # registration with os.path.isdir() so a deleted dest dir re-triggers install.
+    if pkg in d.get('packages', []) and os.path.isdir(pkg):
         sys.exit(0)
     sys.exit(1)
 except Exception:
