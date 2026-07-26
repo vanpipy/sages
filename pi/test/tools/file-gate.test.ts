@@ -1,40 +1,25 @@
 /**
- * Tests for the file-gate: path-aware policy that allows the main
- * agent to write to Sages meta-files (`.pi/orchestrator/`, `pi/`,
- * `README.md`, `AGENTS.md`, `package.json`, etc.) but rejects writes
- * to production code (which must go through the Agent tool with a
- * `developer` subagent (with explicit managed-worktree isolation).
+ * Tests for the file-gate: path-aware policy that decides whether
+ * the main agent (or any subagent inheriting the bash-guard) can
+ * write to a given path.
  *
- * RED phase: these tests fail until `file-gate.ts` is implemented.
+ * After commit f7144b2 (2026-07-26), the file-gate is **policy only**:
+ *   - `canMainAgentWrite(path)` returns true iff path is meta-file
+ *     (`.pi/orchestrator/`, `pi/`, sibling subpackages under `pi-…`, root docs) and not
+ *     production code (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, ...).
+ *   - `policyMessage(path)` returns the human-readable explanation
+ *     used by the bash-guard when a write is blocked.
+ *
+ * The LLM-facing tool surface (Layer 1) no longer exposes any direct
+ * write tool — the bash-guard (Layer 2) is the only remaining
+ * limb-side write enforcement. The main agent dispatches
+ * `Agent({subagent_type: "general-purpose"})` (no isolation) for
+ * meta-file edits and `Agent({subagent_type: "developer", isolation: {...}})`
+ * (managed worktree) for production code.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import {
-	canMainAgentWrite,
-	executeSagesEdit,
-	executeSagesWrite,
-	policyMessage,
-} from "@/tools/file-gate.js";
-
-let cwd: string;
-
-beforeEach(() => {
-	cwd = mkdtempSync(join(tmpdir(), "sages-filegate-test-"));
-});
-
-afterEach(() => {
-	rmSync(cwd, { recursive: true, force: true });
-});
-
-function parseResult(resp: any): any {
-	return typeof resp.content[0].text === "string"
-		? { text: resp.content[0].text, isError: resp.isError }
-		: JSON.parse(resp.content[0].text);
-}
+import { describe, it, expect } from "bun:test";
+import { canMainAgentWrite, policyMessage } from "@/tools/file-gate.js";
 
 describe("canMainAgentWrite", () => {
 	describe("meta paths (allowed)", () => {
@@ -56,7 +41,6 @@ describe("canMainAgentWrite", () => {
 			"pi/skills/brainstorming/SKILL.md",
 			"pi/templates/SYSTEM.md",
 			"pi/templates/SUBAGENTS.md",
-			"pi/templates/agents/developer.md",
 			"pi/templates/agent-tool-description.md",
 			"pi/templates/subagents.json",
 			"pi/scripts/install.sh",
@@ -144,158 +128,32 @@ describe("policyMessage", () => {
 		expect(msg).toContain("src/foo.ts");
 	});
 
-	it("points at the Agent tool + developer subagent", () => {
+	it("points at the Agent tool + general-purpose for meta-file edits", () => {
 		const msg = policyMessage("src/foo.ts");
 		expect(msg.toLowerCase()).toContain("agent");
+		// Either general-purpose (meta) or developer (prod) is acceptable
+		// in the policy text; for src/foo.ts (production) the message
+		// must mention developer.
 		expect(msg.toLowerCase()).toContain("developer");
 	});
-});
 
-describe("executeSagesWrite", () => {
-	it("writes a meta-file when path is allowed", async () => {
-		const resp = await executeSagesWrite(
-			{ path: ".pi/orchestrator/goal-test.yaml", content: "id: GC-test\n" },
-			{ cwd },
-		);
-		const r = parseResult(resp);
-		expect(r.isError).toBeFalsy();
-		expect(existsSync(join(cwd, ".pi/orchestrator/goal-test.yaml"))).toBe(true);
-		expect(readFileSync(join(cwd, ".pi/orchestrator/goal-test.yaml"), "utf-8")).toBe("id: GC-test\n");
+	it("mentions general-purpose as the meta-file subagent", () => {
+		const msg = policyMessage("src/foo.ts");
+		expect(msg).toContain("general-purpose");
 	});
 
-	it("rejects a production-code path with isError + policy message", async () => {
-		const resp = await executeSagesWrite(
-			{ path: "src/foo.ts", content: "// should not be written" },
-			{ cwd },
-		);
-		const r = parseResult(resp);
-		expect(resp.isError).toBe(true);
-		expect(r.text.toLowerCase()).toContain("agent");
-		expect(r.text.toLowerCase()).toContain("developer");
-		expect(existsSync(join(cwd, "src/foo.ts"))).toBe(false);
+	it("lists the meta-path allowlist for general-purpose dispatch", () => {
+		const msg = policyMessage("src/foo.ts");
+		// Spot-check key allowlist entries
+		expect(msg).toContain(".pi/orchestrator/");
+		expect(msg).toContain("pi/src/");
+		expect(msg).toContain("pi-");
+		expect(msg).toContain("README.md");
+		expect(msg).toContain("AGENTS.md");
 	});
 
-	it("rejects a path-traversal attempt", async () => {
-		const resp = await executeSagesWrite(
-			{ path: "../etc/passwd", content: "x" },
-			{ cwd },
-		);
-		expect(resp.isError).toBe(true);
-	});
-
-	it("rejects an absolute path", async () => {
-		const resp = await executeSagesWrite(
-			{ path: "/etc/passwd", content: "x" },
-			{ cwd },
-		);
-		expect(resp.isError).toBe(true);
-	});
-});
-
-describe("executeSagesEdit", () => {
-	beforeEach(() => {
-		mkdirSync(join(cwd, ".pi", "orchestrator"), { recursive: true });
-		writeFileSync(
-			join(cwd, ".pi", "orchestrator", "goal-test.yaml"),
-			"id: GC-test\ntitle: old\n",
-			"utf-8",
-		);
-	});
-
-	it("replaces oldText with newText on a meta-file", async () => {
-		const resp = await executeSagesEdit(
-			{
-				path: ".pi/orchestrator/goal-test.yaml",
-				oldText: "title: old",
-				newText: "title: new",
-			},
-			{ cwd },
-		);
-		const r = parseResult(resp);
-		expect(r.isError).toBeFalsy();
-		const updated = readFileSync(join(cwd, ".pi/orchestrator/goal-test.yaml"), "utf-8");
-		expect(updated).toContain("title: new");
-		expect(updated).not.toContain("title: old");
-	});
-
-	it("rejects edit on production code", async () => {
-		const resp = await executeSagesEdit(
-			{
-				path: "src/foo.ts",
-				oldText: "x",
-				newText: "y",
-			},
-			{ cwd },
-		);
-		expect(resp.isError).toBe(true);
-	});
-
-	it("returns isError if oldText is not found", async () => {
-		const resp = await executeSagesEdit(
-			{
-				path: ".pi/orchestrator/goal-test.yaml",
-				oldText: "title: nonexistent",
-				newText: "title: new",
-			},
-			{ cwd },
-		);
-		expect(resp.isError).toBe(true);
-	});
-
-	// Regression test for the 2026-07-26 multi-line replace gotcha.
-	// When oldText and newText have the SAME line count (1:1), the
-	// in-tool replace is well-behaved. The IPC layer's tail-duplication
-	// bug is documented in `executeSagesEdit`'s source comment and
-	// triggers when newText is LONGER than oldText — outside this
-	// tool's boundary. This test only verifies the in-tool contract.
-	it("replaces multi-line oldText 1:1 (same line count)", async () => {
-		writeFileSync(
-			join(cwd, ".pi", "orchestrator", "multi-line.yaml"),
-			"line-1\nline-2\nline-3\nline-4\n",
-			"utf-8",
-		);
-		const resp = await executeSagesEdit(
-			{
-				path: ".pi/orchestrator/multi-line.yaml",
-				oldText: "line-2\nline-3\nline-4",
-				newText: "REPLACED-2\nREPLACED-3\nREPLACED-4",
-			},
-			{ cwd },
-		);
-		const r = parseResult(resp);
-		expect(r.isError).toBeFalsy();
-		const updated = readFileSync(
-			join(cwd, ".pi", "orchestrator", "multi-line.yaml"),
-			"utf-8",
-		);
-		// All three lines replaced in place, no other lines added/removed
-		expect(updated).toBe("line-1\nREPLACED-2\nREPLACED-3\nREPLACED-4\n");
-	});
-
-	it("replaces only the FIRST occurrence of oldText", async () => {
-		writeFileSync(
-			join(cwd, ".pi", "orchestrator", "dup.yaml"),
-			"foo\nfoo\nfoo\n",
-			"utf-8",
-		);
-		const resp = await executeSagesEdit(
-			{
-				path: ".pi/orchestrator/dup.yaml",
-				oldText: "foo",
-				newText: "bar",
-			},
-			{ cwd },
-		);
-		const r = parseResult(resp);
-		expect(r.isError).toBeFalsy();
-		const updated = readFileSync(
-			join(cwd, ".pi", "orchestrator", "dup.yaml"),
-			"utf-8",
-		);
-		// String.prototype.replace with string first arg replaces only
-		// the FIRST occurrence (would need a global regex / String.replaceAll
-		// for multi-occurrence). Locking this in so callers don't expect
-		// "edit all" semantics.
-		expect(updated).toBe("bar\nfoo\nfoo\n");
+	it("explains that no direct write tool exists (force subagent dispatch)", () => {
+		const msg = policyMessage("src/foo.ts");
+		expect(msg).toMatch(/no direct write tool|dispatch/i);
 	});
 });

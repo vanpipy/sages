@@ -65,17 +65,19 @@ describe("registerSagesExtension — Layer 1: edit/write drop", () => {
 
     it("T-A: drops `edit` and `write` from a mixed list", () => {
         const filtered = registerAndFilter([
-            "read", "edit", "write", "grep", "bash", "sages_write",
+            "read", "edit", "write", "grep", "bash",
         ]);
-        expect(filtered).toEqual(["read", "grep", "bash", "sages_write"]);
+        expect(filtered).toEqual(["read", "grep", "bash"]);
     });
 
-    it("T-B: preserves all non-write tools including sages_edit + orchestrator tools (drops edit + write)", () => {
-        // Fixture includes both the write tools to drop AND a comprehensive set
-        // of read/meta/orchestrator/dispatch tools that must be preserved.
+    it("T-B: preserves all non-write tools including orchestrator tools + Agent (drops edit + write)", () => {
+        // After commit f7144b2 (sages_write/sages_edit retired) and
+        // 633ca97 (registerFileGate un-registered), the main agent's
+        // toolset is 4 orchestrator + 1 Agent + read tools. There is NO
+        // direct meta-file write tool — all file edits must go through
+        // Agent dispatch (general-purpose for meta, developer for prod).
         const fixture = [
-            "read", "grep", "find", "ls",
-            "bash", "sages_write", "sages_edit",
+            "read", "grep", "find", "ls", "bash",
             "goal_contract_create", "dag_synthesize",
             "task_dispatch", "orchestrator_audit",
             "Agent", "get_subagent_result", "steer_subagent",
@@ -94,8 +96,18 @@ describe("registerSagesExtension — Layer 1: edit/write drop", () => {
     });
 
     it("no-op when neither edit nor write is in active tools", () => {
-        const filtered = registerAndFilter(["read", "bash", "sages_write", "sages_edit"]);
-        expect(filtered).toEqual(["read", "bash", "sages_write", "sages_edit"]);
+        const filtered = registerAndFilter([
+            "read", "bash",
+            "goal_contract_create", "dag_synthesize",
+            "task_dispatch", "orchestrator_audit",
+            "Agent",
+        ]);
+        expect(filtered).toEqual([
+            "read", "bash",
+            "goal_contract_create", "dag_synthesize",
+            "task_dispatch", "orchestrator_audit",
+            "Agent",
+        ]);
     });
 });
 
@@ -146,18 +158,28 @@ describe("registerSagesExtension — Layer 2: bash write-intent gate", () => {
 });
 
 describe("registerSagesExtension — registration correctness", () => {
-    it("still registers all orchestrator + file-gate tools after adding gates", () => {
+    it("registers only the 4 orchestrator tools (no sages_write/sages_edit since f7144b2 + 633ca97)", () => {
         const mock = new MockPi();
         registerSagesExtension(mock as any);
         const toolNames = mock.registeredTools.map((t) => t.name).sort();
-        // 4 orchestrator + 2 file-gate = 6
         expect(toolNames).toEqual([
             "dag_synthesize",
             "goal_contract_create",
             "orchestrator_audit",
-            "sages_edit",
-            "sages_write",
             "task_dispatch",
         ]);
+    });
+
+    it("main agent toolset contains no direct write tools (forces Agent dispatch)", () => {
+        // Belt-and-suspenders: after dropping raw edit/write AND retiring
+        // sages_write/sages_edit, the LLM has no way to write any file
+        // directly. All edits must go through Agent dispatch. This is
+        // the "pure coordinator" design point.
+        const mock = new MockPi();
+        registerSagesExtension(mock as any);
+        const toolNames = mock.registeredTools.map((t) => t.name);
+        for (const writeLike of ["edit", "write", "sages_edit", "sages_write"]) {
+            expect(toolNames).not.toContain(writeLike);
+        }
     });
 });
