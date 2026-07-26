@@ -155,7 +155,7 @@ AGENT_DIR="$PI_DIR/agent"
   awk '/^SUBAGENT_TARGET_DIR=/' "$SCRIPT"
   awk '/^SUBAGENT_NAMES=/' "$SCRIPT"
   awk '/^SUBAGENT_SENTINEL_TEXT=/' "$SCRIPT"
-  for fn in is_subagent_template_installed backup_legacy_developer_template _atomic_copy install_subagent_templates uninstall_subagent_templates; do
+  for fn in is_subagent_template_installed backup_legacy_developer _atomic_copy install_subagent_templates uninstall_subagent_templates; do
     extract_fn "$fn"
   done
 } > "$TMPDIR4/subagent-fns.sh"

@@ -138,7 +138,7 @@ function Backup-PhaseASubagentTemplate {
 # is installed — only back up + classify. A Sages-managed legacy file is
 # removed after backup (the built-in makes it redundant); a user-customized
 # one remains authoritative and is preserved.
-function Backup-LegacyDeveloperTemplate {
+function Backup-LegacyDeveloper {
     $legacyName = "software-developer"
     $legacy = Join-Path $SUBAGENT_TARGET_DIR "$legacyName.md"
     if (-not (Test-Path $legacy)) { return }
@@ -171,7 +171,7 @@ function Install-SubagentTemplates {
     }
 
     $null = New-Item -ItemType Directory -Path $SUBAGENT_TARGET_DIR -Force -ErrorAction SilentlyContinue
-    Backup-LegacyDeveloperTemplate
+    Backup-LegacyDeveloper
 
     foreach ($name in $SUBAGENT_NAMES) {
         $template = Join-Path $SUBAGENT_TEMPLATE_DIR "$name.md"

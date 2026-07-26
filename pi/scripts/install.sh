@@ -529,7 +529,7 @@ is_subagent_template_installed() {
 # template is installed — only back up + classify. A Sages-managed legacy
 # file is removed after backup (the built-in makes it redundant); a
 # user-customized one remains authoritative and is preserved.
-backup_legacy_developer_template() {
+backup_legacy_developer() {
   local legacy_name="software-developer"
   local legacy="$SUBAGENT_TARGET_DIR/$legacy_name.md"
   [[ -f "$legacy" ]] || return 0
@@ -544,11 +544,16 @@ backup_legacy_developer_template() {
   fi
 
   cp "$legacy" "$backup_root/${legacy_name}.${ts}.md"
+  # canonical_name is the role's CURRENT canonical identifier (developer),
+  # not where the canonical lives — `reason` and the per-install
+  # `pi-subagents` route are the location hint. The legacy `subagent_name`
+  # is the historical filename the user might be migrating from.
   cat > "$backup_root/${legacy_name}.${ts}.md.meta" <<META_EOF
 classification: ${classification}
 install_time: ${ts}
 subagent_name: ${legacy_name}
 canonical_name: developer
+canonical_lives_in: pi-subagents (built-in)
 phase: A
 reason: previous developer-agent filename preserved; canonical developer is now built-in to pi-subagents
 META_EOF
@@ -593,7 +598,7 @@ install_subagent_templates() {
   fi
 
   mkdir -p "$SUBAGENT_TARGET_DIR"
-  backup_legacy_developer_template
+  backup_legacy_developer
 
   local name template target
   for name in "${SUBAGENT_NAMES[@]}"; do
