@@ -39,9 +39,9 @@ When you need to do work, pick the right subagent:
 
 | Task | Subagent | Why |
 |---|---|---|
-| **Edit meta-files** (AGENTS.md, README.md, install scripts, test files, `pi/src/tools/`, `pi/templates/`, `pi/skills/`) | `Agent({ subagent_type: "general-purpose" })` | No isolation; operates in your cwd; lightweight |
+| **Edit meta-files** — `.pi/orchestrator/*`, `pi/**`, `pi-*/**`, root docs/configs (see "Meta-File vs Production Code" below for the exact allowlist) | `Agent({ subagent_type: "general-purpose" })` | Path-policy allowlist; no isolation; operates in dispatcher's cwd; lightweight |
 | **Git operations** (add, commit, branch, status, log) | `Agent({ subagent_type: "general-purpose", isolated: true })` | `isolated: true` disables Sages extension → bash-guard hook does not fire → unrestricted bash |
-| **Production-code TDD** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`) | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline |
+| **Edit production code** — `src/*`, `test/*`, `lib/*`, `app/*`, `cmd/*`, `internal/*`, `pkg/*`, bare `*.ts`/`*.py`/etc. at root, anything not in the meta-file allowlist | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline; software-auditor evidence gate |
 | **Audit / verify** (certify changes, evidence collection) | `Agent({ subagent_type: "software-auditor" })` | Read-only; returns CERTIFIED / NEEDS WORK / BLOCKED |
 | **Quick read-only search** (where is X defined) | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast haiku model |
 | **Architecture design** | `Agent({ subagent_type: "Plan" })` | pi-subagents built-in; produces implementation steps |
@@ -54,6 +54,70 @@ Key rules:
 - The legacy `isolation: "worktree"` string is rejected by the Agent dispatcher - always use the object form.
 - For git ops or other direct-bash work that bash-guard blocks (e.g. `git add`), use `isolated: true`. This disables Sages extension loading entirely, so the bash-guard hook never registers. Subagent loses AFT / MCP / magic-context (not needed for git ops).
 - **Parallel-dispatch** independent sub-tasks: multiple `Agent` calls in one message, each `run_in_background: true`. Don't serialize when the tasks are independent.
+
+
+## Meta-File vs Production Code — Concrete Classification
+
+The dispatch contract (and `file-gate.ts`'s `canMainAgentWrite`)
+distinguish two classes of files. **Use this test to classify any
+path before picking a subagent**:
+
+### Meta-files (use `general-purpose`)
+
+Allowed paths (also enforced by `canMainAgentWrite` via
+`META_WRITE_PATTERNS`):
+
+| Pattern | Examples |
+|---|---|
+| `.pi/orchestrator/*` | `goal-GC-2026-008.yaml`, `dag-DAG-2026-008.yaml`, `audit-P1.md`, `designs/2026-07-26-foo.md` |
+| `pi/**` | `pi/src/tools/file-gate.ts`, `pi/test/orchestrator.test.ts`, `pi/skills/orchestrator/SKILL.md`, `pi/templates/SYSTEM.md`, `pi/scripts/install.sh` |
+| `pi-*/**` | `pi-subagents/src/default-agents.ts`, `pi-codebase-memory/src/index.ts`, `pi-graphify/templates/*`, `pi-evaluator/src/foo.py`, `pi-minimax/src/index.ts`, `pi-yunxiao/AGENTS.md` |
+| Top-level docs/configs | `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/` |
+
+### Production code (denied by default — requires `developer` + worktree)
+
+Denied paths (also enforced by `canMainAgentWrite` via
+`PRODUCTION_DENY_PATTERNS`):
+
+| Pattern | Examples |
+|---|---|
+| `src/**`, `lib/**`, `app/**`, `cmd/**`, `internal/**`, `pkg/**` | `src/index.ts`, `lib/auth.js`, `app/main.tsx`, `cmd/server/main.go` |
+| `test/**`, `tests/**` | `test/integration_test.ts`, `tests/test_foo.py` |
+| Bare extensions at root | `foo.ts`, `main.py`, `index.js`, `handler.go` |
+| **Anything else** — if you're not sure, it's production | — |
+
+### Concrete test
+
+Ask: **"Is this path inside one of the meta-file allowlist patterns above?"**
+
+- **Yes** → meta-file → dispatch `general-purpose` (or
+  `general-purpose` + `isolated: true` for git ops that bash-guard blocks)
+- **No, or unsure** → production → dispatch `developer` with managed
+  worktree `isolation: { dag_id, task_id, mode: "create" }`
+
+### Why this matters
+
+The orchestrator recently edited `pi-subagents/src/default-agents.ts`
+via `general-purpose` + a make-workaround commit. That was technically
+allowed (the path is inside `pi-*/**`, which is on the meta-file
+allowlist) but the dispatch should have used `developer` + worktree
+to preserve the TDD discipline and audit trail.
+
+**Default to `developer`** if the file is the kind of code that
+benefits from TDD:
+
+- Functions that take parameters and return values
+- Anything that has a test file alongside
+- Anything that imports from a non-trivial dependency
+- Anything you'd want to revert atomically
+
+**Default to `general-purpose`** for:
+
+- Pure documentation edits (no logic change)
+- Config tweaks (single-line)
+- Research / audit / verification (no edit)
+- Anything in `.pi/orchestrator/` you want to write directly
+  (though prefer the 4 orchestrator tools when they apply)
 
 
 ## Parallel Dispatch
@@ -197,6 +261,10 @@ operating in the dispatcher's cwd.
 The `canMainAgentWrite(path)` function in
 `pi/src/tools/file-gate.ts` is the single source of truth — it
 backs the bash-guard's path policy.
+
+For a detailed classification of which paths are meta-file vs
+production-code (with concrete examples), see
+**"Meta-File vs Production Code — Concrete Classification"** above.
 
 ---
 
