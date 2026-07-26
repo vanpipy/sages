@@ -6,6 +6,7 @@
 
 import { DEVELOPER_PROMPT } from "./agent-prompts/developer.js";
 import { EXPLORE_PROMPT } from "./agent-prompts/explore.js";
+import { GENERAL_PURPOSE_PROMPT } from "./agent-prompts/general-purpose.js";
 import { PLAN_PROMPT } from "./agent-prompts/plan.js";
 import type { AgentConfig } from "./types.js";
 
@@ -68,9 +69,10 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			// inheritContext / runInBackground / isolated omitted — strategy fields, callers decide per-call.
 			// Setting them to false would lock callsite intent (see resolveAgentInvocationConfig in invocation-config.ts).
 			extensions: true,
+			excludeExtensions: ["pi-subagents"],	// ← NEW: cannot recursively dispatch Agent tool
 			skills: true,
-			systemPrompt: "",
-			promptMode: "append",
+			systemPrompt: GENERAL_PURPOSE_PROMPT,	// ← NEW: explicit role constraint
+			promptMode: "replace",				// ← NEW: replace model default, don't append empty
 			isDefault: true,
 		},
 	],
