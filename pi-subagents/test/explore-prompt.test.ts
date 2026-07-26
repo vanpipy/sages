@@ -12,10 +12,20 @@ describe("explore-prompt: invariants", () => {
 		expect(EXPLORE_PROMPT).toContain("Modifying existing files");
 		expect(EXPLORE_PROMPT).toContain("Using redirect operators");
 	});
-	it("directs searches through find, grep, and read tools", () => {
-		expect(EXPLORE_PROMPT).toContain("find tool");
-		expect(EXPLORE_PROMPT).toContain("grep tool");
-		expect(EXPLORE_PROMPT).toContain("read tool");
+	it("instructs use of codebase_memory_search_graph for symbol lookup", () => {
+		expect(EXPLORE_PROMPT).toContain("codebase_memory_search_graph");
+		expect(EXPLORE_PROMPT).toMatch(/Named symbol lookup/i);
+	});
+	it("instructs use of aft_search for concept search", () => {
+		expect(EXPLORE_PROMPT).toContain("aft_search");
+		expect(EXPLORE_PROMPT).toMatch(/Concept \/ pattern search/i);
+	});
+	it("warns against using bash find/cat/grep (use AFT/MCP instead)", () => {
+		expect(EXPLORE_PROMPT).toContain("NOT for `find`/`cat`/`grep` (use AFT/MCP equivalents above)");
+	});
+	it("instructs use of ctx_search for past work", () => {
+		expect(EXPLORE_PROMPT).toContain("ctx_search");
+		expect(EXPLORE_PROMPT).toMatch(/Past work \/ memory/i);
 	});
 	it("requires absolute file paths", () => expect(EXPLORE_PROMPT).toMatch(/absolute file paths/i));
 	it("forbids emojis", () => expect(EXPLORE_PROMPT).toContain("Do not use emojis"));
