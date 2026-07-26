@@ -68,7 +68,20 @@ export interface DispatchTask {
   task_id: string;
   subagent_type: string;
   prompt: string;
-  isolation: "worktree" | "none";
+  /**
+   * Phase A P3 (DAG-2026-011) — managed-worktree isolation shape.
+   *
+   * Set to the explicit `{ dag_id, task_id, mode }` object for tasks
+   * that target the `developer` subagent (so the Agent dispatcher
+   * provisions a managed worktree). `undefined` for everything else
+   * (Explore / Plan / software-auditor / general-purpose).
+   *
+   * The legacy `"worktree"` string literal is NOT accepted by the
+   * Agent dispatcher — see `pi-subagents/src/worktree-contract.ts`.
+   */
+  isolation?:
+    | { dag_id: string; task_id: string; worktree_id?: string; mode: "create" | "reuse" }
+    | "none";
   run_in_background: boolean;
   model?: string;
   thinking?: "low" | "medium" | "high" | "xhigh";
@@ -139,7 +152,12 @@ export function buildDispatchPlan(
       subagent_type: t.subagent_type,
       // Inject upstream task outputs into the prompt
       prompt: injectUpstreamOutputs(plan, taskById, t),
-      isolation: t.isolation,
+      isolation:
+        t.subagent_type === "developer" || t.subagent_type === "software-developer"
+          ? (typeof t.isolation === "object" && t.isolation !== null
+              ? t.isolation
+              : { dag_id: plan.id, task_id: t.id, mode: "create" as const })
+          : undefined,
       run_in_background: t.run_in_background ?? defaultRunInBackground(t.subagent_type),
       wait_for: tasks.length > 1 ? "batch_completion" : "completion",
       report_path: `.pi/orchestrator/task-${t.id}-report.md`,

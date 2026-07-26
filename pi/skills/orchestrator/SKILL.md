@@ -105,7 +105,8 @@ For each batch (1 → N):
 1. Read the dispatch plan from task_dispatch output (or rebuild if needed)
 2. Spawn subagents in parallel (one Agent tool call per task in the batch):
    - Use run_in_background: true when batch has >1 task
-   - Use isolation: "worktree" for any task that edits code
+   - For `developer` tasks: use `isolation: { dag_id: DAG_ID, task_id: TASK_ID, mode: "create" }` (managed worktree object required by the Agent dispatcher)
+   - For other subagents (`general-purpose` / `software-auditor` / `Explore` / `Plan`): no `isolation` field (operate in dispatcher cwd)
    - The subagent receives its task's prompt from the dispatch plan
 3. Wait for all tasks in the batch to complete (get_subagent_result)
 4. Run orchestrator_audit({ dag_id, batch }) to verify the batch

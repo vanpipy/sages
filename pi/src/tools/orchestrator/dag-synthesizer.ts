@@ -44,7 +44,15 @@ export const TaskNodeSchema = Type.Object({
   files: Type.Array(Type.String(), { description: "Files this task touches" }),
   subagent_type: Type.String({ description: "Subagent role to dispatch to" }),
   batch: Type.Number({ description: "Concurrency group (1-based, contiguous)", minimum: 1 }),
-  isolation: Type.Union([Type.Literal("worktree"), Type.Literal("none")]),
+  isolation: Type.Optional(Type.Union([
+    Type.Literal("none"),
+    Type.Object({
+      dag_id: Type.String(),
+      task_id: Type.String(),
+      worktree_id: Type.Optional(Type.String()),
+      mode: Type.Union([Type.Literal("create"), Type.Literal("reuse")]),
+    }),
+  ])),
   tdd: Type.Union([Type.Literal("strict"), Type.Literal("none")]),
   /**
    * Optional per-task override for the dispatcher's `run_in_background`
