@@ -219,7 +219,7 @@ refactor(orchestrator): merge GC-2026-004 subagent persistence refactor
 Commit as the resolved git author (`git config user.{name,email}`,
 fallback `git log -1`). Never `--author=…` or `GIT_AUTHOR_*` env overrides.
 Audit gate rejects fabricated authors. Resolve script at
-`pi/templates/agents/developer.md` §Author (the canonical built-in content also lives in `pi-subagents/src/agent-prompts/developer.ts`).
+`pi-subagents/src/agent-prompts/developer.ts` Author (canonical built-in; the user-level template was retired when the in-prompt migration landed — Phase A DAG-2026-011).
 
 ### What's not committed
 

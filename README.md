@@ -2,10 +2,24 @@
 
 Multi-agent workflow system for [pi](https://pi.dev). A 4-tool
 orchestrator drives a Goal → DAG → Dispatch → Audit pipeline; TDD
-implementation and per-task auditing are delegated to
-`developer` (canonical) and `software-auditor` subagents spawned via
-the Agent tool from `@tintinweb/pi-subagents`. See [History](#history)
-for the project's Four-Sages mythology.
+implementation and per-task auditing are delegated to `developer` and
+`software-auditor` subagents spawned via the Agent tool from
+`@tintinweb/pi-subagents`. See [History](#history) for the project's
+Four-Sages mythology.
+
+## What's in this repo
+
+Sages is a monorepo of 7 npm packages:
+
+| Package | Purpose |
+|---|---|
+| `pi` | Main orchestrator (4-tool pipeline + 2 meta-file tools) |
+| `pi-subagents` | Agent tool (subagent lifecycle, worktrees) |
+| `pi-codebase-memory` | Code knowledge graph (MCP server) |
+| `pi-graphify` | Graph extraction skill |
+| `pi-evaluator` | Eval metrics (cost, security, text quality) |
+| `pi-minimax` | MiniMax AI integration |
+| `pi-yunxiao` | Alibaba Cloud DevOps integration |
 
 ## Architecture
 
@@ -16,109 +30,73 @@ dag_synthesize        →  .pi/orchestrator/dag-{id}.yaml
         ↓
 task_dispatch         →  Agent-call plan (LLM spawns)
         ↓
-developer             →  .pi/orchestrator/task-{id}-report.md
-software-auditor      →  .pi/orchestrator/audit-{task_id}.md
-        ↓
+developer / software-auditor (subagents) →  /tmp/pi-subagents-.../tasks/<id>.output
+        ↓                                      (L3 main agent writes summary to .pi/orchestrator/)
 orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
+
+(meta-file tools, path-gated:)
+sages_write / sages_edit  →  .pi/orchestrator/*, pi/*, pi-*/, root docs
 ```
 
-Sages owns the 4 orchestrator tools and all `.pi/orchestrator/*`
-files. Subagent spawning, worktree creation, background queueing, and
-result collection are owned by `@tintinweb/pi-subagents` (deliberate
-delegation boundary — Sages does not re-implement the Agent tool).
-
-`developer` (TDD: RED → GREEN → REFACTOR) and
-`software-auditor` (per-task certifier) are user-level agents shipped
-to `~/.pi/agent/agents/` by `pi/scripts/install.sh`. `Explore`,
-`Plan`, `general-purpose` are built-in.
+Sages owns the 4 orchestrator tools + 2 meta-file tools. Subagent
+spawning, worktree creation, background queueing, and result
+collection are owned by `@tintinweb/pi-subagents`. Full operational
+manual: [AGENTS.md](AGENTS.md).
 
 ## Installation
 
 ```bash
-# Quick install
+# Main orchestrator (required)
 curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | bash
 
-# Manual
-git clone https://github.com/vanpipy/sages.git
-cd sages && ./pi/scripts/install.sh
+# Subpackages (each has its own installer)
+./pi-{subagents,codebase-memory,graphify,evaluator,minimax,yunxiao}/scripts/install.sh
 ```
-
-The installer registers the 4 orchestrator tools, installs the
-orchestrator skill + system prompt, ships the two custom subagent
-templates, and adds the `@tintinweb/pi-subagents` npm dependency.
 
 ## Workflow
 
 | Stage | Tool | Output |
 |---|---|---|
-| 1 | `goal_contract_create({ id, success_criteria, anti_goals, scope, constraints, done_definition })` | `.pi/orchestrator/goal-{id}.yaml` |
-| 2 | `dag_synthesize({ goal_id, tasks: [...] })` | `.pi/orchestrator/dag-{id}.yaml` |
-| 3 | `task_dispatch({ dag_id, strategy })` | Agent-call plan (LLM spawns) |
-| 4 | `orchestrator_audit({ dag_id, batch?, task_id?, depth?, observation })` | `.pi/orchestrator/audit-workflow.md` |
-
-**Defaults**: `depth: "fast"` (3 phases ink/nose/foot; `full` adds
-castration/death). `run_in_background` is derived from
-`subagent_type` — Explore/Plan/general-purpose foreground,
-developer/software-auditor background. Override per task via
-`TaskNode.run_in_background`.
+| 1 | `goal_contract_create` | `goal-{id}.yaml` |
+| 2 | `dag_synthesize` | `dag-{id}.yaml` |
+| 3 | `task_dispatch` | Agent-call plan |
+| 4 | `orchestrator_audit` | `audit-workflow.md` |
 
 **Evidence gate** (cannot be bypassed): `verdict: "PASS"` requires
 `findings.length ≥ findings_required_min` (1 fast / 3 full) AND
-`workflowReady === true`; otherwise the tool auto-downgrades to
-`REVISE`.
+`workflowReady === true`; otherwise auto-downgrades to `REVISE`.
 
-## MDD Plane
-
-Each `TaskNode` carries an MDD `plane` (Business / Data / Control /
-Foundation / Observation / Security / Evolution) and `priority` for
-DAG auditing. The original four-sage workflow that authored
-`draft.md` files is gone.
-
-## Project Structure
-
-```
-sages/
-├── pi/
-│   ├── src/
-│   │   ├── extension.ts                  # entrypoint → registerOrchestratorTools
-│   │   ├── index.ts
-│   │   └── tools/
-│   │       ├── orchestrator/             # 4-tool surface + types + template renderer
-│   │       └── brainstorming/            # pre-design intent clarification
-│   ├── test/                              # 343 tests
-│   ├── skills/                            # orchestrator + brainstorming
-│   └── templates/                         # installed by install.sh to ~/.pi/agent/
-└── .pi/orchestrator/                      # runtime workspace (ephemeral)
-```
+For developers and security researchers, see [AGENTS.md](AGENTS.md).
 
 ## Development
 
 ```bash
 cd pi
-bun run typecheck       # 0 errors
-bun test ./test         # 343 pass
-bash test/install.test.sh  # all pass
+bun install && bun run typecheck && bun test   # 530 tests across 29 files
 ```
 
-All three must pass before committing. Imports: use `@/...` in
+Commit messages follow [Conventional Commits
+1.0.0](https://www.conventionalcommits.org/). Use `@/...` in
 `pi/test/`, relative paths in `pi/src/`.
 
 ## Security
 
 - No direct `node:fs` in production code — use `FileService`.
-- `.pi/orchestrator/` directory is `0o700`; audit state and report
-  files are `0o600`.
+- `.pi/orchestrator/` is `0o700`; audit state and reports are `0o600`.
 - No hardcoded models, no API keys in code.
+- L3 main agent has a two-layer hard threshold (path-gate + bash-guard)
+  preventing direct writes to user production code.
+
+For the full security model (write policy, hard threshold, three-tier
+agent model), see [AGENTS.md](AGENTS.md).
 
 ## History
 
-The project name and agent-titles reference Chinese mythology
-(Fuxi / QiaoChui / LuBan / GaoYao). The current runtime is the
-4-tool DAG-based orchestrator documented above; the legacy role-named
-tools and `.sages/workspace/` storage were removed in a
-`simplify-actions` refactor. Regression-guarded by
-`pi/test/post-tool-removal.test.ts`.
+Earlier versions exposed four role-named tools (`fuxi_*`, `qiaoChui_*`,
+`luban_*`, `gaoyao_*`) plus an FSM-style orchestrator, with state
+under `.sages/workspace/`. Removed in a `simplify-actions` refactor
+(2026-07-24). Regression-guarded by `pi/test/post-tool-removal.test.ts`.
 
 ## License
 
-MIT
+`MIT` — see [LICENSE](LICENSE).
