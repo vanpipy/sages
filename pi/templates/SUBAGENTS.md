@@ -18,7 +18,7 @@ identity from `~/.pi/agent/agents/<name>.md`).
 
 The orchestrator dispatches subagents based on the task shape:
 
-- **Meta-files / git ops / research / lightweight tasks** → `general-purpose` (no isolation). For git ops, also pass `isolated: true` to bypass the bash-guard. For git ops, also pass `isolated: true` to bypass the bash-guard.
+- **Meta-files / git ops / research / lightweight tasks** → `general-purpose`. For git ops, also pass `isolated: true` to bypass the bash-guard. **Dispatch independent tasks in parallel** (multiple `Agent` calls in one message, each `run_in_background: true`).
 - **Production-code TDD work** → `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree)
 - **Audit / verify** → `software-auditor` (read-only, evidence-based)
 - **Quick search / architecture design** → `Explore` / `Plan` (pi-subagents built-ins)
@@ -231,6 +231,55 @@ Agent({
 })
 // Subagent reports the SHA; main verifies with git log --oneline -2
 ```
+
+### Example 5: parallel dispatch (3 independent tasks)
+
+```ts
+// L3 main agent — 3 independent investigations, all in parallel
+Agent({
+  subagent_type: "general-purpose",
+  prompt: "Verify commit A passes tests. Run bun test pi/test/.",
+  description: "Verify commit A",
+  run_in_background: true,
+})
+Agent({
+  subagent_type: "general-purpose",
+  prompt: "Verify commit B passes tests. Run bun test pi-subagents/test/.",
+  description: "Verify commit B",
+  run_in_background: true,
+})
+Agent({
+  subagent_type: "general-purpose",
+  isolated: true,
+  prompt: "Commit pending changes with proper message.",
+  description: "Commit pending changes",
+  run_in_background: true,
+})
+// Main agent continues, collects results via notification or get_subagent_result()
+```
+
+Anti-pattern:
+
+```ts
+// ✗ serial — each call blocks until subagent finishes
+const r1 = await Agent({ subagent_type: "general-purpose", prompt: "Verify A" })
+const r2 = await Agent({ subagent_type: "general-purpose", prompt: "Verify B" })
+// total wall time = T(A) + T(B)
+```
+
+```ts
+// ✓ parallel — total wall time = max(T(A), T(B))
+Agent({ ..., prompt: "Verify A", run_in_background: true })
+Agent({ ..., prompt: "Verify B", run_in_background: true })
+```
+
+### When to use foreground vs background
+
+| Pattern | When |
+|---|---|
+| **Parallel background** | Multiple independent sub-tasks (most common) |
+| **Single foreground** | Result feeds next decision, task is short, no parallel work |
+| **Background + get_subagent_result** | Long-running, need explicit polling |
 
 ### Composing a DAG
 

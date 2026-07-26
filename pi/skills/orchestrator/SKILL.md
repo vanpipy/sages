@@ -130,6 +130,21 @@ The legacy `isolation: "worktree"` string literal is **rejected** by the current
 
 > **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / graphify / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block.
 
+### Parallelism
+
+When dispatching multiple sub-tasks for a single workflow stage:
+
+```ts
+// ✓ one message, multiple background calls
+Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true })
+Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true })
+Agent({ subagent_type: "developer", isolation: {...}, prompt: "...", run_in_background: true })
+```
+
+Don't serialize when tasks are independent. Foreground is the default for `general-purpose`/`Explore`/`Plan` because the system expects these to be short helper tasks where the result feeds the next decision — use it deliberately for that case.
+
+Background is the default for `developer`/`software-auditor` (5-10 min TDD / audit) — collect results via notification or `get_subagent_result()`.
+
 
 **Dispatch patterns**
 

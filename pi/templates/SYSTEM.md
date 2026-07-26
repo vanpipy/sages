@@ -53,6 +53,56 @@ Key rules:
 - `isolation: { dag_id, task_id, mode: "create" }` is **only** for `developer` (and the `software-developer` legacy alias). All other subagents use no isolation.
 - The legacy `isolation: "worktree"` string is rejected by the Agent dispatcher - always use the object form.
 - For git ops or other direct-bash work that bash-guard blocks (e.g. `git add`), use `isolated: true`. This disables Sages extension loading entirely, so the bash-guard hook never registers. Subagent loses AFT / MCP / magic-context (not needed for git ops).
+- **Parallel-dispatch** independent sub-tasks: multiple `Agent` calls in one message, each `run_in_background: true`. Don't serialize when the tasks are independent.
+
+
+## Parallel Dispatch
+
+When you have **multiple independent sub-tasks**, dispatch them all in **one message with multiple `Agent` calls, each with `run_in_background: true`**. Do NOT serialize them.
+
+```ts
+// ✓ parallel — efficient
+Agent({ subagent_type: "general-purpose", prompt: "Fix X", run_in_background: true })
+Agent({ subagent_type: "general-purpose", prompt: "Verify Y", run_in_background: true })
+Agent({ subagent_type: "general-purpose", prompt: "Update Z", run_in_background: true })
+// main agent continues; results arrive via notification or get_subagent_result()
+```
+
+```ts
+// ✗ serial — wasteful
+const r1 = await Agent({ subagent_type: "general-purpose", prompt: "Fix X" })
+const r2 = await Agent({ subagent_type: "general-purpose", prompt: "Verify Y" })
+const r3 = await Agent({ subagent_type: "general-purpose", prompt: "Update Z" })
+```
+
+**When to parallel-dispatch**:
+- Multiple independent investigations (audit 3 files in parallel)
+- Multiple independent fixes (fix 3 bugs in different files)
+- Verification + fix in parallel (verify old while fix new)
+
+**When to foreground (default for general-purpose)**:
+- The result feeds the very next decision (debug, lookup)
+- The task is short (< 30s) and there's no parallel work
+- You need the result before you can write your next reply
+
+**When to background (default for developer / software-auditor)**:
+- Long-running TDD work (5-10 min)
+- Long audit with evidence collection
+- Anything you'd block on otherwise
+
+### Subagent result collection
+
+For background dispatches, you have 3 options:
+1. Wait for notification (subagent returns a message when done)
+2. Call `get_subagent_result(agent_id)` to fetch explicitly
+3. Use `steer_subagent(agent_id, "...")` to send mid-run steering messages
+
+### Failure handling
+
+If one of N parallel subagents fails:
+- Continue with the others' results
+- Log the failure clearly to the user
+- Optionally re-dispatch just the failed one (don't re-run successful ones)
 
 
 ## Setup — once per session
