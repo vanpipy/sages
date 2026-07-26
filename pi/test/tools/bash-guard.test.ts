@@ -92,13 +92,14 @@ describe("shouldBlockBashCommand — 15 design cases", () => {
 		expect(r.reason).toContain("Unknown bash command");
 	});
 
-	it("T14: # sages:safe\\npython3 -c \"...\" → block:false (escape hatch)", () => {
+	it("T14: python3 -c \"...\" > block:true (unknown + no extractable target; previously bypassed via escape hatch)", () => {
 		const r = shouldBlockBashCommand(
-			`# sages:safe\npython3 -c "import os; os.remove('src/x.ts')"`,
+			`python3 -c "import os; os.remove('src/x.ts')"`,
 			CTX,
 		);
-		expect(r.block).toBe(false);
-	});
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("Unknown bash command");
+		});
 
 	it("T15: sed -i 's/a/b/' src/foo.ts → block:true (sed -i is write-intent)", () => {
 		const r = shouldBlockBashCommand(`sed -i 's/a/b/' src/foo.ts`, CTX);
@@ -156,13 +157,14 @@ describe("shouldBlockBashCommand — chained commands (T16–T22)", () => {
 		expect(r.reason).toContain("src/foo.ts");
 	});
 
-	it("T22: `# sages:safe\\nrm src/foo.ts && echo done` → allow (escape hatch wins first)", () => {
+	it("T22: `rm src/foo.ts && echo done` > block (chained segment split, no escape hatch)", () => {
 		const r = shouldBlockBashCommand(
-			"# sages:safe\nrm src/foo.ts && echo done",
+			`rm src/foo.ts && echo done`,
 			CTX,
 		);
-		expect(r.block).toBe(false);
-	});
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+		});
 
 	it("T23: `echo \"rm src/foo.ts\" && echo done` → allow (rm is in quoted string, not a command)", () => {
 		const r = shouldBlockBashCommand(
@@ -215,25 +217,25 @@ describe("shouldBlockBashCommand — chained commands (T16–T22)", () => {
 		expect(r.reason).toContain("src/foo.ts");
 	});
 
-	it("T25b: `# sages:safe\\nperl -e \"unlink 'src/foo.ts'\"` → allow (escape hatch wins first)", () => {
-		// Regression guard: the new perl case must not bypass the
-		// `# sages:safe` escape hatch — it runs before classification.
+	it("T25b: `perl -e \"unlink 'src/foo.ts'\"` > block (F4-1 perl path extraction)", () => {
+		// Regression guard: the perl case extracts path-like strings
+		// from quoted content and surfaces them as production targets.
 		const r = shouldBlockBashCommand(
-			`# sages:safe\nperl -e "unlink 'src/foo.ts'"`,
+			`perl -e "unlink 'src/foo.ts'"`,
 			CTX,
 		);
-		expect(r.block).toBe(false);
-	});
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+		});
 
-	it("T26b: `# sages:safe\\necho x 2> src/foo.ts` → allow (escape hatch wins first)", () => {
-		// Regression guard: the new fd-redirect handling must not
-		// bypass the `# sages:safe` escape hatch.
+	it("T26b: `echo x 2> src/foo.ts` > block (F4-2 fd-redirect detection)", () => {
 		const r = shouldBlockBashCommand(
-			`# sages:safe\necho x 2> src/foo.ts`,
+			`echo x 2> src/foo.ts`,
 			CTX,
 		);
-		expect(r.block).toBe(false);
-	});
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+		});
 
 	it("T26c: `echo x 2>&1` → allow (fd duplication, not a file redirect)", () => {
 		// Regression guard: fd duplication (stderr → stdout) must NOT
@@ -361,8 +363,4 @@ describe("shouldBlockBashCommand — reason format", () => {
 		expect(r.reason!.toLowerCase()).toContain("developer");
 	});
 
-	it("mentions the # sages:safe escape hatch in production-target case", () => {
-		const r = shouldBlockBashCommand("rm src/foo.ts", CTX);
-		expect(r.reason).toContain("# sages:safe");
-	});
 });

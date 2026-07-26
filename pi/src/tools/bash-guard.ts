@@ -70,8 +70,6 @@ const READ_ONLY_GIT_SUBCOMMANDS = new Set([
 	"status", "log", "diff", "show", "branch",
 ]);
 
-/** Escape hatch prefix; the entire command bypasses the guard. */
-const ESCAPE_HATCH = "# sages:safe";
 
 /**
  * Shared redirect-detector prefix. Matches any file-redirect:
@@ -367,19 +365,23 @@ export function extractBashTargets(command: string): string[] {
  * Decide whether to block a bash command.
  *
  * Rules (in order):
- *   1. `# sages:safe` prefix (after trim) → never block (escape hatch).
- *   2. Split into chained segments on top-level `&&` / `||` / `;`.
+ *   1. Split into chained segments on top-level `&&` / `||` / `;`.
  *      Walk each segment independently: a write-intent command chained
  *      after a read-only command (e.g. `echo done && rm src/foo.ts`)
  *      still trips the gate. See `splitChainedCommands` for the
  *      segmenter and T16–T22 in `bash-guard.test.ts` for coverage.
- *   3. If ANY segment is write-intent with a denied target → block
+ *   2. If ANY segment is write-intent with a denied target → block
  *      with the long reason naming the union of denied targets.
- *   4. If ANY segment is `unknown` with no extractable targets → block
- *      with the short "Unknown bash command; prefix with '# sages:safe'"
- *      reason (forces the LLM to opt in explicitly).
- *   5. Otherwise → allow (all segments read-only OR write-intent to
+ *   3. If ANY segment is `unknown` with no extractable targets → block
+ *      with the short "Unknown bash command; dispatch a subagent or
+ *      rephrase with known-safe commands" reason.
+ *   4. Otherwise → allow (all segments read-only OR write-intent to
  *      non-production paths).
+ *
+ * There is no escape hatch. The main agent cannot bypass this gate via
+ * `bash`. All file writes (meta-file or production) must go through
+ * `Agent` dispatch (`general-purpose` for meta-files, `developer` with
+ * managed worktree for production code).
  *
  * The `ctx` parameter is accepted for symmetry with the file-gate
  * `execute*` signatures and to give the wiring a future place to
@@ -391,12 +393,7 @@ export function shouldBlockBashCommand(
 ): BashGuardDecision {
 	const trimmed = command.trimStart();
 
-	// 1. Escape hatch — opt-in bypass for genuinely safe commands.
-	if (trimmed.startsWith(ESCAPE_HATCH)) {
-		return { block: false };
-	}
-
-	// 2. Split into top-level chained segments (handles &&, ||, ;
+	// 1. Split into top-level chained segments (handles &&, ||, ;
 	//    respecting quotes + paren/brace nesting).
 	const segments = splitChainedCommands(trimmed);
 
@@ -440,20 +437,20 @@ export function shouldBlockBashCommand(
 		}
 	}
 
-	// 3. Any denied target → block with the long reason.
+	// 2. Any denied target → block with the long reason.
 	if (deniedTargets.length > 0) {
 		return { block: true, reason: formatBlockReason(deniedTargets) };
 	}
 
-	// 4. Any unknown-no-target segment → force opt-in via escape hatch.
+	// 3. Any unknown-no-target segment → block (no escape hatch; main agent must dispatch a subagent or rephrase).
 	if (sawUnknown) {
 		return {
 			block: true,
-			reason: "Unknown bash command; prefix with '# sages:safe' to bypass",
+			reason: "Unknown bash command; dispatch a subagent via Agent or rephrase with known-safe commands",
 		};
 	}
 
-	// 5. All segments either read-only or write-intent to non-production
+	// 4. All segments either read-only or write-intent to non-production
 	//    paths (e.g. `/tmp/...`) → allow.
 	return { block: false };
 }
@@ -600,8 +597,9 @@ function formatBlockReason(targets: string[]): string {
 		"    run_in_background: true,",
 		"  })",
 		"",
-		"Or, if this command is genuinely safe (e.g. writing to /tmp),",
-		"prefix the command with:  # sages:safe",
+		"There is no escape hatch. If this command is genuinely safe",
+		"(e.g. writing to /tmp), rephrase the command or dispatch a",
+		"subagent via Agent.",
 	];
 	return lines.join("\n");
 }

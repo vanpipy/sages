@@ -127,8 +127,7 @@ Two mechanical enforcements fire regardless of how the prompt is framed:
   for any other write).
 - **Layer 2 — Bash write-intent gate** (`tool_call`): every bash command
   passes through `shouldBlockBashCommand()` in
-  `pi/src/tools/bash-guard.ts`. Writes to production code are blocked;
-  `# sages:safe` is the escape hatch.
+  `pi/src/tools/bash-guard.ts`. Writes to production code are blocked.
 
 Both layers share `canMainAgentWrite()` from `pi/src/tools/file-gate.ts`
 as single source of truth.

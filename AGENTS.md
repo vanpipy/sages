@@ -237,15 +237,14 @@ pi.on("tool_call", (event: any, ctx: any) => {
 
 `shouldBlockBashCommand` (in `pi/src/tools/bash-guard.ts`):
 
-1. If command (after `trim`) starts with `# sages:safe` → allow (escape hatch)
-2. Classify command (`read-only` / `write-intent` / `unknown`)
-3. Extract target paths from write-intent commands (`rm`, `mv`, `cp`,
+1. Classify command (`read-only` / `write-intent` / `unknown`)
+2. Extract target paths from write-intent commands (`rm`, `mv`, `cp`,
    `sed -i`, `tee`, `perl -pi`, shell redirects `>` `>>` + `N>file`,
    `git checkout --`, `git restore`, `git rm`, `git clean -fd`,
    `find -delete`, `tar -xf`)
-4. For each target, call `canMainAgentWrite(target)` — same function
+3. For each target, call `canMainAgentWrite(target)` — same function
    the path gate uses
-5. Block if any target is denied, with a redirect message naming the
+4. Block if any target is denied, with a redirect message naming the
    target paths + the dispatch instruction
 
 39 design test cases (`pi/test/tools/bash-guard.test.ts` T1–T39) cover
