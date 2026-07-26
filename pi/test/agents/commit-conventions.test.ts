@@ -1,5 +1,10 @@
 /**
- * Tests for the Commit Conventions section in developer.md.
+ * Tests for the Commit Conventions section in the developer agent prompt.
+ *
+ * Phase A (DAG-2026-011): the canonical `developer` agent lives as a
+ * pi-subagents built-in (see `pi-subagents/src/agent-prompts/developer.ts`
+ * and `pi-subagents/src/default-agents.ts`). The user-level template was
+ * retired; these tests now read the built-in prompt file directly.
  *
  * The section encodes two non-negotiable constraints:
  *   1. Every commit MUST follow Conventional Commits 1.0.0
@@ -9,20 +14,20 @@
  *      invented. Fabricated authors break `git blame`, release tooling,
  *      and the audit trail.
  *
- * These tests catch the rules by reading the shipped template and
+ * These tests catch the rules by reading the shipped prompt and
  * asserting key strings are present. They do NOT spawn a sub-agent
  * (that's covered by manual smoke + the orchestrator's evidence gate).
- *
- * RED phase — these tests fail until the section is added.
  */
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const AGENT_PATH = join(__dirname, "..", "..", "templates", "agents", "developer.md");
+// Phase A: developer is built-in to pi-subagents. Read from the source tree.
+const REPO_ROOT = resolve(__dirname, "..", "..");
+const AGENT_PATH = join(REPO_ROOT, "..", "pi-subagents", "src", "agent-prompts", "developer.ts");
 
 const TEXT = readFileSync(AGENT_PATH, "utf-8");
 

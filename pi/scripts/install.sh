@@ -35,17 +35,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 
 # Subagent template install info.
-# Source: pi/templates/agents/{developer,software-auditor}.md (git-tracked)
+# Source: pi/templates/agents/software-auditor.md (git-tracked)
 # Target: $AGENT_DIR/agents/ — global agent definitions loaded by pi-subagents.
-# Used by sages orchestrator workflow to spawn sub-agents by name
-# (subagent_type="developer" / "software-auditor"). Without these,
-# the orchestrator's Agent tool calls fail with "unknown agent" errors.
+# Used by sages orchestrator workflow to spawn the software-auditor subagent.
+# Without this, the orchestrator's Agent tool calls fail with "unknown agent".
 #
-# Phase A P3 (DAG-2026-011): `developer.md` is the canonical template.
-# Before installing it, an existing legacy `software-developer.md` is
-# classified and backed up under `$AGENT_DIR/agents/.phase-a-migration/`.
-# User-customized legacy files stay in place; Sages-managed legacy files are
-# removed after backup so alias resolution reaches canonical `developer`.
+# Phase A (DAG-2026-011) complete: `developer` is a canonical built-in in
+# pi-subagents (see `pi-subagents/src/default-agents.ts`). The user-level
+# template is no longer shipped. Users with customizations can drop a `.md`
+# of the same name into `.pi/agents/` (project-level) or
+# `~/.pi/agent/agents/` (global) to override the built-in.
+#
+# Phase A's legacy migration (software-developer.md → developer) is reduced
+# to "back up + classify": no canonical install, since the built-in handles
+# `developer` via the alias. User-customized legacy stays in place; Sages-
+# managed legacy is removed after backup (the built-in makes it redundant).
+#
 # Phase B (out of scope) will migrate `software-auditor` to `auditor` with
 # the same playbook.
 #
@@ -58,18 +63,13 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 #
 #   Stage 1  Explore              ← pi-subagents built-in (no install)
 #   Stage 2  Plan                 ← pi-subagents built-in (no install)
-#   Stage 3  developer            ← canonical; pi-subagents built-in
-#                                   (legacy alias `software-developer`
-#                                    also accepted via the alias metadata)
+#   Stage 3  developer            ← pi-subagents built-in (no install;
+#                                   legacy alias `software-developer`
+#                                   also accepted via the alias metadata)
 #   Stage 4  software-auditor     ← shipped via SUBAGENT_NAMES below
-#
-# We ship canonical `developer.md` plus `software-auditor.md` (the auditor
-# rename is Phase B). The matching canonical developer identity also ships
-# inside pi-subagents; the user-level template remains available for explicit
-# customization without reviving the deprecated filename.
 SUBAGENT_TEMPLATE_DIR="$SCRIPT_DIR/../templates/agents"
 SUBAGENT_TARGET_DIR="$AGENT_DIR/agents"
-SUBAGENT_NAMES=("software-auditor" "developer")
+SUBAGENT_NAMES=("software-auditor")
 
 # Subagent pipeline doc — installed to $AGENT_DIR/SUBAGENTS.md alongside
 # the agent .md files. Plain markdown, NOT parsed by pi-subagents (it only
@@ -505,8 +505,10 @@ install_system_prompt() {
 
 # ────────────────────────────────────────────────────────────
 # Subagent templates (pi-subagents' global agent definitions)
-# Source: pi/templates/agents/{developer,software-auditor}.md
+# Source: pi/templates/agents/software-auditor.md
 # Target: $SUBAGENT_TARGET_DIR/ — where pi-subagents loads agents by name.
+# (developer is built-in to pi-subagents; see DEVELOPER_AGENT in
+#  pi-subagents/src/default-agents.ts.)
 # ────────────────────────────────────────────────────────────
 
 # Sentinel marker stamped into every template body (see templates/agents/*.md).
@@ -522,9 +524,11 @@ is_subagent_template_installed() {
   [[ -f "$file" ]] && grep -q "$SUBAGENT_SENTINEL_TEXT" "$file" 2>/dev/null
 }
 
-# Phase A migration helper. Preserve the previous filename before canonical
-# `developer.md` is installed. A Sages-managed legacy file can be removed after
-# backup; a user-customized one remains authoritative and is only classified.
+# Phase A migration helper. Preserve the previous developer filename. Since
+# the canonical developer is now built-in to pi-subagents, NO canonical
+# template is installed — only back up + classify. A Sages-managed legacy
+# file is removed after backup (the built-in makes it redundant); a
+# user-customized one remains authoritative and is preserved.
 backup_legacy_developer_template() {
   local legacy_name="software-developer"
   local legacy="$SUBAGENT_TARGET_DIR/$legacy_name.md"
@@ -546,12 +550,12 @@ install_time: ${ts}
 subagent_name: ${legacy_name}
 canonical_name: developer
 phase: A
-reason: previous developer-agent filename preserved before canonical template install
+reason: previous developer-agent filename preserved; canonical developer is now built-in to pi-subagents
 META_EOF
 
   if [[ "$classification" = "sages-managed" ]]; then
     rm -f "$legacy"
-    echo "  Migrated $legacy_name.md to developer.md (backup: .phase-a-migration/${legacy_name}.${ts}.md)"
+    echo "  Removed legacy $legacy_name.md (sages-managed) — developer is now built-in (backup: .phase-a-migration/${legacy_name}.${ts}.md)"
   else
     echo "  $legacy_name.md is user-customized — backed up to .phase-a-migration/${legacy_name}.${ts}.md and left in place"
   fi

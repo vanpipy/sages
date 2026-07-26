@@ -35,14 +35,15 @@ $REPO_URL = "https://github.com/vanpipy/sages.git"
 $AGENT_DIR = "$PI_DIR\agent"
 
 # Subagent template install info (mirrors install.sh).
-# Source: pi/templates/agents/{developer,software-auditor}.md
+# Source: pi/templates/agents/software-auditor.md
 # Target: $AGENT_DIR\agents\ — global agent definitions loaded by pi-subagents.
-# Without these, sages' orchestrator can't dispatch developer / software-auditor
-# subagents by name. The 2 built-in agents (Explore, Plan) come from pi-subagents
-# and need no install — see also SUBAGENTS.md for the full 4-agent pipeline.
+# Without this, sages' orchestrator can't dispatch the software-auditor
+# subagent by name. The 3 built-in agents (developer, Explore, Plan) come
+# from pi-subagents and need no install — see also SUBAGENTS.md for the
+# full 4-agent pipeline.
 $SUBAGENT_TEMPLATE_DIR = Join-Path (Split-Path -Parent $PSCommandPath) "..\templates\agents"
 $SUBAGENT_TARGET_DIR = "$AGENT_DIR\agents"
-$SUBAGENT_NAMES = @("software-auditor", "developer")
+$SUBAGENT_NAMES = @("software-auditor")
 $SUBAGENT_SENTINEL = "SAGES_TEMPLATE_V1"
 
 # Subagent pipeline doc — installed alongside agent .md files. Plain markdown,
@@ -132,9 +133,11 @@ function Backup-PhaseASubagentTemplate {
     return $backupName
 }
 
-# Migrate the previous developer filename. User customizations remain in place;
-# Sages-managed legacy content is removed after the backup so the canonical
-# `developer` alias path cannot be shadowed by an obsolete roster entry.
+# Phase A migration: preserve the previous developer filename. Since the
+# canonical developer is now built-in to pi-subagents, NO canonical template
+# is installed — only back up + classify. A Sages-managed legacy file is
+# removed after backup (the built-in makes it redundant); a user-customized
+# one remains authoritative and is preserved.
 function Backup-LegacyDeveloperTemplate {
     $legacyName = "software-developer"
     $legacy = Join-Path $SUBAGENT_TARGET_DIR "$legacyName.md"
@@ -146,13 +149,13 @@ function Backup-LegacyDeveloperTemplate {
         -File $legacy `
         -Name $legacyName `
         -Classification $classification `
-        -Reason "previous developer-agent filename preserved before canonical template install"
+        -Reason "previous developer-agent filename preserved; canonical developer is now built-in to pi-subagents"
 
     if ($managed) {
         Remove-Item -Force $legacy
-        Write-Host "  Migrated $legacyName.md to developer.md (backup: .phase-a-migration/$backupName)"
+        Write-Host "  Removed legacy $legacyName.md (sages-managed) - developer is now built-in (backup: .phase-a-migration/$backupName)"
     } else {
-        Write-Host "  $legacyName.md is user-customized — backed up to .phase-a-migration/$backupName and left in place"
+        Write-Host "  $legacyName.md is user-customized - backed up to .phase-a-migration/$backupName and left in place"
     }
 }
 

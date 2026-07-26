@@ -19,7 +19,9 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const TEMPLATES_DIR = join(__dirname, "..", "templates", "agents");
-const FILES = ["developer.md", "software-auditor.md"];
+// `developer` is built-in to pi-subagents (Phase A complete); only
+// software-auditor is shipped as a user-level template.
+const FILES = ["software-auditor.md"];
 
 // Minimal frontmatter parse matching pi's `--- YAML --- body` convention.
 function extractFrontmatter(text: string): string | null {
@@ -90,6 +92,6 @@ describe("shipped subagent frontmatter (no third-party deps)", () => {
 
   it("agents directory lists exactly the expected files", () => {
     const entries = readdirSync(TEMPLATES_DIR).sort();
-    expect(entries).toEqual(["developer.md", "software-auditor.md"]);
+    expect(entries).toEqual(["software-auditor.md"]);
   });
 });

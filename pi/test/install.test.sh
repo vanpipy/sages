@@ -87,19 +87,15 @@ source "$TMPDIR/pi-codebase-memory-fns.sh"
 
 SUBAGENT_TEMPLATES_DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)/templates/agents"
 
-# Test T4.1: both template files exist
-for f in software-auditor.md developer.md; do
-  test -f "$SUBAGENT_TEMPLATES_DIR/$f" \
-    || { echo "❌ FAIL: template missing: $SUBAGENT_TEMPLATES_DIR/$f"; exit 1; }
-done
-echo "✅ PASS: templates/agents/{software-auditor,developer}.md exist"
+# Test T4.1: shipped template file exists (developer is built-in to pi-subagents)
+test -f "$SUBAGENT_TEMPLATES_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: template missing: $SUBAGENT_TEMPLATES_DIR/software-auditor.md"; exit 1; }
+echo "✅ PASS: templates/agents/software-auditor.md exists"
 
-# Test T4.2: both templates carry SAGES_TEMPLATE_V1 sentinel
-for f in software-auditor.md developer.md; do
-  grep -q 'SAGES_TEMPLATE_V1' "$SUBAGENT_TEMPLATES_DIR/$f" \
-    || { echo "❌ FAIL: template $f missing sentinel"; exit 1; }
-done
-echo "✅ PASS: both templates carry SAGES_TEMPLATE_V1 sentinel"
+# Test T4.2: shipped template carries SAGES_TEMPLATE_V1 sentinel
+grep -q 'SAGES_TEMPLATE_V1' "$SUBAGENT_TEMPLATES_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: template software-auditor.md missing sentinel"; exit 1; }
+echo "✅ PASS: software-auditor.md carries SAGES_TEMPLATE_V1 sentinel"
 
 # Test T4.3: SUBAGENT_* constants defined
 for c in SUBAGENT_TEMPLATE_DIR SUBAGENT_TARGET_DIR SUBAGENT_NAMES SUBAGENT_SENTINEL_TEXT; do
@@ -178,40 +174,37 @@ test "$SUBAGENT_TEMPLATE_DIR_CANONICAL" = "$SUBAGENT_TEMPLATES_DIR_CANONICAL" \
   || { echo "❌ FAIL: SUBAGENT_TEMPLATE_DIR (canonical=$SUBAGENT_TEMPLATE_DIR_CANONICAL) != $SUBAGENT_TEMPLATES_DIR_CANONICAL"; exit 1; }
 echo "✅ PASS: SUBAGENT_TEMPLATE_DIR resolves to pi/templates/agents"
 
-# Test T4.10: SUBAGENT_NAMES has the 2 expected agents in canonical order
-[[ "${#SUBAGENT_NAMES[@]}" -eq 2 ]] \
-  || { echo "❌ FAIL: SUBAGENT_NAMES has ${#SUBAGENT_NAMES[@]} entries, expected 2"; exit 1; }
+# Test T4.10: SUBAGENT_NAMES has the 1 expected agent (Phase A complete:
+# developer is built-in to pi-subagents, not shipped here)
+[[ "${#SUBAGENT_NAMES[@]}" -eq 1 ]] \
+  || { echo "❌ FAIL: SUBAGENT_NAMES has ${#SUBAGENT_NAMES[@]} entries, expected 1"; exit 1; }
 [[ "${SUBAGENT_NAMES[0]}" = "software-auditor" ]] \
-  && [[ "${SUBAGENT_NAMES[1]}" = "developer" ]] \
-  || { echo "❌ FAIL: SUBAGENT_NAMES = (${SUBAGENT_NAMES[*]}), expected (software-auditor developer)"; exit 1; }
-echo "✅ PASS: SUBAGENT_NAMES = (software-auditor developer)"
+  || { echo "❌ FAIL: SUBAGENT_NAMES = (${SUBAGENT_NAMES[*]}), expected (software-auditor)"; exit 1; }
+echo "✅ PASS: SUBAGENT_NAMES = (software-auditor)"
 
-# Test T4.11: behavioral — install_subagent_templates creates both files
+# Test T4.11: behavioral — install_subagent_templates creates the shipped file
 mkdir -p "$SUBAGENT_TARGET_DIR"
 test ! -e "$SUBAGENT_TARGET_DIR/software-auditor.md" \
   || { echo "❌ FAIL: pre-test: target already has software-auditor.md"; exit 1; }
 
 install_subagent_templates
 
-for name in software-auditor developer; do
-  test -f "$SUBAGENT_TARGET_DIR/$name.md" \
-    || { echo "❌ FAIL: install did not create $name.md"; exit 1; }
-done
-echo "✅ PASS: install_subagent_templates creates both agent files when missing"
+test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: install did not create software-auditor.md"; exit 1; }
+# developer.md is NOT installed — the canonical developer is built-in to pi-subagents
+test ! -f "$SUBAGENT_TARGET_DIR/developer.md" \
+  || { echo "❌ FAIL: install should NOT create developer.md (built-in to pi-subagents)"; exit 1; }
+echo "✅ PASS: install_subagent_templates creates software-auditor.md and does NOT create developer.md"
 
-# Test T4.12: installed files match templates byte-for-byte
-for name in software-auditor developer; do
-  diff -q "$SUBAGENT_TEMPLATE_DIR/$name.md" "$SUBAGENT_TARGET_DIR/$name.md" > /dev/null \
-    || { echo "❌ FAIL: $name.md content mismatch with template"; diff "$SUBAGENT_TEMPLATE_DIR/$name.md" "$SUBAGENT_TARGET_DIR/$name.md"; exit 1; }
-done
-echo "✅ PASS: installed files match templates byte-for-byte"
+# Test T4.12: installed file matches template byte-for-byte
+diff -q "$SUBAGENT_TEMPLATE_DIR/software-auditor.md" "$SUBAGENT_TARGET_DIR/software-auditor.md" > /dev/null \
+  || { echo "❌ FAIL: software-auditor.md content mismatch with template"; diff "$SUBAGENT_TEMPLATE_DIR/software-auditor.md" "$SUBAGENT_TARGET_DIR/software-auditor.md"; exit 1; }
+echo "✅ PASS: installed file matches template byte-for-byte"
 
-# Test T4.13: installed files carry the sentinel
-for name in software-auditor developer; do
-  is_subagent_template_installed "$SUBAGENT_TARGET_DIR/$name.md" \
-    || { echo "❌ FAIL: $name.md doesn't carry sentinel"; exit 1; }
-done
-echo "✅ PASS: installed files carry SAGES_TEMPLATE_V1 sentinel"
+# Test T4.13: installed file carries the sentinel
+is_subagent_template_installed "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: software-auditor.md doesn't carry sentinel"; exit 1; }
+echo "✅ PASS: installed file carries SAGES_TEMPLATE_V1 sentinel"
 
 # Test T4.14: idempotent — re-install doesn't change our installed file
 install_subagent_templates  # no --force, sentinel present → should skip
@@ -249,59 +242,33 @@ echo "✅ PASS: FORCE=true install overwrites user-customized file"
 
 # Test T4.17: uninstall removes files WE installed (sentinel present)
 uninstall_subagent_templates
-for name in software-auditor developer; do
-  test ! -f "$SUBAGENT_TARGET_DIR/$name.md" \
-    || { echo "❌ FAIL: uninstall did not remove $name.md"; exit 1; }
-done
+test ! -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: uninstall did not remove software-auditor.md"; exit 1; }
 echo "✅ PASS: uninstall_subagent_templates removes our installed templates"
 
 # Test T4.18: uninstall leaves user-customized files alone
-cat > "$SUBAGENT_TARGET_DIR/developer.md" <<'CUSTOM_EOF'
+# (User-customized software-auditor.md, not the developer.md-as-fixture
+# we used pre-Phase-A — software-auditor.md is the only shipped template now.)
+cat > "$SUBAGENT_TARGET_DIR/software-auditor.md" <<'CUSTOM_EOF'
 ---
-name: Custom Developer
+name: Custom Auditor
 description: User-written agent — uninstall must NOT touch.
 ---
-# Custom Developer
+# Custom Auditor
 CUSTOM_EOF
 
 uninstall_subagent_templates
 
-test -f "$SUBAGENT_TARGET_DIR/developer.md" \
-  || { echo "❌ FAIL: uninstall removed user-customized developer.md"; exit 1; }
-grep -q "Custom Developer" "$SUBAGENT_TARGET_DIR/developer.md" \
+test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: uninstall removed user-customized software-auditor.md"; exit 1; }
+grep -q "Custom Auditor" "$SUBAGENT_TARGET_DIR/software-auditor.md" \
   || { echo "❌ FAIL: user-written content lost"; exit 1; }
 echo "✅ PASS: uninstall_subagent_templates preserves user-customized files"
 
-# Test T4.19: mixed state — install (no FORCE) on partial state installs
-# only the missing template, leaves user-customized untouched
-# Setup: developer.md is user-customized (from T4.18 above),
-# software-auditor.md does NOT exist (was uninstalled in T4.17)
-test ! -e "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: pre-test: software-auditor.md unexpectedly present"; exit 1; }
-
-install_subagent_templates  # no FORCE → install missing auditor, skip user developer
-
-test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: install didn't add missing software-auditor.md"; exit 1; }
-is_subagent_template_installed "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: newly-installed auditor lacks sentinel"; exit 1; }
-grep -q "Custom Developer" "$SUBAGENT_TARGET_DIR/developer.md" \
-  || { echo "❌ FAIL: mixed-state install overwrote user developer"; exit 1; }
-echo "✅ PASS: mixed-state install installs only missing; user file untouched"
-
-# Test T4.20: mixed-state uninstall removes only our installed file
-# (auditor was installed by us in T4.19; developer is user-customized)
-uninstall_subagent_templates
-test ! -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: mixed uninstall did not remove our auditor"; exit 1; }
-test -f "$SUBAGENT_TARGET_DIR/developer.md" \
-  || { echo "❌ FAIL: mixed uninstall clobbered user developer"; exit 1; }
-grep -q "Custom Developer" "$SUBAGENT_TARGET_DIR/developer.md" \
-  || { echo "❌ FAIL: user content lost in mixed uninstall"; exit 1; }
-echo "✅ PASS: mixed-state uninstall only removes our installed file"
-
 # Test T4.20a: Phase A preserves and classifies a user-customized legacy
-# developer filename before installing the canonical developer.md template.
+# developer filename. Since canonical developer is now built-in to
+# pi-subagents, NO canonical template is installed — only back up + classify.
+# User-customized legacy stays in place; sages-managed legacy is removed.
 rm -f "$SUBAGENT_TARGET_DIR/developer.md"
 cat > "$SUBAGENT_TARGET_DIR/software-developer.md" <<'CUSTOM_EOF'
 ---
@@ -313,16 +280,21 @@ CUSTOM_EOF
 
 install_subagent_templates
 
-test -f "$SUBAGENT_TARGET_DIR/software-developer.md"   || { echo "❌ FAIL: Phase A removed user-customized legacy developer file"; exit 1; }
-test -f "$SUBAGENT_TARGET_DIR/developer.md"   || { echo "❌ FAIL: Phase A did not install canonical developer.md"; exit 1; }
+# User-customized legacy is preserved.
+test -f "$SUBAGENT_TARGET_DIR/software-developer.md" \
+  || { echo "❌ FAIL: Phase A removed user-customized legacy developer file"; exit 1; }
+# NO canonical developer.md is installed (built-in to pi-subagents).
+test ! -f "$SUBAGENT_TARGET_DIR/developer.md" \
+  || { echo "❌ FAIL: Phase A should NOT install canonical developer.md (built-in to pi-subagents)"; exit 1; }
+# Back up metadata present.
 legacy_backup=$(find "$SUBAGENT_TARGET_DIR/.phase-a-migration" -maxdepth 1 -type f -name 'software-developer.*.md' | head -1)
-test -n "$legacy_backup"   || { echo "❌ FAIL: Phase A did not back up the legacy developer file"; exit 1; }
-test -f "$legacy_backup.meta"   || { echo "❌ FAIL: Phase A backup metadata sidecar missing"; exit 1; }
-grep -q '^classification: user-customized$' "$legacy_backup.meta"   || { echo "❌ FAIL: Phase A backup metadata did not classify user customization"; exit 1; }
-echo "✅ PASS: Phase A backs up/classifies legacy developer customization and installs canonical developer.md"
-
-# Cleanup test 4
-rm -rf "$TMPDIR4"
+test -n "$legacy_backup" \
+  || { echo "❌ FAIL: Phase A did not back up the legacy developer file"; exit 1; }
+test -f "$legacy_backup.meta" \
+  || { echo "❌ FAIL: Phase A backup metadata sidecar missing"; exit 1; }
+grep -q '^classification: user-customized$' "$legacy_backup.meta" \
+  || { echo "❌ FAIL: Phase A backup metadata did not classify user customization"; exit 1; }
+echo "✅ PASS: Phase A backs up/classifies legacy developer customization (no canonical install — built-in to pi-subagents)"
 unset PI_DIR AGENT_DIR
 
 # ─────────────────────────────────────────────────────────────────
@@ -336,26 +308,21 @@ unset PI_DIR AGENT_DIR
 # with `thinking: high` and an absolute max_turns cap.
 # ─────────────────────────────────────────────────────────────────
 
-# Test T4.21: neither template pins a model
-for f in software-auditor.md developer.md; do
-  grep -qE '^model:' "$SUBAGENT_TEMPLATES_DIR/$f" \
-    && { echo "❌ FAIL: template $f declares 'model:' (must inherit parent)"; exit 1; \
-  } || echo "✅ PASS: $f has no hard-coded model — inherits parent"
-done
+# Test T4.21: shipped template does not pin a model
+# (developer is built-in to pi-subagents; this template doesn't ship here.)
+grep -qE '^model:' "$SUBAGENT_TEMPLATES_DIR/software-auditor.md" \
+  && { echo "❌ FAIL: template software-auditor.md declares 'model:' (must inherit parent)"; exit 1; \
+} || echo "✅ PASS: software-auditor.md has no hard-coded model — inherits parent"
 
-# Test T4.22: neither template pins thinking level
-for f in software-auditor.md developer.md; do
-  grep -qE '^thinking:' "$SUBAGENT_TEMPLATES_DIR/$f" \
-    && { echo "❌ FAIL: template $f declares 'thinking:' (must inherit parent)"; exit 1; \
-  } || echo "✅ PASS: $f has no hard-coded thinking level — inherits parent"
-done
+# Test T4.22: shipped template does not pin thinking level
+grep -qE '^thinking:' "$SUBAGENT_TEMPLATES_DIR/software-auditor.md" \
+  && { echo "❌ FAIL: template software-auditor.md declares 'thinking:' (must inherit parent)"; exit 1; \
+} || echo "✅ PASS: software-auditor.md has no hard-coded thinking level — inherits parent"
 
-# Test T4.23: neither template pins max_turns
-for f in software-auditor.md developer.md; do
-  grep -qE '^max_turns:' "$SUBAGENT_TEMPLATES_DIR/$f" \
-    && { echo "❌ FAIL: template $f declares 'max_turns:' (must inherit parent)"; exit 1; \
-  } || echo "✅ PASS: $f has no hard-coded max_turns — inherits parent"
-done
+# Test T4.23: shipped template does not pin max_turns
+grep -qE '^max_turns:' "$SUBAGENT_TEMPLATES_DIR/software-auditor.md" \
+  && { echo "❌ FAIL: template software-auditor.md declares 'max_turns:' (must inherit parent)"; exit 1; \
+} || echo "✅ PASS: software-auditor.md has no hard-coded max_turns — inherits parent"
 
 # ──────────────────────────────────────────────────────────────────
 # T6.x: background-default contract for "implement" + "audit" phases
@@ -424,12 +391,15 @@ echo "✅ PASS: SUBAGENTS.md documents developer+auditor as background-default"
 # Test T6.4: developer system prompt accepts being spawned in background
 # (the agent's job is to behave well under background — acknowledge steers,
 # do not block on stdin, etc.)
-for agent in developer software-auditor; do
-  f="$SUBAGENT_TEMPLATES_DIR/$agent.md"
-  grep -qiE 'background' "$f" \
-    || { echo "❌ FAIL: $agent.md must mention 'background' (acknowledges the spawn mode)"; exit 1; }
-done
-echo "✅ PASS: developer + software-auditor system prompts acknowledge background mode"
+# Phase A: developer is built-in to pi-subagents; check the built-in prompt file.
+DEVELOPER_PROMPT_FILE="$(cd "$(dirname "$SCRIPT")/../.." && pwd)/pi-subagents/src/agent-prompts/developer.ts"
+test -f "$DEVELOPER_PROMPT_FILE" \
+  || { echo "❌ FAIL: developer prompt file missing at $DEVELOPER_PROMPT_FILE"; exit 1; }
+grep -qiE 'background' "$DEVELOPER_PROMPT_FILE" \
+  || { echo "❌ FAIL: developer.ts must mention 'background' (acknowledges the spawn mode)"; exit 1; }
+grep -qiE 'background' "$SUBAGENT_TEMPLATES_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: software-auditor.md must mention 'background' (acknowledges the spawn mode)"; exit 1; }
+echo "✅ PASS: developer (built-in) + software-auditor system prompts acknowledge background mode"
 
 # Test T6.5: orchestrator SKILL.md has a parallelism_notes section
 test -f "$ORCH_SKILL_DIR/SKILL.md" || { echo "❌ FAIL: orchestrator SKILL.md missing"; exit 1; }

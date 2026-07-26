@@ -166,13 +166,17 @@ if not exist "%AGENT_DIR%\settings.json" (
 )
 powershell -Command "$d = Get-Content '%AGENT_DIR%\settings.json' -Raw ^| ConvertFrom-Json; if(-not $d.packages) { $d.packages = @() }; $d.packages = @($d.packages ^| Where-Object { $_ -ne '%PKG_DIR%' -and $_ -notmatch '%PKG_NAME%' }); if('%PKG_DIR%' -notin $d.packages) { $d.packages += '%PKG_DIR%' }; $d ^| ConvertTo-Json -Depth 10 ^| Set-Content '%AGENT_DIR%\settings.json' -Encoding UTF8"
 
-REM ─── Subagent templates (Stages 3+4 of 4-agent pipeline) ───
+REM ─── Subagent templates (Stage 4 of 4-agent pipeline) ───
+REM Note: developer is built-in to pi-subagents (Phase A complete);
+REM only software-auditor is shipped here.
 echo ==^> Installing subagent templates...
 if not exist "%AGENT_DIR%\agents" mkdir "%AGENT_DIR%\agents" >nul 2>&1
 
 REM Phase A migration: classify and preserve the previous developer filename.
-REM User-customized content remains in place; a Sages-managed legacy file is
-REM removed after backup so canonical developer alias resolution is not shadowed.
+REM Since canonical developer is now built-in to pi-subagents, NO canonical
+REM template is installed - only back up + classify. User-customized content
+REM remains in place; a Sages-managed legacy file is removed after backup
+REM (the built-in makes it redundant).
 set "PHASE_A_BACKUP_DIR=%AGENT_DIR%\agents\.phase-a-migration"
 set "LEGACY_DEVELOPER=%AGENT_DIR%\agents\software-developer.md"
 if exist "!LEGACY_DEVELOPER!" (
@@ -188,17 +192,17 @@ if exist "!LEGACY_DEVELOPER!" (
         echo subagent_name: software-developer
         echo canonical_name: developer
         echo phase: A
-        echo reason: previous developer-agent filename preserved before canonical template install
+        echo reason: previous developer-agent filename preserved; canonical developer is now built-in to pi-subagents
     ) > "!PHASE_A_BACKUP_DIR!\software-developer.!PHASE_A_TS!.md.meta"
     if "!PHASE_A_CLASSIFICATION!"=="sages-managed" (
         del /Q "!LEGACY_DEVELOPER!"
-        echo   Migrated software-developer.md to developer.md; backup saved under .phase-a-migration
+        echo   Removed legacy software-developer.md (sages-managed) - developer is now built-in; backup saved under .phase-a-migration
     ) else (
         echo   software-developer.md user-customized; backup saved under .phase-a-migration and original left in place
     )
 )
 
-for %%N in (software-auditor developer) do (
+for %%N in (software-auditor) do (
     set "TPL_NAME=%%N"
     set "TEMPLATE=%TMP_DIR%\pi\templates\agents\%%N.md"
     set "TARGET=%AGENT_DIR%\agents\%%N.md"
