@@ -48,6 +48,7 @@ import { canMainAgentWrite, policyMessage } from "./file-gate.js";
 const READ_ONLY_FIRST_WORDS = new Set([
 	"ls", "cat", "head", "tail", "grep", "wc", "file", "stat",
 	"tree", "which", "jq", "env",
+	"cd", "pwd", "printenv",
 ]);
 
 /** Write-intent first-words (always win over read-only). */

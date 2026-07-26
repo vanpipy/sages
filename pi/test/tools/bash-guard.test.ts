@@ -243,6 +243,32 @@ describe("shouldBlockBashCommand — chained commands (T16–T22)", () => {
 		const r = shouldBlockBashCommand("echo x 2>&1", CTX);
 		expect(r.block).toBe(false);
 	});
+
+	it("T27: `cd /tmp && cat /etc/hostname` → allow (cd is read-only shell builtin)", () => {
+		// Regression guard: shell builtins `cd`, `pwd`, `printenv` are
+		// common prefixes for chained read-only commands. Treating
+		// them as "unknown" forces the sawUnknown branch and blocks
+		// benign chains like `cd /tmp && cat /etc/hostname`. After
+		// 0b7827d removed the `# sages:safe` escape hatch, this
+		// surfaced as a usability regression for LLM agents using
+		// these idiomatic patterns.
+		const r = shouldBlockBashCommand("cd /tmp && cat /etc/hostname", CTX);
+		expect(r.block).toBe(false);
+	});
+
+	it("T28: `cd /tmp && rm src/foo.ts` → block (chained rm still wins)", () => {
+		// Even with cd added to read-only, the chained rm must still
+		// trip the gate — cd is harmless in isolation but write-intent
+		// commands chained after it must still be guarded.
+		const r = shouldBlockBashCommand("cd /tmp && rm src/foo.ts", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("src/foo.ts");
+	});
+
+	it("T29: `pwd && echo done` → allow (pwd is read-only)", () => {
+		const r = shouldBlockBashCommand("pwd && echo done", CTX);
+		expect(r.block).toBe(false);
+	});
 });
 
 describe("classifyBashCommand — selected cases", () => {
