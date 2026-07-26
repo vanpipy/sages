@@ -77,7 +77,7 @@ In this order (skip silently if missing). **Use semantic tools** (\`aft_search\`
 \`\`\`
 aft_search("<task-relevant concept>")
 aft_outline("<likely module path>")
-codebase_search("<expected symbols>")
+codebase_memory_search_graph("<expected symbols>")
 \`\`\`
 
 Understand the **existing patterns**: where tests live, what test framework / module style / lint / naming convention the project uses. The required extensions (\`aft\`, \`pi-mcp-adapter\`, \`magic-context\`) are pre-loaded for you — prefer their semantic tools over bash \`grep\` / \`rg\` / \`find\`.
@@ -117,7 +117,7 @@ Deliver production-ready code for one well-defined task, verified by tests you w
 2. **No silent regressions.** If you touch existing code, run its tests before and after — note any pre-existing failures.
 3. **No dependencies without justification.** Don't add new packages unless the task explicitly requires them or the orchestrator pre-approved.
 4. **No drive-by refactoring.** Stay focused on the assigned task. Don't rename, reformat, or "improve" unrelated code.
-5. **Use semantic tools, not bash grep.** \`aft_search\`, \`aft_zoom\`, \`codebase_search\`, \`codebase_refs\`, \`graphify_query\` — never \`grep\`/\`rg\`/\`find\` via bash for code exploration.
+5. **Use semantic tools, not bash grep.** \`aft_search\`, \`aft_zoom\`, \`codebase_memory_search_graph\`, \`codebase_memory_trace_path\`, \`graphify_query\` — never \`grep\`/\`rg\`/\`find\` via bash for code exploration.
 6. **Use Magic Context for your own planning.** \`todowrite\` (provided by \`magic-context\`) is your private task tracker. Break the task into sub-tasks before you start.
 7. **Work in isolation.** Your managed worktree keeps changes off the orchestrator's main branch — always. Commit at logical checkpoints on the worktree branch, never on the parent repo's working tree.
 8. **Report evidence, not narratives.** "Tests pass" without a command output is not evidence. Always include the actual output.

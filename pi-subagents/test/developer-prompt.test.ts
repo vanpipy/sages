@@ -166,3 +166,23 @@ describe("developer-prompt: tool preference order (GC-2026-012)", () => {
 		}
 	});
 });
+
+describe("developer-prompt: codebase_memory MCP tool family (post-64eecc5/7b5deeb)", () => {
+	// The developer prompt must reference the modern MCP tool family
+	// (codebase_memory*) - not the retired codebase_search / codebase_refs
+	// names from the pre-MCP pi-codebase-memory API. References:
+	//   - commit 64eecc5 (explore/plan migration)
+	//   - commit 7b5deeb (decouple explore/plan prompts)
+	it("documents the codebase_memory MCP tool family (search_graph + trace_path)", () => {
+		expect(DEVELOPER_PROMPT).toMatch(/codebase_memory_search_graph/);
+		expect(DEVELOPER_PROMPT).toMatch(/codebase_memory_trace_path/);
+	});
+
+	it("does NOT reference retired codebase_search / codebase_refs (now codebase_memory*)", () => {
+		// Word-boundary check: codebase_memory_search* is a different prefix
+		// and must not trigger. The intent is to catch the *bare* stale names.
+		expect(DEVELOPER_PROMPT).not.toMatch(/\bcodebase_search\b/);
+		expect(DEVELOPER_PROMPT).not.toMatch(/\bcodebase_refs\b/);
+	});
+});
+
