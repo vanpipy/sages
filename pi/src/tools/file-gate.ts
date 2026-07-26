@@ -195,6 +195,27 @@ export async function executeSagesEdit(
 			}],
 		};
 	}
+	// ─── gotcha: 1:1 size replacement only ───────────────────────────
+	// This uses String.prototype.replace (string first arg → literal
+	// match, only the FIRST occurrence). It does NOT honor newlines,
+	// indentation, or multi-line blocks specially.
+	//
+	// Observed in 2026-07-26 during `chore(pi-subagents): retire
+	// user-level developer.md` (commits 248f7db + 569a9f5 + 4ce3a51):
+	// when oldText is a multi-line block AND newText is LONGER than
+	// oldText, an upstream IPC layer (or the tool dispatcher) may
+	// duplicate newText's "tail" (the lines beyond oldText's length)
+	// at the END of the file, after the final summary. The replacement
+	// at the matched location also proceeds normally. Symptom: file
+	// grows by `len(newText)` but the original oldText block remains
+	// in place, plus a duplicate tail appears at EOF.
+	//
+	// Workaround: keep oldText and newText the SAME line count (1:1
+	// replacement) — restructure the target file BEFORE the edit if
+	// needed. The regression test `executeSagesEdit > 1:1 size
+	// replacement only` below locks in that this tool is well-behaved
+	// when sizes match; the gotcha lives in an upper layer and is
+	// documented here for future maintainers.
 	const updated = original.replace(params.oldText, params.newText);
 	mkdirSync(dirname(fullPath), { recursive: true });
 	writeFileSync(fullPath, updated, "utf-8");

@@ -241,4 +241,61 @@ describe("executeSagesEdit", () => {
 		);
 		expect(resp.isError).toBe(true);
 	});
+
+	// Regression test for the 2026-07-26 multi-line replace gotcha.
+	// When oldText and newText have the SAME line count (1:1), the
+	// in-tool replace is well-behaved. The IPC layer's tail-duplication
+	// bug is documented in `executeSagesEdit`'s source comment and
+	// triggers when newText is LONGER than oldText — outside this
+	// tool's boundary. This test only verifies the in-tool contract.
+	it("replaces multi-line oldText 1:1 (same line count)", async () => {
+		writeFileSync(
+			join(cwd, ".pi", "orchestrator", "multi-line.yaml"),
+			"line-1\nline-2\nline-3\nline-4\n",
+			"utf-8",
+		);
+		const resp = await executeSagesEdit(
+			{
+				path: ".pi/orchestrator/multi-line.yaml",
+				oldText: "line-2\nline-3\nline-4",
+				newText: "REPLACED-2\nREPLACED-3\nREPLACED-4",
+			},
+			{ cwd },
+		);
+		const r = parseResult(resp);
+		expect(r.isError).toBeFalsy();
+		const updated = readFileSync(
+			join(cwd, ".pi", "orchestrator", "multi-line.yaml"),
+			"utf-8",
+		);
+		// All three lines replaced in place, no other lines added/removed
+		expect(updated).toBe("line-1\nREPLACED-2\nREPLACED-3\nREPLACED-4\n");
+	});
+
+	it("replaces only the FIRST occurrence of oldText", async () => {
+		writeFileSync(
+			join(cwd, ".pi", "orchestrator", "dup.yaml"),
+			"foo\nfoo\nfoo\n",
+			"utf-8",
+		);
+		const resp = await executeSagesEdit(
+			{
+				path: ".pi/orchestrator/dup.yaml",
+				oldText: "foo",
+				newText: "bar",
+			},
+			{ cwd },
+		);
+		const r = parseResult(resp);
+		expect(r.isError).toBeFalsy();
+		const updated = readFileSync(
+			join(cwd, ".pi", "orchestrator", "dup.yaml"),
+			"utf-8",
+		);
+		// String.prototype.replace with string first arg replaces only
+		// the FIRST occurrence (would need a global regex / String.replaceAll
+		// for multi-occurrence). Locking this in so callers don't expect
+		// "edit all" semantics.
+		expect(updated).toBe("bar\nfoo\nfoo\n");
+	});
 });
