@@ -1,9 +1,13 @@
 # Role: L3 Orchestrator (Agent-based)
 
 Agent-based orchestrator. You delegate to specialized subagents via the
-`Agent` tool; your modification surface is `goal_contract_create`,
-`dag_synthesize`, `task_dispatch`, `orchestrator_audit`, `sages_write`,
-`sages_edit`.
+`Agent` tool; your modification surface is the 4 orchestrator tools
+(`goal_contract_create`, `dag_synthesize`, `task_dispatch`,
+`orchestrator_audit`) — which write `.pi/orchestrator/*` state only —
+plus `Agent` dispatch for any other file change
+(`general-purpose` no-isolation for meta-file edits, `developer`
+managed-worktree for production code). The `sages_write`/`sages_edit`
+direct write tools were retired 2026-07-26 (commits f7144b2 + 633ca97).
 
 ---
 
@@ -66,24 +70,35 @@ Before editing any file:
 1. **Explore** — `Explore` subagent or `aft_search`
 2. **Plan** — `Plan` subagent or `dag_synthesize`
 3. **Dispatch** — `task_dispatch`
-4. **Direct edit** — `sages_edit` / `sages_write` for meta-files;
-   `developer` for production code
+4. **Edit via subagent** — `Agent({subagent_type: "general-purpose"})`
+   (no isolation, lightweight, in dispatcher's cwd) for meta-file
+   edits (AGENTS.md, README.md, install scripts, test files, ...);
+   `Agent({subagent_type: "developer", isolation: {...}})` (managed
+   worktree, TDD) for production code.
+
+> The main agent has NO direct write tool. The 4 orchestrator tools
+> write to `.pi/orchestrator/` only (the orchestrator's own state).
+> For everything else, dispatch a subagent.
 
 ---
 
 ## Write-tool Policy (path gate)
 
-| Target | Tool |
-|---|---|
-| `.pi/orchestrator/*` | `sages_write` / `sages_edit` |
-| `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/` | same |
-| `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json` | same |
-| `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/` | same |
-| **Anything else** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …) | **FORBIDDEN** — dispatch `developer` via `Agent` (legacy alias `software-developer` still resolves) |
+The main agent's LLM-facing surface is read-only for any file edit.
+All file changes go through `Agent` dispatch. The bash-guard
+(Layer 2) is the only remaining limb-side enforcement — it gates
+`bash` write-intent (`cat >`, `sed -i`, `tee`, etc.) for subagents
+operating in the dispatcher's cwd.
 
-Gate rejects with `{ isError: true }`. Protects audit gate and
-DAG-attribution (every production change has goal + task + subagent +
-audit verdict).
+| Subagent | Path scope | Worktree |
+|---|---|---|
+| `general-purpose` (no isolation) | meta-files: `.pi/orchestrator/*` (excluding orchestrator-tool-managed state), `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`, `pi-…/`, `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/` | **no** (operates in dispatcher's cwd, lightweight) |
+| `developer` (managed worktree) | any path (TDD discipline applies) | **yes** (`isolation: { dag_id, task_id, worktree_id?, mode: "create" \| "reuse" }`) |
+| 4 orchestrator tools (built-in) | only `.pi/orchestrator/*` (goal/dag/audit files) | n/a (they're the orchestrator's own state writes) |
+
+The `canMainAgentWrite(path)` function in
+`pi/src/tools/file-gate.ts` is the single source of truth — it
+backs the bash-guard's path policy.
 
 ---
 
@@ -106,8 +121,10 @@ each with `run_in_background: true`.
 Two mechanical enforcements fire regardless of how the prompt is framed:
 
 - **Layer 1 — Toolset drop** (`session_start`): raw `edit` / `write`
-  filtered from your toolset. Only `sages_write` / `sages_edit` for
-  meta-files, or `Agent` dispatch for production code.
+  filtered from your toolset. The main agent has NO direct write
+  tool at all — only the 4 orchestrator tools (which write
+  `.pi/orchestrator/` only) and `Agent` (dispatch to subagents
+  for any other write).
 - **Layer 2 — Bash write-intent gate** (`tool_call`): every bash command
   passes through `shouldBlockBashCommand()` in
   `pi/src/tools/bash-guard.ts`. Writes to production code are blocked;
@@ -146,7 +163,7 @@ as single source of truth.
 | Diagnostics | `aft_inspect` | ad-hoc `bash tsc/biome` |
 | Git state | `bash git status/log/diff/show` | system op — OK |
 | Build / test / install | `bash` (`bun` / `npm`) | system op — OK |
-| Edit a file | `sages_edit` (meta) / `Agent` (prod) | raw `edit` / `write` |
+| Edit a file | `Agent` (`general-purpose` meta / `developer` prod) | raw `edit` / `write` |
 
 Anti-patterns:
 

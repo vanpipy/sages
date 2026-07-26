@@ -26,8 +26,10 @@ orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
 
 **Ownership**:
 
-- **Sages** (in-process pi extension): 4 orchestrator tools + 2 meta-file
-  tools (`sages_write`, `sages_edit`), and all `.pi/orchestrator/*` files.
+- **Sages** (in-process pi extension): 4 orchestrator tools (write
+  `.pi/orchestrator/*` only) and the main-agent gates (Layer 1 +
+  Layer 2). The main agent has NO direct write tool — any other
+  file edit goes through `Agent` dispatch.
 - **`@tintinweb/pi-subagents`** (external): the `Agent` tool —
   subagent spawning, worktree creation, background queueing, result
   collection, steering. Sages does not re-implement this.
@@ -49,7 +51,7 @@ orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
 | `dag_synthesize` | 2 | Validate + persist a TaskNode DAG; render `task_template` from `task_params` |
 | `task_dispatch` | 3 | Return Agent-call plan grouped by batch; LLM executes via the external `Agent` tool |
 | `orchestrator_audit` | 4 | Read per-task `audit-{id}.md`; aggregate verdicts; enforce evidence gate; write `audit-workflow.md` |
-| `sages_write` / `sages_edit` | — | **Path-gated** writes to Sages meta-files (`.pi/orchestrator/`, `pi/`, `pi-*/`, root docs). Rejects production code — see §"Write policy" below |
+| `sages_write` / `sages_edit` | — | **RETIRED 2026-07-26** (commits f7144b2 + 633ca97). The main agent now has NO direct write tool — all file edits go through `Agent` dispatch (`general-purpose` for meta-files, `developer` for production code). See §"Write policy" below. |
 
 Shared helpers in `pi/src/tools/orchestrator/template-loader.ts`:
 `loadPromptTemplate`, `loadGoalTemplate`, `loadDagTemplate`,
@@ -87,13 +89,29 @@ The path the tool **returns** is the path the tool **writes**.
 
 ## Write policy (main agent)
 
-The main orchestrator agent can write **directly** to Sages meta-files
-only. For everything else, dispatch a `developer` subagent via the
-Agent tool.
+The main orchestrator agent has **no direct write tool at all**.
+The 4 orchestrator tools (`goal_contract_create`, `dag_synthesize`,
+`task_dispatch`, `orchestrator_audit`) write orchestrator state
+under `.pi/orchestrator/` only. For any other file edit, dispatch a
+subagent via the `Agent` tool:
 
-**Allowlisted for direct write** (via `sages_write` / `sages_edit`):
+- **Meta-files** (AGENTS.md, README.md, install scripts, test files, …):
+  dispatch `general-purpose` with no `isolation` parameter (lightweight,
+  operates in dispatcher's cwd). Main agent reviews the diff before
+  committing.
+- **Production code** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …):
+  dispatch `developer` with managed worktree isolation
+  (`isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`).
+  TDD discipline + audit gate + merge gate apply.
+
+**Meta-files** that the main agent dispatches `general-purpose` to
+edit (the bash-guard's `canMainAgentWrite` allowlist is the single
+source of truth for this list — see `pi/src/tools/file-gate.ts`):
 
 - `.pi/orchestrator/**` — goal / dag / audit / state / designs
+  (NB: the 4 orchestrator tools write here directly; `general-purpose`
+  can write to designs/, but for state files prefer the orchestrator
+  tools)
 - `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`
 - `pi-*/` — sibling subpackages (pi-subagents, pi-codebase-memory,
   pi-graphify, pi-evaluator, pi-minimax, pi-yunxiao)
@@ -101,11 +119,11 @@ Agent tool.
 - `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/`
 
 **Production code** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …) is
-**rejected by the gate** with `{ isError: true }` and a message pointing
-at the Agent tool. The gate's job is to protect the audit invariant
-(software-auditor independently re-runs `verification_cmd` on the
-developer's work) and DAG-attribution (every production change has
-a goal contract + task + subagent + audit verdict).
+**rejected by the bash-guard** for any subagent. The guard's job is to
+protect the audit invariant (software-auditor independently re-runs
+`verification_cmd` on the developer's work) and DAG-attribution
+(every production change has a goal contract + task + subagent +
+audit verdict).
 
 **Read tools remain unrestricted** (`read`, `aft_read`, `aft_search`,
 `codebase_*`, `graphify_*`, `bash` for read-only commands) — the main
@@ -188,15 +206,20 @@ pi.on("session_start", () => {
 ```
 
 The LLM's `tool_calls` list never includes raw `edit` or `write`. The
-only paths to modify any file are:
+LLM has NO direct write tool at all — the only paths to modify any
+file are:
 
 | Target | Allowed path |
 |---|---|
-| Meta-files (`.pi/`, `pi/`, `pi-*/`, root docs, …) | `sages_write` / `sages_edit` (path-gated) |
-| Production code | `Agent` dispatch to `developer` (TDD + managed-worktree + audit) |
+| Orchestrator state (`.pi/orchestrator/goal-*.yaml`, `dag-*.yaml`, `audit-*.md`) | 4 orchestrator tools (direct write, no dispatch) |
+| Other meta-files (`.pi/orchestrator/designs/`, `pi/`, `pi-*/`, root docs, …) | `Agent({subagent_type: "general-purpose"})` — no isolation, lightweight, in dispatcher's cwd |
+| Production code (user `src/`, `test/`, …) | `Agent({subagent_type: "developer", isolation: {...}})` — managed worktree + TDD + audit |
 
 If the LLM tries to call raw `edit`/`write`, the tool isn't in the
-visible list — the model has to take one of the two allowed paths.
+visible list (Layer 1). The bash-guard (Layer 2) also blocks bash
+write-intent (`cat >`, `sed -i`, `tee`, …) targeting production
+code — `canMainAgentWrite()` is the single source of truth for the
+path policy.
 
 ### Layer 2 — Bash write-intent gate (`tool_call`)
 
@@ -238,7 +261,7 @@ fd-redirect detection, line 85) harden the two known gaps.
 |---|---|---|---|
 | **L1 — read-only** | `Explore`, `Plan`, `software-auditor` | **none** (frontmatter `tools:` allowlist) | LLM physically cannot call write |
 | **L2 — write-in-worktree** | `developer` (canonical, alias `software-developer`) | `edit`, `write` | managed-worktree object (`{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`) + `software-auditor` + merge gate |
-| **L3 — coordinator** | **main agent** | `sages_write` / `sages_edit` only (raw `edit`/`write` filtered out) | Layer 1 + Layer 2 hard threshold |
+| **L3 — coordinator** | **main agent** | 4 orchestrator tools (write `.pi/orchestrator/*` only) + `Agent` (dispatch). NO direct write tool — raw `edit`/`write` filtered, `sages_write`/`sages_edit` retired. | Layer 1 + Layer 2 hard threshold |
 
 The asymmetry IS the design — `developer` keeps raw edit/write
 because that's its job; main agent gives them up because they were

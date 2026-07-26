@@ -113,6 +113,47 @@ Agent({
 
 **Returns**: `CERTIFIED | NEEDS WORK | BLOCKED` + evidence-based report.
 
+### Sidecar: `general-purpose` (lightweight helper, no worktree)
+
+`general-purpose` is the main agent's **fallback helper** for
+small/lightweight tasks that don't justify a worktree. The main
+agent uses it to edit meta-files (AGENTS.md, README.md, install
+scripts, test files, ...) directly in the dispatcher's cwd —
+**no isolation, no worktree, no commit by the subagent** (the
+main agent reviews the diff and commits if good).
+
+```ts
+Agent({
+  subagent_type: "general-purpose",
+  prompt: "Edit pi/scripts/install.sh to rename the function " +
+          "backup_legacy_developer_template to backup_legacy_developer. " +
+          "Read the file first, then make the edit. Report the diff.",
+  description: "Rename function in install.sh",
+  // NO isolation — operates in dispatcher's cwd
+  run_in_background: true,
+})
+```
+
+When to use:
+- **Meta-file edits** (orchestrator has no direct write tool for
+  AGENTS.md / README.md / install scripts / test files / ...)
+- **Ad-hoc fixes** (typo, config tweak, "look up this symbol")
+- **Help from other subagents** (a `developer` running in a
+  worktree can dispatch `general-purpose` for an assist; the
+  helper runs in the developer's worktree cwd)
+
+When NOT to use:
+- **Production code** — dispatch `developer` with managed
+  worktree (TDD + audit gate)
+- **Substantial work** — `general-purpose` doesn't enforce TDD;
+  for anything with verification, prefer `developer`
+
+The `general-purpose` agent has `tools: ["*"]` and `extensions: true`
+in `pi-subagents/src/default-agents.ts:58-74`, so it can use any
+tool. But it inherits the bash-guard from the dispatcher's cwd —
+`canMainAgentWrite()` still applies, so production-code writes
+are blocked even via `general-purpose` bash.
+
 ### Composing a DAG
 
 The orchestrator stitches stages into a DAG via `goal_contract_create` →
