@@ -11,7 +11,17 @@ import { extractText } from "../context.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal, getSessionContextPercent } from "../usage.js";
 import type { Theme } from "./agent-widget.js";
-import { type AgentActivity, buildInvocationTags, describeActivity, fgPreservingNestedStyles, formatDuration, formatSessionTokens, getDisplayName, getPromptModeLabel } from "./agent-widget.js";
+import {
+	type AgentActivity,
+	buildInvocationTags,
+	describeActivity,
+	fgPreservingNestedStyles,
+	formatDuration,
+	formatSessionTokens,
+	getDisplayName,
+	getPromptModeLabel,
+	toolDisplayName,
+} from "./agent-widget.js";
 import { createViewerKeys, type ViewerKeybindings, type ViewerKeys } from "./viewer-keys.js";
 
 /** Base lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
@@ -310,7 +320,7 @@ export class ConversationViewer implements Component {
         for (const c of msg.content) {
           if (c.type === "text" && c.text) textParts.push(c.text);
           else if (c.type === "toolCall") {
-            toolCalls.push((c as any).name ?? (c as any).toolName ?? "unknown");
+            toolCalls.push(toolDisplayName((c as any).name ?? (c as any).toolName ?? "unknown"));
           }
         }
         if (needsSeparator) lines.push(th.fg("dim", "───"));

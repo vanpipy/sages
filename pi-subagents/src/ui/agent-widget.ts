@@ -37,8 +37,22 @@ export const ERROR_STATUSES = new Set([
 	"stopped",
 ]);
 
-/** Tool name → human-readable action for activity descriptions. */
+/**
+ * Tool name → human-readable action for activity descriptions.
+ *
+ * Two sections:
+ *   1. pi-coding-agent built-ins (`read`, `bash`, `edit`, `write`, `grep`,
+ *      `find`, `ls`) — these come from the host pi runtime.
+ *   2. Sages-extension tools: AFT (text/concept code search), codebase-memory
+ *      MCP (graph-based code intel), graphify MCP (semantic graph query),
+ *      Magic Context (long-term recall + todos), the Sages orchestrator's
+ *      4 DAG-stage tools, and the Agent tool family registered by this
+ *      extension. Names are the actual values the model sees on the wire
+ *      (including MCP server prefixes — see `toolPrefix: "short"` in
+ *      `~/.pi/agent/mcp.json`).
+ */
 const TOOL_DISPLAY: Record<string, string> = {
+	// ── pi-coding-agent built-ins ────────────────────────────
 	read: "reading",
 	bash: "running command",
 	edit: "editing",
@@ -46,7 +60,75 @@ const TOOL_DISPLAY: Record<string, string> = {
 	grep: "searching",
 	find: "finding files",
 	ls: "listing",
+
+	// ── AFT (text/concept code-search layer, @cortexkit/aft-pi) ───────
+	aft_search: "searching code",
+	aft_outline: "listing structure",
+	aft_zoom: "reading symbol",
+	aft_inspect: "checking code health",
+	aft_callgraph: "tracing call graph",
+	aft_refactor: "refactoring code",
+	aft_import: "editing imports",
+	aft_safety: "snapshotting file",
+	aft_conflicts: "checking merge conflicts",
+	aft_delete: "deleting file",
+	aft_move: "moving file",
+
+	// ── codebase-memory MCP (graph-based code intel) ─────────────
+	// Server `codebase-memory-mcp` → prefix `codebase_memory` (toolPrefix: short).
+	codebase_memory_list_projects: "listing projects",
+	codebase_memory_index_status: "checking index",
+	codebase_memory_index_repository: "indexing repo",
+	codebase_memory_delete_project: "deleting project",
+	codebase_memory_search_graph: "searching code graph",
+	codebase_memory_search_code: "searching code",
+	codebase_memory_trace_path: "tracing call path",
+	codebase_memory_detect_changes: "checking changes",
+	codebase_memory_query_graph: "querying graph",
+	codebase_memory_get_graph_schema: "reading schema",
+	codebase_memory_get_code_snippet: "reading snippet",
+	codebase_memory_get_architecture: "checking architecture",
+	codebase_memory_manage_adr: "managing ADR",
+	codebase_memory_ingest_traces: "ingesting traces",
+
+	// ── graphify MCP (semantic graph query) ──────────────────
+	// Server `graphify` → prefix `graphify`.
+	graphify_query: "querying graph",
+	graphify_shortest_path: "finding path",
+	graphify_get_node: "reading node",
+	graphify_get_neighbors: "traversing neighbors",
+	graphify_get_community: "reading community",
+	graphify_god_nodes: "finding central nodes",
+	graphify_graph_stats: "checking graph",
+
+	// ── Magic Context (long-term recall + todos, @cortexkit/pi-magic-context) ──
+	ctx_search: "searching memory",
+	ctx_expand: "expanding history",
+	ctx_memory: "writing memory",
+	ctx_note: "writing note",
+	ctx_reduce: "reclaiming context",
+	todowrite: "updating tasks",
+
+	// ── Sages orchestrator (4 DAG-stage tools, sages/src/tools/orchestrator) ──
+	goal_contract_create: "creating goal",
+	dag_synthesize: "synthesizing DAG",
+	task_dispatch: "dispatching tasks",
+	orchestrator_audit: "auditing workflow",
+
+	// ── Agent tool family (registered by this extension) ────────────
+	Agent: "dispatching subagent",
+	get_subagent_result: "checking subagent",
+	steer_subagent: "steering subagent",
 };
+
+/**
+ * Resolve a tool's name to its human-readable activity label.
+ * Falls back to the raw name when no entry exists in {@link TOOL_DISPLAY},
+ * so newly-added tools still render something sensible instead of "unknown".
+ */
+export function toolDisplayName(name: string): string {
+	return TOOL_DISPLAY[name] ?? name;
+}
 
 // ---- Types ----
 
@@ -254,7 +336,7 @@ export function describeActivity(
 	if (activeTools.size > 0) {
 		const groups = new Map<string, number>();
 		for (const toolName of activeTools.values()) {
-			const action = TOOL_DISPLAY[toolName] ?? toolName;
+			const action = toolDisplayName(toolName);
 			groups.set(action, (groups.get(action) ?? 0) + 1);
 		}
 
