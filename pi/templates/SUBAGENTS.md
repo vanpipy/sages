@@ -272,13 +272,32 @@ const r2 = await Agent({ subagent_type: "general-purpose", prompt: "Verify B" })
 Agent({ ..., prompt: "Verify A", run_in_background: true })
 Agent({ ..., prompt: "Verify B", run_in_background: true })
 ```
+**Don't parallelize when tasks share mutable state**:
+
+```ts
+// ✖ DON'T — three parallel git commits race on .git/index
+Agent({ ..., prompt: "git add X && git commit -m 'A'", run_in_background: true })
+Agent({ ..., prompt: "git add Y && git commit -m 'B'", run_in_background: true })
+Agent({ ..., prompt: "git add Z && git commit -m 'C'", run_in_background: true })
+// second and third commits fail (HEAD moved) or produce non-linear history
+```ts
+// ✓ DO — serialize when commits chain
+Agent({ ..., prompt: "git commit A" })  // foreground; wait for SHA
+Agent({ ..., prompt: "git commit B using parent <SHA-A>" })  // chain
+Agent({ ..., prompt: "git commit C using parent <SHA-B>" })  // chain
+
+Other serial-required patterns:
+- Multiple edits to the **same file** (working tree race)
+- Lockfile updates (`package-lock.json`, `Cargo.lock`)
+- `npm install` (concurrent invocations corrupt `node_modules/`)
 
 ### When to use foreground vs background
 
 | Pattern | When |
 |---|---|
-| **Parallel background** | Multiple independent sub-tasks (most common) |
-| **Single foreground** | Result feeds next decision, task is short, no parallel work |
+| **Parallel background** | Multiple **independent** sub-tasks (different files, different refs, no shared state) |
+| **Serial foreground** | Tasks share state (commits, lockfiles, same file) OR next depends on previous |
+| **Single foreground** | Result feeds next decision; task is short; no parallel work |
 | **Background + get_subagent_result** | Long-running, need explicit polling |
 
 ### Composing a DAG

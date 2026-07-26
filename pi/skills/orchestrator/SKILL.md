@@ -145,6 +145,16 @@ Don't serialize when tasks are independent. Foreground is the default for `gener
 
 Background is the default for `developer`/`software-auditor` (5-10 min TDD / audit) — collect results via notification or `get_subagent_result()`.
 
+### When NOT to parallelize
+
+The principle: **parallelize independent tasks; serialize dependent ones**. Don't parallelize:
+- Multiple `git commit`s (share `.git/index` and `HEAD`; each needs previous SHA as parent)
+- Multiple edits to the **same file** (working tree race)
+- Lockfile updates (`package-lock.json`, `Cargo.lock`)
+- `npm install` / `cargo build` (shared build artifacts)
+
+The orchestrator's recent commit chain was all serial foreground — and that was correct. See commit history `0b7827d` → `91d5cfd` → ... → `9cd121a` for examples.
+
 
 **Dispatch patterns**
 

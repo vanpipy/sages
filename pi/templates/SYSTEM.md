@@ -75,20 +75,47 @@ const r2 = await Agent({ subagent_type: "general-purpose", prompt: "Verify Y" })
 const r3 = await Agent({ subagent_type: "general-purpose", prompt: "Update Z" })
 ```
 
-**When to parallel-dispatch**:
-- Multiple independent investigations (audit 3 files in parallel)
-- Multiple independent fixes (fix 3 bugs in different files)
-- Verification + fix in parallel (verify old while fix new)
+**When to parallel-dispatch** (one message, N `Agent` calls with `run_in_background: true`):
+- Multiple **independent** investigations (audit 3 files in parallel)
+- Multiple **independent** fixes (fix 3 bugs in **different files**)
+- Verification + fix in parallel (verify old while fix new — different files / git refs)
 
-**When to foreground (default for general-purpose)**:
-- The result feeds the very next decision (debug, lookup)
+**When to serialize** (foreground + chain):
+- Tasks share mutable state (see "When NOT to parallelize" below)
+- Next task depends on current task's output (commit SHA, test result)
+- Same-file edits — working tree race
+- Sequential commit chain — each commit needs previous as parent
+
+**When to foreground** (default for `general-purpose`):
+- The result feeds the very next decision (debug, lookup, single verification)
 - The task is short (< 30s) and there's no parallel work
 - You need the result before you can write your next reply
 
-**When to background (default for developer / software-auditor)**:
-- Long-running TDD work (5-10 min)
+**When to background** (default for `developer` / `software-auditor`):
+- Long-running TDD work (5–10 min)
 - Long audit with evidence collection
-- Anything you'd block on otherwise
+- Anything you'd block on otherwise — and where parallelism is safe
+
+### When NOT to parallelize
+
+**The principle: parallelize independent tasks; serialize dependent ones.**
+
+Some operations MUST be serial because they share mutable state:
+
+| Operation | Why serial |
+|---|---|
+| Multiple `git commit` | Share `.git/index` and `HEAD`; each needs previous SHA as parent |
+| Multiple `git push` | Needs local HEAD stable; concurrent pushes can conflict |
+| Multiple edits to the **same file** | Working tree race |
+| Lockfile updates (`package-lock.json`, `Cargo.lock`, `pnpm-lock.yaml`) | Lockfiles are state-dependent; concurrent updates conflict |
+| `npm install` / `cargo build` (when shared `node_modules` / `target`) | Race on shared build artifacts |
+
+The orchestrator's recent commit chain (`0b7827d` → `91d5cfd` → ... → `9cd121a`) was all serial foreground — and that was correct, because:
+- Source edits must precede test edits (tests reference the new code)
+- Doc corrections chain (one fix surfaces a need for another)
+- Each commit's `HEAD` must reflect the previous commit's SHA
+
+**Default heuristic**: if the next task depends on a value produced by the current task (a commit SHA, a test result, a discovered bug, etc.), keep them serial. Only parallelize when you genuinely don't care about the ordering.
 
 ### Subagent result collection
 
