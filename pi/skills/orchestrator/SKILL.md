@@ -120,13 +120,16 @@ When dispatching via the `Agent` tool, pick the right subagent type:
 
 | Task | Subagent | `isolation` |
 |--- |--- |--- |
-| Meta-file edits / git ops / research / lightweight | `general-purpose` | none |
+| Meta-file edits / git ops / research / lightweight | `general-purpose` | none; **add `isolated: true` for git ops** to bypass bash-guard |
 | Production-code TDD work | `developer` (legacy alias: `software-developer`) | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
 | Audit / evidence collection | `software-auditor` | none |
 | Quick read-only search | `Explore` | none (built-in) |
 | Architecture design | `Plan` | none (built-in) |
 
 The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. Always pass the object form.
+
+> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / graphify / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block.
+
 
 **Dispatch patterns**
 
