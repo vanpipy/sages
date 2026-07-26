@@ -114,17 +114,38 @@ For each batch (1 → N):
 6. If PASS → proceed to next batch
 ```
 
-#### Subagent per task role — canonical mapping
+#### Subagent dispatch contract
 
-Map each DAG task to the right `subagent_type` from the 4-agent pipeline (see Subagent Contract above). Role selection by *purpose*, not convenience:
+When dispatching via the `Agent` tool, pick the right subagent type:
 
-| Task purpose                           | `subagent_type`       | `isolation` | Notes                                                             |
-|----------------------------------------|-----------------------|-------------|-------------------------------------------------------------------|
-| Codebase research ("where is X?")      | `Explore`             | none        | Read-only. Haiku — cheap.                                         |
-| Architecture / step-by-step plan       | `Plan`                | none        | Read-only. Returns plan + Critical Files.                         |
-| Edit production code (TDD: RED→GREEN)  | `developer`           | `worktree` (managed object) | Strict TDD discipline. Sonnet + high thinking.         |
-| Verify / certify prior work            | `software-auditor`    | none        | Read-only. Independent of implementer — fresh eyes.               |
-| Catch-all fallback (use sparingly)     | `general-purpose`     | n/a         | Last resort. Don't use for plan/dev/audit — specialised roles win. |
+| Task | Subagent | `isolation` |
+|--- |--- |--- |
+| Meta-file edits / git ops / research / lightweight | `general-purpose` | none |
+| Production-code TDD work | `developer` (legacy alias: `software-developer`) | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
+| Audit / evidence collection | `software-auditor` | none |
+| Quick read-only search | `Explore` | none (built-in) |
+| Architecture design | `Plan` | none (built-in) |
+
+The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. Always pass the object form.
+
+**Dispatch patterns**
+
+```ts
+// Meta-file edit (general-purpose)
+Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true })
+
+// Production-code TDD (developer + worktree)
+Agent({
+  subagent_type: "developer",
+  isolation: { dag_id: <dag-id>, task_id: <task-id>, mode: "create" },
+  prompt: "...",
+  run_in_background: true,
+})
+
+// Audit (software-auditor)
+Agent({ subagent_type: "software-auditor", prompt: "...", run_in_background: true })
+```
+
 
 The DAG's batch numbers should *roughly* follow the pipeline order, but batching is for parallelism within a stage, not across:
 - Batch 1 (research): one or more `Explore` tasks in parallel — discover all the things you'll need before planning

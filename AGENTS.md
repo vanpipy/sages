@@ -254,13 +254,17 @@ respecting quotes + parens, defeating the original first-word bypass.
 F4-1 (`perl -pi` target extraction, line 226) and F4-2 (`N>file`
 fd-redirect detection, line 85) harden the two known gaps.
 
+### Subagent dispatch contract
+
+The L3 main agent dispatches subagents based on the task shape — NEVER use `developer` for meta-files or git operations (use `general-purpose`). See `pi/templates/SUBAGENTS.md § Dispatch Contract` for the full decision tree.
+
 ### Three-tier agent model
 
 | Tier | Who | Write tools | Safety mechanism |
 |---|---|---|---|
 | **L1 — read-only** | `Explore`, `Plan`, `software-auditor` | **none** (frontmatter `tools:` allowlist) | LLM physically cannot call write |
 | **L2 — write-in-worktree** | `developer` (canonical, alias `software-developer`) | `edit`, `write` | managed-worktree object (`{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`) + `software-auditor` + merge gate |
-| **L3 — coordinator** | **main agent** | 4 orchestrator tools (write `.pi/orchestrator/*` only) + `Agent` (dispatch). NO direct write tool — raw `edit`/`write` filtered, `sages_write`/`sages_edit` retired. | Layer 1 + Layer 2 hard threshold |
+| **L3 — coordinator** | **main agent** | 4 orchestrator tools (write `.pi/orchestrator/*` only) + `Agent` (dispatch). NO direct write tool. Dispatches: `general-purpose` for meta-files/git/lightweight, `developer` (with `isolation: { dag_id, task_id, mode: "create" }`) for production-code TDD, `software-auditor` for audit. See `pi/templates/SUBAGENTS.md § Dispatch Contract`. | Layer 1 + Layer 2 hard threshold |
 
 The asymmetry IS the design — `developer` keeps raw edit/write
 because that's its job; main agent gives them up because they were

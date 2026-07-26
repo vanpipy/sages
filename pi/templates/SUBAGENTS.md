@@ -14,6 +14,22 @@ description as "see `~/.pi/agent/SUBAGENTS.md` for the full rationale
 and code examples". Subagents themselves do NOT read it (they get their
 identity from `~/.pi/agent/agents/<name>.md`).
 
+## Dispatch Contract (L3 main agent perspective)
+
+The orchestrator dispatches subagents based on the task shape:
+
+- **Meta-files / git ops / research / lightweight tasks** → `general-purpose` (no isolation)
+- **Production-code TDD work** → `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree)
+- **Audit / verify** → `software-auditor` (read-only, evidence-based)
+- **Quick search / architecture design** → `Explore` / `Plan` (pi-subagents built-ins)
+- **Multi-stage workflows** → `task_dispatch` (orchestrator tool) — emits developer / auditor dispatches automatically
+
+The orchestrator should NEVER:
+- Use `developer` for git operations or meta-file edits (use `general-purpose`).
+- Use `general-purpose` for production-code TDD (use `developer`).
+
+When the orchestrator dispatches `developer` with `isolation: { dag_id, task_id, mode: "create" }`, pi-subagents provisions a managed worktree at `<repo>/.pi/worktree/<dag>/<task>` from `origin/main`, leases it for the duration of the task, and the developer commits inside the worktree. The orchestrator merges the result branch into main after audit.
+
 ## Agent Roster
 
 | Stage | `subagent_type`     | Source                              | Tools                | Purpose                                                                |
@@ -153,6 +169,49 @@ in `pi-subagents/src/default-agents.ts:58-74`, so it can use any
 tool. But it inherits the bash-guard from the dispatcher's cwd —
 `canMainAgentWrite()` still applies, so production-code writes
 are blocked even via `general-purpose` bash.
+
+## Dispatch examples
+
+### Example 1: edit a meta-file
+
+```ts
+// L3 main agent (orchestrator)
+Agent({
+  subagent_type: "general-purpose",
+  prompt: "Edit AGENTS.md to add X. Read first, edit, report diff.",
+  description: "Edit AGENTS.md to add X",
+  run_in_background: true,
+})
+// Main reviews diff → main commits
+```
+
+### Example 2: production-code TDD
+
+```ts
+Agent({
+  subagent_type: "developer",
+  isolation: {
+    dag_id: "GC-2026-008",
+    task_id: "X1",
+    mode: "create",
+  },
+  prompt: "Implement the new caching layer in src/cache/. RED first, then GREEN, then REFACTOR. Run `bun test test/cache/` after each step.",
+  description: "Implement caching layer",
+  run_in_background: true,
+})
+// Developer commits inside the worktree; orchestrator merges after audit
+```
+
+### Example 3: audit a change
+
+```ts
+Agent({
+  subagent_type: "software-auditor",
+  prompt: "Verify commit 0675713 is consistent with its commit message: run `bun test`, confirm 4 files modified, confirm no other files touched. Return CERTIFIED / NEEDS WORK / BLOCKED with evidence.",
+  description: "Audit commit 0675713",
+  run_in_background: true,
+})
+```
 
 ### Composing a DAG
 

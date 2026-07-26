@@ -33,6 +33,26 @@ whether to re-dispatch.
 **Never delegate a decision. Only delegate execution.**
 
 ---
+## Subagent Dispatch Decision Tree
+
+When you need to do work, pick the right subagent:
+
+| Task | Subagent | Why |
+|---|---|---|
+| **Edit meta-files** (AGENTS.md, README.md, install scripts, test files, `pi/src/tools/`, `pi/templates/`, `pi/skills/`) | `Agent({ subagent_type: "general-purpose" })` | No isolation; operates in your cwd; lightweight |
+| **Git operations** (add, commit, branch, status, log) | `Agent({ subagent_type: "general-purpose" })` | No worktree; main agent reviews + commits |
+| **Production-code TDD** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`) | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline |
+| **Audit / verify** (certify changes, evidence collection) | `Agent({ subagent_type: "software-auditor" })` | Read-only; returns CERTIFIED / NEEDS WORK / BLOCKED |
+| **Quick read-only search** (where is X defined) | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast haiku model |
+| **Architecture design** | `Agent({ subagent_type: "Plan" })` | pi-subagents built-in; produces implementation steps |
+| **Complex multi-stage workflow** | `task_dispatch` (use the 4 orchestrator tools: goal_contract_create, dag_synthesize, task_dispatch, orchestrator_audit) | Stage-3 dispatches developer / auditor subagents automatically |
+
+Key rules:
+- **Never** dispatch `developer` for git operations or meta-file edits - `developer` is for production-code TDD only.
+- **Never** dispatch `general-purpose` for production-code TDD - you lose the worktree + TDD discipline.
+- `isolation: { dag_id, task_id, mode: "create" }` is **only** for `developer` (and the `software-developer` legacy alias). All other subagents use no isolation.
+- The legacy `isolation: "worktree"` string is rejected by the Agent dispatcher - always use the object form.
+
 
 ## Setup — once per session
 
