@@ -1,35 +1,36 @@
 /**
  * File Gate — path-aware policy for main-agent file writes.
  *
- * The main orchestrator agent can directly write to Sages **meta-files**
- * (orchestrator state under `.pi/orchestrator/`, the Sages source tree
- * under `pi/`, root docs, package metadata, ignore files). It CANNOT
- * directly write to **production code** (user `src/`, `test/`, `lib/`,
- * any other user code); those must go through the `Agent` tool with
- * a `developer` subagent (with an explicit managed-worktree isolation object) so the audit gate stays intact.
+ * The main orchestrator agent CANNOT directly edit ANY file (meta or
+ * production). The 4 orchestrator tools (`goal_contract_create`,
+ * `dag_synthesize`, `task_dispatch`, `orchestrator_audit`) write
+ * orchestrator state under `.pi/orchestrator/`; everything else
+ * (AGENTS.md, README.md, install scripts, test files, ...) must go
+ * through the `Agent` tool.
  *
- * Two tools are exposed:
- *   - `sages_write(path, content)`  full overwrite of a meta-file
- *   - `sages_edit(path, oldText, newText)`  targeted replace in a meta-file
+ * For meta-file edits, dispatch `general-purpose` subagent (no worktree —
+ * lightweight, operates in dispatcher's cwd). For production code,
+ * dispatch `developer` subagent (managed worktree + TDD discipline).
  *
- * Both share `canMainAgentWrite(path)` for the allowlist check. A
- * rejected path returns `{ isError: true, content: [{ text: policyMessage(...) }] }`
- * so the LLM can see exactly why and what to do instead (dispatch
- * a `developer` task via the Agent tool — pass `isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }` for managed worktrees.
+ * The path policy (`canMainAgentWrite`) is the **single source of
+ * truth** for the bash-guard (Layer 2). The bash-guard
+ * (`pi/src/tools/bash-guard.ts`) imports and uses the same function so
+ * `cat > meta-file` and `sages_write meta-file` would have given the
+ * same answer. With `sages_write`/`sages_edit` retired (2026-07-26),
+ * the LLM-facing tool surface no longer exposes any direct write — the
+ * bash-guard is the only remaining limb-side enforcement.
  *
  * Read tools (`read`, `aft_read`, `aft_search`, `codebase_*`, `graphify_*`,
  * `bash` for read-only commands) are intentionally NOT gated — the
  * main agent still needs to read user code to understand context.
  *
- * The policy is enforced at the tool layer; the system prompt
+ * The policy is enforced at the bash layer; the system prompt
  * (`pi/templates/SYSTEM.md §1`) carries the matching convention so
- * the LLM prefers `sages_edit` / `sages_write` over raw `edit` / `write`
- * even when the latter would technically succeed.
+ * the LLM dispatches `general-purpose` (no isolation) for meta-file
+ * edits and `developer` (managed worktree) for production code.
  */
 
-import { Type, type Static } from "typebox";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, isAbsolute } from "node:path";
+import { isAbsolute } from "node:path";
 
 /** Patterns that match meta-paths the main agent may write. */
 const META_WRITE_PATTERNS: RegExp[] = [
@@ -69,6 +70,15 @@ const PRODUCTION_DENY_PATTERNS: RegExp[] = [
 /**
  * Returns true iff the main agent may write to the given path.
  *
+ * This is the single source of truth for write policy — used by the
+ * bash-guard (Layer 2) to decide whether `cat > path` / `sed -i path` /
+ * `tee path` / etc. are allowed. The LLM-facing tool surface no
+ * longer includes any direct write tool, so the main agent must
+ * dispatch a subagent to perform writes — but the path policy still
+ * matters because (a) the subagent inherits the dispatcher's cwd
+ * (and the bash-guard applies to its bash commands too), and (b) a
+ * future tool must use the same function.
+ *
  * Deny rules (in order):
  *   1. Empty / null-byte / `..` / `~/` / absolute paths
  *   2. Production code patterns (user source roots + source extensions)
@@ -96,23 +106,22 @@ export function canMainAgentWrite(path: string): boolean {
 	return false;
 }
 
-/** Human-readable explanation returned to the LLM when a write is rejected. */
+/** Human-readable explanation of the policy (used by the bash-guard). */
 export function policyMessage(path: string): string {
 	return [
-		`main agent cannot directly edit "${path}".`,
+		`Path "${path}" is not main-agent-writable.`,
 		``,
-		`Production code and user source files must be modified via the Agent tool —`,
-		`dispatch a developer subagent with run_in_background: true. Pass isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" } for managed worktrees — the legacy isolation: "worktree" string literal is no longer accepted.`,
-		`Example:`,
-		`  Agent({`,
-		`    subagent_type: "developer",`,
-		`    prompt: "Implement <change> in <path>. <context>...",`,
-		`    run_in_background: true,`,
-		`  })`,
+		`The main agent has NO direct write tools. All file changes must be`,
+		`dispatched to a subagent via the Agent tool:`,
+		`  - For meta-file edits (AGENTS.md, README.md, install scripts,`,
+		`    test files, etc.): dispatch \`general-purpose\` (no isolation,`,
+		`    lightweight, operates in dispatcher's cwd). Review the diff`,
+		`    before committing.`,
+		`  - For production code (src/, test/, lib/, *.ts, *.py, ...):`,
+		`    dispatch \`developer\` with managed worktree isolation`,
+		`    (pass \`isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }\`).`,
 		``,
-		`Then run orchestrator_audit({ dag_id }) to verify.`,
-		``,
-		`Allowed direct writes from the main agent are limited to Sages meta-files:`,
+		`Allowed paths for \`general-purpose\` subagent (no isolation):`,
 		`  - .pi/orchestrator/*  (goal/dag/audit/state/designs)`,
 		`  - pi/src/, pi/test/, pi/skills/, pi/templates/, pi/scripts/`,
 		`  - pi-*/  (sibling subpackages: pi-subagents, pi-codebase-memory, pi-graphify, pi-evaluator, pi-minimax, pi-yunxiao)`,
@@ -120,165 +129,9 @@ export function policyMessage(path: string): string {
 		`  - .gitignore, .graphifyignore, .aft.jsonc`,
 		`  - .claude/, .codex/`,
 		``,
+		`All other paths (production code, user source) require the`,
+		`developer subagent in a managed worktree.`,
+		``,
 		`See SYSTEM.md §1 "Action Priority" for the policy.`,
 	].join("\n");
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Tool parameter schemas
-// ─────────────────────────────────────────────────────────────────────────
-
-export const SagesWriteParams = Type.Object({
-	path: Type.String({ description: "Relative path within cwd (e.g. .pi/orchestrator/goal-GC-1.yaml)" }),
-	content: Type.String({ description: "Full new file content" }),
-});
-
-export const SagesEditParams = Type.Object({
-	path: Type.String({ description: "Relative path within cwd" }),
-	oldText: Type.String({ description: "Exact substring to replace" }),
-	newText: Type.String({ description: "Replacement content" }),
-});
-
-// ─────────────────────────────────────────────────────────────────────────
-// Execute functions (exported for unit testing; the registered tool's
-// execute() delegates to these)
-// ─────────────────────────────────────────────────────────────────────────
-
-export type ToolResponse = {
-	content: { type: "text"; text: string }[];
-	isError?: boolean;
-};
-
-/** Result of `executeSagesWrite` — a thin response wrapper for tests. */
-export async function executeSagesWrite(
-	params: Static<typeof SagesWriteParams>,
-	ctx: { cwd: string },
-): Promise<ToolResponse> {
-	if (!canMainAgentWrite(params.path)) {
-		return {
-			isError: true,
-			content: [{ type: "text", text: policyMessage(params.path) }],
-		};
-	}
-	const fullPath = ctx.cwd.replace(/\/+$/, "") + "/" + params.path;
-	mkdirSync(dirname(fullPath), { recursive: true });
-	writeFileSync(fullPath, params.content, "utf-8");
-	return {
-		content: [{ type: "text", text: `wrote ${params.path} (${params.content.length} bytes)` }],
-	};
-}
-
-export async function executeSagesEdit(
-	params: Static<typeof SagesEditParams>,
-	ctx: { cwd: string },
-): Promise<ToolResponse> {
-	if (!canMainAgentWrite(params.path)) {
-		return {
-			isError: true,
-			content: [{ type: "text", text: policyMessage(params.path) }],
-		};
-	}
-	const fullPath = ctx.cwd.replace(/\/+$/, "") + "/" + params.path;
-	if (!existsSync(fullPath)) {
-		return {
-			isError: true,
-			content: [{ type: "text", text: `sages_edit: file not found at ${params.path}` }],
-		};
-	}
-	const original = readFileSync(fullPath, "utf-8");
-	if (!original.includes(params.oldText)) {
-		return {
-			isError: true,
-			content: [{
-				type: "text",
-				text: `sages_edit: oldText not found in ${params.path} (file may have changed; re-read first)`,
-			}],
-		};
-	}
-	// ─── gotcha: 1:1 size replacement only ───────────────────────────
-	// This uses String.prototype.replace (string first arg → literal
-	// match, only the FIRST occurrence). It does NOT honor newlines,
-	// indentation, or multi-line blocks specially.
-	//
-	// Observed in 2026-07-26 during `chore(pi-subagents): retire
-	// user-level developer.md` (commits 248f7db + 569a9f5 + 4ce3a51):
-	// when oldText is a multi-line block AND newText is LONGER than
-	// oldText, an upstream IPC layer (or the tool dispatcher) may
-	// duplicate newText's "tail" (the lines beyond oldText's length)
-	// at the END of the file, after the final summary. The replacement
-	// at the matched location also proceeds normally. Symptom: file
-	// grows by `len(newText)` but the original oldText block remains
-	// in place, plus a duplicate tail appears at EOF.
-	//
-	// Workaround: keep oldText and newText the SAME line count (1:1
-	// replacement) — restructure the target file BEFORE the edit if
-	// needed. The regression test `executeSagesEdit > 1:1 size
-	// replacement only` below locks in that this tool is well-behaved
-	// when sizes match; the gotcha lives in an upper layer and is
-	// documented here for future maintainers.
-	const updated = original.replace(params.oldText, params.newText);
-	mkdirSync(dirname(fullPath), { recursive: true });
-	writeFileSync(fullPath, updated, "utf-8");
-	return {
-		content: [{
-			type: "text",
-			text: `edited ${params.path} (${original.length} → ${updated.length} bytes)`,
-		}],
-	};
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Tool registration
-// ─────────────────────────────────────────────────────────────────────────
-
-/**
- * Register the path-gated `sages_edit` and `sages_write` tools on the
- * pi extension API. Call from `src/extension.ts` alongside
- * `registerOrchestratorTools`.
- */
-export function registerFileGate(pi: any): void {
-	pi.registerTool({
-		name: "sages_write",
-		label: "Sages Write (meta-file)",
-		description: [
-			"Overwrite a Sages meta-file with new content.",
-			"Allowlisted paths only:",
-			"  - .pi/orchestrator/*  (goal/dag/audit/state/designs)",
-			"  - pi/src/, pi/test/, pi/skills/, pi/templates/, pi/scripts/",
-			"  - README.md, AGENTS.md, package.json, tsconfig.json",
-			"  - .gitignore, .graphifyignore, .aft.jsonc, .claude/, .codex/",
-			"Production code (src/, test/, lib/, *.ts, *.py, ...) is REJECTED.",
-			"Use the Agent tool with subagent_type=developer for those. Pass `isolation: { dag_id, task_id, worktree_id?, mode: \"create\" | \"reuse\" }` for managed worktrees.",
-		].join("\n"),
-		parameters: SagesWriteParams,
-		async execute(
-			_toolCallId: string,
-			params: any,
-			_signal: any,
-			_onUpdate: any,
-			ctx: any,
-		) {
-			return await executeSagesWrite(params, { cwd: ctx.cwd });
-		},
-	});
-
-	pi.registerTool({
-		name: "sages_edit",
-		label: "Sages Edit (meta-file)",
-		description: [
-			"Replace oldText with newText in a Sages meta-file.",
-			"Allowlisted paths only (see sages_write description).",
-			"Production code is REJECTED — use Agent + developer subagent (with explicit managed-worktree isolation). ",
-		].join("\n"),
-		parameters: SagesEditParams,
-		async execute(
-			_toolCallId: string,
-			params: any,
-			_signal: any,
-			_onUpdate: any,
-			ctx: any,
-		) {
-			return await executeSagesEdit(params, { cwd: ctx.cwd });
-		},
-	});
 }
