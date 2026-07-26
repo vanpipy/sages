@@ -37,6 +37,8 @@ const META_WRITE_PATTERNS: RegExp[] = [
 	/^\.pi\//,
 	// Sages own source tree
 	/^pi\//,
+	// Sibling subpackages (Sages monorepo)
+	/^pi-[a-z0-9-]+\//,
 	// Root meta files
 	/^README\.md$/,
 	/^AGENTS\.md$/,
@@ -113,6 +115,7 @@ export function policyMessage(path: string): string {
 		`Allowed direct writes from the main agent are limited to Sages meta-files:`,
 		`  - .pi/orchestrator/*  (goal/dag/audit/state/designs)`,
 		`  - pi/src/, pi/test/, pi/skills/, pi/templates/, pi/scripts/`,
+		`  - pi-*/  (sibling subpackages: pi-subagents, pi-codebase-memory, pi-graphify, pi-evaluator, pi-minimax, pi-yunxiao)`,
 		`  - README.md, AGENTS.md, package.json, tsconfig.json`,
 		`  - .gitignore, .graphifyignore, .aft.jsonc`,
 		`  - .claude/, .codex/`,

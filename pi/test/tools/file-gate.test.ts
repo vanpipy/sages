@@ -70,6 +70,17 @@ describe("canMainAgentWrite", () => {
 			".graphifyignore",
 			".aft.jsonc",
 			".aft.json",
+			// Sibling subpackages (Sages monorepo)
+			"pi-subagents/src/agent-runner.ts",
+			"pi-subagents/src/agent-prompts/developer.ts",
+			"pi-subagents/package.json",
+			"pi-codebase-memory/src/index.ts",
+			"pi-graphify/src/index.ts",
+			"pi-evaluator/src/evaluator.py",
+			"pi-minimax/src/index.ts",
+			"pi-yunxiao/src/index.ts",
+			"pi-yunxiao/README.md",
+			"pi-yunxiao/AGENTS.md",
 		];
 		for (const p of allowed) {
 			it(`allows ${p}`, () => {
