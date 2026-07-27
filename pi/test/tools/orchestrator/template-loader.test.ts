@@ -39,6 +39,34 @@ describe("template-loader", () => {
       expect(content).toContain("{{sc_list}}");
       expect(content).toContain("{{files_to_touch}}");
       expect(content).toContain("{{acceptance_cmd}}");
+      expect(content).toContain("{{workspace_id}}");
+      expect(content).toContain("{{upstream_handoffs}}");
+      expect(content).toContain(
+        ".pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md",
+      );
+    });
+
+    it("loads subagent-merger.md with merge-specific task data", () => {
+      const content = loadPromptTemplate("subagent-merger");
+      expect(content).not.toBeNull();
+      for (const field of [
+        "task_id",
+        "task_title",
+        "branch_a",
+        "branch_b",
+        "base_ref",
+        "sc_list",
+        "escalation_path",
+        "worktree_path_a",
+        "worktree_path_b",
+      ]) {
+        expect(content).toContain(`{{${field}}}`);
+      }
+      expect(content).toContain("## Verification on Merge Result");
+      expect(content).toContain("## Reporting");
+      expect(content).toContain(
+        ".pi/orchestrator/audit-merge-{{task_id}}.md",
+      );
     });
 
     it("loads subagent-auditor.md (renamed from subagent-software-auditor in GC-2026-014)", () => {
@@ -262,11 +290,12 @@ describe("template-loader", () => {
   });
 
   describe("listTemplates", () => {
-    it("returns the 3 known prompt templates (general-purpose removed in Phase C)", () => {
+    it("returns the 4 known prompt templates (general-purpose removed in Phase C)", () => {
       const names = listTemplates("prompts");
       expect(names).toContain("subagent-developer");
       expect(names).toContain("subagent-auditor");
       expect(names).toContain("subagent-explore");
+      expect(names).toContain("subagent-merger");
       // general-purpose was removed in DAG-2026-011 Phase C — its
       // template file is gone, the schema entry is gone. The subagent
       // itself is no longer in `pi-subagents/src/default-agents.ts`.
@@ -274,7 +303,7 @@ describe("template-loader", () => {
       // The Phase A / Phase B aliases were removed in GC-2026-014.
       expect(names).not.toContain("subagent-software-developer");
       expect(names).not.toContain("subagent-software-auditor");
-      expect(names.length).toBe(3);
+      expect(names.length).toBe(4);
     });
 
     it("returns the 4 known goal templates", () => {
