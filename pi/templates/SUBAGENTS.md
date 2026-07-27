@@ -22,15 +22,16 @@ decisions.
 
 The orchestrator dispatches subagents based on the task shape:
 
-- **Meta-files / git ops / research / lightweight tasks** → `general-purpose`. For git ops, also pass `isolated: true` to bypass the bash-guard. **Dispatch independent tasks in parallel** (multiple `Agent` calls in one message, each `run_in_background: true`).
+- **Meta-file edits / design-doc writes** → `developer` with `tdd: "none"` (no isolation, in dispatcher's cwd). For git ops that bash-guard would block, also pass `isolated: true` to bypass the bash-guard hook.
 - **Production-code TDD work** → `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree)
 - **Audit / verify** → `auditor` (read-only, evidence-based)
 - **Quick search** → `Explore`; **Planning Brief compilation** → `Plan` (bounded, read-only).
 - **Multi-stage workflows** → `task_dispatch` (orchestrator tool) — emits developer / auditor dispatches automatically
 
 The pipeline is main-agent understanding and decision → Planning Brief → Plan compilation and main-agent review → dispatch → audit.
-- Use `developer` for git operations or meta-file edits (use `general-purpose`).
-- Use `general-purpose` for production-code TDD (use `developer`).
+- Use `developer` with `tdd: "none"` (no isolation) for git operations and meta-file edits.
+- Use `developer` with managed worktree for production-code TDD work.
+- Use `auditor` (read-only) for verification — never modify production code from an auditor dispatch.
 
 When the orchestrator dispatches `developer` with `isolation: { dag_id, task_id, mode: "create" }`, pi-subagents provisions a managed worktree at `<repo>/.pi/worktree/<dag>/<task>` from `origin/main`, leases it for the duration of the task, and the developer commits inside the worktree. The orchestrator merges the result branch into main after audit.
 
@@ -43,13 +44,15 @@ When the orchestrator dispatches `developer` with `isolation: { dag_id, task_id,
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. Host-managed worktree. |
 | 4     | `auditor`   | **shipped** (this repo)              | read, bash, grep, find, ls, aft_* | Evidence-based certifier. **Read-only** — re-runs commands, never modifies production code. |
 
-**3 built-ins + 2 shipped.** The 3 built-ins (`Explore`, `Plan`,
-`general-purpose`) come from `@tintinweb/pi-subagents`. The 2 custom
-(`developer`, `auditor`) are installed by sages (`developer` is a Phase A alias)
-from `pi/templates/agents/` to `~/.pi/agent/agents/`. Don't re-ship
-`Explore` / `Plan` — overriding with a project-specific copy brings
-no behaviour change. Override them only when project-specific rules
-are needed (drop a `.md` of the same name into `agents/`).
+**Four default agents.** Two built-ins (`Explore`, `Plan`) ship from
+`@tintinweb/pi-subagents`. Two Sages agents (`developer`, `auditor`)
+are installed by sages (`developer` is a Phase A alias of itself — it
+inherits its identity from `~/.pi/agent/agents/` and is the canonical
+strict-TDD implementer; `auditor` is the canonical evidence certifier)
+into `~/.pi/agent/agents/`. Don't re-ship `Explore` / `Plan` —
+overriding with a project-specific copy brings no behaviour change.
+Override them only when project-specific rules are needed (drop a
+`.md` of the same name into `agents/`).
 
 ## Dispatch Examples
 
@@ -132,47 +135,6 @@ Agent({
 
 **Returns**: `CERTIFIED | NEEDS WORK | BLOCKED` + evidence-based report.
 
-### Sidecar: `general-purpose` (lightweight helper, no worktree)
-
-`general-purpose` is the main agent's **fallback helper** for
-small/lightweight tasks that don't justify a worktree. The main
-agent uses it to edit meta-files (AGENTS.md, README.md, install
-scripts, test files, ...) directly in the dispatcher's cwd —
-**no isolation, no worktree, no commit by the subagent** (the
-main agent reviews the diff and commits if good).
-
-```ts
-Agent({
-  subagent_type: "general-purpose",
-  prompt: "Edit pi/scripts/install.sh to rename the function " +
-          "backup_legacy_developer_template to backup_legacy_developer. " +
-          "Read the file first, then make the edit. Report the diff.",
-  description: "Rename function in install.sh",
-  // NO isolation — operates in dispatcher's cwd
-  run_in_background: true,
-})
-```
-
-When to use:
-- **Meta-file edits** (orchestrator has no direct write tool for
-  AGENTS.md / README.md / install scripts / test files / ...)
-- **Ad-hoc fixes** (typo, config tweak, "look up this symbol")
-- **Help from other subagents** (a `developer` running in a
-  worktree can dispatch `general-purpose` for an assist; the
-  helper runs in the developer's worktree cwd)
-
-When NOT to use:
-- **Production code** — dispatch `developer` with managed
-  worktree (TDD + audit gate)
-- **Substantial work** — `general-purpose` doesn't enforce TDD;
-  for anything with verification, prefer `developer`
-
-The `general-purpose` agent has `tools: ["*"]` and `extensions: true`
-in `pi-subagents/src/default-agents.ts:58-74`, so it can use any
-tool. But it inherits the bash-guard from the dispatcher's cwd —
-`canMainAgentWrite()` still applies, so production-code writes
-are blocked even via `general-purpose` bash.
-
 ## Dispatch examples
 
 ### Example 1: edit a meta-file
@@ -180,7 +142,8 @@ are blocked even via `general-purpose` bash.
 ```ts
 // L3 main agent (orchestrator)
 Agent({
-  subagent_type: "general-purpose",
+  subagent_type: "developer",
+  tdd: "none",
   prompt: "Edit AGENTS.md to add X. Read first, edit, report diff.",
   description: "Edit AGENTS.md to add X",
   run_in_background: true,
@@ -226,8 +189,9 @@ Agent({
 // is unrestricted (but loses AFT / MCP / magic-context - not
 // needed for git ops).
 Agent({
-  subagent_type: "general-purpose",
+  subagent_type: "developer",
   isolated: true,
+  tdd: "none",
   prompt: "Run these in sequence:\\n  cd /home/leroy/Project/sages\\n  git add pi/src/tools/foo.ts\\n  git commit -m 'fix(foo): ...'",
   description: "Commit fix to pi/src/tools/foo.ts",
   run_in_background: true,
@@ -240,20 +204,21 @@ Agent({
 ```ts
 // L3 main agent — 3 independent investigations, all in parallel
 Agent({
-  subagent_type: "general-purpose",
+  subagent_type: "auditor",
   prompt: "Verify commit A passes tests. Run bun test pi/test/.",
   description: "Verify commit A",
   run_in_background: true,
 })
 Agent({
-  subagent_type: "general-purpose",
+  subagent_type: "auditor",
   prompt: "Verify commit B passes tests. Run bun test pi-subagents/test/.",
   description: "Verify commit B",
   run_in_background: true,
 })
 Agent({
-  subagent_type: "general-purpose",
+  subagent_type: "developer",
   isolated: true,
+  tdd: "none",
   prompt: "Commit pending changes with proper message.",
   description: "Commit pending changes",
   run_in_background: true,
@@ -265,8 +230,8 @@ Anti-pattern:
 
 ```ts
 // ✗ serial — each call blocks until subagent finishes
-const r1 = await Agent({ subagent_type: "general-purpose", prompt: "Verify A" })
-const r2 = await Agent({ subagent_type: "general-purpose", prompt: "Verify B" })
+const r1 = await Agent({ subagent_type: "auditor", prompt: "Verify A" })
+const r2 = await Agent({ subagent_type: "auditor", prompt: "Verify B" })
 // total wall time = T(A) + T(B)
 ```
 

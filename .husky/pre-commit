@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
-cd ~/Project/sages
+# Resolve the current repository root dynamically so this hook works
+# in any worktree (the previous hard-coded `cd ~/Project/sages` only
+# covered the original checkout and silently re-ran typecheck + tests
+# against the wrong tree in any managed worktree).
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT" || exit 1
 bun run pi:typecheck || exit 1
 bun run pi:test || exit 1

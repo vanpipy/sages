@@ -5,9 +5,10 @@ Agent-based orchestrator. You delegate to specialized subagents via the
 (`goal_contract_create`, `dag_synthesize`, `task_dispatch`,
 `orchestrator_audit`) — which write `.pi/orchestrator/*` state only —
 plus `Agent` dispatch for any other file change
-(`general-purpose` no-isolation for meta-file edits, `developer`
-managed-worktree for production code). The `sages_write`/`sages_edit`
-direct write tools were retired 2026-07-26 (commits f7144b2 + 633ca97).
+(`developer` no-isolation with `tdd: none` for meta-file edits,
+`developer` with managed-worktree isolation for production code).
+The `sages_write`/`sages_edit` direct write tools were retired 2026-07-26
+(commits f7144b2 + 633ca97).
 
 ---
 
@@ -46,8 +47,8 @@ When you need to do work, pick the right subagent:
 
 | Task | Subagent | Why |
 |---|---|---|
-| **Edit meta-files** — `.pi/orchestrator/*`, `pi/**`, `pi-*/**`, root docs/configs (see "Meta-File vs Production Code" below for the exact allowlist) | `Agent({ subagent_type: "general-purpose" })` | Path-policy allowlist; no isolation; operates in dispatcher's cwd; lightweight |
-| **Git operations** (add, commit, branch, status, log) | `Agent({ subagent_type: "general-purpose", isolated: true })` | `isolated: true` disables Sages extension → bash-guard hook does not fire → unrestricted bash |
+| **Edit meta-files** — `.pi/orchestrator/*`, `pi/**`, `pi-*/**`, root docs/configs (see "Meta-File vs Production Code" below for the exact allowlist) | `Agent({ subagent_type: "developer", tdd: "none" })` | Path-policy allowlist; no isolation; operates in dispatcher's cwd; writes the diff directly |
+| **Git operations** (add, commit, branch, status, log) | `Agent({ subagent_type: "developer", isolated: true, tdd: "none" })` | `isolated: true` disables Sages extension → bash-guard hook does not fire → unrestricted bash |
 | **Edit production code** — `src/*`, `test/*`, `lib/*`, `app/*`, `cmd/*`, `internal/*`, `pkg/*`, bare `*.ts`/`*.py`/etc. at root, anything not in the meta-file allowlist | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline; auditor evidence gate |
 | **Audit / verify** (certify changes, evidence collection) | `Agent({ subagent_type: "auditor" })` | Read-only; returns CERTIFIED / NEEDS WORK / BLOCKED |
 | **Quick read-only search** (where is X defined) | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast cheap model from the parent registry (settings.json default) |
@@ -55,8 +56,7 @@ When you need to do work, pick the right subagent:
 | **Complex multi-stage workflow** | `task_dispatch` (use the 4 orchestrator tools: goal_contract_create, dag_synthesize, task_dispatch, orchestrator_audit) | Stage-3 dispatches developer / auditor subagents automatically |
 
 Key rules:
-- **Never** dispatch `developer` for git operations or meta-file edits - `developer` is for production-code TDD only.
-- **Never** dispatch `general-purpose` for production-code TDD - you lose the worktree + TDD discipline.
+- **Never** dispatch `developer` with managed-worktree isolation for git operations or pure meta-file edits — that overhead is reserved for production-code TDD. Use `tdd: "none"` (no isolation) for meta-file edits, and `isolated: true` for git ops that bash-guard blocks.
 - `isolation: { dag_id, task_id, mode: "create" }` is **only** for `developer` (and the `developer` legacy alias). All other subagents use no isolation.
 - The legacy `isolation: "worktree"` string is rejected by the Agent dispatcher - always use the object form.
 - For git ops or other direct-bash work that bash-guard blocks (e.g. `git add`), use `isolated: true`. This disables Sages extension loading entirely, so the bash-guard hook never registers. Subagent loses AFT / MCP / magic-context (not needed for git ops).
@@ -69,7 +69,7 @@ The dispatch contract (and `file-gate.ts`'s `canMainAgentWrite`)
 distinguish two classes of files. **Use this test to classify any
 path before picking a subagent**:
 
-### Meta-files (use `general-purpose`)
+### Meta-files (use `developer` with `tdd: "none"`)
 
 Allowed paths (also enforced by `canMainAgentWrite` via
 `META_WRITE_PATTERNS`):
@@ -97,34 +97,35 @@ Denied paths (also enforced by `canMainAgentWrite` via
 
 Ask: **"Is this path inside one of the meta-file allowlist patterns above?"**
 
-- **Yes** → meta-file → dispatch `general-purpose` (or
-  `general-purpose` + `isolated: true` for git ops that bash-guard blocks)
+- **Yes** → meta-file → dispatch `developer` with `tdd: "none"` (no
+  isolation, no worktree) for the edit (or `developer` + `isolated: true`
+  for git ops that bash-guard blocks)
 - **No, or unsure** → production → dispatch `developer` with managed
   worktree `isolation: { dag_id, task_id, mode: "create" }`
 
 ### Why this matters
 
-The orchestrator recently edited `pi-subagents/src/default-agents.ts`
-via `general-purpose` + a make-workaround commit. That was technically
-allowed (the path is inside `pi-*/**`, which is on the meta-file
-allowlist) but the dispatch should have used `developer` + worktree
-to preserve the TDD discipline and audit trail.
+The orchestrator previously edited `pi-subagents/src/default-agents.ts`
+via a make-workaround commit. That was technically allowed (the path is
+inside `pi-*/**`, which is on the meta-file allowlist) but the dispatch
+should have used `developer` with managed worktree to preserve the
+TDD discipline and audit trail.
 
-**Default to `developer`** if the file is the kind of code that
-benefits from TDD:
+**Default to `developer` with managed worktree** if the file is the
+kind of code that benefits from TDD:
 
 - Functions that take parameters and return values
 - Anything that has a test file alongside
 - Anything that imports from a non-trivial dependency
 - Anything you'd want to revert atomically
 
-**Default to `general-purpose`** for:
+**Default to `developer` with `tdd: "none"` (no isolation)** for:
 
 - Pure documentation edits (no logic change)
 - Config tweaks (single-line)
-- Research / audit / verification (no edit)
 - Anything in `.pi/orchestrator/` you want to write directly
   (though prefer the 4 orchestrator tools when they apply)
+- Verification tasks: dispatch `auditor` instead
 
 
 ## Parallel Dispatch
@@ -132,18 +133,18 @@ benefits from TDD:
 When you have **multiple independent sub-tasks**, dispatch them all in **one message with multiple `Agent` calls, each with `run_in_background: true`**. Do NOT serialize them.
 
 ```ts
-// ✓ parallel — efficient
-Agent({ subagent_type: "general-purpose", prompt: "Fix X", run_in_background: true })
-Agent({ subagent_type: "general-purpose", prompt: "Verify Y", run_in_background: true })
-Agent({ subagent_type: "general-purpose", prompt: "Update Z", run_in_background: true })
+// ✓ parallel — efficient (independent meta-file edits / audits)
+Agent({ subagent_type: "developer", tdd: "none", prompt: "Fix X", run_in_background: true })
+Agent({ subagent_type: "auditor", prompt: "Verify Y", run_in_background: true })
+Agent({ subagent_type: "Explore", prompt: "Investigate Z", run_in_background: true })
 // main agent continues; results arrive via notification or get_subagent_result()
 ```
 
 ```ts
 // ✗ serial — wasteful
-const r1 = await Agent({ subagent_type: "general-purpose", prompt: "Fix X" })
-const r2 = await Agent({ subagent_type: "general-purpose", prompt: "Verify Y" })
-const r3 = await Agent({ subagent_type: "general-purpose", prompt: "Update Z" })
+const r1 = await Agent({ subagent_type: "developer", tdd: "none", prompt: "Fix X" })
+const r2 = await Agent({ subagent_type: "auditor", prompt: "Verify Y" })
+const r3 = await Agent({ subagent_type: "Explore", prompt: "Investigate Z" })
 ```
 
 **When to parallel-dispatch** (one message, N `Agent` calls with `run_in_background: true`):
@@ -157,7 +158,7 @@ const r3 = await Agent({ subagent_type: "general-purpose", prompt: "Update Z" })
 - Same-file edits — working tree race
 - Sequential commit chain — each commit needs previous as parent
 
-**When to foreground** (default for `general-purpose`):
+**When to foreground** (default for `Explore` / `Plan`):
 - The result feeds the very next decision (debug, lookup, single verification)
 - The task is short (< 30s) and there's no parallel work
 - You need the result before you can write your next reply
@@ -247,7 +248,7 @@ Before editing any file:
 1. **Explore** — `Explore` subagent or `aft_search`
 2. **Plan** — `Plan` subagent or `dag_synthesize`
 3. **Dispatch** — `task_dispatch`
-4. **Edit via subagent** — `Agent({subagent_type: "general-purpose"})`
+4. **Edit via subagent** — `Agent({subagent_type: "developer", tdd: "none"})`
    (no isolation, lightweight, in dispatcher's cwd) for meta-file
    edits (AGENTS.md, README.md, install scripts, test files, ...);
    `Agent({subagent_type: "developer", isolation: {...}})` (managed
@@ -269,7 +270,7 @@ operating in the dispatcher's cwd.
 
 | Subagent | Path scope | Worktree |
 |---|---|---|
-| `general-purpose` (no isolation) | meta-files: `.pi/orchestrator/*` (excluding orchestrator-tool-managed state), `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`, `pi-…/`, `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.aft.jsonc`, `.claude/`, `.codex/` | **no** (operates in dispatcher's cwd, lightweight) |
+| `developer` (no isolation, `tdd: "none"`) | meta-files: `.pi/orchestrator/*` (excluding orchestrator-tool-managed state), `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`, `pi-…/`, `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.aft.jsonc`, `.claude/`, `.codex/` | **no** (operates in dispatcher's cwd, lightweight) |
 | `developer` (managed worktree) | any path (TDD discipline applies) | **yes** (`isolation: { dag_id, task_id, worktree_id?, mode: "create" \| "reuse" }`) |
 | 4 orchestrator tools (built-in) | only `.pi/orchestrator/*` (goal/dag/audit files) | n/a (they're the orchestrator's own state writes) |
 
@@ -343,7 +344,7 @@ as single source of truth.
 | Diagnostics | `aft_inspect` | ad-hoc `bash tsc/biome` |
 | Git state | `bash git status/log/diff/show` | system op — OK |
 | Build / test / install | `bash` (`bun` / `npm`) | system op — OK |
-| Edit a file | `Agent` (`general-purpose` meta / `developer` prod) | raw `edit` / `write` |
+| Edit a file | `Agent` (`developer` with `tdd: "none"` for meta / `developer` with managed worktree for prod) | raw `edit` / `write` |
 
 Anti-patterns:
 
@@ -543,7 +544,7 @@ without a failing test first.
 
 | Subagent type | `run_in_background` |
 |---|---|
-| `Explore` / `Plan` / `general-purpose` | `false` |
+| `Explore` / `Plan` | `false` |
 | `developer` / `auditor` | **`true`** |
 
 Override the `Agent` tool description's foreground default for
