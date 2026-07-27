@@ -91,10 +91,13 @@ describe("developer-migration: canonical name `developer`", () => {
       makeDagWithTemplate("subagent-software-developer"),
       MOCK_CONTRACT,
     );
-    expect(result.errors).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/task_template.*not a known template/),
-      ]),
+    // `expect.arrayContaining` / `expect.stringMatching` are vitest-only
+    // matchers — this file imports from `bun:test`, whose `Expect` type
+    // doesn't surface them. Use the portable `.toMatch(regex)` on the
+    // joined error string instead (preserves the original intent:
+    // "at least one error mentions the rejected template").
+    expect(result.errors.join(" ")).toMatch(
+      /task_template.*not a known template/,
     );
   });
 
