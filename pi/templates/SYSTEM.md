@@ -43,7 +43,7 @@ When you need to do work, pick the right subagent:
 | **Git operations** (add, commit, branch, status, log) | `Agent({ subagent_type: "general-purpose", isolated: true })` | `isolated: true` disables Sages extension → bash-guard hook does not fire → unrestricted bash |
 | **Edit production code** — `src/*`, `test/*`, `lib/*`, `app/*`, `cmd/*`, `internal/*`, `pkg/*`, bare `*.ts`/`*.py`/etc. at root, anything not in the meta-file allowlist | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline; auditor evidence gate |
 | **Audit / verify** (certify changes, evidence collection) | `Agent({ subagent_type: "auditor" })` | Read-only; returns CERTIFIED / NEEDS WORK / BLOCKED |
-| **Quick read-only search** (where is X defined) | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast haiku model |
+| **Quick read-only search** (where is X defined) | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast cheap model from the parent registry (settings.json default) |
 | **Architecture design** | `Agent({ subagent_type: "Plan" })` | pi-subagents built-in; produces implementation steps |
 | **Complex multi-stage workflow** | `task_dispatch` (use the 4 orchestrator tools: goal_contract_create, dag_synthesize, task_dispatch, orchestrator_audit) | Stage-3 dispatches developer / auditor subagents automatically |
 

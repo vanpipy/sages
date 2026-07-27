@@ -65,6 +65,8 @@ import {
 	resolveJoinMode,
 } from "./invocation-config.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
+import { resolveDispatcherModelFallback } from "./model-fallback.js";
+import { getSettingsDefaultModel } from "./settings-default-model.js";
 import {
 	createOutputFilePath,
 	streamToOutputFile,
@@ -1043,7 +1045,7 @@ If the target is already known, use a direct tool — \`read\` for a known path,
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.), since it is not aware of the user's intent.
 - If an agent's description says it should be used proactively, try to use it without the user having to ask for it first.
-- Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
+- Use model to specify a different model (as "provider/modelId", or any substring of a registered id). Omit to inherit the parent session's model.
 - Use thinking to control extended thinking level.
 - Use inherit_context if the agent needs the parent conversation history.
 - Use isolation: "worktree" to run the agent in an isolated git worktree (safe parallel file modifications). The worktree is automatically cleaned up if the agent makes no changes; otherwise the path and branch are returned in the result.${scheduleGuideline}
@@ -1141,7 +1143,7 @@ Terse command-style prompts produce shallow, generic work.
 				model: Type.Optional(
 					Type.String({
 						description:
-							'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+							'Optional model override. Accepts "provider/modelId" or any substring of a registered id. Omit to inherit the parent session\'s default (from settings.json).',
 					}),
 				),
 				thinking: Type.Optional(
@@ -1423,8 +1425,48 @@ Terse command-style prompts produce shallow, generic work.
 						ctx.modelRegistry,
 					);
 					if (typeof resolved === "string") {
-						if (resolvedConfig.modelFromParams) return textResult(resolved);
-						// config-specified: silent fallback to parent
+						// GC-2026-014 follow-up: when the LLM-supplied model is
+						// unresolvable (most commonly a provider-specific fuzzy
+						// nickname on a non-matching registry), the dispatcher
+						// used to surface the raw "Model not found" error and
+						// abort the spawn. The new policy is warn + fall back —
+						// the resolver stays a pure function over the registry,
+						// and the dispatcher owns the policy in
+						// `resolveDispatcherModelFallback`. Settings.json
+						// default is preferred when the registry has it; the
+						// parent session's model is the secondary fallback.
+						// Frontmatter-pinned unresolvable is silent (the
+						// agent's identity is authoritative). See
+						// `src/model-fallback.ts` for the decision matrix.
+						const settingsDefault = getSettingsDefaultModel(ctx.cwd);
+						const fallback = resolveDispatcherModelFallback({
+							resolved,
+							registry: ctx.modelRegistry,
+							parentModel: model,
+							settingsDefault,
+							modelFromParams: resolvedConfig.modelFromParams,
+						});
+						if (fallback.shouldWarn && fallback.model) {
+							// The warning text references the SOURCE we ended
+							// up using (`fallbackKind` from the decision)
+							// rather than `settingsDefault` directly — a
+							// configured-but-not-in-registry settings default
+							// falls through to parent, in which case the
+							// label here must say "parent session model",
+							// not "(from settings.json)".
+							const targetLabel =
+								fallback.fallbackKind === "settings" && settingsDefault
+									? `${settingsDefault.provider}/${settingsDefault.model} (from settings.json)`
+									: `parent session model (${fallback.model.provider}/${fallback.model.id})`;
+							ctx.ui?.notify?.(
+								`Agent "${subagentType}" received unresolvable model "${resolvedConfig.modelInput}" — falling back to ${targetLabel}.`,
+								"warning",
+							);
+						}
+						if (fallback.model) model = fallback.model;
+						// No fallback available → fall through with `model` left
+						// at its prior value (parent model), letting the agent
+						// runner's standard inheritance kick in.
 					} else {
 						model = resolved;
 					}
