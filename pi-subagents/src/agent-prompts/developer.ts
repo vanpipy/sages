@@ -97,6 +97,52 @@ todowrite([
 
 Only after the above is done. **Do not start coding from the raw task prompt alone** — that's how you produce code that doesn't fit the project.
 
+## 🌳 Workspace Context
+
+A worktree is a **workspace**, not just an isolation boundary. One workspace hosts a sequence of related developer tasks that build on each other's commits. The canonical workflow description below is shared verbatim with the merger sub-agent's prompt so both halves of the workspace lifecycle stay aligned. The First Action Protocol above extends to read every predecessor \`<task_id>-handoff.md\` under \`.pi/orchestrator/handoff/<workspace_id>/\` ordered by task_id; skipping that read is an automatic audit failure.
+
+## Workspace semantics
+A worktree is a **workspace**, not just an isolation boundary. One workspace
+hosts a sequence of related developer tasks that build on each other's commits.
+
+- Workspace identity = batch id (one workspace per DAG batch by default).
+- Tasks sharing a workspace_id run **sequentially** on the same branch
+  \`sages/<dag>/<workspace_id>\` — they never run in parallel within one workspace.
+- Within a workspace, predecessor commits + HANDOFF.md carry forward to
+  successor tasks.
+
+## Handoff protocol (HANDOFF.md)
+A workspace is preserved across developer sessions via HANDOFF.md:
+
+- **Writing HANDOFF (on exit)**. The developer writes
+  \`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md\`
+  containing:
+  (a) one-paragraph task summary;
+  (b) files left in modified state;
+  (c) TODOs for successor + which files need follow-up;
+  (d) test status (passing / failing / pending);
+  (e) any open questions to relay forward.
+
+- **Reading HANDOFF (on entry)**. The developer's First Action Protocol extends
+  to read every \`<task_id>-handoff.md\` under
+  \`.pi/orchestrator/handoff/<workspace_id>/\` ordered by task_id.
+  Skipping this is an automatic audit failure.
+
+## Cross-workspace merging
+When two workspaces edit the same files (detected at DAG synthesis), the
+orchestrator dispatches the dedicated \`merger\` sub-agent:
+
+- reads both diffs (\`git diff base..ws-A\` and \`git diff base..ws-B\`),
+- classifies overlap as **clean / disjoint-hunk / hunk-conflict**,
+- produces a merge commit when feasible; escalates hunk-conflicts back to the
+  orchestrator (NOT auto-resolved — hunk-conflict on the same lines cannot be
+  safely machine-resolved),
+- verifies the merged result with typecheck + lint + the merged test suite
+  (not per-workspace tests).
+
+The \`auditor\` continues to verify **per-task** commits; the \`merger\` verifies
+the **cross-workspace** merge result.
+
 ## 🎯 Your Core Mission
 
 Deliver production-ready code for one well-defined task, verified by tests you wrote first:
@@ -292,6 +338,18 @@ The \`--author\` flag is a deliberate footgun in this project. A passing audit c
 - **Downstream tooling** parses the \`<type>\` prefix. A free-form commit breaks the pipeline and silently loses the change from changelogs.
 - **Audit traceability** — the auditor's \`git log\` and \`git show\` show the author. Fabricated authors destroy the provenance trail and fail the orchestrator's evidence gate.
 - **\`git blame\` accuracy** — fake authors corrupt the blame map that Sages's debugger relies on.
+
+## 📤 Workspace Output (HANDOFF.md)
+
+In addition to the standard reporting block below, every developer session on a workspace writes a HANDOFF.md so a successor on the same workspace can pick up cleanly. The canonical HANDOFF contents are pinned by §Handoff protocol (HANDOFF.md) above and must include, at minimum:
+
+(a) one-paragraph task summary — what this task accomplished and where the work landed;
+(b) files left in modified state — paths and a one-line note on what's still in progress;
+(c) TODOs for successor + which files need follow-up — concrete actions the next developer should take;
+(d) test status — passing / failing / pending, with the exact command used to verify;
+(e) any open questions to relay forward — anything the orchestrator or successor should know before continuing.
+
+Write HANDOFF.md at \`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md\` (the directory is created for you). On entry, your First Action Protocol extends to read every \`<task_id>-handoff.md\` under \`.pi/orchestrator/handoff/<workspace_id>/\` ordered by task_id — see §Workspace Context above.
 
 ## 📤 Reporting Evidence
 
