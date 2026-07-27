@@ -74,7 +74,7 @@ export interface DispatchTask {
    * Set to the explicit `{ dag_id, task_id, mode }` object for tasks
    * that target the `developer` subagent (so the Agent dispatcher
    * provisions a managed worktree). `undefined` for everything else
-   * (Explore / Plan / software-auditor / general-purpose).
+   * (Explore / Plan / auditor / general-purpose).
    *
    * The legacy `"worktree"` string literal is NOT accepted by the
    * Agent dispatcher — see `pi-subagents/src/worktree-contract.ts`.
@@ -94,13 +94,11 @@ export interface DispatchTask {
 /**
  * Default `run_in_background` policy by subagent type. The rule mirrors
  * `pi/templates/SUBAGENTS.md` and the SKILL.md Stage 1-2 / 3-4 split:
- *   - Explore, Plan, general-purpose  → foreground (short, blocking)
- *   - developer, software-auditor    → background (long, steerable)
+ *   - Explore, Plan                    → foreground (short, blocking)
+ *   - developer, auditor               → background (long, steerable)
  *
- * Phase A P3 (DAG-2026-011): the canonical name is `developer`. The
- * legacy alias `software-developer` is preserved here as a defensive
- * fallback for callers that haven't migrated yet — it maps to the same
- * semantics. New authoring MUST use the canonical name.
+ * GC-2026-014: the legacy `software-developer` / `software-auditor`
+ * aliases were removed. New authoring MUST use the canonical names.
  *
  * Tasks may override per-task via `TaskNode.run_in_background`.
  */
@@ -111,8 +109,7 @@ export function defaultRunInBackground(subagentType: string): boolean {
     case "general-purpose":
       return false;
     case "developer":
-    case "software-developer":
-    case "software-auditor":
+    case "auditor":
       return true;
     default:
       // Unknown subagent: default to background to avoid surprises;
@@ -153,7 +150,7 @@ export function buildDispatchPlan(
       // Inject upstream task outputs into the prompt
       prompt: injectUpstreamOutputs(plan, taskById, t),
       isolation:
-        t.subagent_type === "developer" || t.subagent_type === "software-developer"
+        t.subagent_type === "developer"
           ? (typeof t.isolation === "object" && t.isolation !== null
               ? t.isolation
               : { dag_id: plan.id, task_id: t.id, mode: "create" as const })

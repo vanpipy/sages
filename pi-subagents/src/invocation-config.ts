@@ -132,22 +132,20 @@ export function resolveJoinMode(
 }
 
 /**
- * Phase A P1 (DAG-2026-011) — package policy for the canonical
- * `developer` agent. The legacy `isolation: "worktree"` string literal
- * is no longer accepted by the Agent tool (see worktree-contract.ts).
- * Instead, `developer` MUST run inside an explicit managed worktree
- * object: `{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`.
+ * Package policy for the canonical `developer` agent. The legacy
+ * `isolation: "worktree"` string literal is no longer accepted by the
+ * Agent tool (see worktree-contract.ts). Instead, `developer` MUST
+ * run inside an explicit managed worktree object:
+ * `{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`.
  *
- * Phase A P2 (DAG-2026-011): the policy also fires when the caller invokes
- * the Phase A alias `software-developer`. The alias resolves to the same
- * canonical roster entry, so it must not be allowed to silently bypass the
- * explicit-worktree requirement. The policy is enforced at the dispatcher
- * boundary so callers see a clean diagnostic BEFORE child execution. It
- * only applies to the canonical `developer` agent (and its alias) —
- * Explore / Plan / any user-defined agent or unknown name is a no-op.
+ * The policy is enforced at the dispatcher boundary so callers see a
+ * clean diagnostic BEFORE child execution. It only applies to the
+ * canonical `developer` agent — Explore / Plan / any user-defined
+ * agent, unknown name, or the legacy `software-developer` spelling
+ * (removed in GC-2026-014; see DAG-2026-011 Phase A) is a no-op.
  *
  * Returns:
- *   - `undefined` when the call is well-formed (developer / alias +
+ *   - `undefined` when the call is well-formed (developer +
  *     valid managed-worktree object), OR when the policy does not apply
  *     (any other agent type).
  *   - A precise error string when the policy rejects the call. The
@@ -158,16 +156,15 @@ export function enforceDeveloperManagedIsolationPolicy(
 	agentType: string | undefined,
 	isolation: unknown,
 ): string | undefined {
-	// Policy is `developer`-specific, plus the Phase A alias
-	// `software-developer`. The dispatcher calls us AFTER
-	// `resolveAgentType`, so the canonical name is lowercase here; the
-	// alias branch is a defensive fallback for callers that pass the
-	// legacy spelling directly. Anything else (Explore, Plan,
-	// general-purpose was removed in DAG-2026-011 Phase C. The policy now
-	// applies only to `developer` and its legacy alias `software-developer`.
-	// Other names (user agents, typo, undefined) is a no-op.
+	// Policy is `developer`-specific. The dispatcher calls us with the
+	// canonical name already resolved (and case-insensitive). The
+	// `software-developer` legacy alias was removed in GC-2026-014 —
+	// the registry no longer carries it, so callers using the legacy
+	// spelling surface as "unknown agent type" upstream of this
+	// function. Anything else (Explore, Plan, user agents, unknown
+	// names, the legacy spelling itself) is a no-op here.
 	const lower = typeof agentType === "string" ? agentType.toLowerCase() : "";
-	if (lower !== "developer" && lower !== "software-developer") return undefined;
+	if (lower !== "developer") return undefined;
 
 	// Legacy literal — dedicated branch so the message carries all three
 	// required patterns (`developer`, `worktree`, `explicit`) in one

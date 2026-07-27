@@ -20,7 +20,7 @@ The orchestrator dispatches subagents based on the task shape:
 
 - **Meta-files / git ops / research / lightweight tasks** → `general-purpose`. For git ops, also pass `isolated: true` to bypass the bash-guard. **Dispatch independent tasks in parallel** (multiple `Agent` calls in one message, each `run_in_background: true`).
 - **Production-code TDD work** → `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree)
-- **Audit / verify** → `software-auditor` (read-only, evidence-based)
+- **Audit / verify** → `auditor` (read-only, evidence-based)
 - **Quick search / architecture design** → `Explore` / `Plan` (pi-subagents built-ins)
 - **Multi-stage workflows** → `task_dispatch` (orchestrator tool) — emits developer / auditor dispatches automatically
 
@@ -37,11 +37,11 @@ When the orchestrator dispatches `developer` with `isolation: { dag_id, task_id,
 | 1     | `Explore`            | pi-subagents built-in                | read, bash, grep, find, ls | Fast codebase search. Haiku — cheap, fast, **read-only**.        |
 | 2     | `Plan`               | pi-subagents built-in                | read, bash, grep, find, ls | Software architect. Sonnet. **Read-only** — returns a step-by-step plan, never edits. |
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. Host-managed worktree. |
-| 4     | `software-auditor`   | **shipped** (this repo)              | read, bash, grep, find, ls, aft_* | Evidence-based certifier. **Read-only** — re-runs commands, never modifies production code. |
+| 4     | `auditor`   | **shipped** (this repo)              | read, bash, grep, find, ls, aft_* | Evidence-based certifier. **Read-only** — re-runs commands, never modifies production code. |
 
 **3 built-ins + 2 shipped.** The 3 built-ins (`Explore`, `Plan`,
 `general-purpose`) come from `@tintinweb/pi-subagents`. The 2 custom
-(`developer`, `software-auditor`) are installed by sages (`software-developer` is a Phase A alias)
+(`developer`, `auditor`) are installed by sages (`developer` is a Phase A alias)
 from `pi/templates/agents/` to `~/.pi/agent/agents/`. Don't re-ship
 `Explore` / `Plan` — overriding with a project-specific copy brings
 no behaviour change. Override them only when project-specific rules
@@ -111,13 +111,13 @@ when branch deletion is intended. Subagents must never write
 
 **Returns**: file paths changed + test output + verification evidence.
 
-### Stage 4 — Verify (`software-auditor`)
+### Stage 4 — Verify (`auditor`)
 
-`software-auditor` runs in the **background by default** (verifies the whole diff, can be steered to add new SCs — same canonical rule via `task-dispatcher.ts:defaultRunInBackground()`).
+`auditor` runs in the **background by default** (verifies the whole diff, can be steered to add new SCs — same canonical rule via `task-dispatcher.ts:defaultRunInBackground()`).
 
 ```ts
 Agent({
-  subagent_type: "software-auditor",
+  subagent_type: "auditor",
   prompt: "Audit the implementer's report at .pi/orchestrator/task-T3-report.md. " +
           "Re-run every verification_cmd from the task prompt. " +
           "Inspect git diff in <worktree-path>. " +
@@ -206,7 +206,7 @@ Agent({
 
 ```ts
 Agent({
-  subagent_type: "software-auditor",
+  subagent_type: "auditor",
   prompt: "Verify commit 0675713 is consistent with its commit message: run `bun test`, confirm 4 files modified, confirm no other files touched. Return CERTIFIED / NEEDS WORK / BLOCKED with evidence.",
   description: "Audit commit 0675713",
   run_in_background: true,
@@ -328,7 +328,7 @@ tasks:
       mode: create
     prompt: "Implement per the plan: RED→GREEN→REFACTOR for install_subagents_doc"
   - id: V1     # Stage 4
-    subagent_type: software-auditor
+    subagent_type: auditor
     batch: 4
     depends_on: [I1]
     prompt: "Certify I1: re-run install.test.sh, inspect worktree diff"

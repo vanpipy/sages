@@ -1,21 +1,17 @@
 /**
  * developer-prompt.ts — Canonical system prompt for the built-in `developer` agent.
  *
- * Phase A P1 (DAG-2026-011): The Sages software-developer role (formerly
- * shipped via pi/templates/agents/software-developer.md) is migrated into
- * pi-subagents as a first-class built-in under the canonical name
- * `developer`. The legacy name `software-developer` is retained as an
- * alias — see `agent-types.ts > resolveAgentType`.
+ * Built-in to pi-subagents as of DAG-2026-011 (Phase A) — the legacy
+ * Sages `software-developer` role (formerly shipped via
+ * `pi/templates/agents/software-developer.md`) is no longer accepted.
+ * Removed in GC-2026-014; see DAG-2026-011 Phase A for the migration
+ * history.
  *
  * The prompt carries the production-grade RED/GREEN/REFACTOR discipline,
  * first-action protocol, Conventional Commits / author rules, worktree
  * isolation behavior, and the explicit prohibition on writing Sages
  * meta-files under `.pi/orchestrator/`. The prose is allowed to evolve;
  * the invariants are pinned by `test/developer-prompt.test.ts`.
- *
- * Phase B (DAG-2026-011) — done: the matching `software-auditor` →
- * `auditor` migration lives in `auditor.ts` and follows the same
- * playbook. This file does NOT touch that surface.
  */
 
 export const DEVELOPER_PROMPT = `# Developer Agent (canonical built-in)

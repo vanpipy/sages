@@ -279,8 +279,8 @@ export function pruneWorktrees(cwd: string): void {
 //     emits a merge instruction, and NEVER removes a worktree that has
 //     changes without an explicit `{ force: true }` from the caller
 //   * release is a separate, explicit operation; the orchestrator decides
-//     when — usually after the auditor (the `auditor` built-in, alias
-//     `software-auditor`) has run its checks
+//     when — usually after the `auditor` built-in has run its checks
+//     (the legacy `software-auditor` alias was removed in GC-2026-014)
 
 /**
  * Identifier components for a managed worktree. Both must pass

@@ -1,13 +1,15 @@
 /**
  * Tests for task-dispatcher's buildDispatchPlan.
  *
- * Round-3 audit (2026-XX) found that `run_in_background` was hard-coded
- * to `true` for every task in `buildDispatchPlan`, ignoring the
- * per-stage rule documented in `pi/templates/SUBAGENTS.md`:
+ * Pins the per-stage `run_in_background` policy documented in
+ * `pi/templates/SUBAGENTS.md`:
  *   - Explore, Plan       → foreground
  *   - developer           → background
- *   - software-auditor    → background
+ *   - auditor             → background
  *   - general-purpose     → foreground (ad-hoc / planning)
+ *
+ * GC-2026-014: the `software-auditor` legacy alias was removed. The
+ * dispatcher now keys off the canonical name `auditor` only.
  *
  * Per-task override via `TaskNode.run_in_background` is also supported.
  */
@@ -70,7 +72,15 @@ describe("buildDispatchPlan — run_in_background policy", () => {
 		expect(d.batches[0].tasks[0].run_in_background).toBe(true);
 	});
 
-	it("software-auditor tasks default to background", () => {
+	it("auditor tasks default to background (canonical)", () => {
+		const plan = makePlan([makeTask("P1", "auditor", 1)]);
+		const d = buildDispatchPlan(plan, "auto", 4);
+		expect(d.batches[0].tasks[0].run_in_background).toBe(true);
+	});
+
+	it("unknown / legacy `software-auditor` spelling falls through to the default-background branch", () => {
+		// GC-2026-014: the alias was removed, so this spelling isn't in the
+		// switch — it falls through to the default branch (background).
 		const plan = makePlan([makeTask("P1", "software-auditor", 1)]);
 		const d = buildDispatchPlan(plan, "auto", 4);
 		expect(d.batches[0].tasks[0].run_in_background).toBe(true);

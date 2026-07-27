@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Orchestrate multi-task workflows via 4-stage DAG (goal → decompose → dispatch → audit). Coordinates `developer` (canonical) and `software-auditor` subagents for execution.
+description: Orchestrate multi-task workflows via 4-stage DAG (goal → decompose → dispatch → audit). Coordinates `developer` (canonical) and `auditor` subagents for execution.
 ---
 
 # Orchestrator - Multi-Task Workflow Coordinator
@@ -38,7 +38,7 @@ The orchestrator dispatches a **single canonical pipeline of 4 subagents**, one 
 | 1     | `Explore`            | **pi-subagents built-in**            | `false`             | "Where is X?" / "find all callers of Y" / pure codebase search                    |
 | 2     | `Plan`               | **pi-subagents built-in**            | `false`             | Need a step-by-step implementation strategy before coding (architect concerns)   |
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | **`true`**          | Write production code + tests in a managed worktree, strict TDD                    |
-| 4     | `software-auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
+| 4     | `auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
 
 `run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table is the canonical reference; see `pi/templates/SUBAGENTS.md` for full rationale and code examples.
 
@@ -111,7 +111,7 @@ For each batch (1 → N):
 2. Spawn subagents in parallel (one Agent tool call per task in the batch):
    - Use run_in_background: true when batch has >1 task
    - For `developer` tasks: use `isolation: { dag_id: DAG_ID, task_id: TASK_ID, mode: "create" }` (managed worktree object required by the Agent dispatcher)
-   - For other subagents (`software-auditor` / `Explore` / `Plan`): no `isolation` field (operate in dispatcher cwd)
+   - For other subagents (`auditor` / `Explore` / `Plan`): no `isolation` field (operate in dispatcher cwd)
    - The subagent receives its task's prompt from the dispatch plan
 3. Wait for all tasks in the batch to complete (get_subagent_result)
 4. Run orchestrator_audit({ dag_id, batch }) to verify the batch
@@ -126,14 +126,14 @@ When dispatching via the `Agent` tool, pick the right subagent type:
 | Task | Subagent | `isolation` |
 |--- |--- |--- |
 | Meta-file edits / design-doc writes (no code) | `developer` (with `tdd: none`) | `{ dag_id, task_id, mode: "create" }` (managed worktree; design-doc under `.pi/orchestrator/` is meta-file path) |
-| Production-code TDD work | `developer` (legacy alias: `software-developer`) | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
-| Audit / evidence collection | `software-auditor` (alias: `auditor`) | none |
+| Production-code TDD work | `developer` (legacy alias: `developer`) | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
+| Audit / evidence collection | `auditor` (alias: `auditor`) | none |
 | Quick read-only search | `Explore` | none (built-in) |
 | Architecture design | `Plan` | none (built-in) |
 
 The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. Always pass the object form.
 
-> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, dispatch the task in the main session's escape mode (the user types `escape-window`) or use the `software-auditor` agent with `isolated: true`.
+> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, dispatch the task in the main session's escape mode (the user types `escape-window`) or use the `auditor` agent with `isolated: true`.
 
 ### Parallelism
 
@@ -148,7 +148,7 @@ Agent({ subagent_type: "developer", isolation: {...}, prompt: "...", run_in_back
 
 Don't serialize when tasks are independent. Foreground is the default for `Explore`/`Plan` because the system expects these to be short helper tasks where the result feeds the next decision — use it deliberately for that case.
 
-Background is the default for `developer`/`software-auditor` (5-10 min TDD / audit) — collect results via notification or `get_subagent_result()`.
+Background is the default for `developer`/`auditor` (5-10 min TDD / audit) — collect results via notification or `get_subagent_result()`.
 
 ### When NOT to parallelize
 
@@ -175,8 +175,8 @@ Agent({
   run_in_background: true,
 })
 
-// Audit (software-auditor)
-Agent({ subagent_type: "software-auditor", prompt: "...", run_in_background: true })
+// Audit (auditor)
+Agent({ subagent_type: "auditor", prompt: "...", run_in_background: true })
 ```
 
 
@@ -184,7 +184,7 @@ The DAG's batch numbers should *roughly* follow the pipeline order, but batching
 - Batch 1 (research): one or more `Explore` tasks in parallel — discover all the things you'll need before planning
 - Batch 2 (planning): one or more `Plan` tasks, each consuming research outputs from Batch 1
 - Batches 3+ (implementation): one or more `developer` tasks per batch (managed-worktree-isolated, TDD)
-- Final batch (verification): one or more `software-auditor` tasks, each auditing a discrete chunk of implementation
+- Final batch (verification): one or more `auditor` tasks, each auditing a discrete chunk of implementation
 
 **For batch 1 specifically**:
 ```
@@ -198,7 +198,7 @@ Turn N+M: Final workflow audit + summary
 
 ### Stage 4: Workflow Audit (workflow-level rollup)
 
-**A3 split**: per-task auditing is the **software-auditor subagent's** job (it
+**A3 split**: per-task auditing is the **auditor subagent's** job (it
 writes `.pi/orchestrator/audit-{task_id}.md`). The `orchestrator_audit` tool
 focuses on **workflow-level** rollup, not per-task re-verification.
 
@@ -214,7 +214,7 @@ After all batches complete:
    - phase_guidance: workflow-level scope (cross-task, not per-task)
    - validation.findings_required_min: 1 (fast) or 3 (full) — minimum
      findings you must submit before `complete` is accepted
-3. Run any blocking-tasks through software-auditor; then call again.
+3. Run any blocking-tasks through auditor; then call again.
 4. Collect workflow-level findings (cross-task consistency, integration SCs,
    coverage gaps) and submit them, then complete — either in one call or two:
 
@@ -260,7 +260,7 @@ diverges from the result.
 
 **Why A3 split?** Per-task audit (re-run verification_cmd, inspect diff, check
 TDD discipline) was duplicated 80% between `orchestrator_audit` and
-`software-auditor`. Now: software-auditor = per-task expert; orchestrator_audit
+`auditor`. Now: auditor = per-task expert; orchestrator_audit
 = workflow-level aggregator. Zero overlap.
 
 **Audit tool call count (fast depth, batched findings)**:
@@ -291,7 +291,7 @@ TDD discipline) was duplicated 80% between `orchestrator_audit` and
 - Design → `dag_synthesize` (typed goal contracts + DAGs replace ad-hoc MDD drafts)
 - Review → `goal_contract_create` (binary SC pass/fail replaces score-gating)
 - TDD execution → delegated to `developer` subagent (see SUBAGENTS.md)
-- Audit → `orchestrator_audit` (workflow-level rollup; A3 split — per-task detail handled by `software-auditor`)
+- Audit → `orchestrator_audit` (workflow-level rollup; A3 split — per-task detail handled by `auditor`)
 
 **Write (delegated only — do NOT edit production code directly)**:
 - `edit`, `write` — only for orchestrator metadata in .pi/orchestrator/
@@ -314,12 +314,12 @@ The orchestrator can reference reusable prompt templates instead of writing ever
 | Template | Subagent type | Notes |
 |----------|--------------|-------|
 | `subagent-developer` (canonical) | developer | Includes First Action Protocol + STRICT TDD guidance + output contract |
-| `subagent-software-developer` (Phase A alias — warns) | developer | Same shape as canonical; use `subagent-developer` for new authoring |
-| `subagent-software-auditor` | software-auditor | Default NEEDS WORK + 6-step audit + 5/3-phase depth |
+| `subagent-developer` (Phase A alias — warns) | developer | Same shape as canonical; use `subagent-developer` for new authoring |
+| `subagent-auditor` | auditor | Default NEEDS WORK + 6-step audit + 5/3-phase depth |
 | `subagent-explore` | Explore | Read-only enforcement + findings.json output schema |
 
 (`subagent-general-purpose` was removed in DAG-2026-011 Phase C. The
-canonical `auditor` template is `subagent-software-auditor`; the
+canonical `auditor` template is `subagent-auditor`; the
 alias `subagent-auditor` is the Phase B canonical name.)
 
 ### Goal templates (copy fields into `goal_contract_create`)
@@ -366,7 +366,7 @@ For progress reports, follow this structure:
 
 When defining a task in `dag_synthesize`, you can either:
 - Write `prompt` directly (LLM composes)
-- OR set `task_template: "subagent-developer"` + `task_params: {...}` → tool auto-renders (legacy `subagent-software-developer` still resolves with a deprecation warning)
+- OR set `task_template: "subagent-developer"` + `task_params: {...}` → tool auto-renders (legacy `subagent-developer` still resolves with a deprecation warning)
 
 The auto-render path is preferred — templates encode the discipline (TDD, First Action Protocol, output contract) that the orchestrator wants every subagent to follow.
 

@@ -7,7 +7,7 @@ Modifying this file re-syncs on next install.sh run.
 Forked from @tintinweb/pi-subagents/examples/agent-tool-description.md
 (reproduces the default "full" description exactly, then overrides the
 two bullets that push the orchestrator toward foreground-default for
-developer/auditor — see pi-subagents PR #91 / `toolDescriptionMode` (legacy `software-developer` is a Phase A alias)
+developer/auditor — see pi-subagents PR #91 / `toolDescriptionMode` (legacy `developer` is a Phase A alias)
 in dist/settings.js).
 
 Template variables (rendered by pi-subagents/dist/index.js#renderToolDescriptionTemplate):
@@ -44,14 +44,14 @@ If the target is already known, use a direct tool — `read` for a known path, `
 
 ### Foreground vs background — sages override
 
-The upstream default frames background as "parallelism". **Sages inverts this for `developer` and `software-auditor`** — they must ALWAYS be background, even when you would otherwise wait synchronously, because the goal is to free the parent context (not just to parallelize):
+The upstream default frames background as "parallelism". **Sages inverts this for `developer` and `auditor`** — they must ALWAYS be background, even when you would otherwise wait synchronously, because the goal is to free the parent context (not just to parallelize):
 
 | Subagent type | `run_in_background` | Why |
 |---|---|---|
 | `Explore` | `false` (foreground) | Short, read-only, result feeds next stage |
 | `Plan` | `false` (foreground) | Short, output is the next prompt |
 | `developer`          | **`true` (background)** | TDD RED→GREEN→REFACTOR is 1–10 min, can be steered |
-| `software-auditor` | **`true` (background)** | Re-runs every verification_cmd, 30s–3 min, can be steered |
+| `auditor` | **`true` (background)** | Re-runs every verification_cmd, 30s–3 min, can be steered |
 
 Use `get_subagent_result(agent_id)` to collect when needed, or `steer_subagent(agent_id, "...")` to redirect mid-run. Don't wait synchronously for developer/auditor even if "the next step depends on it" — the notification arrives when the agent completes; the parent context stays free in the meantime. See {{agentDir}}/SUBAGENTS.md for the full rationale and code examples.
 
@@ -64,7 +64,7 @@ For any multi-step task (≥ 3 sub-tasks), **the main agent maintains its own `t
 - `pending` = next dispatch, blocked on a dependency
 - `completed` = subagent returned; orchestrator verified the result
 
-Mark each todo's `content` with `[serial]` or `[parallel]` based on dependencies. Dispatch a batch of independent `[parallel]` todos in **one message with multiple `Agent` calls**, each with `run_in_background: true`. Update statuses as results arrive. The todowrite is the dashboard the user (and you) read to see orchestration state. Subagents should also maintain their own todowrite — see `pi-subagents/src/agent-prompts/developer.ts` / `software-auditor.md` for sub-task planning guidance.
+Mark each todo's `content` with `[serial]` or `[parallel]` based on dependencies. Dispatch a batch of independent `[parallel]` todos in **one message with multiple `Agent` calls**, each with `run_in_background: true`. Update statuses as results arrive. The todowrite is the dashboard the user (and you) read to see orchestration state. Subagents should also maintain their own todowrite — see `pi-subagents/src/agent-prompts/developer.ts` / `auditor.md` for sub-task planning guidance.
 
 - Use resume with an agent ID to continue a previous agent's work. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use steer_subagent to send mid-run messages to a running background agent.

@@ -1,13 +1,12 @@
 /**
- * developer-continuity.test.ts — Phase A P2 background/steer/get_subagent_result continuity.
+ * developer-continuity.test.ts — Background / steer / get_subagent_result
+ * continuity for the canonical `developer` agent.
  *
- * Pins the lifecycle invariant for the canonical `developer` agent
- * (and its Phase A alias):
+ * Pins the lifecycle invariant for the canonical `developer` agent:
  *
- *   1. After spawn(), `record.managedWorktree` carries the full
- *      handoff set — path, branch, baseSha, baseRef, head, dirty,
- *      reused, leaseToken, dag_id, task_id, worktree_id, repoRoot —
- *      and the `aliasUsed` / `requestedName` metadata.
+ *   1. After spawn(), `record.managedWorktree` carries the full handoff
+ *      set — path, branch, baseSha, baseRef, head, dirty, reused,
+ *      leaseToken, dag_id, task_id, worktree_id, repoRoot.
  *   2. A subsequent `steer_subagent` call leaves the handoff unchanged
  *      (deep equality). Steering is a control-plane operation that
  *      must not mutate the worktree identity.
@@ -22,6 +21,10 @@
  * The test stubs `runAgent` via `vi.mock` so the LLM child never runs;
  * we exercise the manager's spawn / steer / getRecord / resume paths
  * directly against a real git repo fixture.
+ *
+ * GC-2026-014: alias-metadata fields (`aliasUsed`, `requestedName`)
+ * were dropped from `AgentRecord`; the canonical-name-only invariant
+ * is pinned here.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -70,7 +73,6 @@ import {
 import { makeRepoFixture, type RepoFixture } from "./_fixture.js";
 
 const CANONICAL = "developer";
-const LEGACY_ALIAS = "software-developer";
 
 describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 	let fx: RepoFixture | undefined;
@@ -95,7 +97,7 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 				description: "spawn under test",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-011",
+					dag_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -104,15 +106,17 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 		const record = manager.getRecord(id);
 		expect(record).toBeDefined();
 		expect(record!.type).toBe(CANONICAL);
-		expect(record!.aliasUsed).toBe(false);
-		expect(record!.requestedName).toBe(CANONICAL);
+		// GC-2026-014: `aliasUsed` / `requestedName` were removed from
+		// `AgentRecord`. The canonical name is all that survives.
+		expect((record as any).aliasUsed).toBeUndefined();
+		expect((record as any).requestedName).toBeUndefined();
 
 		const handoff = record!.managedWorktree;
 		expect(handoff).toBeDefined();
-		expect(handoff!.dag_id).toBe("DAG-2026-011");
+		expect(handoff!.dag_id).toBe("DAG-2026-014");
 		expect(handoff!.task_id).toBe("P2");
 		expect(handoff!.worktree_id).toBe("P2");
-		expect(handoff!.branch).toMatch(/^sages\/DAG-2026-011\/P2$/);
+		expect(handoff!.branch).toMatch(/^sages\/DAG-2026-014\/P2$/);
 		expect(handoff!.baseRef).toBe("origin/main");
 		expect(typeof handoff!.path).toBe("string");
 		expect(handoff!.path.length).toBeGreaterThan(0);
@@ -128,32 +132,6 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 		manager.abort(id);
 	});
 
-	it("spawn with the alias canonicalizes the type and sets aliasUsed: true", () => {
-		const manager = new AgentManager();
-		const id = manager.spawn(
-			{} as any,
-			{ cwd: fx!.root } as any,
-			LEGACY_ALIAS,
-			"implement the thing",
-			{
-				description: "spawn under test",
-				isBackground: false,
-				managedWorktree: {
-					dag_id: "DAG-2026-011",
-					task_id: "P2",
-					mode: "create",
-				},
-			} as any,
-		);
-		const record = manager.getRecord(id);
-		expect(record).toBeDefined();
-		expect(record!.type).toBe(CANONICAL);
-		expect(record!.aliasUsed).toBe(true);
-		expect(record!.requestedName).toBe(LEGACY_ALIAS);
-
-		manager.abort(id);
-	});
-
 	it("mode=reuse against an existing worktree updates reused:true and keeps identity", async () => {
 		const manager = new AgentManager();
 		// First spawn creates the worktree.
@@ -166,7 +144,7 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 				description: "create",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-011",
+					dag_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -191,7 +169,7 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 				description: "reuse",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-011",
+					dag_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "reuse",
 				},
@@ -232,7 +210,7 @@ describe("developer-continuity: steer / getRecord / resume preserve the handoff"
 				description: "steer target",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-011",
+					dag_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -264,7 +242,7 @@ describe("developer-continuity: steer / getRecord / resume preserve the handoff"
 				description: "background target",
 				isBackground: true,
 				managedWorktree: {
-					dag_id: "DAG-2026-011",
+					dag_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -289,7 +267,7 @@ describe("developer-continuity: steer / getRecord / resume preserve the handoff"
 				description: "resume target",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-011",
+					dag_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},

@@ -3,7 +3,7 @@
 Multi-agent workflow system for [pi](https://pi.dev). A 4-tool
 orchestrator drives a Goal → DAG → Dispatch → Audit pipeline; TDD
 implementation and per-task auditing are delegated to `developer` and
-`software-auditor` subagents spawned via the Agent tool from
+`auditor` subagents spawned via the Agent tool from
 `@tintinweb/pi-subagents`. See [History](#history) for the project's
 Four-Sages mythology.
 
@@ -29,7 +29,7 @@ dag_synthesize        →  .pi/orchestrator/dag-{id}.yaml
         ↓
 task_dispatch         →  Agent-call plan (LLM spawns)
         ↓
-developer / software-auditor (subagents) →  /tmp/pi-subagents-.../tasks/<id>.output
+developer / auditor (subagents) →  /tmp/pi-subagents-.../tasks/<id>.output
         ↓                                      (L3 main agent writes summary to .pi/orchestrator/)
 orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
 

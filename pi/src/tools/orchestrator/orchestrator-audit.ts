@@ -4,16 +4,16 @@
  * Stage 4 of orchestrator workflow: workflow-level audit rollup.
  *
  * A3 split: per-task audit (re-run verification_cmd, inspect diff, check TDD
- * discipline) is delegated to the `software-auditor` subagent, which writes
+ * discipline) is delegated to the `auditor` subagent, which writes
  * `.pi/orchestrator/audit-{task_id}.md`. This tool pools those per-task
  * reports and aggregates them into a workflow-level view — focusing on
  * cross-task consistency, SC coverage, and integration-level concerns.
  *
  * Phases (A3 scope — workflow-level unless noted):
- *   - ink:       verify each task has a software-auditor report AND it's CERTIFIED
+ *   - ink:       verify each task has an auditor report AND it's CERTIFIED
  *   - nose:      cross-check SC coverage across all tasks (goal contract)
  *   - foot:      OPTIONAL re-run of cross-cutting verification_cmd (per-task
- *                verification is software-auditor's job)
+ *                verification is auditor's job)
  *   - castration: workflow-level security (full only) — orphaned worktrees,
  *                shared secrets across tasks
  *   - death:     long-term viability (full only) — orphaned branches, drive-by
@@ -171,7 +171,7 @@ export function registerOrchestratorAuditTool(pi: any): void {
   pi.registerTool({
     name: "orchestrator_audit",
     label: "Orchestrator Audit",
-    description: "Stage 4: workflow-level audit rollup (A3). Reads software-auditor reports, aggregates verdicts, surfaces cross-task findings. Default depth fast (3 phases: ink/nose/foot); pass depth:full for castration/death. State persists between calls. Verdict: PASS/REVISE/REJECT with score.",
+    description: "Stage 4: workflow-level audit rollup (A3). Reads auditor reports, aggregates verdicts, surfaces cross-task findings. Default depth fast (3 phases: ink/nose/foot); pass depth:full for castration/death. State persists between calls. Verdict: PASS/REVISE/REJECT with score.",
     parameters: OrchestratorAuditParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
@@ -279,7 +279,7 @@ async function initAudit(
   const phases = getPhasesForDepth(depth);
   const phaseGuidance = buildWorkflowPhaseGuidance(phases);
 
-  // A3 — read software-auditor's per-task reports and aggregate
+  // A3 — read auditor's per-task reports and aggregate
   const reports = readAuditReports(cwd, tasks);
   const workflowSummary = aggregateTaskAudits(tasks, reports);
 
@@ -534,13 +534,13 @@ export function appendFindings(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A3 — workflow-level audit aggregation (read software-auditor's reports)
+// A3 — workflow-level audit aggregation (read auditor's reports)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Verdict strings emitted by software-auditor subagent (per SUBAGENTS.md). */
+/** Verdict strings emitted by the auditor subagent (per SUBAGENTS.md). */
 export type SubagentVerdict = "CERTIFIED" | "NEEDS WORK" | "BLOCKED" | "UNKNOWN";
 
-/** Per-task summary extracted from a software-auditor audit report. */
+/** Per-task summary extracted from an auditor audit report. */
 export interface TaskAuditSummary {
   task_id: string;
   has_report: boolean;
@@ -558,7 +558,7 @@ export interface WorkflowAuditSummary {
 }
 
 /**
- * Parse a software-auditor report (markdown) into a structured summary.
+ * Parse an auditor report (markdown) into a structured summary.
  * Pure function — caller handles file I/O.
  *
  * Recognizes:
@@ -623,7 +623,7 @@ export function aggregateTaskAudits(
  * id; missing or unreadable files map to null.
  *
  * This is the A3 glue: the orchestrator_audit tool at workflow level reads
- * software-auditor's per-task reports rather than re-running the audit.
+ * auditor's per-task reports rather than re-running the audit.
  */
 function readAuditReports(cwd: string, tasks: TaskNode[]): Map<string, string | null> {
   const reports = new Map<string, string | null>();
@@ -644,18 +644,18 @@ function readAuditReports(cwd: string, tasks: TaskNode[]): Map<string, string | 
 
 /**
  * Build workflow-level phase guidance (A3 — the per-task details are now
- * handled by software-auditor; this tool focuses on cross-task concerns).
+ * handled by auditor; this tool focuses on cross-task concerns).
  */
 function buildWorkflowPhaseGuidance(phases: string[]): Record<string, string> {
   const g: Record<string, string> = {};
   if (phases.includes("ink")) {
-    g.ink = "INK — verify each task has a software-auditor report at .pi/orchestrator/audit-{id}.md. `workflowReady=true` means all tasks are certified. Missing/blocked reports are listed in `blockingTasks`.";
+    g.ink = "INK — verify each task has an auditor report at .pi/orchestrator/audit-{id}.md. `workflowReady=true` means all tasks are certified. Missing/blocked reports are listed in `blockingTasks`.";
   }
   if (phases.includes("nose")) {
     g.nose = "NOSE — cross-check SC coverage across all tasks. Goal contract at .pi/orchestrator/goal-{id}.yaml. Each SC must be covered by at least one task's acceptance.covers AND that task's audit must be CERTIFIED.";
   }
   if (phases.includes("foot")) {
-    g.foot = "FOOT — OPTIONAL re-run of goal-contract verification_cmd (software-auditor already ran them per-task). Use only for cross-cutting SCs that span multiple tasks (e.g., end-to-end integration tests).";
+    g.foot = "FOOT — OPTIONAL re-run of goal-contract verification_cmd (auditor already ran them per-task). Use only for cross-cutting SCs that span multiple tasks (e.g., end-to-end integration tests).";
   }
   if (phases.includes("castration")) {
     g.castration = "CASTRATION — workflow-level security: no orphaned worktrees, no shared secrets across tasks, no inconsistent auth patterns across the codebase.";

@@ -94,10 +94,10 @@ tasks:
       - pi-evaluator/test/lib/artifact-reader.test.ts
       - pi-evaluator/test/lib/jsonl-reader.test.ts
       - pi-evaluator/fixtures/workflow-good/
-    subagent_type: software-auditor
+    subagent_type: auditor
     batch: 4
     # Phase A P3: only the canonical `developer` uses the managed-worktree
-    # object. software-auditor still uses `isolation: none`; Phase B
+    # object. auditor still uses `isolation: none`; Phase B
     # migrates the auditor role the same way.
     isolation: "none"
     tdd: none

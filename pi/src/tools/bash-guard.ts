@@ -3,7 +3,7 @@
  * operations that target production code paths.
  *
  * The main orchestrator agent must not be able to bypass the
- * `developer` / `software-auditor` audit gate by issuing
+ * `developer` / `auditor` audit gate by issuing
  * raw `bash` commands (`rm`, `mv`, `cp`, `sed -i`, `find -delete`,
  * `git checkout --`, `tar -xf`, redirects, …). The `Agent` tool is
  * the only legitimate path for production-code changes.

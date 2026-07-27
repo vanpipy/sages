@@ -51,7 +51,7 @@ done_definition: |
 parallelism_notes: |
   # Background-default for implement + audit (verified 2026-07-24).
   #
-  # "Implementation" (developer) and "audit" (software-auditor)
+  # "Implementation" (developer) and "audit" (auditor)
   # are long-running, high-latency phases. The orchestrator MUST spawn
   # them with `run_in_background: true` so the parent agent can
   # continue work (e.g. review other diffs, run steer_subagent) while

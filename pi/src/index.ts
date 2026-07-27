@@ -3,14 +3,14 @@
  *
  * Provides the orchestrator workflow (goal → decompose → dispatch → audit)
  * that drives multi-task agent pipelines. Subagent execution itself
- * (`developer`, `software-auditor`) is delegated to the Agent
- * tool — those agents are installed as user-level agents by
- * `pi/scripts/install.sh`, see `pi/templates/SUBAGENTS.md`.
+ * (`developer`, `auditor`) is delegated to the Agent
+ * tool — those agents are built-in to `pi-subagents`, see
+ * `pi/templates/SUBAGENTS.md`.
  *
  *   - Orchestrator: `goal_contract_create`, `dag_synthesize`,
  *     `task_dispatch`, `orchestrator_audit`
  *   - Subagents (delegated to Agent tool): `Explore`, `Plan`,
- *     `developer`, `software-auditor` (DAG-2026-011 Phase C: the
+ *     `developer`, `auditor` (DAG-2026-011 Phase C: the
  *     `general-purpose` helper was removed; meta-file work now uses
  *     `developer` with `tdd: none`)
  *
@@ -29,7 +29,7 @@
 export { default as default, default as registerSagesExtension } from "./extension.js";
 
 // Orchestrator tool registrar — the only public API for in-process tools.
-// Subagent personas (Explore / Plan / developer / software-auditor)
+// Subagent personas (Explore / Plan / developer / auditor)
 // are reached via the Agent tool, not through this index.
 export { registerOrchestratorTools } from "./tools/orchestrator/index.js";
 

@@ -40,7 +40,7 @@ $AGENT_DIR = "$PI_DIR\agent"
 # canonical built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
 # No user-level template is shipped; SUBAGENT_NAMES is empty and the
 # install path is a no-op for subagent templates. Pre-existing user-
-# level `software-developer.md` and `software-auditor.md` (if installed
+# level `developer.md` and `auditor.md` (if installed
 # by older install.sh / install.ps1 / install.bat versions) are LEFT IN
 # PLACE for the user to remove manually — auto-backup-and-remove was
 # removed because the user-level file is theirs to manage. New user
@@ -115,7 +115,7 @@ function IsSubagentTemplateInstalled {
 }
 # Phase A + Phase B (DAG-2026-011) — done. The canonical `developer` and
 # `auditor` agents are both built-in to pi-subagents. Pre-existing
-# user-level `software-developer.md` and `software-auditor.md` files
+# user-level `developer.md` and `auditor.md` files
 # (if installed by older install.sh / install.ps1 / install.bat versions)
 # are left in place for the user to remove manually. The user-level file
 # shadows the built-in alias via direct registry hit precedence in
@@ -124,7 +124,7 @@ function IsSubagentTemplateInstalled {
 # need.
 
 # Phase B (DAG-2026-011): the canonical `auditor` is now built-in to
-# pi-subagents; the legacy `software-auditor.md` (if previously installed
+# pi-subagents; the legacy `auditor.md` (if previously installed
 # by an older install.ps1) is left in place for the user to remove
 # manually. The user-level file shadows the built-in alias via direct
 # registry hit precedence (see agent-types.ts > registerAgents), so
@@ -175,12 +175,12 @@ function Install-SubagentTemplates {
 
 # Remove agent files in $SUBAGENT_TARGET_DIR ONLY if they carry our sentinel.
 # Iterates $SUBAGENT_NAMES (empty post-Phase B) PLUS the historical
-# filenames the previous install shipped (software-auditor, software-developer),
+# filenames the previous install shipped (auditor, developer),
 # so a user upgrading from a pre-Phase-A/Phase-B install can cleanly remove
 # the leftover Sages-managed file. User-written or hand-edited agent files
 # are left alone (NEVER-TOUCH policy).
 function Uninstall-SubagentTemplates {
-    $historicalNames = @("software-auditor", "software-developer")
+    $historicalNames = @("auditor", "developer")
     $allNames = @($SUBAGENT_NAMES + $historicalNames) | Select-Object -Unique
     foreach ($name in $allNames) {
         $target = Join-Path $SUBAGENT_TARGET_DIR "$name.md"

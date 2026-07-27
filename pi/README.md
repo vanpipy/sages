@@ -37,7 +37,7 @@ pi/
 │   ├── subagents.json            #   → {toolDescriptionMode: custom}
 │   └── agents/                    #   → custom subagent templates
 │       ├── developer.md
-│       └── software-auditor.md
+│       └── auditor.md
 └── scripts/                       # install.sh / install.bat / install.ps1
 ```
 
@@ -65,7 +65,7 @@ The installer:
    `agent-tool-description.md`, `subagents.json` (sentinel-protected;
    preserves user customizations).
 2. Ships the two custom subagent templates
-   (`developer`, `software-auditor`) to
+   (`developer`, `auditor`) to
    `~/.pi/agent/agents/`. Calls to `developer` must pass an explicit
    managed-worktree isolation object: `{ dag_id, task_id, worktree_id?,
    mode: "create" | "reuse" }`.

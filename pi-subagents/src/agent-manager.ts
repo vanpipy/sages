@@ -38,7 +38,7 @@ import {
 	releaseManagedWorktreeLease,
 	worktreePath,
 } from "./worktree.js";
-import { resolveAgentType } from "./agent-types.js";
+import { resolveType } from "./agent-types.js";
 import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
 import type { ManagedWorktreeRequest } from "./worktree-contract.js";
 import {
@@ -215,14 +215,17 @@ export class AgentManager {
 		// can fix and retry; the RPC layer converts throws into error envelopes.
 		assertValidSpawnCwd(options.cwd);
 
-		// Phase A P2 (DAG-2026-011): resolve alias + enforce managed-isolation
-		// policy at the spawn boundary. The Agent tool's dispatcher also runs
-		// this check, but spawn() is the safety net for any direct caller —
-		// cross-extension RPC, the scheduler, or tests — that bypasses the
-		// dispatcher. Without this, the legacy developer alias with no
-		// managed-worktree object would silently spawn against the host repo.
-		const aliasResolved = resolveAgentType(type);
-		const canonicalType = aliasResolved?.canonical ?? type;
+		// Phase A P2 (DAG-2026-011) (updated GC-2026-014): enforce managed-
+		// isolation policy at the spawn boundary. The Agent tool's dispatcher
+		// also runs this check, but spawn() is the safety net for any direct
+		// caller — cross-extension RPC, the scheduler, or tests — that
+		// bypasses the dispatcher. Without this, a developer spawn without
+		// a managed-worktree object would silently run against the host
+		// repo. The `type` is whatever the caller supplied; the registry
+		// resolver (run earlier in the dispatcher) maps any legacy
+		// `software-developer` spelling to "unknown agent type" before it
+		// reaches this path.
+		const canonicalType = resolveType(type) ?? type;
 		if (canonicalType === "developer") {
 			const policyError = enforceDeveloperManagedIsolationPolicy(
 				canonicalType,
@@ -238,8 +241,6 @@ export class AgentManager {
 		const record: AgentRecord = {
 			id,
 			type: canonicalType,
-			aliasUsed: aliasResolved?.alias === true,
-			requestedName: aliasResolved?.requested ?? type,
 			description: options.description,
 			status: options.isBackground ? "queued" : "running",
 			toolUses: 0,

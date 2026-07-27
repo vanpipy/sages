@@ -41,12 +41,19 @@ describe("template-loader", () => {
       expect(content).toContain("{{acceptance_cmd}}");
     });
 
-    it("loads subagent-software-auditor.md", () => {
-      const content = loadPromptTemplate("subagent-software-auditor");
+    it("loads subagent-auditor.md (renamed from subagent-software-auditor in GC-2026-014)", () => {
+      const content = loadPromptTemplate("subagent-auditor");
       expect(content).not.toBeNull();
       expect(content).toContain("{{task_id}}");
       expect(content).toContain("{{depth}}");
       expect(content).toContain("{{task_report_path}}");
+    });
+
+    it("does NOT load the legacy subagent-software-auditor key (renamed in GC-2026-014)", () => {
+      // The Phase B template file was renamed via `git mv`; the legacy
+      // key now misses the schema and returns null.
+      const content = loadPromptTemplate("subagent-software-auditor");
+      expect(content).toBeNull();
     });
 
     it("loads subagent-explore.md", () => {
@@ -100,7 +107,7 @@ describe("template-loader", () => {
           files_to_touch: "src/foo.ts",
           acceptance_cmd: "echo ok",
         };
-        if (name === "subagent-software-auditor") {
+        if (name === "subagent-auditor") {
           params.depth = "full";
           params.task_report_path = ".pi/orchestrator/task-P1-report.md";
           params.isolation = "none";
@@ -109,7 +116,7 @@ describe("template-loader", () => {
       };
       const templateNames = [
         "subagent-developer",
-        "subagent-software-auditor",
+        "subagent-auditor",
         "subagent-explore",
       ];
       for (const name of templateNames) {
@@ -233,7 +240,7 @@ describe("template-loader", () => {
     });
 
     it("renders auditor prompt with audit-specific data", () => {
-      const out = renderTaskPrompt("subagent-software-auditor", {
+      const out = renderTaskPrompt("subagent-auditor", {
         task_id: "P7",
         task_title: "Audit refactor",
         sc_list: "- SC1: refactor complete",
@@ -258,13 +265,16 @@ describe("template-loader", () => {
     it("returns the 3 known prompt templates (general-purpose removed in Phase C)", () => {
       const names = listTemplates("prompts");
       expect(names).toContain("subagent-developer");
-      expect(names).toContain("subagent-software-auditor");
+      expect(names).toContain("subagent-auditor");
       expect(names).toContain("subagent-explore");
       // general-purpose was removed in DAG-2026-011 Phase C — its
       // template file is gone, the schema entry is gone. The subagent
       // itself is no longer in `pi-subagents/src/default-agents.ts`.
       expect(names).not.toContain("subagent-general-purpose");
-      expect(names.length).toBeGreaterThanOrEqual(3);
+      // The Phase A / Phase B aliases were removed in GC-2026-014.
+      expect(names).not.toContain("subagent-software-developer");
+      expect(names).not.toContain("subagent-software-auditor");
+      expect(names.length).toBe(3);
     });
 
     it("returns the 4 known goal templates", () => {

@@ -79,7 +79,7 @@ describe("artifact-reader", () => {
 		});
 		expect(impl?.run_in_background).toBe(true);
 		const audit = dag.tasks.find((t) => t.id === "P1.audit");
-		expect(audit?.subagent_type).toBe("software-auditor");
+		expect(audit?.subagent_type).toBe("auditor");
 		expect(audit?.isolation).toBe("none");
 		expect(audit?.run_in_background).toBe(true);
 	});

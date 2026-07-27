@@ -33,25 +33,19 @@ const DEVELOPER_BUILTIN_TOOLS: readonly string[] = [
 ];
 
 /**
- * Canonical `developer` agent — Phase A P1 (DAG-2026-011).
+ * Canonical `developer` agent.
  *
- * Migrated from pi/templates/agents/software-developer.md into
- * pi-subagents as a first-class built-in under the canonical name
- * `developer`. The legacy Sages name `software-developer` is preserved
- * as an alias (see `aliases` below) so existing orchestrators and
- * audit consumers keep working while the canonical migration lands.
- *
- * Phase B (DAG-2026-011) — done: the matching migration for the
- * `software-auditor` role is complete; see `AUDITOR_AGENT` below.
+ * Built-in to pi-subagents as of DAG-2026-011. The legacy Sages name
+ * `software-developer` (and the alias-resolution machinery that
+ * accepted it) was removed in GC-2026-014 — callers must use the
+ * canonical `developer` spelling now.
  */
 const DEVELOPER_AGENT: AgentConfig = {
 	name: "developer",
 	displayName: "Developer",
 	description:
 		"Production-grade software implementation agent following strict " +
-		"test-driven development (TDD) discipline (RED → GREEN → REFACTOR). " +
-		"The canonical replacement for the legacy Sages `software-developer` " +
-		"role; the legacy name is preserved as an alias for backwards compatibility.",
+		"test-driven development (TDD) discipline (RED → GREEN → REFACTOR).",
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
 	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
 	// Subagent isolation: even though `extensions:` is an explicit allowlist
@@ -68,18 +62,15 @@ const DEVELOPER_AGENT: AgentConfig = {
 	// turns is the budget per individual run. Caller may still override via
 	// Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
-	aliases: ["software-developer"],
 };
 
 /**
- * Canonical `auditor` agent — Phase B (DAG-2026-011).
+ * Canonical `auditor` agent.
  *
- * Migrated from pi/templates/agents/software-auditor.md (shipped via
- * `pi/scripts/install.sh` to `~/.pi/agent/agents/`) into pi-subagents
- * as a first-class built-in under the canonical name `auditor`. The
- * legacy Sages name `software-auditor` is preserved as an alias (see
- * `aliases` below) so existing orchestrators and audit consumers keep
- * working while the canonical migration lands.
+ * Built-in to pi-subagents as of DAG-2026-011 (Phase B). The legacy
+ * Sages name `software-auditor` (and the alias-resolution machinery
+ * that accepted it) was removed in GC-2026-014 — callers must use the
+ * canonical `auditor` spelling now.
  *
  * Symmetry with `developer`:
  *   - same built-in tool set (7 tools, including \`edit\`/\`write\` for
@@ -110,8 +101,7 @@ const AUDITOR_AGENT: AgentConfig = {
 		"Strict evidence-based software auditor — verifies task completion " +
 		"against acceptance criteria using TDD evidence (test output, typecheck, " +
 		"lint, command results). Default verdict is NEEDS WORK unless overwhelming " +
-		"proof is provided. Canonical replacement for the legacy Sages " +
-		"`software-auditor` role; the legacy name is preserved as an alias.",
+		"proof is provided.",
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
 	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
 	// Symmetric with `developer`: the auditor is read-only on production
@@ -126,7 +116,6 @@ const AUDITOR_AGENT: AgentConfig = {
 	// report write; 200 turns is the per-run budget. Caller may still
 	// override via Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
-	aliases: ["software-auditor"],
 };
 
 const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];

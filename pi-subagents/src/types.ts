@@ -113,20 +113,11 @@ export interface AgentConfig {
 	enabled?: boolean;
 	/** Where this agent was loaded from */
 	source?: "default" | "project" | "global";
-	/**
-	 * Legacy / alias names. When a caller invokes the agent under one of
-	 * these names, `resolveAgentType` still maps the request to the
-	 * canonical name but flags the resolution as `alias: true` /
-	 * `deprecated: true` so audit / migration tooling can surface a
-	 * warning. The roster itself MUST NOT carry a separate entry for an
-	 * alias name — that's what this field is for.
-	 *
-	 * Phase A P1 (DAG-2026-011): the canonical `developer` agent records
-	 * the legacy Sages developer name here as a deprecation
-	 * signal. Phase B (DAG-2026-011) — done: the canonical `auditor`
-	 * agent records the legacy Sages `software-auditor` name the same way.
-	 */
-	aliases?: string[];
+	// Removed in GC-2026-014: the `aliases` field was dropped from
+	// `AgentConfig`. See DAG-2026-011 Phase A + Phase B for the migration
+	// history (the canonical `developer` / `auditor` agents no longer
+	// accept the legacy `software-developer` / `software-auditor`
+	// spellings — those names are unknown agent types, not aliases).
 }
 
 export type JoinMode = "async" | "group" | "smart";
@@ -143,17 +134,9 @@ export type WidgetMode = "all" | "background" | "off";
 export interface AgentRecord {
 	id: string;
 	type: SubagentType;
-	/**
-	 * Phase A P2 (DAG-2026-011) — alias metadata captured at spawn time.
-	 * `requestedName` is the spelling the caller used (verbatim, including
-	 * case); `aliasUsed` is true iff the spelling was a legacy alias that
-	 * resolved through the `aliases` field of a roster entry. Used by
-	 * background queueing, get_subagent_result, steering, and resume so
-	 * audit / telemetry can surface a deprecation warning without having
-	 * to re-resolve through the registry.
-	 */
-	requestedName?: string;
-	aliasUsed?: boolean;
+	// Removed in GC-2026-014: `requestedName` and `aliasUsed` were
+	// dropped from `AgentRecord`. See DAG-2026-011 Phase A + Phase B for
+	// the migration history.
 	description: string;
 	status:
 		| "queued"

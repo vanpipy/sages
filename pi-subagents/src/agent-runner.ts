@@ -481,15 +481,16 @@ export async function runAgent(
   } else {
     // `agentConfig` is undefined when `getAgentConfig(type)` returned no
     // match. In practice `index.ts` resolves unknown types BEFORE calling
-    // `runAgent` (via the alias-aware `resolveAgentType` + `getConfig` —
-    // which now throws). The remaining defensive throw here is a
-    // belt-and-suspenders signal that the resolver was bypassed. The
-    // `general-purpose` fallback was removed with the agent itself;
-    // there is no implicit "any unknown name → general-purpose" mapping
-    // any more.
+    // `runAgent` (via `resolveType` + `getConfig` — both throw). The
+    // remaining defensive throw here is a belt-and-suspenders signal
+    // that the resolver was bypassed. The `general-purpose` fallback was
+    // removed with the agent itself (DAG-2026-011 Phase C), and the
+    // `software-developer` / `software-auditor` legacy aliases were
+    // removed in GC-2026-014 — there is no implicit "any unknown name →
+    // general-purpose" or alias mapping any more.
     throw new Error(
       `runAgent called with unknown agent type "${type}" (no config). ` +
-        `The caller must resolve the type via resolveAgentType() / getConfig() before reaching here.`,
+        `The caller must resolve the type via resolveType() / getConfig() before reaching here.`,
     );
   }
 
@@ -699,6 +700,12 @@ export async function runAgent(
   // Pi 0.80.8 replaced createAgentSession's modelRegistry option with
   // modelRuntime, but ExtensionContext still exposes only the registry facade.
   // Pass both so the full supported Pi range retains the parent's providers.
+  // The conditional-spread idiom (`...(x !== undefined && { ... })`) widens
+  // `modelRuntime` to `{} | null | undefined` in TypeScript's inferred literal
+  // type; cast directly to the receiving field type instead — `unknown`
+  // satisfies the `modelRuntime?: unknown` intersection member but is not
+  // itself assignable to `ModelRuntime | undefined`, so the literal must
+  // declare the narrowed type. `undefined` is equivalent to omitting the key.
   const parentModelRuntime = (ctx.modelRegistry as unknown as { runtime?: unknown }).runtime;
   const sessionOpts: Parameters<typeof createAgentSession>[0] & {
     modelRegistry: ExtensionContext["modelRegistry"];
@@ -709,7 +716,7 @@ export async function runAgent(
     sessionManager,
     settingsManager,
     modelRegistry: ctx.modelRegistry,
-    ...(parentModelRuntime !== undefined && { modelRuntime: parentModelRuntime }),
+    modelRuntime: parentModelRuntime as NonNullable<Parameters<typeof createAgentSession>[0]>["modelRuntime"],
     model,
     tools: allowedTools,
     resourceLoader: loader,

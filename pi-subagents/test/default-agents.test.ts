@@ -1,11 +1,15 @@
 /**
  * default-agents.test.ts — Registry invariants for built-in subagents.
  *
- * Phase A P1 (DAG-2026-011): the canonical `developer` agent is added to
- * `DEFAULT_AGENTS`. This file pins the roster invariants every other test
- * can build on: name, tools, extensions, background default, prompt
- * embed, and the explicit managed-isolation policy NOT being carried via
- * the legacy `isolation: "worktree"` field on the config itself.
+ * Pins the roster invariants every other test can build on: name, tools,
+ * extensions, background default, prompt embed, and the explicit
+ * managed-isolation policy NOT being carried via the legacy
+ * `isolation: "worktree"` field on the config itself.
+ *
+ * GC-2026-014: the Phase A / Phase B aliases (`software-developer` /
+ * `software-auditor`) were removed entirely — both names now resolve as
+ * unknown agent types and are NOT in any roster entry or `aliases` field.
+ * The "legacy aliases removed" invariants below pin that state.
  */
 
 import { describe, expect, it } from "vitest";
@@ -21,14 +25,15 @@ describe("default-agents: roster", () => {
 		expect(DEFAULT_AGENTS.has("general-purpose")).toBe(false);
 	});
 
-	it("registers the canonical `developer` agent (Phase A P1)", () => {
+	it("registers the canonical `developer` agent", () => {
 		expect(DEFAULT_AGENTS.has("developer")).toBe(true);
 	});
 
-	it("does NOT register a duplicate `software-developer` roster entry (alias only)", () => {
-		// The Phase A alias `software-developer -> developer` is metadata,
-		// not a separate registry entry. A duplicate roster would let the
-		// alias shadow canonical defaults and break precedence rules.
+	it("does NOT register `software-developer` (GC-2026-014: legacy alias removed)", () => {
+		// The Phase A alias was dropped in GC-2026-014 along with the
+		// AgentConfig.aliases field. Callers passing the legacy spelling
+		// now get a precise "Unknown agent type" error from the Agent
+		// dispatcher.
 		expect(DEFAULT_AGENTS.has("software-developer")).toBe(false);
 	});
 });
@@ -89,7 +94,7 @@ describe("default-agents: developer config", () => {
 		expect(dev?.runInBackground).toBe(true);
 	});
 
-	it("does NOT copy the legacy `isolation: 'worktree'` literal — that policy is encoded separately", () => {
+	it("does NOT carry the legacy `isolation: 'worktree'` literal — that policy is encoded separately", () => {
 		// The legacy string literal is rejected by the worktree contract. The
 		// package policy for `developer` (require explicit managed-worktree
 		// object) lives in `enforceDeveloperManagedIsolationPolicy`, NOT in
@@ -98,10 +103,10 @@ describe("default-agents: developer config", () => {
 		expect(dev?.isolation).toBeUndefined();
 	});
 
-	it("records the legacy `software-developer` name in `aliases` (deprecation signal)", () => {
-		expect(dev?.aliases).toEqual(
-			expect.arrayContaining(["software-developer"]),
-		);
+	it("does NOT carry a `software-developer` alias (GC-2026-014: aliases field removed from AgentConfig)", () => {
+		// The AgentConfig.aliases field was dropped entirely in GC-2026-014.
+		// Pin the absence so a future contributor can't quietly reintroduce it.
+		expect(dev?.aliases).toBeUndefined();
 	});
 });
 
@@ -187,17 +192,14 @@ describe("default-agents: per-agent maxTurns budgets", () => {
 	});
 });
 
-describe("default-agents: roster — auditor (Phase B)", () => {
-	// The `auditor` agent is the Phase B (DAG-2026-011) mirror of the
-	// developer migration. Registered as a first-class built-in; the
-	// legacy `software-auditor` is preserved as an alias, not a roster
-	// entry, so user overrides still win (and the alias still resolves
-	// for the orchestrator's `Agent({ subagent_type: "software-auditor" })`).
+describe("default-agents: auditor (Phase B) — canonical `auditor` registered", () => {
 	it("registers the canonical `auditor` agent", () => {
 		expect(DEFAULT_AGENTS.has("auditor")).toBe(true);
 	});
 
-	it("does NOT register a duplicate `software-auditor` roster entry (alias only)", () => {
+	it("does NOT register `software-auditor` (GC-2026-014: legacy alias removed)", () => {
+		// The Phase B alias was dropped in GC-2026-014 along with the
+		// AgentConfig.aliases field.
 		expect(DEFAULT_AGENTS.has("software-auditor")).toBe(false);
 	});
 });
@@ -273,10 +275,9 @@ describe("default-agents: auditor config", () => {
 		expect(aud?.isolation).toBeUndefined();
 	});
 
-	it("records the legacy `software-auditor` name in `aliases` (deprecation signal)", () => {
-		expect(aud?.aliases).toEqual(
-			expect.arrayContaining(["software-auditor"]),
-		);
+	it("does NOT carry a `software-auditor` alias (GC-2026-014: aliases field removed from AgentConfig)", () => {
+		// The AgentConfig.aliases field was dropped entirely in GC-2026-014.
+		expect(aud?.aliases).toBeUndefined();
 	});
 });
 

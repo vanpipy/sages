@@ -18,7 +18,7 @@ dag_synthesize        →  .pi/orchestrator/dag-{id}.yaml
 task_dispatch         →  Agent-call plan (LLM spawns)
         ↓
 developer             →  /tmp/pi-subagents-.../tasks/<id>.output
-software-auditor      →  /tmp/pi-subagents-.../tasks/<id>.output
+auditor      →  /tmp/pi-subagents-.../tasks/<id>.output
                         (L3 main agent writes summary to .pi/orchestrator/)
         ↓
 orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
@@ -35,7 +35,7 @@ orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
   collection, steering. Sages does not re-implement this.
 - **User-level agents** (installed to `~/.pi/agent/agents/` by
   `pi/scripts/install.sh`): `developer` (canonical; legacy alias
-  `software-developer` resolves to it) and `software-auditor`
+  `developer` resolves to it) and `auditor`
   (canonical; alias `auditor`).
 - **Built-in agents** (from pi-subagents): `Explore`, `Plan`.
   (`general-purpose` was removed in DAG-2026-011 Phase C — the
@@ -66,7 +66,7 @@ Shared helpers in `pi/src/tools/orchestrator/template-loader.ts`:
 1. **Goal** — `goal_contract_create` writes `.pi/orchestrator/goal-{id}.yaml`. Hard-validates unique SC ids, non-empty `verification_cmd`, `criterion ≥ 10` chars, non-empty `done_definition`.
 2. **DAG** — `dag_synthesize` writes `.pi/orchestrator/dag-{id}.yaml`. Hard-validates SC coverage, no cycles, batch contiguity, `depends_on` direction, within-batch independence, `task_template` whitelist, `task_params` schema.
 3. **Dispatch** — `task_dispatch` returns a `DispatchPlan`; the LLM spawns each task via the `Agent` tool.
-4. **Audit** — `software-auditor` writes per-task `audit-{task_id}.md`; `orchestrator_audit` aggregates into `audit-workflow.md`.
+4. **Audit** — `auditor` writes per-task `audit-{task_id}.md`; `orchestrator_audit` aggregates into `audit-workflow.md`.
 
 State persists between calls (`audit-state-{dag_id}.yaml`, `chmod 0o600`) so the LLM can resume after context compaction. Lifecycle: `init → recording → complete`; recording after `complete` is rejected.
 
@@ -124,7 +124,7 @@ source of truth for this list — see `pi/src/tools/file-gate.ts`):
 
 **Production code** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …) is
 **rejected by the bash-guard** for any subagent. The guard's job is to
-protect the audit invariant (software-auditor independently re-runs
+protect the audit invariant (auditor independently re-runs
 `verification_cmd` on the developer's work) and DAG-attribution
 (every production change has a goal contract + task + subagent +
 audit verdict).
@@ -135,7 +135,7 @@ agent still needs to read user code to understand context.
 
 ### Subagent write prohibition (added 2026-07-25)
 
-Subagents (`developer`, `software-auditor`, `Explore`, `Plan`)
+Subagents (`developer`, `auditor`, `Explore`, `Plan`)
 **MUST NOT** actively write to `.pi/orchestrator/`. This directory is
 the orchestrator's state space — only the L3 main agent (or humans
 explicitly) decide what goes in there. (`general-purpose` was removed
@@ -152,7 +152,7 @@ off-limits.)
   record, not the subagent's.
 
 Practical consequences:
-- The `developer` / `software-auditor` agent templates must NOT
+- The `developer` / `auditor` agent templates must NOT
   instruct subagents to write `task-{id}-report.md` or
   `audit-{id}.md` to `.pi/orchestrator/`.
 - `pi/src/tools/orchestrator/task-dispatcher.ts` `report_path` field
@@ -269,9 +269,9 @@ The L3 main agent dispatches subagents based on the task shape — NEVER use `de
 
 | Tier | Who | Write tools | Safety mechanism |
 |---|---|---|---|
-| **L1 — read-only** | `Explore`, `Plan`, `software-auditor` (auditor is read-only on production code; writes only to its own `audit-{task_id}.md`) | **none** (frontmatter `tools:` allowlist) | LLM physically cannot call write |
-| **L2 — write-in-worktree** | `developer` (canonical, alias `software-developer`) | `edit`, `write` | managed-worktree object (`{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`) + `software-auditor` + merge gate. `tdd: none` flips the gate off for meta-file / design-doc writes (path must still be a meta-file). |
-| **L3 — coordinator** | **main agent** | 4 orchestrator tools (write `.pi/orchestrator/*` only) + `Agent` (dispatch). NO direct write tool. Dispatches: `developer` (with `isolation: { dag_id, task_id, mode: "create" }`, `tdd: "none"` for meta-files / design-doc writes; managed worktree + TDD for production code), `software-auditor` (alias `auditor`) for audit. See `pi/templates/SUBAGENTS.md § Dispatch Contract`. The escape window (§"Escape Window") gives the main agent direct write tools in 主动 mode when it gets stuck. | Layer 1 + Layer 2 hard threshold |
+| **L1 — read-only** | `Explore`, `Plan`, `auditor` (auditor is read-only on production code; writes only to its own `audit-{task_id}.md`) | **none** (frontmatter `tools:` allowlist) | LLM physically cannot call write |
+| **L2 — write-in-worktree** | `developer` (canonical, alias `developer`) | `edit`, `write` | managed-worktree object (`{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`) + `auditor` + merge gate. `tdd: none` flips the gate off for meta-file / design-doc writes (path must still be a meta-file). |
+| **L3 — coordinator** | **main agent** | 4 orchestrator tools (write `.pi/orchestrator/*` only) + `Agent` (dispatch). NO direct write tool. Dispatches: `developer` (with `isolation: { dag_id, task_id, mode: "create" }`, `tdd: "none"` for meta-files / design-doc writes; managed worktree + TDD for production code), `auditor` (alias `auditor`) for audit. See `pi/templates/SUBAGENTS.md § Dispatch Contract`. The escape window (§"Escape Window") gives the main agent direct write tools in 主动 mode when it gets stuck. | Layer 1 + Layer 2 hard threshold |
 
 The asymmetry IS the design — `developer` keeps raw edit/write
 because that's its job; main agent gives them up because they were
@@ -285,7 +285,7 @@ never its job.
 ├── dag-{id}.yaml               # OrchestrationPlan
 ├── audit-state-{dag_id}.yaml   # persisted AuditState (0o600)
 ├── task-{id}-report.md         # L3 main agent's summary of developer output
-├── audit-{task_id}.md          # L3 main agent's summary of software-auditor output
+├── audit-{task_id}.md          # L3 main agent's summary of auditor output
 ├── audit-workflow.md           # workflow rollup (0o600)
 └── designs/                    # brainstorming "save for later" (see brainstorming/index.ts:writeDesignDoc)
 ```
@@ -306,7 +306,7 @@ only by `pi-graphify/templates/start-mcp.sh` and
 - **KD-3**: black-box contract — `content.text` = summary, `details`
   = full `DispatchPlan` / audit result.
 - **KD-4**: TDD discipline lives in `developer`, not a wrapper.
-- **KD-5**: A3 split — per-task audit is `software-auditor`'s job;
+- **KD-5**: A3 split — per-task audit is `auditor`'s job;
   `orchestrator_audit` is workflow-level rollup. Zero overlap.
 - **KD-6**: `run_in_background` derived from `subagent_type` with
   per-task override.

@@ -182,15 +182,13 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
 
   // 5b. Validate task_template references (if set, must be a known template).
   //
-  // Phase A P3 (DAG-2026-011): the canonical template name for the
-  // developer agent is `subagent-developer`. The legacy spelling
-  // `subagent-software-developer` is NOT advertised here — it is
-  // rejected as an unknown template. Persisted DAGs that still carry
-  // the legacy name fail validation; the dispatcher has a separate
-  // alias-resolution path that warns callers about the deprecation.
+  // GC-2026-014: the canonical templates are `subagent-developer` and
+  // `subagent-auditor`. The legacy `subagent-software-developer` and
+  // `subagent-software-auditor` spellings are NOT advertised here — they
+  // are rejected as unknown templates. Persisted DAGs that still carry
+  // the legacy names fail validation.
   const KNOWN_TEMPLATES = new Set([
     "subagent-developer",
-    "subagent-software-auditor",
     "subagent-auditor",
     "subagent-explore",
   ]);
@@ -238,20 +236,15 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
 
   // 8. Subagent type referenced (soft check — warn if unknown)
   //
-   // Phase A P3 (DAG-2026-011): the canonical subagent name is
-   // `developer`. The legacy `software-developer` alias is preserved
-   // here as a deprecation signal — a persisted DAG that uses the
-   // legacy spelling gets a warning, not an error. Phase A P4 does
-   // the same migration for `software-auditor` → `auditor`. Phase C
-   // removed `general-purpose` (it was a catch-all helper); persisted
-   // DAGs that use the name get a warning, not an error.
+  // GC-2026-014: the canonical subagent types are `developer` and
+  // `auditor` (plus pi-subagents built-ins `Explore` / `Plan`).
+  // `general-purpose` was removed in DAG-2026-011 Phase C — persisted
+  // DAGs that use the name get a warning, not an error.
   const knownSubagents = new Set([
     "Explore",
     "Plan",
     "developer",
-    "software-developer",
     "auditor",
-    "software-auditor",
   ]);
   for (const t of input.tasks as any[]) {
     if (!knownSubagents.has(t.subagent_type)) {

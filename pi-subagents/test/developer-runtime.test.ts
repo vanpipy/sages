@@ -1,31 +1,32 @@
 /**
- * developer-runtime.test.ts — Phase A P2 runtime enforcement.
+ * developer-runtime.test.ts — Runtime invariants of `developer` after
+ * GC-2026-014.
  *
- * Phase A P1 wired the *policy* (`enforceDeveloperManagedIsolationPolicy`)
- * for the canonical `developer` agent. Phase A P2 enforces that policy
- * at the Agent-tool runtime boundary — both for the canonical name and
- * for the Phase A alias `software-developer`. This file pins down:
+ * GC-2026-014 removed the entire alias infrastructure (DAG-2026-011
+ * Phase A + B): the `software-developer` legacy spelling no longer
+ * resolves, and `AgentConfig.aliases` is gone from the type. This file
+ * pins the post-removal invariants:
  *
- *   1. The alias name `software-developer` resolves to the same policy
- *      as the canonical `developer` (same accept set, same reject set).
- *   2. `getAvailableTypes()` does NOT advertise the alias name; the
- *      canonical `developer` is the only public roster entry.
- *   3. `normalizeWorktreeIsolation` rejects the legacy `"worktree"`
- *      literal for any caller (defense-in-depth — the dispatcher
- *      surfaces a precise error rather than a silent /tmp fallback).
- *   4. `enforceDeveloperManagedIsolationPolicy` accepts a valid
- *      managed-worktree object verbatim for both names and rejects
- *      every legacy / malformed shape uniformly.
- *   5. The alias metadata (`alias: true, deprecated: true`) round-trips
- *      through `resolveAgentType` exactly as required by P2.6.
+ *   1. The canonical `developer` name resolves; the legacy spelling
+ *      resolves as undefined.
+ *   2. `getAvailableTypes()` does NOT advertise the legacy alias name.
+ *   3. `DEFAULT_AGENTS` does not carry a duplicate legacy roster entry.
+ *   4. `normalizeWorktreeIsolation` still rejects the legacy
+ *      `"worktree"` literal for any caller (defense-in-depth — the
+ *      dispatcher surfaces a precise error rather than a silent
+ *      /tmp fallback).
+ *   5. `enforceDeveloperManagedIsolationPolicy` accepts a valid
+ *      managed-worktree object verbatim and rejects every legacy /
+ *      malformed shape uniformly.
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_AGENTS } from "../src/default-agents.js";
 import {
+	getAgentConfig,
 	getAvailableTypes,
 	registerAgents,
-	resolveAgentType,
+	resolveType,
 	setDefaultsDisabled,
 } from "../src/agent-types.js";
 import { enforceDeveloperManagedIsolationPolicy } from "../src/invocation-config.js";
@@ -37,72 +38,38 @@ import {
 const CANONICAL = "developer";
 const LEGACY_ALIAS = "software-developer";
 
-describe("developer-runtime: alias name also triggers managed-isolation policy", () => {
+describe("developer-runtime: canonical developer resolves, legacy alias does not (GC-2026-014)", () => {
 	beforeEach(() => {
 		setDefaultsDisabled(false);
 		registerAgents(new Map());
 	});
 
-	it("accepts a valid managed-worktree object under the alias name", () => {
-		const ok = enforceDeveloperManagedIsolationPolicy(LEGACY_ALIAS, {
-			dag_id: "DAG-2026-011",
-			task_id: "P2",
-			mode: "create",
-		});
-		expect(ok).toBeUndefined();
+	it("resolveType returns the canonical name for the canonical spelling", () => {
+		expect(resolveType(CANONICAL)).toBe(CANONICAL);
 	});
 
-	it("rejects the legacy literal under the alias name (same message family)", () => {
-		const err = enforceDeveloperManagedIsolationPolicy(
-			LEGACY_ALIAS,
-			"worktree",
-		);
-		expect(err).toBeDefined();
-		expect(err).toMatch(/developer/i);
-		expect(err).toMatch(/worktree/i);
-		expect(err).toMatch(/explicit/i);
+	it("resolveType returns undefined for the legacy alias spelling", () => {
+		expect(resolveType(LEGACY_ALIAS)).toBeUndefined();
 	});
 
-	it("rejects undefined / null / unrelated strings under the alias name", () => {
+	it("getAgentConfig returns undefined for the legacy alias spelling", () => {
+		expect(getAgentConfig(LEGACY_ALIAS)).toBeUndefined();
+	});
+
+	it("enforceDeveloperManagedIsolationPolicy is a no-op for the legacy alias (it is no longer a developer)", () => {
+		// The policy is `developer`-specific. Legacy callers that survive
+		// past resolveType's unknown-name rejection (e.g. cross-extension
+		// RPC bypassing the dispatcher) will not be policy-checked here;
+		// they fall through with undefined isolation, and the spawn fails
+		// upstream on the unknown-type rejection. Pin the policy shape
+		// anyway so future contributors don't widen it back to the
+		// legacy spelling.
+		expect(
+			enforceDeveloperManagedIsolationPolicy(LEGACY_ALIAS, "worktree"),
+		).toBeUndefined();
 		expect(
 			enforceDeveloperManagedIsolationPolicy(LEGACY_ALIAS, undefined),
-		).toBeDefined();
-		expect(
-			enforceDeveloperManagedIsolationPolicy(LEGACY_ALIAS, null),
-		).toBeDefined();
-		expect(
-			enforceDeveloperManagedIsolationPolicy(LEGACY_ALIAS, ""),
-		).toBeDefined();
-		expect(
-			enforceDeveloperManagedIsolationPolicy(LEGACY_ALIAS, "branch"),
-		).toBeDefined();
-	});
-
-	it("rejects malformed managed-worktree objects under the alias name", () => {
-		expect(
-			enforceDeveloperManagedIsolationPolicy(LEGACY_ALIAS, {} as any),
-		).toBeDefined();
-		expect(
-			enforceDeveloperManagedIsolationPolicy(LEGACY_ALIAS, {
-				dag_id: "DAG-1",
-			} as any),
-		).toBeDefined();
-		expect(
-			enforceDeveloperManagedIsolationPolicy(LEGACY_ALIAS, {
-				dag_id: "DAG-1",
-				task_id: "P1",
-				mode: "explode",
-			} as any),
-		).toBeDefined();
-	});
-
-	it("is case-insensitive on the alias name (Software-Developer, etc.)", () => {
-		const err = enforceDeveloperManagedIsolationPolicy(
-			"Software-Developer",
-			"worktree",
-		);
-		expect(err).toBeDefined();
-		expect(err).toMatch(/developer/i);
+		).toBeUndefined();
 	});
 });
 
@@ -117,7 +84,7 @@ describe("developer-runtime: getAvailableTypes does NOT advertise the alias", ()
 		expect(types).toContain(CANONICAL);
 	});
 
-	it("does NOT list the Phase A alias in available types", () => {
+	it("does NOT list the removed legacy alias in available types", () => {
 		const types = getAvailableTypes();
 		expect(types).not.toContain(LEGACY_ALIAS);
 	});
@@ -145,13 +112,13 @@ describe("developer-runtime: normalizeWorktreeIsolation rejects the legacy liter
 
 	it("parses a valid explicit object verbatim", () => {
 		const req = normalizeWorktreeIsolation({
-			dag_id: "DAG-2026-011",
-			task_id: "P2",
+			dag_id: "DAG-2026-014",
+			task_id: "P1",
 			mode: "create",
 		});
 		expect(req).toBeDefined();
-		expect(req?.dag_id).toBe("DAG-2026-011");
-		expect(req?.task_id).toBe("P2");
+		expect(req?.dag_id).toBe("DAG-2026-014");
+		expect(req?.task_id).toBe("P1");
 		expect(req?.mode).toBe("create");
 	});
 
@@ -162,34 +129,50 @@ describe("developer-runtime: normalizeWorktreeIsolation rejects the legacy liter
 	});
 });
 
-describe("developer-runtime: alias metadata round-trips", () => {
-	beforeEach(() => {
-		setDefaultsDisabled(false);
-		registerAgents(new Map());
+describe("developer-runtime: enforceDeveloperManagedIsolationPolicy unit checks", () => {
+	it("accepts a valid managed-worktree object under the canonical name", () => {
+		const ok = enforceDeveloperManagedIsolationPolicy(CANONICAL, {
+			dag_id: "DAG-2026-014",
+			task_id: "P1",
+			mode: "create",
+		});
+		expect(ok).toBeUndefined();
 	});
 
-	it("resolveAgentType returns alias:true, deprecated:true for the legacy spelling", () => {
-		const r = resolveAgentType(LEGACY_ALIAS);
-		expect(r).toBeDefined();
-		expect(r!.requested).toBe(LEGACY_ALIAS);
-		expect(r!.canonical).toBe(CANONICAL);
-		expect(r!.alias).toBe(true);
-		expect(r!.deprecated).toBe(true);
+	it("rejects the legacy literal under the canonical name", () => {
+		const err = enforceDeveloperManagedIsolationPolicy(CANONICAL, "worktree");
+		expect(err).toBeDefined();
+		expect(err).toMatch(/developer/i);
+		expect(err).toMatch(/worktree/i);
+		expect(err).toMatch(/explicit/i);
 	});
 
-	it("resolveAgentType returns alias:false, deprecated:false for the canonical spelling", () => {
-		const r = resolveAgentType(CANONICAL);
-		expect(r).toBeDefined();
-		expect(r!.requested).toBe(CANONICAL);
-		expect(r!.canonical).toBe(CANONICAL);
-		expect(r!.alias).toBe(false);
-		expect(r!.deprecated).toBe(false);
+	it("rejects undefined / null / unrelated strings under the canonical name", () => {
+		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, undefined)).toBeDefined();
+		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, null)).toBeDefined();
+		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, "")).toBeDefined();
+		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, "branch")).toBeDefined();
 	});
 
-	it("resolveAgentType preserves case on the requested field", () => {
-		const r = resolveAgentType("Software-Developer");
-		expect(r!.requested).toBe("Software-Developer");
-		expect(r!.canonical).toBe(CANONICAL);
-		expect(r!.alias).toBe(true);
+	it("rejects malformed managed-worktree objects under the canonical name", () => {
+		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, {} as any)).toBeDefined();
+		expect(
+			enforceDeveloperManagedIsolationPolicy(CANONICAL, {
+				dag_id: "DAG-1",
+			} as any),
+		).toBeDefined();
+		expect(
+			enforceDeveloperManagedIsolationPolicy(CANONICAL, {
+				dag_id: "DAG-1",
+				task_id: "P1",
+				mode: "explode",
+			} as any),
+		).toBeDefined();
+	});
+
+	it("is case-insensitive on the canonical name (Developer, DEVELOPER)", () => {
+		const err = enforceDeveloperManagedIsolationPolicy("Developer", "worktree");
+		expect(err).toBeDefined();
+		expect(err).toMatch(/developer/i);
 	});
 });

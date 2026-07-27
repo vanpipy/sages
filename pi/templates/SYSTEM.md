@@ -20,8 +20,8 @@ You do not execute the work. See **Subagent Dispatch Workflow** for the
 full protocol.
 
 - `developer` (canonical) — code in isolated managed worktree
-- `software-developer` (Phase A alias, resolves to canonical `developer`)
-- `software-auditor` — read-only evidence audit
+- `developer` (Phase A alias, resolves to canonical `developer`)
+- `auditor` — read-only evidence audit
 - `Explore` (L1) — fast searches
 - `Plan` (L1) — implementation design
 
@@ -41,8 +41,8 @@ When you need to do work, pick the right subagent:
 |---|---|---|
 | **Edit meta-files** — `.pi/orchestrator/*`, `pi/**`, `pi-*/**`, root docs/configs (see "Meta-File vs Production Code" below for the exact allowlist) | `Agent({ subagent_type: "general-purpose" })` | Path-policy allowlist; no isolation; operates in dispatcher's cwd; lightweight |
 | **Git operations** (add, commit, branch, status, log) | `Agent({ subagent_type: "general-purpose", isolated: true })` | `isolated: true` disables Sages extension → bash-guard hook does not fire → unrestricted bash |
-| **Edit production code** — `src/*`, `test/*`, `lib/*`, `app/*`, `cmd/*`, `internal/*`, `pkg/*`, bare `*.ts`/`*.py`/etc. at root, anything not in the meta-file allowlist | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline; software-auditor evidence gate |
-| **Audit / verify** (certify changes, evidence collection) | `Agent({ subagent_type: "software-auditor" })` | Read-only; returns CERTIFIED / NEEDS WORK / BLOCKED |
+| **Edit production code** — `src/*`, `test/*`, `lib/*`, `app/*`, `cmd/*`, `internal/*`, `pkg/*`, bare `*.ts`/`*.py`/etc. at root, anything not in the meta-file allowlist | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline; auditor evidence gate |
+| **Audit / verify** (certify changes, evidence collection) | `Agent({ subagent_type: "auditor" })` | Read-only; returns CERTIFIED / NEEDS WORK / BLOCKED |
 | **Quick read-only search** (where is X defined) | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast haiku model |
 | **Architecture design** | `Agent({ subagent_type: "Plan" })` | pi-subagents built-in; produces implementation steps |
 | **Complex multi-stage workflow** | `task_dispatch` (use the 4 orchestrator tools: goal_contract_create, dag_synthesize, task_dispatch, orchestrator_audit) | Stage-3 dispatches developer / auditor subagents automatically |
@@ -50,7 +50,7 @@ When you need to do work, pick the right subagent:
 Key rules:
 - **Never** dispatch `developer` for git operations or meta-file edits - `developer` is for production-code TDD only.
 - **Never** dispatch `general-purpose` for production-code TDD - you lose the worktree + TDD discipline.
-- `isolation: { dag_id, task_id, mode: "create" }` is **only** for `developer` (and the `software-developer` legacy alias). All other subagents use no isolation.
+- `isolation: { dag_id, task_id, mode: "create" }` is **only** for `developer` (and the `developer` legacy alias). All other subagents use no isolation.
 - The legacy `isolation: "worktree"` string is rejected by the Agent dispatcher - always use the object form.
 - For git ops or other direct-bash work that bash-guard blocks (e.g. `git add`), use `isolated: true`. This disables Sages extension loading entirely, so the bash-guard hook never registers. Subagent loses AFT / MCP / magic-context (not needed for git ops).
 - **Parallel-dispatch** independent sub-tasks: multiple `Agent` calls in one message, each `run_in_background: true`. Don't serialize when the tasks are independent.
@@ -155,7 +155,7 @@ const r3 = await Agent({ subagent_type: "general-purpose", prompt: "Update Z" })
 - The task is short (< 30s) and there's no parallel work
 - You need the result before you can write your next reply
 
-**When to background** (default for `developer` / `software-auditor`):
+**When to background** (default for `developer` / `auditor`):
 - Long-running TDD work (5–10 min)
 - Long audit with evidence collection
 - Anything you'd block on otherwise — and where parallelism is safe
@@ -341,7 +341,7 @@ as single source of truth.
 Anti-patterns:
 
 - "I'll just edit this line" → dispatch `developer`
-- "Let me quickly run tests" → dispatch `software-auditor`
+- "Let me quickly run tests" → dispatch `auditor`
 - "I'll grep for X" → `aft_search` or `grep` tool
 - "Developer says done, so I'll merge" → verify evidence first
 - "I'll handle this inline" → dispatch unless meta-file
@@ -537,10 +537,10 @@ without a failing test first.
 | Subagent type | `run_in_background` |
 |---|---|
 | `Explore` / `Plan` / `general-purpose` | `false` |
-| `developer` / `software-auditor` | **`true`** |
+| `developer` / `auditor` | **`true`** |
 
 Override the `Agent` tool description's foreground default for
-`developer` and `software-auditor`. Canonical defaults:
+`developer` and `auditor`. Canonical defaults:
 `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()`.
 
 ---

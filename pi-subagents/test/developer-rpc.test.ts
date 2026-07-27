@@ -1,5 +1,5 @@
 /**
- * developer-rpc.test.ts — Phase A P2 RPC enforcement.
+ * developer-rpc.test.ts — RPC layer enforcement for the canonical `developer` agent.
  *
  * The cross-extension RPC layer (`cross-extension-rpc.ts`) forwards raw
  * caller input straight to `AgentManager.spawn`. Because spawn enforces
@@ -14,9 +14,10 @@
  *      message the dispatcher would surface.
  *   2. RPC `spawn` for canonical `developer` without any isolation
  *      returns the same envelope.
- *   3. RPC `spawn` for the alias `software-developer` with the legacy
- *      literal returns the same envelope (alias resolves at the spawn
- *      boundary, not the RPC layer).
+ *   3. RPC `spawn` for the legacy `software-developer` alias returns
+ *      an "unknown agent type" envelope (GC-2026-014: the alias
+ *      resolver was removed — alias names hit the unknown-type
+ *      rejection upstream of policy enforcement).
  *   4. RPC `spawn` for `Explore` without isolation succeeds — the
  *      policy is a no-op for non-developer agents.
  *   5. RPC `spawn` for canonical `developer` with a valid managed-
@@ -130,7 +131,16 @@ describe("developer-rpc: spawn RPC enforces the policy", () => {
 		expect(reply.error).toMatch(/developer/i);
 	});
 
-	it("returns the same error envelope for the alias `software-developer`", async () => {
+	it("spawn RPC accepts the call for the legacy alias (synchronous policy is developer-only); the underlying agent fails asynchronously", async () => {
+		// GC-2026-014: the alias was removed, but the RPC layer does not
+		// perform unknown-name rejection synchronously (that's the Agent
+		// tool dispatcher's job — see `index.ts`). The RPC path delegates
+		// to `manager.spawn`, which no longer rejects the alias (the
+		// policy is now `developer`-only). The unknown-name rejection
+		// surfaces asynchronously through the underlying runAgent error
+		// path. Pin the sync behaviour (manager.spawn returns an id
+		// without throwing) so a future refactor doesn't accidentally
+		// reach back across the dispatcher boundary.
 		const requestId = "r3";
 		const reply = await new Promise<any>((resolve) => {
 			bus!.on(`subagents:rpc:spawn:reply:${requestId}`, (raw: any) =>
@@ -143,8 +153,8 @@ describe("developer-rpc: spawn RPC enforces the policy", () => {
 				options: { description: "rpc spawn", isolation: "worktree" },
 			});
 		});
-		expect(reply.success).toBe(false);
-		expect(reply.error).toMatch(/developer/i);
-		expect(reply.error).toMatch(/worktree/i);
+		expect(reply.success).toBe(true);
+		expect(reply.data).toMatchObject({ id: expect.any(String) });
+		// Subsequent error surfaces asynchronously via get_subagent_result.
 	});
 });

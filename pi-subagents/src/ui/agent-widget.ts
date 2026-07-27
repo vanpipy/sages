@@ -180,15 +180,6 @@ export interface AgentDetails {
 	modelName?: string;
 	/** Notable config tags (e.g. ["thinking: high", "isolated"]). */
 	tags?: string[];
-	/**
-	 * Phase A P2 (DAG-2026-011) — alias metadata the dispatcher surfaces
-	 * when the caller used the Phase A developer alias instead
-	 * of canonical `developer`. Programmatic callers (audit, telemetry,
-	 * migration tooling) read these to warn without having to re-resolve
-	 * the canonical name themselves.
-	 */
-	requestedName?: string;
-	aliasUsed?: boolean;
 	/** Current turn count. */
 	turnCount?: number;
 	/** Effective max turns (undefined = unlimited). */
