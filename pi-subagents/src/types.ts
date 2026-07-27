@@ -213,7 +213,7 @@ export interface AgentRecord {
 }
 
 export interface AgentInvocation {
-	/** Short display name, e.g. "haiku" — only set when different from parent. */
+	/** Short display name when the subagent's model differs from the parent's; absent when inherited. */
 	modelName?: string;
 	thinking?: ThinkingLevel;
 	maxTurns?: number;

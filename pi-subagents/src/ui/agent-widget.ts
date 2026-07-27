@@ -176,7 +176,7 @@ export interface AgentDetails {
 	activity?: string;
 	/** Current spinner frame index (for animated running indicator). */
 	spinnerFrame?: number;
-	/** Short model name if different from parent (e.g. "haiku", "sonnet"). */
+	/** Short display name when the subagent's model differs from the parent's; empty when inherited. */
 	modelName?: string;
 	/** Notable config tags (e.g. ["thinking: high", "isolated"]). */
 	tags?: string[];

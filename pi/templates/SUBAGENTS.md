@@ -34,7 +34,7 @@ When the orchestrator dispatches `developer` with `isolation: { dag_id, task_id,
 
 | Stage | `subagent_type`     | Source                              | Tools                | Purpose                                                                |
 |-------|----------------------|--------------------------------------|----------------------|------------------------------------------------------------------------|
-| 1     | `Explore`            | pi-subagents built-in                | read, bash, grep, find, ls | Fast codebase search. Haiku — cheap, fast, **read-only**.        |
+| 1     | `Explore`            | pi-subagents built-in                | read, bash, grep, find, ls | Fast codebase search. Cheap, fast, **read-only** — inherits the parent registry's cheapest available model when dispatched without `model=`.        |
 | 2     | `Plan`               | pi-subagents built-in                | read, bash, grep, find, ls | Software architect. Sonnet. **Read-only** — returns a step-by-step plan, never edits. |
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. Host-managed worktree. |
 | 4     | `auditor`   | **shipped** (this repo)              | read, bash, grep, find, ls, aft_* | Evidence-based certifier. **Read-only** — re-runs commands, never modifies production code. |

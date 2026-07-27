@@ -70,7 +70,7 @@ Mark each todo's `content` with `[serial]` or `[parallel]` based on dependencies
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.), since it is not aware of the user's intent.
 - If an agent's description says it should be used proactively, try to use it without the user having to ask for it first.
-- Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
+- Use model to specify a different model (as "provider/modelId", or any substring of a registered id). Omit to inherit the parent session's model.
 - Use thinking to control extended thinking level.
 - Use inherit_context if the agent needs the parent conversation history.
 - For Sages code dispatch, pass `isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`. The pi-subagents host provisions `<repo>/.pi/worktree/<dag>/<worktree>` from `origin/main` on `sages/<dag>/<worktree>` before child startup and leases the slot; concurrent reuse is rejected. The main agent coordinates only and MUST NOT run Git worktree provisioning. Result details include path, branch, baseSha, baseRef, head, dirty, and leaseToken. The host never auto-merges or appends a merge command. Reuse and release are explicit; after validation and any requested integration, call the host `AgentManager.releaseManagedWorktree(...)`, with `deleteBranch: true` only when branch deletion is intended. Managed Sages dispatch never falls back to `/tmp`. Subagents must not write `.pi/orchestrator/`.{{scheduleGuideline}}
