@@ -37,6 +37,13 @@ describe("default-agents: roster", () => {
 		expect(DEFAULT_AGENTS.has("developer")).toBe(true);
 	});
 
+	it("registers the canonical `merger` agent (GC-2026-prompt-workspace: cross-workspace merge)", () => {
+		// Q4=b: a dedicated `merger` sub-agent handles cross-workspace
+		// file overlap. The merger is read-only on production code —
+		// it produces merge commits via git plumbing only.
+		expect(DEFAULT_AGENTS.has("merger")).toBe(true);
+	});
+
 	it("does NOT register `software-developer` (GC-2026-014: legacy alias removed)", () => {
 		// The Phase A alias was dropped in GC-2026-014 along with the
 		// AgentConfig.aliases field. Callers passing the legacy spelling
@@ -128,13 +135,132 @@ describe("default-agents: developer config", () => {
  * `excludeExtensions: ["pi-subagents"]` is the cleanest expression of the
  * policy and the only one user-defined agents can read at a glance.
  */
+describe("default-agents: merger config (GC-2026-prompt-workspace)", () => {
+	// Q4=b: the merger is a dedicated sub-agent that handles cross-
+	// workspace file overlap. It is read-only on production code —
+	// producing merge commits via `git -C <worktree> merge --no-ff`
+	// (bash + git plumbing) rather than edit/write. The runtime knobs
+	// below pin this contract; the prose in `merger.ts` is the
+	// matching half.
+	const merger = DEFAULT_AGENTS.get("merger");
+
+	it("is registered with isDefault: true", () => {
+		expect(merger?.isDefault).toBe(true);
+	});
+
+	it("has displayName 'Merger' and description referencing cross-workspace merge", () => {
+		expect(merger?.displayName).toBe("Merger");
+		const desc = merger?.description.toLowerCase() ?? "";
+		expect(desc, "must mention merge").toContain("merge");
+		expect(desc, "must mention cross-workspace").toMatch(/cross[- ]?workspace/);
+	});
+
+	it("uses promptMode: 'replace' (matches all other defaults)", () => {
+		expect(merger?.promptMode).toBe("replace");
+	});
+
+	it("carries the canonical system prompt (non-empty, references the three classifications)", () => {
+		expect(typeof merger?.systemPrompt).toBe("string");
+		expect(merger?.systemPrompt.length).toBeGreaterThan(0);
+		// The three classifications are the load-bearing taxonomy.
+		expect(merger?.systemPrompt).toContain("clean");
+		expect(merger?.systemPrompt).toContain("disjoint-hunk");
+		expect(merger?.systemPrompt).toContain("hunk-conflict");
+		// And the canonical §Cross-workspace merging header is the
+		// cross-file consistency anchor (see merger-prompt.test.ts).
+		expect(merger?.systemPrompt).toMatch(/^##\s+.*Cross-workspace merging.*$/m);
+	});
+
+	it("builtinToolNames does NOT include `edit` or `write` (read-only on production code)", () => {
+		// The merger produces commits via git plumbing only. edit/write
+		// are stripped from the tool list at the registry layer so
+		// even a prompt drift cannot let the merger modify production
+		// code directly.
+		const tools = new Set(merger?.builtinToolNames ?? []);
+		expect(
+			tools.has("edit"),
+			"merger must NOT have the edit tool (read-only on production code)",
+		).toBe(false);
+		expect(
+			tools.has("write"),
+			"merger must NOT have the write tool (read-only on production code)",
+		).toBe(false);
+		// Read-only surface: read, bash, grep, find, ls.
+		for (const t of ["read", "bash", "grep", "find", "ls"]) {
+			expect(tools.has(t), `merger must include tool ${t}`).toBe(true);
+		}
+	});
+
+	it("carries the required extensions: aft, pi-mcp-adapter, pi-magic-context", () => {
+		// Symmetric with developer / auditor: the merger reaches for
+		// the same indexed semantic tools so it can read both diffs
+		// and classify overlap without shell grep.
+		const extensions = merger?.extensions;
+		expect(extensions).not.toBe(false);
+		const list =
+			extensions === true || extensions === undefined ? null : extensions;
+		expect(list, "merger must pin extensions to a list").not.toBeNull();
+		expect(list).toContain("aft");
+		expect(list).toContain("pi-mcp-adapter");
+		expect(list).toContain("pi-magic-context");
+	});
+
+	it("disables skills (false) — merger is a deterministic tool, no project conventions", () => {
+		expect(merger?.skills).toBe(false);
+	});
+
+	it("runInBackground = true (merger is dispatched as background)", () => {
+		// Merge classification + git plumbing + typecheck + lint + test
+		// run for 30s–3min. Symmetric with developer / auditor.
+		expect(merger?.runInBackground).toBe(true);
+	});
+
+	it("inheritContext = false — main agent must send a self-contained merge brief", () => {
+		// The merger is a deterministic tool. It must NOT fork the
+		// parent's chat history; the brief carries the workspace-A +
+		// workspace-B branches, SC ids, and worktree paths explicitly.
+		expect(merger?.inheritContext).toBe(false);
+	});
+
+	it("sets a bounded maxTurns (80 — read both diffs + classify + merge + verify + report)", () => {
+		// Less than developer/auditor (200) because the merger is a
+		// narrow tool: read diffs, classify, produce one merge commit
+		// or escalate. Going over 80 turns means the brief was wrong,
+		// not that the merger needs more budget.
+		expect(merger?.maxTurns).toBe(80);
+	});
+
+	it("does NOT carry an isolation policy — merger uses no worktree, operates against supplied worktree paths", () => {
+		// The merger is dispatched from inside the orchestrator's
+		// context; the brief carries the worktree paths. No
+		// managed-worktree object on the merger config itself.
+		expect(merger?.isolation).toBeUndefined();
+	});
+
+	it("excludes pi-subagents from its extension set (no recursive Agent dispatch)", () => {
+		// Symmetric with the other defaults: the merger must not load
+		// the Agent tool and recursively spawn subagents.
+		const excludes = merger?.excludeExtensions ?? [];
+		expect(
+			excludes.map((s) => s.toLowerCase()),
+			`merger.excludeExtensions must include "pi-subagents"`,
+		).toContain("pi-subagents");
+	});
+});
+
 describe("default-agents: subagent isolation", () => {
 	// Every default agent must carry `excludeExtensions: ["pi-subagents"]` so
 	// the Agent tool / get_subagent_result / steer_subagent never load. The
 	// `developer` agent is also covered even though its `extensions:` list
 	// doesn't include `pi-subagents` — explicit excludes survive a future
 	// loosening of the include list.
-	for (const name of ["Explore", "Plan", "developer", "auditor"] as const) {
+	for (const name of [
+		"Explore",
+		"Plan",
+		"developer",
+		"auditor",
+		"merger",
+	] as const) {
 		it(`${name} excludes pi-subagents from its extension set`, () => {
 			const config = DEFAULT_AGENTS.get(name);
 			expect(
@@ -163,6 +289,7 @@ describe("default-agents: per-agent maxTurns budgets", () => {
 		Plan: 12,
 		developer: 200,
 		auditor: 200,
+		merger: 80,
 	};
 
 	for (const [name, limit] of Object.entries(expected)) {

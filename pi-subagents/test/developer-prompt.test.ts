@@ -200,10 +200,9 @@ describe("developer-prompt: MUST/forbidden language for tool preference (GC-2026
 
 	it("Tool preference order section forbids bash code search (grep / rg / find / cat)", () => {
 		const section = sectionBody("Tool preference order");
-		expect(
-			section,
-			"section must explicitly forbid bash code search",
-		).toMatch(/FORBIDDEN|forbidden/i);
+		expect(section, "section must explicitly forbid bash code search").toMatch(
+			/FORBIDDEN|forbidden/i,
+		);
 		// AFT item (item 1) is the MANDATORY first choice — must be
 		// positioned as the rule, not a preference.
 		expect(section, "AFT item must carry MUST/mandatory language").toMatch(
@@ -218,15 +217,121 @@ describe("developer-prompt: MUST/forbidden language for tool preference (GC-2026
 		// rather than re-derive AGENTS.md / README.md / CLAUDE.md /
 		// package.json (audit showed this wasted 3–8 turns per spawn).
 		const section = sectionBody("First Action Protocol");
-		expect(
-			section,
-			"section must mention parent-injected context",
-		).toMatch(/parent[- ]injected|injected.*context/i);
+		expect(section, "section must mention parent-injected context").toMatch(
+			/parent[- ]injected|injected.*context/i,
+		);
 		// And must explicitly tell the agent NOT to re-read the conventions.
 		expect(
 			section,
 			"section must tell the agent to NOT re-read AGENTS.md / README.md / CLAUDE.md",
 		).toMatch(/DO NOT re-read|do not re-read/i);
+	});
+});
+
+describe("developer-prompt: workspace + HANDOFF invariants (GC-2026-prompt-workspace)", () => {
+	// Q2=b: a worktree is a workspace, not just an isolation boundary.
+	// Q3=c: HANDOFF.md is the carrier across developer sessions on the
+	// same workspace. Both ends of the protocol — read on entry + write
+	// on exit — must be encoded in the developer prompt with MUST
+	// language; skipping the read is an automatic audit failure.
+	//
+	// The canonical text is shared verbatim with `merger.ts` so the two
+	// prompts cannot drift apart. The prose is allowed to evolve; the
+	// invariants below are not.
+
+	it("declares a 'Workspace Context' section header", () => {
+		// The "Workspace Context" section sits between the First Action
+		// Protocol and the Core Mission. It encodes the read-HANDOFF
+		// half of the protocol (the developer side).
+		const re = /^##\s+.*Workspace Context.*$/m;
+		const m = DEVELOPER_PROMPT.match(re);
+		expect(
+			m?.index ?? -1,
+			"'Workspace Context' section must exist",
+		).toBeGreaterThanOrEqual(0);
+	});
+
+	it("declares a 'Workspace Output' section header", () => {
+		// The "Workspace Output" section encodes the write-HANDOFF
+		// half — what the developer writes on exit so a successor on
+		// the same workspace can pick up cleanly.
+		const re = /^##\s+.*Workspace Output.*$/m;
+		const m = DEVELOPER_PROMPT.match(re);
+		expect(
+			m?.index ?? -1,
+			"'Workspace Output' section must exist",
+		).toBeGreaterThanOrEqual(0);
+	});
+
+	it("references the HANDOFF.md write path (.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md)", () => {
+		expect(DEVELOPER_PROMPT).toContain(
+			".pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md",
+		);
+	});
+
+	it("references the HANDOFF.md read path (.pi/orchestrator/handoff/<workspace_id>/)", () => {
+		expect(DEVELOPER_PROMPT).toContain(
+			".pi/orchestrator/handoff/<workspace_id>/",
+		);
+	});
+
+	it("'Workspace Context' is positioned AFTER 'First Action Protocol' (extends it)", () => {
+		// The Workspace Context section extends the First Action
+		// Protocol (reading HANDOFF.md is the new step inserted into
+		// the entry sequence). It must therefore come after the
+		// existing First Action Protocol section.
+		const protoIdx =
+			DEVELOPER_PROMPT.match(/^##\s+.*First Action Protocol.*$/m)?.index ?? -1;
+		const ctxIdx =
+			DEVELOPER_PROMPT.match(/^##\s+.*Workspace Context.*$/m)?.index ?? -1;
+		expect(protoIdx).toBeGreaterThanOrEqual(0);
+		expect(ctxIdx).toBeGreaterThanOrEqual(0);
+		expect(
+			ctxIdx,
+			"'Workspace Context' must come after 'First Action Protocol'",
+		).toBeGreaterThan(protoIdx);
+	});
+
+	it("skipping read-HANDOFF is explicitly tied to 'automatic audit failure'", () => {
+		// The developer prompt MUST surface the consequence (audit
+		// failure) of skipping the HANDOFF read. This pins the
+		// MUST-level language so a future prose edit doesn't soften
+		// it back to "consider reading".
+		expect(DEVELOPER_PROMPT.toLowerCase()).toContain("automatic audit failure");
+		// And the audit-failure language must appear in the Workspace
+		// Context section, not somewhere unrelated.
+		const ctxIdx =
+			DEVELOPER_PROMPT.match(/^##\s+.*Workspace Context.*$/m)?.index ?? -1;
+		expect(ctxIdx).toBeGreaterThanOrEqual(0);
+		const after = DEVELOPER_PROMPT.slice(ctxIdx);
+		const nextSection = after.slice(2).match(/^##\s/m);
+		const endIdx =
+			nextSection?.index === undefined ? after.length : nextSection.index + 2;
+		const section = after.slice(0, endIdx).toLowerCase();
+		expect(
+			section,
+			"audit-failure language must be inside 'Workspace Context'",
+		).toContain("automatic audit failure");
+	});
+
+	it("'Workspace Output' section lists the (a)-(e) HANDOFF contents (summary, modified files, TODOs, test status, questions)", () => {
+		// The HANDOFF writer must include the five-part body so
+		// successors can pick up cleanly. The prose is allowed to
+		// rephrase, but all five labelled points must appear in the
+		// section.
+		const ctxIdx =
+			DEVELOPER_PROMPT.match(/^##\s+.*Workspace Output.*$/m)?.index ?? -1;
+		expect(ctxIdx).toBeGreaterThanOrEqual(0);
+		const after = DEVELOPER_PROMPT.slice(ctxIdx);
+		const nextSection = after.slice(2).match(/^##\s/m);
+		const endIdx =
+			nextSection?.index === undefined ? after.length : nextSection.index + 2;
+		const section = after.slice(0, endIdx).toLowerCase();
+		expect(section, "must include task summary").toMatch(/summary/);
+		expect(section, "must include modified files").toMatch(/modified/);
+		expect(section, "must include TODOs for successor").toMatch(/todo/);
+		expect(section, "must include test status").toMatch(/test status/);
+		expect(section, "must include open questions").toMatch(/open question/);
 	});
 });
 
@@ -248,4 +353,3 @@ describe("developer-prompt: codebase_memory MCP tool family (post-64eecc5/7b5dee
 		expect(DEVELOPER_PROMPT).not.toMatch(/\bcodebase_refs\b/);
 	});
 });
-
