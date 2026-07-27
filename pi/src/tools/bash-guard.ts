@@ -1,6 +1,11 @@
 /**
- * Bash Guard — classify bash commands and block write-intent
- * operations that target production code paths.
+ * Bash Guard — four-layer command gate, evaluated L1 → L2 → L3 → L4:
+ * L1 read allows commands classified read-only; L2 git-meta applies a
+ * positive git-subcommand whitelist and rejects destructive variants; L3
+ * meta-file-write allows extracted targets in `META_FILE_ALLOWLIST` via
+ * `canMainAgentWriteMeta()`; L4 production-code-write denies everything
+ * targeting production paths or otherwise unknown. Upper layers allow
+ * known-safe operations; L4 requires a developer subagent.
  *
  * The main orchestrator agent must not be able to bypass the
  * `developer` / `auditor` audit gate by issuing
@@ -12,7 +17,8 @@
  * the `bash` tool's `tool_call` event layer is P2's job; here we
  * expose three functions used by both the wiring and the tests:
  *
- *   classifyBashCommand(cmd)  → "read-only" | "write-intent" | "unknown"
+ *   classifyBashCommand(cmd)  → "read-only" | "write-intent" | "git-meta" | "unknown"
+ *   isGitMetaCommand(cmd)     → positive-whitelist `GitMetaVerdict`
  *   extractBashTargets(cmd)   → string[] of paths the command will write
  *   shouldBlockBashCommand(cmd, ctx) → { block, reason? }
  *
@@ -42,7 +48,7 @@ import { isAbsolute } from "node:path";
 // for callers that want to surface the meta-file denial verbatim;
 // the bash-guard composes its own reason because the bash denial
 // is command-shaped, not path-shaped.
-import { canMainAgentWrite, policyMessage } from "./file-gate.js";
+import { canMainAgentWrite, canMainAgentWriteMeta, policyMessage } from "./file-gate.js";
 
 /** Unconditional read-only first-words. */
 const READ_ONLY_FIRST_WORDS = new Set([
@@ -53,7 +59,7 @@ const READ_ONLY_FIRST_WORDS = new Set([
 
 /** Write-intent first-words (always win over read-only). */
 const WRITE_INTENT_FIRST_WORDS = new Set([
-	"rm", "mv", "cp", "sed", "perl", "tee", "truncate",
+	"rm", "mv", "cp", "sed", "perl", "tee", "truncate", "mkdir",
 	"chmod", "chown", "tar", "unzip",
 ]);
 
@@ -66,11 +72,9 @@ const READ_ONLY_PREFIX_PATTERNS: RegExp[] = [
 	/^make\b/,
 ];
 
-/** Read-only git subcommands. */
-const READ_ONLY_GIT_SUBCOMMANDS = new Set([
-	"status", "log", "diff", "show", "branch",
-]);
 
+/** Git commands retained as L1 read-only for classifier compatibility. */
+const READ_ONLY_GIT_SUBCOMMANDS = new Set(["status", "log", "diff", "show", "branch"]);
 
 /**
  * Shared redirect-detector prefix. Matches any file-redirect:
@@ -83,12 +87,92 @@ const READ_ONLY_GIT_SUBCOMMANDS = new Set([
  */
 const WRITE_REDIRECT_PREFIX = /\d*&?(?:>>|>(?!&))/;
 
-export type BashClassification = "read-only" | "write-intent" | "unknown";
+export type BashClassification = "read-only" | "write-intent" | "git-meta" | "unknown";
+
+export type GitMetaVerdict =
+	| { allow: true; subcommand: string }
+	| { allow: false; reason: string };
 
 export interface BashGuardDecision {
 	block: boolean;
 	reason?: string;
 }
+
+/** Tokenize the command prefix while preserving spaces inside shell quotes. */
+function shellTokens(command: string): string[] {
+	const tokens: string[] = [];
+	let token = "";
+	let quote: "'" | '"' | undefined;
+	let escaped = false;
+	for (const char of command.trim()) {
+		if (escaped) {
+			token += char;
+			escaped = false;
+			continue;
+		}
+		if (char === "\\" && quote !== "'") {
+			escaped = true;
+			continue;
+		}
+		if (quote) {
+			if (char === quote) quote = undefined;
+			else token += char;
+			continue;
+		}
+		if (char === "'" || char === '"') {
+			quote = char;
+			continue;
+		}
+		if (/\s/.test(char)) {
+			if (token) {
+				tokens.push(token);
+				token = "";
+			}
+		} else token += char;
+	}
+	if (token) tokens.push(token);
+	return tokens;
+}
+
+function gitTokens(command: string): string[] | undefined {
+	const tokens = shellTokens(command);
+	let index = 0;
+	while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index])) index++;
+	while (index < tokens.length && tokens[index].startsWith("-") && tokens[index] !== "--") index++;
+	return tokens[index] === "git" ? tokens.slice(index) : undefined;
+}
+
+/** Classify a git command against the positive L2 whitelist. */
+export function isGitMetaCommand(command: string): GitMetaVerdict {
+	const tokens = gitTokens(command);
+	if (!tokens) return { allow: false, reason: "not a git command" };
+	const sub = tokens[1];
+	const args = tokens.slice(2);
+	const rendered = `git ${sub ?? ""}`.trim();
+	const destructive =
+		(sub === "checkout" && args.includes("--")) ||
+		sub === "restore" ||
+		sub === "rm" ||
+		sub === "mv" ||
+		(sub === "reset" && args.includes("--hard")) ||
+		(sub === "clean" && args.some(a => /^-[a-z]+$/i.test(a) && a.includes("f") && a.includes("d"))) ||
+		(sub === "stash" && args[0] === "drop") || (sub === "tag" && args.includes("-d")) ||
+		(sub === "branch" && args.some(a => a === "-D" || a === "-d")) ||
+		(sub === "push" && args.some(a => a === "--force" || a === "-f")) ||
+		(sub === "worktree" && args[0] === "remove" && args.includes("--force"));
+	if (destructive) return { allow: false, reason: `destructive: ${rendered}${args.length ? ` ${args.join(" ")}` : ""}` };
+	if (!sub) return { allow: false, reason: "unsupported: git command has no subcommand" };
+
+	const direct = new Set(["status", "log", "diff", "show", "blame", "shortlog", "reflog", "rev-parse", "rev-list", "add", "commit", "merge", "cherry-pick", "rebase", "stash", "fetch", "pull", "push", "init", "clone"]);
+	let allow = direct.has(sub);
+	if (sub === "tag" || sub === "branch") allow = !args.some(a => a.startsWith("-") && a !== "-l" && a !== "--list");
+	if (sub === "worktree") allow = ["list", "add", "remove"].includes(args[0] ?? "");
+	if (sub === "remote") allow = args[0] === "-v" || args[0] === "add";
+	if (sub === "submodule") allow = args[0] === "status";
+	if (sub === "config") allow = args[0] === "--get" || args[0] === "--list";
+	return allow ? { allow: true, subcommand: sub } : { allow: false, reason: `unsupported: ${rendered}` };
+}
+
 
 /**
  * Classify a bash command by its first word (with a few exceptions
@@ -147,14 +231,18 @@ export function classifyBashCommand(command: string): BashClassification {
 		return "read-only";
 	}
 
-	// 6. git read-only subcommands.
-	if (firstWord === "git") {
-		const tokens = trimmed.split(/\s+/);
-		const sub = tokens[1];
+	// 6. Existing read-only git commands remain L1 for API compatibility.
+	const tokens = shellTokens(trimmed);
+	const gitIndex = tokens.findIndex(t => t === "git");
+	if (gitIndex >= 0) {
+		const sub = tokens[gitIndex + 1];
 		if (sub && READ_ONLY_GIT_SUBCOMMANDS.has(sub)) return "read-only";
-		if (sub === "worktree" && tokens[2] === "list") return "read-only";
-		return "unknown";
+		if (sub === "worktree" && tokens[gitIndex + 2] === "list") return "read-only";
 	}
+
+	// Other whitelisted git-meta subcommands are L2.
+	const gitVerdict = isGitMetaCommand(trimmed);
+	if (gitVerdict.allow) return "git-meta";
 
 	// 7. npm/bun/pytest/cargo/make prefix patterns.
 	for (const re of READ_ONLY_PREFIX_PATTERNS) {
@@ -216,8 +304,13 @@ export function extractBashTargets(command: string): string[] {
 			else if (args.length === 1) targets.push(args[0]);
 			break;
 		}
+		case "mkdir": {
+			for (const t of tokens.slice(1)) if (!t.startsWith("-")) targets.push(t);
+			break;
+		}
 		case "tee": {
 			for (const t of tokens.slice(1)) {
+				if (t === "<" || t.startsWith("<")) break;
 				if (!t.startsWith("-")) targets.push(t);
 			}
 			break;
@@ -408,8 +501,17 @@ export function shouldBlockBashCommand(
 
 		const classification = classifyBashCommand(seg);
 
-		// Read-only segment is unconditionally safe — skip.
+		// L2: all git commands are decided by the positive whitelist before
+		// read/write handling, including env-prefixed invocations.
+		if (gitTokens(seg)) {
+			const verdict = isGitMetaCommand(seg);
+			if (verdict.allow) continue;
+			return { block: true, reason: verdict.reason };
+		}
+
+		// L1 read-only segment is unconditionally safe.
 		if (classification === "read-only") continue;
+		if (classification === "git-meta") continue;
 
 		// Write-intent segment — check its extracted targets.
 		if (classification === "write-intent") {
@@ -567,7 +669,10 @@ export function splitChainedCommands(command: string): string[] {
 function isProductionTarget(target: string): boolean {
 	if (!target) return false;
 	if (isAbsolute(target)) return false;
-	return !canMainAgentWrite(target);
+	// `canMainAgentWrite` historically allows all Sages package files. L4 is
+	// intentionally narrower: runtime source and tests still require developer.
+	if (/^pi\/(?:src|test)\//.test(target)) return true;
+	return !canMainAgentWrite(target) && !canMainAgentWriteMeta(target);
 }
 
 /**

@@ -11,8 +11,10 @@ import { describe, it, expect } from "bun:test";
 import {
 	classifyBashCommand,
 	extractBashTargets,
+	isGitMetaCommand,
 	shouldBlockBashCommand,
 } from "@/tools/bash-guard.js";
+import { canMainAgentWriteMeta } from "@/tools/file-gate.js";
 
 const CTX = { cwd: "/tmp/sages-project" };
 
@@ -375,6 +377,60 @@ describe("extractBashTargets — selected cases", () => {
 		expect(classifyBashCommand("git status")).toBe("read-only");
 	});
 });
+
+describe("GC-2026-015 four-layer bash guard", () => {
+	const l2Allow = [
+		"git status", "git status -s", "git log", "git log --oneline -5",
+		"git log -1 --format='%H %s'", "git diff", "git diff origin/main..HEAD",
+		"git show abc123", "git blame src/foo.ts", "git shortlog -sn", "git reflog",
+		"git rev-parse HEAD", "git rev-list --count HEAD", "git tag -l", "git branch -l",
+		"git worktree list", "git add src/foo.ts", "git commit -m 'message'",
+		"git branch feature/x", "git merge --no-ff feature/x", "git cherry-pick abc123",
+		"git rebase main", "git stash", "git fetch origin", "git pull",
+		"git push origin feature/x", "git remote -v", "git worktree add /tmp/w feature/x",
+		"git config --get user.name", "git config --list",
+		"GIT_AUTHOR_NAME=foo git log --oneline",
+	];
+	for (const [index, command] of l2Allow.entries()) it(`T-L2-${String(index + 1).padStart(2, "0")} L2 git-meta allows ${command}`, () => {
+		expect(isGitMetaCommand(command).allow).toBe(true);
+		expect(shouldBlockBashCommand(command, CTX)).toEqual({ block: false });
+	});
+	const l2Deny = [
+		"git checkout -- src/foo.ts", "git restore src/foo.ts", "git rm src/foo.ts",
+		"git mv src/foo.ts src/bar.ts", "git reset --hard HEAD~1", "git clean -fd",
+		"git stash drop", "git tag -d v1.0.0", "git branch -D feature/x",
+		"git push --force origin main", "git push -f origin main", "git worktree remove --force /tmp/w",
+	];
+	for (const [index, command] of l2Deny.entries()) it(`T-L2-D-${String(index + 1).padStart(2, "0")} L2 git-meta destructive denies ${command}`, () => {
+		const verdict = isGitMetaCommand(command);
+		expect(verdict.allow).toBe(false);
+		if (!verdict.allow) expect(verdict.reason).toContain("destructive:");
+		const result = shouldBlockBashCommand(command, CTX);
+		expect(result.block).toBe(true);
+		expect(result.reason).toContain("destructive:");
+	});
+	const l3Allow = [
+		"cat > .pi/orchestrator/audit-P1.md <<EOF\ntext\nEOF", "sed -i 's/foo/bar/' pi/templates/SYSTEM.md",
+		"tee AGENTS.md < /dev/null", "cat > README.md <<EOF\ntext\nEOF", "cat > pi/README.md <<EOF\ntext\nEOF",
+		"sed -i 's/x/y/' .gitignore", "cat > .aft.jsonc <<EOF\n{}\nEOF", "cat > .claude/settings.json <<EOF\n{}\nEOF",
+		"cat > pi/skills/orchestrator/SKILL.md <<EOF\ntext\nEOF", "cat > pi/scripts/install.sh <<EOF\ntext\nEOF",
+		"mkdir -p .pi/orchestrator/new-dir", "echo 'foo' > pi/templates/new-file.md",
+	];
+	for (const [index, command] of l3Allow.entries()) it(`T-L3-${String(index + 1).padStart(2, "0")} L3 meta-file allows ${command}`, () => {
+		expect(shouldBlockBashCommand(command, CTX).block).toBe(false);
+	});
+	const l4Deny = ["cat > src/foo.ts <<EOF\ntext\nEOF", "sed -i 's/foo/bar/' pi/src/index.ts", "cat > pi/test/install.test.sh <<EOF\ntext\nEOF", "echo 'foo' > AGENTS.md.bak"];
+	for (const [index, command] of l4Deny.entries()) it(`T-L3-N-${String(index + 1).padStart(2, "0")} L4 production-code denies ${command}`, () => {
+		expect(shouldBlockBashCommand(command, CTX).block).toBe(true);
+	});
+	it("exposes the L3 path allowlist", () => {
+		expect(canMainAgentWriteMeta("AGENTS.md")).toBe(true);
+		expect(canMainAgentWriteMeta("pi/templates/SYSTEM.md")).toBe(true);
+		expect(canMainAgentWriteMeta("src/foo.ts")).toBe(false);
+		expect(canMainAgentWriteMeta("AGENTS.md.bak")).toBe(false);
+	});
+});
+
 
 describe("shouldBlockBashCommand — reason format", () => {
 	it("includes the production-code targets in the reason", () => {
