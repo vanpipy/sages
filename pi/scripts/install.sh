@@ -110,6 +110,11 @@ PI_GRAPHIFY_SRC_REL="pi-graphify"
 PI_GRAPHIFY_DEST_DIR="$PI_DIR/packages/pi-graphify"
 PI_GRAPHIFY_PKG="$PI_GRAPHIFY_DEST_DIR"
 
+# pi-subagents package info (sage peer, deployed by file-copy like pi-graphify)
+PI_SUBAGENTS_SRC_REL="pi-subagents"
+PI_SUBAGENTS_DEST_DIR="$PI_DIR/packages/pi-subagents"
+PI_SUBAGENTS_PKG="$PI_SUBAGENTS_DEST_DIR"
+
 # graphify CLI install info
 GRAPHIFY_BIN_PATH="$HOME/.local/bin/graphify"
 
@@ -1016,7 +1021,7 @@ install_sages_files() {
 # but `cp -r` then copied those symlinks into $PI_DIR/packages/, where the same
 # relative path resolves to a non-existent `~/.pi/packages/pi/node_modules`.
 setup_peer_node_modules_symlinks() {
-  for peer in pi-graphify pi-codebase-memory; do
+  for peer in pi-graphify pi-codebase-memory pi-subagents; do
     local peer_dir="$PI_DIR/packages/$peer"
     [[ ! -d "$peer_dir" ]] && continue
     if [[ -L "$peer_dir/node_modules" || -e "$peer_dir/node_modules" ]]; then
@@ -1033,31 +1038,37 @@ setup_peer_node_modules_symlinks() {
 # The orchestrator tool surface uses pi-subagents' `Agent` tool to
 # actually spawn subagents for the 4-stage workflow.
 #
-# IMPORTANT: install.sh does NOT install pi-subagents.
-# The Sages fork of pi-subagents (@sages/pi-subagents, deployed at
-# $PI_DIR/packages/pi-subagents) is the canonical source. It is
-# deployed manually from the certified merge (see memory #28) — not
-# pulled from npm. The npm upstream (`npm:@tintinweb/pi-subagents`)
-# is intentionally NOT installed because it conflicts with the
-# local fork by registering the same tool names (Agent,
-# get_subagent_result, steer_subagent).
+# Source of truth: the local fork at ./pi-subagents/ (a sibling of
+# ./pi/ in this sages monorepo). At runtime pi loads it from
+# $PI_DIR/packages/pi-subagents, which install.sh deploys by file-copy
+# during the default install path (mirror of the pi-graphify flow).
 #
-# The two cleanup helpers below are kept for `--uninstall`:
-#   - `is_pi_subagents_installed` detects either form (npm or path)
-#   - `uninstall_pi_subagents` strips BOTH forms from settings.json,
-#     so users who previously installed the npm version can clean up
+# The npm upstream (npm:@tintinweb/pi-subagents) is intentionally NOT
+# installed because it would conflict with the local fork by
+# registering the same tool names (Agent, get_subagent_result,
+# steer_subagent). If a user previously had the npm version installed,
+# they should remove it from settings.json before running this script;
+# uninstall_pi_subagents strips both forms.
+#
+# Note: the previous design deferred pi-subagents to a "manually
+# deployed from a certified merge" path (see memory #28). As of the
+# script-refactor that added install_pi_subagents, this script owns
+# the install/uninstall lifecycle.
 # ──────────────────────────────────────────────────────────────────
 
 is_pi_subagents_installed() {
+  # Auto-recovery invariant: return true ONLY when both conditions hold —
+  # settings.json registers the package AND the dest dir exists on disk.
+  # Mirrors is_pi_codebase_memory_installed: pair settings.json registration
+  # with os.path.isdir() so a deleted dest dir re-triggers install.
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && return 1
   python3 -c "
-import json, sys
+import json, os, sys
 try:
     d = json.load(open('$settings'))
-    pkgs = d.get('packages', [])
-    # Accept either the npm form or any path-form (local fork).
-    if any(p == 'npm:@tintinweb/pi-subagents' or p.endswith('/pi-subagents') or p.endswith('@tintinweb/pi-subagents') for p in pkgs):
+    pkg = '$PI_SUBAGENTS_PKG'
+    if pkg in d.get('packages', []) and os.path.isdir(pkg):
         sys.exit(0)
     sys.exit(1)
 except Exception:
@@ -1065,19 +1076,59 @@ except Exception:
 " 2>/dev/null
 }
 
-# Note: install_pi_subagents is intentionally REMOVED. The local fork
-# at $PI_DIR/packages/pi-subagents is deployed manually from a
-# certified merge; the npm upstream would conflict with it. Users
-# who want the npm version can run `pi install npm:@tintinweb/pi-subagents`
-# manually AFTER removing the local fork entry from settings.json.
+install_pi_subagents_files() {
+  local src_root="$TMP_DIR/$PI_SUBAGENTS_SRC_REL"
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in clone, skipping pi-subagents files"
+    return 0
+  }
+  if [[ -d "$PI_SUBAGENTS_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-subagents files (exists, use --force)"
+  else
+    rm -rf "$PI_SUBAGENTS_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_SUBAGENTS_DEST_DIR"
+    echo "  Installed pi-subagents files to $PI_SUBAGENTS_DEST_DIR"
+  fi
+  if [[ -f "$PI_SUBAGENTS_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    (cd "$PI_SUBAGENTS_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
+  fi
+}
+
+install_pi_subagents() {
+  echo "==> Installing pi-subagents..."
+  if is_pi_subagents_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-subagents already installed (use --force to reinstall)"
+    return 0
+  fi
+  if ! install_pi_subagents_files; then
+    echo "  Error: install_pi_subagents_files failed, aborting"
+    return 1
+  fi
+  if is_pi_subagents_installed; then
+    echo "  pi-subagents already registered in settings.json"
+  else
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_SUBAGENTS_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+  fi
+  echo "  pi-subagents installed"
+}
 
 uninstall_pi_subagents() {
-  echo "==> Cleaning pi-subagents entries from settings.json..."
+  echo "==> Uninstalling pi-subagents..."
 
-  # Strip BOTH forms from settings.json (handles legacy npm install
-  # + the local fork path). The actual min/max worktree files are
-  # NOT removed — sage users deploy the local fork manually and
-  # may want to keep it.
+  # 1) Strip BOTH forms from settings.json (handles legacy npm install + the local fork path).
   local settings="$PI_DIR/agent/settings.json"
   [[ -f "$settings" ]] && python3 -c "
 import json, sys
@@ -1093,7 +1144,13 @@ except Exception as e:
     print('  Warning:', e, file=sys.stderr)
 " 2>/dev/null || true
 
-  echo "  pi-subagents settings cleaned (local fork files at $PI_DIR/packages/pi-subagents left in place)"
+  # 2) Remove the package directory if it exists.
+  if [[ -d "$PI_SUBAGENTS_DEST_DIR" ]]; then
+    rm -rf "$PI_SUBAGENTS_DEST_DIR"
+    echo "  Removed $PI_SUBAGENTS_DEST_DIR"
+  fi
+
+  echo "  pi-subagents uninstalled"
 }
 
 # ──────────────────────────────────────────────────────────────────
@@ -1303,12 +1360,8 @@ install() {
     echo "  Note: graphify CLI install failed. To retry: uv tool install 'graphifyy[mcp]'"
   }
 
-  # Install pi-subagents (local fork at $PI_DIR/packages/pi-subagents)
-  # is NOT installed by this script — it's deployed manually from a
-  # certified merge. The npm upstream (npm:@tintinweb/pi-subagents)
-  # would conflict with the local fork by registering the same tool
-  # names. Users with the npm version installed should remove it from
-  # settings.json before running this script.
+  # Install pi-subagents (sage peer, file-copy from ./pi-subagents/ in the clone).
+  install_pi_subagents || true
 
   # After ALL peer file copies are done, set up node_modules symlinks pointing
   # at sages' shared deps (idempotent — skipped if peers already have node_modules).
