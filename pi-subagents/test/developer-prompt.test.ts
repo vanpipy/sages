@@ -171,6 +171,65 @@ describe("developer-prompt: tool preference order (GC-2026-012)", () => {
 	});
 });
 
+describe("developer-prompt: MUST/forbidden language for tool preference (GC-2026-016)", () => {
+	// GC-2026-016: an audit of 78 historical sessions showed bash = 63% of
+	// all tool calls while AFT = 0.06% and codebase_memory = 0%. Preference
+	// language ("reach for", "use", "fine for") was being ignored by the
+	// subagent LLM. The fix is to upgrade the prose to MUST / FORBIDDEN /
+	// MUST NOT and pin the new invariant here so a future prose edit
+	// doesn't silently re-soften the rule.
+
+	function sectionBody(name: string): string {
+		const re = new RegExp(`^##\\s+.*${name}.*$`, "m");
+		const m = DEVELOPER_PROMPT.match(re);
+		const idx = m?.index ?? -1;
+		expect(idx).toBeGreaterThanOrEqual(0);
+		const after = DEVELOPER_PROMPT.slice(idx);
+		const nextMatch = after.slice(2).match(/^##\s/m);
+		const endIdxInner =
+			nextMatch?.index === undefined ? after.length : nextMatch.index + 2;
+		return after.slice(0, endIdxInner);
+	}
+
+	it("Tool preference order section carries MUST language", () => {
+		const section = sectionBody("Tool preference order");
+		expect(section, "section must use MUST/required/expected language").toMatch(
+			/\bMUST\b/,
+		);
+	});
+
+	it("Tool preference order section forbids bash code search (grep / rg / find / cat)", () => {
+		const section = sectionBody("Tool preference order");
+		expect(
+			section,
+			"section must explicitly forbid bash code search",
+		).toMatch(/FORBIDDEN|forbidden/i);
+		// AFT item (item 1) is the MANDATORY first choice — must be
+		// positioned as the rule, not a preference.
+		expect(section, "AFT item must carry MUST/mandatory language").toMatch(
+			/\bMUST\b/,
+		);
+	});
+
+	it("First Action Protocol section treats parent-injected context as authoritative (GC-2026-016)", () => {
+		// GC-2026-016: inherit_context defaults to true, so the subagent
+		// forks the parent's conversation. The First Action Protocol must
+		// therefore tell the subagent to TRUST the parent-injected context
+		// rather than re-derive AGENTS.md / README.md / CLAUDE.md /
+		// package.json (audit showed this wasted 3–8 turns per spawn).
+		const section = sectionBody("First Action Protocol");
+		expect(
+			section,
+			"section must mention parent-injected context",
+		).toMatch(/parent[- ]injected|injected.*context/i);
+		// And must explicitly tell the agent NOT to re-read the conventions.
+		expect(
+			section,
+			"section must tell the agent to NOT re-read AGENTS.md / README.md / CLAUDE.md",
+		).toMatch(/DO NOT re-read|do not re-read/i);
+	});
+});
+
 describe("developer-prompt: codebase_memory MCP tool family (post-64eecc5/7b5deeb)", () => {
 	// The developer prompt must reference the modern MCP tool family
 	// (codebase_memory*) - not the retired codebase_search / codebase_refs

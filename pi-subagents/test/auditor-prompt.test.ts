@@ -211,3 +211,53 @@ describe("auditor-prompt: tool preference order (GC-2026-012 symmetry)", () => {
 		}
 	});
 });
+
+describe("auditor-prompt: MUST/forbidden language for tool preference (GC-2026-016)", () => {
+	// Symmetric with developer-prompt. Audit showed the auditor ALSO
+	// defaulted to bash grep / rg / find instead of AFT — pinning the
+	// MUST/forbidden rule here so the auditor's prose can't drift back
+	// to preference language.
+
+	function sectionBody(name: string): string {
+		const re = new RegExp(`^##\\s+.*${name}.*$`, "m");
+		const m = AUDITOR_PROMPT.match(re);
+		const idx = m?.index ?? -1;
+		expect(idx).toBeGreaterThanOrEqual(0);
+		const after = AUDITOR_PROMPT.slice(idx);
+		const nextMatch = after.slice(2).match(/^##\s/m);
+		const endIdxInner =
+			nextMatch?.index === undefined ? after.length : nextMatch.index + 2;
+		return after.slice(0, endIdxInner);
+	}
+
+	it("Tool preference order section carries MUST language", () => {
+		const section = sectionBody("Tool preference order");
+		expect(section, "section must use MUST/required/expected language").toMatch(
+			/\bMUST\b/,
+		);
+	});
+
+	it("Tool preference order section forbids bash code search (grep / rg / find / cat)", () => {
+		const section = sectionBody("Tool preference order");
+		expect(
+			section,
+			"section must explicitly forbid bash code search",
+		).toMatch(/FORBIDDEN|forbidden/i);
+	});
+
+	it("First Action Protocol section treats parent-injected context as authoritative (GC-2026-016)", () => {
+		// Symmetric with developer-prompt: with inherit_context=true
+		// (GC-2026-016 default), the auditor MUST accept the parent's
+		// project-context block as authoritative rather than re-reading
+		// AGENTS.md / README.md / CLAUDE.md / package.json.
+		const section = sectionBody("First Action Protocol");
+		expect(
+			section,
+			"section must mention parent-injected context",
+		).toMatch(/parent[- ]injected|injected.*context/i);
+		expect(
+			section,
+			"section must tell the agent to NOT re-read AGENTS.md / README.md / CLAUDE.md",
+		).toMatch(/DO NOT re-read|do not re-read/i);
+	});
+});
