@@ -19,7 +19,7 @@
  *     worktree shape — Sages callers must use the explicit object).
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -47,7 +47,6 @@ const MOCK_CONTRACT: any = {
 function makeDagWithTemplate(templateName: string): DAGInput {
   return {
     goal_id: "GC-2026-011",
-    title: "Phase A P3 migration test",
     tasks: [
       {
         id: "P1",
@@ -156,7 +155,8 @@ describe("developer-migration: TEMPLATE_PARAM_SCHEMAS keyed by canonical name", 
     // After P3.6 the file is renamed to subagent-developer.md.
     const content = loadPromptTemplate("subagent-developer");
     expect(typeof content).toBe("string");
-    expect(content.length).toBeGreaterThan(0);
+    expect(content).not.toBeNull();
+    expect(content!.length).toBeGreaterThan(0);
   });
 
   it("validateTemplateParams accepts well-formed params for `subagent-developer`", () => {

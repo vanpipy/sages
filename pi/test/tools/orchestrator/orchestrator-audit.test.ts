@@ -261,7 +261,7 @@ No verdict here.
 				files: [],
 				subagent_type: "developer",
 				batch: 2,
-				isolation: "worktree",
+				isolation: { dag_id: "DAG-test", task_id: "P2", mode: "create" },
 				tdd: "strict",
 				prompt: "x",
 				acceptance: { covers: ["SC2"] },

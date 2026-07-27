@@ -361,7 +361,7 @@ describe("validateDAG", () => {
               files: [],
               subagent_type: "developer",
               batch: 2,
-              isolation: "worktree",
+              isolation: { dag_id: "DAG-test", task_id: "P2", mode: "create" },
               tdd: "strict",
               prompt: "implement the things (long enough prompt)",
               acceptance: { covers: ["SC1", "SC2"] },
