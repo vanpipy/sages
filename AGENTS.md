@@ -38,9 +38,8 @@ orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
   `developer` resolves to it) and `auditor`
   (canonical; alias `auditor`).
 - **Built-in agents** (from pi-subagents): `Explore`, `Plan`.
-  (`general-purpose` was removed in DAG-2026-011 Phase C — the
-  escape window replaces it for ad-hoc work; see §"Escape Window"
-  below.)
+  `Explore` supports bounded read-only understanding; `Plan` is a
+  read-only Planning Brief compiler. The main agent owns all decisions.
 
 > **Tool routing decisions** (AFT vs `codebase_*` vs
 > `codebase_memory_*` vs Magic Context vs Sages): see

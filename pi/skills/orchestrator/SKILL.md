@@ -31,12 +31,15 @@ For single trivial tasks (one-line edit, single function), do NOT use this skill
 
 ## Subagent Contract — The 4-Agent Pipeline
 
-The orchestrator dispatches a **single canonical pipeline of 4 subagents**, one per stage. Stages 1-2 come from pi-subagents built-ins; Stages 3-4 are shipped by sages (installed to `~/.pi/agent/agents/` by `install.sh`). Full deployment reference + invocation recipes live in `~/.pi/agent/SUBAGENTS.md` (also installed by sages).
+The main agent first understands and decides, including architecture, trade-offs,
+scope, acceptance, and dependencies. It then passes a complete Planning Brief
+to Plan for bounded compilation; the main agent reviews the result before
+implementation dispatch.
 
 | Stage | `subagent_type`     | Source                              | `run_in_background` | When to dispatch                                                                 |
 |-------|----------------------|--------------------------------------|---------------------|----------------------------------------------------------------------------------|
 | 1     | `Explore`            | **pi-subagents built-in**            | `false`             | "Where is X?" / "find all callers of Y" / pure codebase search                    |
-| 2     | `Plan`               | **pi-subagents built-in**            | `false`             | Need a step-by-step implementation strategy before coding (architect concerns)   |
+| 2     | `Plan`               | **pi-subagents built-in**            | `false`             | Compiles the main agent's Planning Brief; bounded read-only helper, not an architecture stage. |
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | **`true`**          | Write production code + tests in a managed worktree, strict TDD                    |
 | 4     | `auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
 
@@ -49,7 +52,9 @@ The orchestrator dispatches a **single canonical pipeline of 4 subagents**, one 
 > (`Plan`). The `developer` agent handles design-doc writes for
 > design tasks; Stages 3-4 are specialised on purpose.
 
-### When each stage is required
+#Before dispatching Plan, the main agent must supply a self-contained Planning Brief containing Goal, chosen approach/decisions, scope/exclusions, critical files/symbols, acceptance/verification, dependencies/sequencing, and known risks/open questions. Plan compiles it; incomplete decisions remain with the main agent.
+
+## When each stage is required
 
 | Task shape                                  | Required stages              |
 |----------------------------------------------|------------------------------|
@@ -129,7 +134,7 @@ When dispatching via the `Agent` tool, pick the right subagent type:
 | Production-code TDD work | `developer` (legacy alias: `developer`) | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
 | Audit / evidence collection | `auditor` (alias: `auditor`) | none |
 | Quick read-only search | `Explore` | none (built-in) |
-| Architecture design | `Plan` | none (built-in) |
+| Planning Brief compilation | `Plan` | none (built-in) |
 
 The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. Always pass the object form.
 

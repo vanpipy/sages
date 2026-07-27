@@ -18,7 +18,8 @@
  * Subagent execution (TDD implementer, auditor) is delegated to the Agent
  * tool with `subagent_type: "developer"` / `"auditor"`.
  * See `pi/templates/SUBAGENTS.md` for the 4-stage pipeline
- * (Explore → Plan → developer → auditor).
+ * (main understanding → Planning Brief → Plan compilation → review →
+ * developer → auditor).
  */
 
 import { registerGoalContractTool } from "./goal-contract.js";

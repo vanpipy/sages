@@ -28,7 +28,26 @@ Available agent types and the tools they have access to:
 
 Custom agents can be defined in .pi/agents/<name>.md (project) or {{agentDir}}/agents/<name>.md (global) — they are picked up automatically. Project-level agents override global ones. Creating a .md file with the same name as a default agent overrides it.
 
-When using the Agent tool, specify a subagent_type parameter to select which agent type to use.
+## Planning handoff
+
+The main agent must decide before calling `Plan`. Send a self-contained
+Planning Brief with this compact schema:
+
+```text
+Goal:
+Chosen approach / decisions:
+Scope / exclusions:
+Critical files / symbols:
+Acceptance / verification:
+Dependencies / sequencing:
+Known risks / open questions:
+```
+
+Plan is a bounded, read-only compiler of that brief. It must not redo
+exploration, choose architecture, or invent missing decisions. The main agent
+reviews `PLAN_STATUS: READY` before dispatch; missing decisions remain with
+the main agent and require `PLAN_STATUS: BLOCKED`.
+
 
 ## When not to use
 
@@ -49,7 +68,7 @@ The upstream default frames background as "parallelism". **Sages inverts this fo
 | Subagent type | `run_in_background` | Why |
 |---|---|---|
 | `Explore` | `false` (foreground) | Short, read-only, result feeds next stage |
-| `Plan` | `false` (foreground) | Short, output is the next prompt |
+| `Plan` | `false` (foreground) | Planning Brief compilation is short and reviewed by the main agent |
 | `developer`          | **`true` (background)** | TDD RED→GREEN→REFACTOR is 1–10 min, can be steered |
 | `auditor` | **`true` (background)** | Re-runs every verification_cmd, 30s–3 min, can be steered |
 

@@ -9,8 +9,8 @@
  *
  *   - Orchestrator: `goal_contract_create`, `dag_synthesize`,
  *     `task_dispatch`, `orchestrator_audit`
- *   - Subagents (delegated to Agent tool): `Explore`, `Plan`,
- *     `developer`, `auditor` (DAG-2026-011 Phase C: the
+ *   - Subagents (delegated to Agent tool): `Explore`, `Plan` (Planning Brief
+ *     compiler), `developer`, `auditor`. The main agent owns decisions.
  *     `general-purpose` helper was removed; meta-file work now uses
  *     `developer` with `tdd: none`)
  *

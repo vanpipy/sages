@@ -14,17 +14,21 @@ description as "see `~/.pi/agent/SUBAGENTS.md` for the full rationale
 and code examples". Subagents themselves do NOT read it (they get their
 identity from `~/.pi/agent/agents/<name>.md`).
 
-## Dispatch Contract (L3 main agent perspective)
+The main agent owns understanding and all planning decisions. It may use
+read-only tools (including Explore) to inspect the repository, then writes a
+self-contained Planning Brief. `Plan` is only a bounded compilation helper
+after the brief; it is not the architecture stage and must not invent missing
+decisions.
 
 The orchestrator dispatches subagents based on the task shape:
 
 - **Meta-files / git ops / research / lightweight tasks** → `general-purpose`. For git ops, also pass `isolated: true` to bypass the bash-guard. **Dispatch independent tasks in parallel** (multiple `Agent` calls in one message, each `run_in_background: true`).
 - **Production-code TDD work** → `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree)
 - **Audit / verify** → `auditor` (read-only, evidence-based)
-- **Quick search / architecture design** → `Explore` / `Plan` (pi-subagents built-ins)
+- **Quick search** → `Explore`; **Planning Brief compilation** → `Plan` (bounded, read-only).
 - **Multi-stage workflows** → `task_dispatch` (orchestrator tool) — emits developer / auditor dispatches automatically
 
-The orchestrator should NEVER:
+The pipeline is main-agent understanding and decision → Planning Brief → Plan compilation and main-agent review → dispatch → audit.
 - Use `developer` for git operations or meta-file edits (use `general-purpose`).
 - Use `general-purpose` for production-code TDD (use `developer`).
 
@@ -35,7 +39,7 @@ When the orchestrator dispatches `developer` with `isolation: { dag_id, task_id,
 | Stage | `subagent_type`     | Source                              | Tools                | Purpose                                                                |
 |-------|----------------------|--------------------------------------|----------------------|------------------------------------------------------------------------|
 | 1     | `Explore`            | pi-subagents built-in                | read, bash, grep, find, ls | Fast codebase search. Cheap, fast, **read-only** — inherits the parent registry's cheapest available model when dispatched without `model=`.        |
-| 2     | `Plan`               | pi-subagents built-in                | read, bash, grep, find, ls | Software architect. Sonnet. **Read-only** — returns a step-by-step plan, never edits. |
+| 2     | `Plan`               | pi-subagents built-in                | read | Planning Brief compiler; Haiku/minimal, foreground, 12-turn cap, no extensions/skills or inherited conversation. **Read-only** — never edits. |
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. Host-managed worktree. |
 | 4     | `auditor`   | **shipped** (this repo)              | read, bash, grep, find, ls, aft_* | Evidence-based certifier. **Read-only** — re-runs commands, never modifies production code. |
 
@@ -65,19 +69,18 @@ Agent({
 
 **Returns**: file/line list + 1-line context. Never edits.
 
-### Stage 2 — Design (`Plan`)
+### Stage 2 — Planning Brief compilation
 
 ```ts
 Agent({
   subagent_type: "Plan",
-  prompt: "Design a plan to add a `--dry-run` flag to pi/scripts/install.sh. " +
-          "The flag should: skip all side effects, but still validate " +
-          "templates and report what WOULD happen.",
-  description: "Plan --dry-run flag",
+  prompt: `Goal: ...\nChosen approach / decisions: ...\nScope / exclusions: ...\nCritical files / symbols: ...\nAcceptance / verification: ...\nDependencies / sequencing: ...\nKnown risks / open questions: ...`,
+  description: "Compile implementation brief",
 })
 ```
 
-**Returns**: ordered steps + critical files list. Never edits.
+Plan compiles the supplied brief; it does not perform architecture design.
+
 
 ### Stage 3 — Implement (`developer`)
 

@@ -23,14 +23,21 @@ full protocol.
 - `developer` (Phase A alias, resolves to canonical `developer`)
 - `auditor` — read-only evidence audit
 - `Explore` (L1) — fast searches
-- `Plan` (L1) — implementation design
+- **Plan** (L1) — bounded Planning Brief compiler; it does not choose architecture or explore.
 
-### Decision-Maker
+### Planning Owner
 
-Subagents execute; they do not decide. You verify evidence, decide
-whether to re-dispatch.
+The main agent owns problem understanding, repository exploration, architecture
+choices, trade-offs, scope, acceptance criteria, dependency topology, and
+known risks. It delegates execution, not unresolved decisions.
 
-**Never delegate a decision. Only delegate execution.**
+Before invoking `Plan`, the main agent must write a self-contained **Planning
+Brief** containing: Goal; chosen approach and decisions; scope and exclusions;
+critical files/symbols; acceptance and verification; dependencies/sequencing;
+and known risks/open questions. Plan only compiles this brief into an ordered
+implementation plan. The main agent reviews the output before dispatch.
+Incomplete decisions stay with the main agent and must not be delegated.
+
 
 ---
 ## Subagent Dispatch Decision Tree
@@ -44,7 +51,7 @@ When you need to do work, pick the right subagent:
 | **Edit production code** — `src/*`, `test/*`, `lib/*`, `app/*`, `cmd/*`, `internal/*`, `pkg/*`, bare `*.ts`/`*.py`/etc. at root, anything not in the meta-file allowlist | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline; auditor evidence gate |
 | **Audit / verify** (certify changes, evidence collection) | `Agent({ subagent_type: "auditor" })` | Read-only; returns CERTIFIED / NEEDS WORK / BLOCKED |
 | **Quick read-only search** (where is X defined) | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast cheap model from the parent registry (settings.json default) |
-| **Architecture design** | `Agent({ subagent_type: "Plan" })` | pi-subagents built-in; produces implementation steps |
+| **Planning** | Main agent writes the Planning Brief; `Agent({ subagent_type: "Plan" })` compiles it | Plan is not the architecture stage |
 | **Complex multi-stage workflow** | `task_dispatch` (use the 4 orchestrator tools: goal_contract_create, dag_synthesize, task_dispatch, orchestrator_audit) | Stage-3 dispatches developer / auditor subagents automatically |
 
 Key rules:

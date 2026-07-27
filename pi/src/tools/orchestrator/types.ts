@@ -102,8 +102,8 @@ export interface TaskNode {
 	/**
 	 * Optional per-task override for the dispatcher's `run_in_background`
 	 * policy. When omitted, the dispatcher derives a default from
-	 * `subagent_type` (Explore/Plan/general-purpose = foreground,
-	 * developer/auditor = background).
+ * `subagent_type` (Explore/Plan = foreground; Plan compiles a main-agent
+	 * Planning Brief; developer/auditor = background).
 	 */
 	run_in_background?: boolean;
 	/** Detailed prompt given to the subagent (assembled by orchestrator from MDD outputs, or rendered from task_template) */
