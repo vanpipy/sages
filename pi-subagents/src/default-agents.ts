@@ -151,20 +151,49 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 		{
 			name: "Plan",
 			displayName: "Plan",
+			// DAG-2026-017: Plan is a lightweight plan compiler. The main
+			// agent supplies a self-contained Planning Brief (problem +
+			// chosen approach + scope + acceptance + verification); Plan
+			// compiles it into an ordered implementation plan or returns
+			// PLAN_STATUS: BLOCKED listing what's missing. Plan must NOT
+			// re-decide architecture, weigh trade-offs, or explore the
+			// repo. See `src/agent-prompts/plan.ts` for the contract and
+			// `test/default-agents.test.ts` + `test/plan-prompt.test.ts`
+			// for the pinned invariants.
 			description:
-				"Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs.",
-			builtinToolNames: READ_ONLY_TOOLS,
-			extensions: true,
-			// Subagent isolation: Plan must not recursively dispatch further Agent calls —
-			// its output is a plan, not a delegated sub-plan.
+				"Plan compiler — converts a main-agent Planning Brief into an ordered implementation plan or returns PLAN_STATUS: BLOCKED with the missing inputs. Does not explore the repo or pick implementation approaches.",
+			// `read` only. The brief is authoritative, so Plan never needs
+			// search/grep/find/ls/bash/edit/write. A single explicit read
+			// is allowed to confirm an exact symbol or path named in the
+			// brief.
+			builtinToolNames: ["read"],
+			// No extensions: codebase_memory_*, aft_*, ctx_search, and
+			// magic-context would each let Plan rebuild the architecture
+			// map from scratch. The main agent already did that work; Plan
+			// is forbidden from redoing it.
+			extensions: false,
 			excludeExtensions: ["pi-subagents"],
-			skills: true,
+			skills: false,
+			// Pin a cheap, fixed model + minimal thinking so Plan cannot
+			// inherit a costly reasoning model from the main agent.
+			model: "anthropic/claude-haiku-4-5",
+			thinking: "minimal",
 			systemPrompt: PLAN_PROMPT,
 			promptMode: "replace",
 			isDefault: true,
-			// Planning: 100 turns covers the architecture exploration + plan write.
-			// Caller may still override via Agent({ max_turns: ... }) at spawn time.
-			maxTurns: 100,
+			// Compile budget, not exploration budget. Going over 12 turns
+			// means the main agent under-specified the brief; Plan should
+			// have returned BLOCKED instead.
+			maxTurns: 12,
+			// Plan returns a single compiled plan inline. Foreground keeps
+			// the orchestrator loop tight; the brief is small enough that
+			// it does not justify a background queue.
+			runInBackground: false,
+			// Deliberate: the main agent owns the conversation. Plan must
+			// receive only the self-contained Brief the main agent chose
+			// to send — NOT the entire upstream transcript. Without this
+			// isolation, Plan would re-derive decisions from chat history.
+			inheritContext: false,
 		},
 	],
 	["developer", DEVELOPER_AGENT],

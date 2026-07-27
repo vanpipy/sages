@@ -32,13 +32,13 @@
  *   - A parent prompt that contains main-agent identity markers is excluded in replace mode.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { buildAgentPrompt } from "../src/prompts.js";
-import type { AgentConfig, EnvInfo } from "../src/types.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AUDITOR_PROMPT } from "../src/agent-prompts/auditor.js";
+import { DEVELOPER_PROMPT } from "../src/agent-prompts/developer.js";
 import { EXPLORE_PROMPT } from "../src/agent-prompts/explore.js";
 import { PLAN_PROMPT } from "../src/agent-prompts/plan.js";
-import { DEVELOPER_PROMPT } from "../src/agent-prompts/developer.js";
-import { AUDITOR_PROMPT } from "../src/agent-prompts/auditor.js";
+import { buildAgentPrompt } from "../src/prompts.js";
+import type { AgentConfig, EnvInfo } from "../src/types.js";
 
 // Minimal reproducible env for deterministic output
 const MINIMAL_ENV: EnvInfo = {
@@ -143,7 +143,11 @@ describe("buildAgentPrompt — replace mode identity isolation", () => {
 				// Spot-check a unique string from each role prompt
 				const uniqueMarker: Record<string, string> = {
 					Explore: "READ-ONLY MODE",
-					Plan: "READ-ONLY MODE",
+					// DAG-2026-017: Plan is a plan compiler, not an architect.
+					// Anchoring the marker on "plan compiler" makes this test
+					// fail loud if anyone reverts Plan to software-architect
+					// prose (where the marker text would be absent).
+					Plan: "plan compiler",
 					developer: "RED → GREEN → REFACTOR",
 					auditor: "evidence-based certification",
 				};
@@ -305,7 +309,12 @@ describe("buildAgentPrompt — append mode intentional compatibility", () => {
 			extensions: true,
 			skills: false,
 		};
-		const prompt = buildAgentPrompt(config, MINIMAL_CWD, MINIMAL_ENV, undefined);
+		const prompt = buildAgentPrompt(
+			config,
+			MINIMAL_CWD,
+			MINIMAL_ENV,
+			undefined,
+		);
 		// The role's own prompt is present.
 		expect(prompt).toContain("RED → GREEN → REFACTOR");
 		// The legacy genericBase fallback is NOT present.

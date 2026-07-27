@@ -21,6 +21,14 @@ describe("default-agents: roster", () => {
 		expect(DEFAULT_AGENTS.has("Plan")).toBe(true);
 	});
 
+	it("registers Plan as a lightweight plan compiler (DAG-2026-017)", () => {
+		// Public name stays `Plan`. Role identity is now "plan compiler";
+		// the main agent owns architecture. Pinned by the dedicated
+		// Plan config tests below.
+		const plan = DEFAULT_AGENTS.get("Plan");
+		expect(plan, "Plan must be registered").toBeDefined();
+	});
+
 	it("does NOT register `general-purpose` (removed in DAG-2026-011 Phase C)", () => {
 		expect(DEFAULT_AGENTS.has("general-purpose")).toBe(false);
 	});
@@ -129,7 +137,10 @@ describe("default-agents: subagent isolation", () => {
 	for (const name of ["Explore", "Plan", "developer", "auditor"] as const) {
 		it(`${name} excludes pi-subagents from its extension set`, () => {
 			const config = DEFAULT_AGENTS.get(name);
-			expect(config, `${name} must be registered as a default agent`).toBeDefined();
+			expect(
+				config,
+				`${name} must be registered as a default agent`,
+			).toBeDefined();
 			const excludes = config?.excludeExtensions ?? [];
 			expect(
 				excludes.map((s) => s.toLowerCase()),
@@ -146,7 +157,10 @@ describe("default-agents: per-agent maxTurns budgets", () => {
 	// Caller-supplied `Agent({ max_turns: ... })` still wins at spawn time.
 	const expected: Record<string, number> = {
 		Explore: 50,
-		Plan: 100,
+		// Plan is a lightweight compiler; the budget covers one Brief +
+		// verified file reads + READY/BLOCKED write. Going over means
+		// the main agent under-specified the brief.
+		Plan: 12,
 		developer: 200,
 		auditor: 200,
 	};
@@ -288,11 +302,109 @@ describe("default-agents: auditor subagent isolation", () => {
 	// it spawn further Agent calls would defeat the audit invariant.
 	it("auditor excludes pi-subagents from its extension set", () => {
 		const config = DEFAULT_AGENTS.get("auditor");
-		expect(config, "auditor must be registered as a default agent").toBeDefined();
+		expect(
+			config,
+			"auditor must be registered as a default agent",
+		).toBeDefined();
 		const excludes = config?.excludeExtensions ?? [];
 		expect(
 			excludes.map((s) => s.toLowerCase()),
 			`auditor.excludeExtensions must include "pi-subagents"`,
+		).toContain("pi-subagents");
+	});
+});
+
+/**
+ * Plan runtime contract — DAG-2026-017.
+ *
+ * Plan is a lightweight plan compiler, not an architect. The runtime
+ * config below is the load-bearing part of the contract: even if a
+ * future contributor weakens the prompt prose, these runtime knobs
+ * keep Plan cheap and bounded.
+ *
+ * Public name stays `Plan`; the description must reflect the new
+ * role; the tools list is the single source of truth for what Plan
+ * can see; model + thinking + maxTurns pin the cost.
+ */
+describe("default-agents: Plan config (DAG-2026-017)", () => {
+	const plan = DEFAULT_AGENTS.get("Plan");
+
+	it("is registered with isDefault: true", () => {
+		expect(plan?.isDefault).toBe(true);
+	});
+
+	it("uses promptMode: 'replace' (matches all other defaults)", () => {
+		expect(plan?.promptMode).toBe("replace");
+	});
+
+	it("description frames Plan as a plan compiler, not an architect", () => {
+		expect(plan?.displayName).toBe("Plan");
+		const desc = plan?.description.toLowerCase() ?? "";
+		// New identity pinned: the agent COMPIles a Planning Brief. The
+		// description MUST NOT promise architecture / exploration /
+		// trade-off design — that is the main agent's job.
+		expect(desc).toContain("plan");
+		expect(desc).toMatch(/brief|compile/);
+		expect(desc).not.toContain("architect");
+		expect(desc).not.toContain("trade-off");
+	});
+
+	it("builtinToolNames is exactly ['read'] — minimal surface for symbol/path confirmation", () => {
+		// No bash, grep, find, ls, edit, write. Plan may read explicitly
+		// named files only.
+		expect(plan?.builtinToolNames).toEqual(["read"]);
+	});
+
+	it("disables extensions (false) — no codebase_memory / aft / ctx_search / magic-context", () => {
+		// The previous Plan config had `extensions: true`, which loaded
+		// aft / pi-mcp-adapter / pi-magic-context and let Plan run the
+		// full architecture scan. Flip to false so Plan cannot reach
+		// those tools even if the prompt drifted.
+		expect(plan?.extensions).toBe(false);
+	});
+
+	it("disables skills (false)", () => {
+		expect(plan?.skills).toBe(false);
+	});
+
+	it("uses fixed lightweight model anthropic/claude-haiku-4-5", () => {
+		// Cost guard: Plan must not inherit the main agent's model.
+		// haiku is the same model Explore uses for cheap read-only work.
+		expect(plan?.model).toBe("anthropic/claude-haiku-4-5");
+	});
+
+	it("uses thinking: 'minimal'", () => {
+		expect(plan?.thinking).toBe("minimal");
+	});
+
+	it("sets maxTurns = 12 (compile budget, not exploration budget)", () => {
+		expect(plan?.maxTurns).toBe(12);
+	});
+
+	it("runInBackground = false (Plan returns a compiled plan inline)", () => {
+		// Default at runtime is false, but the config field MUST be
+		// pinned explicit so a future contributor can't silently flip
+		// Plan to async.
+		expect(plan?.runInBackground).toBe(false);
+	});
+
+	it("inheritContext = false — main agent must send a self-contained Planning Brief", () => {
+		// Deliberate: the main agent owns its conversation. Plan must
+		// receive only the Brief it was asked to compile, not the entire
+		// upstream transcript. This is the load-bearing isolation that
+		// keeps Plan from re-deriving decisions from chat history.
+		expect(plan?.inheritContext).toBe(false);
+	});
+});
+
+describe("default-agents: Plan subagent isolation", () => {
+	it("excludes pi-subagents from its extension set", () => {
+		const plan = DEFAULT_AGENTS.get("Plan");
+		expect(plan, "Plan must be registered as a default agent").toBeDefined();
+		const excludes = plan?.excludeExtensions ?? [];
+		expect(
+			excludes.map((s) => s.toLowerCase()),
+			`Plan.excludeExtensions must include "pi-subagents"`,
 		).toContain("pi-subagents");
 	});
 });
