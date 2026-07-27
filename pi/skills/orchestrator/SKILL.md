@@ -42,6 +42,7 @@ implementation dispatch.
 | 2     | `Plan`               | **pi-subagents built-in**            | `false`             | Compiles the main agent's Planning Brief; bounded read-only helper, not an architecture stage. |
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | **`true`**          | Write production code + tests in a managed worktree, strict TDD                    |
 | 4     | `auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
+| Cross-workspace merge verification | `merger (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatched by the orchestrator after DAG synthesis detects cross-workspace file overlap; reads both diffs, classifies, produces merge commit or escalates hunk-conflict. |
 
 `run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table is the canonical reference; see `pi/templates/SUBAGENTS.md` for full rationale and code examples.
 
@@ -274,7 +275,59 @@ TDD discipline) was duplicated 80% between `orchestrator_audit` and
 - 1× complete
 - Total: **3 tool calls** (one-finding-per-call was 5+)
 
-## Tool Roster (when in orchestrator mode)
+## Workspace + Handoff + Merger
+
+The workflow uses three coordinated sub-protocols: workspace semantics,
+HANDOFF.md-based session continuity, and dedicated cross-workspace merging.
+The canonical protocol is reproduced below:
+
+```markdown
+## Workspace semantics
+A worktree is a **workspace**, not just an isolation boundary. One workspace
+hosts a sequence of related developer tasks that build on each other's commits.
+
+- Workspace identity = batch id (one workspace per DAG batch by default).
+- Tasks sharing a workspace_id run **sequentially** on the same branch
+  `sages/<dag>/<workspace_id>` — they never run in parallel within one workspace.
+- Within a workspace, predecessor commits + HANDOFF.md carry forward to
+  successor tasks.
+
+## Handoff protocol (HANDOFF.md)
+A workspace is preserved across developer sessions via HANDOFF.md:
+
+- **Writing HANDOFF (on exit)**. The developer writes
+  `.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md`
+  containing:
+  (a) one-paragraph task summary;
+  (b) files left in modified state;
+  (c) TODOs for successor + which files need follow-up;
+  (d) test status (passing / failing / pending);
+  (e) any open questions to relay forward.
+
+- **Reading HANDOFF (on entry)**. The developer's First Action Protocol extends
+  to read every `<task_id>-handoff.md` under
+  `.pi/orchestrator/handoff/<workspace_id>/` ordered by task_id.
+  Skipping this is an automatic audit failure.
+
+## Cross-workspace merging
+When two workspaces edit the same files (detected at DAG synthesis), the
+orchestrator dispatches the dedicated `merger` sub-agent:
+
+- reads both diffs (`git diff base..ws-A` and `git diff base..ws-B`),
+- classifies overlap as **clean / disjoint-hunk / hunk-conflict**,
+- produces a merge commit when feasible; escalates hunk-conflicts back to the
+  orchestrator (NOT auto-resolved — hunk-conflict on the same lines cannot be
+  safely machine-resolved),
+- verifies the merged result with typecheck + lint + the merged test suite
+  (not per-workspace tests).
+
+The `auditor` continues to verify **per-task** commits; the `merger` verifies
+the **cross-workspace** merge result.
+```
+
+This canonical text is mirrored byte-for-byte in
+`pi-subagents/src/agent-prompts/developer.ts` and
+`pi-subagents/src/agent-prompts/merger.ts`.
 
 **Read (always allowed)**:
 - `aft_search`, `aft_zoom`, `aft_outline`, `aft_read` — code understanding
