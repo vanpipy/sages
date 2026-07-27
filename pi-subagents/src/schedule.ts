@@ -34,7 +34,7 @@ import type {
 	ManagedWorktreeRequest,
 	ParsedManagedWorktreeRequest,
 } from "./worktree-contract.js";
-import { resolveAgentType } from "./agent-types.js";
+import { resolveType } from "./agent-types.js";
 import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
 
 /** Event emitted on `pi.events` for cross-extension consumers. */
@@ -123,12 +123,12 @@ export class SubagentScheduler {
 	 */
 	buildJob(input: NewJobInput): ScheduledSubagent {
 		const detected = SubagentScheduler.detectSchedule(input.schedule);
-		// Phase A P2: resolve alias + apply the developer policy before
-		// persisting. The legacy developer alias canonicalizes to
-		// `developer` here so the same enforcement applies regardless of
-		// which spelling the caller used.
-		const aliasResolved = resolveAgentType(input.subagent_type);
-		const canonical = aliasResolved?.canonical ?? input.subagent_type;
+		// Apply the developer policy before persisting. The canonical name
+		// is resolved via the registry (case-insensitive); the legacy
+		// `software-developer` alias was removed in GC-2026-014, so any
+		// caller still passing that spelling is a no-op here and surfaces
+		// as an unknown agent type elsewhere in the dispatch chain.
+		const canonical = resolveType(input.subagent_type) ?? input.subagent_type;
 		if (canonical === "developer") {
 			// Reject recurring developer schedules outright — the
 			// fire-time policy check can't recover from a malformed

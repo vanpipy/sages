@@ -170,8 +170,8 @@ REM ─── Subagent templates (Stage 4 of 4-agent pipeline) ───
 REM Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
 REM subagent (Explore, Plan, developer, auditor) is a
 REM canonical built-in in pi-subagents. No user-level template is shipped
-REM here. Pre-existing user-level `software-developer.md` and
-REM `software-auditor.md` (if installed by older install.sh / install.ps1
+REM here. Pre-existing user-level `developer.md` and
+REM `auditor.md` (if installed by older install.sh / install.ps1
 REM / install.bat versions) are LEFT IN PLACE for the user to remove
 REM manually — auto-backup-and-remove was removed because the user-level
 REM file is theirs to manage. See DEVELOPER_AGENT and AUDITOR_AGENT
@@ -380,7 +380,7 @@ REM Remove subagent templates (only if our sentinel). Phase A + Phase B
 REM complete: no canonical template is shipped any more, but the
 REM uninstall still walks the historical names so a user who installed
 REM before Phase B can cleanly remove the leftover Sages-managed file.
-for %%N in (software-auditor software-developer developer) do (
+for %%N in (auditor developer developer) do (
     set "TARGET=%AGENT_DIR%\agents\%%N.md"
     if exist "!TARGET!" (
         findstr /C:"SAGES_TEMPLATE_V1" "!TARGET!" >nul 2>&1

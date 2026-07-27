@@ -1,12 +1,16 @@
 /**
  * developer-prompt.test.ts — Content invariants of the developer prompt module.
  *
- * Phase A P1 (DAG-2026-011): the Sages software-developer role is migrated
- * into a dedicated prompt module under pi-subagents/src/agent-prompts/.
- * This file pins the **semantic invariants** every consumer can rely on,
- * not the prose. The prose is allowed to evolve; the invariants are not.
+ * The canonical `developer` prompt is embedded as a built-in in
+ * `pi-subagents/src/agent-prompts/developer.ts`. This file pins the
+ * **semantic invariants** every consumer can rely on, not the prose.
+ * The prose is allowed to evolve; the invariants are not.
  *
- * Required content (per Phase A P1 spec):
+ * GC-2026-014: the `software-developer` legacy alias was removed — the
+ * canonical name is `developer` now. The test focuses on the prompt's
+ * behavioural contracts, which are independent of the alias rename.
+ *
+ * Required content:
  *   - RED → GREEN → REFACTOR cycle
  *   - First-action protocol (AGENTS.md / README / CLAUDE.md discovery)
  *   - Conventional Commits + author rules (no --author, no GIT_AUTHOR_*)

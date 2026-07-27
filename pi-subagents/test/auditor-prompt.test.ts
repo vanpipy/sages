@@ -1,12 +1,16 @@
 /**
  * auditor-prompt.test.ts — Content invariants of the auditor prompt module.
  *
- * Phase B (DAG-2026-011): the Sages `software-auditor` role is migrated
- * into a dedicated prompt module under `pi-subagents/src/agent-prompts/`.
- * This file pins the **semantic invariants** every consumer can rely on,
- * not the prose. The prose is allowed to evolve; the invariants are not.
+ * The canonical `auditor` prompt is embedded as a built-in in
+ * `pi-subagents/src/agent-prompts/auditor.ts`. This file pins the
+ * **semantic invariants** every consumer can rely on, not the prose.
+ * The prose is allowed to evolve; the invariants are not.
  *
- * Required content (per Phase B spec):
+ * GC-2026-014: the `software-auditor` legacy alias was removed — the
+ * canonical name is `auditor` now. The test focuses on the prompt's
+ * behavioural contracts, which are independent of the alias rename.
+ *
+ * Required content:
  *   - Three verdicts (CERTIFIED / NEEDS WORK / BLOCKED) named explicitly
  *   - Default-verdict stance: "default to NEEDS WORK" is the auditor's
  *     starting position; flipping to CERTIFIED requires overwhelming proof

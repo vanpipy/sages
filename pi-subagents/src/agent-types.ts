@@ -74,7 +74,8 @@ function resolveKey(name: string): string | undefined {
 }
 
 /** Resolve a type name case-insensitively. Returns the canonical key or undefined. */
-export function resolveType(name: string): string | undefined {
+export function resolveType(name: string | undefined): string | undefined {
+	if (typeof name !== "string" || name.length === 0) return undefined;
 	return resolveKey(name);
 }
 
@@ -190,80 +191,13 @@ export function getConfig(type: string): {
 }
 
 /**
- * Phase A P1 (DAG-2026-011): surface the resolved agent identity with
- * explicit `requested` / `canonical` / `alias` / `deprecated` fields so
- * callers (audit, telemetry, migration tooling) can warn when a legacy
- * alias is used without needing a separate roster entry.
+ * Resolve an agent type name against the unified registry. Returns the
+ * canonical (case-preserved from the registry key) name when a direct,
+ * case-insensitive hit exists; `undefined` otherwise.
  *
- * Lookup precedence (mirrors `registerAgents`):
- *   1. Direct registry hit (case-insensitive). User-defined agents
- *      shadow the canonical default — a user-registered
- *      `software-developer` is treated as canonical, NOT as the
- *      alias of `developer`.
- *   2. Alias hit (case-insensitive across all `AgentConfig.aliases`).
- *      Only registered alias strings resolve; arbitrary names return
- *      `undefined`.
- *
- * `deprecated: true` is set whenever the lookup went through the alias
- * path — the canonical roster entry is unchanged, but the caller used
- * a legacy name. Direct hits are never deprecated.
+ * Removed in GC-2026-014: the prior alias-walk across `AgentConfig.aliases`
+ * (which mapped `software-developer` → `developer` and `software-auditor`
+ * → `auditor`). See DAG-2026-011 Phase A + Phase B for the migration
+ * history. The legacy names now resolve as unknown agent types — there is
+ * no soft deprecation path any more.
  */
-export interface ResolvedAgentType {
-	/** Name the caller asked for, verbatim (including case). */
-	requested: string;
-	/** Resolved canonical name (case preserved from the registry key). */
-	canonical: string;
-	/** True iff resolution went through the `aliases` field of a roster entry. */
-	alias: boolean;
-	/** True iff the resolution surfaces a legacy / deprecated spelling. */
-	deprecated: boolean;
-}
-
-/**
- * Resolve an agent type name against the unified registry, returning
- * `{ requested, canonical, alias, deprecated }` or `undefined` when no
- * canonical match AND no alias match exists.
- *
- * Case-insensitive on both the registry keys AND the alias strings.
- * User-defined agents always win over the canonical default (and over
- * the alias) because `registerAgents` overlays user entries on top.
- */
-export function resolveAgentType(
-	name: string | undefined,
-): ResolvedAgentType | undefined {
-	if (typeof name !== "string" || name.length === 0) return undefined;
-
-	const requested = name;
-
-	// Step 1 — direct registry hit, case-insensitive. User-registered
-	// entries shadow defaults and aliases alike.
-	const direct = resolveKey(name);
-	if (direct) {
-		return {
-			requested,
-			canonical: direct,
-			alias: false,
-			deprecated: false,
-		};
-	}
-
-	// Step 2 — alias hit. Walk every roster entry's `aliases` list,
-	// comparing case-insensitively. First match wins.
-	const lower = name.toLowerCase();
-	for (const [canonical, config] of agents) {
-		if (!config.aliases || config.aliases.length === 0) continue;
-		for (const alias of config.aliases) {
-			if (typeof alias !== "string") continue;
-			if (alias.toLowerCase() === lower) {
-				return {
-					requested,
-					canonical,
-					alias: true,
-					deprecated: true,
-				};
-			}
-		}
-	}
-
-	return undefined;
-}

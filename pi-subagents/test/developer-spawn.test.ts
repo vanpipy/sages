@@ -1,40 +1,35 @@
 /**
- * developer-spawn.test.ts — Phase A P2 AgentManager.spawn enforcement.
+ * developer-spawn.test.ts — `AgentManager.spawn` managed-isolation enforcement.
  *
  * Pins the runtime boundary that AgentManager.spawn must enforce on the
- * canonical `developer` agent (and its Phase A alias):
+ * canonical `developer` agent:
  *
- *   1. Alias resolution at the spawn boundary — `software-developer` is
- *      canonicalized to `developer` before the managed-worktree path
- *      runs. The `record.type` carries the canonical name; the
- *      `record.aliasUsed` and `record.requestedName` capture the
- *      caller's spelling for audit.
+ *   1. `DEFAULT_AGENTS` does not duplicate the developer roster under any
+ *      legacy alias name (GC-2026-014: the alias infrastructure was
+ *      removed entirely — `software-developer` is an unknown agent type).
  *   2. The managed-isolation policy is enforced BEFORE `runAgent`
- *      runs. Missing / malformed / legacy-string isolation for
- *      canonical `developer` (or its alias) throws — the spawn must
- *      not silently fall back to general-purpose (which was removed
- *      in DAG-2026-011 Phase C — passing that name is now an
- *      "unknown agent type" error, not a fallback path).
+ *      runs. Missing / legacy-string isolation for canonical `developer`
+ *      throws — the spawn must not silently fall back to general-purpose
+ *      (which was removed in DAG-2026-011 Phase C — passing that name is
+ *      now an "unknown agent type" error, not a fallback path).
  *   3. A valid managed-worktree object provisions the worktree and
  *      attaches the handoff to `record.managedWorktree` (path /
  *      branch / baseSha / baseRef / head / dirty / leaseToken /
  *      dag_id / task_id / worktree_id / repoRoot). Other agents
  *      (Explore / Plan) are unaffected.
- *   4. `agentPinned` precedence in `resolveAgentInvocationConfig` does
- *      NOT override a caller's explicit object — the explicit
- *      `managedWorktree` from `params.isolation` wins.
  *
  * The integration tests use the `_fixture.ts` helper for real git
  * repos and stub `runAgent` so the test only exercises the spawn path
  * (not the LLM child execution).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentManager } from "../src/agent-manager.js";
 import { DEFAULT_AGENTS } from "../src/default-agents.js";
 import {
+	getAgentConfig,
 	registerAgents,
-	resolveAgentType,
+	resolveType,
 	setDefaultsDisabled,
 } from "../src/agent-types.js";
 import { makeRepoFixture, type RepoFixture } from "./_fixture.js";
@@ -42,30 +37,32 @@ import { makeRepoFixture, type RepoFixture } from "./_fixture.js";
 const CANONICAL = "developer";
 const LEGACY_ALIAS = "software-developer";
 
-describe("developer-spawn: alias resolution at the spawn boundary", () => {
+describe("developer-spawn: registry invariants (GC-2026-014)", () => {
 	beforeEach(() => {
 		setDefaultsDisabled(false);
 		registerAgents(new Map());
 	});
 
-	it("resolveAgentType canonicalizes the alias to `developer`", () => {
-		const r = resolveAgentType(LEGACY_ALIAS);
-		expect(r).toBeDefined();
-		expect(r!.canonical).toBe(CANONICAL);
-		expect(r!.alias).toBe(true);
-		expect(r!.deprecated).toBe(true);
-	});
-
-	it("resolveAgentType canonicalizes the alias case-insensitively", () => {
-		const r = resolveAgentType("Software-Developer");
-		expect(r).toBeDefined();
-		expect(r!.canonical).toBe(CANONICAL);
-		expect(r!.alias).toBe(true);
-	});
-
-	it("DEFAULT_AGENTS does not duplicate the alias as a roster entry", () => {
-		expect(DEFAULT_AGENTS.has(LEGACY_ALIAS)).toBe(false);
+	it("registers the canonical `developer` under that exact name", () => {
 		expect(DEFAULT_AGENTS.has(CANONICAL)).toBe(true);
+	});
+
+	it("does NOT register a legacy `software-developer` roster entry — the alias is gone", () => {
+		expect(DEFAULT_AGENTS.has(LEGACY_ALIAS)).toBe(false);
+	});
+
+	it("resolveType returns `developer` for the canonical spelling", () => {
+		expect(resolveType("developer")).toBe("developer");
+	});
+
+	it("resolveType returns `undefined` for the legacy spelling (alias removed in GC-2026-014)", () => {
+		// The Phase A alias infrastructure was deleted. Legacy callers
+		// surfacing as "Unknown agent type" — pin the resolution path.
+		expect(resolveType(LEGACY_ALIAS)).toBeUndefined();
+	});
+
+	it("getAgentConfig returns undefined for the legacy spelling", () => {
+		expect(getAgentConfig(LEGACY_ALIAS)).toBeUndefined();
 	});
 });
 
@@ -107,19 +104,6 @@ describe("developer-spawn: managed-isolation policy refuses malformed isolation"
 				CANONICAL,
 				"implement the thing",
 				{ description: "spawn" } as any,
-			),
-		).toThrow(/developer/i);
-	});
-
-	it("throws when alias `software-developer` is spawned with the legacy string", () => {
-		const manager = new AgentManager();
-		expect(() =>
-			manager.spawn(
-				{} as any,
-				{ cwd: fx!.root } as any,
-				LEGACY_ALIAS,
-				"implement the thing",
-				{ description: "spawn", isolation: "worktree" } as any,
 			),
 		).toThrow(/developer/i);
 	});

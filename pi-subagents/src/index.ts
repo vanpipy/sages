@@ -48,7 +48,6 @@ import {
 	getAvailableTypes,
 	isDefaultsDisabled,
 	registerAgents,
-	resolveAgentType,
 	resolveType,
 	setDefaultsDisabled,
 } from "./agent-types.js";
@@ -1374,42 +1373,28 @@ Terse command-style prompts produce shallow, generic work.
 				reloadCustomAgents();
 
 				const rawType = params.subagent_type as SubagentType;
-				// Phase A P2 (DAG-2026-011): resolve through the alias-aware lookup
-				// so `software-developer` maps to canonical `developer` and the
-				// request metadata (alias / deprecated) round-trips through the
-				// runtime. `resolveType` (legacy) only handles direct registry
-				// hits and would silently fall back to the unknown-type path
-				// for the alias — losing the managed-isolation policy
-				// enforcement below.
-				//
-				// Phase C (DAG-2026-011): there is no `general-purpose` fallback
-				// any more. An unknown `subagent_type` is a hard error from
-				// the resolver (see `resolveAgentType` — `alias: true` returns
-				// the canonical, `undefined` means "truly unknown" and we
-				// surface a precise error below). The catch-all `??` here
-				// only fires for code paths that bypassed the resolver.
-				const aliasResolved = resolveAgentType(rawType);
-				const resolved = aliasResolved?.canonical;
-				if (resolved === undefined) {
+				// GC-2026-014: the `software-developer` / `software-auditor`
+				// legacy spellings were removed — both fall through the
+				// case-insensitive registry lookup as unknown agent types and
+				// surface here as a precise error. The alias-aware resolver
+				// from Phase A was deleted along with the alias metadata on
+				// `AgentConfig` and `AgentRecord` (no soft deprecation path —
+				// the goal is full removal, see DAG-2026-011 Phase A + B).
+				const subagentType = resolveType(rawType);
+				if (subagentType === undefined) {
 					throw new Error(
 						`Unknown agent type "${rawType}". Built-in agents: ` +
 							[...getAvailableTypes()].join(", ") +
 							`.`,
 					);
 				}
-				const subagentType = resolved;
-				const fellBack = resolved === undefined;
-				const aliasUsed = aliasResolved?.alias === true;
-				const requestedName = aliasResolved?.requested ?? rawType;
 
-				// Phase A P2 (DAG-2026-011): developer-managed-isolation policy.
-				// Applies when the resolved canonical agent is `developer` (i.e.
-				// the caller asked for `developer` or its Phase A alias
-				// `software-developer`). The legacy `isolation: "worktree"`
-				// string literal AND missing / malformed isolation are rejected
-				// here, BEFORE child execution. The error message names the
-				// agent and the explicit object form so callers can fix the
-				// request without consulting docs.
+				// GC-2026-014: developer-managed-isolation policy now fires
+				// only for the canonical `developer` name (the legacy
+				// `software-developer` alias was removed — those callers hit
+				// the unknown-type error above). The legacy `isolation:
+				// "worktree"` string literal AND missing / malformed
+				// isolation are still rejected here, BEFORE child execution.
 				if (subagentType === "developer") {
 					const policyError = enforceDeveloperManagedIsolationPolicy(
 						"developer",
@@ -1418,17 +1403,6 @@ Terse command-style prompts produce shallow, generic work.
 					if (policyError) {
 						return textResult(policyError);
 					}
-				}
-
-				// Phase A P2 (DAG-2026-011): surface a deprecation warning when
-				// the caller used the legacy alias name. The spawn still succeeds
-				// (the alias resolves to canonical `developer`) but the UI gets
-				// a non-blocking notice so callers can migrate at their own pace.
-				if (aliasUsed) {
-					ctx.ui.notify(
-						`Subagent "${requestedName}" is a deprecated alias for canonical "${subagentType}" — update your dispatch to use "${subagentType}" directly.`,
-						"warning",
-					);
 				}
 
 				const displayName = getDisplayName(subagentType);
@@ -1578,11 +1552,6 @@ Terse command-style prompts produce shallow, generic work.
 					subagentType,
 					modelName,
 					tags: agentTags.length > 0 ? agentTags : undefined,
-					// Phase A P2 (DAG-2026-011): alias metadata end-to-end. Programmatic
-					// callers read these to surface a deprecation warning when the
-					// caller used the legacy `software-developer` spelling.
-					requestedName: aliasUsed ? requestedName : undefined,
-					aliasUsed: aliasUsed ? true : undefined,
 				};
 
 				// ---- Schedule: register a job, don't spawn now ----
@@ -1894,19 +1863,10 @@ Terse command-style prompts produce shallow, generic work.
 					tokens: tokenText,
 				});
 
-				// No more "general-purpose" fallback — an unknown agent type
-				// surfaces a precise error (see `resolveAgentType` +
-				// `getConfig` for the throw path). The note placeholder is
-				// retained in case future fallback paths are reintroduced; for
-				// now it is always empty.
-				const fallbackNote = fellBack
-					? `Note: Unknown agent type "${rawType}". The L3 main agent has no fallback subagent; check the agent name and try again.\n\n`
-					: "";
-
 				if (record.status === "error") {
 					// Error headline + any partial output the run produced before failing.
 					return textResult(
-						`${fallbackNote}Agent failed: ${record.error}${partialOutputSuffix(record)}`,
+						`Agent failed: ${record.error}${partialOutputSuffix(record)}`,
 						details,
 					);
 				}
@@ -1916,7 +1876,7 @@ Terse command-style prompts produce shallow, generic work.
 				const statsParts = [`${record.toolUses} tool uses`];
 				if (tokenText) statsParts.push(tokenText);
 				return textResult(
-					`${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
+					`Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
 						(record.result?.trim() || "No output."),
 					details,
 				);

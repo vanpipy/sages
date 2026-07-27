@@ -16,9 +16,9 @@
  * and are installed automatically alongside skills/ via install_sages_files().
  *
  * Subagent execution (TDD implementer, auditor) is delegated to the Agent
- * tool with `subagent_type: "developer"` / `"software-auditor"`.
+ * tool with `subagent_type: "developer"` / `"auditor"`.
  * See `pi/templates/SUBAGENTS.md` for the 4-stage pipeline
- * (Explore → Plan → developer → software-auditor).
+ * (Explore → Plan → developer → auditor).
  */
 
 import { registerGoalContractTool } from "./goal-contract.js";

@@ -78,7 +78,7 @@ export interface TaskNode {
 	depends_on: string[];
 	/** Files this task touches */
 	files: string[];
-	/** Subagent role to dispatch to (e.g. "developer", "software-auditor") */
+	/** Subagent role to dispatch to (e.g. "developer", "auditor") */
 	subagent_type: string;
 	/** Concurrency grouping — same batch runs in parallel */
 	batch: number;
@@ -103,7 +103,7 @@ export interface TaskNode {
 	 * Optional per-task override for the dispatcher's `run_in_background`
 	 * policy. When omitted, the dispatcher derives a default from
 	 * `subagent_type` (Explore/Plan/general-purpose = foreground,
-	 * developer/software-auditor = background).
+	 * developer/auditor = background).
 	 */
 	run_in_background?: boolean;
 	/** Detailed prompt given to the subagent (assembled by orchestrator from MDD outputs, or rendered from task_template) */

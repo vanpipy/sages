@@ -114,8 +114,8 @@ tasks:
     description: "Audit fix against acceptance criteria + check no regressions"
     plane: Security
     priority: medium
-    subagent_type: software-auditor
-    task_template: subagent-software-auditor
+    subagent_type: auditor
+    task_template: subagent-auditor
     task_params:
       task_id: P4
       task_title: "Audit the fix"
@@ -131,7 +131,7 @@ tasks:
     # Auditor runs while the orchestrator can do other prep work;
     # `get_subagent_result` collects the verdict when needed.
     # The dispatcher would default this to true based on
-    # subagent_type=software-auditor (Phase B will rename to `auditor`).
+    # subagent_type=auditor (Phase B will rename to `auditor`).
     run_in_background: true
     files: []
     prompt: "Audit the bug fix in P3 against SC1/SC2/SC3. Read the developer's report at .pi/orchestrator/task-P3-report.md, re-run `npm test` to verify SC2, inspect the diff vs main to confirm SC3 (no drive-by refactor). Default verdict is NEEDS WORK; only flip to CERTIFIED with overwhelming evidence."

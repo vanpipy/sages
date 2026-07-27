@@ -137,7 +137,7 @@ tasks:
       mode: create
     tdd: strict
     # Background-default for implement/audit (verified 2026-07-24).
-    # All developer / software-auditor tasks in this DAG run in
+    # All developer / auditor tasks in this DAG run in
     # background so the orchestrator can steer / track multiple at once.
     # The dispatcher would default this to true based on subagent_type;
     # the explicit annotation documents intent at the call site.
@@ -236,8 +236,8 @@ tasks:
     description: "Audit refactor result against acceptance criteria"
     plane: Security
     priority: high
-    subagent_type: software-auditor
-    task_template: subagent-software-auditor
+    subagent_type: auditor
+    task_template: subagent-auditor
     task_params:
       task_id: P7
       task_title: "Audit refactor"

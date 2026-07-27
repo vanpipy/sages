@@ -384,7 +384,7 @@ text = open('$f').read()
 task_blocks = re.split(r'\n(?=\s*-\s+id:\s)', text)
 ok = True
 for blk in task_blocks:
-    if 'subagent_type: developer' in blk or 'subagent_type: software-auditor' in blk:
+    if 'subagent_type: developer' in blk or 'subagent_type: auditor' in blk:
         if not re.search(r'run_in_background:\s*true', blk):
             ok = False
             print(f'❌ FAIL: $dag.yaml has implement/audit task without run_in_background: true', file=sys.stderr)
@@ -401,11 +401,11 @@ test -f "$SUBAGENTS_TEMPLATE" || { echo "❌ FAIL: SUBAGENTS.md template missing
 grep -qE 'run_in_background|background' "$SUBAGENTS_TEMPLATE" \
   || { echo "❌ FAIL: SUBAGENTS.md must discuss run_in_background / background execution"; exit 1; }
 # Specific contract: SUBAGENTS.md must explicitly state developer+auditor are background-default.
-# Phase A: the deprecated developer alias was replaced by canonical `developer` (prompt: subagent-developer.md).
-grep -qE '(developer|developer)[^[:alnum:]_-].*background|background.*(developer|developer)' "$SUBAGENTS_TEMPLATE" \
-  || { echo "❌ FAIL: SUBAGENTS.md must state developer (formerly developer) runs in background by default"; exit 1; }
-grep -qE 'software-auditor.*background|background.*software-auditor' "$SUBAGENTS_TEMPLATE" \
-  || { echo "❌ FAIL: SUBAGENTS.md must state software-auditor runs in background by default"; exit 1; }
+# Phase A: software-developer was renamed to developer (prompt: subagent-developer.md).
+grep -qE 'developer[^[:alnum:]_-].*background|background.*developer' "$SUBAGENTS_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS.md must state developer runs in background by default"; exit 1; }
+grep -qE 'auditor[^[:alnum:]_-].*background|background.*auditor' "$SUBAGENTS_TEMPLATE" \
+  || { echo "❌ FAIL: SUBAGENTS.md must state auditor runs in background by default"; exit 1; }
 echo "✅ PASS: SUBAGENTS.md documents developer+auditor as background-default"
 
 # Test T6.4: developer + auditor system prompts accept being spawned in
@@ -441,20 +441,20 @@ echo "✅ PASS: SYSTEM.md references background execution"
 # Test T6.7: subagent prompt templates include
 # the "you may be spawned in background" guidance. Without it, subagents
 # might not behave well when called with run_in_background: true.
-# Phase A: developer was renamed to developer (see SKILL.md alias section).
-for prompt in subagent-developer.md subagent-software-auditor.md; do
+# Phase A: software-developer was renamed to developer (see SKILL.md migration section).
+for prompt in subagent-developer.md subagent-auditor.md; do
   f="$PROMPTS_DIR/$prompt"
   test -f "$f" || { echo "❌ FAIL: $prompt missing in $PROMPTS_DIR"; exit 1; }
   grep -qiE 'background' "$f" \
     || { echo "❌ FAIL: $prompt must mention background mode (subagent context)"; exit 1; }
 done
-echo "✅ PASS: subagent-{developer,software-auditor} prompts mention background mode"
+echo "✅ PASS: subagent-{developer,auditor} prompts mention background mode"
 
 # ──────────────────────────────────────────────────────────────────
 # T5: SUBAGENTS.md — 4-agent pipeline doc
 # Validates: install.sh ships templates/SUBAGENTS.md to $AGENT_DIR/SUBAGENTS.md,
 # complementing install_subagent_templates() so the full 4-agent pipeline
-# (Explore + Plan + developer + software-auditor) is documented
+# (Explore + Plan + developer + auditor) is documented
 # in one discoverable place.
 # ──────────────────────────────────────────────────────────────────
 
@@ -466,7 +466,7 @@ test -f "$SUBAGENTS_TEMPLATE" \
 echo "✅ PASS: templates/SUBAGENTS.md exists"
 
 # Test T5.2: SUBAGENTS.md documents all 4 pipeline agents by name
-for agent in Explore Plan developer software-auditor; do
+for agent in Explore Plan developer auditor; do
   grep -q "$agent" "$SUBAGENTS_TEMPLATE" \
     || { echo "❌ FAIL: SUBAGENTS.md missing agent '$agent'"; exit 1; }
 done

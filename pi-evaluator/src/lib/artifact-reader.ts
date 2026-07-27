@@ -26,7 +26,7 @@
  * better than silently misparsing.
  *
  * Markdown audit parsing is regex-extracted (verdict, findings, workflowReady)
- * since the audit template is hand-written by software-auditor, not generated.
+ * since the audit template is hand-written by the `auditor` subagent, not generated.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -681,7 +681,7 @@ export async function readTaskReports(
 /**
  * Read every `audit-{id}.md` in `workflowPath` and extract verdict + findings +
  * workflowReady via regex. The regex set is intentionally narrow — the audit
- * template is hand-written by software-auditor, so any deviation throws
+ * template is hand-written by the `auditor` subagent, so any deviation throws
  * ArtifactReadError so we notice.
  */
 export async function readAuditReports(

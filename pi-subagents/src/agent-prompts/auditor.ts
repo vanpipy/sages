@@ -1,13 +1,12 @@
 /**
  * auditor-prompt.ts — Canonical system prompt for the built-in `auditor` agent.
  *
- * Phase B (DAG-2026-011): the Sages `software-auditor` role (formerly
- * shipped via `pi/templates/agents/software-auditor.md` and installed to
- * `~/.pi/agent/agents/` by `pi/scripts/install.sh`) is migrated into
- * pi-subagents as a first-class built-in under the canonical name
- * `auditor`. The legacy name `software-auditor` is retained as an alias
- * — see `agent-types.ts > resolveAgentType`. Phase A (developer) shipped
- * the same playbook; this file mirrors it.
+ * Built-in to pi-subagents as of DAG-2026-011 (Phase B) — the legacy
+ * Sages `software-auditor` role (formerly shipped via
+ * `pi/templates/agents/software-auditor.md` and installed to
+ * `~/.pi/agent/agents/` by `pi/scripts/install.sh`) is no longer
+ * accepted. Removed in GC-2026-014; see DAG-2026-011 Phase B for the
+ * migration history.
  *
  * The prompt carries the evidence-based audit discipline: default
  * "NEEDS WORK" verdict, re-run every verification command, separate

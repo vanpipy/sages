@@ -1,5 +1,5 @@
 /**
- * developer-schedule.test.ts — Phase A P2 schedule enforcement.
+ * developer-schedule.test.ts — Schedule enforcement for the canonical `developer` agent.
  *
  * Pin the policy at the schedule-store boundary:
  *
@@ -13,13 +13,18 @@
  *   3. Reuse mode for a developer schedule is validated through the
  *      same parser the foreground path uses — a malformed reuse object
  *      is rejected.
- *   4. The legacy `isolation: \"worktree\"` string literal is rejected
+ *   4. The legacy `isolation: "worktree"` string literal is rejected
  *      for developer schedules (same message family as foreground).
  *   5. Explore / Plan schedules are unaffected (general-purpose was removed
  *      in DAG-2026-011 Phase C; passing that name is now an unknown-type
  *      error, not a no-op schedule).
  *   6. The persisted ScheduledSubagent carries the isolation object
  *      verbatim — not a coerced string.
+ *
+ * GC-2026-014: the legacy `software-developer` alias was removed. The
+ * schedule-builder policy now applies only to the canonical `developer`
+ * name; legacy callers surface as unknown agent types elsewhere in the
+ * dispatch chain and never reach `buildJob`.
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
@@ -40,7 +45,7 @@ describe("developer-schedule: persistence", () => {
 	it("persists the explicit managed-worktree object verbatim (one-shot)", () => {
 		const scheduler = new SubagentScheduler();
 		const obj = {
-			dag_id: "DAG-2026-011",
+			dag_id: "DAG-2026-014",
 			task_id: "P2",
 			mode: "create" as const,
 		};
@@ -66,7 +71,7 @@ describe("developer-schedule: persistence", () => {
 				subagent_type: CANONICAL,
 				prompt: "do the thing",
 				isolation: {
-					dag_id: "DAG-2026-011",
+					dag_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -84,7 +89,7 @@ describe("developer-schedule: persistence", () => {
 				subagent_type: CANONICAL,
 				prompt: "do the thing",
 				isolation: {
-					dag_id: "DAG-2026-011",
+					dag_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -102,7 +107,7 @@ describe("developer-schedule: persistence", () => {
 				subagent_type: CANONICAL,
 				prompt: "do the thing",
 				isolation: {
-					dag_id: "DAG-2026-011",
+					dag_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -171,27 +176,5 @@ describe("developer-schedule: persistence", () => {
 				prompt: "do the thing",
 			}),
 		).not.toThrow();
-	});
-
-	it("does NOT reject recurring schedules for the alias name (alias is metadata, not a separate roster)", () => {
-		const scheduler = new SubagentScheduler();
-		// The alias resolves to canonical `developer` — but the buildJob
-		// validation runs against the raw caller-supplied name. To match
-		// the dispatcher, buildJob should also reject the alias with the
-		// same precise reason.
-		expect(() =>
-			scheduler.buildJob({
-				name: "recurring-alias-developer",
-				description: "every 5m",
-				schedule: "5m",
-				subagent_type: "software-developer",
-				prompt: "do the thing",
-				isolation: {
-					dag_id: "DAG-2026-011",
-					task_id: "P2",
-					mode: "create",
-				},
-			}),
-		).toThrow(/developer/i);
 	});
 });

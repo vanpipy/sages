@@ -321,12 +321,9 @@ function typeMatches(actual: string, expected: string): boolean {
  * When adding a new template, add its schema here for validation.
  */
 const TEMPLATE_PARAM_SCHEMAS: Record<string, TemplateParam[]> = {
-  // Phase A P3 (DAG-2026-011): canonical template name is
-  // `subagent-developer`. The legacy key `subagent-software-developer`
-  // is preserved as a fallback that returns the same schema; persisted
-  // DAGs continue to validate, but new authoring MUST use the
-  // canonical key. The dispatcher separately surfaces a deprecation
-  // warning when the alias is invoked.
+  // Canonical name `subagent-developer` (GC-2026-014: legacy
+  // `subagent-software-developer` alias removed — persisted DAGs that
+  // still carry that key fail validation, see `validateDAG`).
   "subagent-developer": [
     { name: "task_id", type: "string", required: true, description: "Task id (e.g. 'P4')" },
     { name: "task_title", type: "string", required: true, description: "Short title" },
@@ -335,16 +332,10 @@ const TEMPLATE_PARAM_SCHEMAS: Record<string, TemplateParam[]> = {
     { name: "files_to_touch", type: "string", required: true, description: "Files this task touches (joined string)" },
     { name: "acceptance_cmd", type: "string", required: false, description: "Optional self_check_cmd" },
   ],
-  // Phase A alias — same schema; the dispatcher warns at validation time.
-  "subagent-software-developer": [
-    { name: "task_id", type: "string", required: true, description: "Task id (e.g. 'P4')" },
-    { name: "task_title", type: "string", required: true, description: "Short title" },
-    { name: "sc_list", type: "string", required: true, description: "Formatted SC list with verification_cmd" },
-    { name: "upstream_outputs", type: "string", required: true, description: "Formatted upstream task outputs (or '(none)')" },
-    { name: "files_to_touch", type: "string", required: true, description: "Files this task touches (joined string)" },
-    { name: "acceptance_cmd", type: "string", required: false, description: "Optional self_check_cmd" },
-  ],
-  "subagent-software-auditor": [
+  // Canonical name `subagent-auditor` (GC-2026-014: legacy
+  // `subagent-software-auditor` alias was renamed via `git mv` on the
+  // prompt file — the template key follows the file name).
+  "subagent-auditor": [
     { name: "task_id", type: "string", required: true, description: "Task id being audited" },
     { name: "task_title", type: "string", required: true, description: "Short title" },
     { name: "sc_list", type: "string", required: true, description: "Formatted SC list" },

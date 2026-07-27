@@ -6,8 +6,8 @@
  *   - getPhasesForDepth: fast vs full phase selection
  *   - buildPhaseGuidance: only enabled phases appear in guidance
  *   - appendFindings: batched write semantics (single recompute, single persist)
- *   - parseAuditReport: extract verdict + finding counts from software-auditor's
- *     report (the A3 contract: orchestrator_audit reads software-auditor's
+ *   - parseAuditReport: extract verdict + finding counts from auditor's
+ *     report (the A3 contract: orchestrator_audit reads auditor's
  *     audit-{id}.md as the source of truth for task-level verdict)
  *   - aggregateTaskAudits: produce a workflow-level rollup
  */
