@@ -7,6 +7,7 @@
 import { AUDITOR_PROMPT } from "./agent-prompts/auditor.js";
 import { DEVELOPER_PROMPT } from "./agent-prompts/developer.js";
 import { EXPLORE_PROMPT } from "./agent-prompts/explore.js";
+import { MERGER_PROMPT } from "./agent-prompts/merger.js";
 import { PLAN_PROMPT } from "./agent-prompts/plan.js";
 import type { AgentConfig } from "./types.js";
 
@@ -120,6 +121,72 @@ const AUDITOR_AGENT: AgentConfig = {
 
 const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
 
+/**
+ * Canonical `merger` agent.
+ *
+ * Built-in to pi-subagents as of GC-2026-prompt-workspace (Q4=b). The
+ * merger sub-agent handles cross-workspace file overlap detected at
+ * DAG synthesis: it reads both workspaces' HANDOFF.md + diffs,
+ * classifies the overlap (clean / disjoint-hunk / hunk-conflict),
+ * produces a merge commit via git plumbing when feasible, and
+ * verifies the merged result with typecheck + lint + the merged
+ * test suite. Hunk-conflicts escalate; they are NOT auto-resolved.
+ *
+ * Read-only on production code: `builtinToolNames` is `READ_ONLY_TOOLS`
+ * (no `edit`, no `write`). Merges happen via `git -C <worktree> merge
+ * --no-ff` from inside bash; the merger never edits a file directly.
+ *
+ * Symmetry with `developer` / `auditor`:
+ *   - same extensions (`aft`, `pi-mcp-adapter`, `pi-magic-context`) so
+ *     the merger reaches for the same indexed semantic tools to read
+ *     both diffs and classify overlap
+ *   - same `excludeExtensions: ["pi-subagents"]` belt-and-suspenders
+ *     guard against recursive Agent dispatch
+ *
+ * Merger-specific:
+ *   - `runInBackground: true` — cross-workspace verification runs
+ *     typecheck + lint + test (30s–3min); must not block the
+ *     orchestrator
+ *   - `maxTurns: 80` — narrower than developer/auditor (200); the
+ *     merger is a deterministic tool: read diffs, classify, one merge
+ *     commit OR escalate. Going over 80 turns means the brief was
+ *     wrong, not that the merger needs more budget
+ *   - `inheritContext: false` — the merger is a deterministic tool; it
+ *     must NOT fork the parent's chat history. The brief carries the
+ *     workspace-A + workspace-B branches, SC ids, and worktree paths
+ *     explicitly.
+ *   - `skills: false` — no project conventions; the merger is dispatched
+ *     with full input from the orchestrator's brief.
+ *   - No `isolation` policy — the merger is dispatched from inside the
+ *     orchestrator's context; the brief carries the worktree paths.
+ */
+const MERGER_AGENT: AgentConfig = {
+	name: "merger",
+	displayName: "Merger",
+	description:
+		"Cross-workspace merge agent — reads both workspaces' HANDOFF.md + diffs, " +
+		"classifies file overlap as clean / disjoint-hunk / hunk-conflict, " +
+		"produces a merge commit via git plumbing when feasible, and verifies the " +
+		"merged result with typecheck + lint + the merged test suite. Read-only on " +
+		"production code (no edit / write tools); hunk-conflicts escalate.",
+	builtinToolNames: READ_ONLY_TOOLS,
+	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
+	excludeExtensions: ["pi-subagents"],
+	skills: false,
+	systemPrompt: MERGER_PROMPT,
+	promptMode: "replace",
+	isDefault: true,
+	runInBackground: true,
+	// Narrower than developer/auditor: read diffs, classify, produce one
+	// merge commit or escalate. Going over 80 turns means the brief was
+	// wrong, not that the merger needs more budget.
+	maxTurns: 80,
+	// Deterministic tool: must not fork parent's chat history. The brief
+	// carries the workspace-A + workspace-B branches, SC ids, and worktree
+	// paths explicitly.
+	inheritContext: false,
+};
+
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	[
 		"Explore",
@@ -198,4 +265,5 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	],
 	["developer", DEVELOPER_AGENT],
 	["auditor", AUDITOR_AGENT],
+	["merger", MERGER_AGENT],
 ]);
