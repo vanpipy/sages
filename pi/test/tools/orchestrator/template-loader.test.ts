@@ -56,11 +56,11 @@ describe("template-loader", () => {
       expect(content).toContain("{{task_id}}");
     });
 
-    it("loads subagent-general-purpose.md", () => {
+    it("does NOT load subagent-general-purpose.md (removed in Phase C)", () => {
+      // DAG-2026-011 Phase C: the `general-purpose` agent was removed;
+      // its prompt template was deleted along with it.
       const content = loadPromptTemplate("subagent-general-purpose");
-      expect(content).not.toBeNull();
-      expect(content).toContain("{{task_id}}");
-      expect(content).toContain("{{acceptance_cmd}}");
+      expect(content).toBeNull();
     });
 
     it("returns null for unknown template", () => {
@@ -111,7 +111,6 @@ describe("template-loader", () => {
         "subagent-developer",
         "subagent-software-auditor",
         "subagent-explore",
-        "subagent-general-purpose",
       ];
       for (const name of templateNames) {
         const rendered = renderWith(name);
@@ -256,13 +255,16 @@ describe("template-loader", () => {
   });
 
   describe("listTemplates", () => {
-    it("returns the 4 known prompt templates", () => {
+    it("returns the 3 known prompt templates (general-purpose removed in Phase C)", () => {
       const names = listTemplates("prompts");
       expect(names).toContain("subagent-developer");
       expect(names).toContain("subagent-software-auditor");
-      expect(names).toContain("subagent-general-purpose");
       expect(names).toContain("subagent-explore");
-      expect(names.length).toBeGreaterThanOrEqual(4);
+      // general-purpose was removed in DAG-2026-011 Phase C — its
+      // template file is gone, the schema entry is gone. The subagent
+      // itself is no longer in `pi-subagents/src/default-agents.ts`.
+      expect(names).not.toContain("subagent-general-purpose");
+      expect(names.length).toBeGreaterThanOrEqual(3);
     });
 
     it("returns the 4 known goal templates", () => {

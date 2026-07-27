@@ -12,10 +12,13 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENTS } from "../src/default-agents.js";
 
 describe("default-agents: roster", () => {
-	it("registers general-purpose, Explore, Plan (unchanged)", () => {
-		expect(DEFAULT_AGENTS.has("general-purpose")).toBe(true);
+	it("registers Explore, Plan (unchanged)", () => {
 		expect(DEFAULT_AGENTS.has("Explore")).toBe(true);
 		expect(DEFAULT_AGENTS.has("Plan")).toBe(true);
+	});
+
+	it("does NOT register `general-purpose` (removed in DAG-2026-011 Phase C)", () => {
+		expect(DEFAULT_AGENTS.has("general-purpose")).toBe(false);
 	});
 
 	it("registers the canonical `developer` agent (Phase A P1)", () => {
@@ -118,7 +121,7 @@ describe("default-agents: subagent isolation", () => {
 	// `developer` agent is also covered even though its `extensions:` list
 	// doesn't include `pi-subagents` — explicit excludes survive a future
 	// loosening of the include list.
-	for (const name of ["general-purpose", "Explore", "Plan", "developer", "auditor"] as const) {
+	for (const name of ["Explore", "Plan", "developer", "auditor"] as const) {
 		it(`${name} excludes pi-subagents from its extension set`, () => {
 			const config = DEFAULT_AGENTS.get(name);
 			expect(config, `${name} must be registered as a default agent`).toBeDefined();
@@ -129,17 +132,6 @@ describe("default-agents: subagent isolation", () => {
 			).toContain("pi-subagents");
 		});
 	}
-
-	it("general-purpose is the only default with the historical inline annotation", () => {
-		// The `// ← NEW: cannot recursively dispatch Agent tool` inline note
-		// is historical context for the recent change. It only needs to live
-		// on one entry; the rest can carry a fresh comment. This test pins
-		// that the marker is exactly where the change history put it — if a
-		// future contributor rewrites the entry, the comment can be dropped
-		// alongside the marker without losing the semantic guarantee above.
-		const gp = DEFAULT_AGENTS.get("general-purpose");
-		expect(gp?.excludeExtensions).toEqual(["pi-subagents"]);
-	});
 });
 
 describe("default-agents: per-agent maxTurns budgets", () => {
@@ -148,7 +140,6 @@ describe("default-agents: per-agent maxTurns budgets", () => {
 	// so an explicit per-agent budget takes precedence over the global default.
 	// Caller-supplied `Agent({ max_turns: ... })` still wins at spawn time.
 	const expected: Record<string, number> = {
-		"general-purpose": 50,
 		Explore: 50,
 		Plan: 100,
 		developer: 200,

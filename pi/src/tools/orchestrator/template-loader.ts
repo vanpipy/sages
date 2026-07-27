@@ -359,12 +359,4 @@ const TEMPLATE_PARAM_SCHEMAS: Record<string, TemplateParam[]> = {
     { name: "sc_list", type: "string", required: true, description: "What to discover" },
     { name: "files_to_touch", type: "string", required: true, description: "Files of interest" },
   ],
-  "subagent-general-purpose": [
-    { name: "task_id", type: "string", required: true, description: "Task id" },
-    { name: "task_title", type: "string", required: true, description: "Short title" },
-    { name: "sc_list", type: "string", required: true, description: "Acceptance criteria" },
-    { name: "upstream_outputs", type: "string", required: true, description: "Upstream context" },
-    { name: "files_to_touch", type: "string", required: true, description: "Files to touch" },
-    { name: "acceptance_cmd", type: "string", required: false, description: "Optional cmd" },
-  ],
 };

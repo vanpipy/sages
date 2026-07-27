@@ -95,8 +95,8 @@ describe("developer-alias: Explore/Plan/general-purpose precedence", () => {
 		registerAgents(new Map());
 	});
 
-	it("Explore/Plan/general-purpose resolve to themselves, not via alias", () => {
-		for (const name of ["Explore", "Plan", "general-purpose"]) {
+	it("Explore/Plan resolve to themselves, not via alias", () => {
+		for (const name of ["Explore", "Plan"]) {
 			const r = resolveAgentType(name);
 			expect(r, `expected ${name} to resolve`).toBeDefined();
 			expect(r!.requested).toBe(name);
@@ -104,6 +104,14 @@ describe("developer-alias: Explore/Plan/general-purpose precedence", () => {
 			expect(r!.alias).toBe(false);
 			expect(r!.deprecated).toBe(false);
 		}
+	});
+
+	it("general-purpose returns undefined (removed)", () => {
+		// Phase C (DAG-2026-011): the `general-purpose` agent was removed.
+		// Calls with that name should fail with a precise "unknown agent
+		// type" error rather than silently running on a fallback config.
+		const r = resolveAgentType("general-purpose");
+		expect(r).toBeUndefined();
 	});
 
 	it("user-defined `developer` in .pi/agents shadows the canonical default", () => {

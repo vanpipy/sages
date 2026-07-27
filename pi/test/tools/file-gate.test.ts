@@ -135,9 +135,14 @@ describe("policyMessage", () => {
 		expect(msg.toLowerCase()).toContain("developer");
 	});
 
-	it("mentions general-purpose as the meta-file subagent", () => {
+	it("mentions developer (not general-purpose) for meta-file subagent guidance", () => {
+		// DAG-2026-011 Phase C removed the `general-purpose` helper. The
+		// policy message now steers callers to the `developer` agent for
+		// both meta-file edits (`tdd: none`) and production code (managed
+		// worktree). The `general-purpose` string is intentionally absent.
 		const msg = policyMessage("src/foo.ts");
-		expect(msg).toContain("general-purpose");
+		expect(msg).toContain("developer");
+		expect(msg).not.toContain("general-purpose");
 	});
 
 	it("lists the meta-path allowlist for general-purpose dispatch", () => {

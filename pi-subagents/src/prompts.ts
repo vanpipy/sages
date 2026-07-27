@@ -56,7 +56,16 @@ Platform: ${env.platform}`;
   const extrasSuffix = extraSections.length > 0 ? "\n\n" + extraSections.join("\n") : "";
 
   if (config.promptMode === "append") {
-    const identity = parentSystemPrompt || genericBase;
+    // Append mode was historically paired with a "genericBase" fallback
+    // when the parent system prompt was unavailable — that fallback
+    // belonged to the removed `general-purpose` agent. Append mode is
+    // now only used for the `developer` and `auditor` built-ins, both
+    // of which always provide a `parentSystemPrompt`; the fallback
+    // path is unreachable. If you hit a caller that does NOT provide
+    // a parent, `parentSystemPrompt` will be undefined and `identity`
+    // will be the empty string — the LLM still has `config.systemPrompt`
+    // and the surrounding bridge/env blocks.
+    const identity = parentSystemPrompt ?? "";
 
     const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.
@@ -93,8 +102,4 @@ ${envBlock}`;
   return activeAgentTag + replaceHeader + "\n\n" + config.systemPrompt + extrasSuffix;
 }
 
-/** Fallback base prompt when parent system prompt is unavailable in append mode. */
-const genericBase = `# Role
-You are a general-purpose coding agent for complex, multi-step tasks.
-You have full access to read, write, edit files, and execute commands.
-Do what has been asked; nothing more, nothing less.`;
+

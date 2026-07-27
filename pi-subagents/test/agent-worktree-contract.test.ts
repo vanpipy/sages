@@ -347,7 +347,7 @@ describe("agent-worktree-contract: deleteManagedWorktree (host-owned release)", 
 		const id = manager.spawn(
 			undefined as any, // stub: runAgent is mocked
 			{ cwd: fx.root } as any,
-			"general-purpose",
+			"Explore",
 			"stub prompt",
 			{
 				description: "wt-delete",
@@ -403,7 +403,7 @@ describe("agent-worktree-contract: deleteManagedWorktree (host-owned release)", 
 		manager.spawn(
 			undefined as any,
 			{ cwd: fx.root } as any,
-			"general-purpose",
+			"Explore",
 			"stub",
 			{
 				description: "wt-preserve-branch",
@@ -469,7 +469,7 @@ describe("agent-worktree-contract: deleteManagedWorktree (host-owned release)", 
 		manager.spawn(
 			undefined as any,
 			{ cwd: fx.root } as any,
-			"general-purpose",
+			"Explore",
 			"stub",
 			{
 				description: "wt-cwd",
@@ -512,7 +512,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 		const idA = manager.spawn(
 			undefined as any,
 			{ cwd: fx.root } as any,
-			"general-purpose",
+			"Explore",
 			"first",
 			{
 				description: "first",
@@ -534,7 +534,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 		const idB = manager.spawn(
 			undefined as any,
 			{ cwd: fx.root } as any,
-			"general-purpose",
+			"Explore",
 			"second",
 			{
 				description: "second",
@@ -556,7 +556,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 		const id = manager.spawn(
 			undefined as any,
 			{ cwd: fx.root } as any,
-			"general-purpose",
+			"Explore",
 			"stub",
 			{
 				description: "handoff",
@@ -595,7 +595,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 		const id = manager.spawn(
 			undefined as any,
 			{ cwd: fx.root } as any,
-			"general-purpose",
+			"Explore",
 			"stub",
 			{
 				description: "bg",
@@ -631,7 +631,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 		const id = manager.spawn(
 			undefined as any,
 			{ cwd: fx.root } as any,
-			"general-purpose",
+			"Explore",
 			"stub",
 			{
 				description: "abort-me",
@@ -683,7 +683,7 @@ describe("agent-worktree-contract: handoff shape is JSON-stringifiable", () => {
 		const id = manager.spawn(
 			undefined as any,
 			{ cwd: fx.root } as any,
-			"general-purpose",
+			"Explore",
 			"stub",
 			{
 				description: "rt",

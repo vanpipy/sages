@@ -168,7 +168,7 @@ powershell -Command "$d = Get-Content '%AGENT_DIR%\settings.json' -Raw ^| Conver
 
 REM ─── Subagent templates (Stage 4 of 4-agent pipeline) ───
 REM Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
-REM subagent (Explore, Plan, general-purpose, developer, auditor) is a
+REM subagent (Explore, Plan, developer, auditor) is a
 REM canonical built-in in pi-subagents. No user-level template is shipped
 REM here. Pre-existing user-level `software-developer.md` and
 REM `software-auditor.md` (if installed by older install.sh / install.ps1

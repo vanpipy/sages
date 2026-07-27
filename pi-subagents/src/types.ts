@@ -12,12 +12,12 @@ export type { ThinkingLevel };
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
 
-/** Names of the three embedded default agents. */
-export const DEFAULT_AGENT_NAMES = [
-	"general-purpose",
-	"Explore",
-	"Plan",
-] as const;
+/** Names of the two read-only embedded default agents. The `developer`
+ * and `auditor` agents are also built-in but are NOT in this list —
+ * they are not dispatched by the "Explore / Plan" pre-task defaults
+ * path; they require explicit caller intent (a DAG task template, an
+ * orchestrator audit, etc.). */
+export const DEFAULT_AGENT_NAMES = ["Explore", "Plan"] as const;
 
 /** Memory scope for persistent agent memory. */
 export type MemoryScope = "user" | "project" | "local";

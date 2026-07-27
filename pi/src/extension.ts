@@ -31,9 +31,9 @@
  *
  * Subagent dispatch and lifecycle are owned by `@tintinweb/pi-subagents`
  * (installed separately). The canonical built-in agents are
- * `developer`, `auditor`, `Explore`, `Plan`; the legacy `general-purpose`
- * helper is removed (was a fallback for meta-file edits that the
- * orchestrator can no longer reach — the escape window replaces it).
+ * `developer`, `auditor`, `Explore`, `Plan`. The `general-purpose`
+ * helper was removed in DAG-2026-011 Phase C — the escape window
+ * above replaces it for ad-hoc work.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";

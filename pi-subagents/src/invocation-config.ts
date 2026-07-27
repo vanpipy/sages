@@ -144,8 +144,7 @@ export function resolveJoinMode(
  * explicit-worktree requirement. The policy is enforced at the dispatcher
  * boundary so callers see a clean diagnostic BEFORE child execution. It
  * only applies to the canonical `developer` agent (and its alias) —
- * Explore / Plan / general-purpose / any user-defined agent or unknown
- * name is a no-op.
+ * Explore / Plan / any user-defined agent or unknown name is a no-op.
  *
  * Returns:
  *   - `undefined` when the call is well-formed (developer / alias +
@@ -164,7 +163,9 @@ export function enforceDeveloperManagedIsolationPolicy(
 	// `resolveAgentType`, so the canonical name is lowercase here; the
 	// alias branch is a defensive fallback for callers that pass the
 	// legacy spelling directly. Anything else (Explore, Plan,
-	// general-purpose, user agents, typo, undefined) is a no-op.
+	// general-purpose was removed in DAG-2026-011 Phase C. The policy now
+	// applies only to `developer` and its legacy alias `software-developer`.
+	// Other names (user agents, typo, undefined) is a no-op.
 	const lower = typeof agentType === "string" ? agentType.toLowerCase() : "";
 	if (lower !== "developer" && lower !== "software-developer") return undefined;
 

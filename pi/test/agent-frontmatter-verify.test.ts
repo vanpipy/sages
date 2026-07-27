@@ -84,7 +84,6 @@ describe("default-agents.ts: shipped built-in frontmatter (no third-party deps)"
   }
 
   for (const name of [
-    "general-purpose",
     "Explore",
     "Plan",
     "developer",

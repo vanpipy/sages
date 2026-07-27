@@ -35,9 +35,12 @@ orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
   collection, steering. Sages does not re-implement this.
 - **User-level agents** (installed to `~/.pi/agent/agents/` by
   `pi/scripts/install.sh`): `developer` (canonical; legacy alias
-  `software-developer` resolves to it) and `software-auditor`.
-- **Built-in agents** (from pi-subagents): `Explore`, `Plan`,
-  `general-purpose`.
+  `software-developer` resolves to it) and `software-auditor`
+  (canonical; alias `auditor`).
+- **Built-in agents** (from pi-subagents): `Explore`, `Plan`.
+  (`general-purpose` was removed in DAG-2026-011 Phase C — the
+  escape window replaces it for ad-hoc work; see §"Escape Window"
+  below.)
 
 > **Tool routing decisions** (AFT vs `codebase_*` vs
 > `codebase_memory_*` vs Magic Context vs Sages): see
@@ -51,7 +54,7 @@ orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
 | `dag_synthesize` | 2 | Validate + persist a TaskNode DAG; render `task_template` from `task_params` |
 | `task_dispatch` | 3 | Return Agent-call plan grouped by batch; LLM executes via the external `Agent` tool |
 | `orchestrator_audit` | 4 | Read per-task `audit-{id}.md`; aggregate verdicts; enforce evidence gate; write `audit-workflow.md` |
-| `sages_write` / `sages_edit` | — | **RETIRED 2026-07-26** (commits f7144b2 + 633ca97). The main agent now has NO direct write tool — all file edits go through `Agent` dispatch (`general-purpose` for meta-files, `developer` for production code). See §"Write policy" below. |
+| `sages_write` / `sages_edit` | — | **RETIRED 2026-07-26** (commits f7144b2 + 633ca97). The main agent now has NO direct write tool — all file edits go through `Agent` dispatch (`developer` with `tdd: none` for meta-files / design-doc writes; `developer` with managed worktree for production code). See §"Write policy" below. |
 
 Shared helpers in `pi/src/tools/orchestrator/template-loader.ts`:
 `loadPromptTemplate`, `loadGoalTemplate`, `loadDagTemplate`,
@@ -95,23 +98,24 @@ The 4 orchestrator tools (`goal_contract_create`, `dag_synthesize`,
 under `.pi/orchestrator/` only. For any other file edit, dispatch a
 subagent via the `Agent` tool:
 
-- **Meta-files** (AGENTS.md, README.md, install scripts, test files, …):
-  dispatch `general-purpose` with no `isolation` parameter (lightweight,
-  operates in dispatcher's cwd). Main agent reviews the diff before
-  committing.
+- **Meta-files** (AGENTS.md, README.md, install scripts, test files,
+  design-doc writes): dispatch `developer` with `tdd: none` (DAG-2026-011
+  Phase C — the `general-purpose` helper was removed; meta-file edits
+  now flow through the `developer` agent in a worktree with the TDD
+  cycle disabled). Main agent reviews the diff before committing.
 - **Production code** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …):
   dispatch `developer` with managed worktree isolation
   (`isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`).
   TDD discipline + audit gate + merge gate apply.
 
-**Meta-files** that the main agent dispatches `general-purpose` to
+**Meta-files** that the main agent dispatches `developer` to
 edit (the bash-guard's `canMainAgentWrite` allowlist is the single
 source of truth for this list — see `pi/src/tools/file-gate.ts`):
 
 - `.pi/orchestrator/**` — goal / dag / audit / state / designs
-  (NB: the 4 orchestrator tools write here directly; `general-purpose`
-  can write to designs/, but for state files prefer the orchestrator
-  tools)
+  (NB: the 4 orchestrator tools write here directly; `developer` with
+  `tdd: none` can write to designs/, but for state files prefer the
+  orchestrator tools)
 - `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`
 - `pi-*/` — sibling subpackages (pi-subagents, pi-codebase-memory,
   pi-graphify, pi-evaluator, pi-minimax, pi-yunxiao)
@@ -131,10 +135,13 @@ agent still needs to read user code to understand context.
 
 ### Subagent write prohibition (added 2026-07-25)
 
-Subagents (`developer`, `software-auditor`, `Explore`, `Plan`,
-`general-purpose`) **MUST NOT** actively write to `.pi/orchestrator/`.
-This directory is the orchestrator's state space — only the L3 main
-agent (or humans explicitly) decide what goes in there.
+Subagents (`developer`, `software-auditor`, `Explore`, `Plan`)
+**MUST NOT** actively write to `.pi/orchestrator/`. This directory is
+the orchestrator's state space — only the L3 main agent (or humans
+explicitly) decide what goes in there. (`general-purpose` was removed
+in DAG-2026-011 Phase C; the `developer` agent with `tdd: none` may
+write design docs to `designs/`, but the rest of the state is
+off-limits.)
 
 - Subagent roles produce their verdicts in the Agent tool's response.
 - The persistent output file managed by pi-subagents
@@ -212,7 +219,7 @@ file are:
 | Target | Allowed path |
 |---|---|
 | Orchestrator state (`.pi/orchestrator/goal-*.yaml`, `dag-*.yaml`, `audit-*.md`) | 4 orchestrator tools (direct write, no dispatch) |
-| Other meta-files (`.pi/orchestrator/designs/`, `pi/`, `pi-*/`, root docs, …) | `Agent({subagent_type: "general-purpose"})` — no isolation, lightweight, in dispatcher's cwd |
+| Other meta-files (`.pi/orchestrator/designs/`, `pi/`, `pi-*/`, root docs, …) | `Agent({subagent_type: "developer", isolation: {...}, tdd: "none"})` — managed worktree + no TDD (DAG-2026-011 Phase C: the `general-purpose` helper was removed; meta-file work now uses `developer` with `tdd: none`) |
 | Production code (user `src/`, `test/`, …) | `Agent({subagent_type: "developer", isolation: {...}})` — managed worktree + TDD + audit |
 
 If the LLM tries to call raw `edit`/`write`, the tool isn't in the
@@ -256,15 +263,15 @@ fd-redirect detection, line 85) harden the two known gaps.
 
 ### Subagent dispatch contract
 
-The L3 main agent dispatches subagents based on the task shape — NEVER use `developer` for meta-files or git operations (use `general-purpose`). See `pi/templates/SUBAGENTS.md § Dispatch Contract` for the full decision tree.
+The L3 main agent dispatches subagents based on the task shape — NEVER use `developer` for meta-files or git operations without `tdd: none` (or for read-only exploration). See `pi/templates/SUBAGENTS.md § Dispatch Contract` for the full decision tree. DAG-2026-011 Phase C removed the `general-purpose` helper — for ad-hoc work, see the §"Escape Window" section below.
 
 ### Three-tier agent model
 
 | Tier | Who | Write tools | Safety mechanism |
 |---|---|---|---|
-| **L1 — read-only** | `Explore`, `Plan`, `software-auditor` | **none** (frontmatter `tools:` allowlist) | LLM physically cannot call write |
-| **L2 — write-in-worktree** | `developer` (canonical, alias `software-developer`) | `edit`, `write` | managed-worktree object (`{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`) + `software-auditor` + merge gate |
-| **L3 — coordinator** | **main agent** | 4 orchestrator tools (write `.pi/orchestrator/*` only) + `Agent` (dispatch). NO direct write tool. Dispatches: `general-purpose` for meta-files/git/lightweight, `developer` (with `isolation: { dag_id, task_id, mode: "create" }`) for production-code TDD, `software-auditor` for audit. See `pi/templates/SUBAGENTS.md § Dispatch Contract`. | Layer 1 + Layer 2 hard threshold |
+| **L1 — read-only** | `Explore`, `Plan`, `software-auditor` (auditor is read-only on production code; writes only to its own `audit-{task_id}.md`) | **none** (frontmatter `tools:` allowlist) | LLM physically cannot call write |
+| **L2 — write-in-worktree** | `developer` (canonical, alias `software-developer`) | `edit`, `write` | managed-worktree object (`{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`) + `software-auditor` + merge gate. `tdd: none` flips the gate off for meta-file / design-doc writes (path must still be a meta-file). |
+| **L3 — coordinator** | **main agent** | 4 orchestrator tools (write `.pi/orchestrator/*` only) + `Agent` (dispatch). NO direct write tool. Dispatches: `developer` (with `isolation: { dag_id, task_id, mode: "create" }`, `tdd: "none"` for meta-files / design-doc writes; managed worktree + TDD for production code), `software-auditor` (alias `auditor`) for audit. See `pi/templates/SUBAGENTS.md § Dispatch Contract`. The escape window (§"Escape Window") gives the main agent direct write tools in 主动 mode when it gets stuck. | Layer 1 + Layer 2 hard threshold |
 
 The asymmetry IS the design — `developer` keeps raw edit/write
 because that's its job; main agent gives them up because they were

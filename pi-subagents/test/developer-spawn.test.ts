@@ -12,12 +12,14 @@
  *   2. The managed-isolation policy is enforced BEFORE `runAgent`
  *      runs. Missing / malformed / legacy-string isolation for
  *      canonical `developer` (or its alias) throws — the spawn must
- *      not silently fall back to general-purpose.
+ *      not silently fall back to general-purpose (which was removed
+ *      in DAG-2026-011 Phase C — passing that name is now an
+ *      "unknown agent type" error, not a fallback path).
  *   3. A valid managed-worktree object provisions the worktree and
  *      attaches the handoff to `record.managedWorktree` (path /
  *      branch / baseSha / baseRef / head / dirty / leaseToken /
  *      dag_id / task_id / worktree_id / repoRoot). Other agents
- *      (Explore / Plan / general-purpose) are unaffected.
+ *      (Explore / Plan) are unaffected.
  *   4. `agentPinned` precedence in `resolveAgentInvocationConfig` does
  *      NOT override a caller's explicit object — the explicit
  *      `managedWorktree` from `params.isolation` wins.

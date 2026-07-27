@@ -57,9 +57,9 @@ export const TaskNodeSchema = Type.Object({
   /**
    * Optional per-task override for the dispatcher's `run_in_background`
    * policy. When omitted, the dispatcher derives a default from
-   * `subagent_type` (Explore/Plan/general-purpose = foreground,
-   * developer/software-auditor = background). Set this when
-   * a specific task needs the opposite of its subagent-type default.
+   * `subagent_type` (Explore/Plan = foreground, developer/auditor =
+   * background). Set this when a specific task needs the opposite
+   * of its subagent-type default.
    */
   run_in_background: Type.Optional(Type.Boolean({ description: "Override the subagent-type default for run_in_background" })),
   prompt: Type.String({ description: "Detailed prompt for subagent", minLength: 20 }),
@@ -191,7 +191,7 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
   const KNOWN_TEMPLATES = new Set([
     "subagent-developer",
     "subagent-software-auditor",
-    "subagent-general-purpose",
+    "subagent-auditor",
     "subagent-explore",
   ]);
   for (const t of input.tasks as any[]) {
@@ -238,17 +238,19 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
 
   // 8. Subagent type referenced (soft check — warn if unknown)
   //
-  // Phase A P3 (DAG-2026-011): the canonical subagent name is
-  // `developer`. The legacy `software-developer` alias is preserved
-  // here as a deprecation signal — a persisted DAG that uses the
-  // legacy spelling gets a warning, not an error. Phase A P4 does
-  // the same migration for `software-auditor` → `auditor`.
+   // Phase A P3 (DAG-2026-011): the canonical subagent name is
+   // `developer`. The legacy `software-developer` alias is preserved
+   // here as a deprecation signal — a persisted DAG that uses the
+   // legacy spelling gets a warning, not an error. Phase A P4 does
+   // the same migration for `software-auditor` → `auditor`. Phase C
+   // removed `general-purpose` (it was a catch-all helper); persisted
+   // DAGs that use the name get a warning, not an error.
   const knownSubagents = new Set([
-    "general-purpose",
     "Explore",
     "Plan",
     "developer",
     "software-developer",
+    "auditor",
     "software-auditor",
   ]);
   for (const t of input.tasks as any[]) {

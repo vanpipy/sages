@@ -16,12 +16,18 @@
  *      via noContextFiles: true and appendSystemPromptOverride: () => [] — so
  *      the only system-prompt content is exactly what buildAgentPrompt produces.
  *
+ * DAG-2026-011 Phase C — `general-purpose` was removed. The tests now
+ * exercise the four remaining built-in agents (Explore, Plan, developer,
+ * auditor). The "GenericBase fallback" test from the original suite is
+ * removed: the fallback was specifically the `general-purpose` base
+ * prompt and the path that referenced it is now dead code.
+ *
  * These tests prove:
  *   - Replace mode NEVER includes parent system prompt content.
  *   - Append mode DOES include parent system prompt when provided.
  *   - The <active_agent name> tag is present in both modes.
- *   - The role-specific prompt (GENERAL_PURPOSE_PROMPT etc.) is present in replace mode.
- *   - GenericBase is NOT used in replace mode.
+ *   - The role-specific prompt is present in replace mode.
+ *   - The genericBase fallback is no longer used.
  *   - In replace mode, the sub_agent_context block is NOT present.
  *   - A parent prompt that contains main-agent identity markers is excluded in replace mode.
  */
@@ -29,10 +35,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { buildAgentPrompt } from "../src/prompts.js";
 import type { AgentConfig, EnvInfo } from "../src/types.js";
-import { GENERAL_PURPOSE_PROMPT } from "../src/agent-prompts/general-purpose.js";
 import { EXPLORE_PROMPT } from "../src/agent-prompts/explore.js";
 import { PLAN_PROMPT } from "../src/agent-prompts/plan.js";
 import { DEVELOPER_PROMPT } from "../src/agent-prompts/developer.js";
+import { AUDITOR_PROMPT } from "../src/agent-prompts/auditor.js";
 
 // Minimal reproducible env for deterministic output
 const MINIMAL_ENV: EnvInfo = {
@@ -47,10 +53,10 @@ const MINIMAL_CWD = "/home/user/project";
  * A parent system prompt that contains main-agent identity markers.
  *
  * IMPORTANT: Phrasing here must NOT overlap with any role-prompt content.
- * The GENERAL_PURPOSE_PROMPT says "dispatched by the L3 orchestrator" — that
- * is the role's OWN description and must remain. This parent prompt uses
- * completely different phrasing so the test can distinguish role identity
- * from parent identity.
+ * The DEVELOPER_PROMPT says "RED → GREEN → REFACTOR"; the AUDITOR_PROMPT
+ * says "default to NEEDS WORK"; neither overlaps with the parent
+ * phrasing. The parent prompt uses completely different language so the
+ * test can distinguish role identity from parent identity.
  */
 const MAIN_AGENT_PARENT_PROMPT = `# Sages Orchestrator
 
@@ -68,10 +74,10 @@ You are the primary coordinator managing the overall workflow...
 describe("buildAgentPrompt — replace mode identity isolation", () => {
 	describe("replace mode never inherits parent identity", () => {
 		for (const [agentName, systemPrompt] of [
-			["general-purpose", GENERAL_PURPOSE_PROMPT],
 			["Explore", EXPLORE_PROMPT],
 			["Plan", PLAN_PROMPT],
 			["developer", DEVELOPER_PROMPT],
+			["auditor", AUDITOR_PROMPT],
 		] as const) {
 			it(`${agentName}: parent prompt content is absent in replace mode`, () => {
 				const config: AgentConfig = {
@@ -97,8 +103,6 @@ describe("buildAgentPrompt — replace mode identity isolation", () => {
 				expect(prompt).not.toContain("Manage the .pi/orchestrator/");
 				expect(prompt).not.toContain("Write implementation code directly");
 				expect(prompt).not.toContain("Review and audit all sub-agent work");
-				// GenericBase fallback content must not appear
-				expect(prompt).not.toContain("general-purpose coding agent for complex");
 				// sub_agent_context block is append-mode only
 				expect(prompt).not.toContain("sub_agent_context");
 			});
@@ -138,10 +142,10 @@ describe("buildAgentPrompt — replace mode identity isolation", () => {
 				);
 				// Spot-check a unique string from each role prompt
 				const uniqueMarker: Record<string, string> = {
-					"general-purpose": "NOT the main agent",
 					Explore: "READ-ONLY MODE",
 					Plan: "READ-ONLY MODE",
 					developer: "RED → GREEN → REFACTOR",
+					auditor: "evidence-based certification",
 				};
 				expect(prompt).toContain(uniqueMarker[agentName]);
 			});
@@ -187,10 +191,10 @@ describe("buildAgentPrompt — replace mode identity isolation", () => {
 
 	describe("replace mode with undefined parentSystemPrompt", () => {
 		for (const [agentName, systemPrompt] of [
-			["general-purpose", GENERAL_PURPOSE_PROMPT],
 			["Explore", EXPLORE_PROMPT],
 			["Plan", PLAN_PROMPT],
 			["developer", DEVELOPER_PROMPT],
+			["auditor", AUDITOR_PROMPT],
 		] as const) {
 			it(`${agentName}: output is identical whether parentSystemPrompt is undefined or a string`, () => {
 				const config: AgentConfig = {
@@ -222,13 +226,11 @@ describe("buildAgentPrompt — replace mode identity isolation", () => {
 });
 
 describe("buildAgentPrompt — append mode intentional compatibility", () => {
-	const CUSTOM_APPEND_PROMPT = "Custom append instructions.";
-
 	for (const [agentName, systemPrompt] of [
-		["general-purpose", GENERAL_PURPOSE_PROMPT],
 		["Explore", EXPLORE_PROMPT],
 		["Plan", PLAN_PROMPT],
 		["developer", DEVELOPER_PROMPT],
+		["auditor", AUDITOR_PROMPT],
 	] as const) {
 		it(`${agentName}: parent system prompt IS included in append mode`, () => {
 			const config: AgentConfig = {
@@ -289,27 +291,34 @@ describe("buildAgentPrompt — append mode intentional compatibility", () => {
 		});
 	}
 
-	it("append mode falls back to genericBase when parentSystemPrompt is undefined", () => {
+	it("append mode with undefined parent: identity falls back to empty (genericBase removed)", () => {
+		// DAG-2026-011 Phase C: the `general-purpose` `genericBase` was
+		// removed. When an append-mode call has no parent system prompt,
+		// the identity section is now the empty string — the LLM still
+		// has `config.systemPrompt` + the active_agent tag + the env
+		// block + (when present) the sub_agent_context bridge.
 		const config: AgentConfig = {
-			name: "general-purpose",
+			name: "developer",
 			description: "Test",
-			systemPrompt: "Custom instructions.",
+			systemPrompt: DEVELOPER_PROMPT,
 			promptMode: "append",
 			extensions: true,
 			skills: false,
 		};
 		const prompt = buildAgentPrompt(config, MINIMAL_CWD, MINIMAL_ENV, undefined);
-		// When no parent is available, append mode uses genericBase as fallback identity
-		expect(prompt).toContain("general-purpose coding agent for complex");
+		// The role's own prompt is present.
+		expect(prompt).toContain("RED → GREEN → REFACTOR");
+		// The legacy genericBase fallback is NOT present.
+		expect(prompt).not.toContain("general-purpose coding agent for complex");
 	});
 });
 
 describe("buildAgentPrompt — extras (memory, skills) survive in replace mode", () => {
 	it("memoryBlock is appended after the role prompt in replace mode", () => {
 		const config: AgentConfig = {
-			name: "general-purpose",
+			name: "developer",
 			description: "Test",
-			systemPrompt: GENERAL_PURPOSE_PROMPT,
+			systemPrompt: DEVELOPER_PROMPT,
 			promptMode: "replace",
 			extensions: true,
 			skills: false,
@@ -324,15 +333,15 @@ describe("buildAgentPrompt — extras (memory, skills) survive in replace mode",
 		expect(prompt).toContain("Some memory content.");
 		// Memory comes after the role prompt
 		expect(prompt.indexOf("Some memory content.")).toBeGreaterThan(
-			prompt.indexOf("NOT the main agent"),
+			prompt.indexOf("RED → GREEN → REFACTOR"),
 		);
 	});
 
 	it("skillBlocks are appended after the role prompt in replace mode", () => {
 		const config: AgentConfig = {
-			name: "general-purpose",
+			name: "developer",
 			description: "Test",
-			systemPrompt: GENERAL_PURPOSE_PROMPT,
+			systemPrompt: DEVELOPER_PROMPT,
 			promptMode: "replace",
 			extensions: true,
 			skills: false,
@@ -352,9 +361,9 @@ describe("buildAgentPrompt — extras (memory, skills) survive in replace mode",
 describe("buildAgentPrompt — git repo env block in replace mode", () => {
 	it("includes git repository and branch when in a git repo", () => {
 		const config: AgentConfig = {
-			name: "general-purpose",
+			name: "developer",
 			description: "Test",
-			systemPrompt: GENERAL_PURPOSE_PROMPT,
+			systemPrompt: DEVELOPER_PROMPT,
 			promptMode: "replace",
 			extensions: true,
 			skills: false,
@@ -376,9 +385,9 @@ describe("buildAgentPrompt — git repo env block in replace mode", () => {
 
 	it("includes 'Not a git repository' when not in a git repo", () => {
 		const config: AgentConfig = {
-			name: "general-purpose",
+			name: "developer",
 			description: "Test",
-			systemPrompt: GENERAL_PURPOSE_PROMPT,
+			systemPrompt: DEVELOPER_PROMPT,
 			promptMode: "replace",
 			extensions: true,
 			skills: false,
@@ -394,11 +403,6 @@ describe("buildAgentPrompt — git repo env block in replace mode", () => {
 });
 
 describe("prompts.ts — module-level invariants (sanity)", () => {
-	it("GENERAL_PURPOSE_PROMPT declares sub-agent identity", () => {
-		expect(GENERAL_PURPOSE_PROMPT).toMatch(/NOT the main agent/i);
-		expect(GENERAL_PURPOSE_PROMPT).toMatch(/single-task helper/i);
-	});
-
 	it("EXPLORE_PROMPT declares read-only intent", () => {
 		expect(EXPLORE_PROMPT).toMatch(/READ-ONLY/i);
 	});
@@ -410,5 +414,10 @@ describe("prompts.ts — module-level invariants (sanity)", () => {
 	it("DEVELOPER_PROMPT declares sub-agent identity", () => {
 		expect(DEVELOPER_PROMPT).toMatch(/sub-agent/i);
 		expect(DEVELOPER_PROMPT).toMatch(/RED.*GREEN.*REFACTOR/i);
+	});
+
+	it("AUDITOR_PROMPT declares sub-agent identity (Phase B)", () => {
+		expect(AUDITOR_PROMPT).toMatch(/NEEDS WORK/i);
+		expect(AUDITOR_PROMPT).toMatch(/verify/i);
 	});
 });

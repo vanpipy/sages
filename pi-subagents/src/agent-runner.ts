@@ -479,12 +479,18 @@ export async function runAgent(
     // so the intent is unmistakable to future readers.
     systemPrompt = buildAgentPrompt(agentConfig, effectiveCwd, env, parentSystemPrompt, extras);
   } else {
-    // Unknown type fallback: spread the canonical general-purpose config (defensive —
-    // unreachable in practice since index.ts resolves unknown types before calling runAgent).
-    const fallback = DEFAULT_AGENTS.get("general-purpose");
-    if (!fallback) throw new Error(`No fallback config available for unknown type "${type}"`);
-    // Fallback also uses replace mode; same reasoning as above.
-    systemPrompt = buildAgentPrompt({ ...fallback, name: type }, effectiveCwd, env, undefined, extras);
+    // `agentConfig` is undefined when `getAgentConfig(type)` returned no
+    // match. In practice `index.ts` resolves unknown types BEFORE calling
+    // `runAgent` (via the alias-aware `resolveAgentType` + `getConfig` —
+    // which now throws). The remaining defensive throw here is a
+    // belt-and-suspenders signal that the resolver was bypassed. The
+    // `general-purpose` fallback was removed with the agent itself;
+    // there is no implicit "any unknown name → general-purpose" mapping
+    // any more.
+    throw new Error(
+      `runAgent called with unknown agent type "${type}" (no config). ` +
+        `The caller must resolve the type via resolveAgentType() / getConfig() before reaching here.`,
+    );
   }
 
   // When skills is string[], we've already preloaded them into the prompt.

@@ -49,7 +49,7 @@ export interface SubagentsSettings {
    */
   scopeModels?: boolean;
   /**
-   * When true, the three built-in default agents (general-purpose, Explore, Plan)
+   * When true, the four built-in default agents (developer, auditor, Explore, Plan)
    * are not registered at startup. User-defined agents from project/global custom
    * agent dirs are completely unaffected — only the hardcoded DEFAULT_AGENTS are suppressed.
    * Defaults to false.

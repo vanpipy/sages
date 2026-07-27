@@ -69,14 +69,19 @@ tasks:
     description: "Design new [interface/API/structure]"
     plane: Foundation
     priority: high
-    subagent_type: Plan
-    task_template: subagent-general-purpose
+    # Phase A P3 + Phase C (DAG-2026-011): the `general-purpose` template
+    # is gone. Design tasks that need to write the design doc to disk
+    # now use `developer` with `tdd: none` (design output, not test
+    # code). The developer is in a managed worktree but writes only
+    # the design file under .pi/orchestrator/.
+    subagent_type: developer
+    task_template: subagent-developer
     task_params:
       task_id: P3
       task_title: "Design new structure"
       sc_list: "SC1 (no old pattern), SC2 (tests still pass), SC3 (new API exists)"
       upstream_outputs: "P1 (old-pattern sites), P2 (good-pattern examples) — both informational"
-      files_to_touch: ""
+      files_to_touch: ".pi/orchestrator/"
       inputs:
         - from_task: P1
           field: findings
@@ -84,10 +89,17 @@ tasks:
           field: findings
     batch: 2
     depends_on: [P1, P2]
-    isolation: none
+    # Phase A P3: explicit managed-worktree object. The developer
+    # agent enforces this; the design is written under .pi/orchestrator/
+    # (meta-file path) so the worktree isolation is a formality here.
+    isolation:
+      dag_id: "[DAG-ID]"
+      task_id: P3
+      mode: create
     tdd: none
-    files: []
-    prompt: "Design a new [interface/API/structure] that replaces [old pattern]. Read the P1 + P2 findings (paths: .pi/orchestrator/task-P1-findings.json, task-P2-findings.json) and use them as input. Write the design to .pi/orchestrator/task-P3-design.md. The design must (a) cover all SCs, (b) mirror the patterns in P2, (c) prescribe the exact module boundary so P4+P5 can implement it independently."
+    run_in_background: true
+    files: [".pi/orchestrator/task-P3-design.md"]
+    prompt: "Design a new [interface/API/structure] that replaces [old pattern]. Read the P1 + P2 findings (paths: .pi/orchestrator/task-P1-findings.json, task-P2-findings.json) and use them as input. Write the design to .pi/orchestrator/task-P3-design.md. The design must (a) cover all SCs, (b) mirror the patterns in P2, (c) prescribe the exact module boundary so P4+P5 can implement it independently. TDD is N/A for this design task — produce the design doc, not test code."
     acceptance: {}
     output_schema:
       kind: design_doc

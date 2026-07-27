@@ -835,12 +835,13 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// ---- Disable default agents configuration ----
-	// When enabled, the three hardcoded default agents (general-purpose, Explore,
-	// Plan) are not registered. User-defined agents from project/global custom
-	// agent dirs are completely unaffected — only DEFAULT_AGENTS are suppressed.
-	// Defaults to false; opt-in via `/agents → Settings` or subagents.json.
-	// State lives in agent-types.ts (isDefaultsDisabled) because registerAgents
-	// needs it; this wrapper just re-registers after flipping it.
+	// When enabled, the four hardcoded default agents (`developer`, `auditor`,
+	// `Explore`, `Plan`) are not registered. User-defined agents from
+	// project/global custom agent dirs are completely unaffected — only
+	// DEFAULT_AGENTS are suppressed. Defaults to false; opt-in via
+	// `/agents → Settings` or subagents.json. State lives in agent-types.ts
+	// (isDefaultsDisabled) because registerAgents needs it; this wrapper
+	// just re-registers after flipping it.
 	function setDisableDefaultAgents(b: boolean): void {
 		setDefaultsDisabled(b);
 		reloadCustomAgents(); // re-register with new setting
@@ -1377,11 +1378,26 @@ Terse command-style prompts produce shallow, generic work.
 				// so `software-developer` maps to canonical `developer` and the
 				// request metadata (alias / deprecated) round-trips through the
 				// runtime. `resolveType` (legacy) only handles direct registry
-				// hits and would silently fall back to `general-purpose` for the
-				// alias — losing the managed-isolation policy enforcement below.
+				// hits and would silently fall back to the unknown-type path
+				// for the alias — losing the managed-isolation policy
+				// enforcement below.
+				//
+				// Phase C (DAG-2026-011): there is no `general-purpose` fallback
+				// any more. An unknown `subagent_type` is a hard error from
+				// the resolver (see `resolveAgentType` — `alias: true` returns
+				// the canonical, `undefined` means "truly unknown" and we
+				// surface a precise error below). The catch-all `??` here
+				// only fires for code paths that bypassed the resolver.
 				const aliasResolved = resolveAgentType(rawType);
 				const resolved = aliasResolved?.canonical;
-				const subagentType = resolved ?? "general-purpose";
+				if (resolved === undefined) {
+					throw new Error(
+						`Unknown agent type "${rawType}". Built-in agents: ` +
+							[...getAvailableTypes()].join(", ") +
+							`.`,
+					);
+				}
+				const subagentType = resolved;
 				const fellBack = resolved === undefined;
 				const aliasUsed = aliasResolved?.alias === true;
 				const requestedName = aliasResolved?.requested ?? rawType;
@@ -1878,10 +1894,13 @@ Terse command-style prompts produce shallow, generic work.
 					tokens: tokenText,
 				});
 
-				// "general-purpose" may itself be unregistered (defaults disabled, no
-				// user override) — getConfig then uses the hardcoded fallback config.
+				// No more "general-purpose" fallback — an unknown agent type
+				// surfaces a precise error (see `resolveAgentType` +
+				// `getConfig` for the throw path). The note placeholder is
+				// retained in case future fallback paths are reintroduced; for
+				// now it is always empty.
 				const fallbackNote = fellBack
-					? `Note: Unknown agent type "${rawType}" — using ${resolveType("general-purpose") ? "general-purpose" : "the fallback agent config"}.\n\n`
+					? `Note: Unknown agent type "${rawType}". The L3 main agent has no fallback subagent; check the agent name and try again.\n\n`
 					: "";
 
 				if (record.status === "error") {
@@ -2627,10 +2646,19 @@ Write the file using the write tool. Only write the file, nothing else.`;
 		const { record } = await manager.spawnAndWait(
 			pi,
 			ctx,
-			"general-purpose",
+			"developer",
 			generatePrompt,
 			{
 				description: `Generate ${name} agent`,
+				// `developer` is a managed-worktree agent; it requires an
+				// explicit isolation object (enforced by
+				// `enforceDeveloperManagedIsolationPolicy`). The wizard
+				// generates a fresh worktree per generation request.
+				managedWorktree: {
+					dag_id: "agent-generation",
+					task_id: name,
+					mode: "create",
+				},
 				maxTurns: 5,
 			},
 		);
@@ -2834,7 +2862,7 @@ ${systemPrompt}
 					id: "disableDefaultAgents",
 					label: "Disable defaults",
 					description:
-						"Hide built-in agents (general-purpose, Explore, Plan) — custom agents are unaffected",
+						"Hide built-in agents (developer, auditor, Explore, Plan) — custom agents are unaffected",
 					currentValue: isDefaultsDisabled() ? "on" : "off",
 					values: ["on", "off"],
 				},

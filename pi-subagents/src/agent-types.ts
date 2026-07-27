@@ -149,7 +149,16 @@ export function getToolNamesForType(type: string): string[] {
 	return config?.builtinToolNames ?? [...BUILTIN_TOOL_NAMES];
 }
 
-/** Get config for a type (case-insensitive, returns a SubagentTypeConfig-compatible object). Falls back to general-purpose. */
+/** Get config for a type (case-insensitive, returns a SubagentTypeConfig-compatible object).
+ *
+ * Throws on unknown / disabled types — the caller MUST resolve a known
+ * agent name before reaching this function (see `resolveAgentType` which
+ * surfaces alias / deprecated metadata for the LLM-facing error
+ * message). The previous "fall back to general-purpose config" path
+ * was removed with the `general-purpose` agent; an explicit
+ * `subagent_type` of `general-purpose` (or any other unknown name)
+ * now hard-fails so the LLM sees the error instead of silently running
+ * with a non-role-specific default. */
 export function getConfig(type: string): {
 	displayName: string;
 	description: string;
@@ -172,30 +181,12 @@ export function getConfig(type: string): {
 			promptMode: config.promptMode,
 		};
 	}
-
-	// Fallback for unknown/disabled types — general-purpose config
-	const gp = agents.get("general-purpose");
-	if (gp && gp.enabled !== false) {
-		return {
-			displayName: gp.displayName ?? gp.name,
-			description: gp.description,
-			builtinToolNames: gp.builtinToolNames ?? BUILTIN_TOOL_NAMES,
-			extensions: gp.extensions,
-			excludeExtensions: gp.excludeExtensions,
-			skills: gp.skills,
-			promptMode: gp.promptMode,
-		};
-	}
-
-	// Absolute fallback (should never happen)
-	return {
-		displayName: "Agent",
-		description: "General-purpose agent for complex, multi-step tasks",
-		builtinToolNames: BUILTIN_TOOL_NAMES,
-		extensions: true,
-		skills: true,
-		promptMode: "append",
-	};
+	throw new Error(
+		`Unknown or disabled agent type "${type}". ` +
+			`Built-in agents: ${[...agents.keys()].filter((k) => agents.get(k)?.enabled !== false).join(", ")}. ` +
+			`If "general-purpose" is needed, ask the user to type the \`escape-window\` trigger ` +
+			`to unlock the main agent's direct write tools.`,
+	);
 }
 
 /**

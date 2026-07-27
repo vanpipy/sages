@@ -10,7 +10,9 @@
  *   - Orchestrator: `goal_contract_create`, `dag_synthesize`,
  *     `task_dispatch`, `orchestrator_audit`
  *   - Subagents (delegated to Agent tool): `Explore`, `Plan`,
- *     `developer`, `software-auditor`, `general-purpose`
+ *     `developer`, `software-auditor` (DAG-2026-011 Phase C: the
+ *     `general-purpose` helper was removed; meta-file work now uses
+ *     `developer` with `tdd: none`)
  *
  * File operations (read/write/edit/grep/bash) are not provided here —
  * they come from pi's built-ins (optionally AFT-backed via
@@ -27,8 +29,8 @@
 export { default as default, default as registerSagesExtension } from "./extension.js";
 
 // Orchestrator tool registrar — the only public API for in-process tools.
-// Subagent personas (Explore / Plan / developer / software-auditor /
-// general-purpose) are reached via the Agent tool, not through this index.
+// Subagent personas (Explore / Plan / developer / software-auditor)
+// are reached via the Agent tool, not through this index.
 export { registerOrchestratorTools } from "./tools/orchestrator/index.js";
 
 // Per-orchestrator runtime support — file I/O with security validation.

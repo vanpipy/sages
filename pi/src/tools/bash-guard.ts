@@ -381,7 +381,7 @@ export function extractBashTargets(command: string): string[] {
  *
  * There is no escape hatch. The main agent cannot bypass this gate via
  * `bash`. All file writes (meta-file or production) must go through
- * `Agent` dispatch (`general-purpose` for meta-files, `developer` with
+ * `Agent` dispatch (`developer` with `tdd: none` for meta-file / design-doc writes; `developer` with managed-worktree isolation for production code). DAG-2026-011 Phase C removed the `general-purpose` helper that previously handled meta-file edits.
  * managed worktree for production code).
  *
  * The `ctx` parameter is accepted for symmetry with the file-gate

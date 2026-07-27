@@ -15,7 +15,9 @@
  *      is rejected.
  *   4. The legacy `isolation: \"worktree\"` string literal is rejected
  *      for developer schedules (same message family as foreground).
- *   5. Explore / Plan / general-purpose schedules are unaffected.
+ *   5. Explore / Plan schedules are unaffected (general-purpose was removed
+ *      in DAG-2026-011 Phase C; passing that name is now an unknown-type
+ *      error, not a no-op schedule).
  *   6. The persisted ScheduledSubagent carries the isolation object
  *      verbatim — not a coerced string.
  */
@@ -165,7 +167,7 @@ describe("developer-schedule: persistence", () => {
 				name: "recurring-gp",
 				description: "every 5m",
 				schedule: "5m",
-				subagent_type: "general-purpose",
+				subagent_type: "Explore", // was general-purpose (removed in Phase C)
 				prompt: "do the thing",
 			}),
 		).not.toThrow();

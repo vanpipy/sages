@@ -36,7 +36,7 @@ $AGENT_DIR = "$PI_DIR\agent"
 
 # Subagent template install info (mirrors install.sh).
 # Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
-# subagent (Explore, Plan, general-purpose, developer, auditor) is a
+# subagent (Explore, Plan, developer, auditor) is a
 # canonical built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
 # No user-level template is shipped; SUBAGENT_NAMES is empty and the
 # install path is a no-op for subagent templates. Pre-existing user-

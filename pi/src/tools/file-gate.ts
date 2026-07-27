@@ -8,9 +8,14 @@
  * (AGENTS.md, README.md, install scripts, test files, ...) must go
  * through the `Agent` tool.
  *
- * For meta-file edits, dispatch `general-purpose` subagent (no worktree —
- * lightweight, operates in dispatcher's cwd). For production code,
- * dispatch `developer` subagent (managed worktree + TDD discipline).
+ * For meta-file edits / design-doc writes, dispatch the `developer`
+ * subagent with `tdd: none` (DAG-2026-011 Phase C — the `general-purpose`
+ * helper was removed; the developer agent handles design-doc writes
+ * for design tasks and code changes for implementation). For production
+ * code, dispatch the `developer` subagent in a managed worktree
+ * (strict TDD discipline). For ad-hoc work outside the dispatch
+ * surface, the user can opt into the main agent's escape mode
+ * (see `pi/src/escape-window.ts`) which gives the LLM direct write tools.
  *
  * The path policy (`canMainAgentWrite`) is the **single source of
  * truth** for the bash-guard (Layer 2). The bash-guard
@@ -18,7 +23,9 @@
  * `cat > meta-file` and `sages_write meta-file` would have given the
  * same answer. With `sages_write`/`sages_edit` retired (2026-07-26),
  * the LLM-facing tool surface no longer exposes any direct write — the
- * bash-guard is the only remaining limb-side enforcement.
+ * bash-guard is the only remaining limb-side enforcement. The escape
+ * window partially relaxes Layer 1 + Layer 2 for the session — see
+ * `escape-window.ts` for the precise carve-out.
  *
  * Read tools (`read`, `aft_read`, `aft_search`, `codebase_*`,
  * `bash` for read-only commands) are intentionally NOT gated — the
@@ -26,8 +33,8 @@
  *
  * The policy is enforced at the bash layer; the system prompt
  * (`pi/templates/SYSTEM.md §1`) carries the matching convention so
- * the LLM dispatches `general-purpose` (no isolation) for meta-file
- * edits and `developer` (managed worktree) for production code.
+ * the LLM dispatches `developer` (managed worktree) for production
+ * code and `developer` with `tdd: none` for design-doc writes.
  */
 
 import { isAbsolute } from "node:path";
@@ -113,14 +120,15 @@ export function policyMessage(path: string): string {
 		`The main agent has NO direct write tools. All file changes must be`,
 		`dispatched to a subagent via the Agent tool:`,
 		`  - For meta-file edits (AGENTS.md, README.md, install scripts,`,
-		`    test files, etc.): dispatch \`general-purpose\` (no isolation,`,
-		`    lightweight, operates in dispatcher's cwd). Review the diff`,
-		`    before committing.`,
+		`    test files, design-doc writes): dispatch \`developer\` with`,
+		`    \`tdd: none\` (no TDD, just write the design / edit). Review the`,
+		`    diff before committing.`,
 		`  - For production code (src/, test/, lib/, *.ts, *.py, ...):`,
 		`    dispatch \`developer\` with managed worktree isolation`,
 		`    (pass \`isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }\`).`,
 		``,
-		`Allowed paths for \`general-purpose\` subagent (no isolation):`,
+		`Allowed paths for the \`developer\` subagent (with \`tdd: none\` or`,
+		`managed-worktree isolation, depending on task shape):`,
 		`  - .pi/orchestrator/*  (goal/dag/audit/state/designs)`,
 		`  - pi/src/, pi/test/, pi/skills/, pi/templates/, pi/scripts/`,
 		`  - pi-*/  (sibling subpackages: pi-subagents, pi-codebase-memory, pi-evaluator, pi-minimax, pi-yunxiao)`,

@@ -89,9 +89,13 @@ describe("developer-managed-isolation: policy", () => {
 		).toBeDefined();
 	});
 
-	it("does NOT apply the policy to other built-in agents (Explore/Plan/general-purpose)", () => {
-		// The policy is `developer`-specific; Explore/Plan/general-purpose
-		// are read-only or unrestricted and run without isolation by default.
+	it("does NOT apply the policy to other built-in agents (Explore/Plan)", () => {
+		// The policy is `developer`-specific; Explore/Plan are read-only
+		// and run without isolation by default. `general-purpose` was
+		// removed in DAG-2026-011 Phase C — passing that name is now
+		// treated as an unknown subagent type (no policy applied, but the
+		// Agent tool surfaces an "unknown agent type" error earlier in
+		// the dispatch chain).
 		expect(
 			enforceDeveloperManagedIsolationPolicy("Explore", undefined),
 		).toBeUndefined();

@@ -42,7 +42,12 @@ The orchestrator dispatches a **single canonical pipeline of 4 subagents**, one 
 
 `run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table is the canonical reference; see `pi/templates/SUBAGENTS.md` for full rationale and code examples.
 
-Fallback: `general-purpose` (built-in, full toolset) is for ad-hoc research that doesn't fit any specific role. Never use it as the implementation or verification path — Stages 3-4 are specialised on purpose.
+> **DAG-2026-011 Phase C**: the `general-purpose` subagent was removed.
+> Ad-hoc research that doesn't fit a specific role should be done in the
+> main agent's escape mode (the user types `escape-window` to unlock
+> direct write tools) or by combining Stages 1 (`Explore`) and 2
+> (`Plan`). The `developer` agent handles design-doc writes for
+> design tasks; Stages 3-4 are specialised on purpose.
 
 ### When each stage is required
 
@@ -106,7 +111,7 @@ For each batch (1 → N):
 2. Spawn subagents in parallel (one Agent tool call per task in the batch):
    - Use run_in_background: true when batch has >1 task
    - For `developer` tasks: use `isolation: { dag_id: DAG_ID, task_id: TASK_ID, mode: "create" }` (managed worktree object required by the Agent dispatcher)
-   - For other subagents (`general-purpose` / `software-auditor` / `Explore` / `Plan`): no `isolation` field (operate in dispatcher cwd)
+   - For other subagents (`software-auditor` / `Explore` / `Plan`): no `isolation` field (operate in dispatcher cwd)
    - The subagent receives its task's prompt from the dispatch plan
 3. Wait for all tasks in the batch to complete (get_subagent_result)
 4. Run orchestrator_audit({ dag_id, batch }) to verify the batch
@@ -120,15 +125,15 @@ When dispatching via the `Agent` tool, pick the right subagent type:
 
 | Task | Subagent | `isolation` |
 |--- |--- |--- |
-| Meta-file edits / git ops / research / lightweight | `general-purpose` | none; **add `isolated: true` for git ops** to bypass bash-guard |
+| Meta-file edits / design-doc writes (no code) | `developer` (with `tdd: none`) | `{ dag_id, task_id, mode: "create" }` (managed worktree; design-doc under `.pi/orchestrator/` is meta-file path) |
 | Production-code TDD work | `developer` (legacy alias: `software-developer`) | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
-| Audit / evidence collection | `software-auditor` | none |
+| Audit / evidence collection | `software-auditor` (alias: `auditor`) | none |
 | Quick read-only search | `Explore` | none (built-in) |
 | Architecture design | `Plan` | none (built-in) |
 
 The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. Always pass the object form.
 
-> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block.
+> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, dispatch the task in the main session's escape mode (the user types `escape-window`) or use the `software-auditor` agent with `isolated: true`.
 
 ### Parallelism
 
@@ -136,12 +141,12 @@ When dispatching multiple sub-tasks for a single workflow stage:
 
 ```ts
 // ✓ one message, multiple background calls
-Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true })
-Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true })
+Agent({ subagent_type: "Explore", prompt: "...", run_in_background: true })
+Agent({ subagent_type: "Explore", prompt: "...", run_in_background: true })
 Agent({ subagent_type: "developer", isolation: {...}, prompt: "...", run_in_background: true })
 ```
 
-Don't serialize when tasks are independent. Foreground is the default for `general-purpose`/`Explore`/`Plan` because the system expects these to be short helper tasks where the result feeds the next decision — use it deliberately for that case.
+Don't serialize when tasks are independent. Foreground is the default for `Explore`/`Plan` because the system expects these to be short helper tasks where the result feeds the next decision — use it deliberately for that case.
 
 Background is the default for `developer`/`software-auditor` (5-10 min TDD / audit) — collect results via notification or `get_subagent_result()`.
 
@@ -159,8 +164,8 @@ The orchestrator's recent commit chain was all serial foreground — and that wa
 **Dispatch patterns**
 
 ```ts
-// Meta-file edit (general-purpose)
-Agent({ subagent_type: "general-purpose", prompt: "...", run_in_background: true })
+// Meta-file edit / design-doc write (developer with tdd: none)
+Agent({ subagent_type: "developer", isolation: {...}, prompt: "Write .pi/orchestrator/task-P3-design.md ...", run_in_background: true })
 
 // Production-code TDD (developer + worktree)
 Agent({
@@ -312,7 +317,10 @@ The orchestrator can reference reusable prompt templates instead of writing ever
 | `subagent-software-developer` (Phase A alias — warns) | developer | Same shape as canonical; use `subagent-developer` for new authoring |
 | `subagent-software-auditor` | software-auditor | Default NEEDS WORK + 6-step audit + 5/3-phase depth |
 | `subagent-explore` | Explore | Read-only enforcement + findings.json output schema |
-| `subagent-general-purpose` | general-purpose | Fallback for tasks without a specific role |
+
+(`subagent-general-purpose` was removed in DAG-2026-011 Phase C. The
+canonical `auditor` template is `subagent-software-auditor`; the
+alias `subagent-auditor` is the Phase B canonical name.)
 
 ### Goal templates (copy fields into `goal_contract_create`)
 
