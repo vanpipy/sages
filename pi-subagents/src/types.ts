@@ -123,7 +123,8 @@ export interface AgentConfig {
 	 *
 	 * Phase A P1 (DAG-2026-011): the canonical `developer` agent records
 	 * the legacy Sages developer name here as a deprecation
-	 * signal. Phase B (out of scope) will do the same for `software-auditor`.
+	 * signal. Phase B (DAG-2026-011) — done: the canonical `auditor`
+	 * agent records the legacy Sages `software-auditor` name the same way.
 	 */
 	aliases?: string[];
 }

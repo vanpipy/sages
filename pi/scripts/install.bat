@@ -167,8 +167,12 @@ if not exist "%AGENT_DIR%\settings.json" (
 powershell -Command "$d = Get-Content '%AGENT_DIR%\settings.json' -Raw ^| ConvertFrom-Json; if(-not $d.packages) { $d.packages = @() }; $d.packages = @($d.packages ^| Where-Object { $_ -ne '%PKG_DIR%' -and $_ -notmatch '%PKG_NAME%' }); if('%PKG_DIR%' -notin $d.packages) { $d.packages += '%PKG_DIR%' }; $d ^| ConvertTo-Json -Depth 10 ^| Set-Content '%AGENT_DIR%\settings.json' -Encoding UTF8"
 
 REM ─── Subagent templates (Stage 4 of 4-agent pipeline) ───
-REM Note: developer is built-in to pi-subagents (Phase A complete);
-REM only software-auditor is shipped here.
+REM Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
+REM subagent (Explore, Plan, general-purpose, developer, auditor) is a
+REM canonical built-in in pi-subagents. No user-level template is shipped
+REM here; the install path is purely a backup-and-classify pass for any
+REM pre-existing user-level files. See DEVELOPER_AGENT and AUDITOR_AGENT
+REM in pi-subagents\src\default-agents.ts.
 echo ==^> Installing subagent templates...
 if not exist "%AGENT_DIR%\agents" mkdir "%AGENT_DIR%\agents" >nul 2>&1
 
@@ -202,7 +206,36 @@ if exist "!LEGACY_DEVELOPER!" (
     )
 )
 
-for %%N in (software-auditor) do (
+REM Phase B migration: classify and preserve the previous auditor filename.
+REM Symmetric with the Phase A block above. Since canonical auditor is now
+REM built-in to pi-subagents, NO canonical template is installed - only
+REM back up + classify. User-customized content remains in place; a
+REM Sages-managed legacy file is removed after backup (the built-in makes
+REM it redundant). The Phase A .phase-a-migration directory is reused so
+REM both phases' backups live under one discoverable location.
+set "LEGACY_AUDITOR=%AGENT_DIR%\agents\software-auditor.md"
+if exist "!LEGACY_AUDITOR!" (
+    if not exist "!PHASE_A_BACKUP_DIR!" mkdir "!PHASE_A_BACKUP_DIR!" >nul 2>&1
+    for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddTHHmmssfff"') do set "PHASE_B_TS=%%T"
+    set "PHASE_B_CLASSIFICATION=user-customized"
+    findstr /C:"SAGES_TEMPLATE_V1" "!LEGACY_AUDITOR!" >nul 2>&1
+    if not errorlevel 1 set "PHASE_B_CLASSIFICATION=sages-managed"
+    copy /Y "!LEGACY_AUDITOR!" "!PHASE_A_BACKUP_DIR!\software-auditor.!PHASE_B_TS!.md" >nul
+    (
+        echo classification: !PHASE_B_CLASSIFICATION!
+        echo install_time: !PHASE_B_TS!
+        echo subagent_name: software-auditor
+        echo canonical_name: auditor
+        echo phase: B
+        echo reason: previous auditor-agent filename preserved; canonical auditor is now built-in to pi-subagents
+    ) > "!PHASE_A_BACKUP_DIR!\software-auditor.!PHASE_B_TS!.md.meta"
+    if "!PHASE_B_CLASSIFICATION!"=="sages-managed" (
+        del /Q "!LEGACY_AUDITOR!"
+        echo   Removed legacy software-auditor.md (sages-managed) - auditor is now built-in; backup saved under .phase-a-migration
+    ) else (
+        echo   software-auditor.md user-customized; backup saved under .phase-a-migration and original left in place
+    )
+)
     set "TPL_NAME=%%N"
     set "TEMPLATE=%TMP_DIR%\pi\templates\agents\%%N.md"
     set "TARGET=%AGENT_DIR%\agents\%%N.md"
@@ -435,8 +468,11 @@ if exist "%AGENT_DIR%\settings.json" (
     echo   Unregistered sages
 )
 
-REM Remove subagent templates (only if our sentinel)
-for %%N in (software-auditor developer) do (
+REM Remove subagent templates (only if our sentinel). Phase A + Phase B
+REM complete: no canonical template is shipped any more, but the
+REM uninstall still walks the historical names so a user who installed
+REM before Phase B can cleanly remove the leftover Sages-managed file.
+for %%N in (software-auditor software-developer developer) do (
     set "TARGET=%AGENT_DIR%\agents\%%N.md"
     if exist "!TARGET!" (
         findstr /C:"SAGES_TEMPLATE_V1" "!TARGET!" >nul 2>&1

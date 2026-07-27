@@ -35,15 +35,20 @@ $REPO_URL = "https://github.com/vanpipy/sages.git"
 $AGENT_DIR = "$PI_DIR\agent"
 
 # Subagent template install info (mirrors install.sh).
-# Source: pi/templates/agents/software-auditor.md
-# Target: $AGENT_DIR\agents\ — global agent definitions loaded by pi-subagents.
-# Without this, sages' orchestrator can't dispatch the software-auditor
-# subagent by name. The 3 built-in agents (developer, Explore, Plan) come
-# from pi-subagents and need no install — see also SUBAGENTS.md for the
-# full 4-agent pipeline.
+# Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
+# subagent (Explore, Plan, general-purpose, developer, auditor) is a
+# canonical built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
+# No user-level template is shipped; SUBAGENT_NAMES is empty and the
+# install path is purely a backup-and-classify pass for any pre-existing
+# user-level files. New user customizations go in `~/.pi/agent/agents/`
+# (global) or `.pi/agents/` (project) and override the built-in.
 $SUBAGENT_TEMPLATE_DIR = Join-Path (Split-Path -Parent $PSCommandPath) "..\templates\agents"
 $SUBAGENT_TARGET_DIR = "$AGENT_DIR\agents"
-$SUBAGENT_NAMES = @("software-auditor")
+# Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
+# subagent is a canonical built-in in pi-subagents. No user-level template
+# is shipped; SUBAGENT_NAMES is empty so the install path is purely a
+# backup-and-classify pass for pre-existing user-level files.
+$SUBAGENT_NAMES = @()
 $SUBAGENT_SENTINEL = "SAGES_TEMPLATE_V1"
 
 # Subagent pipeline doc — installed alongside agent .md files. Plain markdown,
@@ -159,6 +164,33 @@ function Backup-LegacyDeveloper {
     }
 }
 
+# Phase B migration: symmetric with Backup-LegacyDeveloper. The canonical
+# `auditor` is now built-in to pi-subagents, so the legacy `software-auditor.md`
+# is no longer installed as a canonical template. A Sages-managed file is
+# removed after backup; a user-customized one is preserved. The Phase A
+# .phase-a-migration directory is reused so both phases' backups live
+# under one discoverable location.
+function Backup-LegacyAuditor {
+    $legacyName = "software-auditor"
+    $legacy = Join-Path $SUBAGENT_TARGET_DIR "$legacyName.md"
+    if (-not (Test-Path $legacy)) { return }
+
+    $managed = IsSubagentTemplateInstalled $legacy
+    $classification = if ($managed) { "sages-managed" } else { "user-customized" }
+    $backupName = Backup-PhaseASubagentTemplate `
+        -File $legacy `
+        -Name $legacyName `
+        -Classification $classification `
+        -Reason "previous auditor-agent filename preserved; canonical auditor is now built-in to pi-subagents"
+
+    if ($managed) {
+        Remove-Item -Force $legacy
+        Write-Host "  Removed legacy $legacyName.md (sages-managed) - auditor is now built-in (backup: .phase-a-migration/$backupName)"
+    } else {
+        Write-Host "  $legacyName.md is user-customized - backed up to .phase-a-migration/$backupName and left in place"
+    }
+}
+
 # Copy each $SUBAGENT_NAMES template to $SUBAGENT_TARGET_DIR. Idempotent:
 #   - missing → install from template
 #   - file exists with sentinel → skip (already installed by us)
@@ -172,6 +204,7 @@ function Install-SubagentTemplates {
 
     $null = New-Item -ItemType Directory -Path $SUBAGENT_TARGET_DIR -Force -ErrorAction SilentlyContinue
     Backup-LegacyDeveloper
+    Backup-LegacyAuditor
 
     foreach ($name in $SUBAGENT_NAMES) {
         $template = Join-Path $SUBAGENT_TEMPLATE_DIR "$name.md"
@@ -203,10 +236,15 @@ function Install-SubagentTemplates {
 }
 
 # Remove agent files in $SUBAGENT_TARGET_DIR ONLY if they carry our sentinel.
-# User-written or hand-edited agent files are left alone (NEVER-TOUCH policy,
-# same as install.sh's uninstall_subagent_templates).
+# Iterates $SUBAGENT_NAMES (empty post-Phase B) PLUS the historical
+# filenames the previous install shipped (software-auditor, software-developer),
+# so a user upgrading from a pre-Phase-A/Phase-B install can cleanly remove
+# the leftover Sages-managed file. User-written or hand-edited agent files
+# are left alone (NEVER-TOUCH policy).
 function Uninstall-SubagentTemplates {
-    foreach ($name in $SUBAGENT_NAMES) {
+    $historicalNames = @("software-auditor", "software-developer")
+    $allNames = @($SUBAGENT_NAMES + $historicalNames) | Select-Object -Unique
+    foreach ($name in $allNames) {
         $target = Join-Path $SUBAGENT_TARGET_DIR "$name.md"
         if (-not (Test-Path $target)) { continue }
         if (IsSubagentTemplateInstalled $target) {

@@ -4,6 +4,7 @@
  * These are always available but can be overridden by user .md files with the same name.
  */
 
+import { AUDITOR_PROMPT } from "./agent-prompts/auditor.js";
 import { DEVELOPER_PROMPT } from "./agent-prompts/developer.js";
 import { EXPLORE_PROMPT } from "./agent-prompts/explore.js";
 import { GENERAL_PURPOSE_PROMPT } from "./agent-prompts/general-purpose.js";
@@ -14,6 +15,13 @@ import type { AgentConfig } from "./types.js";
  * Required built-in tool names for the canonical `developer` agent.
  * Mirrors the seven built-ins `pi-coding-agent` exposes
  * (`createCodingTools` ∪ `createReadOnlyTools`).
+ *
+ * The canonical `auditor` agent shares this set: \`edit\` / \`write\` are
+ * available for the auditor's single allowed write target
+ * (\`.pi/orchestrator/audit-{task_id}.md\`), and \`read\` / \`bash\` /
+ * \`grep\` / \`find\` / \`ls\` carry the verify-only re-run loop. The
+ * auditor prompt itself enforces "no production edits" — the tools are
+ * present, the policy is the prompt's job.
  */
 const DEVELOPER_BUILTIN_TOOLS: readonly string[] = [
 	"read",
@@ -34,8 +42,8 @@ const DEVELOPER_BUILTIN_TOOLS: readonly string[] = [
  * as an alias (see `aliases` below) so existing orchestrators and
  * audit consumers keep working while the canonical migration lands.
  *
- * Phase B (out of scope here) will do the matching migration for the
- * `software-auditor` role.
+ * Phase B (DAG-2026-011) — done: the matching migration for the
+ * `software-auditor` role is complete; see `AUDITOR_AGENT` below.
  */
 const DEVELOPER_AGENT: AgentConfig = {
 	name: "developer",
@@ -62,6 +70,64 @@ const DEVELOPER_AGENT: AgentConfig = {
 	// Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
 	aliases: ["software-developer"],
+};
+
+/**
+ * Canonical `auditor` agent — Phase B (DAG-2026-011).
+ *
+ * Migrated from pi/templates/agents/software-auditor.md (shipped via
+ * `pi/scripts/install.sh` to `~/.pi/agent/agents/`) into pi-subagents
+ * as a first-class built-in under the canonical name `auditor`. The
+ * legacy Sages name `software-auditor` is preserved as an alias (see
+ * `aliases` below) so existing orchestrators and audit consumers keep
+ * working while the canonical migration lands.
+ *
+ * Symmetry with `developer`:
+ *   - same built-in tool set (7 tools, including \`edit\`/\`write\` for
+ *     the auditor's single allowed write target)
+ *   - same \`extensions: [aft, pi-mcp-adapter, pi-magic-context]\` so the
+ *     auditor reaches for the same indexed semantic tools as the
+ *     developer
+ *   - same \`excludeExtensions: ["pi-subagents"]\` belt-and-suspenders
+ *     guard against recursive Agent dispatch
+ *
+ * Audit-specific:
+ *   - \`runInBackground: true\` — full audits re-run every verification
+ *     command (30s–3 min) and must not block the orchestrator
+ *   - \`maxTurns: 200\` — the auditor's re-run loop (typecheck + lint +
+ *     tests + diff inspection + report write) is the budget per run;
+ *     callers may override via Agent({ max_turns: ... })
+ *   - \`skills: false\` — no project conventions; the auditor re-derives
+ *     them at audit time per the First Action Protocol
+ *
+ * No managed-worktree policy: \`enforceDeveloperManagedIsolationPolicy\`
+ * is `developer`-only. The auditor is read-only on the developer's
+ * worktree and writes only to \`.pi/orchestrator/audit-{task_id}.md\`.
+ */
+const AUDITOR_AGENT: AgentConfig = {
+	name: "auditor",
+	displayName: "Auditor",
+	description:
+		"Strict evidence-based software auditor — verifies task completion " +
+		"against acceptance criteria using TDD evidence (test output, typecheck, " +
+		"lint, command results). Default verdict is NEEDS WORK unless overwhelming " +
+		"proof is provided. Canonical replacement for the legacy Sages " +
+		"`software-auditor` role; the legacy name is preserved as an alias.",
+	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
+	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
+	// Symmetric with `developer`: the auditor is read-only on production
+	// code by policy, but the Agent tool cannot load here regardless.
+	excludeExtensions: ["pi-subagents"],
+	skills: false,
+	systemPrompt: AUDITOR_PROMPT,
+	promptMode: "replace",
+	isDefault: true,
+	runInBackground: true,
+	// Full audits re-run typecheck + lint + tests + diff inspection +
+	// report write; 200 turns is the per-run budget. Caller may still
+	// override via Agent({ max_turns: ... }) at spawn time.
+	maxTurns: 200,
+	aliases: ["software-auditor"],
 };
 
 const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
@@ -135,4 +201,5 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 		},
 	],
 	["developer", DEVELOPER_AGENT],
+	["auditor", AUDITOR_AGENT],
 ]);

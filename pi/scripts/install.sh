@@ -35,10 +35,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 
 # Subagent template install info.
-# Source: pi/templates/agents/software-auditor.md (git-tracked)
-# Target: $AGENT_DIR/agents/ — global agent definitions loaded by pi-subagents.
-# Used by sages orchestrator workflow to spawn the software-auditor subagent.
-# Without this, the orchestrator's Agent tool calls fail with "unknown agent".
+# Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
+# subagent (Explore, Plan, general-purpose, developer, auditor) is a
+# canonical built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
+# No user-level template is shipped; SUBAGENT_NAMES is empty and the
+# install path is purely a backup-and-classify pass for any pre-existing
+# user-level files. New user customizations go in `~/.pi/agent/agents/`
+# (global) or `.pi/agents/` (project) and override the built-in.
 #
 # Phase A (DAG-2026-011) complete: `developer` is a canonical built-in in
 # pi-subagents (see `pi-subagents/src/default-agents.ts`). The user-level
@@ -51,8 +54,12 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # `developer` via the alias. User-customized legacy stays in place; Sages-
 # managed legacy is removed after backup (the built-in makes it redundant).
 #
-# Phase B (out of scope) will migrate `software-auditor` to `auditor` with
-# the same playbook.
+# Phase B (DAG-2026-011) complete: `software-auditor` → `auditor` follows
+# the same playbook. `auditor` is a canonical built-in in pi-subagents
+# (see `pi-subagents/src/default-agents.ts > AUDITOR_AGENT`); the legacy
+# `software-auditor` is preserved as an alias. `SUBAGENT_NAMES` is empty
+# so the install no longer ships any user-level .md — the built-in covers
+# both spellings, and user customizations survive untouched.
 #
 # Each template body carries an HTML-comment sentinel (SAGES_TEMPLATE_V1) so
 # uninstall_subagent_templates can distinguish "we installed this" from
@@ -66,10 +73,12 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 #   Stage 3  developer            ← pi-subagents built-in (no install;
 #                                   legacy alias `software-developer`
 #                                   also accepted via the alias metadata)
-#   Stage 4  software-auditor     ← shipped via SUBAGENT_NAMES below
+#   Stage 4  auditor              ← pi-subagents built-in (no install;
+#                                   legacy alias `software-auditor`
+#                                   also accepted via the alias metadata)
 SUBAGENT_TEMPLATE_DIR="$SCRIPT_DIR/../templates/agents"
 SUBAGENT_TARGET_DIR="$AGENT_DIR/agents"
-SUBAGENT_NAMES=("software-auditor")
+SUBAGENT_NAMES=()
 
 # Subagent pipeline doc — installed to $AGENT_DIR/SUBAGENTS.md alongside
 # the agent .md files. Plain markdown, NOT parsed by pi-subagents (it only
@@ -521,9 +530,11 @@ install_system_prompt() {
 
 # ────────────────────────────────────────────────────────────
 # Subagent templates (pi-subagents' global agent definitions)
-# Source: pi/templates/agents/software-auditor.md
-# Target: $SUBAGENT_TARGET_DIR/ — where pi-subagents loads agents by name.
-# (developer is built-in to pi-subagents; see DEVELOPER_AGENT in
+# Phase A + Phase B: every default is built-in to pi-subagents; no
+# canonical template is installed. The remaining pass only backs up
+# + classifies pre-existing user-level files (developer / software-developer
+# + auditor / software-auditor). See DEVELOPER_AGENT and AUDITOR_AGENT
+# in `pi-subagents/src/default-agents.ts`.
 #  pi-subagents/src/default-agents.ts.)
 # ────────────────────────────────────────────────────────────
 
@@ -582,6 +593,47 @@ META_EOF
   fi
 }
 
+# Phase B migration helper. Symmetric with `backup_legacy_developer` above:
+# the canonical `auditor` is now built-in to pi-subagents, so the legacy
+# `software-auditor.md` is no longer installed as a canonical template. A
+# Sages-managed legacy file is removed after backup (the built-in makes
+# it redundant); a user-customized one remains authoritative and is
+# preserved — user customizations always win. The Phase A backup directory
+# is reused so both phases' backups live under
+# `$SUBAGENT_TARGET_DIR/.phase-a-migration/` for unified inspection.
+backup_legacy_auditor() {
+  local legacy_name="software-auditor"
+  local legacy="$SUBAGENT_TARGET_DIR/$legacy_name.md"
+  [[ -f "$legacy" ]] || return 0
+
+  local backup_root="$SUBAGENT_TARGET_DIR/.phase-a-migration"
+  local ts classification
+  mkdir -p "$backup_root"
+  ts=$(date +%Y%m%dT%H%M%S)
+  classification="user-customized"
+  if is_subagent_template_installed "$legacy"; then
+    classification="sages-managed"
+  fi
+
+  cp "$legacy" "$backup_root/${legacy_name}.${ts}.md"
+  cat > "$backup_root/${legacy_name}.${ts}.md.meta" <<META_EOF
+classification: ${classification}
+install_time: ${ts}
+subagent_name: ${legacy_name}
+canonical_name: auditor
+canonical_lives_in: pi-subagents (built-in)
+phase: B
+reason: previous auditor-agent filename preserved; canonical auditor is now built-in to pi-subagents
+META_EOF
+
+  if [[ "$classification" = "sages-managed" ]]; then
+    rm -f "$legacy"
+    echo "  Removed legacy $legacy_name.md (sages-managed) — auditor is now built-in (backup: .phase-a-migration/${legacy_name}.${ts}.md)"
+  else
+    echo "  $legacy_name.md is user-customized — backed up to .phase-a-migration/${legacy_name}.${ts}.md and left in place"
+  fi
+}
+
 # Atomic file copy: write to "<target>.tmp.<pid>" then mv to target. On
 # Linux/POSIX, `mv` within the same filesystem is an atomic rename, so
 # concurrent readers (e.g., pi-subagents scanning $AGENT_DIR/agents/)
@@ -615,6 +667,7 @@ install_subagent_templates() {
 
   mkdir -p "$SUBAGENT_TARGET_DIR"
   backup_legacy_developer
+  backup_legacy_auditor
 
   local name template target
   for name in "${SUBAGENT_NAMES[@]}"; do

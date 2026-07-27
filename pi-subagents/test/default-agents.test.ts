@@ -118,7 +118,7 @@ describe("default-agents: subagent isolation", () => {
 	// `developer` agent is also covered even though its `extensions:` list
 	// doesn't include `pi-subagents` — explicit excludes survive a future
 	// loosening of the include list.
-	for (const name of ["general-purpose", "Explore", "Plan", "developer"] as const) {
+	for (const name of ["general-purpose", "Explore", "Plan", "developer", "auditor"] as const) {
 		it(`${name} excludes pi-subagents from its extension set`, () => {
 			const config = DEFAULT_AGENTS.get(name);
 			expect(config, `${name} must be registered as a default agent`).toBeDefined();
@@ -152,6 +152,7 @@ describe("default-agents: per-agent maxTurns budgets", () => {
 		Explore: 50,
 		Plan: 100,
 		developer: 200,
+		auditor: 200,
 	};
 
 	for (const [name, limit] of Object.entries(expected)) {
@@ -192,5 +193,114 @@ describe("default-agents: per-agent maxTurns budgets", () => {
 				`default agent "${name}" maxTurns must be <= ${MAX_TURNS_CEILING}`,
 			).toBe(true);
 		}
+	});
+});
+
+describe("default-agents: roster — auditor (Phase B)", () => {
+	// The `auditor` agent is the Phase B (DAG-2026-011) mirror of the
+	// developer migration. Registered as a first-class built-in; the
+	// legacy `software-auditor` is preserved as an alias, not a roster
+	// entry, so user overrides still win (and the alias still resolves
+	// for the orchestrator's `Agent({ subagent_type: "software-auditor" })`).
+	it("registers the canonical `auditor` agent", () => {
+		expect(DEFAULT_AGENTS.has("auditor")).toBe(true);
+	});
+
+	it("does NOT register a duplicate `software-auditor` roster entry (alias only)", () => {
+		expect(DEFAULT_AGENTS.has("software-auditor")).toBe(false);
+	});
+});
+
+describe("default-agents: auditor config", () => {
+	const aud = DEFAULT_AGENTS.get("auditor");
+
+	it("is registered with isDefault: true", () => {
+		expect(aud?.isDefault).toBe(true);
+	});
+
+	it("has displayName 'Auditor' and description referencing the audit discipline", () => {
+		expect(aud?.displayName).toBe("Auditor");
+		expect(aud?.description.toLowerCase()).toContain("audit");
+		// Default verdict stance is part of the public contract.
+		expect(aud?.description.toLowerCase()).toContain("needs work");
+	});
+
+	it("uses promptMode: 'replace' so the canonical prompt replaces the parent identity", () => {
+		expect(aud?.promptMode).toBe("replace");
+	});
+
+	it("carries the canonical system prompt (non-empty, references all three verdicts)", () => {
+		expect(typeof aud?.systemPrompt).toBe("string");
+		expect(aud?.systemPrompt.length).toBeGreaterThan(0);
+		expect(aud?.systemPrompt).toContain("CERTIFIED");
+		expect(aud?.systemPrompt).toContain("NEEDS WORK");
+		expect(aud?.systemPrompt).toContain("BLOCKED");
+	});
+
+	it("lists the same required built-in tools as developer (read, bash, grep, find, ls, edit, write)", () => {
+		// The auditor shares developer's tool set: edit/write are present
+		// for the single allowed write target (the audit-{task_id}.md
+		// report). The "verify only / no production edits" rule lives
+		// in the prompt, not in the tool allowlist.
+		const tools = new Set(aud?.builtinToolNames ?? []);
+		for (const t of ["read", "bash", "grep", "find", "ls", "edit", "write"]) {
+			expect(tools.has(t), `auditor must include tool ${t}`).toBe(true);
+		}
+	});
+
+	it("carries the required extensions: aft, pi-mcp-adapter, pi-magic-context", () => {
+		// Symmetric with developer. The auditor prompt's tool preference
+		// order relies on these extensions being loaded.
+		const extensions = aud?.extensions;
+		expect(extensions).not.toBe(false);
+		const list =
+			extensions === true || extensions === undefined ? null : extensions;
+		expect(list, "auditor must pin extensions to a list").not.toBeNull();
+		expect(list).toContain("aft");
+		expect(list).toContain("pi-mcp-adapter");
+		expect(list).toContain("pi-magic-context");
+	});
+
+	it("disables skills (false) — auditor re-derives conventions at audit time per First Action Protocol", () => {
+		expect(aud?.skills).toBe(false);
+	});
+
+	it("defaults runInBackground to true (audits re-run every verification and must not block)", () => {
+		expect(aud?.runInBackground).toBe(true);
+	});
+
+	it("sets maxTurns = 200 (re-run loop + diff inspection + report write)", () => {
+		// Symmetric with developer; audits need a generous budget for
+		// typecheck + lint + tests + diff inspection + report write.
+		expect(aud?.maxTurns).toBe(200);
+	});
+
+	it("does NOT copy the legacy `isolation: 'worktree'` literal — auditor is read-only on the developer's worktree", () => {
+		// The auditor never enters a managed worktree; it audits the
+		// developer's worktree from the outside. `enforceDeveloperManagedIsolationPolicy`
+		// is `developer`-only.
+		expect(aud?.isolation).toBeUndefined();
+	});
+
+	it("records the legacy `software-auditor` name in `aliases` (deprecation signal)", () => {
+		expect(aud?.aliases).toEqual(
+			expect.arrayContaining(["software-auditor"]),
+		);
+	});
+});
+
+describe("default-agents: auditor subagent isolation", () => {
+	// Symmetric with developer: the auditor also pins
+	// `excludeExtensions: ["pi-subagents"]` so the Agent tool cannot
+	// load by accident. The auditor's purpose is verify-only — letting
+	// it spawn further Agent calls would defeat the audit invariant.
+	it("auditor excludes pi-subagents from its extension set", () => {
+		const config = DEFAULT_AGENTS.get("auditor");
+		expect(config, "auditor must be registered as a default agent").toBeDefined();
+		const excludes = config?.excludeExtensions ?? [];
+		expect(
+			excludes.map((s) => s.toLowerCase()),
+			`auditor.excludeExtensions must include "pi-subagents"`,
+		).toContain("pi-subagents");
 	});
 });

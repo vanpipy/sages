@@ -13,8 +13,9 @@
  * meta-files under `.pi/orchestrator/`. The prose is allowed to evolve;
  * the invariants are pinned by `test/developer-prompt.test.ts`.
  *
- * Phase B (out of scope here) will migrate the matching `software-auditor`
- * role. This file does NOT touch that surface.
+ * Phase B (DAG-2026-011) — done: the matching `software-auditor` →
+ * `auditor` migration lives in `auditor.ts` and follows the same
+ * playbook. This file does NOT touch that surface.
  */
 
 export const DEVELOPER_PROMPT = `# Developer Agent (canonical built-in)

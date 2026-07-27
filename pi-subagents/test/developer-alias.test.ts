@@ -66,9 +66,17 @@ describe("developer-alias: resolveAgentType", () => {
 
 	it("returns undefined for names that have no canonical match and no alias", () => {
 		expect(resolveAgentType("does-not-exist")).toBeUndefined();
-		// Sanity: 'software-auditor' is NOT in scope for Phase A — Phase B
-		// migrates the auditor. The alias must NOT quietly resolve it.
-		expect(resolveAgentType("software-auditor")).toBeUndefined();
+	});
+
+	it("Phase B: `software-auditor` resolves to the canonical `auditor` via alias", () => {
+		// Symmetric with the `developer` / `software-developer` alias
+		// (Phase A). The legacy spelling is preserved for backwards
+		// compatibility with existing orchestrators and audit consumers.
+		const r = resolveAgentType("software-auditor");
+		expect(r).toBeDefined();
+		expect(r!.canonical).toBe("auditor");
+		expect(r!.alias).toBe(true);
+		expect(r!.deprecated).toBe(true);
 	});
 
 	it("preserves custom-precedence hooks: defaults toggle via setDefaultsDisabled", () => {

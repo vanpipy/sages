@@ -4,8 +4,11 @@ Task Prompt Template: subagent-software-auditor
 Renders into the subagent's task prompt at dispatch time. The agent
 identity (verification discipline, evidence gate, audit report
 template, Final Verdict semantics) lives in
-templates/agents/software-auditor.md and is loaded by pi-subagents as
-the subagent's identity body — DO NOT duplicate it here.
+pi-subagents/src/agent-prompts/auditor.ts (built-in since DAG-2026-011
+Phase B) and is loaded by pi-subagents as the subagent's identity
+body — DO NOT duplicate it here. The filename `subagent-software-auditor`
+is preserved so existing orchestrators and DAG templates that target
+the legacy alias still resolve through the alias metadata.
 
 This template carries ONLY the per-task audit data:
   - task ID + title (which task of the DAG to audit)
