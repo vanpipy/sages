@@ -95,8 +95,16 @@ export function resolveAgentInvocationConfig(
 				| ThinkingLevel
 				| undefined,
 			maxTurns: agentConfig?.maxTurns ?? params.max_turns,
+			// GC-2026-016: inheritContext defaults to true. The audit of 78
+			// historical sessions showed the orchestrator's task prompt
+			// already carries the project context the subagent needs;
+			// defaulting to false made subagents re-derive AGENTS.md /
+			// README.md / CLAUDE.md / package.json for 3–8 turns each spawn.
+			// The DEVELOPER + AUDITOR prompts now treat parent-injected
+			// context as authoritative and only fall back to file reads
+			// when no parent context was injected.
 			inheritContext:
-				agentConfig?.inheritContext ?? params.inherit_context ?? false,
+				agentConfig?.inheritContext ?? params.inherit_context ?? true,
 			runInBackground:
 				agentConfig?.runInBackground ?? params.run_in_background ?? false,
 			isolated: agentConfig?.isolated ?? params.isolated ?? false,
@@ -113,8 +121,10 @@ export function resolveAgentInvocationConfig(
 			| ThinkingLevel
 			| undefined,
 		maxTurns: agentConfig?.maxTurns ?? params.max_turns,
+		// GC-2026-016: inheritContext defaults to true. See the comment on
+		// the agentPinned branch above for the audit rationale.
 		inheritContext:
-			agentConfig?.inheritContext ?? params.inherit_context ?? false,
+			agentConfig?.inheritContext ?? params.inherit_context ?? true,
 		runInBackground:
 			agentConfig?.runInBackground ?? params.run_in_background ?? false,
 		isolated: agentConfig?.isolated ?? params.isolated ?? false,
