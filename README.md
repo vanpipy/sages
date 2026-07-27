@@ -9,14 +9,13 @@ Four-Sages mythology.
 
 ## What's in this repo
 
-Sages is a monorepo of 7 npm packages:
+Sages is a monorepo of 6 npm packages:
 
 | Package | Purpose |
 |---|---|
 | `pi` | Main orchestrator (4-tool pipeline + 2 meta-file tools) |
 | `pi-subagents` | Agent tool (subagent lifecycle, worktrees) |
 | `pi-codebase-memory` | Code knowledge graph (MCP server) |
-| `pi-graphify` | Graph extraction skill |
 | `pi-evaluator` | Eval metrics (cost, security, text quality) |
 | `pi-minimax` | MiniMax AI integration |
 | `pi-yunxiao` | Alibaba Cloud DevOps integration |
@@ -50,7 +49,7 @@ manual: [AGENTS.md](AGENTS.md).
 curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | bash
 
 # Subpackages (each has its own installer)
-./pi-{subagents,codebase-memory,graphify,evaluator,minimax,yunxiao}/scripts/install.sh
+./pi-{subagents,codebase-memory,evaluator,minimax,yunxiao}/scripts/install.sh
 ```
 
 ## Workflow
@@ -72,7 +71,7 @@ For developers and security researchers, see [AGENTS.md](AGENTS.md).
 
 ```bash
 cd pi
-bun install && bun run typecheck && bun test   # 530 tests across 29 files
+bun install && bun run typecheck && bun test   # 528 tests across 29 files
 ```
 
 Commit messages follow [Conventional Commits

@@ -71,8 +71,8 @@ Allowed paths (also enforced by `canMainAgentWrite` via
 |---|---|
 | `.pi/orchestrator/*` | `goal-GC-2026-008.yaml`, `dag-DAG-2026-008.yaml`, `audit-P1.md`, `designs/2026-07-26-foo.md` |
 | `pi/**` | `pi/src/tools/file-gate.ts`, `pi/test/orchestrator.test.ts`, `pi/skills/orchestrator/SKILL.md`, `pi/templates/SYSTEM.md`, `pi/scripts/install.sh` |
-| `pi-*/**` | `pi-subagents/src/default-agents.ts`, `pi-codebase-memory/src/index.ts`, `pi-graphify/templates/*`, `pi-evaluator/src/foo.py`, `pi-minimax/src/index.ts`, `pi-yunxiao/AGENTS.md` |
-| Top-level docs/configs | `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/` |
+| `pi-*/**` | `pi-subagents/src/default-agents.ts`, `pi-codebase-memory/src/index.ts`, `pi-evaluator/src/foo.py`, `pi-minimax/src/index.ts`, `pi-yunxiao/AGENTS.md` |
+| Top-level docs/configs | `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.aft.jsonc`, `.claude/`, `.codex/` |
 
 ### Production code (denied by default — requires `developer` + worktree)
 
@@ -200,17 +200,15 @@ If one of N parallel subagents fails:
 
 ### Tool Backend Warmup (REQUIRED — first thing, in parallel, in one turn)
 
-**MUST run as the very first tool call of the session** — before any other tool call, including `read`, `aft_read`, `aft_search`, `aft_outline`, `ls`, `grep`, `find`, and BEFORE reading `README.md`, `AGENTS.md`, `CLAUDE.md`, or any other project context file. The warmup is the very first tool batch in turn 0 of the session; both calls MUST be **issued in parallel as one tool batch**:
+**MUST run as the very first tool call of the session** — before any other tool call, including `read`, `aft_read`, `aft_search`, `aft_outline`, `ls`, `grep`, `find`, and BEFORE reading `README.md`, `AGENTS.md`, `CLAUDE.md`, or any other project context file. The warmup is the very first tool batch in turn 0 of the session; it MUST be **issued before any other tool call**:
 
 - `codebase_memory_list_projects`
-- `graphify_graph_stats`
 
-Both must go in a single parallel batch within one turn — **never serially, never after a search/read or a context-file read**. Subagents you spawn later share the same MCP server process, so warming once at session start saves every subsequent call (yours AND every subagent's) the ~1–3 s MCP cold-start penalty that the underlying ~270 MB Go binary otherwise pays on first contact.
+The warmup must go in a single parallel batch within one turn — **never serially, never after a search/read or a context-file read**. Subagents you spawn later share the same MCP server process, so warming once at session start saves every subsequent call (yours AND every subagent's) the ~1–3 s MCP cold-start penalty that the underlying ~270 MB Go binary otherwise pays on first contact.
 
 ```
 // turn 0 (warmup is the very first tool batch, before any context load):
 [parallel] codebase_memory_list_projects
-[parallel] graphify_graph_stats
 ```
 
 > **Do not skip this step.** If you call `aft_search` (or any other tool, or read any project context file) before issuing the warmup batch, the cold-start runs anyway on the first MCP call you do make — and the second MCP call later — paying the latency penalty twice. Issuing both warmup calls together in turn 0 collapses both cold-start hits into one round-trip and primes the shared MCP server for every subagent you dispatch afterwards.
@@ -254,7 +252,7 @@ operating in the dispatcher's cwd.
 
 | Subagent | Path scope | Worktree |
 |---|---|---|
-| `general-purpose` (no isolation) | meta-files: `.pi/orchestrator/*` (excluding orchestrator-tool-managed state), `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`, `pi-…/`, `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.graphifyignore`, `.aft.jsonc`, `.claude/`, `.codex/` | **no** (operates in dispatcher's cwd, lightweight) |
+| `general-purpose` (no isolation) | meta-files: `.pi/orchestrator/*` (excluding orchestrator-tool-managed state), `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`, `pi-…/`, `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.aft.jsonc`, `.claude/`, `.codex/` | **no** (operates in dispatcher's cwd, lightweight) |
 | `developer` (managed worktree) | any path (TDD discipline applies) | **yes** (`isolation: { dag_id, task_id, worktree_id?, mode: "create" \| "reuse" }`) |
 | 4 orchestrator tools (built-in) | only `.pi/orchestrator/*` (goal/dag/audit files) | n/a (they're the orchestrator's own state writes) |
 
@@ -310,7 +308,7 @@ as single source of truth.
 | Find symbol by name | `codebase_search`, `codebase_refs` |
 | Cross-file within 1 package | `aft_search` (text) or `codebase_refs` (symbol) |
 | Cross-package / blast radius | `codebase_memory_trace_path`, `codebase_memory_get_architecture` |
-| Concept / semantic | `graphify_query`, `codebase_memory_search_graph` (semantic_query) |
+| Concept / semantic | `codebase_memory_search_graph` (semantic_query) |
 | Hotspot / complexity | `codebase_memory_query_graph` (complexity props) |
 | Past session / parked decision | `ctx_search`, `ctx_expand`, `ctx_note` |
 | Process-enforced multi-task | `goal_contract_create` → `dag_synthesize` → `task_dispatch` → `orchestrator_audit` |

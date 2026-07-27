@@ -92,7 +92,7 @@ SUBAGENTS_CONFIG_TARGET="$AGENT_DIR/subagents.json"
 # pi-codebase-memory sage-peer (local package, installed by file-copy not `pi install npm:`)
 PI_CODEBASE_MEMORY_SRC_REL="pi-codebase-memory"
 PI_CODEBASE_MEMORY_DEST_DIR="$PI_DIR/packages/pi-codebase-memory"
-# Package identifier used everywhere (registered in settings.json like pi-graphify).
+# Package identifier used everywhere (registered in settings.json).
 # Test contract: must be the dest-dir absolute path, NOT a `npm:` identifier.
 PI_CODEBASE_MEMORY_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"
 
@@ -101,19 +101,10 @@ CBM_REPO="DeusData/codebase-memory-mcp"
 CBM_INSTALL_DIR="$HOME/.local/bin"
 CBM_BINARY_PATH="$CBM_INSTALL_DIR/codebase-memory-mcp"
 
-# pi-graphify package info (sage peer for graphify MCP integration)
-PI_GRAPHIFY_SRC_REL="pi-graphify"
-PI_GRAPHIFY_DEST_DIR="$PI_DIR/packages/pi-graphify"
-PI_GRAPHIFY_PKG="$PI_GRAPHIFY_DEST_DIR"
-
-# pi-subagents package info (sage peer, deployed by file-copy like pi-graphify)
+# pi-subagents package info (sage peer, deployed by file-copy)
 PI_SUBAGENTS_SRC_REL="pi-subagents"
 PI_SUBAGENTS_DEST_DIR="$PI_DIR/packages/pi-subagents"
 PI_SUBAGENTS_PKG="$PI_SUBAGENTS_DEST_DIR"
-
-# graphify CLI install info
-GRAPHIFY_BIN_PATH="$HOME/.local/bin/graphify"
-
 
 # Cleanup trap
 TMP_DIR=""
@@ -209,7 +200,7 @@ install_pi_codebase_memory() {
     (cd "$PI_CODEBASE_MEMORY_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
   fi
 
-  # Register local-peer package in settings.json (matches pi-graphify pattern).
+  # Register local-peer package in settings.json (matches the local-peer pattern).
   # Idempotent: skips if already present.
   local settings="$PI_DIR/agent/settings.json"
   mkdir -p "$(dirname "$settings")"
@@ -343,155 +334,6 @@ uninstall_codebase_memory_mcp_binary() {
   fi
   rm -f "$CBM_BINARY_PATH"
   echo "  Removed $CBM_BINARY_PATH"
-}
-
-# ────────────────────────────────────────────────────────────
-# Sage peer for graphify MCP integration (file copy + mcp.json merge + uv tool install)
-# ────────────────────────────────────────────────────────────
-
-is_pi_graphify_installed() {
-  local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && return 1
-  python3 -c "
-import json, sys
-try:
-    d = json.load(open('$settings'))
-    pkgs = d.get('packages', [])
-    if any(p == '$PI_GRAPHIFY_PKG' or p.endswith('/pi-graphify') for p in pkgs):
-        sys.exit(0)
-    sys.exit(1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null
-}
-
-install_pi_graphify_files() {
-  local src_root="$TMP_DIR/$PI_GRAPHIFY_SRC_REL"
-  [[ ! -d "$src_root" ]] && {
-    echo "  Warning: $src_root not found in clone, skipping pi-graphify files"
-    return 0
-  }
-  if [[ -d "$PI_GRAPHIFY_DEST_DIR" && "${FORCE:-false}" != true ]]; then
-    echo "  Skipping pi-graphify files (exists, use --force)"
-  else
-    rm -rf "$PI_GRAPHIFY_DEST_DIR"
-    mkdir -p "$PI_DIR/packages"
-    cp -r "$src_root" "$PI_GRAPHIFY_DEST_DIR"
-    echo "  Installed pi-graphify files to $PI_GRAPHIFY_DEST_DIR"
-  fi
-  if [[ -f "$PI_GRAPHIFY_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
-    (cd "$PI_GRAPHIFY_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
-  fi
-}
-
-write_graphify_mcp_config() {
-  local template=""
-  if [[ -f "$PI_GRAPHIFY_DEST_DIR/templates/mcp.json" ]]; then
-    template="$PI_GRAPHIFY_DEST_DIR/templates/mcp.json"
-  elif [[ -f "$TMP_DIR/$PI_GRAPHIFY_SRC_REL/templates/mcp.json" ]]; then
-    template="$TMP_DIR/$PI_GRAPHIFY_SRC_REL/templates/mcp.json"
-  fi
-  [[ -z "$template" ]] && { echo "  Warning: graphify mcp.json template not found"; return 0; }
-
-  # Substitute __PI_GRAPHIFY_START_MCP__ placeholder with absolute path
-  local resolved_template
-  resolved_template=$(mktemp)
-  sed "s|__PI_GRAPHIFY_START_MCP__|$PI_GRAPHIFY_DEST_DIR/templates/start-mcp.sh|g" "$template" > "$resolved_template"
-
-  # NEVER-TOUCH policy: see the relevant install_* function for rationale.
-  if [[ -f "$PI_DIR/agent/mcp.json" ]]; then
-    echo "  Skipped mcp.json (already exists, user-customized — preserved as-is)"
-    rm -f "$resolved_template"
-    return 0
-  fi
-
-  mkdir -p "$PI_DIR/agent"
-  cp "$resolved_template" "$PI_DIR/agent/mcp.json"
-  echo "  Wrote $PI_DIR/agent/mcp.json from template"
-  rm -f "$resolved_template"
-}
-
-install_graphify_binary() {
-  echo "==> Installing graphify CLI (with [mcp] extra)..."
-
-  # v0.8.33+: [mcp] extra is verified by checking if `graphify.serve` module is importable
-  # (not via `graphify --help | grep --mcp` anymore — that flag is gone in v0.8.33).
-  _graphify_mcp_ready() {
-    uv run --with graphifyy --with mcp python -c "from graphify.serve import serve; print('ok')" 2>/dev/null | grep -q "ok"
-  }
-
-  if [[ -x "$GRAPHIFY_BIN_PATH" ]] && _graphify_mcp_ready; then
-    echo "  graphify already installed with [mcp] extra at $GRAPHIFY_BIN_PATH"
-    return 0
-  fi
-  if ! command -v uv &>/dev/null; then
-    echo "  Error: uv required (curl -LsSf https://astral.sh/uv/install.sh | sh)"
-    return 1
-  fi
-
-  # If binary exists but [mcp] extra is missing, plain `uv tool install graphifyy[mcp]`
-  # is a metadata no-op — uv doesn't reinstall to pull in new extras. Force --reinstall
-  # so the extra dependencies are actually fetched.
-  local reinstall_flag=""
-  if [[ -x "$GRAPHIFY_BIN_PATH" ]]; then
-    reinstall_flag="--reinstall"
-    echo "  Reinstalling graphify with [mcp] extra (binary exists without [mcp])..."
-  else
-    echo "  Installing via 'uv tool install graphifyy[mcp]'..."
-  fi
-  if uv tool install $reinstall_flag "graphifyy[mcp]" 2>&1 | tail -3; then
-    echo "  Installed graphify at $GRAPHIFY_BIN_PATH"
-  else
-    echo "  uv tool install failed"
-    return 1
-  fi
-  if ! _graphify_mcp_ready; then
-    echo "  Warning: [mcp] extra still missing. Try: uv tool install --reinstall 'graphifyy[mcp]'"
-    return 1
-  fi
-}
-
-install_pi_graphify() {
-  echo "==> Installing pi-graphify..."
-  if is_pi_graphify_installed && [[ "${FORCE:-false}" != true ]]; then
-    echo "  pi-graphify already installed (use --force to reinstall)"
-    write_graphify_mcp_config
-    return 0
-  fi
-  if ! install_pi_graphify_files; then
-    echo "  Error: install_pi_graphify_files failed, aborting"
-    return 1
-  fi
-  if is_pi_graphify_installed; then
-    echo "  pi-graphify already registered in settings.json"
-  else
-    local settings="$PI_DIR/agent/settings.json"
-    mkdir -p "$(dirname "$settings")"
-    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
-    python3 -c "
-import json
-f, pkg = '$settings', '$PI_GRAPHIFY_PKG'
-try: d = json.load(open(f))
-except: d = {'packages': []}
-if pkg not in d.get('packages', []):
-    d['packages'] = d.get('packages', []) + [pkg]
-    json.dump(d, open(f, 'w'), indent=2)
-    print('  Registered', pkg)
-"
-  fi
-  write_graphify_mcp_config
-
-  # Remove user-level graphify skill if present (v0.3.0: package owns canonical skill).
-  # pi skill priority rules give user-level skills precedence, so without this removal,
-  # the package's bundled skills/graphify/SKILL.md is silently skipped and a collision warning
-  # appears at startup.
-  local user_skill="$PI_DIR/agent/skills/graphify"
-  if [[ -d "$user_skill" ]]; then
-    rm -rf "$user_skill"
-    echo "  Removed user-level skill $user_skill (now owned by pi-graphify package)"
-  fi
-
-  echo "  pi-graphify installed"
 }
 
 install_system_prompt() {
@@ -985,7 +827,7 @@ install_sages_files() {
 # but `cp -r` then copied those symlinks into $PI_DIR/packages/, where the same
 # relative path resolves to a non-existent `~/.pi/packages/pi/node_modules`.
 setup_peer_node_modules_symlinks() {
-  for peer in pi-graphify pi-codebase-memory pi-subagents; do
+  for peer in pi-codebase-memory pi-subagents; do
     local peer_dir="$PI_DIR/packages/$peer"
     [[ ! -d "$peer_dir" ]] && continue
     if [[ -L "$peer_dir/node_modules" || -e "$peer_dir/node_modules" ]]; then
@@ -1005,7 +847,7 @@ setup_peer_node_modules_symlinks() {
 # Source of truth: the local fork at ./pi-subagents/ (a sibling of
 # ./pi/ in this sages monorepo). At runtime pi loads it from
 # $PI_DIR/packages/pi-subagents, which install.sh deploys by file-copy
-# during the default install path (mirror of the pi-graphify flow).
+# during the default install path (mirror of the local-peer flow).
 #
 # The npm upstream (npm:@tintinweb/pi-subagents) is intentionally NOT
 # installed because it would conflict with the local fork by
@@ -1220,7 +1062,7 @@ install_pi_magic_context() {
       npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_MAGIC_CONTEXT_PKG" 2>&1 | tail -3) || {
       echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_MAGIC_CONTEXT_PKG' manually"
     }
-    # Register in settings.json (matches pi-graphify pattern).
+    # Register in settings.json (matches the local-peer pattern).
     local settings="$PI_DIR/agent/settings.json"
     mkdir -p "$(dirname "$settings")"
     [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
@@ -1314,14 +1156,6 @@ install() {
     echo "  Note: codebase-memory-mcp binary install failed."
     echo "  Sage will work without it; MCP graph tools unavailable until manually installed."
     echo "  To retry: bash <(curl -fsSL https://raw.githubusercontent.com/${CBM_REPO}/main/install.sh)"
-  }
-
-  # Install pi-graphify (sage peer for graphify MCP integration)
-  install_pi_graphify || true
-
-  # Install graphify CLI with [mcp] extra
-  install_graphify_binary || {
-    echo "  Note: graphify CLI install failed. To retry: uv tool install 'graphifyy[mcp]'"
   }
 
   # Install pi-subagents (sage peer, file-copy from ./pi-subagents/ in the clone).

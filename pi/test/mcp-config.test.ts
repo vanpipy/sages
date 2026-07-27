@@ -4,9 +4,9 @@
  * Per the user's MCP lifecycle requirement (still applicable):
  *   - AFT bridge: long-lived per session; lifecycle via aft-pi extension
  *   - codebase-memory: eager + idleTimeout: 0
- *   - graphify: lazy + idleTimeout: 10
  *
  * AFT does NOT ship a templates/mcp.json — its setup command handles config.
+ * graphify was removed; its template no longer exists.
  *
  * These tests verify the templates that DO exist.
  */
@@ -42,24 +42,12 @@ describe("MCP server lifecycle config (templates)", () => {
 		expect(cfg.mcpServers["codebase-memory-mcp"].idleTimeout).toBe(0);
 	});
 
-	it("pi-graphify/templates/mcp.json keeps graphify as lazy + idleTimeout 10 (by design)", () => {
-		const cfg = loadMcpTemplate("pi-graphify/templates/mcp.json");
-		expect(cfg.mcpServers.graphify).toBeDefined();
-		expect(cfg.mcpServers.graphify.lifecycle).toBe("lazy");
-		expect(cfg.mcpServers.graphify.idleTimeout).toBe(10);
-	});
-
 	it("lazy/eager servers with idleTimeout have sane value (>= 0)", () => {
-		for (const rel of [
-			"pi-codebase-memory/templates/mcp.json",
-			"pi-graphify/templates/mcp.json",
-		]) {
-			const cfg = loadMcpTemplate(rel);
-			for (const [, server] of Object.entries(cfg.mcpServers)) {
-				const srv = server as any;
-				expect(typeof srv.idleTimeout).toBe("number");
-				expect(srv.idleTimeout).toBeGreaterThanOrEqual(0);
-			}
+		const cfg = loadMcpTemplate("pi-codebase-memory/templates/mcp.json");
+		for (const [, server] of Object.entries(cfg.mcpServers)) {
+			const srv = server as any;
+			expect(typeof srv.idleTimeout).toBe("number");
+			expect(srv.idleTimeout).toBeGreaterThanOrEqual(0);
 		}
 	});
 });

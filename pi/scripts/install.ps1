@@ -5,7 +5,7 @@
 #
 # Also installs magic-context config + subagent templates +
 # the 4-agent subagent pipeline doc. Does NOT install npm-based peers
-# (pi-magic-context, pi-subagents, pi-codebase-memory, pi-graphify)
+# (pi-magic-context, pi-subagents, pi-codebase-memory)
 # — those have Linux-specific deps (uv, onnxruntime) and require pi CLI;
 # install them with `pi install npm:@...` after this script completes.
 #
@@ -292,7 +292,7 @@ function unregister_settings {
 
 function install {
     Write-Host "==> Installing sages + subagent templates + subagents doc + SYSTEM.md..."
-    Write-Host "    (npm peers: pi-magic-context, pi-subagents, pi-codebase-memory, pi-graphify" -NoNewline
+    Write-Host "    (npm peers: pi-magic-context, pi-subagents, pi-codebase-memory" -NoNewline
     Write-Host " — install those with 'pi install npm:...' after this script)"
 
     # Pre-flight checks

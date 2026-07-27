@@ -45,7 +45,6 @@ Peer extensions in the same monorepo (each has its own `pi/`
 package, see their own `README.md`):
 
 - `pi-codebase-memory/` — tree-sitter AST indexing + 15 MCP tools
-- `pi-graphify/` — knowledge graph generator + MCP server
 - `pi-magic-context/` — cross-session memory (`ctx_search` / `ctx_note`)
 - `pi-aft/` — AFT-backed file ops (`aft_search` / `aft_read` / `aft_edit`)
 
@@ -72,7 +71,7 @@ The installer:
    mode: "create" | "reuse" }`.
 3. Installs peer extension npm packages
    (`@tintinweb/pi-subagents`, `@cortexkit/aft-pi`, etc.).
-4. Configures AFT and graphify for the host project.
+4. Configures AFT for the host project.
 
 The shell installer suite at `pi/test/install.test.sh` exercises all
 of the above idempotently.
@@ -109,8 +108,6 @@ relative paths in `pi/src/`.
 The `.sages/workspace/` directory is intentionally kept as an **empty
 marker**. It is read (not written) by:
 
-- `pi-graphify/templates/start-mcp.sh:33,43` — to detect the sage
-  root and pick the correct `graphify-out/` location.
 - `pi-codebase-memory/src/index.ts:32` — `isSageWorkspace` heuristic
   to decide whether the codebase indexer should run.
 

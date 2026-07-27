@@ -128,7 +128,7 @@ When dispatching via the `Agent` tool, pick the right subagent type:
 
 The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. Always pass the object form.
 
-> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / graphify / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block.
+> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block.
 
 ### Parallelism
 
@@ -270,7 +270,6 @@ TDD discipline) was duplicated 80% between `orchestrator_audit` and
 - `aft_search`, `aft_zoom`, `aft_outline`, `aft_read` — code understanding
 - `ctx_search` — query Magic Context for past experiences
 - `codebase_search`, `codebase_refs` — symbol lookup
-- `graphify_query`, `graphify_god_nodes` — concept graphs
 
 **Orchestrator (always allowed)**:
 - `goal_contract_create`

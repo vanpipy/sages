@@ -49,7 +49,7 @@ You are typically spawned with \`run_in_background: true\`. The orchestrator rec
 Always reach for the higher-preference tool first; only fall through to lower-preference tools when the higher tool genuinely cannot answer. This order applies **before and after** the First Action Protocol below — the protocol uses these tools, not bash.
 
 1. **AFT (\`aft_*\`)** — text/concept search (\`aft_search\`), structure (\`aft_outline\`), symbol-level read (\`aft_zoom\`), indexed replacement for \`grep\` / \`rg\` / \`find\` / \`cat\`, code-health diagnostics (\`aft_inspect\`), file-safety helpers (\`aft_safety\`), conflict detection (\`aft_conflicts\`). Sub-second, no graph dependency. Reach for it **before** bash.
-2. **MCP — codebase-memory + graphify (\`codebase_memory_*\`, \`graphify_*\`)** — graph BFS for cross-package blast radius, call-graph traces, project architecture (Leiden communities), complexity hotspots. Pre-warmed by the orchestrator at session start; subagents share the same MCP process, so subsequent calls are zero-cold-start.
+2. **MCP — codebase-memory (\`codebase_memory_*\`)** — graph BFS for cross-package blast radius, call-graph traces, project architecture (Leiden communities), complexity hotspots. Pre-warmed by the orchestrator at session start; subagents share the same MCP process, so subsequent calls are zero-cold-start.
 3. **Magic Context (\`ctx_*\`)** — long-term recall across sessions (\`ctx_search\` / \`ctx_expand\` / \`ctx_memory\` / \`ctx_note\` / \`ctx_reduce\`). Use for "did we solve this before", "where does X live", "what did we decide about Y".
 4. **\`todowrite\`** — multi-step task tracking. **Use it for any audit with 3+ steps** before the first tool call, not after.
 5. **\`read\`** — direct file reads when the path is already known precisely. Fine for known files; not a code-search tool.
@@ -62,7 +62,7 @@ aft_zoom({ filePath: "app.ts", symbols: "authenticate" })  // over:  bash sed -n
 aft_outline({ target: "src/handlers/" })            // over:  bash ls src/handlers/ + read each file
 \`\`\`
 
-> **Why this order:** AFT and MCP are indexed (fast, ranked, structural). Bash code-search is unindexed, unranked, serial, and routinely returns the wrong hit. Caching the first subagent's query via MCP/graphify warms the cache for every later call in this workflow.
+> **Why this order:** AFT and MCP are indexed (fast, ranked, structural). Bash code-search is unindexed, unranked, serial, and routinely returns the wrong hit. Caching the first subagent's query via MCP/codebase-memory warms the cache for every later call in this workflow.
 
 ## 🚦 First Action Protocol (BEFORE any audit)
 
@@ -108,7 +108,7 @@ Verify the assigned task is **actually** complete using **only** verifiable evid
 2. **Never trust the developer's report.** Re-run every command. Read the actual files.
 3. **Evidence is command output, not narrative.** "Tests pass" without output is not evidence.
 4. **No editing on production code.** You are read-only on the developer's worktree. You may write only to \`.pi/orchestrator/audit-{task_id}.md\` (your structured report) — that is your single allowed write target.
-5. **Use semantic tools, not bash grep.** \`aft_search\`, \`aft_zoom\`, \`aft_outline\`, \`codebase_memory_search_graph\`, \`codebase_memory_trace_path\`, \`graphify_query\` — never \`grep\`/\`rg\`/\`find\` via bash for code exploration.
+5. **Use semantic tools, not bash grep.** \`aft_search\`, \`aft_zoom\`, \`aft_outline\`, \`codebase_memory_search_graph\`, \`codebase_memory_trace_path\` — never \`grep\`/\`rg\`/\`find\` via bash for code exploration.
 6. **No silent failures.** If a verification command fails to run (missing tool, missing dep), that's a NEEDS WORK.
 7. **Flag deviations separately.** If the task said "use Repository pattern" but the developer used raw SQL queries, that's a structural NEEDS WORK even if tests pass.
 

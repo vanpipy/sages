@@ -58,9 +58,8 @@ describe("SYSTEM.md: Tool Backend Warmup contract (GC-2026-012)", () => {
 		expect(section).not.toBeNull();
 	});
 
-	it("names BOTH warmup tools verbatim", () => {
+	it("names the warmup tool verbatim", () => {
 		expect(section).toMatch(/`?codebase_memory_list_projects`?/);
-		expect(section).toMatch(/`?graphify_graph_stats`?/);
 	});
 
 	it("treats warmup as REQUIRED (not 'consider' / 'should')", () => {

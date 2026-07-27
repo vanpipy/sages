@@ -51,7 +51,6 @@ describe("canMainAgentWrite", () => {
 			"package.json",
 			"tsconfig.json",
 			".gitignore",
-			".graphifyignore",
 			".aft.jsonc",
 			".aft.json",
 			// Sibling subpackages (Sages monorepo)
@@ -59,7 +58,6 @@ describe("canMainAgentWrite", () => {
 			"pi-subagents/src/agent-prompts/developer.ts",
 			"pi-subagents/package.json",
 			"pi-codebase-memory/src/index.ts",
-			"pi-graphify/src/index.ts",
 			"pi-evaluator/src/evaluator.py",
 			"pi-minimax/src/index.ts",
 			"pi-yunxiao/src/index.ts",

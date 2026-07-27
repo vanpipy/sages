@@ -20,7 +20,7 @@
  * the LLM-facing tool surface no longer exposes any direct write — the
  * bash-guard is the only remaining limb-side enforcement.
  *
- * Read tools (`read`, `aft_read`, `aft_search`, `codebase_*`, `graphify_*`,
+ * Read tools (`read`, `aft_read`, `aft_search`, `codebase_*`,
  * `bash` for read-only commands) are intentionally NOT gated — the
  * main agent still needs to read user code to understand context.
  *
@@ -46,7 +46,6 @@ const META_WRITE_PATTERNS: RegExp[] = [
 	/^package\.json$/,
 	/^tsconfig(\..+)?\.json$/,
 	/^\.gitignore$/,
-	/^\.graphifyignore$/,
 	/^\.aft\.jsonc?$/,
 	/^\.claude\//,
 	/^\.codex\//,
@@ -124,9 +123,9 @@ export function policyMessage(path: string): string {
 		`Allowed paths for \`general-purpose\` subagent (no isolation):`,
 		`  - .pi/orchestrator/*  (goal/dag/audit/state/designs)`,
 		`  - pi/src/, pi/test/, pi/skills/, pi/templates/, pi/scripts/`,
-		`  - pi-*/  (sibling subpackages: pi-subagents, pi-codebase-memory, pi-graphify, pi-evaluator, pi-minimax, pi-yunxiao)`,
+		`  - pi-*/  (sibling subpackages: pi-subagents, pi-codebase-memory, pi-evaluator, pi-minimax, pi-yunxiao)`,
 		`  - README.md, AGENTS.md, package.json, tsconfig.json`,
-		`  - .gitignore, .graphifyignore, .aft.jsonc`,
+		`  - .gitignore, .aft.jsonc`,
 		`  - .claude/, .codex/`,
 		``,
 		`All other paths (production code, user source) require the`,

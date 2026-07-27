@@ -5,7 +5,7 @@ REM Installs to %USERPROFILE%\.pi\packages\sages
 REM
 REM Also installs subagent templates + the 4-agent subagent pipeline doc.
 REM Does NOT install npm-based peers (pi-magic-context, pi-subagents,
-REM pi-codebase-memory, pi-graphify) — those have Linux-specific deps
+REM pi-codebase-memory) — those have Linux-specific deps
 REM (uv, onnxruntime) and require pi CLI; install them with
 REM `pi install npm:@...` after this script completes.
 REM
@@ -74,7 +74,7 @@ if defined SYSTEM_ONLY goto :system_only
 REM ──────────── DEFAULT INSTALL ────────────
 
 echo ==^> Installing sages + subagent templates + subagents doc + SYSTEM.md...
-echo     (npm peers: pi-magic-context, pi-subagents, pi-codebase-memory, pi-graphify
+echo     (npm peers: pi-magic-context, pi-subagents, pi-codebase-memory
 echo      install those with 'pi install npm:...' after this script)
 
 REM Pre-flight checks

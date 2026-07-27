@@ -44,7 +44,7 @@ export const ERROR_STATUSES = new Set([
  *   1. pi-coding-agent built-ins (`read`, `bash`, `edit`, `write`, `grep`,
  *      `find`, `ls`) — these come from the host pi runtime.
  *   2. Sages-extension tools: AFT (text/concept code search), codebase-memory
- *      MCP (graph-based code intel), graphify MCP (semantic graph query),
+ *      MCP (graph-based code intel),
  *      Magic Context (long-term recall + todos), the Sages orchestrator's
  *      4 DAG-stage tools, and the Agent tool family registered by this
  *      extension. Names are the actual values the model sees on the wire
@@ -90,16 +90,6 @@ const TOOL_DISPLAY: Record<string, string> = {
 	codebase_memory_get_architecture: "checking architecture",
 	codebase_memory_manage_adr: "managing ADR",
 	codebase_memory_ingest_traces: "ingesting traces",
-
-	// ── graphify MCP (semantic graph query) ──────────────────
-	// Server `graphify` → prefix `graphify`.
-	graphify_query: "querying graph",
-	graphify_shortest_path: "finding path",
-	graphify_get_node: "reading node",
-	graphify_get_neighbors: "traversing neighbors",
-	graphify_get_community: "reading community",
-	graphify_god_nodes: "finding central nodes",
-	graphify_graph_stats: "checking graph",
 
 	// ── Magic Context (long-term recall + todos, @cortexkit/pi-magic-context) ──
 	ctx_search: "searching memory",
