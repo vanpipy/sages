@@ -25,9 +25,16 @@ describe("shouldBlockBashCommand — 15 design cases", () => {
 		expect(r.reason).toContain("src/auth/service.ts");
 	});
 
-	it("T2: rm -rf /tmp/foo → block:false (/tmp not denied)", () => {
+	it("T2: rm -rf /tmp/foo → block:true (destructives are always denied, regardless of target)", () => {
+		// Restored in GC-2026-015 follow-up: rm/mv/cp/unlink/rmdir
+		// are always denied. Even on /tmp (which is otherwise
+		// allowed), `rm` triggers the destructive short-circuit.
+		// The /tmp-not-denied carve-out is preserved for
+		// non-destructive write-intents (see T4 below) and for
+		// dangerous-only-not-destructive paths via tar/tee/etc.
 		const r = shouldBlockBashCommand("rm -rf /tmp/foo", CTX);
-		expect(r.block).toBe(false);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
 	});
 
 	it("T3: cat src/foo.ts → block:false (read-only)", () => {
@@ -52,10 +59,13 @@ describe("shouldBlockBashCommand — 15 design cases", () => {
 		expect(r.reason).toContain("src/foo.ts");
 	});
 
-	it("T7: mv /tmp/x.ts src/foo.ts → block:true (dst denied)", () => {
+	it("T7: mv /tmp/x.ts src/foo.ts → block:true (destructive — dst argument is now subsumed)", () => {
+		// `mv` is a destructive first-word and is ALWAYS denied
+		// (GC-2026-015 follow-up). The deny's reason is the
+		// destructive prefix rather than the dst path.
 		const r = shouldBlockBashCommand("mv /tmp/x.ts src/foo.ts", CTX);
 		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.reason).toContain("destructive:");
 	});
 
 	it("T8: git checkout -- src/foo.ts → block:true", () => {
@@ -141,10 +151,14 @@ describe("shouldBlockBashCommand — chained commands (T16–T22)", () => {
 		expect(r.block).toBe(false);
 	});
 
-	it("T19: `rm /tmp/foo && rm src/foo.ts` → block (one segment targets denied path)", () => {
+	it("T19: `rm /tmp/foo && rm src/foo.ts` → block (destructive segment short-circuits)", () => {
+		// Restored invariant (GC-2026-015 follow-up): `rm` always
+		// blocks regardless of target. The first segment's
+		// destructive preview appears in the reason; the second
+		// segment is not evaluated.
 		const r = shouldBlockBashCommand("rm /tmp/foo && rm src/foo.ts", CTX);
 		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.reason).toContain("destructive:");
 	});
 
 	it("T20: `rm src/foo.ts || echo failed` → block (write intent in first segment of ||)", () => {
@@ -433,8 +447,11 @@ describe("GC-2026-015 four-layer bash guard", () => {
 
 
 describe("shouldBlockBashCommand — reason format", () => {
-	it("includes the production-code targets in the reason", () => {
-		const r = shouldBlockBashCommand("rm src/auth/service.ts", CTX);
+	it("includes the production-code targets in the reason (non-destructive write-intent to production)", () => {
+		// Use a non-destructive write-intent so the L4
+		// production-target path surfaces (the destructive
+		// short-circuit would otherwise fire first on `rm`).
+		const r = shouldBlockBashCommand("echo x > src/auth/service.ts", CTX);
 		expect(r.reason).toContain("bash command targets production code:");
 		expect(r.reason).toContain("src/auth/service.ts");
 	});
@@ -446,3 +463,162 @@ describe("shouldBlockBashCommand — reason format", () => {
 	});
 
 });
+
+/**
+ * GC-2026-015 follow-up — two regressions introduced by the four-layer
+ * bash-guard refactor (698e65c) need fixing:
+ *
+ *   1. rm/mv/cp/unlink/rmdir on meta-file paths were accidentally
+ *      allowed. The L3 canMainAgentWriteMeta allowlist (`rm .pi/orchestrator/x.md`
+ *      → both canMainAgentWrite AND canMainAgentWriteMeta true →
+ *      isProductionTarget false → L3 lets it through) violated the
+ *      anti-goal "destructives stay denied regardless of which layer".
+ *
+ *   2. extractBashTargets for `rm` over-matched on chain operators:
+ *      `rm pi/src/foo.ts 2>&1 | head -5` extracted `2>&1`, `|`, `head`
+ *      as targets. Fix: stop at the first shell operator.
+ */
+describe("GC-2026-015 follow-up — destructive deny", () => {
+	it("T-D-01: `rm .pi/orchestrator/test.md` → DENY (anti-goal regression on L3 meta-file path)", () => {
+		const r = shouldBlockBashCommand("rm .pi/orchestrator/test.md", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+		// Must NOT be the L3 allow response (no "bash command targets production" reason).
+		expect(r.reason).toContain(".pi/orchestrator/test.md");
+	});
+
+	it("T-D-02: `rm AGENTS.md` → DENY", () => {
+		const r = shouldBlockBashCommand("rm AGENTS.md", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+	});
+
+	it("T-D-03: `mv pi/templates/foo.md pi/templates/bar.md` → DENY", () => {
+		const r = shouldBlockBashCommand("mv pi/templates/foo.md pi/templates/bar.md", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+	});
+
+	it("T-D-04: `cp pi/skills/foo.md pi/skills/bar.md` → DENY", () => {
+		const r = shouldBlockBashCommand("cp pi/skills/foo.md pi/skills/bar.md", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+	});
+
+	it("T-D-05: `rm -rf .pi/orchestrator` → DENY", () => {
+		const r = shouldBlockBashCommand("rm -rf .pi/orchestrator", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+	});
+
+	it("T-D-06: `rm --force .pi/orchestrator/anything.md` → DENY", () => {
+		const r = shouldBlockBashCommand("rm --force .pi/orchestrator/anything.md", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+	});
+
+	it("T-D-07: `unlink .pi/orchestrator/foo.md` → DENY", () => {
+		const r = shouldBlockBashCommand("unlink .pi/orchestrator/foo.md", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+	});
+
+	it("T-D-08: `rmdir .pi/orchestrator/subdir` → DENY", () => {
+		const r = shouldBlockBashCommand("rmdir .pi/orchestrator/subdir", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+	});
+
+	it("T-D-09: `mkdir -p .pi/orchestrator/new-dir` → ALLOW (mkdir is not a destructive first-word)", () => {
+		// Regression guard: the destructive short-circuit must NOT
+		// over-block mkdir / tee / sed / perl etc. L3 meta-file
+		// allowlist must continue to apply to non-destructive
+		// write-intent commands.
+		const r = shouldBlockBashCommand("mkdir -p .pi/orchestrator/new-dir", CTX);
+		expect(r.block).toBe(false);
+	});
+
+	it("T-D-10: `tee .pi/orchestrator/foo.md < /dev/null` → ALLOW (tee is not destructive)", () => {
+		// Regression guard: tee is in WRITE_INTENT_FIRST_WORDS but is
+		// not in DESTRUCTIVE_FIRST_WORDS — meta-file tee writes remain
+		// L3-allowed.
+		const r = shouldBlockBashCommand("tee .pi/orchestrator/foo.md < /dev/null", CTX);
+		expect(r.block).toBe(false);
+	});
+
+	it("T-D-11: `echo done && rm .pi/orchestrator/foo.md` → DENY (destructive segment wins past read-only echo)", () => {
+		const r = shouldBlockBashCommand("echo done && rm .pi/orchestrator/foo.md", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+	});
+});
+
+describe("GC-2026-015 follow-up — chain-parser correctness", () => {
+	it("T-CP-01: extractBashTargets(`rm pi/src/test.ts 2>&1 | head -5`) → only [pi/src/test.ts]", () => {
+		const t = extractBashTargets("rm pi/src/test.ts 2>&1 | head -5");
+		expect(t).toEqual(["pi/src/test.ts"]);
+	});
+
+	it("T-CP-01b: shouldBlockBashCommand(`rm pi/src/test.ts 2>&1 | head -5`) → DENY (destructive short-circuit)", () => {
+		// End-to-end: the destructive short-circuit must block this
+		// command (the chain parser splits segments, but the rm
+		// segment fires destructive before extractBashTargets runs).
+		const r = shouldBlockBashCommand("rm pi/src/test.ts 2>&1 | head -5", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("destructive:");
+	});
+
+	it("T-CP-02: extractBashTargets(`mv src/foo.ts src/bar.ts && echo done`) → [src/foo.ts, src/bar.ts]", () => {
+		const t = extractBashTargets("mv src/foo.ts src/bar.ts && echo done");
+		expect(t).toEqual(["src/foo.ts", "src/bar.ts"]);
+	});
+
+	it("T-CP-03: extractBashTargets(`cat > .pi/orchestrator/test.md <<EOF\\nfoo\\nEOF`) → [.pi/orchestrator/test.md]", () => {
+		// L3 meta-file allow path: the `cat >` redirect is captured by
+		// the global redirect extractor; heredoc EOF marker must NOT
+		// be a target.
+		const t = extractBashTargets("cat > .pi/orchestrator/test.md <<EOF\nfoo\nEOF");
+		expect(t).toEqual([".pi/orchestrator/test.md"]);
+	});
+
+	it("T-CP-03b: shouldBlockBashCommand(...) ALLOW (L3 redirect still allowed)", () => {
+		const r = shouldBlockBashCommand(
+			"cat > .pi/orchestrator/test.md <<EOF\nfoo\nEOF",
+			CTX,
+		);
+		expect(r.block).toBe(false);
+	});
+
+	it("T-CP-04: extractBashTargets(`sed -i 's/foo/bar/' pi/src/index.ts`) → [pi/src/index.ts] only", () => {
+		const t = extractBashTargets("sed -i 's/foo/bar/' pi/src/index.ts");
+		expect(t).toEqual(["pi/src/index.ts"]);
+	});
+
+	it("T-CP-04b: shouldBlockBashCommand(...) → DENY (L4 production-code)", () => {
+		const r = shouldBlockBashCommand("sed -i 's/foo/bar/' pi/src/index.ts", CTX);
+		expect(r.block).toBe(true);
+		expect(r.reason).toContain("pi/src/index.ts");
+	});
+
+	it("T-CP-05: extractBashTargets(`rm -rf /tmp/foo`) → [/tmp/foo] (operator stop doesn't affect /tmp case)", () => {
+		// Regression guard: the operator-stop fix must NOT over-eagerly
+		// strip legitimate non-flag args. /tmp/foo has no operator in
+		// the slice(1) range.
+		const t = extractBashTargets("rm -rf /tmp/foo");
+		expect(t).toEqual(["/tmp/foo"]);
+	});
+
+	it("T-CP-06: extractBashTargets(`mkdir -p .pi/orchestrator/sub && echo done`) → [.pi/orchestrator/sub]", () => {
+		// mkdir: stop at the `&&` so echo/done are not targets.
+		const t = extractBashTargets("mkdir -p .pi/orchestrator/sub && echo done");
+		expect(t).toEqual([".pi/orchestrator/sub"]);
+	});
+
+	it("T-CP-07: extractBashTargets(`cp src/foo.ts dst/ ; rm bar`) → [dst/] (cp stops at `;`)", () => {
+		// cp: stop at the `;` so the chained `rm bar` is not picked up
+		// as a cp target.
+		const t = extractBashTargets("cp src/foo.ts dst/ ; rm bar");
+		expect(t).toEqual(["dst/"]);
+	});
+});
+

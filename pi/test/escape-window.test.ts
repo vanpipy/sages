@@ -126,19 +126,28 @@ describe("escape-window: Layer 2 (bash) policy split", () => {
 		expect(decision).toBeUndefined();
 	});
 
-	it("destructive commands (rm / mv / cp) respect the path policy even in escape mode", () => {
-		// rm a meta-file — allowed (path is in the meta allowlist).
+	it("destructive commands (rm / mv / cp) are always denied, even in escape mode", () => {
+		// GC-2026-015 follow-up: rm/mv/cp/unlink/rmdir are ALWAYS
+		// denied regardless of target path (the destructive-invariant
+		// shortcut in `shouldBlockBashCommand` returns before any
+		// path check). The escape window's bypass does NOT override
+		// this — the user must dispatch a `developer` subagent for
+		// rm/mv/cp against either meta-files or production code.
+		//
+		// rm a meta-file — blocked (destructive, regardless of path).
 		const okMeta = evaluateEscapeBash(`rm ${META}`, "/Users/me/proj");
-		expect(okMeta).toBeUndefined();
-		// rm a production file — blocked (path policy still applies).
+		expect(okMeta).toBeDefined();
+		expect(okMeta?.reason).toMatch(/destructive:/);
+		// rm a production file — also blocked, same destructive reason.
 		const blockProd = evaluateEscapeBash(`rm ${PROD}`, "/Users/me/proj");
 		expect(blockProd).toBeDefined();
-		expect(blockProd?.reason).toMatch(/production/i);
+		expect(blockProd?.reason).toMatch(/destructive:/);
 	});
 
 	it("non-destructive write-intent bypasses the path policy in escape mode", () => {
 		// sed -i into a production file is allowed under escape mode
-		// (the user explicitly opted in; rm / mv / cp still need meta).
+		// (the user explicitly opted in; rm / mv / cp are still
+		// blocked via the destructive-invariant — see the test above).
 		const sed = evaluateEscapeBash(`sed -i 's/x/y/' ${PROD}`, "/Users/me/proj");
 		expect(sed).toBeUndefined();
 		// Redirect into a production file is also allowed.
