@@ -221,6 +221,16 @@ Do this AFTER the warmup above (so the MCP cold-start is already paid). Read in 
 2. `AGENTS.md` (overrides global rules)
 3. `CLAUDE.md` / `.pi/SYSTEM.md` / `.specify/memory/constitution.md` / `SPEC.md`
 4. `pi/skills/*/SKILL.md` (auto-loaded)
+
+### Escape Window (主动模式 — 主动退出 subagent-only 流程)
+
+The Sages extension enforces a hard threshold on the main agent: it has **no direct write tools** (`edit` / `write` are stripped from the active toolset; bash write-intent is gated by `canMainAgentWrite`). All file changes normally go through `Agent` dispatch. If the main agent gets stuck — too many tool errors, or the user explicitly opts in — it can open an **escape window**:
+
+- **Triggers** (any one fires it):
+  1. The user types the literal string `escape-window` as a chat message.
+  2. Tool errors / blocks cross `200` (cumulative in the current session).
+- **Effect**: `edit` / `write` are re-added to the active toolset (Layer 1 reverses); bash write-intent is allowed to any path EXCEPT destructive commands (`rm` / `mv` / `cp` / `unlink` / `rmdir` — these still require a meta-file path). The user is explicitly notified via a system note in the conversation log the moment the window opens.
+- **Persistence**: the window is sticky for the rest of the session. There is **no in-session exit** — the window closes when the session ends. Treat the window as a deliberate "I am taking direct responsibility for this edit" action; production code changes are no longer routed through a managed worktree or an audit pass.
 ---
 
 ## Action Priority
