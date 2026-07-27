@@ -101,3 +101,96 @@ describe("default-agents: developer config", () => {
 		);
 	});
 });
+
+/**
+ * Subagent isolation + per-agent turn-limit invariants.
+ *
+ * Pinned here so the policy "subagents cannot dispatch further subagents" and
+ * the role-specific `maxTurns` budgets are visible in code, not just inferred
+ * from prose. The runtime already enforces the Agent-tool ban via
+ * `EXCLUDED_TOOL_NAMES` in agent-runner.ts, but the proactive
+ * `excludeExtensions: ["pi-subagents"]` is the cleanest expression of the
+ * policy and the only one user-defined agents can read at a glance.
+ */
+describe("default-agents: subagent isolation", () => {
+	// Every default agent must carry `excludeExtensions: ["pi-subagents"]` so
+	// the Agent tool / get_subagent_result / steer_subagent never load. The
+	// `developer` agent is also covered even though its `extensions:` list
+	// doesn't include `pi-subagents` — explicit excludes survive a future
+	// loosening of the include list.
+	for (const name of ["general-purpose", "Explore", "Plan", "developer"] as const) {
+		it(`${name} excludes pi-subagents from its extension set`, () => {
+			const config = DEFAULT_AGENTS.get(name);
+			expect(config, `${name} must be registered as a default agent`).toBeDefined();
+			const excludes = config?.excludeExtensions ?? [];
+			expect(
+				excludes.map((s) => s.toLowerCase()),
+				`${name}.excludeExtensions must include "pi-subagents"`,
+			).toContain("pi-subagents");
+		});
+	}
+
+	it("general-purpose is the only default with the historical inline annotation", () => {
+		// The `// ← NEW: cannot recursively dispatch Agent tool` inline note
+		// is historical context for the recent change. It only needs to live
+		// on one entry; the rest can carry a fresh comment. This test pins
+		// that the marker is exactly where the change history put it — if a
+		// future contributor rewrites the entry, the comment can be dropped
+		// alongside the marker without losing the semantic guarantee above.
+		const gp = DEFAULT_AGENTS.get("general-purpose");
+		expect(gp?.excludeExtensions).toEqual(["pi-subagents"]);
+	});
+});
+
+describe("default-agents: per-agent maxTurns budgets", () => {
+	// The runtime resolves `maxTurns` as
+	//   options.maxTurns ?? agentConfig?.maxTurns ?? defaultMaxTurns
+	// so an explicit per-agent budget takes precedence over the global default.
+	// Caller-supplied `Agent({ max_turns: ... })` still wins at spawn time.
+	const expected: Record<string, number> = {
+		"general-purpose": 50,
+		Explore: 50,
+		Plan: 100,
+		developer: 200,
+	};
+
+	for (const [name, limit] of Object.entries(expected)) {
+		it(`${name} sets maxTurns = ${limit}`, () => {
+			const config = DEFAULT_AGENTS.get(name);
+			expect(config?.maxTurns, `${name} must pin maxTurns`).toBe(limit);
+		});
+	}
+
+	it("every default agent sets an explicit maxTurns (no global-default fallthrough)", () => {
+		// A future contributor who adds a new default agent and forgets to
+		// set `maxTurns` would silently inherit the global default — which
+		// is `undefined` (unlimited) at startup. This test guards against
+		// that by requiring every default to declare its own budget.
+		for (const [name, config] of DEFAULT_AGENTS) {
+			expect(
+				typeof config.maxTurns,
+				`default agent "${name}" must declare an explicit maxTurns`,
+			).toBe("number");
+			expect(
+				(config.maxTurns ?? 0) > 0,
+				`default agent "${name}" maxTurns must be positive`,
+			).toBe(true);
+		}
+	});
+
+	it("maxTurns budgets are within the settings ceiling (defense-in-depth)", () => {
+		// `MAX_TURNS_CEILING = 10_000` (settings.ts) bounds what `sanitize()`
+		// accepts from project / global subagents.json. The hardcoded agent
+		// defaults skip sanitize() (they're in source, not config) but the
+		// values should still stay well below the ceiling so future
+		// settings-layer overrides can never be silently stricter than the
+		// hardcoded default.
+		const MAX_TURNS_CEILING = 10_000;
+		for (const [name, config] of DEFAULT_AGENTS) {
+			expect(
+				(config.maxTurns ?? 0) <= MAX_TURNS_CEILING,
+				`default agent "${name}" maxTurns must be <= ${MAX_TURNS_CEILING}`,
+			).toBe(true);
+		}
+	});
+});

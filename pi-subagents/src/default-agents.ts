@@ -47,11 +47,20 @@ const DEVELOPER_AGENT: AgentConfig = {
 		"role; the legacy name is preserved as an alias for backwards compatibility.",
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
 	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
+	// Subagent isolation: even though `extensions:` is an explicit allowlist
+	// (no `pi-subagents` entry) so the Agent tool cannot load by accident, we
+	// pin `excludeExtensions: ["pi-subagents"]` to make the policy explicit and
+	// survive any future loosening of the `extensions:` list.
+	excludeExtensions: ["pi-subagents"],
 	skills: false,
 	systemPrompt: DEVELOPER_PROMPT,
 	promptMode: "replace",
 	isDefault: true,
 	runInBackground: true,
+	// Developer tasks run RED → GREEN → REFACTOR cycles plus exploration, so 200
+	// turns is the budget per individual run. Caller may still override via
+	// Agent({ max_turns: ... }) at spawn time.
+	maxTurns: 200,
 	aliases: ["software-developer"],
 };
 
@@ -74,6 +83,9 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			systemPrompt: GENERAL_PURPOSE_PROMPT,	// ← NEW: explicit role constraint
 			promptMode: "replace",				// ← NEW: replace model default, don't append empty
 			isDefault: true,
+			// Single-task helper: 50 turns is the budget for one focused job.
+			// Caller may still override via Agent({ max_turns: ... }) at spawn time.
+			maxTurns: 50,
 		},
 	],
 	[
@@ -85,6 +97,9 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 				'Fast read-only search agent for locating code. Use it to find files by pattern (eg. "src/components/**/*.tsx"), grep for symbols or keywords (eg. "API endpoints"), or answer "where is X defined / which files reference Y." Do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. When calling, specify search breadth: "quick" for a single targeted lookup, "medium" for moderate exploration, or "very thorough" to search across multiple locations and naming conventions.',
 			builtinToolNames: READ_ONLY_TOOLS,
 			extensions: true,
+			// Subagent isolation: Explore is read-only but still must not recursively
+			// dispatch further Agent calls — its budget is dedicated to one search job.
+			excludeExtensions: ["pi-subagents"],
 			skills: true,
 			// Fast/cheap model for read-only search. Provider-preferred but resilient:
 			// resolveModel matches this fuzzily (date-stamp optional) and falls back to
@@ -93,6 +108,9 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			systemPrompt: EXPLORE_PROMPT,
 			promptMode: "replace",
 			isDefault: true,
+			// Read-only search: 50 turns is the budget for one breadth-bounded lookup.
+			// Caller may still override via Agent({ max_turns: ... }) at spawn time.
+			maxTurns: 50,
 		},
 	],
 	[
@@ -104,10 +122,16 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 				"Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs.",
 			builtinToolNames: READ_ONLY_TOOLS,
 			extensions: true,
+			// Subagent isolation: Plan must not recursively dispatch further Agent calls —
+			// its output is a plan, not a delegated sub-plan.
+			excludeExtensions: ["pi-subagents"],
 			skills: true,
 			systemPrompt: PLAN_PROMPT,
 			promptMode: "replace",
 			isDefault: true,
+			// Planning: 100 turns covers the architecture exploration + plan write.
+			// Caller may still override via Agent({ max_turns: ... }) at spawn time.
+			maxTurns: 100,
 		},
 	],
 	["developer", DEVELOPER_AGENT],
