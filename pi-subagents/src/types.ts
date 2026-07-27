@@ -42,7 +42,14 @@ export interface ManagedWorktreeHandoff {
 	/** sha of the commit the worktree was provisioned from (pinned at first provision). */
 	baseSha: string;
 	/** The ref the worktree was provisioned from. Always `origin/main`. */
-	baseRef: "origin/main";
+	/**
+	 * The ref the worktree was provisioned from. Defaults to
+	 * `origin/main` when the caller did not specify a `base_ref` and
+	 * the current working directory has no detectable branch
+	 * (detached HEAD); otherwise the resolved ref at provision time
+	 * (e.g. `origin/main`, `origin/feature/x`, `feature/x`).
+	 */
+	baseRef: string;
 	/** Current HEAD SHA inside the worktree (captured at provision time). */
 	head: string;
 	/** True when the worktree had uncommitted changes at provision time. */

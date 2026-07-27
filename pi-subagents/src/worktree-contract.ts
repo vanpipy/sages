@@ -32,12 +32,21 @@ export type ManagedWorktreeMode = "create" | "reuse";
  * `mode: "create"` errors when the slot is occupied (no silent reuse);
  * `mode: "reuse"` errors when the slot is unoccupied or the existing
  * worktree's identity / branch state does not match what this call expects.
+ *
+ * `base_ref` is optional — when provided, the worktree is provisioned from
+ * this ref (validated as a safe git ref name: `[A-Za-z0-9._/-]+`). When
+ * omitted, the helper resolves the current working directory's branch:
+ * prefer the upstream tracking ref (e.g. `origin/main`) when set, fall back
+ * to the local branch name, and finally to `origin/main` for detached HEAD.
+ * Local refs (e.g. `feature/x`) do not trigger a fetch; remote-tracking refs
+ * (e.g. `origin/feature/x`) trigger `git fetch origin <branch>` first.
  */
 export interface ManagedWorktreeRequest {
 	dag_id: string;
 	task_id: string;
 	worktree_id?: string;
 	mode: ManagedWorktreeMode;
+	base_ref?: string;
 }
 
 /**
@@ -72,6 +81,17 @@ export const MANAGED_WORKTREE_REQUEST_TYPE: TSchema = Type.Object({
 			'"reuse" re-enters the existing managed worktree at the same slot ' +
 			"(errors on identity mismatch).",
 	}),
+	base_ref: Type.Optional(
+		Type.String({
+			description:
+				'Optional base ref. Accepts local branches ("main", "feature/x"), ' +
+				'remote-tracking refs ("origin/main", "origin/feature/x"), or any safe git ref. ' +
+				'Omit to default to the current working directory\'s branch ' +
+				'(upstream tracking ref if set, else local branch, else "origin/main" fallback). ' +
+				"Refused at provision time if the ref does not resolve.",
+			pattern: "^[A-Za-z0-9._/-]+$",
+		}),
+	),
 });
 
 /**
@@ -131,11 +151,20 @@ export function parseManagedWorktreeRequest(
 			`Agent isolation: 'mode' must be "create" or "reuse" (got ${JSON.stringify(mode)}).`,
 		);
 	}
+	const base_ref = obj.base_ref;
+	if (base_ref !== undefined) {
+		if (typeof base_ref !== "string" || base_ref.length === 0) {
+			throw new Error(
+				`Agent isolation: 'base_ref' must be a non-empty string when provided (got ${JSON.stringify(base_ref)}).`,
+			);
+		}
+	}
 	const parsed: ParsedManagedWorktreeRequest = {
 		dag_id: dag_id as string,
 		task_id: task_id as string,
 		worktree_id: worktree_id as string | undefined,
 		mode,
+		base_ref: base_ref as string | undefined,
 	};
 	// Delegate identity validation to the worktree helper so both surfaces
 	// speak the same constraint language. Throws on path-traversal / whitespace.

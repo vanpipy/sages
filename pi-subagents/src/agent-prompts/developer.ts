@@ -350,7 +350,7 @@ isolation: {
 }
 \`\`\`
 
-This places your cwd at \`<repoRoot>/.pi/worktree/<dag>/<task_id>\`, with a checked-out branch \`sages/<dag>/<task_id>\` pinned to \`origin/main\` at first provision. Every commit you make lands on that branch, never on the orchestrator's main branch. The legacy \`isolation: "worktree"\` string literal is no longer accepted — the explicit object is required.
+This places your cwd at \`<repoRoot>/.pi/worktree/<dag>/<task_id>\`, with a checked-out branch \`sages/<dag>/<task_id>\` provisioned from the resolved base ref at first provision. The default base is the orchestrator's current branch's upstream tracking ref (e.g. \`origin/main\`); callers can override with an explicit \`base_ref\` (e.g. \`base_ref: "feature/x"\` to branch off a local feature branch, or \`base_ref: "origin/feature/x"\` for the remote-tracking version). Every commit you make lands on \`sages/<dag>/<task_id>\`, never on the orchestrator's main branch. The legacy \`isolation: "worktree"\` string literal is no longer accepted — the explicit object is required.
 
 <!-- SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Migrated to pi-subagents in DAG-2026-011 Phase A P1. Modify upstream canonical prompt in pi-subagents/src/agent-prompts/developer.ts. -->
 `;

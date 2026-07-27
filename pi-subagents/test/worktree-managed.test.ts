@@ -12,6 +12,13 @@
  *   4. createManagedWorktree uses `origin/main` (not local HEAD, not detached).
  *   5. createManagedWorktree throws when `origin/main` is missing — no
  *      fallback to local refs.
+ *
+ * GC-2026-008 P2 (base_ref): the base ref is now configurable per call.
+ * When `opts.base_ref` is supplied it is used verbatim (after validation);
+ * when omitted, the helper resolves the current branch's upstream tracking
+ * ref (e.g. `origin/main`) and falls back to the local branch name and
+ * finally `origin/main` for detached HEAD. Marker schema bumps to v2 and
+ * records the actual ref; v1 markers remain readable for inspection.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -20,6 +27,8 @@ import { join } from "node:path";
 import {
   branchName,
   createManagedWorktree,
+  resolveBaseRef,
+  validateBaseRef,
   validateIdentity,
   worktreePath,
 } from "../src/worktree.js";
@@ -245,5 +254,272 @@ describe("worktree-managed: no fallback (stricter than the upstream Agent-isolat
         worktree: "P1",
       }),
     ).toThrow();
+  });
+});
+
+/**
+ * GC-2026-008 P2: `validateBaseRef` accepts the same character class git
+ * uses for ref names (with `.` and `/` allowed on top of identity rules),
+ * and refuses anything that could escape into a flag or a path-traversal
+ * sequence when the string is passed to a `git` invocation.
+ */
+describe("worktree-managed: validateBaseRef (P2)", () => {
+  it.each([
+    ["main"],
+    ["develop"],
+    ["feature/x"],
+    ["feature-x"],
+    ["v1.2.3"],
+    ["release_2024.01"],
+    ["origin/main"],
+    ["origin/feature/x"],
+    ["a"],
+    ["0"],
+  ])("accepts safe ref %s", (ref) => {
+    expect(() => validateBaseRef(ref)).not.toThrow();
+  });
+
+  it.each([
+    ["", "must not be empty"],
+    [" main", "leading/trailing whitespace"],
+    ["main ", "leading/trailing whitespace"],
+    ["../etc/passwd", "not a safe git ref name"],
+    ["main..other", "not a safe git ref name"],
+    ["HEAD@{0}", "not a safe git ref name"],
+    ["/main", "not a safe git ref name"],
+    ["main/sub/", "not a safe git ref name"],
+    ["main branch", "not a safe git ref name"],
+    ["main;rm", "not a safe git ref name"],
+    ["main$ref", "not a safe git ref name"],
+  ])("refuses unsafe ref %s (%s)", (ref, _hint) => {
+    expect(() => validateBaseRef(ref)).toThrow();
+  });
+
+  it("refuses non-string input", () => {
+    expect(() => validateBaseRef(undefined as any)).toThrow();
+    expect(() => validateBaseRef(null as any)).toThrow();
+    expect(() => validateBaseRef(42 as any)).toThrow();
+  });
+});
+
+/**
+ * GC-2026-008 P2: `resolveBaseRef` is the smart default that powers the
+ * "get baseline from cwd" capability. Three resolution levels:
+ *   1. Explicit `baseRef` → validate + return verbatim
+ *   2. Auto: current branch's upstream (e.g. `origin/main`)
+ *   3. Auto: local branch name (when no upstream)
+ *   4. Fallback: `"origin/main"` (detached HEAD / non-git)
+ *
+ * The fixture's local `main` tracks `origin/main`, so the smart default
+ * picks `origin/main` in the default case — preserving the historical
+ * GC-2026-008 P1 behavior on the main branch.
+ */
+describe("worktree-managed: resolveBaseRef (P2)", () => {
+  let fx: RepoFixture;
+  beforeEach(() => {
+    fx = makeRepoFixture("resolve-base-ref");
+  });
+  afterEach(() => {
+    fx.dispose();
+  });
+
+  it("explicit baseRef is returned verbatim (after validation)", () => {
+    expect(resolveBaseRef(fx.root, "feature/x")).toBe("feature/x");
+    expect(resolveBaseRef(fx.root, "origin/feature/x")).toBe("origin/feature/x");
+    expect(resolveBaseRef(fx.root, "v1.2.3")).toBe("v1.2.3");
+  });
+
+  it("explicit baseRef that fails validation throws (no silent fallback)", () => {
+    expect(() => resolveBaseRef(fx.root, "../escape")).toThrow();
+    expect(() => resolveBaseRef(fx.root, "")).toThrow();
+  });
+
+  it("auto on a tracking branch returns the upstream ref (e.g. origin/main)", () => {
+    // Fixture's main tracks origin/main → smart default picks origin/main.
+    expect(resolveBaseRef(fx.root, undefined)).toBe("origin/main");
+  });
+
+  it("auto on a branch with no upstream returns the local branch name", () => {
+    // Create a feature branch without an upstream — local branch wins.
+    // `checkout -b` does NOT auto-set upstream by default; defensive
+    // `--unset-upstream` would fail when there's no upstream to unset, so
+    // we skip it and rely on the rev-parse sanity check below.
+    runGit(["checkout", "-b", "feature/no-upstream"], { cwd: fx.root });
+    // Sanity: no upstream configured for this branch.
+    expect(() =>
+      runGit(["rev-parse", "--abbrev-ref", "@{u}"], { cwd: fx.root }),
+    ).toThrow();
+    expect(resolveBaseRef(fx.root, undefined)).toBe("feature/no-upstream");
+  });
+
+  it("auto on detached HEAD falls back to origin/main", () => {
+    // Detach HEAD at the current commit.
+    runGit(["checkout", "--detach"], { cwd: fx.root });
+    expect(resolveBaseRef(fx.root, undefined)).toBe("origin/main");
+  });
+});
+
+/**
+ * GC-2026-008 P2: `createManagedWorktree` honors the explicit `base_ref`
+ * field at provision time. Remote-tracking refs trigger a `git fetch`
+ * first; local refs do not. The result's `baseRef` records the actual
+ * ref used, and the marker (schema v2) carries it for reuse verification.
+ */
+describe("worktree-managed: create with explicit base_ref (P2)", () => {
+  let fx: RepoFixture;
+  beforeEach(() => {
+    fx = makeRepoFixture("create-base-ref");
+  });
+  afterEach(() => {
+    fx.dispose();
+  });
+
+  it("explicit base_ref 'origin/main' produces baseRef='origin/main' (same as default)", () => {
+    const wt = createManagedWorktree({
+      repoRoot: fx.root,
+      dag: "GC-2026-008",
+      worktree: "P1",
+      base_ref: "origin/main",
+    });
+    expect(wt.baseRef).toBe("origin/main");
+    expect(wt.baseSha).toBe(fx.originMainSha);
+  });
+
+  it("explicit base_ref 'feature/x' (local) uses the local tip without fetching", () => {
+    // Create a feature branch off main with one extra commit, no upstream.
+    // `checkout -b` does NOT auto-set upstream; the branch is local-only.
+    runGit(["checkout", "-b", "feature/local"], { cwd: fx.root });
+    const featureSha = runGit(["rev-parse", "HEAD"], { cwd: fx.root }).trim();
+    runGit(["commit", "--allow-empty", "-m", "feat: local work"], {
+      cwd: fx.root,
+    });
+    const tipSha = runGit(["rev-parse", "HEAD"], { cwd: fx.root }).trim();
+
+    const wt = createManagedWorktree({
+      repoRoot: fx.root,
+      dag: "GC-2026-008",
+      worktree: "P1",
+      base_ref: "feature/local",
+    });
+    expect(wt.baseRef).toBe("feature/local");
+    expect(wt.baseSha).toBe(tipSha);
+    // The worktree is at the tip of the local feature branch, not the
+    // seed commit (proves no fetch-then-detach happened — fetch would
+    // have left it at featureSha, the upstream-tracking base).
+    const headSha = runGit(["rev-parse", "HEAD"], { cwd: wt.path }).trim();
+    expect(headSha).toBe(tipSha);
+    expect(headSha).not.toBe(featureSha);
+  });
+
+  it("explicit base_ref 'origin/feature/x' triggers a fetch and uses the remote tip", () => {
+    // Create a feature branch and push it to origin so origin/feature/x exists.
+    runGit(["checkout", "-b", "feature/published"], { cwd: fx.root });
+    const featureCommit = runGit(
+      ["commit", "--allow-empty", "-m", "feat: published"],
+      { cwd: fx.root },
+    );
+    void featureCommit;
+    runGit(["push", "origin", "feature/published"], { cwd: fx.root });
+    const originTipSha = runGit(
+      ["rev-parse", "origin/feature/published"],
+      { cwd: fx.root },
+    ).trim();
+
+    const wt = createManagedWorktree({
+      repoRoot: fx.root,
+      dag: "GC-2026-008",
+      worktree: "P1",
+      base_ref: "origin/feature/published",
+    });
+    expect(wt.baseRef).toBe("origin/feature/published");
+    expect(wt.baseSha).toBe(originTipSha);
+  });
+
+  it("invalid base_ref (path-traversal) is rejected at the type boundary", () => {
+    // validateBaseRef throws synchronously, BEFORE the create call hits git.
+    expect(() =>
+      createManagedWorktree({
+        repoRoot: fx.root,
+        dag: "GC-2026-008",
+        worktree: "P1",
+        base_ref: "../etc/passwd",
+      }),
+    ).toThrow();
+  });
+
+  it("unresolvable base_ref throws (no silent fallback to origin/main)", () => {
+    // The ref passes validation but does not exist in the repo.
+    expect(() =>
+      createManagedWorktree({
+        repoRoot: fx.root,
+        dag: "GC-2026-008",
+        worktree: "P1",
+        base_ref: "does/not/exist",
+      }),
+    ).toThrow(/does not resolve/);
+  });
+});
+
+/**
+ * GC-2026-008 P2: the marker schema bumps from v1 to v2 to record the
+ * actual `baseRef` used at provision time. v1 markers (always
+ * `origin/main`) remain readable for inspection but the reader exposes
+ * them with the v1-implied `baseRef: "origin/main"` so reuse-contract
+ * comparisons work uniformly across versions.
+ */
+describe("worktree-managed: marker schema v2 (P2)", () => {
+  let fx: RepoFixture;
+  beforeEach(() => {
+    fx = makeRepoFixture("marker-schema");
+  });
+  afterEach(() => {
+    fx.dispose();
+  });
+
+  it("provisions write a v2 marker with the resolved baseRef", async () => {
+    const { readManagedWorktreeMarker } = await import("../src/worktree.js");
+    const wt = createManagedWorktree({
+      repoRoot: fx.root,
+      dag: "GC-2026-008",
+      worktree: "P1",
+      base_ref: "origin/main",
+    });
+    const marker = readManagedWorktreeMarker(fx.root, "GC-2026-008", "P1");
+    expect(marker).not.toBeNull();
+    expect(marker!.schema).toBe(2);
+    expect(marker!.baseRef).toBe("origin/main");
+    expect(marker!.baseSha).toBe(wt.baseSha);
+  });
+
+  it("v1 markers in the wild are still readable (with synthesized baseRef)", async () => {
+    const {
+      markerPath,
+      readManagedWorktreeMarker,
+    } = await import("../src/worktree.js");
+    const { writeFileSync, mkdirSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+
+    // Plant a fake v1 marker as if a previous version of the helper had
+    // provisioned the slot.
+    const fp = markerPath(fx.root, "GC-2026-008", "P1");
+    mkdirSync(dirname(fp), { recursive: true });
+    writeFileSync(
+      fp,
+      JSON.stringify({
+        schema: 1,
+        repoRoot: fx.root,
+        dag: "GC-2026-008",
+        worktree: "P1",
+        path: "/tmp/fake",
+        branch: "sages/GC-2026-008/P1",
+        baseSha: fx.originMainSha,
+        baseRef: "origin/main",
+        createdAt: Date.now(),
+      }),
+    );
+    const marker = readManagedWorktreeMarker(fx.root, "GC-2026-008", "P1");
+    expect(marker).not.toBeNull();
+    expect(marker!.schema).toBe(1);
+    expect(marker!.baseRef).toBe("origin/main");
   });
 });

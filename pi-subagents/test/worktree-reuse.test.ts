@@ -251,3 +251,95 @@ describe("worktree-reuse: refuse to provision over an unrelated worktree on disk
     expect(existsSync(join(slot, "left-over.txt"))).toBe(true);
   });
 });
+
+/**
+ * GC-2026-008 P2: the reuse contract also enforces that the slot's
+ * recorded `baseRef` matches the call's resolved ref. A worktree
+ * provisioned from `feature/x` cannot be silently reused for a call
+ * that resolves `origin/main` (or any other ref) — even when the rest
+ * of the identity is identical. To reuse with a different baseline the
+ * caller must pass a matching `base_ref`, or remove the worktree and
+ * re-provision.
+ */
+describe("worktree-reuse: P2 — baseRef mismatch refused", () => {
+  let fx: RepoFixture;
+  beforeEach(() => {
+    fx = makeRepoFixture("reuse-base-ref");
+  });
+  afterEach(() => {
+    fx.dispose();
+  });
+
+  it("rejects reuse when the recorded baseRef differs from the call's resolved ref", () => {
+    // 1. Provision from `feature/x` (local branch, no upstream).
+    runGit(["checkout", "-b", "feature/x"], { cwd: fx.root });
+    const first = createManagedWorktree({
+      repoRoot: fx.root,
+      dag: "GC-2026-008",
+      worktree: "P1",
+      base_ref: "feature/x",
+    });
+    expect(first.baseRef).toBe("feature/x");
+
+    // 2. Switch the parent cwd back to `main` (which tracks `origin/main`).
+    //    The smart default now resolves to `origin/main`, which does not
+    //    match the recorded `feature/x`. Must refuse reuse.
+    runGit(["checkout", "main"], { cwd: fx.root });
+
+    expect(() =>
+      createManagedWorktree({
+        repoRoot: fx.root,
+        dag: "GC-2026-008",
+        worktree: "P1",
+        reuse: true,
+      }),
+    ).toThrow(/recorded baseRef is 'feature\/x'.*resolves baseRef to 'origin\/main'/);
+  });
+
+  it("accepts reuse when the call passes the matching base_ref", () => {
+    runGit(["checkout", "-b", "feature/x"], { cwd: fx.root });
+    const first = createManagedWorktree({
+      repoRoot: fx.root,
+      dag: "GC-2026-008",
+      worktree: "P1",
+      base_ref: "feature/x",
+    });
+    expect(first.baseRef).toBe("feature/x");
+
+    // Reuse with the matching base_ref — must succeed.
+    const second = createManagedWorktree({
+      repoRoot: fx.root,
+      dag: "GC-2026-008",
+      worktree: "P1",
+      reuse: true,
+      base_ref: "feature/x",
+    });
+    expect(second.reused).toBe(true);
+    expect(second.baseRef).toBe("feature/x");
+    expect(second.baseSha).toBe(first.baseSha);
+  });
+
+  it("rejects reuse even with a different explicit base_ref than the marker records", () => {
+    runGit(["checkout", "-b", "feature/x"], { cwd: fx.root });
+    createManagedWorktree({
+      repoRoot: fx.root,
+      dag: "GC-2026-008",
+      worktree: "P1",
+      base_ref: "feature/x",
+    });
+
+    // Different explicit base_ref must also refuse. Use `main` (a
+    // local branch that DOES resolve) so the call clears the
+    // "does not resolve" gate and reaches the reuse-contract baseRef
+    // comparison.
+    expect(() =>
+      createManagedWorktree({
+        repoRoot: fx.root,
+        dag: "GC-2026-008",
+        worktree: "P1",
+        reuse: true,
+        base_ref: "main",
+      }),
+    ).toThrow(/recorded baseRef is 'feature\/x'.*resolves baseRef to 'main'/);
+  });
+});

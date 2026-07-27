@@ -330,6 +330,10 @@ export class AgentManager {
 					dag: req.dag_id,
 					worktree: worktreeId,
 					reuse: req.mode === "reuse",
+					// Forward the caller's explicit base_ref (or undefined to
+					// auto-detect from the cwd's current branch). The helper
+					// resolves the actual ref; we just plumb the request through.
+					base_ref: req.base_ref,
 				});
 				// Inspect at provision time so we can capture `dirty` + `head` for
 				// handoff; the inspector never mutates, so this is safe even if the
@@ -348,7 +352,10 @@ export class AgentManager {
 					path: wt.path,
 					branch: wt.branch,
 					baseSha: wt.baseSha,
-					baseRef: "origin/main",
+					// baseRef is now dynamic (resolved at provision time) —
+					// surface the actual ref so downstream consumers can
+					// audit which baseline the worktree branched from.
+					baseRef: wt.baseRef,
 					head,
 					dirty,
 					reused: wt.reused,

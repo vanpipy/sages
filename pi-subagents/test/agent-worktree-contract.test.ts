@@ -707,3 +707,117 @@ describe("agent-worktree-contract: handoff shape is JSON-stringifiable", () => {
 		manager.dispose();
 	});
 });
+
+/**
+ * GC-2026-008 P2: the request schema gains an optional `base_ref` field.
+ * The parser must:
+ *   - accept the field when present (any safe git ref string)
+ *   - default to `undefined` when absent (the helper's smart default then
+ *     resolves to the cwd's current branch)
+ *   - reject non-string / empty values
+ * The schema's `required` list must NOT include `base_ref` (it's optional).
+ */
+describe("agent-worktree-contract: P2 — base_ref field in the request", () => {
+	it("MANAGED_WORKTREE_REQUEST_TYPE does NOT require base_ref (it's optional)", () => {
+		const required = MANAGED_WORKTREE_REQUEST_TYPE.required ?? [];
+		expect(required).toEqual(expect.arrayContaining(["dag_id", "task_id", "mode"]));
+		expect(required).not.toContain("base_ref");
+		expect(required).not.toContain("worktree_id");
+	});
+
+	it("MANAGED_WORKTREE_REQUEST_TYPE declares base_ref as an optional string property", () => {
+		const props = MANAGED_WORKTREE_REQUEST_TYPE.properties as Record<
+			string,
+			{ type?: string; pattern?: string }
+		>;
+		expect(props.base_ref).toBeDefined();
+		expect(props.base_ref.type).toBe("string");
+		// The pattern enforces the same character class the runtime validates.
+		expect(props.base_ref.pattern).toBe("^[A-Za-z0-9._/-]+$");
+	});
+
+	it("parseManagedWorktreeRequest omits base_ref when caller does not supply it", () => {
+		const parsed = parseManagedWorktreeRequest({
+			dag_id: "GC-2026-008",
+			task_id: "P1",
+			mode: "create",
+		});
+		expect(parsed.base_ref).toBeUndefined();
+	});
+
+	it("parseManagedWorktreeRequest preserves a valid base_ref verbatim", () => {
+		const parsed = parseManagedWorktreeRequest({
+			dag_id: "GC-2026-008",
+			task_id: "P1",
+			mode: "create",
+			base_ref: "feature/x",
+		});
+		expect(parsed.base_ref).toBe("feature/x");
+	});
+
+	it("parseManagedWorktreeRequest accepts origin/<branch> refs", () => {
+		const parsed = parseManagedWorktreeRequest({
+			dag_id: "GC-2026-008",
+			task_id: "P1",
+			mode: "create",
+			base_ref: "origin/feature/x",
+		});
+		expect(parsed.base_ref).toBe("origin/feature/x");
+	});
+
+	it("parseManagedWorktreeRequest accepts tag-like refs with dots", () => {
+		const parsed = parseManagedWorktreeRequest({
+			dag_id: "GC-2026-008",
+			task_id: "P1",
+			mode: "create",
+			base_ref: "v1.2.3",
+		});
+		expect(parsed.base_ref).toBe("v1.2.3");
+	});
+
+	it("parseManagedWorktreeRequest rejects non-string base_ref", () => {
+		expect(() =>
+			parseManagedWorktreeRequest({
+				dag_id: "GC-2026-008",
+				task_id: "P1",
+				mode: "create",
+				base_ref: 42,
+			}),
+		).toThrow(/base_ref/);
+		expect(() =>
+			parseManagedWorktreeRequest({
+				dag_id: "GC-2026-008",
+				task_id: "P1",
+				mode: "create",
+				base_ref: null,
+			}),
+		).toThrow(/base_ref/);
+	});
+
+	it("parseManagedWorktreeRequest rejects empty-string base_ref", () => {
+		expect(() =>
+			parseManagedWorktreeRequest({
+				dag_id: "GC-2026-008",
+				task_id: "P1",
+				mode: "create",
+				base_ref: "",
+			}),
+		).toThrow(/base_ref/);
+	});
+
+	it("parseManagedWorktreeRequest accepts unsafe-looking base_ref at the schema layer (runtime validates)", () => {
+		// The parser is intentionally a thin field-presence + type check.
+		// The deeper `git check-ref-format` validation runs in
+		// `createManagedWorktree` via `validateBaseRef` — a stage 1 schema
+		// match is not the same as a safe ref name. Documenting the
+		// separation here so a future contributor doesn't "promote" the
+		// regex into the parser and lose the rich error messages.
+		const parsed = parseManagedWorktreeRequest({
+			dag_id: "GC-2026-008",
+			task_id: "P1",
+			mode: "create",
+			base_ref: "../escape",
+		});
+		expect(parsed.base_ref).toBe("../escape");
+	});
+});
