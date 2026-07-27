@@ -424,8 +424,11 @@ export async function runAgent(
 
   const env = await detectEnv(options.pi, effectiveCwd);
 
-  // Get parent system prompt for append-mode agents
-  const parentSystemPrompt = ctx.getSystemPrompt();
+  // Get parent system prompt only for append-mode agents.
+  // Replace-mode agents get a completely fresh prompt and must not inherit
+  // the parent identity (even though buildAgentPrompt already ignores the value
+  // in replace mode, reading it here would be unnecessary context leakage).
+  const parentSystemPrompt = agentConfig?.promptMode === "append" ? ctx.getSystemPrompt() : undefined;
 
   // Build prompt extras (memory, skill preloading)
   const extras: PromptExtras = {};
@@ -471,13 +474,17 @@ export async function runAgent(
   // Build system prompt from agent config
   let systemPrompt: string;
   if (agentConfig) {
+    // agentConfig.promptMode is always "replace" for all built-in types;
+    // parentSystemPrompt is already undefined above, but pass it explicitly
+    // so the intent is unmistakable to future readers.
     systemPrompt = buildAgentPrompt(agentConfig, effectiveCwd, env, parentSystemPrompt, extras);
   } else {
     // Unknown type fallback: spread the canonical general-purpose config (defensive —
     // unreachable in practice since index.ts resolves unknown types before calling runAgent).
     const fallback = DEFAULT_AGENTS.get("general-purpose");
     if (!fallback) throw new Error(`No fallback config available for unknown type "${type}"`);
-    systemPrompt = buildAgentPrompt({ ...fallback, name: type }, effectiveCwd, env, parentSystemPrompt, extras);
+    // Fallback also uses replace mode; same reasoning as above.
+    systemPrompt = buildAgentPrompt({ ...fallback, name: type }, effectiveCwd, env, undefined, extras);
   }
 
   // When skills is string[], we've already preloaded them into the prompt.
