@@ -59,7 +59,11 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # (see `pi-subagents/src/default-agents.ts > AUDITOR_AGENT`); the legacy
 # `software-auditor` is preserved as an alias. `SUBAGENT_NAMES` is empty
 # so the install no longer ships any user-level .md — the built-in covers
-# both spellings, and user customizations survive untouched.
+# both spellings. Unlike Phase A's developer migration, the install does
+# NOT auto-backup or auto-remove a pre-existing `software-auditor.md` at
+# `$AGENT_DIR/agents/`: the user cleans it up manually if they want the
+# built-in to take over (the user-level file would otherwise shadow the
+# alias via direct registry-hit precedence in `registerAgents`).
 #
 # Each template body carries an HTML-comment sentinel (SAGES_TEMPLATE_V1) so
 # uninstall_subagent_templates can distinguish "we installed this" from
@@ -593,46 +597,13 @@ META_EOF
   fi
 }
 
-# Phase B migration helper. Symmetric with `backup_legacy_developer` above:
-# the canonical `auditor` is now built-in to pi-subagents, so the legacy
-# `software-auditor.md` is no longer installed as a canonical template. A
-# Sages-managed legacy file is removed after backup (the built-in makes
-# it redundant); a user-customized one remains authoritative and is
-# preserved — user customizations always win. The Phase A backup directory
-# is reused so both phases' backups live under
-# `$SUBAGENT_TARGET_DIR/.phase-a-migration/` for unified inspection.
-backup_legacy_auditor() {
-  local legacy_name="software-auditor"
-  local legacy="$SUBAGENT_TARGET_DIR/$legacy_name.md"
-  [[ -f "$legacy" ]] || return 0
-
-  local backup_root="$SUBAGENT_TARGET_DIR/.phase-a-migration"
-  local ts classification
-  mkdir -p "$backup_root"
-  ts=$(date +%Y%m%dT%H%M%S)
-  classification="user-customized"
-  if is_subagent_template_installed "$legacy"; then
-    classification="sages-managed"
-  fi
-
-  cp "$legacy" "$backup_root/${legacy_name}.${ts}.md"
-  cat > "$backup_root/${legacy_name}.${ts}.md.meta" <<META_EOF
-classification: ${classification}
-install_time: ${ts}
-subagent_name: ${legacy_name}
-canonical_name: auditor
-canonical_lives_in: pi-subagents (built-in)
-phase: B
-reason: previous auditor-agent filename preserved; canonical auditor is now built-in to pi-subagents
-META_EOF
-
-  if [[ "$classification" = "sages-managed" ]]; then
-    rm -f "$legacy"
-    echo "  Removed legacy $legacy_name.md (sages-managed) — auditor is now built-in (backup: .phase-a-migration/${legacy_name}.${ts}.md)"
-  else
-    echo "  $legacy_name.md is user-customized — backed up to .phase-a-migration/${legacy_name}.${ts}.md and left in place"
-  fi
-}
+# Phase B (DAG-2026-011): the canonical `auditor` is now built-in to
+# pi-subagents; the legacy `software-auditor.md` (if previously installed
+# by an older install.sh) is left in place for the user to remove
+# manually. The user-level file shadows the built-in alias via direct
+# registry hit precedence (see agent-types.ts > registerAgents), so
+# removing it is a deliberate user choice — auto-backup-and-remove
+# adds complexity the user doesn't need.
 
 # Atomic file copy: write to "<target>.tmp.<pid>" then mv to target. On
 # Linux/POSIX, `mv` within the same filesystem is an atomic rename, so
@@ -667,7 +638,6 @@ install_subagent_templates() {
 
   mkdir -p "$SUBAGENT_TARGET_DIR"
   backup_legacy_developer
-  backup_legacy_auditor
 
   local name template target
   for name in "${SUBAGENT_NAMES[@]}"; do

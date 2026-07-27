@@ -164,32 +164,13 @@ function Backup-LegacyDeveloper {
     }
 }
 
-# Phase B migration: symmetric with Backup-LegacyDeveloper. The canonical
-# `auditor` is now built-in to pi-subagents, so the legacy `software-auditor.md`
-# is no longer installed as a canonical template. A Sages-managed file is
-# removed after backup; a user-customized one is preserved. The Phase A
-# .phase-a-migration directory is reused so both phases' backups live
-# under one discoverable location.
-function Backup-LegacyAuditor {
-    $legacyName = "software-auditor"
-    $legacy = Join-Path $SUBAGENT_TARGET_DIR "$legacyName.md"
-    if (-not (Test-Path $legacy)) { return }
-
-    $managed = IsSubagentTemplateInstalled $legacy
-    $classification = if ($managed) { "sages-managed" } else { "user-customized" }
-    $backupName = Backup-PhaseASubagentTemplate `
-        -File $legacy `
-        -Name $legacyName `
-        -Classification $classification `
-        -Reason "previous auditor-agent filename preserved; canonical auditor is now built-in to pi-subagents"
-
-    if ($managed) {
-        Remove-Item -Force $legacy
-        Write-Host "  Removed legacy $legacyName.md (sages-managed) - auditor is now built-in (backup: .phase-a-migration/$backupName)"
-    } else {
-        Write-Host "  $legacyName.md is user-customized - backed up to .phase-a-migration/$backupName and left in place"
-    }
-}
+# Phase B (DAG-2026-011): the canonical `auditor` is now built-in to
+# pi-subagents; the legacy `software-auditor.md` (if previously installed
+# by an older install.ps1) is left in place for the user to remove
+# manually. The user-level file shadows the built-in alias via direct
+# registry hit precedence (see agent-types.ts > registerAgents), so
+# removing it is a deliberate user choice — auto-backup-and-remove
+# adds complexity the user doesn't need.
 
 # Copy each $SUBAGENT_NAMES template to $SUBAGENT_TARGET_DIR. Idempotent:
 #   - missing → install from template
@@ -204,7 +185,6 @@ function Install-SubagentTemplates {
 
     $null = New-Item -ItemType Directory -Path $SUBAGENT_TARGET_DIR -Force -ErrorAction SilentlyContinue
     Backup-LegacyDeveloper
-    Backup-LegacyAuditor
 
     foreach ($name in $SUBAGENT_NAMES) {
         $template = Join-Path $SUBAGENT_TEMPLATE_DIR "$name.md"

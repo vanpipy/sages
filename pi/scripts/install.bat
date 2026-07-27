@@ -170,9 +170,12 @@ REM ─── Subagent templates (Stage 4 of 4-agent pipeline) ───
 REM Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
 REM subagent (Explore, Plan, general-purpose, developer, auditor) is a
 REM canonical built-in in pi-subagents. No user-level template is shipped
-REM here; the install path is purely a backup-and-classify pass for any
-REM pre-existing user-level files. See DEVELOPER_AGENT and AUDITOR_AGENT
-REM in pi-subagents\src\default-agents.ts.
+REM here. Phase A still runs a one-shot backup of any pre-existing
+REM software-developer.md (under .phase-a-migration/) so the user's
+REM customized content survives a re-install; Phase B does NOT do the
+REM same for software-auditor.md — the user removes it manually if they
+REM want the built-in alias to take over. See DEVELOPER_AGENT and
+REM AUDITOR_AGENT in pi-subagents\src\default-agents.ts.
 echo ==^> Installing subagent templates...
 if not exist "%AGENT_DIR%\agents" mkdir "%AGENT_DIR%\agents" >nul 2>&1
 
@@ -206,72 +209,6 @@ if exist "!LEGACY_DEVELOPER!" (
     )
 )
 
-REM Phase B migration: classify and preserve the previous auditor filename.
-REM Symmetric with the Phase A block above. Since canonical auditor is now
-REM built-in to pi-subagents, NO canonical template is installed - only
-REM back up + classify. User-customized content remains in place; a
-REM Sages-managed legacy file is removed after backup (the built-in makes
-REM it redundant). The Phase A .phase-a-migration directory is reused so
-REM both phases' backups live under one discoverable location.
-set "LEGACY_AUDITOR=%AGENT_DIR%\agents\software-auditor.md"
-if exist "!LEGACY_AUDITOR!" (
-    if not exist "!PHASE_A_BACKUP_DIR!" mkdir "!PHASE_A_BACKUP_DIR!" >nul 2>&1
-    for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddTHHmmssfff"') do set "PHASE_B_TS=%%T"
-    set "PHASE_B_CLASSIFICATION=user-customized"
-    findstr /C:"SAGES_TEMPLATE_V1" "!LEGACY_AUDITOR!" >nul 2>&1
-    if not errorlevel 1 set "PHASE_B_CLASSIFICATION=sages-managed"
-    copy /Y "!LEGACY_AUDITOR!" "!PHASE_A_BACKUP_DIR!\software-auditor.!PHASE_B_TS!.md" >nul
-    (
-        echo classification: !PHASE_B_CLASSIFICATION!
-        echo install_time: !PHASE_B_TS!
-        echo subagent_name: software-auditor
-        echo canonical_name: auditor
-        echo phase: B
-        echo reason: previous auditor-agent filename preserved; canonical auditor is now built-in to pi-subagents
-    ) > "!PHASE_A_BACKUP_DIR!\software-auditor.!PHASE_B_TS!.md.meta"
-    if "!PHASE_B_CLASSIFICATION!"=="sages-managed" (
-        del /Q "!LEGACY_AUDITOR!"
-        echo   Removed legacy software-auditor.md (sages-managed) - auditor is now built-in; backup saved under .phase-a-migration
-    ) else (
-        echo   software-auditor.md user-customized; backup saved under .phase-a-migration and original left in place
-    )
-)
-    set "TPL_NAME=%%N"
-    set "TEMPLATE=%TMP_DIR%\pi\templates\agents\%%N.md"
-    set "TARGET=%AGENT_DIR%\agents\%%N.md"
-
-    if exist "!TEMPLATE!" (
-        if exist "!TARGET!" (
-            findstr /C:"SAGES_TEMPLATE_V1" "!TARGET!" >nul 2>&1
-            if not errorlevel 1 (
-                if "%FORCE%"=="true" (
-                    copy /Y "!TEMPLATE!" "!TARGET!" >nul
-                    echo   Installed %%N.md (--force)
-                ) else (
-                    echo   %%N.md already installed (use --force to reinstall)
-                )
-            ) else (
-                if not exist "!PHASE_A_BACKUP_DIR!" mkdir "!PHASE_A_BACKUP_DIR!" >nul 2>&1
-                for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddTHHmmssfff"') do set "PHASE_A_TS=%%T"
-                copy /Y "!TARGET!" "!PHASE_A_BACKUP_DIR!\%%N.!PHASE_A_TS!.md" >nul
-                (
-                    echo classification: user-customized
-                    echo install_time: !PHASE_A_TS!
-                    echo subagent_name: %%N
-                    echo canonical_name: developer
-                    echo phase: A
-                    echo reason: existing canonical target lacks SAGES_TEMPLATE_V1 sentinel; skipped install
-                ) > "!PHASE_A_BACKUP_DIR!\%%N.!PHASE_A_TS!.md.meta"
-                echo   %%N.md user-customized; backed up under .phase-a-migration (use --force to overwrite)
-            )
-        ) else (
-            copy /Y "!TEMPLATE!" "!TARGET!" >nul
-            echo   Installed %%N.md
-        )
-    ) else (
-        echo   Warning: template missing: !TEMPLATE!
-    )
-)
 
 REM ─── SUBAGENTS.md (4-agent pipeline doc) ───
 echo ==^> Installing subagents doc...

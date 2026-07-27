@@ -200,51 +200,38 @@ test ! -e "$SUBAGENT_TARGET_DIR/developer.md" \
   || { echo "❌ FAIL: install should NOT create developer.md (built-in to pi-subagents)"; exit 1; }
 echo "✅ PASS: install_subagent_templates does not create any agent file (built-ins are pi-subagents-internal)"
 
-# Test T4.12: Sages-managed legacy software-auditor.md is backed up to
-# .phase-a-migration/ AND removed (the built-in makes it redundant). A
-# user-customized one is left in place; we test that case in T4.14 below.
+# Test T4.12: Phase B policy — a pre-existing user-level software-auditor.md
+# is LEFT IN PLACE (no auto-backup, no auto-remove). The user cleans it up
+# manually if they want the built-in alias to take over. This is a deliberate
+# simplification vs Phase A: the user-level file is theirs to manage.
 mkdir -p "$SUBAGENT_TARGET_DIR"
 cat > "$SUBAGENT_TARGET_DIR/software-auditor.md" <<'LEGACY_EOF'
 ---
-name: Sages-managed auditor
+name: User-customized auditor
 description: legacy
 ---
-# Legacy sages-managed software-auditor.md (with SAGES_TEMPLATE_V1 sentinel)
-SAGES_TEMPLATE_V1
+# User-customized software-auditor.md (Phase B does not touch this)
 LEGACY_EOF
 
 install_subagent_templates
 
-# Sages-managed version must be GONE (backed up + removed).
-test ! -e "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: install should remove the sages-managed software-auditor.md (built-in makes it redundant)"; exit 1; }
-# And the backup must exist.
-BACKUP_COUNT=$(ls "$SUBAGENT_TARGET_DIR/.phase-a-migration"/software-auditor.*.md 2>/dev/null | wc -l | tr -d ' ')
-[[ "$BACKUP_COUNT" -ge 1 ]] \
-  || { echo "❌ FAIL: expected at least one backup of software-auditor.md under .phase-a-migration/"; exit 1; }
-echo "✅ PASS: install_subagent_templates backs up + removes the sages-managed software-auditor.md"
+# File is unchanged after install.
+test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: Phase B install should NOT remove user-level software-auditor.md (user cleans up manually)"; exit 1; }
+grep -q "User-customized auditor" "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: user content was modified by install"; exit 1; }
+# No backup directory created.
+test ! -d "$SUBAGENT_TARGET_DIR/.phase-a-migration" \
+  || { echo "❌ FAIL: Phase B should NOT create .phase-a-migration/ for the auditor (user-cleans-up policy)"; ls "$SUBAGENT_TARGET_DIR/.phase-a-migration"; exit 1; }
+echo "✅ PASS: Phase B install leaves user-level software-auditor.md untouched (user cleans up manually)"
 
-# Test T4.13: backup metadata sidecar records canonical_name=auditor + phase=B
-META_FILE=$(ls "$SUBAGENT_TARGET_DIR/.phase-a-migration"/software-auditor.*.md.meta 2>/dev/null | head -1)
-[[ -n "$META_FILE" ]] \
-  || { echo "❌ FAIL: expected a .meta sidecar for the auditor backup"; exit 1; }
-grep -q "^classification: sages-managed" "$META_FILE" \
-  || { echo "❌ FAIL: meta should record classification=sages-managed"; exit 1; }
-grep -q "^canonical_name: auditor" "$META_FILE" \
-  || { echo "❌ FAIL: meta should record canonical_name=auditor"; exit 1; }
-grep -q "^phase: B" "$META_FILE" \
-  || { echo "❌ FAIL: meta should record phase=B (Phase B migration)"; exit 1; }
-echo "✅ PASS: backup_legacy_auditor writes a phase=B meta sidecar"
-
-# Test T4.14: idempotent — re-running install_subagent_templates after
-# the backup/remove cycle is a no-op (the slot is now clean).
-install_subagent_templates
-# No canonical agent file is created or modified.
-test ! -e "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: re-install re-created software-auditor.md (should be no-op)"; exit 1; }
-test ! -e "$SUBAGENT_TARGET_DIR/developer.md" \
-  || { echo "❌ FAIL: re-install re-created developer.md (should be no-op)"; exit 1; }
-echo "✅ PASS: install_subagent_templates is idempotent (no canonical install)"
+# Test T4.13: idempotent — re-running install_subagent_templates is still
+# a no-op (Phase A backup_legacy_developer may have created the directory
+# but Phase B must not). We don't assert the directory state here (T4.20a
+# covers Phase A's developer backup separately); only the agent files.
+test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
+  || { echo "❌ FAIL: re-install removed user-level software-auditor.md"; exit 1; }
+echo "✅ PASS: install_subagent_templates is idempotent (Phase B leaves user files alone)"
 
 # Test T4.15: user-customized legacy auditor is preserved on re-install.
 # Symmetric with T4.20a below for the developer migration: user
@@ -258,17 +245,22 @@ description: User-customized — must be preserved across no-FORCE re-installs.
 (custom body content; deliberately lacks the install-template marker)
 CUSTOM_EOF
 
-install_subagent_templates  # no --force → must NOT overwrite user file
+install_subagent_templates  # no-op now (Phase B policy: no auto-backup, no auto-remove)
 
+# Phase B policy: the user cleans up their software-auditor.md manually.
+# Re-install must not clobber, modify, or back up the file.
 grep -q "My Custom Auditor" "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: user-customized software-auditor.md was clobbered"; cat "$SUBAGENT_TARGET_DIR/software-auditor.md"; exit 1; }
+  || { echo "❌ FAIL: user-customized software-auditor.md was modified by re-install"; cat "$SUBAGENT_TARGET_DIR/software-auditor.md"; exit 1; }
 is_subagent_template_installed "$SUBAGENT_TARGET_DIR/software-auditor.md" \
   && { echo "❌ FAIL: user-customized file got sentinel from re-install"; exit 1; \
-} || echo "✅ PASS: user-customized legacy auditor preserved on no-FORCE install (Phase B)"
+} || echo "✅ PASS: re-install leaves user-level software-auditor.md untouched (Phase B user-cleans-up policy)"
 
 # Test T4.16: uninstall_subagent_templates is a no-op when no canonical
 # template is present (the only files in $SUBAGENT_TARGET_DIR are
 # user-customized; they lack the sentinel and must NOT be touched).
+# Note: even though we kept the historical-name list in the uninstall
+# for safety, the user file above has no SAGES_TEMPLATE_V1 sentinel so
+# it must NOT be deleted.
 uninstall_subagent_templates
 test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
   || { echo "❌ FAIL: uninstall removed user-customized software-auditor.md"; exit 1; }
