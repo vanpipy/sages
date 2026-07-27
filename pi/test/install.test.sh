@@ -156,7 +156,7 @@ AGENT_DIR="$PI_DIR/agent"
   awk '/^SUBAGENT_TARGET_DIR=/' "$SCRIPT"
   awk '/^SUBAGENT_NAMES=/' "$SCRIPT"
   awk '/^SUBAGENT_SENTINEL_TEXT=/' "$SCRIPT"
-  for fn in is_subagent_template_installed backup_legacy_developer backup_legacy_auditor _atomic_copy install_subagent_templates uninstall_subagent_templates; do
+  for fn in is_subagent_template_installed _atomic_copy install_subagent_templates uninstall_subagent_templates; do
     extract_fn "$fn"
   done
 } > "$TMPDIR4/subagent-fns.sh"
@@ -268,36 +268,33 @@ grep -q "My Custom Auditor" "$SUBAGENT_TARGET_DIR/software-auditor.md" \
   || { echo "❌ FAIL: user-written content lost during uninstall"; exit 1; }
 echo "✅ PASS: uninstall_subagent_templates is a no-op when no canonical files exist"
 
-# Test T4.20a: Phase A preserves and classifies a user-customized legacy
-# developer filename. Since canonical developer is now built-in to
-# pi-subagents, NO canonical template is installed — only back up + classify.
-# User-customized legacy stays in place; sages-managed legacy is removed.
+# Test T4.20a: Phase A + Phase B user-cleans-up policy. A pre-existing
+# user-level `software-developer.md` is LEFT IN PLACE (no auto-backup,
+# no auto-remove) — the user removes it manually if they want the
+# built-in `developer` to take over.
 rm -f "$SUBAGENT_TARGET_DIR/developer.md"
 cat > "$SUBAGENT_TARGET_DIR/software-developer.md" <<'CUSTOM_EOF'
 ---
 name: Legacy Custom Developer
-description: Previous user customization that Phase A must preserve.
+description: User cleans up manually.
 ---
 # Legacy Custom Developer
 CUSTOM_EOF
 
 install_subagent_templates
 
-# User-customized legacy is preserved.
+# User-customized legacy is preserved (no auto-backup, no auto-remove).
 test -f "$SUBAGENT_TARGET_DIR/software-developer.md" \
-  || { echo "❌ FAIL: Phase A removed user-customized legacy developer file"; exit 1; }
+  || { echo "❌ FAIL: install removed user-customized software-developer.md"; exit 1; }
+grep -q "Legacy Custom Developer" "$SUBAGENT_TARGET_DIR/software-developer.md" \
+  || { echo "❌ FAIL: user content was modified by install"; exit 1; }
 # NO canonical developer.md is installed (built-in to pi-subagents).
 test ! -f "$SUBAGENT_TARGET_DIR/developer.md" \
-  || { echo "❌ FAIL: Phase A should NOT install canonical developer.md (built-in to pi-subagents)"; exit 1; }
-# Back up metadata present.
-legacy_backup=$(find "$SUBAGENT_TARGET_DIR/.phase-a-migration" -maxdepth 1 -type f -name 'software-developer.*.md' | head -1)
-test -n "$legacy_backup" \
-  || { echo "❌ FAIL: Phase A did not back up the legacy developer file"; exit 1; }
-test -f "$legacy_backup.meta" \
-  || { echo "❌ FAIL: Phase A backup metadata sidecar missing"; exit 1; }
-grep -q '^classification: user-customized$' "$legacy_backup.meta" \
-  || { echo "❌ FAIL: Phase A backup metadata did not classify user customization"; exit 1; }
-echo "✅ PASS: Phase A backs up/classifies legacy developer customization (no canonical install — built-in to pi-subagents)"
+  || { echo "❌ FAIL: install should NOT create canonical developer.md (built-in to pi-subagents)"; exit 1; }
+# No backup directory created (Phase A backup logic removed).
+test ! -d "$SUBAGENT_TARGET_DIR/.phase-a-migration" \
+  || { echo "❌ FAIL: install should NOT create .phase-a-migration/ (user-cleans-up policy)"; ls "$SUBAGENT_TARGET_DIR/.phase-a-migration"; exit 1; }
+echo "✅ PASS: install leaves user-level software-developer.md untouched (Phase A user-cleans-up policy)"
 unset PI_DIR AGENT_DIR
 
 # ─────────────────────────────────────────────────────────────────

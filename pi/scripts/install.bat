@@ -170,44 +170,15 @@ REM ─── Subagent templates (Stage 4 of 4-agent pipeline) ───
 REM Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
 REM subagent (Explore, Plan, general-purpose, developer, auditor) is a
 REM canonical built-in in pi-subagents. No user-level template is shipped
-REM here. Phase A still runs a one-shot backup of any pre-existing
-REM software-developer.md (under .phase-a-migration/) so the user's
-REM customized content survives a re-install; Phase B does NOT do the
-REM same for software-auditor.md — the user removes it manually if they
-REM want the built-in alias to take over. See DEVELOPER_AGENT and
-REM AUDITOR_AGENT in pi-subagents\src\default-agents.ts.
+REM here. Pre-existing user-level `software-developer.md` and
+REM `software-auditor.md` (if installed by older install.sh / install.ps1
+REM / install.bat versions) are LEFT IN PLACE for the user to remove
+REM manually — auto-backup-and-remove was removed because the user-level
+REM file is theirs to manage. See DEVELOPER_AGENT and AUDITOR_AGENT
+REM in pi-subagents\src\default-agents.ts.
 echo ==^> Installing subagent templates...
 if not exist "%AGENT_DIR%\agents" mkdir "%AGENT_DIR%\agents" >nul 2>&1
 
-REM Phase A migration: classify and preserve the previous developer filename.
-REM Since canonical developer is now built-in to pi-subagents, NO canonical
-REM template is installed - only back up + classify. User-customized content
-REM remains in place; a Sages-managed legacy file is removed after backup
-REM (the built-in makes it redundant).
-set "PHASE_A_BACKUP_DIR=%AGENT_DIR%\agents\.phase-a-migration"
-set "LEGACY_DEVELOPER=%AGENT_DIR%\agents\software-developer.md"
-if exist "!LEGACY_DEVELOPER!" (
-    if not exist "!PHASE_A_BACKUP_DIR!" mkdir "!PHASE_A_BACKUP_DIR!" >nul 2>&1
-    for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMddTHHmmssfff"') do set "PHASE_A_TS=%%T"
-    set "PHASE_A_CLASSIFICATION=user-customized"
-    findstr /C:"SAGES_TEMPLATE_V1" "!LEGACY_DEVELOPER!" >nul 2>&1
-    if not errorlevel 1 set "PHASE_A_CLASSIFICATION=sages-managed"
-    copy /Y "!LEGACY_DEVELOPER!" "!PHASE_A_BACKUP_DIR!\software-developer.!PHASE_A_TS!.md" >nul
-    (
-        echo classification: !PHASE_A_CLASSIFICATION!
-        echo install_time: !PHASE_A_TS!
-        echo subagent_name: software-developer
-        echo canonical_name: developer
-        echo phase: A
-        echo reason: previous developer-agent filename preserved; canonical developer is now built-in to pi-subagents
-    ) > "!PHASE_A_BACKUP_DIR!\software-developer.!PHASE_A_TS!.md.meta"
-    if "!PHASE_A_CLASSIFICATION!"=="sages-managed" (
-        del /Q "!LEGACY_DEVELOPER!"
-        echo   Removed legacy software-developer.md (sages-managed) - developer is now built-in; backup saved under .phase-a-migration
-    ) else (
-        echo   software-developer.md user-customized; backup saved under .phase-a-migration and original left in place
-    )
-)
 
 
 REM ─── SUBAGENTS.md (4-agent pipeline doc) ───

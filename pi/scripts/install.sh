@@ -39,31 +39,14 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # subagent (Explore, Plan, general-purpose, developer, auditor) is a
 # canonical built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
 # No user-level template is shipped; SUBAGENT_NAMES is empty and the
-# install path is purely a backup-and-classify pass for any pre-existing
-# user-level files. New user customizations go in `~/.pi/agent/agents/`
-# (global) or `.pi/agents/` (project) and override the built-in.
-#
-# Phase A (DAG-2026-011) complete: `developer` is a canonical built-in in
-# pi-subagents (see `pi-subagents/src/default-agents.ts`). The user-level
-# template is no longer shipped. Users with customizations can drop a `.md`
-# of the same name into `.pi/agents/` (project-level) or
-# `~/.pi/agent/agents/` (global) to override the built-in.
-#
-# Phase A's legacy migration (software-developer.md → developer) is reduced
-# to "back up + classify": no canonical install, since the built-in handles
-# `developer` via the alias. User-customized legacy stays in place; Sages-
-# managed legacy is removed after backup (the built-in makes it redundant).
-#
-# Phase B (DAG-2026-011) complete: `software-auditor` → `auditor` follows
-# the same playbook. `auditor` is a canonical built-in in pi-subagents
-# (see `pi-subagents/src/default-agents.ts > AUDITOR_AGENT`); the legacy
-# `software-auditor` is preserved as an alias. `SUBAGENT_NAMES` is empty
-# so the install no longer ships any user-level .md — the built-in covers
-# both spellings. Unlike Phase A's developer migration, the install does
-# NOT auto-backup or auto-remove a pre-existing `software-auditor.md` at
-# `$AGENT_DIR/agents/`: the user cleans it up manually if they want the
-# built-in to take over (the user-level file would otherwise shadow the
-# alias via direct registry-hit precedence in `registerAgents`).
+# install path is a no-op for subagent templates. Pre-existing user-
+# level `software-developer.md` and `software-auditor.md` (if installed
+# by older install.sh / install.ps1 / install.bat versions) are LEFT IN
+# PLACE for the user to remove manually — auto-backup-and-remove was
+# removed because the user-level file is theirs to manage. New user
+# customizations go in `~/.pi/agent/agents/` (global) or `.pi/agents/`
+# (project) and override the built-in via direct registry-hit
+# precedence in `registerAgents` (see agent-types.ts).
 #
 # Each template body carries an HTML-comment sentinel (SAGES_TEMPLATE_V1) so
 # uninstall_subagent_templates can distinguish "we installed this" from
@@ -535,11 +518,10 @@ install_system_prompt() {
 # ────────────────────────────────────────────────────────────
 # Subagent templates (pi-subagents' global agent definitions)
 # Phase A + Phase B: every default is built-in to pi-subagents; no
-# canonical template is installed. The remaining pass only backs up
-# + classifies pre-existing user-level files (developer / software-developer
-# + auditor / software-auditor). See DEVELOPER_AGENT and AUDITOR_AGENT
-# in `pi-subagents/src/default-agents.ts`.
-#  pi-subagents/src/default-agents.ts.)
+# canonical template is installed. Pre-existing user-level files
+# (developer / software-developer + auditor / software-auditor) are
+# left in place for the user to remove manually. See DEVELOPER_AGENT
+# and AUDITOR_AGENT in `pi-subagents/src/default-agents.ts`.
 # ────────────────────────────────────────────────────────────
 
 # Sentinel marker stamped into every template body (see templates/agents/*.md).
@@ -555,55 +537,15 @@ is_subagent_template_installed() {
   [[ -f "$file" ]] && grep -q "$SUBAGENT_SENTINEL_TEXT" "$file" 2>/dev/null
 }
 
-# Phase A migration helper. Preserve the previous developer filename. Since
-# the canonical developer is now built-in to pi-subagents, NO canonical
-# template is installed — only back up + classify. A Sages-managed legacy
-# file is removed after backup (the built-in makes it redundant); a
-# user-customized one remains authoritative and is preserved.
-backup_legacy_developer() {
-  local legacy_name="software-developer"
-  local legacy="$SUBAGENT_TARGET_DIR/$legacy_name.md"
-  [[ -f "$legacy" ]] || return 0
-
-  local backup_root="$SUBAGENT_TARGET_DIR/.phase-a-migration"
-  local ts classification
-  mkdir -p "$backup_root"
-  ts=$(date +%Y%m%dT%H%M%S)
-  classification="user-customized"
-  if is_subagent_template_installed "$legacy"; then
-    classification="sages-managed"
-  fi
-
-  cp "$legacy" "$backup_root/${legacy_name}.${ts}.md"
-  # canonical_name is the role's CURRENT canonical identifier (developer),
-  # not where the canonical lives — `reason` and the per-install
-  # `pi-subagents` route are the location hint. The legacy `subagent_name`
-  # is the historical filename the user might be migrating from.
-  cat > "$backup_root/${legacy_name}.${ts}.md.meta" <<META_EOF
-classification: ${classification}
-install_time: ${ts}
-subagent_name: ${legacy_name}
-canonical_name: developer
-canonical_lives_in: pi-subagents (built-in)
-phase: A
-reason: previous developer-agent filename preserved; canonical developer is now built-in to pi-subagents
-META_EOF
-
-  if [[ "$classification" = "sages-managed" ]]; then
-    rm -f "$legacy"
-    echo "  Removed legacy $legacy_name.md (sages-managed) — developer is now built-in (backup: .phase-a-migration/${legacy_name}.${ts}.md)"
-  else
-    echo "  $legacy_name.md is user-customized — backed up to .phase-a-migration/${legacy_name}.${ts}.md and left in place"
-  fi
-}
-
-# Phase B (DAG-2026-011): the canonical `auditor` is now built-in to
-# pi-subagents; the legacy `software-auditor.md` (if previously installed
-# by an older install.sh) is left in place for the user to remove
-# manually. The user-level file shadows the built-in alias via direct
-# registry hit precedence (see agent-types.ts > registerAgents), so
-# removing it is a deliberate user choice — auto-backup-and-remove
-# adds complexity the user doesn't need.
+# Phase A + Phase B (DAG-2026-011) — done. The canonical `developer`
+# and `auditor` agents are both built-in to pi-subagents. Pre-existing
+# user-level `software-developer.md` and `software-auditor.md` files
+# (if installed by older install.sh / install.ps1 / install.bat
+# versions) are left in place for the user to remove manually. The
+# user-level file shadows the built-in alias via direct registry hit
+# precedence in `registerAgents` (see agent-types.ts), so removing it
+# is a deliberate user choice — auto-backup-and-remove adds complexity
+# the user doesn't need.
 
 # Atomic file copy: write to "<target>.tmp.<pid>" then mv to target. On
 # Linux/POSIX, `mv` within the same filesystem is an atomic rename, so
@@ -637,7 +579,6 @@ install_subagent_templates() {
   fi
 
   mkdir -p "$SUBAGENT_TARGET_DIR"
-  backup_legacy_developer
 
   local name template target
   for name in "${SUBAGENT_NAMES[@]}"; do

@@ -39,15 +39,16 @@ $AGENT_DIR = "$PI_DIR\agent"
 # subagent (Explore, Plan, general-purpose, developer, auditor) is a
 # canonical built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
 # No user-level template is shipped; SUBAGENT_NAMES is empty and the
-# install path is purely a backup-and-classify pass for any pre-existing
-# user-level files. New user customizations go in `~/.pi/agent/agents/`
-# (global) or `.pi/agents/` (project) and override the built-in.
+# install path is a no-op for subagent templates. Pre-existing user-
+# level `software-developer.md` and `software-auditor.md` (if installed
+# by older install.sh / install.ps1 / install.bat versions) are LEFT IN
+# PLACE for the user to remove manually — auto-backup-and-remove was
+# removed because the user-level file is theirs to manage. New user
+# customizations go in `~/.pi/agent/agents/` (global) or `.pi/agents/`
+# (project) and override the built-in via direct registry-hit
+# precedence in `registerAgents` (see agent-types.ts).
 $SUBAGENT_TEMPLATE_DIR = Join-Path (Split-Path -Parent $PSCommandPath) "..\templates\agents"
 $SUBAGENT_TARGET_DIR = "$AGENT_DIR\agents"
-# Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
-# subagent is a canonical built-in in pi-subagents. No user-level template
-# is shipped; SUBAGENT_NAMES is empty so the install path is purely a
-# backup-and-classify pass for pre-existing user-level files.
 $SUBAGENT_NAMES = @()
 $SUBAGENT_SENTINEL = "SAGES_TEMPLATE_V1"
 
@@ -112,57 +113,15 @@ function IsSubagentTemplateInstalled {
     if (-not $content) { return $false }
     return $content.Contains($SUBAGENT_SENTINEL)
 }
-
-# Preserve and classify a previous template before Phase A skips or migrates it.
-# The metadata sidecar keeps rollback possible without consulting git.
-function Backup-PhaseASubagentTemplate {
-    param(
-        [string]$File,
-        [string]$Name,
-        [string]$Classification,
-        [string]$Reason
-    )
-    $backupRoot = Join-Path $SUBAGENT_TARGET_DIR ".phase-a-migration"
-    $null = New-Item -ItemType Directory -Path $backupRoot -Force -ErrorAction SilentlyContinue
-    $timestamp = Get-Date -Format "yyyyMMddTHHmmssfff"
-    $backupName = "$Name.$timestamp.md"
-    Copy-Item $File (Join-Path $backupRoot $backupName) -Force
-    @(
-        "classification: $Classification",
-        "install_time: $timestamp",
-        "subagent_name: $Name",
-        "canonical_name: developer",
-        "phase: A",
-        "reason: $Reason"
-    ) | Set-Content (Join-Path $backupRoot "$backupName.meta") -Encoding UTF8
-    return $backupName
-}
-
-# Phase A migration: preserve the previous developer filename. Since the
-# canonical developer is now built-in to pi-subagents, NO canonical template
-# is installed — only back up + classify. A Sages-managed legacy file is
-# removed after backup (the built-in makes it redundant); a user-customized
-# one remains authoritative and is preserved.
-function Backup-LegacyDeveloper {
-    $legacyName = "software-developer"
-    $legacy = Join-Path $SUBAGENT_TARGET_DIR "$legacyName.md"
-    if (-not (Test-Path $legacy)) { return }
-
-    $managed = IsSubagentTemplateInstalled $legacy
-    $classification = if ($managed) { "sages-managed" } else { "user-customized" }
-    $backupName = Backup-PhaseASubagentTemplate `
-        -File $legacy `
-        -Name $legacyName `
-        -Classification $classification `
-        -Reason "previous developer-agent filename preserved; canonical developer is now built-in to pi-subagents"
-
-    if ($managed) {
-        Remove-Item -Force $legacy
-        Write-Host "  Removed legacy $legacyName.md (sages-managed) - developer is now built-in (backup: .phase-a-migration/$backupName)"
-    } else {
-        Write-Host "  $legacyName.md is user-customized - backed up to .phase-a-migration/$backupName and left in place"
-    }
-}
+# Phase A + Phase B (DAG-2026-011) — done. The canonical `developer` and
+# `auditor` agents are both built-in to pi-subagents. Pre-existing
+# user-level `software-developer.md` and `software-auditor.md` files
+# (if installed by older install.sh / install.ps1 / install.bat versions)
+# are left in place for the user to remove manually. The user-level file
+# shadows the built-in alias via direct registry hit precedence in
+# `registerAgents` (see agent-types.ts), so removing it is a deliberate
+# user choice — auto-backup-and-remove adds complexity the user doesn't
+# need.
 
 # Phase B (DAG-2026-011): the canonical `auditor` is now built-in to
 # pi-subagents; the legacy `software-auditor.md` (if previously installed
@@ -184,7 +143,6 @@ function Install-SubagentTemplates {
     }
 
     $null = New-Item -ItemType Directory -Path $SUBAGENT_TARGET_DIR -Force -ErrorAction SilentlyContinue
-    Backup-LegacyDeveloper
 
     foreach ($name in $SUBAGENT_NAMES) {
         $template = Join-Path $SUBAGENT_TEMPLATE_DIR "$name.md"
