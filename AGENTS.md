@@ -261,6 +261,30 @@ respecting quotes + parens, defeating the original first-word bypass.
 F4-1 (`perl -pi` target extraction, line 226) and F4-2 (`N>file`
 fd-redirect detection, line 85) harden the two known gaps.
 
+## Bash-guard four-layer model (GC-2026-015)
+
+The `pi/src/tools/bash-guard.ts` path gate classifies every command into
+one of four layers. Evaluation order is L1 → L2 → L3 → L4 (first match
+wins; a command is either allowed by an upper layer or denied by L4).
+
+| Layer | What | Example | Default |
+|---|---|---|---|
+| **L1 read** | Read-only commands | `cat`, `ls`, `find`, `grep`, `aft_*`, `ctx_*`, `git status` (read-only) | allow |
+| **L2 git-meta** | Git subcommands that only touch `.git/` | `git log`, `git commit`, `git merge`, `git worktree add`, `git branch` | allow (subcommand whitelist) |
+| **L3 meta-file-write** | Writes to Sages meta-files (path allowlist) | `cat > AGENTS.md`, `sed -i` on `pi/templates/` | allow (`canMainAgentWriteMeta()`) |
+| **L4 production-code-write** | Writes to `src/`, `test/`, `lib/`, etc. | `cat > src/foo.ts`, `sed -i` on `pi/src/` | DENY (dispatch `developer`) |
+
+The L2 whitelist excludes destructive subcommands (`git checkout -- <file>`,
+`git restore <file>`, `git reset --hard`, `git clean -fd`, `git stash drop`,
+`git tag -d`, `git branch -D`, `git push -f`). The L3 allowlist lives in
+`pi/src/tools/file-gate.ts` (`META_FILE_ALLOWLIST`) and is the single source
+of truth. The L4 deny list (`PRODUCTION_DENY_PATTERNS`) is unchanged.
+
+Production code still requires the `developer` subagent. The main agent
+can read, run git-meta, and write to Sages meta-files directly — but every
+`src/` / `test/` / `lib/` change goes through the TDD + audit gate.
+
+
 ### Subagent dispatch contract
 
 The L3 main agent dispatches subagents based on the task shape — NEVER use `developer` for meta-files or git operations without `tdd: none` (or for read-only exploration). See `pi/templates/SUBAGENTS.md § Dispatch Contract` for the full decision tree. DAG-2026-011 Phase C removed the `general-purpose` helper — for ad-hoc work, see the §"Escape Window" section below.

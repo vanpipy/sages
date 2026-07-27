@@ -1,6 +1,11 @@
 /**
- * Bash Guard — classify bash commands and block write-intent
- * operations that target production code paths.
+ * Bash Guard — four-layer command gate, evaluated L1 → L2 → L3 → L4:
+ * L1 read allows commands classified read-only; L2 git-meta applies a
+ * positive git-subcommand whitelist and rejects destructive variants; L3
+ * meta-file-write allows extracted targets in `META_FILE_ALLOWLIST` via
+ * `canMainAgentWriteMeta()`; L4 production-code-write denies everything
+ * targeting production paths or otherwise unknown. Upper layers allow
+ * known-safe operations; L4 requires a developer subagent.
  *
  * The main orchestrator agent must not be able to bypass the
  * `developer` / `auditor` audit gate by issuing
@@ -12,7 +17,8 @@
  * the `bash` tool's `tool_call` event layer is P2's job; here we
  * expose three functions used by both the wiring and the tests:
  *
- *   classifyBashCommand(cmd)  → "read-only" | "write-intent" | "unknown"
+ *   classifyBashCommand(cmd)  → "read-only" | "write-intent" | "git-meta" | "unknown"
+ *   isGitMetaCommand(cmd)     → positive-whitelist `GitMetaVerdict`
  *   extractBashTargets(cmd)   → string[] of paths the command will write
  *   shouldBlockBashCommand(cmd, ctx) → { block, reason? }
  *
@@ -42,7 +48,7 @@ import { isAbsolute } from "node:path";
 // for callers that want to surface the meta-file denial verbatim;
 // the bash-guard composes its own reason because the bash denial
 // is command-shaped, not path-shaped.
-import { canMainAgentWrite, policyMessage } from "./file-gate.js";
+import { canMainAgentWrite, canMainAgentWriteMeta, policyMessage } from "./file-gate.js";
 
 /** Unconditional read-only first-words. */
 const READ_ONLY_FIRST_WORDS = new Set([
@@ -53,9 +59,49 @@ const READ_ONLY_FIRST_WORDS = new Set([
 
 /** Write-intent first-words (always win over read-only). */
 const WRITE_INTENT_FIRST_WORDS = new Set([
-	"rm", "mv", "cp", "sed", "perl", "tee", "truncate",
+	"rm", "mv", "cp", "sed", "perl", "tee", "truncate", "mkdir",
 	"chmod", "chown", "tar", "unzip",
 ]);
+
+/**
+ * Unconditionally destructive first-words — ALWAYS denied, regardless
+ * of target path. This restores the pre-GC-2026-015 invariant that
+ * the four-layer refactor's L3 meta-file allowlist would otherwise
+ * relax (a path like `.pi/orchestrator/foo.md` makes both
+ * `canMainAgentWrite` AND `canMainAgentWriteMeta` return true, so
+ * `isProductionTarget` returns false and `rm` slips through).
+ *
+ * Subset of `WRITE_INTENT_FIRST_WORDS`. Non-destructive
+ * write-intent commands (`mkdir`, `tee`, `sed`, `perl`, `tar`,
+ * `chmod`, …) remain L3-controlled: they're allowed on meta-file
+ * paths and denied on production paths via `isProductionTarget`.
+ *
+ * Anti-goal contract (GC-2026-015): "Do NOT change the existing
+ * destructives (`rm`, `mv`, `cp`, `unlink`, `rmdir`) — they stay
+ * denied regardless of which layer."
+ */
+const DESTRUCTIVE_FIRST_WORDS = new Set([
+	"rm", "mv", "cp", "unlink", "rmdir",
+]);
+
+/**
+ * Chain / pipe / redirect / fd operators that terminate a command's
+ * arg list. Used by `extractBashTargets` to stop at the first
+ * non-target token so e.g. `rm pi/src/foo.ts 2>&1 | head -5` extracts
+ * only `pi/src/foo.ts` (not `2>&1`, `|`, `head`).
+ *
+ * Kept narrow on purpose — these are SHELL-level separators, not
+ * data the user might be passing as a filename. Quoted operators
+ * (`"&&"`) never reach here because the helper is called on
+ * already-shell-tokenized args.
+ */
+function isShellOperator(token: string): boolean {
+	if (token === "|" || token === ";" || token === "&") return true;
+	if (token === "&&" || token === "||") return true;
+	if (token.startsWith(">") || token.startsWith("<")) return true;
+	if (token === "2>&1" || token.startsWith("&>")) return true;
+	return false;
+}
 
 /** Read-only prefix patterns. */
 const READ_ONLY_PREFIX_PATTERNS: RegExp[] = [
@@ -66,11 +112,9 @@ const READ_ONLY_PREFIX_PATTERNS: RegExp[] = [
 	/^make\b/,
 ];
 
-/** Read-only git subcommands. */
-const READ_ONLY_GIT_SUBCOMMANDS = new Set([
-	"status", "log", "diff", "show", "branch",
-]);
 
+/** Git commands retained as L1 read-only for classifier compatibility. */
+const READ_ONLY_GIT_SUBCOMMANDS = new Set(["status", "log", "diff", "show", "branch"]);
 
 /**
  * Shared redirect-detector prefix. Matches any file-redirect:
@@ -83,12 +127,92 @@ const READ_ONLY_GIT_SUBCOMMANDS = new Set([
  */
 const WRITE_REDIRECT_PREFIX = /\d*&?(?:>>|>(?!&))/;
 
-export type BashClassification = "read-only" | "write-intent" | "unknown";
+export type BashClassification = "read-only" | "write-intent" | "git-meta" | "unknown";
+
+export type GitMetaVerdict =
+	| { allow: true; subcommand: string }
+	| { allow: false; reason: string };
 
 export interface BashGuardDecision {
 	block: boolean;
 	reason?: string;
 }
+
+/** Tokenize the command prefix while preserving spaces inside shell quotes. */
+function shellTokens(command: string): string[] {
+	const tokens: string[] = [];
+	let token = "";
+	let quote: "'" | '"' | undefined;
+	let escaped = false;
+	for (const char of command.trim()) {
+		if (escaped) {
+			token += char;
+			escaped = false;
+			continue;
+		}
+		if (char === "\\" && quote !== "'") {
+			escaped = true;
+			continue;
+		}
+		if (quote) {
+			if (char === quote) quote = undefined;
+			else token += char;
+			continue;
+		}
+		if (char === "'" || char === '"') {
+			quote = char;
+			continue;
+		}
+		if (/\s/.test(char)) {
+			if (token) {
+				tokens.push(token);
+				token = "";
+			}
+		} else token += char;
+	}
+	if (token) tokens.push(token);
+	return tokens;
+}
+
+function gitTokens(command: string): string[] | undefined {
+	const tokens = shellTokens(command);
+	let index = 0;
+	while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index])) index++;
+	while (index < tokens.length && tokens[index].startsWith("-") && tokens[index] !== "--") index++;
+	return tokens[index] === "git" ? tokens.slice(index) : undefined;
+}
+
+/** Classify a git command against the positive L2 whitelist. */
+export function isGitMetaCommand(command: string): GitMetaVerdict {
+	const tokens = gitTokens(command);
+	if (!tokens) return { allow: false, reason: "not a git command" };
+	const sub = tokens[1];
+	const args = tokens.slice(2);
+	const rendered = `git ${sub ?? ""}`.trim();
+	const destructive =
+		(sub === "checkout" && args.includes("--")) ||
+		sub === "restore" ||
+		sub === "rm" ||
+		sub === "mv" ||
+		(sub === "reset" && args.includes("--hard")) ||
+		(sub === "clean" && args.some(a => /^-[a-z]+$/i.test(a) && a.includes("f") && a.includes("d"))) ||
+		(sub === "stash" && args[0] === "drop") || (sub === "tag" && args.includes("-d")) ||
+		(sub === "branch" && args.some(a => a === "-D" || a === "-d")) ||
+		(sub === "push" && args.some(a => a === "--force" || a === "-f")) ||
+		(sub === "worktree" && args[0] === "remove" && args.includes("--force"));
+	if (destructive) return { allow: false, reason: `destructive: ${rendered}${args.length ? ` ${args.join(" ")}` : ""}` };
+	if (!sub) return { allow: false, reason: "unsupported: git command has no subcommand" };
+
+	const direct = new Set(["status", "log", "diff", "show", "blame", "shortlog", "reflog", "rev-parse", "rev-list", "add", "commit", "merge", "cherry-pick", "rebase", "stash", "fetch", "pull", "push", "init", "clone"]);
+	let allow = direct.has(sub);
+	if (sub === "tag" || sub === "branch") allow = !args.some(a => a.startsWith("-") && a !== "-l" && a !== "--list");
+	if (sub === "worktree") allow = ["list", "add", "remove"].includes(args[0] ?? "");
+	if (sub === "remote") allow = args[0] === "-v" || args[0] === "add";
+	if (sub === "submodule") allow = args[0] === "status";
+	if (sub === "config") allow = args[0] === "--get" || args[0] === "--list";
+	return allow ? { allow: true, subcommand: sub } : { allow: false, reason: `unsupported: ${rendered}` };
+}
+
 
 /**
  * Classify a bash command by its first word (with a few exceptions
@@ -147,14 +271,18 @@ export function classifyBashCommand(command: string): BashClassification {
 		return "read-only";
 	}
 
-	// 6. git read-only subcommands.
-	if (firstWord === "git") {
-		const tokens = trimmed.split(/\s+/);
-		const sub = tokens[1];
+	// 6. Existing read-only git commands remain L1 for API compatibility.
+	const tokens = shellTokens(trimmed);
+	const gitIndex = tokens.findIndex(t => t === "git");
+	if (gitIndex >= 0) {
+		const sub = tokens[gitIndex + 1];
 		if (sub && READ_ONLY_GIT_SUBCOMMANDS.has(sub)) return "read-only";
-		if (sub === "worktree" && tokens[2] === "list") return "read-only";
-		return "unknown";
+		if (sub === "worktree" && tokens[gitIndex + 2] === "list") return "read-only";
 	}
+
+	// Other whitelisted git-meta subcommands are L2.
+	const gitVerdict = isGitMetaCommand(trimmed);
+	if (gitVerdict.allow) return "git-meta";
 
 	// 7. npm/bun/pytest/cargo/make prefix patterns.
 	for (const re of READ_ONLY_PREFIX_PATTERNS) {
@@ -194,30 +322,63 @@ export function extractBashTargets(command: string): string[] {
 	switch (firstWord) {
 		case "rm": {
 			// rm [-rf|-r|-f|...]* <path> [<path>...]
+			// Stop at the first shell operator (chain parser
+			// hardening — `rm foo 2>&1 | head` previously
+			// extracted `2>&1`, `|`, `head` as targets).
 			for (const t of tokens.slice(1)) {
-				if (!t.startsWith("-")) targets.push(t);
+				if (t.startsWith("-")) continue;
+				if (isShellOperator(t)) break;
+				targets.push(t);
 			}
 			break;
 		}
 		case "mv": {
-			// mv <src> <dst>   (take first non-flag and last non-flag)
-			const args = tokens.slice(1).filter(t => !t.startsWith("-"));
-			if (args.length >= 2) {
-				targets.push(args[0], args[args.length - 1]);
-			} else if (args.length === 1) {
-				targets.push(args[0]);
+			// mv <src> <dst>   (take first non-flag and last non-flag).
+			// Walk forward, skip flags, stop at the first shell
+			// operator. The path pair is the first and last
+			// collected path before the operator.
+			const pathArgs: string[] = [];
+			for (const t of tokens.slice(1)) {
+				if (t.startsWith("-")) continue;
+				if (isShellOperator(t)) break;
+				pathArgs.push(t);
+			}
+			if (pathArgs.length >= 2) {
+				targets.push(pathArgs[0], pathArgs[pathArgs.length - 1]);
+			} else if (pathArgs.length === 1) {
+				targets.push(pathArgs[0]);
 			}
 			break;
 		}
 		case "cp": {
-			// cp <src> <dst>   → only <dst>
-			const args = tokens.slice(1).filter(t => !t.startsWith("-"));
-			if (args.length >= 2) targets.push(args[args.length - 1]);
-			else if (args.length === 1) targets.push(args[0]);
+			// cp <src> <dst>   → only <dst>.
+			// Walk forward, skip flags, stop at the first shell
+			// operator. Capture the last path arg before the
+			// operator (= destination). A single arg is treated as
+			// the destination too (e.g. `cp a` → [a]).
+			let last: string | undefined;
+			for (const t of tokens.slice(1)) {
+				if (t.startsWith("-")) continue;
+				if (isShellOperator(t)) break;
+				last = t;
+			}
+			if (last !== undefined) targets.push(last);
+			break;
+		}
+		case "mkdir": {
+			// mkdir [-p] <dir> [<dir>...] — stop at first operator.
+			for (const t of tokens.slice(1)) {
+				if (t.startsWith("-")) continue;
+				if (isShellOperator(t)) break;
+				targets.push(t);
+			}
 			break;
 		}
 		case "tee": {
+			// tee <path> [<path>...] — stop at first operator.
 			for (const t of tokens.slice(1)) {
+				if (t === "<" || t.startsWith("<")) break;
+				if (isShellOperator(t)) break;
 				if (!t.startsWith("-")) targets.push(t);
 			}
 			break;
@@ -229,7 +390,8 @@ export function extractBashTargets(command: string): string[] {
 			// extract paths using a two-pronged heuristic:
 			//
 			//   1. Plain non-flag, non-quoted args (e.g., `perl -pi -e
-			//      's/a/b/' x.ts` → `x.ts`).
+			//      's/a/b/' x.ts` → `x.ts`). Stop at the first
+			//      shell operator.
 			//   2. Quoted strings that look like file paths (have `/`
 			//      and a basename with `.`, or start with `./`, `../`,
 			//      `/`). We match single-quoted strings before
@@ -242,6 +404,7 @@ export function extractBashTargets(command: string): string[] {
 			//      single-quote pass).
 			for (const t of tokens.slice(1)) {
 				if (t.startsWith("-") || t.startsWith("'") || t.startsWith('"')) continue;
+				if (isShellOperator(t)) break;
 				targets.push(t);
 			}
 			const isPathLike = (s: string): boolean => {
@@ -267,30 +430,38 @@ export function extractBashTargets(command: string): string[] {
 		}
 		case "sed": {
 			// sed -i<SUFFIX>? '<expr>' <path> [<path>...]
-			// Path is the last non-flag token after the expression.
-			const args = tokens.slice(1);
-			for (let i = args.length - 1; i >= 0; i--) {
-				if (!args[i].startsWith("-")) {
-					targets.push(args[i]);
-					break;
-				}
+			// Walk forward, capture the LAST non-flag, non-operator
+			// token (i.e., the path closest to the script). The
+			// forward walk replaces the previous reverse scan so
+			// chain operators terminate the path hunt
+			// (`sed -i 's/a/b/' x.ts && rm y` → only [x.ts]).
+			let lastPath: string | undefined;
+			for (const a of tokens.slice(1)) {
+				if (a.startsWith("-")) continue;
+				if (isShellOperator(a)) break;
+				lastPath = a;
 			}
+			if (lastPath) targets.push(lastPath);
 			break;
 		}
 		case "find": {
 			// find <dir> -delete  → <dir>
-			// The directory is the first non-flag argument.
+			// The directory is the first non-flag, non-operator
+			// argument (skip `|`, `;`, etc. defensively even though
+			// find + redirect is unusual).
 			if (/(^|\s)-delete(\s|$)/.test(trimmed)) {
 				const args = tokens.slice(1);
-				const dir = args.find(a => !a.startsWith("-"));
+				const dir = args.find(a => !a.startsWith("-") && !isShellOperator(a));
 				if (dir) targets.push(dir);
 			}
 			break;
 		}
 		case "tar": {
 			// tar -xf|-xjf|-xzf <arc> [-C <dir>] → <dir> or cwd
+			// Reject operator tokens after `-C` (e.g.,
+			// `tar -xzf a.tar.gz -C && rm x` falls back to cwd).
 			const cIdx = tokens.indexOf("-C");
-			if (cIdx >= 0 && tokens[cIdx + 1]) {
+			if (cIdx >= 0 && tokens[cIdx + 1] && !isShellOperator(tokens[cIdx + 1])) {
 				targets.push(tokens[cIdx + 1]);
 			} else {
 				targets.push(".");
@@ -406,10 +577,44 @@ export function shouldBlockBashCommand(
 		const trimmedSeg = seg.trimStart();
 		if (!trimmedSeg) continue;
 
+		// L2 git-meta: positive-whitelist. Catches git's own
+		// destructive subcommands (git rm / git mv / git checkout -- /
+		// git reset --hard / etc.) BEFORE the destructive
+		// short-circuit below — git's own destructives use the L2
+		// "destructive:" prefix and are explicitly listed in
+		// `isGitMetaCommand`.
+		if (gitTokens(seg)) {
+			const verdict = isGitMetaCommand(seg);
+			if (verdict.allow) continue;
+			return { block: true, reason: verdict.reason };
+		}
+
+		// Destructive-command short-circuit
+		// (GC-2026-015 follow-up — restores pre-existing
+		// invariant). rm/mv/cp/unlink/rmdir are ALWAYS denied
+		// regardless of target path, including L3 meta-file
+		// allowlist hits. The four-layer refactor accidentally
+		// relaxed this: `rm .pi/orchestrator/foo.md` had both
+		// `canMainAgentWrite` AND `canMainAgentWriteMeta` returning
+		// true, so `isProductionTarget` returned false and `rm`
+		// slipped through (anti-goal: "destructives stay denied
+		// regardless of which layer").
+		{
+			const segFirst = trimmedSeg.split(/\s+/, 1)[0]?.toLowerCase();
+			if (segFirst && DESTRUCTIVE_FIRST_WORDS.has(segFirst)) {
+				const preview = trimmedSeg.split(/\s+/).slice(0, 2).join(" ");
+				return {
+					block: true,
+					reason: `destructive: ${preview} (rm/mv/cp/unlink/rmdir are always denied — use Agent to dispatch a developer subagent if meta-file cleanup is needed)`,
+				};
+			}
+		}
+
 		const classification = classifyBashCommand(seg);
 
-		// Read-only segment is unconditionally safe — skip.
+		// L1 read-only segment is unconditionally safe.
 		if (classification === "read-only") continue;
+		if (classification === "git-meta") continue;
 
 		// Write-intent segment — check its extracted targets.
 		if (classification === "write-intent") {
@@ -567,7 +772,10 @@ export function splitChainedCommands(command: string): string[] {
 function isProductionTarget(target: string): boolean {
 	if (!target) return false;
 	if (isAbsolute(target)) return false;
-	return !canMainAgentWrite(target);
+	// `canMainAgentWrite` historically allows all Sages package files. L4 is
+	// intentionally narrower: runtime source and tests still require developer.
+	if (/^pi\/(?:src|test)\//.test(target)) return true;
+	return !canMainAgentWrite(target) && !canMainAgentWriteMeta(target);
 }
 
 /**

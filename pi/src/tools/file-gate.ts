@@ -37,13 +37,37 @@
  * code and `developer` with `tdd: none` for design-doc writes.
  */
 
-import { isAbsolute } from "node:path";
+import { isAbsolute, normalize } from "node:path";
 
-/** Patterns that match meta-paths the main agent may write. */
+/** L3: Sages meta-files where the main agent can write directly. */
+export const META_FILE_ALLOWLIST = [
+	".pi/orchestrator/", ".pi/agents/", "pi/templates/", "pi/skills/",
+	"pi/scripts/", "AGENTS.md", "README.md", "pi/README.md", ".gitignore",
+	".aft.jsonc", ".claude/", ".codex/",
+] as const;
+
+/** Returns true when path is an explicitly allowlisted Sages meta-file. */
+export function canMainAgentWriteMeta(path: string): boolean {
+	if (!path || path.includes("\0") || path.includes("~") || isAbsolute(path)) return false;
+	if (path.endsWith("/") || path.endsWith("\\")) return false;
+	const normalized = normalize(path).replace(/^(?:\.\/)+/, "").replaceAll("\\", "/");
+	if (normalized === ".." || normalized.startsWith("../")) return false;
+	for (const entry of META_FILE_ALLOWLIST) {
+		if (entry.endsWith("/")) {
+			if (normalized.startsWith(entry)) return true;
+		} else if (normalized === entry || normalized.endsWith(`/${entry}`)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
 const META_WRITE_PATTERNS: RegExp[] = [
 	// Orchestrator state (goals, dags, audits, designs, etc.)
 	/^\.pi\//,
-	// Sages own source tree
+	// Sages own source tree (legacy file-gate policy; bash L4 narrows pi/src
+	// and pi/test before applying the combined L3 allowlists).
 	/^pi\//,
 	// Sibling subpackages (Sages monorepo)
 	/^pi-[a-z0-9-]+\//,

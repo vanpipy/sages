@@ -125,7 +125,13 @@ describe("registerSagesExtension — Layer 2: bash write-intent gate", () => {
         return handler!;
     }
 
-    it("T-C: blocks `rm src/foo.ts` with reason mentioning production code", async () => {
+    it("T-C: blocks `rm src/foo.ts` with destructive reason (GC-2026-015 follow-up)", async () => {
+        // Restored invariant: rm/mv/cp/unlink/rmdir are always
+        // denied regardless of target, so the L4 production-target
+        // reason is shadowed by the destructive short-circuit. Use
+        // a non-destructive write-intent below to assert the
+        // L4 production-target reason survives for ordinary
+        // write-intents.
         const handler = await getBashHandler();
         const result = await handler(
             { toolName: "bash", input: { command: "rm src/foo.ts" } },
@@ -133,7 +139,7 @@ describe("registerSagesExtension — Layer 2: bash write-intent gate", () => {
         );
         expect(result).toBeDefined();
         expect(result.block).toBe(true);
-        expect(result.reason).toMatch(/production code/);
+        expect(result.reason).toMatch(/destructive:/);
     });
 
     it("T-D: passes through non-bash events (returns undefined)", async () => {
