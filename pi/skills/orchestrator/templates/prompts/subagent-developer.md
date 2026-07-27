@@ -16,6 +16,7 @@ from its identity + the worktree state:
   - task ID + title (which task of the DAG this is)
   - success criteria (which SCs from the goal contract apply)
   - upstream outputs (context from dependent tasks)
+  - workspace context (workspace identity + predecessor HANDOFF contents)
   - files to touch (the DAG's expected file list)
   - self-check command (the DAG's acceptance.self_check_cmd, optional)
 
@@ -24,6 +25,8 @@ Parameters (filled by dag_synthesizer at render time):
   - task_title       : string     — short title from TaskNode.description
   - sc_list          : string     — formatted SC list with verification_cmd
   - upstream_outputs : string     — formatted upstream task outputs (or "(none)")
+  - workspace_id      : string — defaults to batch_id; identifies the worker's worktree + branch
+  - upstream_handoffs : string — concatenated HANDOFF bodies ordered by task_id (or "(none)")
   - files_to_touch   : string     — file paths from TaskNode.files
   - acceptance_cmd   : string     — optional self_check_cmd
 -->
@@ -34,6 +37,19 @@ Parameters (filled by dag_synthesizer at render time):
 **Title**: {{task_title}}
 
 > **Note**: you may be running in background — the orchestrator gets your agent id immediately and may `steer_subagent` to redirect you mid-run. No synchronous user interaction.
+
+## Workspace Context
+
+**Workspace**: {{workspace_id}}
+
+By default, `workspace_id = batch_id`. The TaskNode prompt
+receives an `upstream_handoffs` parameter containing concatenated HANDOFF
+contents ordered by `task_id`, or `(none)` if this is the first task in the
+workspace.
+
+### Upstream HANDOFF contents
+
+{{upstream_handoffs}}
 
 ## Success Criteria (all must pass)
 
@@ -46,6 +62,13 @@ Parameters (filled by dag_synthesizer at render time):
 ## Files You'll Touch
 
 {{files_to_touch}}
+
+## Workspace Output
+
+On exit, write the handoff record to
+`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md`. Include the
+summary, modified files, successor TODOs, test status, and open questions so
+the next developer session can continue the workspace without repeating work.
 
 ## Self-Check Before Reporting
 
