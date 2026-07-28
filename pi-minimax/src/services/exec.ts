@@ -25,8 +25,8 @@ const execFileAsync = promisify(execFile);
  * Rationale: long-running mmx commands (e.g. `video generate` polling for
  * minutes by default) would block the pi agent indefinitely without a timeout.
  * 60s is enough for most interactive calls (text, image, search, quota) but
- * will cut off long polls — use `minimax_exec` with `mmx video generate
- * --async` to get a task ID and poll separately.
+ * will cut off long polls — invoke `mmx <cmd> --async` directly via the
+ * AFT-backed bash tool to get a task ID and poll separately.
  */
 export const EXEC_TIMEOUT_MS = 60_000;
 

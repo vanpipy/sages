@@ -1,10 +1,10 @@
 # pi-evaluator
 
-Auto-run and evaluate Four Sages Agents workflow sessions using HuggingFace `evaluate`.
+Auto-run and evaluate Sages 4-stage workflow sessions using HuggingFace `evaluate`.
 
 ## Features
 
-- **Auto-run Mode**: Execute Four Sages workflows with automatic phase transitions
+- **Auto-run Mode**: Execute Sages workflows with automatic phase transitions
 - **Auto-Proceed**: Detects tool completion and sends next command
 - **Code Preservation**: All generated code saved to `evaluations/{id}/codes/` for inspection
 - **Evaluate Mode**: Analyze existing session logs for quality metrics
@@ -55,8 +55,8 @@ evaluations/
 
 ## Configuration
 
-The Four Sages workflow auto-proceeds based on tool completion.
-Phases transition automatically without manual approval.
+The 4-stage workflow auto-proceeds based on tool completion.
+Stages transition automatically without manual approval.
 
 ### Environment Variables
 

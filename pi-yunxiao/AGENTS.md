@@ -53,7 +53,7 @@
 ## 跑测试
 
 ```bash
-bun test                     # 75 unit tests (always, CI safe)
+bun test                     # all green
 bun run test:e2e             # 10 e2e tests (real MCP server + real token)
                              #   skips gracefully if no token
 bash test/smoke.sh           # 端到端 smoke (file inventory + typecheck + install.sh e2e)

@@ -1,6 +1,6 @@
 # pi-evaluator Usage Guide
 
-Auto-run and evaluate Four Sages Agents workflow sessions using HuggingFace `evaluate`.
+Auto-run and evaluate Sages 4-stage workflow sessions using HuggingFace `evaluate`.
 
 ## Quick Start
 
@@ -29,7 +29,7 @@ pi-evaluator check-env
 - Python >= 3.10
 - HuggingFace `evaluate` and `datasets` libraries
 - `pi` binary availability
-- Four Sages extension installation
+- Sages extension installation
 
 **Output:**
 ```
@@ -37,7 +37,7 @@ pi-evaluator check-env
 ✅ HuggingFace evaluate
 ✅ HuggingFace datasets
 ✅ pi binary
-✅ Four Sages extension
+✅ Sages extension
 
   python_version: 3.12.4
   evaluate_version: 0.4.0
@@ -209,8 +209,8 @@ pi-evaluator compare s1.jsonl s2.jsonl -v
 
 ## Configuration
 
-The Four Sages workflow auto-proceeds based on tool completion.
-Phases transition automatically without manual approval.
+The 4-stage workflow auto-proceeds based on tool completion.
+Stages transition automatically without manual approval.
 
 ### Environment Variables
 
@@ -295,7 +295,7 @@ evaluations/
 
 ## Phase Scores & Metrics
 
-### Design (Fuxi) - Weight: 30%
+### Design — Weight: 30%
 
 | Metric | Description |
 |--------|-------------|
@@ -304,7 +304,7 @@ evaluations/
 | `cross_references` | Cross-plane link count |
 | `decisions` | Key decisions documented |
 
-### Review (QiaoChui) - Weight: 20%
+### Review — Weight: 20%
 
 | Metric | Description |
 |--------|-------------|
@@ -312,7 +312,7 @@ evaluations/
 | `feasibility_score` | 100 - (blockers × 20) |
 | `task_count` | Number of tasks created |
 
-### Execute (LuBan) - Weight: 30%
+### Execute — Weight: 30%
 
 | Metric | Description |
 |--------|-------------|
@@ -321,7 +321,7 @@ evaluations/
 | `error_recovery_rate` | % of errors recovered |
 | `parallel_efficiency` | Actual vs expected parallelism |
 
-### Audit (GaoYao) - Weight: 20%
+### Audit — Weight: 20%
 
 | Metric | Description |
 |--------|-------------|

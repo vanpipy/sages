@@ -152,13 +152,7 @@ bun test ./test/binary-finder.test.ts
 
 See `AGENTS.md` for project conventions, TDD discipline, and known traps.
 
-## 📊 Status (post 2026-07-19 simplification)
-
-- **Two tools**: `minimax_auth_status`, `minimax_search_query` (was three; `minimax_exec` removed — escape hatch no longer needed since the LLM uses bash + the `mmxc-cli` skill for all other modalities)
-- All non-exec tests pass (exec-tool test deleted)
-- **tsc clean** (`tsc --noEmit` exits 0)
-- **install.sh** verified deploys to `~/.pi/packages/minimax`
-- **Real integration**: finds `mmx` via npm-global on this machine, runs the real auth-status JSON parser
+## Status — currently shipping; see git log for recent changes.
 
 ## Related
 

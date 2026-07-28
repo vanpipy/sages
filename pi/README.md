@@ -26,9 +26,9 @@ pi/
 │       │   ├── task-dispatcher.ts # Stage 3
 │       │   ├── orchestrator-audit.ts # Stage 4 (A3 split)
 │       │   └── template-loader.ts  # {{var}} / {{#if}} / {{#each}}
-│       ├── file-gate.ts          # path-gated sages_edit / sages_write (meta-files only)
+│       ├── file-gate.ts          # canMainAgentWrite() — L1/L2 path policy single source of truth
 │       └── brainstorming/        # pre-design intent clarification (slash command)
-├── test/                         # 625 Bun tests
+├── test/                         # Bun test suite (see test count: bun test ./test)
 ├── skills/                        # orchestrator + brainstorming SKILL.md
 ├── templates/                     # installed by install.sh to ~/.pi/agent/
 │   ├── SYSTEM.md                 #   → Main Agent system prompt
@@ -89,7 +89,7 @@ of the above idempotently.
 cd pi
 bun install                     # one-time
 bun run typecheck               # 0 errors expected
-bun test ./test                 # 625 pass
+bun test ./test                 # all green
 bash test/install.test.sh       # all pass
 ```
 

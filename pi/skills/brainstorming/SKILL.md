@@ -21,7 +21,7 @@ Use this skill **before** starting any implementation work:
 - Modifying existing behavior
 - Even for "simple" projects
 
-**This is a standalone common action** - it works with or without an active Fuxi workflow.
+**This is a standalone common action** - it works with or without an active orchestrator workflow.
 
 ## Command
 
@@ -56,7 +56,7 @@ flowchart TD
     M --> N[User Reviews Spec]
     N -->|Changes| O[Update Spec]
     O --> N
-    N -->|Approved| P[Transition to Fuxi]
+    N -->|Approved| P[Transition to goal_contract_create]
     P --> Q[End - User proceeds]
 ```
 

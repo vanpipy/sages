@@ -58,7 +58,7 @@ mmx-cli 自己的状态在 `~/.mmx/`：
 - **GREEN**：写最小实现让测试通过
 - **REFACTOR**：清理优化
 
-测试用 `bun:test` 框架。**LuBan 的 luban_execute_task 当前会生成 placeholder test**（`expect(true).toBe(false)`），所以我们用 manual TDD：自己写测试 + 自己写实现，提交时遵循同样的纪律。
+测试用 `bun:test` 框架。
 
 ### 6. TypeBox schema
 
@@ -119,23 +119,14 @@ bun test ./test/binary-finder.test.ts
 
 1. **mmx-cli 不读 `MINIMAX_API_KEY` env**（resolver.ts 只读 --api-key flag 和 config.json）。我们的 auto-bootstrap 填补了这个 gap。
 2. **Bash 工作目录不持久**：每次 `bash` 调用 cwd 重置为 `~/Project/sages/`，需要 `cd ~/Project/sages/pi-minimax && ...` 显式切换。
-3. **LuBan stub test bug**：`luban_execute_task` 写 `expect(true).toBe(false)` 永远失败。Manual TDD only。
-4. **OAuth 和 api_key 互斥**：mmx-cli's `runOAuthLogin` 会 `delete existing.api_key`，反之亦然。我们的 bootstrap 只在 unauthed 时触发，不会破坏现有会话。
-5. **`bun test` 路径**：默认从 cwd 找 `*.test.ts`；显式路径要 `./test/foo.test.ts`（不是 `test/foo.test.ts`）。
-6. **tsc 不检查 test/**：bun-types 的 `bun:test` 模块 tsc 不识别。test tsconfig exclude 掉，bun runtime 处理。
-7. **exec timeout (60s)**：`EXEC_TIMEOUT_MS = 60_000` hardcoded。Long-running mmx commands (e.g. `video generate` polling) will hit timeout. Use `mmx <cmd> --async` for long polls, or call mmx directly outside pi.
-8. **auth cache TTL (5min)**：`AUTH_CACHE_TTL_MS = 300_000` hardcoded. The `ok` cache expires after 5min; next ensureAuth() re-checks. Catches OAuth session expiry mid-session.
-9. **Process-global module-level cache**：`cachedState` (auth-bootstrap), `cached` (binary-finder), and `cachedState` (region-fix) are bare `let` at module level. Assumes single pi agent per process. If you ever embed pi-minimax in a multi-instance scenario, wrap caches in a class instance.
-10. **Env param injection risk**：`execMmx`'s `env` param merges arbitrary Record<string,string> into subprocess env. If LLM is prompt-injected, could override `PATH` etc. Acceptable risk: `env` param only reachable via `minimax_exec` escape hatch (LLM-controlled). Not exposed in any L2 tool's TypeBox schema.
-11. **`--api-key` visible in ps aux**: `execMmx` appends `--api-key <key>` to mmx argv; briefly visible in `ps aux | grep mmx`. mmx-cli processes it in-memory and never logs it, but the key is in the OS process table for ~ms. Acceptable for single-user local use; consider env-var passing for CI/multi-user.
-12. **mmx-cli region=cn base_url bug (auto-fixed via region-fix service)**：mmx-cli 1.0.15/1.0.16 在 region=cn 时解析的 base_url 含 `/anthropic/v1`，但 endpoint handler 又会 prepend `/v1/...`，结果 URL 变成 `.../anthropic/v1/v1/...` 触发 404。`region-fix.ts` 检测到 `region === "cn"` 时，execMmx 自动 append `--base-url https://api.minimaxi.com` 绕过 bug。如果用户改了 region 需要重启 pi（cache 无 TTL）；`clearRegionFixCache()` 仅给测试用。`baseUrl` 参数在 `minimax_search_query` 上变成"显式 override"语义（escape hatch）。
+3. **OAuth 和 api_key 互斥**：mmx-cli's `runOAuthLogin` 会 `delete existing.api_key`，反之亦然。我们的 bootstrap 只在 unauthed 时触发，不会破坏现有会话。
+4. **`bun test` 路径**：默认从 cwd 找 `*.test.ts`；显式路径要 `./test/foo.test.ts`（不是 `test/foo.test.ts`）。
+5. **tsc 不检查 test/**：bun-types 的 `bun:test` 模块 tsc 不识别。test tsconfig exclude 掉，bun runtime 处理。
+6. **exec timeout (60s)**：`EXEC_TIMEOUT_MS = 60_000` hardcoded。Long-running mmx commands (e.g. `video generate` polling) will hit timeout. Use `mmx <cmd> --async` for long polls, or call mmx directly outside pi.
+7. **auth cache TTL (5min)**：`AUTH_CACHE_TTL_MS = 300_000` hardcoded. The `ok` cache expires after 5min; next ensureAuth() re-checks. Catches OAuth session expiry mid-session.
+8. **Process-global module-level cache**：`cachedState` (auth-bootstrap), `cached` (binary-finder), and `cachedState` (region-fix) are bare `let` at module level. Assumes single pi agent per process. If you ever embed pi-minimax in a multi-instance scenario, wrap caches in a class instance.
+9. **Env param injection risk**：`execMmx` 的 `env` 参数会把任意 `Record<string,string>` 合并到子进程环境中，可能覆盖 `PATH` 等关键变量。该参数目前仅供内部调用，未暴露在任何 L2 工具的 TypeBox schema 中；未来若新增公开工具，不得直接透传它。
+10. **`--api-key` visible in ps aux**: `execMmx` appends `--api-key <key>` to mmx argv; briefly visible in `ps aux | grep mmx`. mmx-cli processes it in-memory and never logs it, but the key is in the OS process table for ~ms. Acceptable for single-user local use; consider env-var passing for CI/multi-user.
+11. **mmx-cli region=cn base_url bug (auto-fixed via region-fix service)**：mmx-cli 1.0.15/1.0.16 在 region=cn 时解析的 base_url 含 `/anthropic/v1`，但 endpoint handler 又会 prepend `/v1/...`，结果 URL 变成 `.../anthropic/v1/v1/...` 触发 404。`region-fix.ts` 检测到 `region === "cn"` 时，execMmx 自动 append `--base-url https://api.minimaxi.com` 绕过 bug。如果用户改了 region 需要重启 pi（cache 无 TTL）；`clearRegionFixCache()` 仅给测试用。`baseUrl` 参数在 `minimax_search_query` 上变成"显式 override"语义（escape hatch）。
 
-## 当前状态
-
-- 75 单元测试通过（binary-finder 8 + exec 11 + exec-region-fix 8 + auth-status 6 + auth-bootstrap 8 + auth tool 5 + search 11 + tools-index 10 + region-fix 9 + extension 2 = 78 个 it() cases）
-  - 实际：75 pass / 0 fail via `bun test ./test`
-- tsc clean
-- install.sh 部署到 ~/.pi/packages/minimax 验证通过
-- 22 个 git commits（T1-T22 + region-fix fix）
-- 33 个 git-tracked 文件，~3100 LOC
-- Audit verdict: 94/100 PASS (7 findings: 5 minor addressed in T18-T20, 2 major addressed in T16-T17)
+## 当前状态 — see git log for recent activity.

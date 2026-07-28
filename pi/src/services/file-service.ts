@@ -16,8 +16,8 @@
  *
  * @deprecated Not used by the 4-tool orchestrator (which writes directly
  * via node:fs under `.pi/orchestrator/`). Kept as a utility for future
- * tools that want a sandboxed file API. New code should prefer the
- * `sages_edit` / `sages_write` path-gated tools (see `file-gate.ts`).
+ * tools that want a sandboxed file API. New code should use node:fs
+ * directly, or extend this if a sandboxed API is genuinely needed.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, statSync } from "node:fs";

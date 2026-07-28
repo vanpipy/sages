@@ -74,7 +74,7 @@ alibabacloud-devops-mcp-server --streamable-http (port 3000)
 codeup.aliyun.com API
 ```
 
-**关键设计**（详见 [设计文档](../../.pi/orchestrator/designs/2026-06-11-yunxiao-pi-design.md) — *注：链接已迁移到 `.pi/orchestrator/designs/`；该设计文件未提交到仓库*）：
+**关键设计**（详见 [`skills/yunxiao/`](skills/yunxiao/) 目录的设计文档与参考材料）：
 
 - **按需启停**：第一个 tool 触发 spawn，闲置 10 分钟自动 kill
 - **flock 并发保护**：多 pi 进程共享同一 server
@@ -118,7 +118,7 @@ rm -rf ~/.cache/yunxiao-mcp/
 npx tsc --noEmit
 
 # 跑测试
-bun test                     # 75 unit tests
+bun test                     # all green
 bash test/smoke.sh           # 端到端 smoke
 
 # 部署（改完源后）
@@ -126,13 +126,7 @@ bash test/smoke.sh           # 端到端 smoke
 exit && pi
 ```
 
-## 📊 状态
-
-- 75 unit tests pass
-- typecheck clean
-- 端到端 install.sh 通过
-- 5 个 git commits（T1-T11）逐步实现
-- 24+ 文件，~2400 行（实现 1500 + 测试 900）
+## 状态 — see git log for recent activity.
 
 ## 📚 文档
 

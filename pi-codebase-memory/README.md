@@ -73,14 +73,7 @@ All promoted directly so LLM sees them in system prompt:
 - **Match peer-extension pattern**: like pi-serena, pi-yunxiao, pi-memory
 - **Lifecycle hooks scoped to this concern**: not bloated into sages core
 
-## Integration with four sages
-
-| Sage stage | Recommended codebase-memory-mcp usage |
-|------------|---------------------------------------|
-| **Fuxi (design)** | `mcp_get_architecture()` — auto codebase overview, no manual survey |
-| **QiaoChui (decompose)** | `mcp_detect_changes({base: "main"})` — know task impact up front |
-| **LuBan (execute)** | `mcp_trace_path({direction: "callers", depth: 2})` — see downstream before edit |
-| **GaoYao (audit)** | `mcp_detect_changes` + `mcp_query_graph` — verify commit safety |
+## Integration with the orchestrator — see the [root README](../README.md#how-it-works) for the 4-stage pipeline.
 
 ## Security constraints
 

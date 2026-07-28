@@ -330,6 +330,62 @@ Each stage gates the next via `depends_on`. The DAG's `batch: N`
 field encodes dependency order — for parallel work, multiple tasks
 share a batch number.
 
+## Git ops from main repo
+
+The bare repository's `.git/` internals (`HEAD`, `refs/`, `objects/`,
+`packed-refs`, and config) are read-only. Refs are changed only through Git
+porcelain, preserving reflogs and locking. The Layer 2 destructive filter,
+not a blanket worktree rule, controls these commands.
+
+Allowed from the main repository and other working directories:
+
+- `git checkout` or `git switch` for refs, new branches, or detached commits
+  (never path checkout; never `--discard-changes`)
+- `git branch` for creation and listing (never deletion)
+- `git fetch`, `pull`, `remote -v`, and `remote add`
+- `git merge`, `cherry-pick`, and `rebase`
+- `git push` without any force option
+- `git worktree add`
+- `git tag` for creation and listing (never deletion)
+- `git add`, `commit`, `stash`, and `stash pop`
+- `git init` and `clone`
+
+Denied from every working directory:
+
+- `git checkout -- <paths>`, `git checkout <ref> -- <paths>`,
+  `git switch --discard-changes`, and `git restore <paths>`
+- `git rm`, `git mv`, `git reset --hard`, and `git clean -fd`
+- `git stash drop`, branch or tag deletion, and forced worktree removal
+- `git push --force`, `-f`, `--force-with-lease`, or `--force-if-includes`
+- direct edits to `.git/`
+
+A worktree is still required for production-code changes, parallel tasks that
+need independent working trees, and destructive work that needs the audit
+gate. It is not required merely to read another branch, compare refs, or run a
+non-destructive ref operation. A broken main worktree must be repaired from a
+fresh managed worktree or by the user, never from inside the broken tree.
+
+## Subagent write prohibition
+
+Subagents (`developer`, `auditor`, `Explore`, and `Plan`) **MUST NOT** actively
+write to `.pi/orchestrator/`. It is the main orchestrator's state space.
+
+- Subagent roles return verdicts through the Agent tool response.
+- The pi-subagents-managed
+  `/tmp/pi-subagents-.../tasks/<id>.output` file is their persistent output.
+- If an audit trail is needed, the main orchestrator writes a summary of the
+  response; that summary is the orchestrator's record.
+
+Practical consequences:
+
+- Developer and auditor prompts must not instruct a subagent to write
+  `task-{id}-report.md` or `audit-{id}.md` under `.pi/orchestrator/`.
+- `task-dispatcher.ts` report paths must not route subagent output into
+  `.pi/orchestrator/`.
+- Design documents under `.pi/orchestrator/designs/` are written only by an
+  explicitly authorized human or main-orchestrator workflow, not as routine
+  subagent output.
+
 ## Related
 
 - **Workflow** (when to dispatch what, how to chain stages): `pi/skills/orchestrator/SKILL.md`

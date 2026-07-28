@@ -80,14 +80,14 @@ mcp({ tool: "mcp_index_repository", args: '{"project":"."}' })  // 走具体 too
 | **架构理解 / 跨包分析** | **codebase-memory-mcp** (`mcp_get_architecture`) | 跨包概览 |
 | **LSP 语义（类型/继承）** | **pi-serena** (`mcp_find_symbol`) | 真实 LSP，不是 regex |
 
-## 配合 four sages 工作流
+## 配合 orchestrator 工作流
 
-| Sage 阶段 | 推荐 codebase-memory-mcp 用法 |
+| Orchestrator 阶段 | 推荐 codebase-memory-mcp 用法 |
 |----------|----------------------------------|
-| **Fuxi（design）** | `mcp_get_architecture()` — 自动拿到代码库 overview，跳过手写调研 |
-| **QiaoChui（decompose）** | `mcp_detect_changes({base: "main"})` — 提前知道任务影响面 |
-| **LuBan（execute）** | `mcp_trace_path({direction: "callers", depth: 2})` — 改前看下游 |
-| **GaoYao（audit）** | `mcp_detect_changes` + `mcp_query_graph` — 验证 commit 是否安全 |
+| **Goal（1. goal_contract_create）** | `mcp_get_architecture()` — 自动拿到代码库 overview，跳过手写调研 |
+| **DAG（2. dag_synthesize）** | `mcp_detect_changes({base: "main"})` — 提前知道任务影响面 |
+| **Dispatch（3. task_dispatch）** | `mcp_trace_path({direction: "callers", depth: 2})` — 改前看下游 |
+| **Audit（4. orchestrator_audit）** | `mcp_detect_changes` + `mcp_query_graph` — 验证 commit 是否安全 |
 
 ## 首次使用（first-session initialization）
 

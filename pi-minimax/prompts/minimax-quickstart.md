@@ -13,17 +13,19 @@ Verify pi-minimax is installed correctly and walk through basic usage.
    - Show the first 2 results (title + link).
    - If empty, note that search returned no results (still success).
 
-3. Show one example of `minimax_exec` for text chat:
+3. (Optional) Demo a non-typed modality via the AFT-backed `bash` tool:
    ```
-   minimax_exec({
-     command: "text chat",
-     args: { message: "Say hello in one word" }
-   })
+   mmx text chat --message "Say hello in one word" \
+     --output json --quiet --non-interactive
    ```
 
+   (See the `mmxc-cli` skill for the full mmx flag reference.)
+
 4. Summarize what's installed and ready:
-   - 3 tools: `minimax_auth_status`, `minimax_exec`, `minimax_search_query`
-   - All other modalities reachable via `minimax_exec`
+   - 2 tools: `minimax_auth_status`, `minimax_search_query`
+   - All other modalities (text/image/video/speech/music/vision/quota/file)
+     reachable via the AFT-backed `bash` tool + `mmx <resource> <command>`,
+     guided by the `mmxc-cli` skill
    - Auto-auth from `MINIMAX_API_KEY` env is enabled
 
 If any step fails, show the structured error and recommend the fix from the
