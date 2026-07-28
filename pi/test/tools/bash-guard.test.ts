@@ -335,7 +335,7 @@ describe("classifyBashCommand — selected cases", () => {
 		expect(classifyBashCommand('ruby -e "puts 1"')).toBe("unknown");
 		expect(classifyBashCommand('bash -c "echo hi"')).toBe("unknown");
 		expect(classifyBashCommand("git checkout -- src/foo.ts")).toBe("unknown");
-		expect(classifyBashCommand("git checkout main")).toBe("unknown");
+		expect(classifyBashCommand("git checkout main")).toBe("git-meta");
 	});
 });
 
@@ -404,6 +404,11 @@ describe("GC-2026-015 four-layer bash guard", () => {
 		"git push origin feature/x", "git remote -v", "git worktree add /tmp/w feature/x",
 		"git config --get user.name", "git config --list",
 		"GIT_AUTHOR_NAME=foo git log --oneline",
+		"git checkout main", "git checkout feature/x", "git checkout -b feature/x",
+		"git checkout -B feature/x", "git checkout --orphan orphan-branch",
+		"git checkout --detach HEAD~1", "git checkout -",
+		"git switch main", "git switch -c feature/x", "git switch -C feature/x",
+		"git switch --orphan orphan-branch", "git switch --detach HEAD~1",
 	];
 	for (const [index, command] of l2Allow.entries()) it(`T-L2-${String(index + 1).padStart(2, "0")} L2 git-meta allows ${command}`, () => {
 		expect(isGitMetaCommand(command).allow).toBe(true);
@@ -414,6 +419,8 @@ describe("GC-2026-015 four-layer bash guard", () => {
 		"git mv src/foo.ts src/bar.ts", "git reset --hard HEAD~1", "git clean -fd",
 		"git stash drop", "git tag -d v1.0.0", "git branch -D feature/x",
 		"git push --force origin main", "git push -f origin main", "git worktree remove --force /tmp/w",
+		"git switch --discard-changes",
+		"git push --force-with-lease origin main", "git push --force-if-includes origin main",
 	];
 	for (const [index, command] of l2Deny.entries()) it(`T-L2-D-${String(index + 1).padStart(2, "0")} L2 git-meta destructive denies ${command}`, () => {
 		const verdict = isGitMetaCommand(command);
