@@ -71,7 +71,7 @@ For developers and security researchers, see [AGENTS.md](AGENTS.md).
 
 ```bash
 cd pi
-bun install && bun run typecheck && bun test   # 528 tests across 29 files
+bun install && bun run typecheck && bun test   # 625 tests across 28 files
 ```
 
 Commit messages follow [Conventional Commits

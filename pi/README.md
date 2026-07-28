@@ -28,7 +28,7 @@ pi/
 │       │   └── template-loader.ts  # {{var}} / {{#if}} / {{#each}}
 │       ├── file-gate.ts          # path-gated sages_edit / sages_write (meta-files only)
 │       └── brainstorming/        # pre-design intent clarification (slash command)
-├── test/                         # 343 Bun tests
+├── test/                         # 625 Bun tests
 ├── skills/                        # orchestrator + brainstorming SKILL.md
 ├── templates/                     # installed by install.sh to ~/.pi/agent/
 │   ├── SYSTEM.md                 #   → Main Agent system prompt
@@ -44,9 +44,17 @@ pi/
 Peer extensions in the same monorepo (each has its own `pi/`
 package, see their own `README.md`):
 
-- `pi-codebase-memory/` — tree-sitter AST indexing + 15 MCP tools
-- `pi-magic-context/` — cross-session memory (`ctx_search` / `ctx_note`)
-- `pi-aft/` — AFT-backed file ops (`aft_search` / `aft_read` / `aft_edit`)
+- `pi-subagents/` — Agent tool (subagent lifecycle, worktrees)
+- `pi-codebase-memory/` — code knowledge graph (MCP server)
+- `pi-evaluator/` — eval metrics (cost, security, text quality)
+- `pi-minimax/` — MiniMax AI integration
+- `pi-yunxiao/` — Alibaba Cloud DevOps integration
+- `pi-semantic-nudge/` — semantic search nudges
+
+> `pi-magic-context` and `pi-aft` are npm packages
+> (`@cortexkit/pi-magic-context`, `@cortexkit/aft-pi`), not in this
+> monorepo. They appear in the runtime tool list when installed via
+> `pi install npm:...`, but their source lives elsewhere.
 
 ## Installation
 
@@ -82,7 +90,7 @@ of the above idempotently.
 cd pi
 bun install                     # one-time
 bun run typecheck               # 0 errors expected
-bun test ./test                 # 343 pass
+bun test ./test                 # 625 pass
 bash test/install.test.sh       # all pass
 ```
 
