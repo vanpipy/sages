@@ -1,23 +1,25 @@
 /**
  * pi-evaluator/src/types.ts
  *
- * All interfaces and type aliases for the 5 pi-evaluator tools, as defined in
- * `.pi/orchestrator/designs/pi-evaluator-refactor.md` §4 "Tool 表面".
+ * All interfaces and type aliases for the Sages reward mode extension, as
+ * defined in the GC-2026-019 spec.
  *
- * P1.a scope: pure type definitions. No runtime values, no logic.
- * P1.b+ consumes these interfaces (artifact-reader, signals, tools).
+ * Scope: pure type definitions. No runtime values, no logic.
+ * Consumed by src/lib/artifact-reader.ts, src/lib/jsonl-reader.ts, and the
+ * signal engine + tool implementations added in T2+.
  *
  * Test: `test/types.test.ts` exercises each interface with a dummy object,
  * proving the types are exported and structurally usable.
  *
- * Invariant: every tool surface defined in PLAN §4 must have its
+ * Invariant: every tool surface defined in the GC-2026-019 spec must have its
  * `Input` + `Validation` pair export here. Sub-shared types
  * (DecisionPoint, Verdict, etc.) are exported as well.
  *
- * P1.b additions: artifact + session types consumed by lib/artifact-reader.ts
- * and lib/jsonl-reader.ts (GoalArtifact, DagArtifact, TaskReportArtifact,
- * AuditReportArtifact, SessionEntry, Message, ContentBlock, ArtifactReadError,
- * plus small structural helpers for MD parsing).
+ * Additions during GC-2026-019 P1: artifact + session types consumed by
+ * lib/artifact-reader.ts and lib/jsonl-reader.ts (GoalArtifact, DagArtifact,
+ * TaskReportArtifact, AuditReportArtifact, SessionEntry, Message,
+ * ContentBlock, ArtifactReadError, plus small structural helpers for MD
+ * parsing).
  */
 
 // ---------------------------------------------------------------------------
@@ -31,7 +33,8 @@
  *
  * Why `evidence`? Traceability. When a signal says "sc_coverage_pct = 80",
  * the eval tool must show *which* SCs were missing / which DAG path proved
- * coverage. The LLM judge (P4) and the main agent need this trail to reason.
+ * coverage. The eval tool callers (eval_score / eval_trend) and the main
+ * agent need this trail to reason.
  */
 export interface Signal<T> {
 	value: T;
@@ -106,7 +109,7 @@ export type DecisionStage =
 
 /**
  * A single decision point — the structured atom that critique_workflow
- * (P4) anchors its issues and forward_look to. `reference` MUST point to a
+ * anchors its issues and forward_look to. `reference` MUST point to a
  * concrete line in session.jsonl or a concrete path in .pi/orchestrator/,
  * so the LLM can drill in.
  */
@@ -183,7 +186,7 @@ export interface OutcomeVerification {
 }
 
 /**
- * Overall verdict of check_workflow. Status rules (from PLAN §4.2):
+ * Overall verdict of check_workflow. Status rules (from GC-2026-019 spec):
  *  - FAIL:                 pass_rate < 0.8 OR sc_with_verification_cmd_pct < 60
  *  - PASS_WITH_GAPS:       pass_rate ≥ 0.8 AND contract_compliance passes, but minor issues
  *  - PASS:                 pass_rate = 1.0 AND contract_compliance ≥ 80
@@ -225,7 +228,7 @@ export interface CritiqueWorkflowInput {
 }
 
 /**
- * One-line overall verdict from the LLM judge. The PLAN uses Chinese
+ * One-line overall verdict from the LLM judge.
  * strings (the tool's eval output is Chinese per design). The literal
  * union keeps the judge prompt honest.
  */
@@ -357,7 +360,7 @@ export interface EvalEnvValidation {
 }
 
 // ---------------------------------------------------------------------------
-// Artifact types (P1.b — consumed by src/lib/artifact-reader.ts)
+// Artifact types (consumed by src/lib/artifact-reader.ts)
 // ---------------------------------------------------------------------------
 
 /** A single success criterion inside a GoalContract's success_criteria array. */
@@ -400,8 +403,22 @@ export interface GoalArtifact {
 	created_at?: string;
 }
 
-/** Isolation mode declared by a DAG task. */
-export type IsolationMode = "worktree" | "none" | "branch" | string;
+/** Isolation mode declared by a DAG task. Either a string literal form or the
+ *  canonical managed-worktree object (per DAG-2026-011 Phase A P3). */
+export type IsolationMode =
+	| "worktree"
+	| "none"
+	| "branch"
+	| ManagedWorktreeIsolation;
+
+/** Canonical managed-worktree isolation: developer tasks declare the explicit
+ *  worktree object instead of the legacy `worktree` string literal. */
+export interface ManagedWorktreeIsolation {
+	dag_id: string;
+	task_id: string;
+	mode: "create" | "reuse";
+	base_ref?: string;
+}
 
 /** A task node inside a DAG. */
 export interface DagTask {
@@ -477,7 +494,7 @@ export class ArtifactReadError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// Session JSONL types (P1.b — consumed by src/lib/jsonl-reader.ts)
+// Session JSONL types (consumed by src/lib/jsonl-reader.ts)
 // ---------------------------------------------------------------------------
 
 /** A single content block inside a Message. */

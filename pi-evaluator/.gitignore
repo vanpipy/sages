@@ -27,36 +27,9 @@ Thumbs.db
 .env
 .env.local
 
-# Python leftovers (until P1.e deletes them)
-__pycache__/
-*.py[cod]
-*.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg/
-*.egg
-# Note: `lib/` is intentionally NOT ignored — P1.b introduces pi-evaluator/src/lib/
-# for artifact-reader + jsonl-reader. The Python `lib/` convention does not apply
-# to this TypeScript project.
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
+# Note: `lib/` is intentionally NOT ignored — src/lib/ contains the TypeScript
+# artifact-reader + jsonl-reader modules. The Python `lib/` convention does
+# not apply to this TypeScript project.
 
 # Worktrees (isolated development)
 .worktrees/
