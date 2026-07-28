@@ -53,7 +53,7 @@ orchestrator_audit    →  .pi/orchestrator/audit-workflow.md (verdict)
 | `dag_synthesize` | 2 | Validate + persist a TaskNode DAG; render `task_template` from `task_params` |
 | `task_dispatch` | 3 | Return Agent-call plan grouped by batch; LLM executes via the external `Agent` tool |
 | `orchestrator_audit` | 4 | Read per-task `audit-{id}.md`; aggregate verdicts; enforce evidence gate; write `audit-workflow.md` |
-| `sages_write` / `sages_edit` | — | **RETIRED 2026-07-26** (commits f7144b2 + 633ca97). The main agent now has NO direct write tool — all file edits go through `Agent` dispatch (`developer` with `tdd: none` for meta-files / design-doc writes; `developer` with managed worktree for production code). See §"Write policy" below. |
+| `sages_write` / `sages_edit` | — | **RETIRED 2026-07-26** (commits f7144b2 + 633ca97). The main agent now has NO direct write tool — all file edits go through `Agent` dispatch (`developer` with `isolation: "current-workspace"` + `tdd: "none"` for meta-files / design-doc writes; `developer` with managed worktree for production code). See §"Write policy" below. |
 
 Shared helpers in `pi/src/tools/orchestrator/template-loader.ts`:
 `loadPromptTemplate`, `loadGoalTemplate`, `loadDagTemplate`,
@@ -100,12 +100,29 @@ subagent via the `Agent` tool:
 - **Meta-files** (AGENTS.md, README.md, install scripts, test files,
   design-doc writes): dispatch `developer` with `tdd: none` (DAG-2026-011
   Phase C — the `general-purpose` helper was removed; meta-file edits
-  now flow through the `developer` agent in a worktree with the TDD
-  cycle disabled). Main agent reviews the diff before committing.
+  now flow through the `developer` agent with the TDD cycle disabled).
+  Main agent reviews the diff before committing. Use `isolation: "current-workspace"`
+  to opt out of a managed worktree entirely (the agent works in the
+  parent's cwd); see §"Dispatch isolation modes" below.
 - **Production code** (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, …):
   dispatch `developer` with managed worktree isolation
   (`isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`).
   TDD discipline + audit gate + merge gate apply.
+
+### Dispatch isolation modes
+
+The `developer` agent supports three explicit isolation modes. The runtime
+rejects `isolation: undefined` for `developer` — every dispatch must name
+one of these:
+
+| Mode | When | Trade-off |
+|---|---|---|
+| `isolation: { dag_id, task_id, mode: "create" }` | Default for production code. Fresh managed worktree at `.pi/worktree/<dag>/<task>` on branch `sages/<dag>/<task>` | Safe — full TDD + audit + merge gate |
+| `isolation: { dag_id, task_id, mode: "reuse" }` | Serial follow-up tasks sharing the same workspace (multi-task DAG) | Reuses the prior slot — commits carry forward, no fresh worktree |
+| `isolation: "current-workspace"` | Meta-file edits, single-line fixes, design-doc writes | No worktree — agent operates in the parent's cwd; faster, but no audit / merge gate |
+
+The legacy `isolation: "worktree"` string literal is rejected; always
+pass the explicit object OR the `"current-workspace"` literal.
 
 **Meta-files** that the main agent dispatches `developer` to
 edit (the bash-guard's `canMainAgentWrite` allowlist is the single
@@ -255,8 +272,8 @@ file are:
 | Target | Allowed path |
 |---|---|
 | Orchestrator state (`.pi/orchestrator/goal-*.yaml`, `dag-*.yaml`, `audit-*.md`) | 4 orchestrator tools (direct write, no dispatch) |
-| Other meta-files (`.pi/orchestrator/designs/`, `pi/`, `pi-*/`, root docs, …) | `Agent({subagent_type: "developer", isolation: {...}, tdd: "none"})` — managed worktree + no TDD (DAG-2026-011 Phase C: the `general-purpose` helper was removed; meta-file work now uses `developer` with `tdd: none`) |
-| Production code (user `src/`, `test/`, …) | `Agent({subagent_type: "developer", isolation: {...}})` — managed worktree + TDD + audit |
+| Other meta-files (`.pi/orchestrator/designs/`, `pi/`, `pi-*/`, root docs, …) | `Agent({subagent_type: "developer", isolation: "current-workspace", tdd: "none"})` — no worktree, operates in dispatcher's cwd, no TDD (DAG-2026-011 Phase C: the `general-purpose` helper was removed; meta-file work now uses `developer` with `tdd: "none"` + `isolation: "current-workspace"`) |
+| Production code (user `src/`, `test/`, …) | `Agent({subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" }})` — managed worktree + TDD + audit gate |
 
 If the LLM tries to call raw `edit`/`write`, the tool isn't in the
 visible list (Layer 1). The bash-guard (Layer 2) also blocks bash
@@ -330,8 +347,8 @@ The L3 main agent dispatches subagents based on the task shape — NEVER use `de
 | Tier | Who | Write tools | Safety mechanism |
 |---|---|---|---|
 | **L1 — read-only** | `Explore`, `Plan`, `auditor` (auditor is read-only on production code; writes only to its own `audit-{task_id}.md`) | **none** (frontmatter `tools:` allowlist) | LLM physically cannot call write |
-| **L2 — write-in-worktree** | `developer` (canonical, alias `developer`) | `edit`, `write` | managed-worktree object (`{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`) + `auditor` + merge gate. `tdd: none` flips the gate off for meta-file / design-doc writes (path must still be a meta-file). |
-| **L3 — coordinator** | **main agent** | 4 orchestrator tools (write `.pi/orchestrator/*` only) + `Agent` (dispatch). NO direct write tool. Dispatches: `developer` (with `isolation: { dag_id, task_id, mode: "create" }`, `tdd: "none"` for meta-files / design-doc writes; managed worktree + TDD for production code), `auditor` (alias `auditor`) for audit. See `pi/templates/SUBAGENTS.md § Dispatch Contract`. The escape window (§"Escape Window") gives the main agent direct write tools in 主动 mode when it gets stuck. | Layer 1 + Layer 2 hard threshold |
+| **L2 — write-in-worktree** | `developer` (canonical, alias `developer`) | `edit`, `write` | managed-worktree object (`{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`) + `auditor` + merge gate for production code. `isolation: "current-workspace"` + `tdd: "none"` is the explicit opt-out for meta-file / design-doc writes — the agent runs in the parent's cwd with no worktree and no audit gate (path must still be a meta-file). |
+| **L3 — coordinator** | **main agent** | 4 orchestrator tools (write `.pi/orchestrator/*` only) + `Agent` (dispatch). NO direct write tool. Dispatches: `developer` with `isolation: "current-workspace"` + `tdd: "none"` for meta-files / design-doc writes (no worktree, no audit), `developer` with `isolation: { dag_id, task_id, mode: "create" }` for production code (managed worktree + TDD + audit), `auditor` (alias `auditor`) for audit. See `pi/templates/SUBAGENTS.md § Dispatch Contract` and §"Dispatch isolation modes" above. The escape window (§"Escape Window") gives the main agent direct write tools in 主动 mode when it gets stuck. | Layer 1 + Layer 2 hard threshold |
 
 The asymmetry IS the design — `developer` keeps raw edit/write
 because that's its job; main agent gives them up because they were
