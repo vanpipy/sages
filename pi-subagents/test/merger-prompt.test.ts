@@ -180,3 +180,60 @@ function sectionBody(name: string): string {
 		nextMatch?.index === undefined ? after.length : nextMatch.index + 2;
 	return after.slice(0, endIdxInner);
 }
+
+describe("merger-prompt: current-workspace isolation mode (GC-2026-017 P3)", () => {
+	// GC-2026-017 P3: the merger prompt must acknowledge that the
+	// workspaces it merges may be the result of a developer spawned
+	// with `isolation: "current-workspace"`. The merger itself still
+	// runs in a scratch worktree, but it must understand that the
+	// source workspaces may be on non-isolated branches (the
+	// orchestrator's main branch or the parent repo's currently
+	// checked-out branch).
+	//
+	// The two-modes framing is added OUTSIDE the canonical
+	// §Workspace/Handoff/Cross-workspace block so byte-identity with
+	// developer.ts is preserved (see the cross-file consistency test
+	// above).
+
+	it("mentions the 'current-workspace' mode literal", () => {
+		expect(MERGER_PROMPT).toContain('"current-workspace"');
+	});
+
+	it("declares a 'Workspace isolation modes' preamble that enumerates both modes", () => {
+		const re = /^##\s+.*Workspace isolation modes.*$/m;
+		const m = MERGER_PROMPT.match(re);
+		expect(
+			m?.index ?? -1,
+			"'Workspace isolation modes' section must exist",
+		).toBeGreaterThanOrEqual(0);
+		const idx = m?.index ?? -1;
+		const after = MERGER_PROMPT.slice(idx);
+		const nextSection = after.slice(2).match(/^##\s/m);
+		const endIdx =
+			nextSection?.index === undefined ? after.length : nextSection.index + 2;
+		const section = after.slice(0, endIdx);
+		expect(
+			section,
+			"preamble must enumerate Managed worktree (default)",
+		).toContain("Managed worktree");
+		expect(
+			section,
+			"preamble must enumerate Current workspace (opt-in)",
+		).toContain("Current workspace");
+	});
+
+	it("'Workspace isolation modes' is positioned BEFORE the canonical byte-identical block", () => {
+		// The two-modes framing is preamble; it must precede the
+		// canonical §Workspace semantics block whose byte-identity
+		// with developer.ts is pinned by the cross-file test above.
+		const preambleIdx =
+			MERGER_PROMPT.match(/^##\s+.*Workspace isolation modes.*$/m)?.index ?? -1;
+		const canonicalIdx = MERGER_PROMPT.indexOf("## Workspace semantics");
+		expect(preambleIdx).toBeGreaterThanOrEqual(0);
+		expect(canonicalIdx).toBeGreaterThanOrEqual(0);
+		expect(
+			preambleIdx,
+			"'Workspace isolation modes' must precede the canonical block",
+		).toBeLessThan(canonicalIdx);
+	});
+});

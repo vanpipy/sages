@@ -77,9 +77,18 @@ The orchestrator's task prompt supplies:
 
 If any of these are missing or ambiguous, STOP and report BLOCKED to the orchestrator.
 
+## 🌐 Workspace isolation modes — what the merger sees
+
+A workspace you merge may be the result of a developer spawned in either of two isolation modes:
+
+1. **Managed worktree (default)** — the workspace is a fresh worktree at \`<repoRoot>/.pi/worktree/<dag>/<workspace_id>\` on a dedicated branch \`sages/<dag>/<workspace_id>\`. The orchestrator hands you \`workspace_a_branch\` / \`workspace_b_branch\` and the matching \`workspace_a_path\` / \`workspace_b_path\`.
+2. **Current workspace (opt-in)** — the developer ran with \`isolation: "current-workspace"\`; their edits landed directly on the caller's checked-out branch (often the orchestrator's main branch or the parent repo's currently checked-out branch). The orchestrator still hands you a branch name and a path, but that branch is NOT isolated from the parent repo — review the diff carefully and prefer auto-merge only for known-safe overlap (single-line edits, meta-file writes, design-doc writes).
+
+The merger itself runs in a scratch worktree at \`merge_target_path\`; you do NOT inherit the source workspaces' isolation mode. Your own worktree is provisioned by the orchestrator at dispatch time.
+
 ## 📜 Canonical workflow — shared with developer.ts (byte-identical)
 
-The following three sections are canonical text shared verbatim with the developer prompt's Workspace Context section. They MUST stay byte-identical across both files so the orchestrator's audit can reason about cross-workspace overlap coherently.
+The following three sections are canonical text shared verbatim with the developer prompt's Workspace Context section. They MUST stay byte-identical across both files so the orchestrator's audit can reason about cross-workspace overlap coherently. (The two-modes framing above is the merger's preamble; the canonical block below applies to MODE-1 worktree workspaces. For MODE-2 current-workspace edits, treat the branch name and path as the orchestrator-provided identifiers and merge by \`git merge --no-ff\` as usual.)
 
 ${"## Workspace semantics"}
 A worktree is a **workspace**, not just an isolation boundary. One workspace

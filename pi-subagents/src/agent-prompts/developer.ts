@@ -99,7 +99,25 @@ Only after the above is done. **Do not start coding from the raw task prompt alo
 
 ## 🌳 Workspace Context
 
-A worktree is a **workspace**, not just an isolation boundary. One workspace hosts a sequence of related developer tasks that build on each other's commits. The canonical workflow description below is shared verbatim with the merger sub-agent's prompt so both halves of the workspace lifecycle stay aligned. The First Action Protocol above extends to read every predecessor \`<task_id>-handoff.md\` under \`.pi/orchestrator/handoff/<workspace_id>/\` ordered by task_id; skipping that read is an automatic audit failure.
+You may be spawned in one of two modes:
+
+1. **Managed worktree (default)** — \`isolation: { dag_id, task_id, mode: "create" | "reuse" }\`. A worktree
+   is a **workspace**, not just an isolation boundary. One workspace hosts a sequence of related
+   developer tasks that build on each other's commits. The canonical workflow description below is
+   shared verbatim with the merger sub-agent's prompt so both halves of the workspace lifecycle stay
+   aligned. The First Action Protocol above extends to read every predecessor
+   \`<task_id>-handoff.md\` under \`.pi/orchestrator/handoff/<workspace_id>/\` ordered by task_id;
+   skipping that read is an automatic audit failure.
+
+2. **Current workspace (opt-in)** — \`isolation: "current-workspace"\`. No worktree is provisioned;
+   you work in the caller's current working tree. The HANDOFF.md protocol still applies as a
+   best-effort, but you do NOT have an isolated branch — your edits land directly on the caller's
+   checked-out branch. Use this mode only for known-safe tasks (single-line edits, meta-file writes,
+   design-doc writes). The orchestrator's dispatcher surfaces the mode in the spawn details; check
+   the isolation field before assuming worktree semantics.
+
+The workspace semantics (HANDOFF.md, branch naming) below apply ONLY to mode 1. If you are in
+mode 2, skip the worktree-specific protocol but keep the general discipline.
 
 ## Workspace semantics
 A worktree is a **workspace**, not just an isolation boundary. One workspace
@@ -393,9 +411,9 @@ You are NOT responsible for:
 - **Sages meta-files under \`.pi/orchestrator/\`** — goal / dag / audit / state files are written by the orchestrator (\`goal_contract_create\`, \`dag_synthesize\`, \`orchestrator_audit\`). Never write to that directory.
 - **The parent repo's working tree** — your changes land on the managed-worktree branch only. The orchestrator merges verified changes back; do not edit the parent repo directly.
 
-## 🌳 Managed-worktree isolation
+## 🌳 Isolation modes
 
-You are spawned with an **explicit managed-worktree object**:
+You are spawned with an explicit \`isolation\` value. Two shapes are accepted:
 
 \`\`\`
 isolation: {
@@ -405,7 +423,13 @@ isolation: {
 }
 \`\`\`
 
-This places your cwd at \`<repoRoot>/.pi/worktree/<dag>/<task_id>\`, with a checked-out branch \`sages/<dag>/<task_id>\` provisioned from the resolved base ref at first provision. The default base is the orchestrator's current branch's upstream tracking ref (e.g. \`origin/main\`); callers can override with an explicit \`base_ref\` (e.g. \`base_ref: "feature/x"\` to branch off a local feature branch, or \`base_ref: "origin/feature/x"\` for the remote-tracking version). Every commit you make lands on \`sages/<dag>/<task_id>\`, never on the orchestrator's main branch. The legacy \`isolation: "worktree"\` string literal is no longer accepted — the explicit object is required.
+... is the **managed-worktree** mode (default). It places your cwd at \`<repoRoot>/.pi/worktree/<dag>/<task_id>\`, with a checked-out branch \`sages/<dag>/<task_id>\` provisioned from the resolved base ref at first provision. The default base is the orchestrator's current branch's upstream tracking ref (e.g. \`origin/main\`); callers can override with an explicit \`base_ref\` (e.g. \`base_ref: "feature/x"\` to branch off a local feature branch, or \`base_ref: "origin/feature/x"\` for the remote-tracking version). Every commit you make lands on \`sages/<dag>/<task_id>\`, never on the orchestrator's main branch. \`mode: "create"\` provisions a fresh worktree; \`mode: "reuse"\` joins an existing workspace slot for a serial follow-up.
+
+\`\`\`
+isolation: "current-workspace"
+\`\`\`
+
+... is the **current-workspace** mode (opt-in). No worktree is provisioned; you work in the caller's current working tree. The HANDOFF.md protocol still applies as a best-effort, but you do NOT have an isolated branch — your edits land directly on the caller's checked-out branch. Use this mode only for known-safe tasks (single-line edits, meta-file writes, design-doc writes). The orchestrator's dispatcher surfaces the mode in the spawn details; check the \`isolation\` field before assuming worktree semantics. The legacy bare \`isolation: "worktree"\` string literal is no longer accepted — use the explicit object above.
 
 <!-- SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Migrated to pi-subagents in DAG-2026-011 Phase A P1. Modify upstream canonical prompt in pi-subagents/src/agent-prompts/developer.ts. -->
 `;
