@@ -1228,13 +1228,25 @@ Terse command-style prompts produce shallow, generic work.
 												'"reuse" re-enters the existing managed worktree at the same slot.',
 										},
 									),
+									base_ref: Type.Optional(
+										Type.String({
+											description:
+												'Optional base ref. Accepts local branches ("main", "feature/x"), ' +
+												'remote-tracking refs ("origin/main", "origin/feature/x"), or any safe git ref. ' +
+												"Omit to default to the current working directory's branch " +
+												'(upstream tracking ref if set, else local branch, else "origin/main" fallback). ' +
+												"Refused at provision time if the ref does not resolve.",
+											pattern: "^[A-Za-z0-9._/-]+$",
+										}),
+									),
 								},
 								{
 									description:
-										"GC-2026-008 P2: the explicit managed-worktree request. The " +
-										'dispatcher refuses the legacy "worktree" string literal in Sages ' +
+										"GC-2026-008 P2: the explicit managed-worktree request. " +
+										'The dispatcher refuses the legacy "worktree" string literal in Sages ' +
 										"contexts so callers do not silently fall back to the /tmp-backed " +
-										"ephemeral worktree.",
+										"ephemeral worktree. " +
+										"Pass `base_ref` to provision from a specific branch/ref instead of the cwd's auto-detected upstream.",
 								},
 							),
 						],
