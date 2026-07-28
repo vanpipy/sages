@@ -21,10 +21,10 @@ describe('ProjectAnalyzer', () => {
   
   describe('construction', () => {
     it('should be able to analyze projects', async () => {
-      // Just verify the analyzer exists and can be called
-      const context = await analyzer.analyze('/tmp');
+      // Smoke test: analyzer returns a context for a known Go fixture.
+      const context = await analyzer.analyze(GO_FIXTURE);
       expect(context).toBeDefined();
-      expect(context.language).toBeDefined();
+      expect(context.language).toBe('go');
     });
   });
   
