@@ -57,12 +57,9 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 #
 #   Stage 1  Explore              ← pi-subagents built-in (no install)
 #   Stage 2  Plan                 ← pi-subagents built-in (no install)
-#   Stage 3  developer            ← pi-subagents built-in (no install;
-#                                   legacy alias `developer`
-#                                   also accepted via the alias metadata)
-#   Stage 4  auditor              ← pi-subagents built-in (no install;
-#                                   legacy alias `auditor`
-#                                   also accepted via the alias metadata)
+#   Stage 3  developer            ← pi-subagents built-in (no install)
+#   Stage 4  auditor              ← pi-subagents built-in (no install)
+#   (cross-workspace)  merger     ← pi-subagents built-in (no install)
 SUBAGENT_TEMPLATE_DIR="$SCRIPT_DIR/../templates/agents"
 SUBAGENT_TARGET_DIR="$AGENT_DIR/agents"
 SUBAGENT_NAMES=()
@@ -361,7 +358,7 @@ install_system_prompt() {
 # Subagent templates (pi-subagents' global agent definitions)
 # Phase A + Phase B: every default is built-in to pi-subagents; no
 # canonical template is installed. Pre-existing user-level files
-# (developer / developer + auditor / auditor) are
+# (developer.md / auditor.md) are
 # left in place for the user to remove manually. See DEVELOPER_AGENT
 # and AUDITOR_AGENT in `pi-subagents/src/default-agents.ts`.
 # ────────────────────────────────────────────────────────────
