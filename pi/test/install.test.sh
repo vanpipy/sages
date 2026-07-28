@@ -1,54 +1,54 @@
 #!/usr/bin/env bash
-# T1: install.sh 行为测试
-# 验证: pi-codebase-memory 像 pi-memory 一样被安装/卸载(settings.json 注册 + package dir 清理)
+# T1: install.sh behavior tests
+# Verify: pi-codebase-memory is installed/uninstalled like pi-memory (settings.json registration + package dir cleanup)
 set -euo pipefail
 
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/scripts/install.sh"
 
 # ────────────────────────────────────────────────────────────
-# 静态结构测试(纯 grep,无需执行 install)
+# Static structure tests (pure grep, no install execution)
 # ────────────────────────────────────────────────────────────
 
-# 测试 1: install.sh 存在且可执行
+# Test 1: install.sh exists and is executable
 test -x "$SCRIPT" || { echo "❌ FAIL: install.sh not executable"; exit 1; }
 echo "✅ PASS: install.sh exists and is executable"
 
-# 测试 2: bash 语法检查
+# Test 2: bash syntax check
 bash -n "$SCRIPT" || { echo "❌ FAIL: bash syntax error"; exit 1; }
 echo "✅ PASS: bash syntax OK"
 
-# 测试 3: 新常量存在且值正确
+# Test 3: new constants exist with correct values
 grep -q 'PI_CODEBASE_MEMORY_PKG="$PI_CODEBASE_MEMORY_DEST_DIR"' "$SCRIPT" \
   || { echo "❌ FAIL: PI_CODEBASE_MEMORY_PKG constant missing or wrong"; exit 1; }
 echo "✅ PASS: PI_CODEBASE_MEMORY_PKG constant defined"
 
-# 测试 4: 三个新函数均已定义
+# Test 4: all three new functions are defined
 for fn in is_pi_codebase_memory_installed install_pi_codebase_memory uninstall_pi_codebase_memory; do
   grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
     || { echo "❌ FAIL: function $fn not defined"; exit 1; }
 done
 echo "✅ PASS: 3 functions defined (is_/install_/uninstall_)"
 
-# 测试 5: install() 流程包含 install_pi_codebase_memory
+# Test 5: install() flow includes install_pi_codebase_memory
 sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_pi_codebase_memory" \
   || { echo "❌ FAIL: install() does not call install_pi_codebase_memory"; exit 1; }
 echo "✅ PASS: install() invokes install_pi_codebase_memory"
 
-# 测试 6: uninstall() 流程包含 uninstall_pi_codebase_memory
+# Test 6: uninstall() flow includes uninstall_pi_codebase_memory
 sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_pi_codebase_memory" \
   || { echo "❌ FAIL: uninstall() does not call uninstall_pi_codebase_memory"; exit 1; }
 echo "✅ PASS: uninstall() invokes uninstall_pi_codebase_memory"
 
-# 测试 7: --sages-only 模式注释显式说明跳过 pi-codebase-memory
+# Test 7: --sages-only mode comments explicitly mention skipping pi-codebase-memory
 grep -q "pi-codebase-memory" "$SCRIPT" \
   || { echo "❌ FAIL: pi-codebase-memory not mentioned in help/comments"; exit 1; }
 echo "✅ PASS: pi-codebase-memory referenced in script"
 
 # ────────────────────────────────────────────────────────────
-# 函数行为测试(隔离 PI_DIR,直接调用函数)
+# Function behavior tests (isolate PI_DIR, invoke functions directly)
 # ────────────────────────────────────────────────────────────
 
-# 提取函数体并 eval(避开 main "$@" 触发 install)
+# Extract function bodies via eval (avoid main "$@" triggering install)
 extract_fn() {
   awk -v fn="$1" '
     $0 ~ "^" fn "\\(\\) \\{" { capture=1; depth=0 }
@@ -59,16 +59,16 @@ extract_fn() {
 TMPDIR="$(mktemp -d)"
 export PI_DIR="$TMPDIR"
 
-# 把 pi 从 PATH 移除,强制 install 走 fallback(settings.json 手动写入)路径,
-# 这样测试不依赖真实的 pi CLI 也不会污染全局 ~/.pi/agent/settings.json
+# Strip pi from PATH so install takes the fallback (manual settings.json write) path,
+# which makes the test independent of a real pi CLI and prevents polluting the global ~/.pi/agent/settings.json
 FAKE_PATH="$(mktemp -d)"
 export PATH="$FAKE_PATH:/usr/bin:/bin"
 
 mkdir -p "$PI_DIR/agent"
 echo '{"packages": []}' > "$PI_DIR/agent/settings.json"
 
-# 加载所需函数(extract_fn 是定义在脚本里的工具函数,不需要)
-# 提取所有 pi-codebase-memory 常量 + 函数 (需要 PI_CODEBASE_MEMORY_DEST_DIR 等)
+# Load the needed functions (extract_fn is defined in this test script, not needed)
+# Extract all pi-codebase-memory constants + functions (need PI_CODEBASE_MEMORY_DEST_DIR, etc.)
 {
   awk '/^PI_CODEBASE_MEMORY_.*=/,/^$/' "$SCRIPT"
   for fn in is_pi_codebase_memory_installed install_pi_codebase_memory uninstall_pi_codebase_memory; do
