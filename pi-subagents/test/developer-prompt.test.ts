@@ -353,3 +353,75 @@ describe("developer-prompt: codebase_memory MCP tool family (post-64eecc5/7b5dee
 		expect(DEVELOPER_PROMPT).not.toMatch(/\bcodebase_refs\b/);
 	});
 });
+
+describe("developer-prompt: current-workspace isolation mode (GC-2026-017 P3)", () => {
+	// GC-2026-017 P3: the developer prompt must acknowledge that the
+	// agent may be dispatched with `isolation: "current-workspace"` —
+	// running in the caller's cwd, no managed worktree, no isolated
+	// branch. The dispatcher surfaces the mode in the spawn details;
+	// the prompt must teach the agent to read that field and not assume
+	// worktree semantics (HANDOFF.md protocol, branch naming, isolation
+	// object shape) when in current-workspace mode.
+	//
+	// Two modes coexist:
+	//   1. Managed worktree (default): isolation = { dag_id, task_id, mode }
+	//   2. Current workspace (opt-in): isolation = "current-workspace"
+	//
+	// The prose is allowed to evolve; the three invariants below are not.
+
+	it("mentions the 'current-workspace' mode literal", () => {
+		// The prompt must surface the exact literal so the LLM matches
+		// the spawn-details field. Bare mentions of "current workspace"
+		// in prose are NOT enough — the agent has to recognize the
+		// exact string the dispatcher emits.
+		expect(DEVELOPER_PROMPT).toContain('"current-workspace"');
+	});
+
+	it("still documents worktree-based isolation (regression guard)", () => {
+		// Anti-goal: the new mode must NOT remove the existing worktree
+		// language — worktree is still the default and the prompt must
+		// keep teaching it. Regression-guard the literal shape.
+		expect(DEVELOPER_PROMPT).toMatch(/worktree/i);
+		expect(DEVELOPER_PROMPT).toContain('mode: "create" | "reuse"');
+		// The HANDOFF.md write path must still appear — the protocol
+		// still applies in worktree mode.
+		expect(DEVELOPER_PROMPT).toContain(
+			".pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md",
+		);
+	});
+
+	it("explicitly enumerates both modes (worktree + current-workspace)", () => {
+		// The Workspace Context preamble must enumerate the two modes
+		// as distinct items so the LLM cannot collapse them. We pin
+		// the enumerated phrasing by requiring both anchor phrases
+		// appear close together in the same section.
+		expect(DEVELOPER_PROMPT).toContain("Managed worktree");
+		expect(DEVELOPER_PROMPT).toContain("Current workspace");
+		// The Workspace Context section must contain the enumeration.
+		// Locate the section and verify both anchors land inside it.
+		const ctxIdx =
+			DEVELOPER_PROMPT.match(/^##\s+.*Workspace Context.*$/m)?.index ?? -1;
+		expect(ctxIdx).toBeGreaterThanOrEqual(0);
+		const after = DEVELOPER_PROMPT.slice(ctxIdx);
+		const nextSection = after.slice(2).match(/^##\s/m);
+		const endIdx =
+			nextSection?.index === undefined ? after.length : nextSection.index + 2;
+		const section = after.slice(0, endIdx);
+		expect(
+			section,
+			"Workspace Context must enumerate the Managed worktree mode",
+		).toContain("Managed worktree");
+		expect(
+			section,
+			"Workspace Context must enumerate the Current workspace mode",
+		).toContain("Current workspace");
+		expect(
+			section,
+			"Workspace Context must enumerate both modes via a numbered list",
+		).toMatch(/^1\.\s+\*\*Managed worktree/m);
+		expect(
+			section,
+			"Workspace Context must enumerate both modes via a numbered list",
+		).toMatch(/^2\.\s+\*\*Current workspace/m);
+	});
+});
