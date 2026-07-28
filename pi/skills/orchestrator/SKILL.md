@@ -131,13 +131,14 @@ When dispatching via the `Agent` tool, pick the right subagent type:
 
 | Task | Subagent | `isolation` |
 |--- |--- |--- |
-| Meta-file edits / design-doc writes (no code) | `developer` (with `tdd: none`) | `{ dag_id, task_id, mode: "create" }` (managed worktree; design-doc under `.pi/orchestrator/` is meta-file path) |
+| Meta-file edits / design-doc writes (no code) | `developer` (with `tdd: none`) | `"current-workspace"` (no worktree; agent operates in dispatcher's cwd) — OR `{ dag_id, task_id, mode: "create" }` if a worktree is genuinely needed (e.g. parallel batch isolation) |
 | Production-code TDD work | `developer` (legacy alias: `developer`) | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
+| Serial follow-up in same workspace (multi-task DAG) | `developer` | `{ dag_id, task_id, mode: "reuse" }` (reuses the prior slot) |
 | Audit / evidence collection | `auditor` (alias: `auditor`) | none |
 | Quick read-only search | `Explore` | none (built-in) |
 | Planning Brief compilation | `Plan` | none (built-in) |
 
-The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. Always pass the object form.
+The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. The `developer` agent now accepts three explicit isolation modes: `{ dag_id, task_id, mode: "create" }` (fresh worktree, default for production code), `{ dag_id, task_id, mode: "reuse" }` (re-enter existing worktree for serial follow-ups), or `"current-workspace"` (no worktree, agent runs in dispatcher's cwd — the explicit opt-out for meta-file edits and design-doc writes). `isolation: undefined` is rejected; every dispatch must name one.
 
 > **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, dispatch the task in the main session's escape mode (the user types `escape-window`) or use the `auditor` agent with `isolated: true`.
 
@@ -170,13 +171,30 @@ The orchestrator's recent commit chain was all serial foreground — and that wa
 **Dispatch patterns**
 
 ```ts
-// Meta-file edit / design-doc write (developer with tdd: none)
-Agent({ subagent_type: "developer", isolation: {...}, prompt: "Write .pi/orchestrator/task-P3-design.md ...", run_in_background: true })
+// Meta-file edit / design-doc write (developer in current workspace, no worktree)
+Agent({
+  subagent_type: "developer",
+  isolation: "current-workspace",
+  tdd: "none",
+  prompt: "Edit AGENTS.md to add Z. Read first, edit, report diff.",
+  run_in_background: true,
+})
+
+// Meta-file edit that needs worktree isolation (e.g. parallel batch)
+Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" }, tdd: "none", prompt: "Write .pi/orchestrator/task-P3-design.md ...", run_in_background: true })
 
 // Production-code TDD (developer + worktree)
 Agent({
   subagent_type: "developer",
   isolation: { dag_id: <dag-id>, task_id: <task-id>, mode: "create" },
+  prompt: "...",
+  run_in_background: true,
+})
+
+// Serial follow-up in same workspace (reuse existing worktree)
+Agent({
+  subagent_type: "developer",
+  isolation: { dag_id: <dag-id>, task_id: <task-id>, mode: "reuse" },
   prompt: "...",
   run_in_background: true,
 })

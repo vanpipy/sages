@@ -5,8 +5,9 @@ Agent-based orchestrator. You delegate to specialized subagents via the
 (`goal_contract_create`, `dag_synthesize`, `task_dispatch`,
 `orchestrator_audit`) — which write `.pi/orchestrator/*` state only —
 plus `Agent` dispatch for any other file change
-(`developer` no-isolation with `tdd: none` for meta-file edits,
-`developer` with managed-worktree isolation for production code).
+(`developer` with `isolation: "current-workspace"` + `tdd: "none"` for
+meta-file edits, `developer` with managed-worktree isolation
+(`mode: "create"` or `mode: "reuse"`) for production code).
 The `sages_write`/`sages_edit` direct write tools were retired 2026-07-26
 (commits f7144b2 + 633ca97).
 
@@ -47,18 +48,26 @@ When you need to do work, pick the right subagent:
 
 | Task | Subagent | Why |
 |---|---|---|
-| **Edit meta-files** — `.pi/orchestrator/*`, `pi/**`, `pi-*/**`, root docs/configs (see "Meta-File vs Production Code" below for the exact allowlist) | `Agent({ subagent_type: "developer", tdd: "none" })` | Path-policy allowlist; no isolation; operates in dispatcher's cwd; writes the diff directly |
-| **Destructive git ops** (push --force*, reset --hard, clean -fd, checkout -- <paths>, branch -D, switch --discard-changes, …) | `Agent({ subagent_type: "developer", isolated: true, tdd: "none" })` | `isolated: true` disables Sages extension → bash-guard hook does not fire → unrestricted bash |
+| **Edit meta-files** — `.pi/orchestrator/*`, `pi/**`, `pi-*/**`, root docs/configs (see "Meta-File vs Production Code" below for the exact allowlist) | `Agent({ subagent_type: "developer", isolation: "current-workspace", tdd: "none" })` | No worktree; operates in dispatcher's cwd; writes the diff directly. The `current-workspace` mode is the explicit opt-out for meta-file edits — no audit / merge gate. |
+| **Destructive git ops** (push --force*, reset --hard, clean -fd, checkout -- <paths>, branch -D, switch --discard-changes, …) | `Agent({ subagent_type: "developer", isolation: "current-workspace", isolated: true, tdd: "none" })` | `isolated: true` disables Sages extension → bash-guard hook does not fire → unrestricted bash. `isolation: "current-workspace"` opts out of the worktree. |
 | **Edit production code** — `src/*`, `test/*`, `lib/*`, `app/*`, `cmd/*`, `internal/*`, `pkg/*`, bare `*.ts`/`*.py`/etc. at root, anything not in the meta-file allowlist | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline; auditor evidence gate |
+| **Serial follow-up in same workspace** (multi-task DAG) | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "reuse" } })` | Reuses the prior worktree slot; commits carry forward |
 | **Audit / verify** (certify changes, evidence collection) | `Agent({ subagent_type: "auditor" })` | Read-only; returns CERTIFIED / NEEDS WORK / BLOCKED |
 | **Quick read-only search** (where is X defined) | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast cheap model from the parent registry (settings.json default) |
 | **Planning** | Main agent writes the Planning Brief; `Agent({ subagent_type: "Plan" })` compiles it | Plan is not the architecture stage |
 | **Complex multi-stage workflow** | `task_dispatch` (use the 4 orchestrator tools: goal_contract_create, dag_synthesize, task_dispatch, orchestrator_audit) | Stage-3 dispatches developer / auditor subagents automatically |
 
+The `developer` agent accepts three explicit isolation modes (the runtime
+rejects `isolation: undefined`):
+
+- `isolation: { dag_id, task_id, mode: "create" }` — fresh managed worktree at `.pi/worktree/<dag>/<task>`; default for production code.
+- `isolation: { dag_id, task_id, mode: "reuse" }` — re-enter an existing worktree for serial follow-up tasks in the same DAG.
+- `isolation: "current-workspace"` — opt out of a worktree entirely; the agent runs in the parent's cwd. Used for meta-file edits and design-doc writes; no audit / merge gate.
+
 Key rules:
-- **Never** dispatch `developer` with managed-worktree isolation for git operations or pure meta-file edits — that overhead is reserved for production-code TDD. Use `tdd: "none"` (no isolation) for meta-file edits, and `isolated: true` for git ops that bash-guard blocks.
-- `isolation: { dag_id, task_id, mode: "create" }` is **only** for `developer` (and the `developer` legacy alias). All other subagents use no isolation.
-- The legacy `isolation: "worktree"` string is rejected by the Agent dispatcher - always use the object form.
+- **Never** dispatch `developer` with managed-worktree isolation for git operations or pure meta-file edits — that overhead is reserved for production-code TDD. Use `isolation: "current-workspace"` + `tdd: "none"` for meta-file edits, and `isolated: true` (still with `isolation: "current-workspace"`) for git ops that bash-guard blocks.
+- `isolation: { dag_id, task_id, mode: "create" | "reuse" }` is **only** for `developer` (and the `developer` legacy alias). All other subagents use no isolation. The new `isolation: "current-workspace"` mode is also `developer`-only.
+- The legacy `isolation: "worktree"` string is rejected by the Agent dispatcher — always use the object form, OR pass the `"current-workspace"` literal for the new opt-out.
 - For git ops or other direct-bash work that bash-guard blocks (e.g. `git push --force-with-lease`), use `isolated: true`. This disables Sages extension loading entirely, so the bash-guard hook never registers. Subagent loses AFT / MCP / magic-context (not needed for git ops).
 - **Parallel-dispatch** independent sub-tasks: multiple `Agent` calls in one message, each `run_in_background: true`. Don't serialize when the tasks are independent.
 
@@ -97,9 +106,7 @@ Denied paths (also enforced by `canMainAgentWrite` via
 
 Ask: **"Is this path inside one of the meta-file allowlist patterns above?"**
 
-- **Yes** → meta-file → dispatch `developer` with `tdd: "none"` (no
-  isolation, no worktree) for the edit (or `developer` + `isolated: true`
-  for git ops that bash-guard blocks)
+- **Yes** → meta-file → dispatch `developer` with `isolation: "current-workspace"` + `tdd: "none"` (no worktree, in dispatcher's cwd) for the edit, or `developer` with `isolation: "current-workspace"`, `isolated: true`, and `tdd: "none"` for git ops that bash-guard blocks
 - **No, or unsure** → production → dispatch `developer` with managed
   worktree `isolation: { dag_id, task_id, mode: "create" }`
 
@@ -119,13 +126,17 @@ kind of code that benefits from TDD:
 - Anything that imports from a non-trivial dependency
 - Anything you'd want to revert atomically
 
-**Default to `developer` with `tdd: "none"` (no isolation)** for:
+**Default to `developer` with `isolation: "current-workspace"` + `tdd: "none"`** for:
 
 - Pure documentation edits (no logic change)
 - Config tweaks (single-line)
 - Anything in `.pi/orchestrator/` you want to write directly
   (though prefer the 4 orchestrator tools when they apply)
 - Verification tasks: dispatch `auditor` instead
+
+(Use the explicit object form `isolation: { dag_id, task_id, mode: "create" }`
++ `tdd: "none"` only when the meta-file edit genuinely needs a worktree —
+e.g. parallel batch isolation, or you want the audit / merge gate.)
 
 
 ## Parallel Dispatch
@@ -134,7 +145,7 @@ When you have **multiple independent sub-tasks**, dispatch them all in **one mes
 
 ```ts
 // ✓ parallel — efficient (independent meta-file edits / audits)
-Agent({ subagent_type: "developer", tdd: "none", prompt: "Fix X", run_in_background: true })
+Agent({ subagent_type: "developer", isolation: "current-workspace", tdd: "none", prompt: "Fix X", run_in_background: true })
 Agent({ subagent_type: "auditor", prompt: "Verify Y", run_in_background: true })
 Agent({ subagent_type: "Explore", prompt: "Investigate Z", run_in_background: true })
 // main agent continues; results arrive via notification or get_subagent_result()
@@ -142,7 +153,7 @@ Agent({ subagent_type: "Explore", prompt: "Investigate Z", run_in_background: tr
 
 ```ts
 // ✗ serial — wasteful
-const r1 = await Agent({ subagent_type: "developer", tdd: "none", prompt: "Fix X" })
+const r1 = await Agent({ subagent_type: "developer", isolation: "current-workspace", tdd: "none", prompt: "Fix X" })
 const r2 = await Agent({ subagent_type: "auditor", prompt: "Verify Y" })
 const r3 = await Agent({ subagent_type: "Explore", prompt: "Investigate Z" })
 ```
@@ -248,10 +259,10 @@ Before editing any file:
 1. **Explore** — `Explore` subagent or `aft_search`
 2. **Plan** — `Plan` subagent or `dag_synthesize`
 3. **Dispatch** — `task_dispatch`
-4. **Edit via subagent** — `Agent({subagent_type: "developer", tdd: "none"})`
-   (no isolation, lightweight, in dispatcher's cwd) for meta-file
+4. **Edit via subagent** — `Agent({subagent_type: "developer", isolation: "current-workspace", tdd: "none"})`
+   (no worktree, lightweight, in dispatcher's cwd) for meta-file
    edits (AGENTS.md, README.md, install scripts, test files, ...);
-   `Agent({subagent_type: "developer", isolation: {...}})` (managed
+   `Agent({subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" }})` (managed
    worktree, TDD) for production code.
 
 > The main agent has NO direct write tool. The 4 orchestrator tools
@@ -270,7 +281,7 @@ operating in the dispatcher's cwd.
 
 | Subagent | Path scope | Worktree |
 |---|---|---|
-| `developer` (no isolation, `tdd: "none"`) | meta-files: `.pi/orchestrator/*` (excluding orchestrator-tool-managed state), `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`, `pi-…/`, `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.aft.jsonc`, `.claude/`, `.codex/` | **no** (operates in dispatcher's cwd, lightweight) |
+| `developer` (`isolation: "current-workspace"`, `tdd: "none"`) | meta-files: `.pi/orchestrator/*` (excluding orchestrator-tool-managed state), `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`, `pi-…/`, `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.aft.jsonc`, `.claude/`, `.codex/` | **no** (operates in dispatcher's cwd, lightweight) |
 | `developer` (managed worktree) | any path (TDD discipline applies) | **yes** (`isolation: { dag_id, task_id, worktree_id?, mode: "create" \| "reuse" }`) |
 | 4 orchestrator tools (built-in) | only `.pi/orchestrator/*` (goal/dag/audit files) | n/a (they're the orchestrator's own state writes) |
 
@@ -344,7 +355,7 @@ as single source of truth.
 | Diagnostics | `aft_inspect` | ad-hoc `bash tsc/biome` |
 | Git state | `bash git status/log/diff/show` | system op — OK |
 | Build / test / install | `bash` (`bun` / `npm`) | system op — OK |
-| Edit a file | `Agent` (`developer` with `tdd: "none"` for meta / `developer` with managed worktree for prod) | raw `edit` / `write` |
+| Edit a file | `Agent` (`developer` with `isolation: "current-workspace"` + `tdd: "none"` for meta / `developer` with managed worktree for prod) | raw `edit` / `write` |
 
 Anti-patterns:
 

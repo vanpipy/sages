@@ -22,18 +22,25 @@ decisions.
 
 The orchestrator dispatches subagents based on the task shape:
 
-- **Meta-file edits / design-doc writes** → `developer` with `tdd: "none"` (no isolation, in dispatcher's cwd). For git ops that bash-guard would block, also pass `isolated: true` to bypass the bash-guard hook.
+- **Meta-file edits / design-doc writes** → `developer` with `isolation: "current-workspace"` + `tdd: "none"` (no worktree; agent operates in dispatcher's cwd). For git ops that bash-guard would block, also pass `isolated: true` to bypass the bash-guard hook.
 - **Production-code TDD work** → `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree)
+- **Serial follow-up in same workspace** → `developer` with `isolation: { dag_id, task_id, mode: "reuse" }` (reuses the prior worktree)
 - **Audit / verify** → `auditor` (read-only, evidence-based)
 - **Quick search** → `Explore`; **Planning Brief compilation** → `Plan` (bounded, read-only).
 - **Multi-stage workflows** → `task_dispatch` (orchestrator tool) — emits developer / auditor dispatches automatically
 
 The pipeline is main-agent understanding and decision → Planning Brief → Plan compilation and main-agent review → dispatch → audit.
-- Use `developer` with `tdd: "none"` (no isolation) for git operations and meta-file edits.
-- Use `developer` with managed worktree for production-code TDD work.
+- Use `developer` with `isolation: "current-workspace"` + `tdd: "none"` for meta-file edits and design-doc writes (no worktree; agent runs in dispatcher's cwd).
+- Use `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree) for production-code TDD work.
+- Use `developer` with `isolation: { dag_id, task_id, mode: "reuse" }` to re-enter an existing worktree for serial follow-up tasks in the same DAG.
 - Use `auditor` (read-only) for verification — never modify production code from an auditor dispatch.
 
-When the orchestrator dispatches `developer` with `isolation: { dag_id, task_id, mode: "create" }`, pi-subagents provisions a managed worktree at `<repo>/.pi/worktree/<dag>/<task>` from `origin/main`, leases it for the duration of the task, and the developer commits inside the worktree. The orchestrator merges the result branch into main after audit.
+The `developer` agent accepts three explicit isolation modes:
+- `isolation: { dag_id, task_id, mode: "create" }` — fresh managed worktree at `.pi/worktree/<dag>/<task>` from `origin/main`; default for production code. Lease is held for the duration of the task; the developer commits inside the worktree and the orchestrator merges the result branch into main after audit.
+- `isolation: { dag_id, task_id, mode: "reuse" }` — re-enter an existing worktree slot for serial follow-ups (concurrent reuse is rejected).
+- `isolation: "current-workspace"` — opt out of a worktree entirely; the agent runs in the parent's cwd. Used for meta-file edits and design-doc writes; no audit gate.
+
+The legacy `isolation: "worktree"` string literal is rejected by the current Agent dispatcher; the `developer` runtime also rejects `isolation: undefined` (every dispatch must name one of the three modes above).
 
 ## Agent Roster
 
@@ -137,18 +144,35 @@ Agent({
 
 ## Dispatch examples
 
-### Example 1: edit a meta-file
+### Example 1: edit a meta-file (current-workspace mode)
 
 ```ts
-// L3 main agent (orchestrator)
+// L3 main agent (orchestrator) — no worktree, agent operates in dispatcher's cwd
 Agent({
   subagent_type: "developer",
+  isolation: "current-workspace",
   tdd: "none",
   prompt: "Edit AGENTS.md to add X. Read first, edit, report diff.",
   description: "Edit AGENTS.md to add X",
   run_in_background: true,
 })
 // Main reviews diff → main commits
+```
+
+### Example 1b: edit a meta-file when worktree isolation is needed (parallel batch)
+
+```ts
+// Use the explicit object form when the meta-file edit needs its own
+// worktree — e.g. running in parallel with other batch tasks that may
+// touch the same files, or when you want the audit/merge gate.
+Agent({
+  subagent_type: "developer",
+  isolation: { dag_id: "GC-2026-008", task_id: "M1", mode: "create" },
+  tdd: "none",
+  prompt: "Edit AGENTS.md to add X. Read first, edit, report diff.",
+  description: "Edit AGENTS.md to add X",
+  run_in_background: true,
+})
 ```
 
 ### Example 2: production-code TDD
