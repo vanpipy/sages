@@ -1,7 +1,7 @@
 {
-  "name": "@sages/pi-four-sages",
+  "name": "@sages/pi",
   "version": "1.0.0",
-  "description": "Four Sages role-based agents for pi - Fuxi (design), QiaoChui (review), LuBan (execute), GaoYao (audit)",
+  "description": "Sages orchestrator — 4-tool DAG workflow (goal → decompose → dispatch → audit) + bash-guard + escape window.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -13,7 +13,9 @@
     "agents",
     "sages",
     "four-sages",
-    "roles"
+    "roles",
+    "orchestrator",
+    "dag"
   ],
   "license": "MIT",
   "pi": {
