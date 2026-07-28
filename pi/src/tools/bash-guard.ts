@@ -198,7 +198,11 @@ export function isGitMetaCommand(command: string): GitMetaVerdict {
 		(sub === "clean" && args.some(a => /^-[a-z]+$/i.test(a) && a.includes("f") && a.includes("d"))) ||
 		(sub === "stash" && args[0] === "drop") || (sub === "tag" && args.includes("-d")) ||
 		(sub === "branch" && args.some(a => a === "-D" || a === "-d")) ||
-		(sub === "push" && args.some(a => a === "--force" || a === "-f")) ||
+		(sub === "push" && args.some(a =>
+			a === "--force" || a === "-f" ||
+			a === "--force-with-lease" || a === "--force-if-includes"
+		)) ||
+		(sub === "switch" && args.includes("--discard-changes")) ||
 		(sub === "worktree" && args[0] === "remove" && args.includes("--force"));
 	if (destructive) return { allow: false, reason: `destructive: ${rendered}${args.length ? ` ${args.join(" ")}` : ""}` };
 	if (!sub) return { allow: false, reason: "unsupported: git command has no subcommand" };
@@ -210,6 +214,21 @@ export function isGitMetaCommand(command: string): GitMetaVerdict {
 	if (sub === "remote") allow = args[0] === "-v" || args[0] === "add";
 	if (sub === "submodule") allow = args[0] === "status";
 	if (sub === "config") allow = args[0] === "--get" || args[0] === "--list";
+	if (sub === "checkout") {
+		// `git checkout <ref>` / `-b <new>` / `-B <new>` / `--orphan <new>`
+		// / `--detach <commit>` / `-` (previous branch). The destructive
+		// filter above already catches the file-overwrite forms
+		// (`git checkout -- <paths>` / `git checkout <ref> -- <paths>`)
+		// via `args.includes("--")`. When we reach here, `--` is NOT
+		// in args, so it's a pure ref operation.
+		allow = true;
+	}
+	if (sub === "switch") {
+		// `git switch <ref>` / `-c <new>` / `-C <new>` / `--orphan <new>`
+		// / `--detach <commit>`. The destructive filter above catches
+		// `--discard-changes` (forced switch with local-change loss).
+		allow = true;
+	}
 	return allow ? { allow: true, subcommand: sub } : { allow: false, reason: `unsupported: ${rendered}` };
 }
 

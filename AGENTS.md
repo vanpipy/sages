@@ -157,38 +157,75 @@ Practical consequences:
 - `pi/src/tools/orchestrator/task-dispatcher.ts` `report_path` field
   should not route subagent output to `.pi/orchestrator/`.
 
-### Bare-repo git internals rule (added 2026-07-25)
+### Main-repo git policy (updated 2026-07-27)
 
-The original repo's git internals are read-only from EVERY agent's
-perspective — L3 main agent, L2 developer, L2 auditor, L1 read-only,
-all subagents.
+The bare repo's `.git/` internals (`HEAD`, `refs/`, `objects/`,
+`packed-refs`, `.git/config`) are still read-only from every agent's
+perspective — never edit them by hand. Refs must be updated through
+`git` porcelain commands (which are themselves L2-controlled), not
+raw file writes that bypass git's reflog + locking.
 
-Concrete prohibitions:
-- Do NOT write to `.git` (the main worktree's git pointer file).
-- Do NOT run `git merge`, `git worktree add/remove`, `git checkout`,
-  `git branch -D`, or any other ref-mutating command from the bare
-  repo root (`/home/leroy/Project/sages`).
-- Do NOT manipulate the bare repo's `.git/` directory directly.
-- Do NOT modify any file under the main worktree directly.
+Ref-mutating git operations are L2-allowed from the main repo
+(`/home/leroy/Project/sages`). The `isGitMetaCommand` destructive
+filter is the real safety net — not a blanket "always use a worktree"
+rule. Allowed from main repo (and every other cwd):
 
-Correct pattern:
-- All git operations (merge, worktree add/remove, checkout, branch)
-  must be initiated from inside a worktree (`/tmp/<purpose>-<dag>`).
-- Worktrees themselves are fine to create — they're the "scratch
-  space" at `/tmp/pi-agent-*` or `/tmp/merge-*`.
-- The "original repo" = bare repo + main worktree is read-only from
-  every agent's perspective.
+- `git checkout <ref>` / `-b <new>` / `-B <new>` / `--orphan <new>` /
+  `--detach <commit>` (no `-- <paths>` form)
+- `git switch <ref>` / `-c <new>` / `-C <new>` / `--orphan <new>` /
+  `--detach <commit>` (no `--discard-changes`)
+- `git branch <name>` / `-l` / `-a` (no `-d` / `-D`)
+- `git fetch` / `git pull` / `git remote -v` / `git remote add`
+- `git merge <ref>` / `git cherry-pick` / `git rebase`
+- `git push` (no `--force` / `-f` / `--force-with-lease` / `--force-if-includes`)
+- `git worktree add <path> <branch>` (creates a managed scratch worktree)
+- `git tag <name>` / `-l` (no `-d`)
+- `git add` / `git commit` / `git stash` / `git stash pop`
+- `git init` / `git clone`
 
-If a workflow needs the main worktree and it's broken: do NOT fix it;
-use a fresh `/tmp/<purpose>-<dag>` worktree. The user can fix their
-local setup separately.
+Still denied from every cwd (destructive blacklist):
 
-Background: 2026-07-25 during GC-2026-004, an earlier operation had
-renamed the main worktree's `.git` to `.git.old`. The L3 main agent
-violated the rule twice — running `git merge` directly in the bare
-repo, and trying to restore `.git` by `echo "gitdir: ..." > .git`.
-The proper response would have been "use a different worktree". Going
-forward, every agent must respect this rule.
+- `git checkout -- <paths>` / `git checkout <ref> -- <paths>` (file
+  discard / file restore from another ref)
+- `git switch --discard-changes` (forces switch with local-change loss)
+- `git restore <paths>`
+- `git rm` / `git mv` (file-level destructive)
+- `git reset --hard`
+- `git clean -fd`
+- `git stash drop`
+- `git branch -d` / `-D`
+- `git push --force` / `-f` / `--force-with-lease` / `--force-if-includes`
+- `git worktree remove --force`
+- Any direct edit to `.git/` files (bypasses git's reflog + locking)
+
+When to still use a worktree:
+
+- For production-code edits (anything L4 blocks — `src/`, `test/`,
+  `lib/`, …). Use managed worktrees at `.pi/worktree/<dag>/<worktree>`
+  (provisioned by the `pi-subagents` host) and dispatch `developer`
+  with `isolation: { dag_id, task_id, mode: "create" }`.
+- For parallel-task isolation, so concurrent agents don't stomp on
+  each other's working trees.
+- For destructive ops that need the audit gate (anything in
+  GC-2026-004's blast radius).
+
+Worktrees are NOT required just to read another branch, compare two
+refs, or do a non-destructive ref op — the L2 layer covers that.
+
+If a workflow needs the main worktree and it's broken: do NOT fix it
+from inside the main worktree. Use a fresh managed worktree
+(`.pi/worktree/<dag>/<worktree>`) and let the user fix their local
+setup separately.
+
+Background: this rule was originally added on 2026-07-25 as a
+blanket "bare repo is fully read-only" prohibition after the L3 main
+agent twice violated it during GC-2026-004 — running `git merge`
+directly in the bare repo, and trying to restore `.git` by
+`echo "gitdir: ..." > .git`. The refined form above keeps the `.git/`
+direct-edit prohibition but delegates the ref-mutating layer to the
+L2 destructive filter, which now covers every historical foot-gun
+(`git checkout --`, `git reset --hard`, `git push --force`,
+`git clean -fd`).
 
 ## Hard Threshold — Brain-vs-Limb Separation (added 2026-07-24)
 

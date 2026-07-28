@@ -48,7 +48,7 @@ When you need to do work, pick the right subagent:
 | Task | Subagent | Why |
 |---|---|---|
 | **Edit meta-files** — `.pi/orchestrator/*`, `pi/**`, `pi-*/**`, root docs/configs (see "Meta-File vs Production Code" below for the exact allowlist) | `Agent({ subagent_type: "developer", tdd: "none" })` | Path-policy allowlist; no isolation; operates in dispatcher's cwd; writes the diff directly |
-| **Git operations** (add, commit, branch, status, log) | `Agent({ subagent_type: "developer", isolated: true, tdd: "none" })` | `isolated: true` disables Sages extension → bash-guard hook does not fire → unrestricted bash |
+| **Destructive git ops** (push --force*, reset --hard, clean -fd, checkout -- <paths>, branch -D, switch --discard-changes, …) | `Agent({ subagent_type: "developer", isolated: true, tdd: "none" })` | `isolated: true` disables Sages extension → bash-guard hook does not fire → unrestricted bash |
 | **Edit production code** — `src/*`, `test/*`, `lib/*`, `app/*`, `cmd/*`, `internal/*`, `pkg/*`, bare `*.ts`/`*.py`/etc. at root, anything not in the meta-file allowlist | `Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" } })` | Managed worktree; RED-GREEN-REFACTOR discipline; auditor evidence gate |
 | **Audit / verify** (certify changes, evidence collection) | `Agent({ subagent_type: "auditor" })` | Read-only; returns CERTIFIED / NEEDS WORK / BLOCKED |
 | **Quick read-only search** (where is X defined) | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast cheap model from the parent registry (settings.json default) |
@@ -59,7 +59,7 @@ Key rules:
 - **Never** dispatch `developer` with managed-worktree isolation for git operations or pure meta-file edits — that overhead is reserved for production-code TDD. Use `tdd: "none"` (no isolation) for meta-file edits, and `isolated: true` for git ops that bash-guard blocks.
 - `isolation: { dag_id, task_id, mode: "create" }` is **only** for `developer` (and the `developer` legacy alias). All other subagents use no isolation.
 - The legacy `isolation: "worktree"` string is rejected by the Agent dispatcher - always use the object form.
-- For git ops or other direct-bash work that bash-guard blocks (e.g. `git add`), use `isolated: true`. This disables Sages extension loading entirely, so the bash-guard hook never registers. Subagent loses AFT / MCP / magic-context (not needed for git ops).
+- For git ops or other direct-bash work that bash-guard blocks (e.g. `git push --force-with-lease`), use `isolated: true`. This disables Sages extension loading entirely, so the bash-guard hook never registers. Subagent loses AFT / MCP / magic-context (not needed for git ops).
 - **Parallel-dispatch** independent sub-tasks: multiple `Agent` calls in one message, each `run_in_background: true`. Don't serialize when the tasks are independent.
 
 
