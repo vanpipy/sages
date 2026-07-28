@@ -1,5 +1,5 @@
 /**
- * worktree-contract.ts — GC-2026-008 P2.
+ * worktree-contract.ts — GC-2026-008 P2 / GC-2026-017.
  *
  * The Agent-boundary contract for the managed-worktree domain. Three jobs:
  *
@@ -16,6 +16,13 @@
  *   3. Validate the request against the same identity rules `validateIdentity`
  *      enforces inside the worktree helper. Path-traversal / whitespace /
  *      separators are caught BEFORE the manager tries to provision.
+ *
+ * GC-2026-017 extends the surface: callers can now opt out of a managed
+ * worktree entirely by passing the literal `"current-workspace"`. This is
+ * recognized ONLY by `normalizeWorktreeIsolation` (which returns
+ * `undefined` to signal "no managed worktree") — the object-form parser
+ * `parseManagedWorktreeRequest` is unchanged and still refuses strings,
+ * and the legacy `"worktree"` literal is still rejected at both surfaces.
  */
 
 import type { TSchema } from "@sinclair/typebox";
@@ -86,7 +93,7 @@ export const MANAGED_WORKTREE_REQUEST_TYPE: TSchema = Type.Object({
 			description:
 				'Optional base ref. Accepts local branches ("main", "feature/x"), ' +
 				'remote-tracking refs ("origin/main", "origin/feature/x"), or any safe git ref. ' +
-				'Omit to default to the current working directory\'s branch ' +
+				"Omit to default to the current working directory's branch " +
 				'(upstream tracking ref if set, else local branch, else "origin/main" fallback). ' +
 				"Refused at provision time if the ref does not resolve.",
 			pattern: "^[A-Za-z0-9._/-]+$",
@@ -188,6 +195,13 @@ export function validateManagedWorktreeRequest(
  * throws if the input is not a recognized form. The legacy string literal
  * is rejected here — same outcome as parsing it directly, exposed for
  * tools / RPC callers that prefer "normalize or throw" semantics.
+ *
+ * GC-2026-017: the literal `"current-workspace"` is recognized as an
+ * explicit opt-in for non-worktree dispatch and returns `undefined` here
+ * (the caller interprets `undefined` as "no managed worktree, run in the
+ * current workspace"). The parser `parseManagedWorktreeRequest` is
+ * unchanged — it still refuses string inputs because it is the
+ * object-form surface only.
  */
 export function normalizeWorktreeIsolation(
 	raw: unknown,
@@ -197,9 +211,13 @@ export function normalizeWorktreeIsolation(
 		if (raw === "worktree") {
 			throw new Error(parseLegacyIsolationField(raw)); // throws always
 		}
+		// GC-2026-017: explicit opt-in for current-workspace dispatch.
+		// Pass-through — no managed worktree is provisioned.
+		if (raw === "current-workspace") return undefined;
 		throw new Error(
 			`Agent isolation: '${raw}' is not a recognized isolation value. ` +
-				`Pass an explicit worktree object or omit isolation.`,
+				`Pass an explicit worktree object, ` +
+				`the literal "current-workspace", or omit isolation.`,
 		);
 	}
 	return parseManagedWorktreeRequest(raw);

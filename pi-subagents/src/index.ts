@@ -64,9 +64,8 @@ import {
 	resolveAgentInvocationConfig,
 	resolveJoinMode,
 } from "./invocation-config.js";
-import { type ModelRegistry, resolveModel } from "./model-resolver.js";
 import { resolveDispatcherModelFallback } from "./model-fallback.js";
-import { getSettingsDefaultModel } from "./settings-default-model.js";
+import { type ModelRegistry, resolveModel } from "./model-resolver.js";
 import {
 	createOutputFilePath,
 	streamToOutputFile,
@@ -80,6 +79,7 @@ import {
 	saveAndEmitChanged,
 	type ToolDescriptionMode,
 } from "./settings.js";
+import { getSettingsDefaultModel } from "./settings-default-model.js";
 import { getStatusNote } from "./status-note.js";
 import type {
 	AgentConfig,
@@ -1192,6 +1192,14 @@ Terse command-style prompts produce shallow, generic work.
 									"so pre-migration callers see a precise error rather than a silent /tmp " +
 									"fallback; see isolation.worktree_object below.",
 							}),
+							Type.Literal("current-workspace", {
+								description:
+									"GC-2026-017: explicit opt-in to run the agent in the caller's own cwd " +
+									"(no managed worktree is provisioned). Use ONLY for known-safe tasks — " +
+									"meta-file edits, single-line documentation patches. The default for " +
+									"`developer` remains the explicit worktree object; `current-workspace` is " +
+									"an explicit opt-in, not a default.",
+							}),
 							Type.Object(
 								{
 									dag_id: Type.String({
@@ -1232,9 +1240,12 @@ Terse command-style prompts produce shallow, generic work.
 						],
 						{
 							description:
-								'Worktree isolation. Accepts either the legacy "worktree" literal ' +
-								"(deprecated; rejected for Sages callers) or the explicit worktree " +
-								'object — { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }. ' +
+								"Isolation mode. Accepts one of three explicit shapes: " +
+								'(1) the literal "worktree" — legacy, rejected for Sages callers; ' +
+								'(2) GC-2026-017: the literal "current-workspace" — explicit opt-in to run ' +
+								"in the caller's own cwd with no managed worktree; " +
+								"(3) the explicit managed-worktree object — { dag_id, task_id, worktree_id?, " +
+								'mode: "create" | "reuse" } (canonical surface). ' +
 								"See pi-subagents/src/worktree-contract.ts.",
 						},
 					),

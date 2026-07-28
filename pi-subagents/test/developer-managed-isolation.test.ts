@@ -119,3 +119,34 @@ describe("developer-managed-isolation: policy", () => {
 		).toBeUndefined();
 	});
 });
+
+describe("developer-managed-isolation: current-workspace mode (GC-2026-017)", () => {
+	// GC-2026-017 adds `isolation: "current-workspace"` as an explicit
+	// opt-in for callers that want `developer` to run in the caller's
+	// own cwd instead of a managed worktree (e.g. meta-file edits,
+	// single-line AGENTS.md patches). The mode is **NOT** the default —
+	// the worktree object form remains the canonical surface — but it
+	// must pass the policy so callers can opt-in explicitly.
+
+	it("accepts `isolation: 'current-workspace'` and returns undefined (pass-through)", () => {
+		const ok = enforceDeveloperManagedIsolationPolicy(DEV, "current-workspace");
+		expect(ok).toBeUndefined();
+	});
+
+	it("still rejects `isolation: 'branch'` (no implicit provision of an unrelated mode)", () => {
+		// The new mode is a literal — it does not imply that every
+		// string literal now passes. Other unrelated literals must
+		// remain rejected so a typo does not silently disable the
+		// policy.
+		expect(enforceDeveloperManagedIsolationPolicy(DEV, "branch")).toBeDefined();
+	});
+
+	it("still rejects `isolation: 'no-isolation'` (must be explicit)", () => {
+		// Explicit-only policy is preserved: callers must pass either
+		// the explicit worktree object OR the new `current-workspace`
+		// literal. Any other string is rejected.
+		expect(
+			enforceDeveloperManagedIsolationPolicy(DEV, "no-isolation"),
+		).toBeDefined();
+	});
+});

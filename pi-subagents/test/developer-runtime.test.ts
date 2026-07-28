@@ -21,7 +21,6 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_AGENTS } from "../src/default-agents.js";
 import {
 	getAgentConfig,
 	getAvailableTypes,
@@ -29,10 +28,15 @@ import {
 	resolveType,
 	setDefaultsDisabled,
 } from "../src/agent-types.js";
-import { enforceDeveloperManagedIsolationPolicy } from "../src/invocation-config.js";
+import { DEFAULT_AGENTS } from "../src/default-agents.js";
+import {
+	enforceDeveloperManagedIsolationPolicy,
+	resolveAgentInvocationConfig,
+} from "../src/invocation-config.js";
 import {
 	normalizeWorktreeIsolation,
 	parseLegacyIsolationField,
+	parseManagedWorktreeRequest,
 } from "../src/worktree-contract.js";
 
 const CANONICAL = "developer";
@@ -148,14 +152,22 @@ describe("developer-runtime: enforceDeveloperManagedIsolationPolicy unit checks"
 	});
 
 	it("rejects undefined / null / unrelated strings under the canonical name", () => {
-		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, undefined)).toBeDefined();
-		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, null)).toBeDefined();
+		expect(
+			enforceDeveloperManagedIsolationPolicy(CANONICAL, undefined),
+		).toBeDefined();
+		expect(
+			enforceDeveloperManagedIsolationPolicy(CANONICAL, null),
+		).toBeDefined();
 		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, "")).toBeDefined();
-		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, "branch")).toBeDefined();
+		expect(
+			enforceDeveloperManagedIsolationPolicy(CANONICAL, "branch"),
+		).toBeDefined();
 	});
 
 	it("rejects malformed managed-worktree objects under the canonical name", () => {
-		expect(enforceDeveloperManagedIsolationPolicy(CANONICAL, {} as any)).toBeDefined();
+		expect(
+			enforceDeveloperManagedIsolationPolicy(CANONICAL, {} as any),
+		).toBeDefined();
 		expect(
 			enforceDeveloperManagedIsolationPolicy(CANONICAL, {
 				dag_id: "DAG-1",
@@ -174,5 +186,33 @@ describe("developer-runtime: enforceDeveloperManagedIsolationPolicy unit checks"
 		const err = enforceDeveloperManagedIsolationPolicy("Developer", "worktree");
 		expect(err).toBeDefined();
 		expect(err).toMatch(/developer/i);
+	});
+});
+
+describe("developer-runtime: current-workspace mode (GC-2026-017)", () => {
+	// GC-2026-017 introduces `isolation: "current-workspace"` as an
+	// explicit opt-in that runs `developer` in the caller's cwd (no
+	// managed worktree). The schema, parser, policy, and runtime
+	// resolver must all agree: pass the literal through and yield
+	// `managedWorktree: undefined` + `isolation: "current-workspace"`.
+
+	it("resolveAgentInvocationConfig: `current-workspace` yields no managedWorktree and the new mode literal", () => {
+		const resolved = resolveAgentInvocationConfig(undefined, {
+			isolation: "current-workspace",
+		});
+		expect(resolved.managedWorktree).toBeUndefined();
+		expect(resolved.isolation).toBe("current-workspace");
+		expect(resolved.isolationRaw).toBe("current-workspace");
+	});
+
+	it("normalizeWorktreeIsolation: `current-workspace` returns undefined (no managed worktree)", () => {
+		expect(normalizeWorktreeIsolation("current-workspace")).toBeUndefined();
+	});
+
+	it("parseManagedWorktreeRequest: `current-workspace` throws (object-form parser only takes objects)", () => {
+		// The object parser is unchanged — it still rejects strings.
+		// The literal is interpreted by `normalizeWorktreeIsolation`
+		// (which DOES accept the new mode) and `enforceDeveloperManagedIsolationPolicy`.
+		expect(() => parseManagedWorktreeRequest("current-workspace")).toThrow();
 	});
 });
