@@ -46,6 +46,7 @@ export const TaskNodeSchema = Type.Object({
   batch: Type.Number({ description: "Concurrency group (1-based, contiguous)", minimum: 1 }),
   isolation: Type.Optional(Type.Union([
     Type.Literal("none"),
+    Type.Literal("current-workspace"), // GC-2026-017: parent-cwd mode (no worktree)
     Type.Object({
       dag_id: Type.String(),
       task_id: Type.String(),

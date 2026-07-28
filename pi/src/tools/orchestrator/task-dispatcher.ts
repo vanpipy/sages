@@ -69,18 +69,27 @@ export interface DispatchTask {
   subagent_type: string;
   prompt: string;
   /**
-   * Phase A P3 (DAG-2026-011) — managed-worktree isolation shape.
+   * GC-2026-017 — isolation mode for the Agent tool. Main-agent dispatches
+   * `developer` in three explicit modes:
    *
-   * Set to the explicit `{ dag_id, task_id, mode }` object for tasks
-   * that target the `developer` subagent (so the Agent dispatcher
-   * provisions a managed worktree). `undefined` for everything else
-   * (Explore / Plan / auditor / general-purpose).
+   *   - Worktree create / reuse object: the Agent dispatcher provisions a
+   *     managed worktree (`mode: "create"` = new slot; `mode: "reuse"` =
+   *     re-enter existing). `task_id` MUST match `DispatchTask.task_id`.
+   *   - `"current-workspace"`: Agent tool runs the subagent in the
+   *     parent's cwd with no worktree. Use for meta-files, single-line
+   *     edits, and design-doc writes. The Agent tool enforces the
+   *     policy; this layer only passes the literal through.
+   *   - `undefined`: dispatched only for non-developer tasks. The
+   *     developer's developer-special-case always assigns an explicit
+   *     value (worktree-create default when the task omitted isolation,
+   *     the object as-is when set, or `"current-workspace"` literally).
    *
-   * The legacy `"worktree"` string literal is NOT accepted by the
-   * Agent dispatcher — see `pi-subagents/src/worktree-contract.ts`.
+   * `"none"` is preserved for backward compatibility with persisted DAGs
+   * that use it (treated like omitted).
    */
   isolation?:
     | { dag_id: string; task_id: string; worktree_id?: string; mode: "create" | "reuse" }
+    | "current-workspace"
     | "none";
   run_in_background: boolean;
   model?: string;
@@ -149,11 +158,21 @@ export function buildDispatchPlan(
       subagent_type: t.subagent_type,
       // Inject upstream task outputs into the prompt
       prompt: injectUpstreamOutputs(plan, taskById, t),
+      // GC-2026-017: developer-special-case resolution.
+      //   1. `"current-workspace"` → pass the literal through (NEW).
+      //   2. Object form → pass through as-is (covers both create + reuse).
+      //   3. `"none"` / `undefined` / anything else → fall back to the
+      //      worktree-create default so the Agent tool provisions a
+      //      managed worktree.
+      // Non-developer tasks leave isolation undefined; the Agent tool's
+      // own policy decides what to do with no isolation for those roles.
       isolation:
         t.subagent_type === "developer"
-          ? (typeof t.isolation === "object" && t.isolation !== null
-              ? t.isolation
-              : { dag_id: plan.id, task_id: t.id, mode: "create" as const })
+          ? (t.isolation === "current-workspace"
+              ? "current-workspace"
+              : typeof t.isolation === "object" && t.isolation !== null
+                ? t.isolation
+                : { dag_id: plan.id, task_id: t.id, mode: "create" as const })
           : undefined,
       run_in_background: t.run_in_background ?? defaultRunInBackground(t.subagent_type),
       wait_for: tasks.length > 1 ? "batch_completion" : "completion",

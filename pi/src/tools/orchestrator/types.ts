@@ -83,19 +83,32 @@ export interface TaskNode {
 	/** Concurrency grouping — same batch runs in parallel */
 	batch: number;
 	/**
-	 * Phase A P3 (DAG-2026-011) — managed-worktree isolation shape.
+	 * Per-task isolation policy. GC-2026-017: main-agent dispatches
+	 * `developer` in three explicit modes:
 	 *
-	 * Canonical form is the explicit managed-worktree object
-	 * `{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`.
-	 * The legacy `"worktree"` string literal is no longer accepted by
-	 * the Agent tool (see `pi-subagents/src/worktree-contract.ts`) — it
-	 * is preserved here as `"none"` and the legacy string for backwards
-	 * compatibility with persisted DAGs, but new authoring MUST use the
-	 * object form. `task_id` MUST match `TaskNode.id` — the dispatcher
-	 * validates this at plan-load time and rejects mismatches.
+	 *   - Worktree (default): `{ dag_id, task_id, mode: "create" }` —
+	 *     Agent tool provisions a managed worktree at
+	 *     `.pi/worktree/<dag>/<task>` on branch `sages/<dag>/<task>`.
+	 *   - Worktree reuse: `{ dag_id, task_id, mode: "reuse" }` — re-enter
+	 *     an existing managed worktree (serial follow-ups in the same
+	 *     workspace).
+	 *   - Current workspace (GC-2026-017 NEW): `"current-workspace"` —
+	 *     Agent tool runs the subagent in the parent's cwd with no
+	 *     worktree. Use only for meta-files, single-line edits, and
+	 *     design-doc writes where the safety invariant of the
+	 *     worktree is unnecessary.
+	 *   - Missing → dispatcher defaults to the worktree create object.
+	 *
+	 * `task_id` MUST match `TaskNode.id` — the dispatcher validates this
+	 * at plan-load time and rejects mismatches.
+	 *
+	 * `"none"` is preserved for backward compatibility with persisted
+	 * DAGs that use it (it means the same as omitted — dispatcher falls
+	 * back to the worktree create default).
 	 */
 	isolation:
 		| { dag_id: string; task_id: string; worktree_id?: string; mode: "create" | "reuse" }
+		| "current-workspace"
 		| "none";
 	/** Whether this task requires strict TDD (delegated to the developer subagent's RED → GREEN → REFACTOR) */
 	tdd: "strict" | "none";
