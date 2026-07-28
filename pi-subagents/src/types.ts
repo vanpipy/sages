@@ -22,8 +22,25 @@ export const DEFAULT_AGENT_NAMES = ["Explore", "Plan"] as const;
 /** Memory scope for persistent agent memory. */
 export type MemoryScope = "user" | "project" | "local";
 
-/** Isolation mode for agent execution. */
-export type IsolationMode = "worktree";
+/**
+ * Isolation mode for agent execution.
+ *
+ * - `"worktree"`         — legacy literal, rejected by the Agent tool's
+ *                          runtime (kept for type-completeness so legacy
+ *                          callers see a precise diagnostic instead of a
+ *                          silent /tmp fallback). Use the explicit
+ *                          `ManagedWorktreeRequest` object form for
+ *                          worktree dispatch.
+ * - `"current-workspace"`— GC-2026-017: explicit opt-in that runs the
+ *                          agent in the caller's own cwd on the caller's
+ *                          branch (no managed worktree provisioned).
+ *                          Reserved for known-safe tasks (meta-file
+ *                          edits, single-line AGENTS.md patches,
+ *                          design-doc writes). Default for `developer`
+ *                          remains worktree dispatch — opt in
+ *                          explicitly.
+ */
+export type IsolationMode = "worktree" | "current-workspace";
 
 /**
  * Handoff metadata the Agent manager attaches to `AgentRecord.managedWorktree`

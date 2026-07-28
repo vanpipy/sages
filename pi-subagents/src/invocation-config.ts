@@ -18,12 +18,24 @@ interface AgentInvocationParams {
 	inherit_context?: boolean;
 	isolated?: boolean;
 	/**
-	 * Accepts either the legacy "worktree" string literal (deprecated for
-	 * Sages callers) or the explicit managed-worktree object. The legacy
-	 * literal raises a precise error through `normalizeWorktreeIsolation`,
-	 * which is also how the dispatcher rejects it BEFORE child execution.
+	 * Accepts three explicit shapes:
+	 *
+	 *   - `"worktree"`         — legacy literal, rejected by the runtime
+	 *                            (kept in the type surface so legacy
+	 *                            callers see a precise diagnostic instead
+	 *                            of a silent /tmp fallback).
+	 *   - `"current-workspace"`— GC-2026-017: explicit opt-in to run in
+	 *                            the caller's own cwd (no managed
+	 *                            worktree). Pass-through, no object
+	 *                            required.
+	 *   - `ManagedWorktreeRequest` object — the canonical form for
+	 *                            worktree dispatch.
+	 *
+	 * The legacy literal raises a precise error through
+	 * `normalizeWorktreeIsolation`, which is also how the dispatcher
+	 * rejects it BEFORE child execution.
 	 */
-	isolation?: "worktree" | ManagedWorktreeRequest;
+	isolation?: "worktree" | "current-workspace" | ManagedWorktreeRequest;
 }
 
 export function resolveAgentInvocationConfig(
@@ -38,10 +50,18 @@ export function resolveAgentInvocationConfig(
 	runInBackground: boolean;
 	isolated: boolean;
 	/**
-	 * Resolved isolation. For the legacy "worktree" literal on a Sages caller
-	 * this is `undefined` and the dispatcher rejects the spawn upstream. For
-	 * an explicit object, this is the parsed request — the Agent manager
-	 * forwards it as `SpawnOptions.managedWorktree`.
+	 * Resolved isolation. One of:
+	 *
+	 *   - `"worktree"`        — the legacy literal (rejected upstream by
+	 *                           the dispatcher for Sages callers).
+	 *   - `"current-workspace"`— GC-2026-017: explicit opt-in to run in
+	 *                           the caller's own cwd (no managed
+	 *                           worktree). Carried through unchanged so
+	 *                           downstream dispatchers can honor the
+	 *                           opt-in.
+	 *   - `ParsedManagedWorktreeRequest` — the parsed object form. The
+	 *                           Agent manager forwards it as
+	 *                           `SpawnOptions.managedWorktree`.
 	 */
 	isolation?: IsolationMode | ParsedManagedWorktreeRequest;
 	/**
@@ -63,16 +83,27 @@ export function resolveAgentInvocationConfig(
 	let isolation: IsolationMode | ParsedManagedWorktreeRequest | undefined;
 	if (params.isolation !== undefined) {
 		if (typeof params.isolation === "string") {
-			// Legacy literal. Defer to `normalizeWorktreeIsolation` for rejection —
-			// this throws, which the Agent tool's dispatcher surfaces as a
-			// pre-execution error so callers see the new contract immediately.
-			try {
-				managedWorktree = normalizeWorktreeIsolation(params.isolation) as
-					| ParsedManagedWorktreeRequest
-					| undefined;
-				isolation = managedWorktree ?? "worktree";
-			} catch {
-				isolation = "worktree";
+			if (params.isolation === "current-workspace") {
+				// GC-2026-017: explicit opt-in to run in the caller's cwd.
+				// No managed worktree is requested; the literal is
+				// carried through unchanged so downstream dispatchers
+				// (pi-evaluator / DAG / index.ts) can honor the opt-in.
+				isolation = "current-workspace";
+				managedWorktree = undefined;
+			} else {
+				// Legacy `"worktree"` literal. Defer to
+				// `normalizeWorktreeIsolation` for rejection — this
+				// throws, which the Agent tool's dispatcher surfaces as
+				// a pre-execution error so callers see the new contract
+				// immediately.
+				try {
+					managedWorktree = normalizeWorktreeIsolation(params.isolation) as
+						| ParsedManagedWorktreeRequest
+						| undefined;
+					isolation = managedWorktree ?? "worktree";
+				} catch {
+					isolation = "worktree";
+				}
 			}
 		} else {
 			managedWorktree = normalizeWorktreeIsolation(
@@ -142,11 +173,18 @@ export function resolveJoinMode(
 }
 
 /**
- * Package policy for the canonical `developer` agent. The legacy
- * `isolation: "worktree"` string literal is no longer accepted by the
- * Agent tool (see worktree-contract.ts). Instead, `developer` MUST
- * run inside an explicit managed worktree object:
- * `{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`.
+ * Package policy for the canonical `developer` agent.
+ *
+ * GC-2026-008 P2 established that `developer` MUST run inside an
+ * explicit managed-worktree object — the legacy `isolation: "worktree"`
+ * string literal was rejected at the dispatcher.
+ *
+ * GC-2026-017 adds an explicit opt-in for non-worktree dispatch: callers
+ * that want `developer` to run in the caller's own cwd (no managed
+ * worktree provisioned) can pass `isolation: "current-workspace"`. The
+ * canonical surface remains the explicit worktree object:
+ *
+ *     { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }
  *
  * The policy is enforced at the dispatcher boundary so callers see a
  * clean diagnostic BEFORE child execution. It only applies to the
@@ -154,10 +192,19 @@ export function resolveJoinMode(
  * agent, unknown name, or the legacy `software-developer` spelling
  * (removed in GC-2026-014; see DAG-2026-011 Phase A) is a no-op.
  *
+ * Three accepted shapes for `isolation`:
+ *   1. `undefined` → reject (policy still requires an explicit choice).
+ *   2. `"current-workspace"` → pass-through (no worktree).
+ *   3. An explicit managed-worktree object → pass-through after field
+ *      validation.
+ *
+ * Legacy `"worktree"` literal, `null`, unrelated strings, numbers, and
+ * malformed objects are all rejected with a precise error message.
+ *
  * Returns:
- *   - `undefined` when the call is well-formed (developer +
- *     valid managed-worktree object), OR when the policy does not apply
- *     (any other agent type).
+ *   - `undefined` when the call is well-formed (developer + valid
+ *     managed-worktree object, OR `current-workspace` opt-in), OR when
+ *     the policy does not apply (any other agent type).
  *   - A precise error string when the policy rejects the call. The
  *     message names the agent, the offending value, and the explicit
  *     object form the caller must use.
@@ -176,6 +223,15 @@ export function enforceDeveloperManagedIsolationPolicy(
 	const lower = typeof agentType === "string" ? agentType.toLowerCase() : "";
 	if (lower !== "developer") return undefined;
 
+	// GC-2026-017: explicit opt-in for current-workspace dispatch.
+	// Pass-through — no managed worktree is requested, and the
+	// downstream caller (Agent manager / DAG dispatcher) honors the
+	// literal by running in the parent's cwd. Returning undefined here
+	// means "policy-compliant; proceed".
+	if (isolation === "current-workspace") {
+		return undefined;
+	}
+
 	// Legacy literal — dedicated branch so the message carries all three
 	// required patterns (`developer`, `worktree`, `explicit`) in one
 	// sentence and is immediately actionable.
@@ -183,24 +239,29 @@ export function enforceDeveloperManagedIsolationPolicy(
 		return (
 			'developer agent: the legacy `isolation: "worktree"` string literal is no longer accepted. ' +
 			"Pass an explicit managed-worktree object instead: " +
-			'{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }.'
+			'{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }, ' +
+			'or pass the literal "current-workspace" to run in the caller\'s cwd.'
 		);
 	}
 
-	// No isolation supplied at all — `developer` always needs a managed
-	// worktree. `null` is a separate, equally-rejected case.
+	// No isolation supplied at all — `developer` always needs an
+	// explicit isolation choice (managed-worktree object OR the
+	// `current-workspace` literal). `null` is a separate,
+	// equally-rejected case.
 	if (isolation === undefined) {
 		return (
-			"developer agent: an explicit managed-worktree object is required " +
+			"developer agent: an explicit isolation choice is required " +
 			"(isolation was undefined). " +
-			'Pass { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }.'
+			'Pass { dag_id, task_id, worktree_id?, mode: "create" | "reuse" } ' +
+			'or the literal "current-workspace".'
 		);
 	}
 	if (isolation === null) {
 		return (
-			"developer agent: an explicit managed-worktree object is required " +
+			"developer agent: an explicit isolation choice is required " +
 			"(isolation was null). " +
-			'Pass { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }.'
+			'Pass { dag_id, task_id, worktree_id?, mode: "create" | "reuse" } ' +
+			'or the literal "current-workspace".'
 		);
 	}
 
@@ -209,8 +270,9 @@ export function enforceDeveloperManagedIsolationPolicy(
 	if (typeof isolation !== "object") {
 		return (
 			`developer agent: isolation must be an explicit managed-worktree ` +
-			`object (got ${JSON.stringify(isolation)}). ` +
-			`Pass { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }.`
+			`object or the literal "current-workspace" (got ${JSON.stringify(isolation)}). ` +
+			`Pass { dag_id, task_id, worktree_id?, mode: "create" | "reuse" } ` +
+			`or "current-workspace".`
 		);
 	}
 
