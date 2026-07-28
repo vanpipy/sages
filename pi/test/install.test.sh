@@ -604,21 +604,6 @@ echo "✅ PASS: uninstall_subagents_doc preserves user-customized SUBAGENTS.md"
 # Cleanup test 5
 rm -rf "$TMPDIR5"
 unset PI_DIR AGENT_DIR
-# ────────────────────────────────────────────────────────────
-# Pi-semantic-nudge test block removed
-#
-# This block previously tested install/uninstall of `pi-semantic-nudge`,
-# which was a local-peer npm package. It was removed from install.sh and
-# replaced by `pi-magic-context` (npm:@cortexkit/pi-magic-context) — see
-# the install.sh header comments and the structural + behavioral
-# coverage of pi-magic-context's replacement (`install_pi_magic_context`,
-# `install_magic_context_config`, etc.) higher up in this file.
-#
-# If pi-semantic-nudge ever returns, restore the block from git history
-# (commit pre-magic-context migration).
-# ────────────────────────────────────────────────────────────
-
-
 
 # ──────────────────────────────────────────────────────────────────
 # T7: AFT install/uninstall fully removed from all 3 install scripts

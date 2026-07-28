@@ -49,7 +49,6 @@ package, see their own `README.md`):
 - `pi-evaluator/` — eval metrics (cost, security, text quality)
 - `pi-minimax/` — MiniMax AI integration
 - `pi-yunxiao/` — Alibaba Cloud DevOps integration
-- `pi-semantic-nudge/` — semantic search nudges
 
 > `pi-magic-context` and `pi-aft` are npm packages
 > (`@cortexkit/pi-magic-context`, `@cortexkit/aft-pi`), not in this
