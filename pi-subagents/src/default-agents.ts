@@ -124,13 +124,17 @@ const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
 /**
  * Canonical `merger` agent.
  *
- * Built-in to pi-subagents as of GC-2026-prompt-workspace (Q4=b). The
+ * Built-in to pi-subagents as the cross-workspace merge helper. The
  * merger sub-agent handles cross-workspace file overlap detected at
  * DAG synthesis: it reads both workspaces' HANDOFF.md + diffs,
  * classifies the overlap (clean / disjoint-hunk / hunk-conflict),
  * produces a merge commit via git plumbing when feasible, and
  * verifies the merged result with typecheck + lint + the merged
  * test suite. Hunk-conflicts escalate; they are NOT auto-resolved.
+ *
+ * (Originally authored under the goal-id `GC-2026-prompt-workspace`
+ * — on the merger prompt + Workspace/HANDOFF refactor; see commit
+ * `386bdb3 feat(default-agents): register merger sub-agent`.)
  *
  * Read-only on production code: `builtinToolNames` is `READ_ONLY_TOOLS`
  * (no `edit`, no `write`). Merges happen via `git -C <worktree> merge
