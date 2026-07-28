@@ -163,17 +163,15 @@ AGENT_DIR="$PI_DIR/agent"
 # shellcheck disable=SC1090
 source "$TMPDIR4/subagent-fns.sh"
 
-# Test T4.9: SUBAGENT_TEMPLATE_DIR resolves to the real templates dir
-# Compare via canonical paths (realpath-style) — SUBAGENT_TEMPLATE_DIR
-# literally contains "..", so string-comparison would fail even when both
-# refer to the same physical directory.
-test -d "$SUBAGENT_TEMPLATE_DIR" \
-  || { echo "❌ FAIL: SUBAGENT_TEMPLATE_DIR not found at $SUBAGENT_TEMPLATE_DIR"; exit 1; }
-SUBAGENT_TEMPLATE_DIR_CANONICAL=$(cd "$SUBAGENT_TEMPLATE_DIR" && pwd)
-SUBAGENT_TEMPLATES_DIR_CANONICAL=$(cd "$SUBAGENT_TEMPLATES_DIR" && pwd)
-test "$SUBAGENT_TEMPLATE_DIR_CANONICAL" = "$SUBAGENT_TEMPLATES_DIR_CANONICAL" \
-  || { echo "❌ FAIL: SUBAGENT_TEMPLATE_DIR (canonical=$SUBAGENT_TEMPLATE_DIR_CANONICAL) != $SUBAGENT_TEMPLATES_DIR_CANONICAL"; exit 1; }
-echo "✅ PASS: SUBAGENT_TEMPLATE_DIR resolves to pi/templates/agents"
+# Test T4.9: SUBAGENT_TEMPLATE_DIR does NOT exist (Phase B migration)
+# As of commit 1d9cbc1 (DAG-2026-011 Phase B), the canonical developer /
+# auditor templates moved to pi-subagents/src/default-agents.ts as
+# built-ins. The pi/templates/agents/ directory was deleted; install.sh
+# now emits a graceful warning when the variable is dereferenced, and
+# install_subagent_templates() is a no-op. This test pins the new state.
+test ! -d "$SUBAGENT_TEMPLATE_DIR" \
+  || { echo "❌ FAIL: SUBAGENT_TEMPLATE_DIR unexpectedly exists at $SUBAGENT_TEMPLATE_DIR (Phase B migration should have removed it)"; exit 1; }
+echo "✅ PASS: SUBAGENT_TEMPLATE_DIR is correctly absent (canonical templates moved to pi-subagents built-ins)"
 
 # Test T4.10: SUBAGENT_NAMES is EMPTY (Phase A + Phase B complete: both
 # developer and auditor are built-in to pi-subagents, not shipped here)
