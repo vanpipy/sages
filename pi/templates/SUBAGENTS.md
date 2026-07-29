@@ -119,8 +119,8 @@ Use the same optional `worktree_id` with `mode: "reuse"` for serial work;
 concurrent reuse is rejected. There is no auto-merge. After validation and
 any requested integration, release explicitly through
 `AgentManager.releaseManagedWorktree(...)`; set `deleteBranch: true` only
-when branch deletion is intended. Subagents must never write
-`.pi/orchestrator/`.
+when branch deletion is intended. Subagents follow the role-owned namespace
+rules below.
 
 **Returns**: file paths changed + test output + verification evidence.
 
@@ -365,26 +365,18 @@ gate. It is not required merely to read another branch, compare refs, or run a
 non-destructive ref operation. A broken main worktree must be repaired from a
 fresh managed worktree or by the user, never from inside the broken tree.
 
-## Subagent write prohibition
+## `.pi/orchestrator/` namespace ownership
 
-Subagents (`developer`, `auditor`, `Explore`, and `Plan`) **MUST NOT** actively
-write to `.pi/orchestrator/`. It is the main orchestrator's state space.
+Subagents use role-owned records without sharing mutable files:
 
-- Subagent roles return verdicts through the Agent tool response.
-- The pi-subagents-managed
-  `/tmp/pi-subagents-.../tasks/<id>.output` file is their persistent output.
-- If an audit trail is needed, the main orchestrator writes a summary of the
-  response; that summary is the orchestrator's record.
+- Developers write `task-{task_id}-report.md` and
+  `handoff/{workspace_id}/{task_id}-handoff.md`.
+- Auditors write `audit-{task_id}.md`.
+- L3 owns `goal-{id}.yaml`, DAG, audit-state, and workflow rollup files.
+- Explore and Plan remain read-only.
 
-Practical consequences:
-
-- Developer and auditor prompts must not instruct a subagent to write
-  `task-{id}-report.md` or `audit-{id}.md` under `.pi/orchestrator/`.
-- `task-dispatcher.ts` report paths must not route subagent output into
-  `.pi/orchestrator/`.
-- Design documents under `.pi/orchestrator/designs/` are written only by an
-  explicitly authorized human or main-orchestrator workflow, not as routine
-  subagent output.
+Cross-namespace overwrites are prohibited. Each role must validate its output
+path before writing and must not replace another role's state.
 
 ## Related
 

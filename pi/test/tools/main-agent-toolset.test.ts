@@ -45,7 +45,7 @@ class MockPi {
     registerFlag(_name: string, _opts: any): void {}
 }
 
-describe("registerSagesExtension — Layer 1: edit/write drop", () => {
+describe("registerSagesExtension — Layer 1: positive capability allowlist", () => {
     let mock: MockPi;
 
     beforeEach(() => {
@@ -70,29 +70,17 @@ describe("registerSagesExtension — Layer 1: edit/write drop", () => {
         expect(filtered).toEqual(["read", "grep", "bash"]);
     });
 
-    it("T-B: preserves all non-write tools including orchestrator tools + Agent (drops edit + write)", () => {
-        // After commit f7144b2 (sages_write/sages_edit retired) and
-        // 633ca97 (registerFileGate un-registered), the main agent's
-        // toolset is 4 orchestrator + 1 Agent + read tools. There is NO
-        // direct meta-file write tool — all file edits must go through
-        // Agent dispatch (general-purpose for meta, developer for prod).
-        const fixture = [
-            "read", "grep", "find", "ls", "bash",
-            "goal_contract_create", "dag_synthesize",
-            "task_dispatch", "orchestrator_audit",
+    it("T-B: preserves approved orchestrator, Agent lifecycle, and read-only tools only", () => {
+        const approved = [
+            "read", "grep", "find", "ls", "bash", "aft_read", "aft_search", "aft_zoom", "aft_outline",
+            "codebase_search", "codebase_refs", "codebase_memory_list_projects", "ctx_search", "todowrite",
+            "goal_contract_create", "dag_synthesize", "task_dispatch", "orchestrator_audit",
             "Agent", "get_subagent_result", "steer_subagent",
-            "edit",   // ← must be dropped
-            "write",  // ← must be dropped
         ];
-        const filtered = registerAndFilter(fixture);
-        expect(filtered).not.toContain("edit");
-        expect(filtered).not.toContain("write");
-        for (const t of fixture) {
-            if (t !== "edit" && t !== "write") {
-                expect(filtered).toContain(t);
-            }
-        }
-        expect(filtered).toHaveLength(fixture.length - 2);
+        const denied = ["edit", "write", "aft_edit", "apply_patch", "mystery_mutate"];
+        const filtered = registerAndFilter([...approved, ...denied]);
+        expect(filtered).toEqual(approved);
+        for (const tool of denied) expect(filtered).not.toContain(tool);
     });
 
     it("no-op when neither edit nor write is in active tools", () => {

@@ -39,9 +39,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-import { canMainAgentWrite, policyMessage } from "./tools/file-gate.js";
 import {
-	classifyBashCommand,
 	shouldBlockBashCommand,
 } from "./tools/bash-guard.js";
 
@@ -54,13 +52,12 @@ export const ESCAPE_RETRY_THRESHOLD = 200;
 /** Marker injected into the system prompt while the window is open. */
 export const ESCAPE_SYSTEM_PROMPT_MARKER = `
 > ⚠️ **ESCAPE WINDOW OPEN — 主动模式** ⚠️
-> The main agent now has direct \`edit\` and \`write\` tools. The bash-guard
-> is partially relaxed: any path is writable via edit/write/redirection,
-> but \`rm\` / \`mv\` / \`cp\` still require the path to be a meta-file
-> (production code paths still blocked for these destructive commands).
-> Use this mode sparingly — every edit lands directly in the working tree
-> without an isolated worktree or an audit pass. There is no in-session
-> exit; the window persists until the session ends.
+> The positive capability gate remains enforced: the main agent has no direct
+> \`edit\` / \`write\` / \`aft_edit\` / \`apply_patch\` tools, and bash still runs
+> through the fail-closed \`shouldBlockBashCommand\` policy. The user explicitly
+> opted in (or the retry threshold tripped), but the dispatcher rules do not
+> relax. Use this mode to surface a stuck workflow; resolve the underlying
+> issue and run the orchestrator tools normally.
 `;
 
 /** Internal mutable state. Exported for test reset. */
@@ -110,32 +107,36 @@ export function openEscapeWindow(
 	};
 }
 
+/** Exact capabilities available to the L3 coordinator. Unknown tools fail closed. */
+export const MAIN_AGENT_CAPABILITY_ALLOWLIST = new Set([
+	"read", "grep", "find", "ls", "bash",
+	"aft_read", "aft_search", "aft_zoom", "aft_outline", "aft_inspect",
+	"codebase_search", "codebase_refs", "codebase_memory_list_projects",
+	"codebase_memory_search_graph", "codebase_memory_query_graph",
+	"codebase_memory_trace_path", "codebase_memory_get_architecture",
+	"graphify_query", "ctx_search", "ctx_expand", "todowrite", "todoread",
+	"goal_contract_create", "dag_synthesize", "task_dispatch", "orchestrator_audit",
+	"Agent", "get_subagent_result", "steer_subagent",
+]);
+
 /**
- * Layer 1 (session_start): drop raw edit/write from the active toolset.
+ * Layer 1 (session_start): positive capability gate.
  *
- * Idempotent: each call resets the active tools minus edit/write. Safe
- * to call multiple times in a single session.
+ * A denylist is insufficient because newly installed mutation tools would be
+ * exposed until this package learned their names. Only reviewed coordinator,
+ * Agent lifecycle, and read-only capabilities survive.
  */
 export function applyLayer1Strip(pi: ExtensionAPI): void {
-	const active = pi.getActiveTools();
-	const stripped = active.filter(
-		(t: string) => t !== "edit" && t !== "write",
-	);
-	pi.setActiveTools(stripped);
+	pi.setActiveTools(pi.getActiveTools().filter((tool: string) => MAIN_AGENT_CAPABILITY_ALLOWLIST.has(tool)));
 }
 
 /**
- * Layer 1 escape reversal: re-add edit/write to the active toolset.
- *
- * Only called when the escape window opens. Idempotent.
+ * Compatibility hook for the historical escape-window event. The positive
+ * capability boundary is non-bypassable, so opening the window reapplies the
+ * allowlist rather than restoring mutation tools.
  */
 export function applyLayer1EscapeAdd(pi: ExtensionAPI): void {
-	const active = pi.getActiveTools();
-	if (active.includes("edit") && active.includes("write")) return;
-	const next = [...active];
-	if (!next.includes("edit")) next.push("edit");
-	if (!next.includes("write")) next.push("write");
-	pi.setActiveTools(next);
+	applyLayer1Strip(pi);
 }
 
 /**
@@ -153,49 +154,8 @@ export function evaluateEscapeBash(
 	command: string,
 	cwd: string,
 ): { block: true; reason: string } | undefined {
-	const classification = classifyBashCommand(command);
-
-	// Read-only — always allow.
-	if (classification === "read-only") return undefined;
-
-	// Write-intent + unknown — split on destructive / non-destructive.
-	// We do a cheap heuristic on the first token: rm / mv / cp / unlink /
-	// rmdir are destructive. The full shouldBlockBashCommand is the
-	// canonical policy; we delegate to it for the per-target path check
-	// so the escape carve-out does not duplicate or drift from the
-	// production policy.
 	const decision = shouldBlockBashCommand(command, { cwd });
-	if (!decision.block) return undefined;
-	if (classification === "unknown") {
-		// Unknown commands (python3 -c, ruby -e, bash -c, …) are NEVER
-		// trusted in any mode — they can do arbitrary file ops without
-		// the bash-guard's path-extraction catching them. The escape
-		// window is for "I want to edit a file with edit/write" not for
-		// "I want to run a script that does whatever". Return the block.
-		return { block: true, reason: decision.reason! };
-	}
-
-	// shouldBlockBashCommand already enforces the path policy. In escape
-	// mode for non-destructive commands we override the path denial —
-	// but we still respect the destructive-command block (rm/mv/cp into
-	// production code). We approximate "destructive" by the first
-	// token: rm / mv / cp / unlink / rmdir.
-	const firstWord = command.trimStart().match(/^\S+/)?.[0] ?? "";
-	const isDestructive =
-		firstWord === "rm" ||
-		firstWord === "mv" ||
-		firstWord === "cp" ||
-		firstWord === "unlink" ||
-		firstWord === "rmdir";
-	if (isDestructive) {
-		// Destructive commands always respect the path policy.
-		return { block: true, reason: decision.reason! };
-	}
-	// Non-destructive write-intent (sed -i, tee, redirects, find -delete,
-	// git restore / rm, ...): in escape mode, bypass the path policy and
-	// allow. The LLM is explicitly in 主动模式 and is responsible for
-	// not corrupting production code.
-	return undefined;
+	return decision.block ? { block: true, reason: decision.reason! } : undefined;
 }
 
 /**
@@ -226,8 +186,8 @@ export function escapeNoteText(state: EscapeState): string {
 	return (
 		`🔓 **ESCAPE WINDOW OPEN** — ${when}\n` +
 		`Reason: ${by}.\n` +
-		`The main agent now has direct \`edit\` / \`write\` tools; the bash-guard\n` +
-		`is partially relaxed (path whitelist bypassed, but rm / mv / cp still\n` +
-		`subject to path policy). The window persists until the session ends.`
+		`The positive capability gate remains enforced: no direct mutation tools\n` +
+		`are added and bash uses the normal fail-closed policy. The session marker\n` +
+		`continues to be appended on subsequent turns. The window persists until the session ends.`
 	);
 }

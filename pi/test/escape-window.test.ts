@@ -53,8 +53,8 @@ describe("escape-window: state machine", () => {
 // ─── Toolset management (Layer 1) ───────────────────────────────────
 
 describe("escape-window: Layer 1 (toolset)", () => {
-	it("applyLayer1Strip removes edit + write from the active toolset", () => {
-		const fakeTools = ["read", "edit", "write", "bash", "grep"];
+	it("applyLayer1Strip uses a positive allowlist, not a mutation-tool denylist", () => {
+		const fakeTools = ["read", "edit", "write", "aft_edit", "apply_patch", "mystery_mutate", "bash", "grep"];
 		const active: string[] = [...fakeTools];
 		const fakePi = {
 			getActiveTools: () => active,
@@ -81,7 +81,7 @@ describe("escape-window: Layer 1 (toolset)", () => {
 		expect(active).toEqual(["read", "bash"]);
 	});
 
-	it("applyLayer1EscapeAdd re-adds edit + write", () => {
+	it("applyLayer1EscapeAdd cannot re-add mutation capabilities", () => {
 		const active: string[] = ["read", "bash"];
 		const fakePi = {
 			getActiveTools: () => active,
@@ -91,12 +91,11 @@ describe("escape-window: Layer 1 (toolset)", () => {
 			},
 		} as never;
 		applyLayer1EscapeAdd(fakePi);
-		expect(active).toContain("edit");
-		expect(active).toContain("write");
+		expect(active).toEqual(["read", "bash"]);
 	});
 
-	it("applyLayer1EscapeAdd does not duplicate existing edit / write entries", () => {
-		const active: string[] = ["read", "edit", "write", "bash"];
+	it("applyLayer1EscapeAdd strips pre-existing mutation capabilities", () => {
+		const active: string[] = ["read", "edit", "write", "aft_edit", "apply_patch", "bash"];
 		const fakePi = {
 			getActiveTools: () => active,
 			setActiveTools: (next: string[]) => {
@@ -105,10 +104,7 @@ describe("escape-window: Layer 1 (toolset)", () => {
 			},
 		} as never;
 		applyLayer1EscapeAdd(fakePi);
-		const edits = active.filter((t) => t === "edit").length;
-		const writes = active.filter((t) => t === "write").length;
-		expect(edits).toBe(1);
-		expect(writes).toBe(1);
+		expect(active).toEqual(["read", "bash"]);
 	});
 });
 
@@ -144,21 +140,16 @@ describe("escape-window: Layer 2 (bash) policy split", () => {
 		expect(blockProd?.reason).toMatch(/destructive:/);
 	});
 
-	it("non-destructive write-intent bypasses the path policy in escape mode", () => {
-		// sed -i into a production file is allowed under escape mode
-		// (the user explicitly opted in; rm / mv / cp are still
-		// blocked via the destructive-invariant — see the test above).
+	it("does not bypass non-destructive write policy", () => {
 		const sed = evaluateEscapeBash(`sed -i 's/x/y/' ${PROD}`, "/Users/me/proj");
-		expect(sed).toBeUndefined();
-		// Redirect into a production file is also allowed.
+		expect(sed).toBeDefined();
 		const redirect = evaluateEscapeBash(`echo hello > ${PROD}`, "/Users/me/proj");
-		expect(redirect).toBeUndefined();
-		// find -delete into a production tree is also allowed.
+		expect(redirect).toBeDefined();
 		const findDel = evaluateEscapeBash(
 			`find src -name '*.tmp' -delete`,
 			"/Users/me/proj",
 		);
-		expect(findDel).toBeUndefined();
+		expect(findDel).toBeDefined();
 	});
 
 	it("'unknown' commands are still blocked (we don't trust them)", () => {
@@ -179,8 +170,7 @@ describe("escape-window: note text", () => {
 		const text = escapeNoteText(s);
 		expect(text).toContain("ESCAPE WINDOW OPEN");
 		expect(text).toContain("user typed `escape-window`");
-		expect(text).toContain("edit");
-		expect(text).toContain("write");
+		expect(text).toContain("capability gate remains enforced");
 	});
 
 	it("escapeNoteText surfaces the retry-threshold reason when that fired", () => {
