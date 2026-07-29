@@ -38,7 +38,9 @@
     "test:e2e": "vitest run e2e --reporter=verbose",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/ test/",
-    "lint:fix": "biome check --fix src/ test/"
+    "lint:fix": "biome check --fix src/ test/",
+    "profile:smoke": "SAGES_PI_PROFILE=1 timeout 7s bun run scripts/profile-smoke.ts",
+    "profile:summary": "SAGES_PI_PROFILE=1 timeout 12s bun run scripts/profile-smoke.ts 2>&1 | grep -E '^profile_summary' | head -3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",

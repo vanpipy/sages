@@ -8,6 +8,7 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { AgentManager } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
+import { inc as profileInc, observe as profileObserve } from "../profile.js";
 import type {
 	AgentInvocation,
 	ManagedWorktreeHandoff,
@@ -306,7 +307,7 @@ function truncateLine(text: string, len = 60): string {
 			.find((l) => l.trim())
 			?.trim() ?? "";
 	if (line.length <= len) return line;
-	return line.slice(0, len) + "…";
+	return `${line.slice(0, len)}…`;
 }
 
 /** Build a human-readable activity string from currently-running tools or response text. */
@@ -331,7 +332,7 @@ export function describeActivity(
 				parts.push(action);
 			}
 		}
-		return parts.join(", ") + "…";
+		return `${parts.join(", ")}…`;
 	}
 
 	// No tools active — show truncated response text if available
@@ -419,11 +420,61 @@ export class AgentWidget {
 		this.update();
 	}
 
-	/** Ensure the widget update timer is running. */
+	/**
+	 * GC-2026-021 B-fix: gate the 80ms redraw timer on actual work.
+	 *
+	 * Original behavior: `ensureTimer` unconditionally started a
+	 * `setInterval(... 80)` even when no agents were visible, so the
+	 * timer fired at 12.4 Hz forever (≈ 17.4 fires/s combined with
+	 * the fleet timer below). At idle, every fire did no useful work
+	 * but kept the event loop alive.
+	 *
+	 * New behavior: only start the timer when there is at least one
+	 * active or recently-finished agent. `update()` already computes
+	 * the same predicate, so the timer auto-stops on the next fire
+	 * after the last agent clears.
+	 */
 	ensureTimer() {
-		if (!this.widgetInterval) {
-			this.widgetInterval = setInterval(() => this.update(), 80);
+		if (this.widgetInterval) return;
+		if (!this.hasWork()) return;
+		// GC-2026-020 instrumentation: 12.5 Hz redraw timer. Verified by
+		// the SC4 instrumented test that the actual fire rate lands
+		// within ±10 % of the design value (80ms).
+		this.widgetInterval = setInterval(() => {
+			const t0 = Date.now();
+			profileInc("tui_widget_render_fired");
+			if (!this.hasWork()) {
+				// Idle dropped between ensureTimer() and now (the
+				// predicate is cheap to re-check). Clear the interval
+				// so we don't keep paying the 12.4 Hz cadence.
+				clearInterval(this.widgetInterval!);
+				this.widgetInterval = undefined;
+				return;
+			}
+			this.update();
+			profileObserve("tui_widget_render_ms", Date.now() - t0);
+		}, 80);
+		// .unref() so the timer doesn't keep the event loop alive by
+		// itself — pi's lifecycle owns the process.
+		if (typeof this.widgetInterval.unref === "function") {
+			this.widgetInterval.unref();
 		}
+	}
+
+	/**
+	 * Cheap predicate: are there any active or recently-finished
+	 * agents the widget would render? Mirrors the `hasActive ||
+	 * hasFinished` check in `update()`. Used by the B-fix timer gate
+	 * to avoid starting the 80ms interval when nothing would render.
+	 */
+	private hasWork(): boolean {
+		if (!this.manager) return false;
+		const agents = this.manager.listAgents();
+		for (const a of agents) {
+			if (a.status === "running" || a.status === "queued") return true;
+			if (a.completedAt && this.shouldShowFinished(a.id, a.status)) return true;
+		}
+		return false;
 	}
 
 	/** Check if a finished agent should still be shown in the widget. */
@@ -528,7 +579,7 @@ export class AgentWidget {
 		for (const a of finished) {
 			finishedLines.push(
 				truncate(
-					theme.fg("dim", "├─") + " " + this.renderFinishedLine(a, theme),
+					`${theme.fg("dim", "├─")} ${this.renderFinishedLine(a, theme)}`,
 				),
 			);
 		}
@@ -707,6 +758,11 @@ export class AgentWidget {
 			}
 			return;
 		}
+
+		// GC-2026-021 B-fix: an external `update()` call (e.g. on a
+		// new turn) may have just produced work after the timer
+		// stopped. Restart the cadence so the new state renders.
+		this.ensureTimer();
 
 		// Status bar — only call setStatus when the text actually changes
 		let newStatusText: string | undefined;
