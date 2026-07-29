@@ -165,10 +165,14 @@ export interface TaskNode {
 	status: "pending" | "in_progress" | "completed" | "failed" | "skipped";
 	retry_count: number;
 	max_retries: number;
+	/** Agent runtime identity recorded by task_dispatch lifecycle updates. */
+	agent_id?: string;
 	/** ISO timestamps */
 	started_at?: string;
 	completed_at?: string;
+	failed_at?: string;
 	/** Outputs */
+	result?: string;
 	output?: string;
 	output_path?: string;
 	error?: string;

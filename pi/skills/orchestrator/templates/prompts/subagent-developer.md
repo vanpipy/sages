@@ -65,10 +65,12 @@ workspace.
 
 ## Workspace Output
 
-On exit, write the handoff record to
-`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md`. Include the
-summary, modified files, successor TODOs, test status, and open questions so
-the next developer session can continue the workspace without repeating work.
+Before exit, write the task report to
+`.pi/orchestrator/task-{{task_id}}-report.md`, and write the handoff record to
+`.pi/orchestrator/handoff/{{workspace_id}}/{{task_id}}-handoff.md`. These are
+developer-owned paths; do not overwrite goal, DAG, audit, or rollup state.
+Include the summary, modified files, successor TODOs, test status, and open
+questions so the next developer session can continue without repeating work.
 
 ## Self-Check Before Reporting
 

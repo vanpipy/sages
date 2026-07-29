@@ -34,10 +34,21 @@ import type {
 } from "./types.js";
 import {
   ORCHESTRATOR_DIR,
+  TASK_AUDIT_PREFIX,
   taskAuditPath,
   WORKFLOW_AUDIT,
 } from "./types.js";
+import {
+  atomicWriteOrchestratorFile,
+  atomicWriteOrchestratorText,
+} from "./state-persistence.js";
 import { loadPlan } from "./dag-synthesizer.js";
+
+const COMPLETE_OBSERVATION = Type.Object({
+  verdict: Type.Union([Type.Literal("PASS"), Type.Literal("REVISE"), Type.Literal("REJECT")]),
+  score: Type.Number({ minimum: 0, maximum: 100 }),
+  summary: Type.String({ minLength: 1 }),
+}, { description: "Finalize the audit" });
 
 export const OrchestratorAuditParams = Type.Object({
   dag_id: Type.String({ description: "DAG id" }),
@@ -97,19 +108,29 @@ export const OrchestratorAuditParams = Type.Object({
       recommendation: Type.Optional(Type.String()),
     }), { description: "An array of findings to record in a single call" })),
     /** Mark audit as complete — verdict, score, summary, all findings */
-    complete: Type.Optional(Type.Object({
-      verdict: Type.Union([Type.Literal("PASS"), Type.Literal("REVISE"), Type.Literal("REJECT")]),
-      score: Type.Number({ minimum: 0, maximum: 100 }),
-      summary: Type.String({ minLength: 1 }),
-    }, { description: "Finalize the audit" })),
+    complete: Type.Optional(COMPLETE_OBSERVATION),
   }, { description: "Audit progress: record a finding or complete the audit" })),
 });
 
 export type OrchestratorAuditInput = Static<typeof OrchestratorAuditParams>;
 
+function auditIdentityFor(params: { dag_id: string; task_id?: string; batch?: number }, depth: "fast" | "full"): AuditIdentity {
+  if (params.task_id) return { dag_id: params.dag_id, scope: "task", scope_key: params.task_id, depth };
+  if (params.batch !== undefined) return { dag_id: params.dag_id, scope: "batch", scope_key: String(params.batch), depth };
+  return { dag_id: params.dag_id, scope: "workflow", scope_key: "workflow", depth };
+}
+
 /** Persisted state file name. Lives at .pi/orchestrator/audit-state-{dag_id}.yaml */
 function auditStatePath(cwd: string, dagId: string): string {
   return join(cwd, ORCHESTRATOR_DIR, `audit-state-${dagId}.yaml`);
+}
+
+/** Identity carried by persisted state to reject cross-scope/depth reuse. */
+export interface AuditIdentity {
+  dag_id: string;
+  scope: "task" | "batch" | "workflow";
+  scope_key: string;
+  depth: "fast" | "full";
 }
 
 /** Audit state — persisted between tool calls so LLM can resume after context compaction. */
@@ -120,6 +141,7 @@ export interface AuditState {
   findings: OrchestratorFinding[];
   score: number;
   depth: "fast" | "full";
+  identity: AuditIdentity;
   /** Lifecycle: "init" right after first call, "recording" while accumulating findings, "complete" after the final call. */
   status: "init" | "recording" | "complete";
   created_at: string;
@@ -142,16 +164,10 @@ function loadAuditState(cwd: string, dagId: string): AuditState | null {
 }
 
 function saveAuditState(cwd: string, state: AuditState): void {
-  const dir = join(cwd, ORCHESTRATOR_DIR);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const statePath = auditStatePath(cwd, state.dag_id);
-  writeFileSync(
-    statePath,
-    yaml.dump(state, { indent: 2, lineWidth: 120, noRefs: true }),
-    "utf-8",
-  );
-  // Lock down file permissions too (state file may contain SC details)
-  try { chmodSync(statePath, 0o600); } catch { /* best-effort on platforms without POSIX perms */ }
+  const path = auditStatePath(cwd, state.dag_id);
+  const serialized = yaml.dump(state, { indent: 2, lineWidth: 120, noRefs: true });
+  const saved = atomicWriteOrchestratorText(cwd, `audit-state-${state.dag_id}.yaml`, serialized, "l3");
+  if (saved !== path) throw new Error(`audit state path mismatch: ${saved} vs ${path}`);
 }
 
 /**
@@ -263,6 +279,7 @@ async function initAudit(
   depth: "fast" | "full",
 ): Promise<any> {
   const now = new Date().toISOString();
+  const identity = auditIdentityFor(params, depth);
   const state: AuditState = {
     dag_id: plan.id,
     plan,
@@ -270,6 +287,7 @@ async function initAudit(
     findings: [],
     score: 100,
     depth,
+    identity,
     status: "init",
     created_at: now,
     updated_at: now,
@@ -294,6 +312,7 @@ async function initAudit(
         files_required: [auditStatePath(cwd, plan.id)],
         findings_required_min: findingsRequiredMin(depth),
       },
+      audit_identity: identity,
       phases,
       phase_guidance: phaseGuidance,
       workflow_summary: workflowSummary,
@@ -345,6 +364,17 @@ async function recordFindings(
         status: "error",
         intent: "Audit is already finalized. Re-run init to start a new audit (or pass force: true on complete to overwrite).",
         validation: { errors: ["audit is finalized; cannot append findings"] },
+      }) }],
+    };
+  }
+
+  const expectedIdentity = auditIdentityFor(params, depth);
+  if (!sameIdentity(state.identity, expectedIdentity)) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        intent: "Audit identity mismatch: persisted state was created with a different scope or depth. Re-run init to start a new audit.",
+        validation: { errors: ["audit identity mismatch: cross-scope or cross-depth reuse rejected"] },
       }) }],
     };
   }
@@ -404,6 +434,16 @@ async function completeAudit(
       }) }],
     };
   }
+  const expectedIdentity = auditIdentityFor(params, state.depth);
+  if (!sameIdentity(state.identity, expectedIdentity)) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        intent: "Audit identity mismatch: persisted state was created with a different scope or depth.",
+        validation: { errors: ["audit identity mismatch: cross-scope or cross-depth reuse rejected"] },
+      }) }],
+    };
+  }
 
   const requested = params.observation.complete as {
     verdict: "PASS" | "REVISE" | "REJECT";
@@ -414,42 +454,56 @@ async function completeAudit(
   const { score, summary } = requested;
   const errors: string[] = [];
 
-  // Evidence gate (C3): verdict=PASS requires both
-  //   (a) findings.length >= findingsRequiredMin(depth)
-  //   (b) workflowReady === true (every task's audit is CERTIFIED)
-  // If either fails, downgrade to REVISE so the LLM can react explicitly
-  // rather than rubber-stamp a passing verdict.
-  const minRequired = findingsRequiredMin(state.depth);
-  if (state.findings.length < minRequired) {
-    errors.push(
-      `verdict:PASS requires >= ${minRequired} finding(s) for ${state.depth} depth; got ${state.findings.length}`,
-    );
-  }
+  // F5/F6 — decouple PASS gate from finding severity:
+  //   - Clean audits (no defect findings + workflowReady) may PASS.
+  //     findingsRequiredMin(depth) is reported as informational only;
+  //     0 defect findings is a valid PASS outcome.
+  //   - workflowReady=false still downgrades PASS to REVISE because
+  //     at least one task's audit is missing/non-CERTIFIED.
+  //   - Severity gates (critical → REJECT, major → REVISE) only override
+  //     a PASS verdict; explicit REVISE/REJECT from the LLM is respected.
 
   // Re-read the per-task reports to compute workflowReady (always fresh
   // — a downstream re-audit may have flipped a task from NEEDS WORK to
   // CERTIFIED between init and complete).
   const reports = readAuditReports(cwd, state.tasks);
   const workflowSummary = aggregateTaskAudits(state.tasks, reports);
-  if (!workflowSummary.workflowReady) {
+  if (verdict === "PASS" && !workflowSummary.workflowReady) {
     errors.push(
       `verdict:PASS requires all tasks certified; blocking: ${workflowSummary.blockingTasks.join(", ")}`,
     );
+    verdict = "REVISE";
   }
 
-  if (verdict === "PASS" && errors.length > 0) {
-    verdict = "REVISE";
+  // Severity gates only override PASS — the LLM's explicit REVISE/REJECT
+  // verdict is respected. This lets the LLM self-correct without the tool
+  // refusing to honor an honest downgrade.
+  if (verdict === "PASS") {
+    const hasCritical = state.findings.some((f) => f.severity === "critical");
+    const hasMajor = state.findings.some((f) => f.severity === "major");
+    if (hasCritical) verdict = "REJECT";
+    else if (hasMajor) verdict = "REVISE";
   }
 
   // Recompute score from findings (don't trust the LLM-supplied score blindly)
   const computedScore = computeScore(state.findings);
   const finalScore = Math.min(score, computedScore);
 
-  // Build the result + write the report
-  // Resolve scope: task_id wins, then batch, then "workflow" (default).
-  // The path the tool returns MUST match the path the tool actually writes to.
-  const scope = params.task_id ?? params.batch?.toString() ?? "workflow";
-  const reportPath = taskAuditPath(cwd, scope);
+  // Namespace ownership check — auditor owns audit-{id}.md, L3 owns the
+  // workflow rollup. The path the tool returns MUST match the path the
+  // tool actually writes to (C1 regression guard). Ownership classification
+  // also rejects cross-namespace writes before they reach the file system.
+  // Per-scope report path:
+  //   - workflow → audit-workflow.md (L3-owned rollup)
+  //   - task     → audit-<task_id>.md      (auditor-owned per-task report)
+  //   - batch    → audit-<batch>.md        (auditor-owned per-batch report)
+  // Both task and batch use the AUDITOR namespace — taskAuditPath gives
+  // identical layout, and the discriminated path matches the test contract
+  // (C1: report_path returned must equal the file actually written).
+  const reportRelative = state.identity.scope === "workflow"
+    ? WORKFLOW_AUDIT
+    : `${TASK_AUDIT_PREFIX}${state.identity.scope_key}.md`;
+  const reportPath = join(cwd, ORCHESTRATOR_DIR, reportRelative);
   const result: OrchestratorAuditResult = {
     verdict,
     score: finalScore,
@@ -476,6 +530,10 @@ async function completeAudit(
         errors,
         warnings: [],
         files_required: [reportPath, auditStatePath(cwd, plan.id)],
+        // Informational only — F6 decoupled the PASS gate from this count.
+        // The LLM uses it to plan how many findings to record when defects
+        // exist; a clean audit (0 findings) may still PASS.
+        findings_required_min: findingsRequiredMin(state.depth),
       },
       verdict,
       score: finalScore,
@@ -699,8 +757,18 @@ export function writeAuditReport(
     lines.push("");
   }
 
-  writeFileSync(path, lines.join("\n"), "utf-8");
-  // Lock down file permissions (report may contain SC details / verdict summary)
-  try { chmodSync(path, 0o600); } catch { /* best-effort on non-POSIX */ }
+  // Namespace ownership check — only auditor-owned audit-{task|batch|scope}.md
+  // and L3-owned audit-workflow.md / audit-rollup-*.md may be written from
+  // this tool. Without this guard, a state-prefixed report path could
+  // accidentally cross a namespace boundary.
+  const relative = path.replace(`${cwd}/${ORCHESTRATOR_DIR}/`, "").replaceAll("\\", "/");
+  const owner: "auditor" | "l3" = relative === WORKFLOW_AUDIT || relative.startsWith("audit-rollup-")
+    ? "l3"
+    : "auditor";
+  atomicWriteOrchestratorText(cwd, relative, lines.join("\n"), owner);
   return path;
+}
+
+function sameIdentity(a: AuditIdentity, b: AuditIdentity): boolean {
+  return a.dag_id === b.dag_id && a.scope === b.scope && a.scope_key === b.scope_key && a.depth === b.depth;
 }

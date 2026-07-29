@@ -28,7 +28,7 @@ Parameters:
 
 {{files_to_touch}}
 
-## Report File
+## Report
 
-Write structured findings to `.pi/orchestrator/task-{{task_id}}-findings.json`
-and inline a summary in your response.
+Return structured findings inline in your response. Explore is read-only and
+does not create `.pi/orchestrator/` artifacts.

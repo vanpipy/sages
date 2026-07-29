@@ -158,8 +158,10 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			writePlan(plan);
 			writeTaskReport("P1", "CERTIFIED");
 
-			// init → record one finding → complete
-			await executeOrchestratorAudit({ dag_id: plan.id }, { cwd });
+			// init → record one finding → complete (all in task scope so the
+			// persisted audit_identity stays bound to scope=task/scope_key=P1
+			// per F5 — cross-scope reuse is rejected).
+			await executeOrchestratorAudit({ dag_id: plan.id, task_id: "P1" }, { cwd });
 			await executeOrchestratorAudit(
 				{
 					dag_id: plan.id,
@@ -190,7 +192,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			writePlan(plan);
 			writeTaskReport("P1", "CERTIFIED");
 
-			await executeOrchestratorAudit({ dag_id: plan.id }, { cwd });
+			await executeOrchestratorAudit({ dag_id: plan.id, batch: 1 }, { cwd });
 			await executeOrchestratorAudit(
 				{
 					dag_id: plan.id,
@@ -276,8 +278,12 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 		});
 	});
 
-	describe("C3 — evidence gate: verdict=PASS requires findings + workflowReady", () => {
-		it("downgrades PASS to REVISE when zero findings", async () => {
+	describe("C3 — evidence gate: verdict=PASS requires workflowReady + severity clean", () => {
+		it("allows a clean audit (zero defect findings + workflowReady) to PASS", async () => {
+			// F5/F6 spec: PASS gate is decoupled from finding count. A clean
+			// audit (all tasks CERTIFIED, no defect findings) may PASS — the
+			// `findingsRequiredMin(depth)` value is reported as informational
+			// metadata only and does NOT gate the verdict.
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
@@ -288,15 +294,18 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 				await executeOrchestratorAudit(
 					{
 						dag_id: plan.id,
-						observation: { complete: { verdict: "PASS", score: 100, summary: "fake pass" } },
+						observation: { complete: { verdict: "PASS", score: 100, summary: "clean audit" } },
 					},
 					{ cwd },
 				),
 			);
 
-			// 0 findings cannot earn PASS (fast=1 minimum)
-			expect(r.verdict).toBe("REVISE");
-			expect(r.validation.errors.length).toBeGreaterThan(0);
+			expect(r.verdict).toBe("PASS");
+			expect(r.findings).toEqual([]);
+			// validation.findings_required_min still surfaces the old
+			// informational minimum (LLM uses it to plan how many findings
+			// to record when defects exist) — but does not block PASS.
+			expect(r.validation.findings_required_min).toBe(1);
 		});
 
 		it("downgrades PASS to REVISE when workflowReady=false", async () => {
@@ -323,7 +332,9 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			expect(r.verdict).toBe("REVISE");
 		});
 
-		it("accepts PASS when findings_required_min met and workflowReady=true", async () => {
+		it("accepts PASS with minor findings and workflowReady=true", async () => {
+			// Severity gate: minor findings do NOT downgrade PASS. Critical
+			// → REJECT and major → REVISE are covered by separate tests.
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
