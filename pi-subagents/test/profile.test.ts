@@ -41,7 +41,7 @@ import {
 
 const GLOBAL_KEY = "__piSubagentsProfile";
 
-describe("profile: env flag", () => {
+describe("profile.overheadDisabled: env flag", () => {
 	beforeEach(() => {
 		_resetForTests();
 		delete process.env.SAGES_PI_PROFILE;
@@ -74,7 +74,7 @@ describe("profile: env flag", () => {
 	});
 });
 
-describe("profile: disabled path is zero-allocation and < 1μs / call (SC1)", () => {
+describe("profile.overheadDisabled: disabled path is zero-allocation and < 1μs / call (SC1)", () => {
 	beforeEach(() => {
 		_resetForTests();
 		delete process.env.SAGES_PI_PROFILE;
@@ -109,7 +109,7 @@ describe("profile: disabled path is zero-allocation and < 1μs / call (SC1)", ()
 	});
 });
 
-describe("profile: enabled path (SC2 — counter / observe / snapshot)", () => {
+describe("profile.overheadDisabled: enabled path (SC2 — counter / observe / snapshot)", () => {
 	beforeEach(() => {
 		_resetForTests();
 		process.env.SAGES_PI_PROFILE = "1";
@@ -155,7 +155,7 @@ describe("profile: enabled path (SC2 — counter / observe / snapshot)", () => {
 	});
 });
 
-describe("profile: stderr summary writer (SC2)", () => {
+describe("profile.overheadDisabled: stderr summary writer (SC2)", () => {
 	beforeEach(() => {
 		_resetForTests();
 		process.env.SAGES_PI_PROFILE = "1";
@@ -251,7 +251,7 @@ describe("profile: stderr summary writer (SC2)", () => {
 	});
 });
 
-describe("profile: singleton survives module re-import", () => {
+describe("profile.overheadDisabled: singleton survives module re-import", () => {
 	beforeEach(() => {
 		_resetForTests();
 		process.env.SAGES_PI_PROFILE = "1";
