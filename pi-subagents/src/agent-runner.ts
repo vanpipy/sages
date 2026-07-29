@@ -4,6 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { inc as profileInc, observe as profileObserve } from "./profile.js";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
@@ -569,7 +570,33 @@ export async function runAgent(
     systemPromptOverride: () => systemPrompt,
     appendSystemPromptOverride: () => [],
   });
+  // GC-2026-020 instrumentation: every `runAgent` call does a full
+  // resource reload (the loader is per-agent, not cached). This is
+  // per-design: agents must not share mutable state. We capture the
+  // reload wall time + extension count so SC5 can spot a fan-out
+  // regression (every Explore spawn re-loading every extension).
+  const reloadStart = Date.now();
   await loader.reload();
+  profileObserve("explore_spawn_ms", Date.now() - reloadStart);
+  if (type === "Explore") {
+    // GC-2026-020: Explore is the multiplicative CPU culprit because
+    // it inherits all default extensions (extensions: true) and is
+    // spawned most often. Counting + p50'd separately keeps the
+    // instrumentation distinguishable from developer/auditor reloads.
+    profileInc("explore_spawn_count");
+    // Best-effort count of extensions loaded. DefaultResourceLoader
+    // doesn't expose a public getter, but the discovered set
+    // captured by the override (`discoveredNames`) gives us the
+    // post-filter truth. When loadAll && !hasExcludes we skip the
+    // override entirely — fall back to "unknown" sentinel (0) and
+    // rely on the spawn ms + per-process extension discovery cost.
+    const loadedNames =
+      discoveredNames ??
+      (loadAll && !hasExcludes ? undefined : new Set<string>());
+    if (loadedNames) {
+      profileInc("default_agent_extensions_loaded", loadedNames.size);
+    }
+  }
 
   // Plain entries in `tools:` are expected to be built-in names (extension tools
   // go through `ext:`), so an unknown name there is unambiguously a typo. Previously

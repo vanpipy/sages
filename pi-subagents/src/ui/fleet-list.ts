@@ -13,6 +13,7 @@
 
 import { Editor, isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentManager } from "../agent-manager.js";
+import { inc as profileInc, observe as profileObserve } from "../profile.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal } from "../usage.js";
 import { type AgentActivity, getDisplayName, type Theme } from "./agent-widget.js";
@@ -116,7 +117,17 @@ export class FleetList {
 
   /** Ensure the re-render timer is running (called when an agent spawns). */
   ensureTimer(): void {
-    if (!this.timer) this.timer = setInterval(() => this.update(), TICK_MS);
+    if (!this.timer) {
+      // GC-2026-020 instrumentation: 5 Hz fleet redraw timer. The SC4
+      // instrumented test pins the actual fire rate to 1000/TICK_MS (≈5
+      // fires/s) ±10 %; identical pattern to agent-widget.ts.
+      this.timer = setInterval(() => {
+        const t0 = Date.now();
+        profileInc("tui_fleet_render_fired");
+        this.update();
+        profileObserve("tui_fleet_render_ms", Date.now() - t0);
+      }, TICK_MS);
+    }
   }
 
   /**

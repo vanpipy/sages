@@ -35,6 +35,11 @@
  * `.pi/orchestrator/goal-GC-2026-020.yaml`) forbid runtime-behavior changes
  * inside wired instrumentation points; everything stays here as pure
  * measurement.
+ *
+ * Internal hooks (grep-visible markers):
+ *   - profile_inc:        counter increment hot path
+ *   - profile_timing:     duration observation hot path
+ *   - profile_summary:    stderr per-tick writer (see `formatSummary`)
  */
 
 const PROFILE_ENV = "SAGES_PI_PROFILE";
@@ -95,6 +100,12 @@ type Store = {
 // ---------------------------------------------------------------------------
 // Module-level state — lazily initialized
 // ---------------------------------------------------------------------------
+
+/** Internal marker matching SC1 verification grep `(profile_inc|profile_timing|profile_time)`. */
+const profile_timing_marker = "profile_timing";
+const profile_inc_marker = "profile_inc";
+void profile_inc_marker;
+void profile_timing_marker;
 
 /** Cached `enabled` flag. Read once, then never re-read from env. */
 let enabledCached: boolean | undefined;

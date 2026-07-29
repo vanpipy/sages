@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ScheduledSubagent, ScheduleStoreData } from "./types.js";
+import { inc as profileInc } from "./profile.js";
 
 const LOCK_RETRY_MS = 50;
 const LOCK_MAX_RETRIES = 100;
@@ -25,9 +26,15 @@ function acquireLock(lockPath: string): void {
   for (let i = 0; i < LOCK_MAX_RETRIES; i++) {
     try {
       writeFileSync(lockPath, `${process.pid}`, { flag: "wx" });
+      profileInc("schedule_store_lock_acquired");
       return;
     } catch (e: any) {
       if (e.code === "EEXIST") {
+        // GC-2026-020 instrumentation: count every loop iteration (lock
+        // contention). The cap is LOCK_MAX_RETRIES (100); the
+        // "max_retries_exceeded" counter fires once when the cap trips
+        // so we know retries > 100 happened WITHOUT losing the raw count.
+        profileInc("schedule_store_busy_wait_retries");
         try {
           const pid = parseInt(readFileSync(lockPath, "utf-8"), 10);
           if (pid && !isProcessRunning(pid)) {
@@ -42,6 +49,10 @@ function acquireLock(lockPath: string): void {
       throw e;
     }
   }
+  // GC-2026-020: separate counter for "cap tripped" — distinguishable
+  // from per-iter retries so dashboards can attribute the 5-second
+  // busy-wait to a stalled peer vs. a transient retry storm.
+  profileInc("schedule_store_max_retries_exceeded");
   throw new Error(`Failed to acquire schedule lock: ${lockPath}`);
 }
 

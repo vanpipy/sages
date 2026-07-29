@@ -53,6 +53,7 @@ import {
 } from "./agent-types.js";
 import { type RpcHandle, registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
+import { inc as profileInc, startSummary as profileStartSummary } from "./profile.js";
 import {
 	isModelInScope,
 	readEnabledModels,
@@ -369,6 +370,10 @@ function buildNotificationDetails(
 }
 
 export default function (pi: ExtensionAPI) {
+	// GC-2026-020: when the env flag is on, kick off the 5s stderr
+	// summary writer. startSummary() is a no-op when disabled so this
+	// costs zero in the default path. Refs: goal-GC-2026-020 SC9.
+	profileStartSummary();
 	// ---- Register custom notification renderer ----
 	pi.registerMessageRenderer<NotificationDetails>(
 		"subagent-notification",
@@ -431,13 +436,20 @@ export default function (pi: ExtensionAPI) {
 	);
 
 	/** Reload agents from project/global custom agent dirs and merge with defaults (called on init and each Agent invocation). */
-	const reloadCustomAgents = () => {
+	const reloadCustomAgents = (trigger: "startup" | "prompt_invoke" | "fs_watch" = "prompt_invoke") => {
+		// GC-2026-020: stamp the trigger label BEFORE loadCustomAgents
+		// runs so dashboards can attribute the reload to its call site.
+		// `fs_watch` is reserved for a future file watcher trigger; it is
+		// never auto-incremented by this module's instrumentation code —
+		// the SC6 test pins that the profile subsystem does NOT self-
+		// trigger fs_watch reloads (observers don't become observed).
+		profileInc(`custom_agents_trigger_${trigger}`);
 		const userAgents = loadCustomAgents(process.cwd());
 		registerAgents(userAgents);
 	};
 
 	// Initial load
-	reloadCustomAgents();
+	reloadCustomAgents("startup");
 
 	// ---- Agent activity tracking + widget ----
 	const agentActivity = new Map<string, AgentActivity>();

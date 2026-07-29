@@ -8,6 +8,7 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { AgentManager } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
+import { inc as profileInc, observe as profileObserve } from "../profile.js";
 import type {
 	AgentInvocation,
 	ManagedWorktreeHandoff,
@@ -422,7 +423,15 @@ export class AgentWidget {
 	/** Ensure the widget update timer is running. */
 	ensureTimer() {
 		if (!this.widgetInterval) {
-			this.widgetInterval = setInterval(() => this.update(), 80);
+			// GC-2026-020 instrumentation: 12.5 Hz redraw timer. Verified by
+			// the SC4 instrumented test that the actual fire rate lands
+			// within ±10 % of the design value (80ms).
+			this.widgetInterval = setInterval(() => {
+				const t0 = Date.now();
+				profileInc("tui_widget_render_fired");
+				this.update();
+				profileObserve("tui_widget_render_ms", Date.now() - t0);
+			}, 80);
 		}
 	}
 

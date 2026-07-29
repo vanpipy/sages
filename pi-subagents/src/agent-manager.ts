@@ -40,6 +40,7 @@ import {
 } from "./worktree.js";
 import { resolveType } from "./agent-types.js";
 import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
+import { inc as profileInc } from "./profile.js";
 import type { ManagedWorktreeRequest } from "./worktree-contract.js";
 import {
 	parseManagedWorktreeRequest,
@@ -186,6 +187,24 @@ export class AgentManager {
 		// Cleanup completed agents after 10 minutes (but keep sessions for resume)
 		this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
 		this.cleanupInterval.unref();
+		// GC-2026-020 instrumentation: each AgentManager factory instantiation
+		// is a multiplicative CPU event in the user's "many pi instances"
+		// pattern — pinned so a B/C refactor can reason about fan-out.
+		profileInc("agent_manager_factory_instantiated");
+	}
+
+	/**
+	 * Mark an agent record as finished exactly once across every code path
+	 * (.then / .catch / stop / abortAll / late-failure-catch). The guard
+	 * checks `completedAt` BEFORE assignment so concurrent transitions all
+	 * collapse on the first writer.
+	 */
+	private noteFinishOnce(record: AgentRecord): void {
+		if (record.completedAt) return;
+		// Decrement the live-agents gauge (separate from `finished_total`,
+		// the lifetime completion counter).
+		profileInc("agent_manager_live", -1);
+		profileInc("finished_total", 1);
 	}
 
 	/** Update the max concurrent background agents limit. */
@@ -257,6 +276,11 @@ export class AgentManager {
 			invocation: options.invocation,
 		};
 		this.agents.set(id, record);
+		// GC-2026-020 instrumentation: every spawn path counts once, even when
+		// it ends up in the concurrency queue (the queue still represents a
+		// live agent). Live-agent gauge tracks spawned-not-yet-finished count.
+		profileInc("spawned_total", 1);
+		profileInc("agent_manager_live", 1);
 
 		const args: SpawnArgs = { pi, ctx, type, prompt, options };
 
@@ -794,6 +818,7 @@ export class AgentManager {
 		if (record.status === "queued") {
 			this.queue = this.queue.filter((q) => q.id !== id);
 			record.status = "stopped";
+			this.noteFinishOnce(record);
 			record.completedAt = Date.now();
 			return true;
 		}
@@ -801,6 +826,7 @@ export class AgentManager {
 		if (record.status !== "running") return false;
 		record.abortController?.abort();
 		record.status = "stopped";
+		this.noteFinishOnce(record);
 		record.completedAt = Date.now();
 		return true;
 	}
@@ -893,6 +919,10 @@ export class AgentManager {
 	}
 
 	private cleanup() {
+		// GC-2026-020 instrumentation: cleanup runs once a minute per
+		// AgentManager; in a multi-pi-instance scenario this is fan-out
+		// CPU if the cleanup body itself becomes expensive.
+		profileInc("agent_manager_cleanup_tick");
 		const cutoff = Date.now() - 10 * 60_000;
 		for (const [id, record] of this.agents) {
 			if (record.status === "running" || record.status === "queued") continue;
@@ -930,6 +960,7 @@ export class AgentManager {
 			const record = this.agents.get(queued.id);
 			if (record) {
 				record.status = "stopped";
+				this.noteFinishOnce(record);
 				record.completedAt = Date.now();
 				count++;
 			}
@@ -940,6 +971,7 @@ export class AgentManager {
 			if (record.status === "running") {
 				record.abortController?.abort();
 				record.status = "stopped";
+				this.noteFinishOnce(record);
 				record.completedAt = Date.now();
 				count++;
 			}

@@ -7,6 +7,7 @@ import { basename, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
 import type { AgentConfig, MemoryScope, ThinkingLevel } from "./types.js";
+import { inc as profileInc, observe as profileObserve } from "./profile.js";
 
 /**
  * Scan for custom agent .md files from multiple locations.
@@ -21,6 +22,12 @@ import type { AgentConfig, MemoryScope, ThinkingLevel } from "./types.js";
  * Any name is allowed — names matching defaults (e.g. "Explore") override them.
  */
 export function loadCustomAgents(cwd: string): Map<string, AgentConfig> {
+  // GC-2026-020 instrumentation: this is the single entry point every site
+  // in index.ts (and tests) uses to refresh the runtime registry. The
+  // elapsed ms lands in the SC2 summary's `custom_reload_ms_p50` field so
+  // we can spot a fan-out regression without adding console.log.
+  const reloadStart = Date.now();
+  profileInc("custom_agents_reload");
   const globalDir = join(getAgentDir(), "agents");
   const workspaceProjectDir = join(cwd, ".agents", "agents");
   const projectDir = join(cwd, ".pi", "agents");
@@ -29,6 +36,7 @@ export function loadCustomAgents(cwd: string): Map<string, AgentConfig> {
   loadFromDir(globalDir, agents, "global");            // lowest priority
   loadFromDir(workspaceProjectDir, agents, "project"); // shared workspace
   loadFromDir(projectDir, agents, "project");          // highest priority (overwrites)
+  profileObserve("custom_reload_ms", Date.now() - reloadStart);
   return agents;
 }
 
@@ -44,6 +52,9 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
   }
 
   for (const file of files) {
+    // GC-2026-020: per-file count + duration observation; the SC2 summary
+    // exposes total count and p50 reload ms.
+    profileInc("custom_agents_files_loaded");
     const name = basename(file, ".md");
 
     let content: string;
