@@ -125,18 +125,21 @@ describe("profile-instrumented/schedule-store: lock contention is observable", (
 		});
 
 		const snap = snapshot();
-		// SC3: "raw retry counter" must be at least the number of failed
-		// acquire attempts — bounded above by LOCK_MAX_RETRIES (100) but
-		// observable per-iteration.
-		expect(snap.busy_wait_retries).toBeGreaterThanOrEqual(3);
+		// SC3: "raw retry counter" must be observable per alive-peer
+		// iteration. GC-2026-028 F4: dead-pid recovery does NOT count
+		// (it is not contention). 3 fails with DEAD_PID = 1 dead-pid
+		// recovery (no count) + 2 alive-peer yields (counted) = 2.
+		// Bounded above by LOCK_MAX_RETRIES (100) but observable
+		// per-iteration.
+		expect(snap.busy_wait_retries).toBeGreaterThanOrEqual(2);
 		// The successful acquisition also lands in `lock_acquired` (logged
 		// in profile.ts switch). We don't pin its value externally — the
 		// counter is not on the SC2 summary surface — but the test's
 		// green path proves the wired call site runs at all.
 		// Direct inc round-trip: confirm the counter is observable when
-		// we also add a known increment.
+		// we also add a known increment. 2 (counted yields) + 10 (manual) = 12.
 		inc("schedule_store_busy_wait_retries", 10);
-		expect(snapshot().busy_wait_retries).toBeGreaterThanOrEqual(13);
+		expect(snapshot().busy_wait_retries).toBeGreaterThanOrEqual(12);
 
 		rmSync(dir, { recursive: true, force: true });
 	});

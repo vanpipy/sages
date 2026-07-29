@@ -57,11 +57,13 @@ async function acquireLock(lockPath: string): Promise<void> {
 			return;
 		} catch (e: any) {
 			if (e.code === "EEXIST") {
-				// GC-2026-020 instrumentation: count every loop iteration (lock
-				// contention). The cap is LOCK_MAX_RETRIES (100); the
-				// "max_retries_exceeded" counter fires once when the cap trips
-				// so we know retries > 100 happened WITHOUT losing the raw count.
-				profileInc("schedule_store_busy_wait_retries");
+				// GC-2026-028 F4 fix: the contention counter now increments
+				// ONLY when we are actually about to yield — i.e. a live
+				// peer holds the lock. Stale-lock recovery (dead-pid →
+				// unlink + continue) is NOT contention; counting it here
+				// would inflate dashboards with false events. The
+				// "max_retries_exceeded" counter still fires when the cap
+				// trips so we don't lose visibility into retry-storms.
 				try {
 					const pid = parseInt(readFileSync(lockPath, "utf-8"), 10);
 					if (pid && !isProcessRunning(pid)) {
@@ -71,6 +73,7 @@ async function acquireLock(lockPath: string): Promise<void> {
 				} catch {
 					/* ignore — try again */
 				}
+				profileInc("schedule_store_busy_wait_retries");
 				// GC-2026-021 B-fix: yield the event loop instead of busy-waiting
 				// for LOCK_RETRY_MS. setTimeout lets the event loop process other
 				// I/O (UI timers, IPC) while we wait for the peer to release the
