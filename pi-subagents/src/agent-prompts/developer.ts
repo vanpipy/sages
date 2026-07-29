@@ -7,6 +7,12 @@
  * Removed in GC-2026-014; see DAG-2026-011 Phase A for the migration
  * history.
  *
+ * SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Migrated to
+ * pi-subagents in DAG-2026-011 Phase A P1. Modify upstream canonical
+ * prompt in pi-subagents/src/agent-prompts/developer.ts. (Kept out of
+ * the prompt literal so the LLM never sees the template-marker
+ * comment.)
+ *
  * The prompt carries the production-grade RED/GREEN/REFACTOR discipline,
  * first-action protocol, Conventional Commits / author rules, worktree
  * isolation behavior, and the explicit prohibition on writing Sages
@@ -430,6 +436,4 @@ isolation: "current-workspace"
 \`\`\`
 
 ... is the **current-workspace** mode (opt-in). No worktree is provisioned; you work in the caller's current working tree. The HANDOFF.md protocol still applies as a best-effort, but you do NOT have an isolated branch — your edits land directly on the caller's checked-out branch. Use this mode only for known-safe tasks (single-line edits, meta-file writes, design-doc writes). The orchestrator's dispatcher surfaces the mode in the spawn details; check the \`isolation\` field before assuming worktree semantics. The legacy bare \`isolation: "worktree"\` string literal is no longer accepted — use the explicit object above.
-
-<!-- SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Migrated to pi-subagents in DAG-2026-011 Phase A P1. Modify upstream canonical prompt in pi-subagents/src/agent-prompts/developer.ts. -->
 `;
