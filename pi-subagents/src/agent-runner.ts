@@ -19,6 +19,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getConfig, getMemoryToolNames, getReadOnlyMemoryToolNames, getToolNamesForType } from "./agent-types.js";
+import { BudgetExceededError, BudgetTracker, loadBudgetFromEnv } from "./budget.js";
 import { buildParentContext, extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
@@ -780,11 +781,47 @@ export async function runAgent(
   let softLimitReached = false;
   let aborted = false;
 
+  // GC-2026-022: per-run budget tracker. The four built-in types each
+  // have a tuned default; custom (user-defined) types fall back to the
+  // developer budget. The tracker writes its own handoff on snapshot
+  // / partial / final events; the rich handoff overwrite is the
+  // orchestrator's job (it knows the gc_id, task_id, and any SC state).
+  const agentTypeForBudget: "developer" | "auditor" | "explorer" | "merger" =
+    type === "developer" || type === "auditor" || type === "explorer" || type === "merger"
+      ? type
+      : "developer";
+  const budgetTracker = new BudgetTracker(
+    loadBudgetFromEnv(agentTypeForBudget),
+    undefined, // default path under .pi/orchestrator/handoff/_budget/
+    { agentType: agentTypeForBudget, taskId: options.agentId ?? type, gcId: "_budget" },
+  );
+  let budgetFailure: string | undefined;
+
   let currentMessageText = "";
   const unsubTurns = session.subscribe((event: AgentSessionEvent) => {
     if (event.type === "turn_end") {
       turnCount++;
       options.onTurnEnd?.(turnCount);
+      // GC-2026-022: budget tick. On 80% a partial handoff lands; on
+      // 100% the tracker writes the final handoff and throws
+      // BudgetExceededError. We catch it here and call session.abort()
+      // so pi-mono's prompt loop unwinds cleanly — whether the
+      // subscribe callback's throw propagates up or not, the abort
+      // guarantees the run ends within one turn. The outer
+      // `try { await session.prompt(...) }` also catches and converts
+      // the error into `aborted=true` so the SDK caller sees a clean
+      // exit.
+      try {
+        budgetTracker.tick();
+      } catch (err) {
+        if (err instanceof BudgetExceededError) {
+          aborted = true;
+          budgetFailure = `budget exceeded: ${err.message}`;
+          session.abort();
+        } else {
+          throw err;
+        }
+      }
       if (maxTurns != null) {
         if (!softLimitReached && turnCount >= maxTurns) {
           softLimitReached = true;
@@ -838,6 +875,18 @@ export async function runAgent(
   const startLen = session.messages.length;
   try {
     await session.prompt(effectivePrompt);
+  } catch (err) {
+    // GC-2026-022: a budget-throw from the subscriber means the run
+    // exceeded its hard turn / wall budget. Convert it to a graceful
+    // `aborted=true` exit so the SDK cleans up the session without
+    // re-entering pi-mono's prompt loop. The handoff file the tracker
+    // already wrote is what the orchestrator reads to resume.
+    if (err instanceof BudgetExceededError) {
+      aborted = true;
+      budgetFailure = `budget exceeded: ${err.message}`;
+    } else {
+      throw err;
+    }
   } finally {
     unsubTurns();
     collector.unsubscribe();
@@ -845,7 +894,8 @@ export async function runAgent(
   }
 
   const responseText = collector.getText().trim() || getLastAssistantText(session, startLen);
-  return { responseText, session, aborted, steered: softLimitReached, failure: finalTurnError(session, startLen) };
+  const failure = budgetFailure ?? finalTurnError(session, startLen);
+  return { responseText, session, aborted, steered: softLimitReached, failure };
 }
 
 /**
