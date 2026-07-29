@@ -29,17 +29,12 @@
  *   cover the documented set.
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	_resetForTests,
-	inc,
-	observe,
-	snapshot,
-} from "../../src/profile.js";
 import { DEFAULT_AGENTS } from "../../src/default-agents.js";
+import { _resetForTests, inc, observe, snapshot } from "../../src/profile.js";
 
 describe("profile-instrumented/explore-spawn: Explore config preserves the multiplicative-CPU profile", () => {
 	it("Explore is registered with extensions: true and READ_ONLY tool set", () => {
@@ -61,7 +56,9 @@ describe("profile-instrumented/explore-spawn: Explore config preserves the multi
 		// incomplete.
 		for (const [name, cfg] of DEFAULT_AGENTS) {
 			if (name === "Explore") continue;
-			expect(cfg.extensions, `${name} must not be extensions:true`).not.toBe(true);
+			expect(cfg.extensions, `${name} must not be extensions:true`).not.toBe(
+				true,
+			);
 		}
 	});
 });

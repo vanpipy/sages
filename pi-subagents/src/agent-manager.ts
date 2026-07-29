@@ -16,6 +16,9 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { resolveType } from "./agent-types.js";
+import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
+import { inc as profileInc } from "./profile.js";
 import type {
 	AgentInvocation,
 	AgentRecord,
@@ -38,9 +41,6 @@ import {
 	releaseManagedWorktreeLease,
 	worktreePath,
 } from "./worktree.js";
-import { resolveType } from "./agent-types.js";
-import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
-import { inc as profileInc } from "./profile.js";
 import type { ManagedWorktreeRequest } from "./worktree-contract.js";
 import {
 	parseManagedWorktreeRequest,
@@ -229,22 +229,24 @@ export class AgentManager {
 		prompt: string,
 		options: SpawnOptions,
 	): string {
+		// Resolve the registry name before validating options or creating any
+		// queue/record state. Direct callers (RPC, scheduler, tests) bypass the
+		// Agent tool dispatcher, so the manager boundary must fail synchronously
+		// for unknown or disabled names rather than starting a doomed agent.
+		const canonicalType = resolveType(type);
+		if (!canonicalType) {
+			throw new Error(`Unknown agent type "${type}"`);
+		}
+
 		// Validate before the queue branch — a queued spawn should fail at the
 		// call, not minutes later at drain. Throw (not warn): programmatic callers
 		// can fix and retry; the RPC layer converts throws into error envelopes.
 		assertValidSpawnCwd(options.cwd);
 
 		// Phase A P2 (DAG-2026-011) (updated GC-2026-014): enforce managed-
-		// isolation policy at the spawn boundary. The Agent tool's dispatcher
-		// also runs this check, but spawn() is the safety net for any direct
-		// caller — cross-extension RPC, the scheduler, or tests — that
-		// bypasses the dispatcher. Without this, a developer spawn without
-		// a managed-worktree object would silently run against the host
-		// repo. The `type` is whatever the caller supplied; the registry
-		// resolver (run earlier in the dispatcher) maps any legacy
-		// `software-developer` spelling to "unknown agent type" before it
-		// reaches this path.
-		const canonicalType = resolveType(type) ?? type;
+		// isolation policy at the spawn boundary. The Agent tool dispatcher also
+		// checks this, but spawn() is the safety net for direct callers such as
+		// cross-extension RPC and the scheduler.
 		if (canonicalType === "developer") {
 			const policyError = enforceDeveloperManagedIsolationPolicy(
 				canonicalType,

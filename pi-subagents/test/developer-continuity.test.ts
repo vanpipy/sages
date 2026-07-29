@@ -33,23 +33,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // provisioning the managed worktree. We don't want the LLM child to
 // execute; we just want to assert the spawn wiring.
 vi.mock("../src/agent-runner.js", () => ({
-	runAgent: vi.fn(async (_ctx: any, _type: any, _prompt: any, _options: any) => {
-		// Drive the same completion handshake as the real runner so the
-		// agent transitions through "running" → "completed" cleanly.
-		return {
-			responseText: "stub-result",
-			session: {
-				steer: async () => undefined,
-				dispose: () => undefined,
-				messages: [],
-				subscribe: () => () => undefined,
-				prompt: async () => undefined,
-			},
-			aborted: false,
-			steered: false,
-			failure: undefined,
-		};
-	}),
+	runAgent: vi.fn(
+		async (_ctx: any, _type: any, _prompt: any, _options: any) => {
+			// Drive the same completion handshake as the real runner so the
+			// agent transitions through "running" → "completed" cleanly.
+			return {
+				responseText: "stub-result",
+				session: {
+					steer: async () => undefined,
+					dispose: () => undefined,
+					messages: [],
+					subscribe: () => () => undefined,
+					prompt: async () => undefined,
+				},
+				aborted: false,
+				steered: false,
+				failure: undefined,
+			};
+		},
+	),
 	resumeAgent: vi.fn(async () => ({ text: "stub-resume", failure: undefined })),
 	steerAgent: vi.fn(async () => undefined),
 	getAgentConversation: vi.fn(() => ""),
@@ -66,10 +68,7 @@ vi.mock("../src/agent-runner.js", () => ({
 }));
 
 import { AgentManager } from "../src/agent-manager.js";
-import {
-	registerAgents,
-	setDefaultsDisabled,
-} from "../src/agent-types.js";
+import { registerAgents, setDefaultsDisabled } from "../src/agent-types.js";
 import { makeRepoFixture, type RepoFixture } from "./_fixture.js";
 
 const CANONICAL = "developer";

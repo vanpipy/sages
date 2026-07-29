@@ -33,28 +33,28 @@ import type { ModelEntry } from "./model-resolver.js";
 
 /** Minimal registry shape — only the methods resolveEnabledModels actually calls. */
 export interface ModelRegistryRef {
-  getAll(): unknown[];
-  getAvailable?(): unknown[];
+	getAll(): unknown[];
+	getAvailable?(): unknown[];
 }
 
 /** Paths to pi's settings.json files: [project, global] (project takes precedence). */
 function settingsPaths(cwd: string): [project: string, global: string] {
-  return [
-    join(cwd, ".pi", "settings.json"),
-    join(getAgentDir(), "settings.json"),
-  ];
+	return [
+		join(cwd, ".pi", "settings.json"),
+		join(getAgentDir(), "settings.json"),
+	];
 }
 
 /** Read `enabledModels` from a single settings.json file. Undefined when missing or absent. */
 function readField(path: string): string[] | undefined {
-  if (!existsSync(path)) return undefined;
-  try {
-    const raw = JSON.parse(readFileSync(path, "utf-8"));
-    if (Array.isArray(raw?.enabledModels)) return raw.enabledModels as string[];
-  } catch {
-    /* corrupt file — silent */
-  }
-  return undefined;
+	if (!existsSync(path)) return undefined;
+	try {
+		const raw = JSON.parse(readFileSync(path, "utf-8"));
+		if (Array.isArray(raw?.enabledModels)) return raw.enabledModels as string[];
+	} catch {
+		/* corrupt file — silent */
+	}
+	return undefined;
 }
 
 /**
@@ -64,8 +64,8 @@ function readField(path: string): string[] | undefined {
  * Returns undefined when neither file has the field.
  */
 export function readEnabledModels(cwd: string): string[] | undefined {
-  const [project, global] = settingsPaths(cwd);
-  return readField(project) ?? readField(global);
+	const [project, global] = settingsPaths(cwd);
+	return readField(project) ?? readField(global);
 }
 
 /**
@@ -90,53 +90,52 @@ let cachedPatternsKey = "";
 
 /** mtime+size hash of one file, or "missing" if absent. */
 function hashOf(path: string): string {
-  try {
-    const s = statSync(path);
-    return `${s.mtimeMs}-${s.size}`;
-  } catch {
-    return "missing";
-  }
+	try {
+		const s = statSync(path);
+		return `${s.mtimeMs}-${s.size}`;
+	} catch {
+		return "missing";
+	}
 }
 
 export function resolveEnabledModels(
-  patterns: string[] | undefined,
-  registry: ModelRegistryRef,
-  cwd: string = process.cwd(),
+	patterns: string[] | undefined,
+	registry: ModelRegistryRef,
+	cwd: string = process.cwd(),
 ): Set<string> | undefined {
-  // Fast path: check cache (stat both project and global settings.json files)
-  const patternsKey = JSON.stringify(patterns);
-  const [project, global] = settingsPaths(cwd);
-  const fileHash = `${hashOf(project)};${hashOf(global)}`;
+	// Fast path: check cache (stat both project and global settings.json files)
+	const patternsKey = JSON.stringify(patterns);
+	const [project, global] = settingsPaths(cwd);
+	const fileHash = `${hashOf(project)};${hashOf(global)}`;
 
-  if (fileHash === cachedHash && patternsKey === cachedPatternsKey) {
-    return cachedAllowed;
-  }
+	if (fileHash === cachedHash && patternsKey === cachedPatternsKey) {
+		return cachedAllowed;
+	}
 
-  // Cache miss — resolve
-  if (!patterns || patterns.length === 0) {
-    cachedHash = fileHash;
-    cachedPatternsKey = patternsKey;
-    cachedAllowed = undefined;
-    return undefined;
-  }
+	// Cache miss — resolve
+	if (!patterns || patterns.length === 0) {
+		cachedHash = fileHash;
+		cachedPatternsKey = patternsKey;
+		cachedAllowed = undefined;
+		return undefined;
+	}
 
-  const available = (registry.getAvailable?.() ?? registry.getAll()) as ModelEntry[];
-  const allowed = new Set<string>();
+	const available = (registry.getAvailable?.() ??
+		registry.getAll()) as ModelEntry[];
+	const allowed = new Set<string>();
 
-  for (const pattern of patterns) {
-    const trimmed = pattern.trim();
-    if (!trimmed) continue;  // skip empty/whitespace
-    resolveExact(trimmed, available, allowed);
-  }
+	for (const pattern of patterns) {
+		const trimmed = pattern.trim();
+		if (!trimmed) continue; // skip empty/whitespace
+		resolveExact(trimmed, available, allowed);
+	}
 
-  const result = allowed.size > 0 ? allowed : undefined;
-  cachedHash = fileHash;
-  cachedPatternsKey = patternsKey;
-  cachedAllowed = result;
-  return result;
+	const result = allowed.size > 0 ? allowed : undefined;
+	cachedHash = fileHash;
+	cachedPatternsKey = patternsKey;
+	cachedAllowed = result;
+	return result;
 }
-
-
 
 /**
  * True when `model` is in the allowed set. Centralizes the key format
@@ -144,37 +143,36 @@ export function resolveEnabledModels(
  * both set-building (resolveExact) and lookup go through `modelKey`.
  */
 export function isModelInScope(
-  model: { provider: string; id: string },
-  allowed: Set<string>,
+	model: { provider: string; id: string },
+	allowed: Set<string>,
 ): boolean {
-  return allowed.has(modelKey(model));
+	return allowed.has(modelKey(model));
 }
 
 /** Canonical lowercase `provider/id` key for the allowed set. */
 function modelKey(model: { provider: string; id: string }): string {
-  return `${model.provider}/${model.id}`.toLowerCase();
+	return `${model.provider}/${model.id}`.toLowerCase();
 }
 
 /**
  * Resolve exact model pattern. Example: "google/gemma-4-31b-it".
  */
 function resolveExact(
-  pattern: string,
-  available: ModelEntry[],
-  allowed: Set<string>,
+	pattern: string,
+	available: ModelEntry[],
+	allowed: Set<string>,
 ): void {
-  // "provider/modelId" — exact (colon is part of id, not split)
-  const slashIdx = pattern.indexOf("/");
-  if (slashIdx === -1) return; // bare modelId not supported
+	// "provider/modelId" — exact (colon is part of id, not split)
+	const slashIdx = pattern.indexOf("/");
+	if (slashIdx === -1) return; // bare modelId not supported
 
-  const provider = pattern.slice(0, slashIdx).toLowerCase();
-  const modelId = pattern.slice(slashIdx + 1).toLowerCase();
-  const exact = available.find(
-    m => m.provider.toLowerCase() === provider && m.id.toLowerCase() === modelId,
-  );
-  if (exact) {
-    allowed.add(modelKey(exact));
-  }
+	const provider = pattern.slice(0, slashIdx).toLowerCase();
+	const modelId = pattern.slice(slashIdx + 1).toLowerCase();
+	const exact = available.find(
+		(m) =>
+			m.provider.toLowerCase() === provider && m.id.toLowerCase() === modelId,
+	);
+	if (exact) {
+		allowed.add(modelKey(exact));
+	}
 }
-
-

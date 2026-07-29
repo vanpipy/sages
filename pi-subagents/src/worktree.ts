@@ -396,11 +396,7 @@ function detectCurrentBranch(repoRoot: string): {
 			// `@{u}` is the upstream tracking ref for the current branch. Throws
 			// "no upstream configured" when the branch has no upstream; we
 			// treat that as "no upstream".
-			const u = runGitIn(
-				["rev-parse", "--abbrev-ref", "@{u}"],
-				repoRoot,
-				true,
-			);
+			const u = runGitIn(["rev-parse", "--abbrev-ref", "@{u}"], repoRoot, true);
 			if (u && u !== "@{u}") {
 				upstream = u;
 			}
@@ -1405,17 +1401,24 @@ export function deleteManagedWorktreeByPath(
 		throw err;
 	}
 	// Containment check FIRST — refuse to leak *any* information about a path
-	// outside `.pi/worktree`, including whether it exists on disk. We normalize
-	// both the supplied path and the containment root, then derive the relative
-	// path; `..` or absolute escape routes are an immediate rejection.
+	// outside `.pi/worktree`, including whether it exists on disk. We resolve
+	// both the supplied path (realpath catches symlink escapes) and the
+	// containment root, then derive the relative path; `..` or absolute
+	// escape routes are an immediate rejection.
+	//
+	// GC-2026-028 F1: the previous check combined `relative()` with
+	// `isAbsolute(got.replace(expected, ""))`, which was always true for any
+	// path that started with the containment root (the `replace` leaves a
+	// leading `/`), so legitimate contained paths were rejected. Realpath
+	// alone catches symlink escapes that plain `normalize` would miss.
 	const expected = normalize(join(realRoot, ".pi", "worktree"));
-	const got = normalize(args.path);
+	const got = realpathOrSelf(args.path);
 	const rel = relative(expected, got);
 	if (
 		rel === "" ||
 		rel.startsWith("..") ||
 		rel.startsWith(sep) ||
-		isAbsolute(got.replace(expected, ""))
+		isAbsolute(rel)
 	) {
 		throw new Error(
 			`managed-worktree: path ${args.path} is not contained under ${expected} ` +
@@ -1423,26 +1426,20 @@ export function deleteManagedWorktreeByPath(
 				`requested path escapes the per-repo .pi/worktree containment root).`,
 		);
 	}
-	// Then dereference symlinks for the actual `git worktree remove` call —
-	// ENOENT here is a clean error, containment already passed above.
-	let realPath: string;
-	try {
-		realPath = realpathSync(args.path);
-	} catch (err: any) {
-		if (err?.code === "ENOENT") {
-			throw new Error(`managed-worktree: ${args.path} does not exist on disk`);
-		}
-		throw err;
+	// `got` is already realpath-resolved (with ENOENT fallback). ENOENT here
+	// is a clean error, containment already passed above.
+	if (!existsSync(got)) {
+		throw new Error(`managed-worktree: ${args.path} does not exist on disk`);
 	}
 	// Path-segment under containment root = `<dag>/<worktree>` — recover them
 	// for branch deletion.
-	const segments = realPath.slice(expected.length + 1).split(sep);
+	const segments = got.slice(expected.length + 1).split(sep);
 	const dag = segments[0] ?? "";
 	const worktree = segments[1] ?? "";
 	const branch = branchName(dag, worktree);
 	return deleteManagedWorktreeByPathImpl({
 		repoRoot: realRoot,
-		path: realPath,
+		path: got,
 		branch,
 		deleteBranch: args.deleteBranch,
 	});
@@ -1506,4 +1503,19 @@ function pathSegment(rel: string): string {
 	if (!rel) return "";
 	const parts = rel.split(sep).filter((s) => s.length > 0);
 	return parts.length === 0 ? rel : parts[0];
+}
+
+/**
+ * Resolve `realpath` but fall back to the input when the path does not exist
+ * on disk yet (e.g. caller is probing). We still catch symlink escapes for
+ * paths that DO exist, because the symlink target must exist for `realpath`
+ * to resolve it — that is the containment guarantee we care about.
+ */
+function realpathOrSelf(p: string): string {
+	try {
+		return realpathSync(p);
+	} catch (err: any) {
+		if (err?.code === "ENOENT") return p;
+		throw err;
+	}
 }

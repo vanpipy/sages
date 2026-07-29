@@ -18,22 +18,13 @@
  *     are silently skipped (no-op on existsSync===false).
  */
 
-import {
-	mkdtempSync,
-	mkdirSync,
-	writeFileSync,
-	rmSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	_resetForTests,
-	inc,
-	snapshot,
-} from "../../src/profile.js";
-import { loadCustomAgents } from "../../src/custom-agents.js";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { loadCustomAgents } from "../../src/custom-agents.js";
+import { _resetForTests, inc, snapshot } from "../../src/profile.js";
 
 describe("profile-instrumented/custom-agents: loadCustomAgents", () => {
 	let projectDir: string;

@@ -25,13 +25,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentManager } from "../src/agent-manager.js";
-import { DEFAULT_AGENTS } from "../src/default-agents.js";
 import {
 	getAgentConfig,
 	registerAgents,
 	resolveType,
 	setDefaultsDisabled,
 } from "../src/agent-types.js";
+import { DEFAULT_AGENTS } from "../src/default-agents.js";
 import { makeRepoFixture, type RepoFixture } from "./_fixture.js";
 
 const CANONICAL = "developer";

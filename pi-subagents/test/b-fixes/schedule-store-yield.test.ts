@@ -142,9 +142,11 @@ describe("b-fixes/schedule-store-yield: lock acquisition is async + yields", () 
 		expect(elapsedMs).toBeGreaterThanOrEqual(0);
 
 		const snap = snapshot();
-		// Counter bumped at least 2 times (the stuck-lock attempts) — proves
-		// the contention path executed.
-		expect(snap.busy_wait_retries).toBeGreaterThanOrEqual(2);
+		// Counter bumped at least once — the dead-pid recovery path does
+		// NOT count (GC-2026-028 F4), so a 2-fail withStuckLock exercises
+		// 1 untracked recovery + 1 counted yield. Proves the alive-peer
+		// contention path executed.
+		expect(snap.busy_wait_retries).toBeGreaterThanOrEqual(1);
 		rmSync(dir, { recursive: true, force: true });
 	});
 
@@ -190,7 +192,9 @@ describe("b-fixes/schedule-store-yield: lock acquisition is async + yields", () 
 		});
 
 		inc("schedule_store_busy_wait_retries", 10);
-		expect(snapshot().busy_wait_retries).toBeGreaterThanOrEqual(13);
+		// 3 fails with DEAD_PID: 1 dead-pid recovery (no count) +
+		// 2 alive-peer yields. +10 manual = 12.
+		expect(snapshot().busy_wait_retries).toBeGreaterThanOrEqual(12);
 		rmSync(dir, { recursive: true, force: true });
 	});
 });

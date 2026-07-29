@@ -22,12 +22,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	_resetForTests,
-	inc,
-	observe,
-	snapshot,
-} from "../../src/profile.js";
+import { _resetForTests, inc, observe, snapshot } from "../../src/profile.js";
 
 // Both UI modules pull TUI types that aren't trivial to mock. We stub
 // out the underlying pi-tui import via vi.mock at module load time so

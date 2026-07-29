@@ -15,9 +15,8 @@
  *   2. RPC `spawn` for canonical `developer` without any isolation
  *      returns the same envelope.
  *   3. RPC `spawn` for the legacy `software-developer` alias returns
- *      an "unknown agent type" envelope (GC-2026-014: the alias
- *      resolver was removed — alias names hit the unknown-type
- *      rejection upstream of policy enforcement).
+ *      an "unknown agent type" envelope before manager side effects
+ *      (GC-2026-028 F6 bounds validation).
  *   4. RPC `spawn` for `Explore` without isolation succeeds — the
  *      policy is a no-op for non-developer agents.
  *   5. RPC `spawn` for canonical `developer` with a valid managed-
@@ -31,12 +30,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { registerRpcHandlers } from "../src/cross-extension-rpc.js";
 import { AgentManager } from "../src/agent-manager.js";
-import {
-	registerAgents,
-	setDefaultsDisabled,
-} from "../src/agent-types.js";
+import { registerAgents, setDefaultsDisabled } from "../src/agent-types.js";
+import { registerRpcHandlers } from "../src/cross-extension-rpc.js";
 import { makeRepoFixture, type RepoFixture } from "./_fixture.js";
 
 interface EventBusStub {
@@ -131,16 +127,10 @@ describe("developer-rpc: spawn RPC enforces the policy", () => {
 		expect(reply.error).toMatch(/developer/i);
 	});
 
-	it("spawn RPC accepts the call for the legacy alias (synchronous policy is developer-only); the underlying agent fails asynchronously", async () => {
-		// GC-2026-014: the alias was removed, but the RPC layer does not
-		// perform unknown-name rejection synchronously (that's the Agent
-		// tool dispatcher's job — see `index.ts`). The RPC path delegates
-		// to `manager.spawn`, which no longer rejects the alias (the
-		// policy is now `developer`-only). The unknown-name rejection
-		// surfaces asynchronously through the underlying runAgent error
-		// path. Pin the sync behaviour (manager.spawn returns an id
-		// without throwing) so a future refactor doesn't accidentally
-		// reach back across the dispatcher boundary.
+	it("rejects the removed legacy alias before spawning", async () => {
+		// GC-2026-028 F6: RPC callers are untrusted. Validate their type
+		// against the enabled registry before calling AgentManager.spawn,
+		// rather than creating a record that only fails asynchronously.
 		const requestId = "r3";
 		const reply = await new Promise<any>((resolve) => {
 			bus!.on(`subagents:rpc:spawn:reply:${requestId}`, (raw: any) =>
@@ -153,8 +143,7 @@ describe("developer-rpc: spawn RPC enforces the policy", () => {
 				options: { description: "rpc spawn", isolation: "worktree" },
 			});
 		});
-		expect(reply.success).toBe(true);
-		expect(reply.data).toMatchObject({ id: expect.any(String) });
-		// Subsequent error surfaces asynchronously via get_subagent_result.
+		expect(reply.success).toBe(false);
+		expect(reply.error).toMatch(/unknown agent type/i);
 	});
 });

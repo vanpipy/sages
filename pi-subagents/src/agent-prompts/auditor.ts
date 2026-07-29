@@ -8,6 +8,12 @@
  * accepted. Removed in GC-2026-014; see DAG-2026-011 Phase B for the
  * migration history.
  *
+ * SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Migrated to
+ * pi-subagents in DAG-2026-011 Phase B. Modify upstream canonical
+ * prompt in pi-subagents/src/agent-prompts/auditor.ts. (Kept out of
+ * the prompt literal so the LLM never sees the template-marker
+ * comment.)
+ *
  * The prompt carries the evidence-based audit discipline: default
  * "NEEDS WORK" verdict, re-run every verification command, separate
  * verification from the developer's narrative, structured audit report
@@ -268,6 +274,4 @@ AUDIT: .pi/orchestrator/audit-P5.md
 EVIDENCE: typecheck 0 errors, lint 0 warnings, 14/14 tests pass, SC1-SC5 all PASS
 CONCERNS: UserRepository.findByEmail() not covered by tests (test gap, not a fail)
 \`\`\`
-
-<!-- SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Migrated to pi-subagents in DAG-2026-011 Phase B. Modify upstream canonical prompt in pi-subagents/src/agent-prompts/auditor.ts. -->
 `;

@@ -19,15 +19,11 @@
  */
 
 import * as fs from "node:fs";
-import { dirname, join } from "node:path";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	_resetForTests,
-	inc,
-	snapshot,
-} from "../../src/profile.js";
+import { _resetForTests, inc, snapshot } from "../../src/profile.js";
 import { ScheduleStore } from "../../src/schedule-store.js";
 
 const ORIGINAL_ENV = process.env.SAGES_PI_PROFILE;
@@ -44,37 +40,33 @@ async function withStuckLock<T>(
 	const realWriteFileSync = fs.writeFileSync;
 	wxAttempts = 0;
 	const spy = vi.spyOn(fs, "writeFileSync");
-	spy.mockImplementation((
-		(
-			path: fs.PathLike,
-			data: string | NodeJS.ArrayBufferView,
-			options?: fs.WriteFileOptions,
-		): void => {
-			if (
-				typeof path === "string" &&
-				path === lockPath &&
-				options &&
-				typeof options === "object" &&
-				"flag" in options &&
-				(options as { flag?: string }).flag === "wx"
-			) {
-				wxAttempts++;
-				if (wxAttempts <= failTimes) {
-					const err = new Error(
-						`EEXIST: ${lockPath}`,
-					) as NodeJS.ErrnoException;
-					err.code = "EEXIST";
-					throw err;
-				}
+	spy.mockImplementation(((
+		path: fs.PathLike,
+		data: string | NodeJS.ArrayBufferView,
+		options?: fs.WriteFileOptions,
+	): void => {
+		if (
+			typeof path === "string" &&
+			path === lockPath &&
+			options &&
+			typeof options === "object" &&
+			"flag" in options &&
+			(options as { flag?: string }).flag === "wx"
+		) {
+			wxAttempts++;
+			if (wxAttempts <= failTimes) {
+				const err = new Error(`EEXIST: ${lockPath}`) as NodeJS.ErrnoException;
+				err.code = "EEXIST";
+				throw err;
 			}
-			return realWriteFileSync.call(
-				fs,
-				path as fs.PathLike,
-				data as string | NodeJS.ArrayBufferView,
-				options as fs.WriteFileOptions | undefined,
-			);
 		}
-	) as typeof fs.writeFileSync);
+		return realWriteFileSync.call(
+			fs,
+			path as fs.PathLike,
+			data as string | NodeJS.ArrayBufferView,
+			options as fs.WriteFileOptions | undefined,
+		);
+	}) as typeof fs.writeFileSync);
 
 	try {
 		return await fn();
@@ -125,18 +117,21 @@ describe("profile-instrumented/schedule-store: lock contention is observable", (
 		});
 
 		const snap = snapshot();
-		// SC3: "raw retry counter" must be at least the number of failed
-		// acquire attempts — bounded above by LOCK_MAX_RETRIES (100) but
-		// observable per-iteration.
-		expect(snap.busy_wait_retries).toBeGreaterThanOrEqual(3);
+		// SC3: "raw retry counter" must be observable per alive-peer
+		// iteration. GC-2026-028 F4: dead-pid recovery does NOT count
+		// (it is not contention). 3 fails with DEAD_PID = 1 dead-pid
+		// recovery (no count) + 2 alive-peer yields (counted) = 2.
+		// Bounded above by LOCK_MAX_RETRIES (100) but observable
+		// per-iteration.
+		expect(snap.busy_wait_retries).toBeGreaterThanOrEqual(2);
 		// The successful acquisition also lands in `lock_acquired` (logged
 		// in profile.ts switch). We don't pin its value externally — the
 		// counter is not on the SC2 summary surface — but the test's
 		// green path proves the wired call site runs at all.
 		// Direct inc round-trip: confirm the counter is observable when
-		// we also add a known increment.
+		// we also add a known increment. 2 (counted yields) + 10 (manual) = 12.
 		inc("schedule_store_busy_wait_retries", 10);
-		expect(snapshot().busy_wait_retries).toBeGreaterThanOrEqual(13);
+		expect(snapshot().busy_wait_retries).toBeGreaterThanOrEqual(12);
 
 		rmSync(dir, { recursive: true, force: true });
 	});
