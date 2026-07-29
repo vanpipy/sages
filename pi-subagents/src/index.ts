@@ -1659,7 +1659,9 @@ Terse command-style prompts produce shallow, generic work.
 						);
 					}
 					try {
-						const job = scheduler.addJob({
+						// GC-2026-021 B-fix: addJob is now async; await it so
+						// `job` is the persisted ScheduledSubagent, not a Promise.
+						const job = await scheduler.addJob({
 							name: params.description as string,
 							description: params.description as string,
 							schedule: params.schedule as string,

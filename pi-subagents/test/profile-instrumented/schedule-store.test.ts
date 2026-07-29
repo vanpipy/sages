@@ -111,7 +111,7 @@ describe("profile-instrumented/schedule-store: lock contention is observable", (
 
 		await withStuckLock(filePath, lockPath, 3, async () => {
 			const store = new ScheduleStore(filePath);
-			store.add({
+			await store.addAsync({
 				id: "j1",
 				name: "test",
 				description: "test",
@@ -141,11 +141,11 @@ describe("profile-instrumented/schedule-store: lock contention is observable", (
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("a successful first-try acquisition produces zero retries", () => {
+	it("a successful first-try acquisition produces zero retries", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "pi-profile-sc3-clean-"));
 		const filePath = join(dir, "subagent-schedules", "clean.json");
 		const store = new ScheduleStore(filePath);
-		store.add({
+		await store.addAsync({
 			id: "j2",
 			name: "clean",
 			description: "clean",
