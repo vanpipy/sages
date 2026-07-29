@@ -9,7 +9,22 @@
  *   error   → { success: false, error: string }
  */
 
+import { getAvailableTypes } from "./agent-types.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
+
+const MAX_PROMPT_BYTES = 256 * 1024;
+const RPC_SPAWN_OPTION_KEYS = new Set([
+  "description",
+  "model",
+  "maxTurns",
+  "isolated",
+  "inheritContext",
+  "thinkingLevel",
+  "isBackground",
+  "isolation",
+  "cwd",
+  "managedWorktree",
+]);
 
 /** Minimal event bus interface needed by the RPC handlers. */
 export interface EventBus {
@@ -81,6 +96,33 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
 
   const unsubSpawn = handleRpc<{ requestId: string; type: string; prompt: string; options?: any }>(
     events, "subagents:rpc:spawn", ({ type, prompt, options }) => {
+      const availableTypes = getAvailableTypes();
+      if (typeof type !== "string" || !availableTypes.includes(type)) {
+        throw new Error(
+          `Unknown agent type "${String(type)}". Available types: ${availableTypes.join(", ")}`,
+        );
+      }
+      if (typeof prompt !== "string") {
+        throw new Error("Spawn prompt must be a string");
+      }
+      if (Buffer.byteLength(prompt, "utf8") > MAX_PROMPT_BYTES) {
+        throw new Error("Spawn prompt exceeds the 256 KiB UTF-8 limit");
+      }
+      if (
+        options !== undefined &&
+        options !== null &&
+        (typeof options !== "object" || Array.isArray(options))
+      ) {
+        throw new Error("Spawn options must be an object");
+      }
+      const normalizedInput = (options ?? {}) as Record<string, unknown>;
+      const unknownOption = Object.keys(normalizedInput).find(
+        (key) => !RPC_SPAWN_OPTION_KEYS.has(key),
+      );
+      if (unknownOption) {
+        throw new Error(`Unknown spawn option "${unknownOption}"`);
+      }
+
       const ctx = getCtx();
       if (!ctx) throw new Error("No active session");
 
@@ -90,7 +132,7 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
       // — same pattern the scheduler path already uses — so the spawned
       // agent's auth lookup doesn't crash with "No API key found for
       // undefined".
-      let normalizedOptions = options ?? {};
+      let normalizedOptions: Record<string, unknown> = normalizedInput;
       if (typeof normalizedOptions.model === "string") {
         const registry = (ctx as { modelRegistry?: ModelRegistry }).modelRegistry;
         if (!registry) {
