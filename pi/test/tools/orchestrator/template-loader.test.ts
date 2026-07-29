@@ -41,8 +41,14 @@ describe("template-loader", () => {
       expect(content).toContain("{{acceptance_cmd}}");
       expect(content).toContain("{{workspace_id}}");
       expect(content).toContain("{{upstream_handoffs}}");
+      // GC-2026-028: developer namespace owns
+      //   - task-<task_id>-report.md  (developer-owned per-task report)
+      //   - handoff/<workspace_id>/<task_id>-handoff.md  (developer-owned handoff)
       expect(content).toContain(
-        ".pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md",
+        ".pi/orchestrator/task-{{task_id}}-report.md",
+      );
+      expect(content).toContain(
+        ".pi/orchestrator/handoff/{{workspace_id}}/{{task_id}}-handoff.md",
       );
     });
 

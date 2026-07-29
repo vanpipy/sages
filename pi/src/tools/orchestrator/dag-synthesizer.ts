@@ -20,11 +20,14 @@
  */
 
 import { Type, type Static } from "typebox";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import * as yaml from "js-yaml";
 import type { GoalContract, OrchestrationPlan, TaskNode } from "./types.js";
-import { ORCHESTRATOR_DIR, dagPath, goalContractPath } from "./types.js";
+import {
+  atomicWriteOrchestratorFile,
+  isGoalContractState,
+  isOrchestrationPlanState,
+  loadYamlOrchestratorFile,
+} from "./state-persistence.js";
 import { renderTaskPrompt, validateTemplateParams } from "./template-loader.js";
 
 export const TaskNodeSchema = Type.Object({
@@ -338,10 +341,10 @@ export function planToYaml(plan: OrchestrationPlan): string {
 
 /** Load a goal contract from disk. */
 export function loadGoalContract(cwd: string, goalId: string): GoalContract | null {
-  const path = goalContractPath(cwd, goalId);
-  if (!existsSync(path)) return null;
-  const raw = readFileSync(path, "utf-8");
-  return parseGoalContractYaml(raw);
+  return loadYamlOrchestratorFile(cwd, `goal-${goalId}.yaml`, {
+    owner: "l3",
+    validate: isGoalContractState as unknown as (value: unknown) => value is GoalContract,
+  });
 }
 
 /** Parse a goal contract YAML, with a clean error if malformed. */
@@ -359,14 +362,10 @@ export function parseGoalContractYaml(raw: string): GoalContract {
 
 /** Load a plan from disk. Returns null if file is missing or malformed. */
 export function loadPlan(cwd: string, dagId: string): OrchestrationPlan | null {
-  const path = dagPath(cwd, dagId);
-  if (!existsSync(path)) return null;
-  const raw = readFileSync(path, "utf-8");
-  try {
-    return yaml.load(raw) as OrchestrationPlan;
-  } catch {
-    return null;
-  }
+  return loadYamlOrchestratorFile(cwd, `dag-${dagId}.yaml`, {
+    owner: "l3",
+    validate: isOrchestrationPlanState as unknown as (value: unknown) => value is OrchestrationPlan,
+  });
 }
 
 /**
@@ -408,11 +407,10 @@ export function registerDAGSynthesizerTool(pi: any): void {
 
       // Build plan and write
       const plan = buildPlan(params, contract);
-      const path = dagPath(cwd, plan.id);
-      const dir = join(cwd, ORCHESTRATOR_DIR);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-
-      writeFileSync(path, planToYaml(plan), "utf-8");
+      const path = atomicWriteOrchestratorFile(cwd, `dag-${plan.id}.yaml`, planToYaml(plan), {
+        owner: "l3",
+        validate: isOrchestrationPlanState,
+      });
 
       return {
         content: [{ type: "text", text: JSON.stringify({

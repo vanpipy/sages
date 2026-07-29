@@ -93,8 +93,9 @@ Do not commit ephemeral `.pi/` state.
    object or `"current-workspace"`.
 4. **Never omit `developer` isolation.** Every developer dispatch must choose an
    explicit mode.
-5. **Never let a subagent write `.pi/orchestrator/`.** See
-   `pi/templates/SUBAGENTS.md` § Subagent write prohibition.
+5. **Respect `.pi/orchestrator/` namespace ownership.** Subagents may write
+   only their role-owned task report, handoff, or audit paths; they must not
+   overwrite L3 workflow state.
 6. **Never run destructive git operations** such as path checkout, hard reset,
    clean, or force push. See `pi/templates/SUBAGENTS.md` § Git ops from main
    repo.
@@ -109,6 +110,15 @@ Do not commit ephemeral `.pi/` state.
 11. **Never commit with `--no-verify`.** Repository hooks must run.
 12. **Never claim a tool result that was not returned.** Retry or report the
     failure instead.
+
+## `.pi/orchestrator/` namespace ownership
+
+Subagents may write only their role-owned records: developers write
+`task-{task_id}-report.md` and
+`handoff/{workspace_id}/{task_id}-handoff.md`; auditors write
+`audit-{task_id}.md`. L3 owns `goal-{id}.yaml`, DAG, audit-state, and workflow
+rollup files. Cross-namespace overwrites are prohibited; Explore and Plan stay
+read-only.
 
 ## Deep references
 

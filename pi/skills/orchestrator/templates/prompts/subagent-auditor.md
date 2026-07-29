@@ -45,3 +45,9 @@ Parameters (filled by dag_synthesizer at render time):
 
 {{#if task_report_paths}}{{#each task_report_paths}}- `{{this}}`
 {{/each}}{{else}}`{{task_report_path}}`{{/if}}
+
+## Audit Output
+
+Write the evidence-based verdict to `.pi/orchestrator/audit-{{task_id}}.md`.
+This is the auditor-owned namespace; do not overwrite developer reports,
+handoffs, goal contracts, DAGs, audit state, or workflow rollups.

@@ -42,7 +42,7 @@
  * `pi/test/tools/bash-guard.test.ts`.
  */
 
-import { isAbsolute } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 // SC7 single-source-of-truth: import the path policy + the
 // LLM-facing reason from `file-gate`. `policyMessage` is re-exported
 // for callers that want to surface the meta-file denial verbatim;
@@ -584,6 +584,25 @@ export function shouldBlockBashCommand(
 ): BashGuardDecision {
 	const trimmed = command.trimStart();
 
+	// Fail closed on shell grammar that changes execution topology or performs
+	// hidden evaluation. Safe reads remain available as a single command.
+	if (/\r|\n/.test(trimmed)) {
+		return { block: true, reason: "Multiline bash commands are denied; use one documented safe command per call" };
+	}
+	if (/(^|[^|])\|([^|]|$)/.test(trimmed)) {
+		return { block: true, reason: "Shell pipelines are denied because downstream mutation targets cannot be proven" };
+	}
+	if (/\$\(|`/.test(trimmed)) {
+		return { block: true, reason: "Shell command substitution is denied" };
+	}
+	const initialTokens = shellTokens(trimmed);
+	if (initialTokens[0] === "env" && initialTokens.length > 1) {
+		return { block: true, reason: "env command wrappers are denied; invoke a documented safe command directly" };
+	}
+	if (initialTokens[0] === "find" && initialTokens.includes("-exec")) {
+		return { block: true, reason: "find -exec is denied because the executed command can mutate arbitrary targets" };
+	}
+
 	// 1. Split into top-level chained segments (handles &&, ||, ;
 	//    respecting quotes + paren/brace nesting).
 	const segments = splitChainedCommands(trimmed);
@@ -591,6 +610,7 @@ export function shouldBlockBashCommand(
 	const deniedTargets: string[] = [];
 	const seenDenied = new Set<string>();
 	let sawUnknown = false;
+	let sawWriteWithoutTarget = false;
 
 	for (const seg of segments) {
 		const trimmedSeg = seg.trimStart();
@@ -637,8 +657,13 @@ export function shouldBlockBashCommand(
 
 		// Write-intent segment — check its extracted targets.
 		if (classification === "write-intent") {
-			for (const t of extractBashTargets(seg)) {
-				if (isProductionTarget(t) && !seenDenied.has(t)) {
+			const targets = extractBashTargets(seg);
+			if (targets.length === 0) {
+				sawWriteWithoutTarget = true;
+				continue;
+			}
+			for (const t of targets) {
+				if (isProductionTarget(t, _ctx.cwd) && !seenDenied.has(t)) {
 					seenDenied.add(t);
 					deniedTargets.push(t);
 				}
@@ -655,7 +680,7 @@ export function shouldBlockBashCommand(
 			continue;
 		}
 		for (const t of segTargets) {
-			if (isProductionTarget(t) && !seenDenied.has(t)) {
+			if (isProductionTarget(t, _ctx.cwd) && !seenDenied.has(t)) {
 				seenDenied.add(t);
 				deniedTargets.push(t);
 			}
@@ -667,7 +692,15 @@ export function shouldBlockBashCommand(
 		return { block: true, reason: formatBlockReason(deniedTargets) };
 	}
 
-	// 3. Any unknown-no-target segment → block (no escape hatch; main agent must dispatch a subagent or rephrase).
+	// 3. Write-intent without a proven target is never safe.
+	if (sawWriteWithoutTarget) {
+		return {
+			block: true,
+			reason: "Write-intent bash command has no verifiable target; dispatch a developer subagent",
+		};
+	}
+
+	// 4. Any unknown-no-target segment → block (no escape hatch; main agent must dispatch a subagent or rephrase).
 	if (sawUnknown) {
 		return {
 			block: true,
@@ -788,13 +821,21 @@ export function splitChainedCommands(command: string): string[] {
  * project and therefore NOT production targets — OS-level guards
  * apply separately. Relative paths are evaluated by `canMainAgentWrite`.
  */
-function isProductionTarget(target: string): boolean {
+function isProductionTarget(target: string, cwd: string): boolean {
 	if (!target) return false;
-	if (isAbsolute(target)) return false;
+	let policyTarget = target;
+	if (isAbsolute(target)) {
+		const root = resolve(cwd);
+		const absolute = resolve(target);
+		const fromRoot = relative(root, absolute).replaceAll("\\", "/");
+		if (fromRoot === "" || fromRoot === ".") return true;
+		if (fromRoot === ".." || fromRoot.startsWith("../") || isAbsolute(fromRoot)) return false;
+		policyTarget = fromRoot;
+	}
 	// `canMainAgentWrite` historically allows all Sages package files. L4 is
 	// intentionally narrower: runtime source and tests still require developer.
-	if (/^pi\/(?:src|test)\//.test(target)) return true;
-	return !canMainAgentWrite(target) && !canMainAgentWriteMeta(target);
+	if (/^pi\/(?:src|test)\//.test(policyTarget)) return true;
+	return !canMainAgentWrite(policyTarget) && !canMainAgentWriteMeta(policyTarget);
 }
 
 /**

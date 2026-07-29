@@ -20,11 +20,9 @@
  */
 
 import { Type, type Static } from "typebox";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import * as yaml from "js-yaml";
 import type { GoalContract, SuccessCriterion } from "./types.js";
-import { ORCHESTRATOR_DIR, goalContractPath } from "./types.js";
+import { atomicWriteOrchestratorFile, isGoalContractState } from "./state-persistence.js";
 
 /** Tool input schema. */
 export const GoalContractParams = Type.Object({
@@ -238,13 +236,12 @@ export function registerGoalContractTool(pi: any): void {
 
       // Build and write
       const contract = buildGoalContract(params);
-      const path = goalContractPath(cwd, contract.id);
-
-      // Ensure dir exists (restricted perms — contains acceptance criteria)
-      const dir = join(cwd, ORCHESTRATOR_DIR);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-
-      writeFileSync(path, yaml.dump(contract, { indent: 2, lineWidth: 120, noRefs: true }), "utf-8");
+      const path = atomicWriteOrchestratorFile(
+        cwd,
+        `goal-${contract.id}.yaml`,
+        yaml.dump(contract, { indent: 2, lineWidth: 120, noRefs: true }),
+        { owner: "l3", validate: isGoalContractState },
+      );
 
       return {
         content: [{ type: "text", text: JSON.stringify({

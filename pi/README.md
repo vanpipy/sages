@@ -96,6 +96,14 @@ bash test/install.test.sh       # all pass
 All three must pass before committing. Use `@/...` in `pi/test/`,
 relative paths in `pi/src/`.
 
+## `.pi/orchestrator/` namespace ownership
+
+Developers own `task-{task_id}-report.md` and
+`handoff/{workspace_id}/{task_id}-handoff.md`; auditors own
+`audit-{task_id}.md`; L3 owns `goal-{id}.yaml`, DAG, audit-state, and workflow
+rollup files. Cross-namespace overwrites are rejected, and Explore/Plan remain
+read-only.
+
 ## Security
 
 - **No direct `node:fs`** in production code — use `FileService`.

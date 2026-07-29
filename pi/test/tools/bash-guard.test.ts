@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { join } from "node:path";
 import {
 	classifyBashCommand,
 	extractBashTargets,
@@ -17,6 +18,48 @@ import {
 import { canMainAgentWriteMeta } from "@/tools/file-gate.js";
 
 const CTX = { cwd: "/tmp/sages-project" };
+
+describe("GC-2026-028 fail-closed shell syntax", () => {
+	(it as any).each([
+		["newline", "cat README.md\necho bypass"],
+		["pipe", "cat README.md | tee src/bypass.ts"],
+		["command substitution", "echo $(touch src/bypass.ts)"],
+		["backtick substitution", "echo `touch src/bypass.ts`"],
+		["environment wrapper", "env X=1 sed -i 's/a/b/' src/bypass.ts"],
+		["find -exec", "find . -name '*.ts' -exec touch {} +"],
+	] as const)("blocks %s syntax", (_label: string, command: string) => {
+		expect(shouldBlockBashCommand(command, CTX).block).toBe(true);
+	});
+
+	(it as any).each([
+		"chmod 600",
+		"tee",
+		"mkdir -p",
+		"sed -i 's/a/b/'",
+	] as const)("blocks write-intent with no extracted target: %s", (command: string) => {
+		expect(shouldBlockBashCommand(command, CTX).block).toBe(true);
+	});
+
+	it("resolves absolute targets under cwd and blocks in-repository writes", () => {
+		const target = join(CTX.cwd, "src/absolute-bypass.ts");
+		const result = shouldBlockBashCommand(`echo x > ${target}`, CTX);
+		expect(result.block).toBe(true);
+		expect(result.reason).toContain(target);
+	});
+
+	it("preserves documented single-command safe reads and out-of-repo temporary redirects", () => {
+		for (const command of [
+			"cat README.md",
+			"ls -la",
+			"grep TODO README.md",
+			"git status",
+			"bun test",
+			"echo x > /tmp/sages-safe-output",
+		]) {
+			expect(shouldBlockBashCommand(command, CTX)).toEqual({ block: false });
+		}
+	});
+});
 
 describe("shouldBlockBashCommand — 15 design cases", () => {
 	it("T1: rm src/auth/service.ts → block:true (target denied)", () => {
@@ -431,10 +474,10 @@ describe("GC-2026-015 four-layer bash guard", () => {
 		expect(result.reason).toContain("destructive:");
 	});
 	const l3Allow = [
-		"cat > .pi/orchestrator/audit-P1.md <<EOF\ntext\nEOF", "sed -i 's/foo/bar/' pi/templates/SYSTEM.md",
-		"tee AGENTS.md < /dev/null", "cat > README.md <<EOF\ntext\nEOF", "cat > pi/README.md <<EOF\ntext\nEOF",
-		"sed -i 's/x/y/' .gitignore", "cat > .aft.jsonc <<EOF\n{}\nEOF", "cat > .claude/settings.json <<EOF\n{}\nEOF",
-		"cat > pi/skills/orchestrator/SKILL.md <<EOF\ntext\nEOF", "cat > pi/scripts/install.sh <<EOF\ntext\nEOF",
+		"echo text > .pi/orchestrator/audit-P1.md", "sed -i 's/foo/bar/' pi/templates/SYSTEM.md",
+		"tee AGENTS.md < /dev/null", "echo text > README.md", "echo text > pi/README.md",
+		"sed -i 's/x/y/' .gitignore", "echo '{}' > .aft.jsonc", "echo '{}' > .claude/settings.json",
+		"echo text > pi/skills/orchestrator/SKILL.md", "echo text > pi/scripts/install.sh",
 		"mkdir -p .pi/orchestrator/new-dir", "echo 'foo' > pi/templates/new-file.md",
 	];
 	for (const [index, command] of l3Allow.entries()) it(`T-L3-${String(index + 1).padStart(2, "0")} L3 meta-file allows ${command}`, () => {
@@ -566,13 +609,10 @@ describe("GC-2026-015 follow-up — chain-parser correctness", () => {
 		expect(t).toEqual(["pi/src/test.ts"]);
 	});
 
-	it("T-CP-01b: shouldBlockBashCommand(`rm pi/src/test.ts 2>&1 | head -5`) → DENY (destructive short-circuit)", () => {
-		// End-to-end: the destructive short-circuit must block this
-		// command (the chain parser splits segments, but the rm
-		// segment fires destructive before extractBashTargets runs).
+	it("T-CP-01b: shouldBlockBashCommand(`rm pi/src/test.ts 2>&1 | head -5`) → DENY (pipeline fails closed)", () => {
 		const r = shouldBlockBashCommand("rm pi/src/test.ts 2>&1 | head -5", CTX);
 		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.reason).toContain("pipelines are denied");
 	});
 
 	it("T-CP-02: extractBashTargets(`mv src/foo.ts src/bar.ts && echo done`) → [src/foo.ts, src/bar.ts]", () => {
@@ -588,12 +628,12 @@ describe("GC-2026-015 follow-up — chain-parser correctness", () => {
 		expect(t).toEqual([".pi/orchestrator/test.md"]);
 	});
 
-	it("T-CP-03b: shouldBlockBashCommand(...) ALLOW (L3 redirect still allowed)", () => {
+	it("T-CP-03b: shouldBlockBashCommand(...) DENY (newline syntax fails closed)", () => {
 		const r = shouldBlockBashCommand(
 			"cat > .pi/orchestrator/test.md <<EOF\nfoo\nEOF",
 			CTX,
 		);
-		expect(r.block).toBe(false);
+		expect(r.block).toBe(true);
 	});
 
 	it("T-CP-04: extractBashTargets(`sed -i 's/foo/bar/' pi/src/index.ts`) → [pi/src/index.ts] only", () => {

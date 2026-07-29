@@ -23,12 +23,13 @@
  */
 
 import { Type, type Static } from "typebox";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as yaml from "js-yaml";
 import type { OrchestrationPlan, TaskNode } from "./types.js";
 import { ORCHESTRATOR_DIR, dagPath } from "./types.js";
 import { loadPlan } from "./dag-synthesizer.js";
+import { atomicWriteOrchestratorFile, isOrchestrationPlanState } from "./state-persistence.js";
 
 export const TaskDispatchParams = Type.Object({
   dag_id: Type.String({ description: "DAG id like 'DAG-2025-001'" }),
@@ -39,7 +40,15 @@ export const TaskDispatchParams = Type.Object({
   ], { description: "How aggressively to dispatch" }),
   /** Optional override: max parallel agents per batch (defaults to 4) */
   max_concurrent: Type.Optional(Type.Number({ minimum: 1, maximum: 16 })),
-  /** Optional: force a re-dispatch even if plan already in executing state */
+  /** Optional lifecycle observation. This records Agent results; it never spawns. */
+  transition: Type.Optional(Type.Object({
+    task_id: Type.String({ minLength: 1 }),
+    status: Type.Union([Type.Literal("in_progress"), Type.Literal("completed"), Type.Literal("failed")]),
+    agent_id: Type.Optional(Type.String({ minLength: 1 })),
+    result: Type.Optional(Type.String()),
+    error: Type.Optional(Type.String()),
+  })),
+  /** Reset all task lifecycle fields before returning a fresh planner output. */
   force: Type.Optional(Type.Boolean()),
 });
 
@@ -291,59 +300,146 @@ export function registerTaskDispatcherTool(pi: any): void {
     parameters: TaskDispatchParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      const cwd: string = ctx.cwd;
-
-      // Load DAG
-      const plan = loadPlan(cwd, params.dag_id);
-      if (!plan) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            intent: `DAG ${params.dag_id} not found. Run dag_synthesize first.`,
-            validation: { errors: [`no DAG at ${dagPath(cwd, params.dag_id)}`] },
-          }) }],
-        };
-      }
-
-      // State guard: refuse to dispatch a completed/failed plan unless --force
-      if ((plan.state === "completed" || plan.state === "failed") && !params.force) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            intent: `DAG ${plan.id} is in terminal state '${plan.state}'. Pass force:true to re-dispatch (will reset task statuses).`,
-            validation: { errors: [`terminal state ${plan.state}`] },
-          }) }],
-        };
-      }
-
-      // Update plan state to executing
-      plan.state = "executing";
-      plan.updated_at = new Date().toISOString();
-
-      // Build dispatch plan
-      const dispatch = buildDispatchPlan(plan, params.strategy, params.max_concurrent ?? 4);
-
-      // Persist updated plan (unified YAML format — same as planToYaml)
-      const planPath = dagPath(cwd, plan.id);
-      writeFileSync(planPath, yaml.dump(plan, { indent: 2, lineWidth: 120, noRefs: true }), "utf-8");
-
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          status: "in_progress",
-          intent: "Dispatch plan ready. Execute each batch's Agent tool calls as described. After each batch, run orchestrator_audit before continuing.",
-          validation: {
-            errors: [],
-            warnings: dispatch.batches.some(b => !b.parallel_safe)
-              ? ["some batches exceed max_concurrent; tasks within will serialize"]
-              : [],
-            files_required: [planPath],
-          },
-          dispatch,
-          plan_state: plan.state,
-          next_step: `For batch 1: call Agent tool ${dispatch.batches[0]?.tasks.length ?? 0} times in one turn (parallel background), then orchestrator_audit({ dag_id: "${plan.id}", batch: 1 }).`,
-        }) }],
-        details: { dispatch, plan_path: planPath },
-      };
+      return executeTaskDispatch(params, { cwd: ctx.cwd });
     },
   });
+}
+
+function errorResponse(intent: string, errors: string[]): any {
+  return { content: [{ type: "text", text: JSON.stringify({ status: "error", intent, validation: { errors } }) }] };
+}
+
+function savePlan(cwd: string, plan: OrchestrationPlan): string {
+  return atomicWriteOrchestratorFile(
+    cwd,
+    `dag-${plan.id}.yaml`,
+    yaml.dump(plan, { indent: 2, lineWidth: 120, noRefs: true }),
+    { owner: "l3", validate: isOrchestrationPlanState },
+  );
+}
+
+function resetTask(task: TaskNode): void {
+  task.status = "pending";
+  task.retry_count = 0;
+  delete task.agent_id;
+  delete task.result;
+  delete task.output;
+  delete task.output_path;
+  delete task.error;
+  delete task.started_at;
+  delete task.completed_at;
+  delete task.failed_at;
+}
+
+function transitionTask(plan: OrchestrationPlan, transition: any): { task?: TaskNode; error?: string } {
+  const task = plan.tasks.find((candidate) => candidate.id === transition.task_id);
+  if (!task) return { error: `task '${transition.task_id}' not found` };
+  const next = transition.status as TaskNode["status"];
+  if (task.status === next) return { error: `duplicate transition: task '${task.id}' is already ${next}` };
+  const now = new Date().toISOString();
+
+  if (next === "in_progress") {
+    if (task.status !== "pending") return { error: `invalid transition ${task.status} -> in_progress for task '${task.id}'` };
+    if (!transition.agent_id?.trim()) return { error: `in_progress transition for task '${task.id}' requires agent_id` };
+    task.status = "in_progress";
+    task.agent_id = transition.agent_id;
+    task.started_at = now;
+    delete task.completed_at;
+    delete task.failed_at;
+    delete task.error;
+  } else if (next === "completed") {
+    if (task.status !== "in_progress") return { error: `invalid transition ${task.status} -> completed for task '${task.id}'` };
+    if (typeof transition.result !== "string" || !transition.result.trim()) return { error: `completed transition for task '${task.id}' requires result` };
+    task.status = "completed";
+    task.result = transition.result;
+    task.output = transition.result;
+    task.completed_at = now;
+    delete task.error;
+    delete task.failed_at;
+  } else if (next === "failed") {
+    if (task.status !== "in_progress") return { error: `invalid transition ${task.status} -> failed for task '${task.id}'` };
+    if (typeof transition.error !== "string" || !transition.error.trim()) return { error: `failed transition for task '${task.id}' requires error` };
+    task.status = "failed";
+    task.error = transition.error;
+    task.failed_at = now;
+    task.completed_at = now;
+    task.retry_count += 1;
+  } else {
+    return { error: `unsupported task status '${next}'` };
+  }
+
+  if (plan.tasks.every((candidate) => candidate.status === "completed" || candidate.status === "skipped")) {
+    plan.state = "completed";
+  } else if (plan.tasks.some((candidate) => candidate.status === "failed")) {
+    plan.state = "failed";
+  } else {
+    plan.state = "executing";
+  }
+  plan.updated_at = now;
+  return { task };
+}
+
+/**
+ * Execute Stage 3 planning or record an externally observed Agent transition.
+ * No code path invokes Agent: callers execute the returned plan themselves.
+ */
+export async function executeTaskDispatch(params: TaskDispatchInput, ctx: { cwd: string }): Promise<any> {
+  const cwd = ctx.cwd;
+  let plan: OrchestrationPlan | null;
+  try {
+    plan = loadPlan(cwd, params.dag_id);
+  } catch (error) {
+    return errorResponse(`DAG ${params.dag_id} is malformed or unsafe.`, [error instanceof Error ? error.message : String(error)]);
+  }
+  if (!plan) {
+    return errorResponse(`DAG ${params.dag_id} not found. Run dag_synthesize first.`, [`no DAG at ${dagPath(cwd, params.dag_id)}`]);
+  }
+
+  if (params.transition) {
+    const transitioned = transitionTask(plan, params.transition);
+    if (transitioned.error) return errorResponse("Task lifecycle transition rejected.", [transitioned.error]);
+    const planPath = savePlan(cwd, plan);
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: plan.state === "failed" ? "failed" : plan.state === "completed" ? "complete" : "in_progress",
+        intent: `Recorded task ${transitioned.task!.id} transition to ${transitioned.task!.status}.`,
+        validation: { errors: [], files_required: [planPath] },
+        task: transitioned.task,
+        plan_state: plan.state,
+      }) }],
+      details: { task: transitioned.task, plan_path: planPath },
+    };
+  }
+
+  if (params.force) {
+    for (const task of plan.tasks) resetTask(task);
+    plan.state = "approved";
+  } else if (plan.state === "executing") {
+    return errorResponse(`DAG ${plan.id} already has an active dispatch plan.`, ["duplicate dispatch rejected; use force:true for a real reset"]);
+  } else if (plan.state === "completed" || plan.state === "failed") {
+    return errorResponse(
+      `DAG ${plan.id} is in terminal state '${plan.state}'. Pass force:true to reset all task lifecycle state.`,
+      [`terminal state ${plan.state}`],
+    );
+  }
+
+  plan.state = "executing";
+  plan.updated_at = new Date().toISOString();
+  const dispatch = buildDispatchPlan(plan, params.strategy, params.max_concurrent ?? 4);
+  const planPath = savePlan(cwd, plan);
+  return {
+    content: [{ type: "text", text: JSON.stringify({
+      status: "in_progress",
+      intent: "Dispatch plan ready. Execute each batch's Agent tool calls as described; task_dispatch does not spawn.",
+      validation: {
+        errors: [],
+        warnings: dispatch.batches.some((batch) => !batch.parallel_safe) ? ["some batches exceed max_concurrent; tasks within will serialize"] : [],
+        files_required: [planPath],
+      },
+      dispatch,
+      plan_state: plan.state,
+      next_step: `For batch 1: call Agent tool ${dispatch.batches[0]?.tasks.length ?? 0} times, then record each lifecycle transition with task_dispatch.`,
+    }) }],
+    details: { dispatch, plan_path: planPath },
+  };
 }

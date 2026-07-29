@@ -494,6 +494,14 @@ After Stage 4 completes with PASS, deliver:
 - Tag/release?
 ```
 
+## `.pi/orchestrator/` namespace ownership
+
+Developers may write only `task-{task_id}-report.md` and
+`handoff/{workspace_id}/{task_id}-handoff.md`; auditors may write only
+`audit-{task_id}.md`. L3 owns `goal-{id}.yaml`, DAG, audit-state, and workflow
+rollup files. Cross-namespace overwrites are prohibited; Explore and Plan stay
+read-only.
+
 ## Examples
 
 For full end-to-end examples (multi-file refactor, new feature, etc.) see the DAG templates under `~/.pi/packages/sages/skills/orchestrator/templates/dag/` (`dag-tdd-refactor.yaml`, `dag-bug-fix.yaml`). They are the canonical reference and are regression-guarded against drift by `pi/test/tools/orchestrator/template-loader.test.ts`.

@@ -572,6 +572,16 @@ deprecated tool names.
 
 ---
 
+## `.pi/orchestrator/` Namespace Ownership
+
+Developers may write only `task-{task_id}-report.md` and
+`handoff/{workspace_id}/{task_id}-handoff.md`; auditors may write only
+`audit-{task_id}.md`. L3 owns `goal-{id}.yaml`, DAG, audit-state, and workflow
+rollup state. Cross-namespace overwrites are prohibited; Explore and Plan are
+read-only.
+
+---
+
 ## Workflow References (on-demand)
 
 - **Multi-task orchestrator**: `pi/skills/orchestrator/SKILL.md`

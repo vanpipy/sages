@@ -104,6 +104,7 @@ describe("orchestrator-audit", () => {
 			findings: [] as OrchestratorFinding[],
 			score: 100,
 			depth: "fast" as const,
+			identity: { dag_id: "DAG-test", scope: "workflow" as const, scope_key: "workflow", depth: "fast" as const },
 			status: "init" as const,
 			created_at: "2025-01-01T00:00:00Z",
 			updated_at: "2025-01-01T00:00:00Z",

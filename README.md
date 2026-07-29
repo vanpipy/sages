@@ -55,6 +55,14 @@ contracts live in `pi/skills/orchestrator/templates/goals/` and are installed to
   (installed to `~/.pi/agent/SUBAGENTS.md`)
 - **Workflow skill:** [`pi/skills/orchestrator/SKILL.md`](pi/skills/orchestrator/SKILL.md)
 
+## `.pi/orchestrator/` namespace ownership
+
+Developers may write `task-{task_id}-report.md` and
+`handoff/{workspace_id}/{task_id}-handoff.md`; auditors may write
+`audit-{task_id}.md`. L3 alone owns `goal-{id}.yaml`, DAG, audit-state, and
+workflow rollup files. Cross-namespace overwrites are prohibited; Explore and
+Plan remain read-only.
+
 ## Security and license
 
 The main agent delegates production changes through managed worktrees rather
