@@ -368,13 +368,12 @@ export class SubagentScheduler {
 		const record = manager.getRecord(agentId);
 		const finalize = async (status: "success" | "error") => {
 			const next = this.getNextRun(id);
-			const current = store.get(id);
 			await store.update(id, {
 				lastRun: new Date().toISOString(),
 				lastStatus: status,
-				runCount: (current?.runCount ?? 0) + 1,
 				nextRun: next,
 			});
+			await store.incrementRunCount(id);
 		};
 
 		// AgentManager's promise resolves either way (its .catch returns ""), so we

@@ -235,6 +235,23 @@ export class ScheduleStore {
 		});
 	}
 
+	/** Atomically increment a job's run count under the store lock. */
+	incrementRunCount(
+		id: string,
+	): Promise<ScheduledSubagent | undefined> {
+		if (!this.jobs.has(id)) return Promise.resolve(undefined);
+		return this.withLock(() => {
+			const existing = this.jobs.get(id);
+			if (!existing) return undefined;
+			const updated = {
+				...existing,
+				runCount: existing.runCount + 1,
+			};
+			this.jobs.set(id, updated);
+			return updated;
+		});
+	}
+
 	/** GC-2026-021 B-fix: `updateAsync` is now an alias for `update`. */
 	updateAsync(
 		id: string,
