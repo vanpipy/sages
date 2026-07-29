@@ -396,11 +396,7 @@ function detectCurrentBranch(repoRoot: string): {
 			// `@{u}` is the upstream tracking ref for the current branch. Throws
 			// "no upstream configured" when the branch has no upstream; we
 			// treat that as "no upstream".
-			const u = runGitIn(
-				["rev-parse", "--abbrev-ref", "@{u}"],
-				repoRoot,
-				true,
-			);
+			const u = runGitIn(["rev-parse", "--abbrev-ref", "@{u}"], repoRoot, true);
 			if (u && u !== "@{u}") {
 				upstream = u;
 			}

@@ -28,11 +28,8 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { registerAgents, setDefaultsDisabled } from "../src/agent-types.js";
 import { SubagentScheduler } from "../src/schedule.js";
-import {
-	registerAgents,
-	setDefaultsDisabled,
-} from "../src/agent-types.js";
 
 const CANONICAL = "developer";
 

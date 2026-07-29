@@ -53,7 +53,6 @@ import {
 } from "./agent-types.js";
 import { type RpcHandle, registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
-import { inc as profileInc, startSummary as profileStartSummary } from "./profile.js";
 import {
 	isModelInScope,
 	readEnabledModels,
@@ -72,6 +71,10 @@ import {
 	streamToOutputFile,
 	writeInitialEntry,
 } from "./output-file.js";
+import {
+	inc as profileInc,
+	startSummary as profileStartSummary,
+} from "./profile.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import {
@@ -436,7 +439,9 @@ export default function (pi: ExtensionAPI) {
 	);
 
 	/** Reload agents from project/global custom agent dirs and merge with defaults (called on init and each Agent invocation). */
-	const reloadCustomAgents = (trigger: "startup" | "prompt_invoke" | "fs_watch" = "prompt_invoke") => {
+	const reloadCustomAgents = (
+		trigger: "startup" | "prompt_invoke" | "fs_watch" = "prompt_invoke",
+	) => {
 		// GC-2026-020: stamp the trigger label BEFORE loadCustomAgents
 		// runs so dashboards can attribute the reload to its call site.
 		// `fs_watch` is reserved for a future file watcher trigger; it is

@@ -6,7 +6,8 @@ describe("explore-prompt: invariants", () => {
 		expect(typeof EXPLORE_PROMPT).toBe("string");
 		expect(EXPLORE_PROMPT.length).toBeGreaterThan(200);
 	});
-	it("declares read-only intent", () => expect(EXPLORE_PROMPT).toMatch(/READ-ONLY/i));
+	it("declares read-only intent", () =>
+		expect(EXPLORE_PROMPT).toMatch(/READ-ONLY/i));
 	it("forbids representative file modifications", () => {
 		expect(EXPLORE_PROMPT).toContain("Creating new files");
 		expect(EXPLORE_PROMPT).toContain("Modifying existing files");
@@ -21,12 +22,16 @@ describe("explore-prompt: invariants", () => {
 		expect(EXPLORE_PROMPT).toMatch(/Concept \/ pattern search/i);
 	});
 	it("warns against using bash find/cat/grep (use AFT/MCP instead)", () => {
-		expect(EXPLORE_PROMPT).toContain("NOT for `find`/`cat`/`grep` (use AFT/MCP equivalents above)");
+		expect(EXPLORE_PROMPT).toContain(
+			"NOT for `find`/`cat`/`grep` (use AFT/MCP equivalents above)",
+		);
 	});
 	it("instructs use of ctx_search for past work", () => {
 		expect(EXPLORE_PROMPT).toContain("ctx_search");
 		expect(EXPLORE_PROMPT).toMatch(/Past work \/ memory/i);
 	});
-	it("requires absolute file paths", () => expect(EXPLORE_PROMPT).toMatch(/absolute file paths/i));
-	it("forbids emojis", () => expect(EXPLORE_PROMPT).toContain("Do not use emojis"));
+	it("requires absolute file paths", () =>
+		expect(EXPLORE_PROMPT).toMatch(/absolute file paths/i));
+	it("forbids emojis", () =>
+		expect(EXPLORE_PROMPT).toContain("Do not use emojis"));
 });

@@ -148,7 +148,10 @@ describe("auditor-prompt: tool preference order (GC-2026-012 symmetry)", () => {
 
 	it("declares a 'Tool preference order' section", () => {
 		const idx = sectionIndex("Tool preference order");
-		expect(idx, "section 'Tool preference order' must exist").toBeGreaterThanOrEqual(0);
+		expect(
+			idx,
+			"section 'Tool preference order' must exist",
+		).toBeGreaterThanOrEqual(0);
 	});
 
 	it("'Tool preference order' is positioned BEFORE 'First Action Protocol'", () => {
@@ -239,10 +242,9 @@ describe("auditor-prompt: MUST/forbidden language for tool preference (GC-2026-0
 
 	it("Tool preference order section forbids bash code search (grep / rg / find / cat)", () => {
 		const section = sectionBody("Tool preference order");
-		expect(
-			section,
-			"section must explicitly forbid bash code search",
-		).toMatch(/FORBIDDEN|forbidden/i);
+		expect(section, "section must explicitly forbid bash code search").toMatch(
+			/FORBIDDEN|forbidden/i,
+		);
 	});
 
 	it("First Action Protocol section treats parent-injected context as authoritative (GC-2026-016)", () => {
@@ -251,10 +253,9 @@ describe("auditor-prompt: MUST/forbidden language for tool preference (GC-2026-0
 		// project-context block as authoritative rather than re-reading
 		// AGENTS.md / README.md / CLAUDE.md / package.json.
 		const section = sectionBody("First Action Protocol");
-		expect(
-			section,
-			"section must mention parent-injected context",
-		).toMatch(/parent[- ]injected|injected.*context/i);
+		expect(section, "section must mention parent-injected context").toMatch(
+			/parent[- ]injected|injected.*context/i,
+		);
 		expect(
 			section,
 			"section must tell the agent to NOT re-read AGENTS.md / README.md / CLAUDE.md",

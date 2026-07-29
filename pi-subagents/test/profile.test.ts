@@ -20,20 +20,13 @@
  * isolation but cases within a file in declaration order).
  */
 
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	_resetForTests,
 	inc,
 	isEnabled,
 	observe,
-	ProfileSnapshot,
+	type ProfileSnapshot,
 	snapshot,
 	startSummary,
 	stopSummary,
@@ -86,7 +79,9 @@ describe("profile.overheadDisabled: disabled path is zero-allocation and < 1μs 
 	});
 
 	it("does NOT allocate on globalThis when disabled", () => {
-		const before = (globalThis as unknown as Record<string, unknown>)[GLOBAL_KEY];
+		const before = (globalThis as unknown as Record<string, unknown>)[
+			GLOBAL_KEY
+		];
 		expect(before).toBeUndefined();
 		// 100k calls — would surface any per-call allocation.
 		for (let i = 0; i < 100_000; i++) {
@@ -94,7 +89,9 @@ describe("profile.overheadDisabled: disabled path is zero-allocation and < 1μs 
 			observe("tui_widget_render_ms", i % 17);
 			snapshot();
 		}
-		const after = (globalThis as unknown as Record<string, unknown>)[GLOBAL_KEY];
+		const after = (globalThis as unknown as Record<string, unknown>)[
+			GLOBAL_KEY
+		];
 		expect(after, "globalThis key must remain undefined").toBeUndefined();
 	});
 
@@ -191,9 +188,7 @@ describe("profile.overheadDisabled: stderr summary writer (SC2)", () => {
 
 		vi.advanceTimersByTime(5000);
 
-		const all = writeSpy.mock.calls
-			.map((c) => String(c[0] ?? ""))
-			.join("");
+		const all = writeSpy.mock.calls.map((c) => String(c[0] ?? "")).join("");
 		writeSpy.mockRestore();
 		vi.useRealTimers();
 

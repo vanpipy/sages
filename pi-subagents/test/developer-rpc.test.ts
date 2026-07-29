@@ -30,12 +30,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { registerRpcHandlers } from "../src/cross-extension-rpc.js";
 import { AgentManager } from "../src/agent-manager.js";
-import {
-	registerAgents,
-	setDefaultsDisabled,
-} from "../src/agent-types.js";
+import { registerAgents, setDefaultsDisabled } from "../src/agent-types.js";
+import { registerRpcHandlers } from "../src/cross-extension-rpc.js";
 import { makeRepoFixture, type RepoFixture } from "./_fixture.js";
 
 interface EventBusStub {

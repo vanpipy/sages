@@ -236,9 +236,7 @@ export class ScheduleStore {
 	}
 
 	/** Atomically increment a job's run count under the store lock. */
-	incrementRunCount(
-		id: string,
-	): Promise<ScheduledSubagent | undefined> {
+	incrementRunCount(id: string): Promise<ScheduledSubagent | undefined> {
 		if (!this.jobs.has(id)) return Promise.resolve(undefined);
 		return this.withLock(() => {
 			const existing = this.jobs.get(id);

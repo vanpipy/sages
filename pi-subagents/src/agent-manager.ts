@@ -16,6 +16,9 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { resolveType } from "./agent-types.js";
+import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
+import { inc as profileInc } from "./profile.js";
 import type {
 	AgentInvocation,
 	AgentRecord,
@@ -38,9 +41,6 @@ import {
 	releaseManagedWorktreeLease,
 	worktreePath,
 } from "./worktree.js";
-import { resolveType } from "./agent-types.js";
-import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
-import { inc as profileInc } from "./profile.js";
 import type { ManagedWorktreeRequest } from "./worktree-contract.js";
 import {
 	parseManagedWorktreeRequest,

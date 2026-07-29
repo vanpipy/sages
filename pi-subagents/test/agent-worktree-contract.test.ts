@@ -720,7 +720,9 @@ describe("agent-worktree-contract: handoff shape is JSON-stringifiable", () => {
 describe("agent-worktree-contract: P2 — base_ref field in the request", () => {
 	it("MANAGED_WORKTREE_REQUEST_TYPE does NOT require base_ref (it's optional)", () => {
 		const required = MANAGED_WORKTREE_REQUEST_TYPE.required ?? [];
-		expect(required).toEqual(expect.arrayContaining(["dag_id", "task_id", "mode"]));
+		expect(required).toEqual(
+			expect.arrayContaining(["dag_id", "task_id", "mode"]),
+		);
 		expect(required).not.toContain("base_ref");
 		expect(required).not.toContain("worktree_id");
 	});

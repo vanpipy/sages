@@ -19,15 +19,11 @@
  */
 
 import * as fs from "node:fs";
-import { dirname, join } from "node:path";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	_resetForTests,
-	inc,
-	snapshot,
-} from "../../src/profile.js";
+import { _resetForTests, inc, snapshot } from "../../src/profile.js";
 import { ScheduleStore } from "../../src/schedule-store.js";
 
 const ORIGINAL_ENV = process.env.SAGES_PI_PROFILE;
@@ -44,37 +40,33 @@ async function withStuckLock<T>(
 	const realWriteFileSync = fs.writeFileSync;
 	wxAttempts = 0;
 	const spy = vi.spyOn(fs, "writeFileSync");
-	spy.mockImplementation((
-		(
-			path: fs.PathLike,
-			data: string | NodeJS.ArrayBufferView,
-			options?: fs.WriteFileOptions,
-		): void => {
-			if (
-				typeof path === "string" &&
-				path === lockPath &&
-				options &&
-				typeof options === "object" &&
-				"flag" in options &&
-				(options as { flag?: string }).flag === "wx"
-			) {
-				wxAttempts++;
-				if (wxAttempts <= failTimes) {
-					const err = new Error(
-						`EEXIST: ${lockPath}`,
-					) as NodeJS.ErrnoException;
-					err.code = "EEXIST";
-					throw err;
-				}
+	spy.mockImplementation(((
+		path: fs.PathLike,
+		data: string | NodeJS.ArrayBufferView,
+		options?: fs.WriteFileOptions,
+	): void => {
+		if (
+			typeof path === "string" &&
+			path === lockPath &&
+			options &&
+			typeof options === "object" &&
+			"flag" in options &&
+			(options as { flag?: string }).flag === "wx"
+		) {
+			wxAttempts++;
+			if (wxAttempts <= failTimes) {
+				const err = new Error(`EEXIST: ${lockPath}`) as NodeJS.ErrnoException;
+				err.code = "EEXIST";
+				throw err;
 			}
-			return realWriteFileSync.call(
-				fs,
-				path as fs.PathLike,
-				data as string | NodeJS.ArrayBufferView,
-				options as fs.WriteFileOptions | undefined,
-			);
 		}
-	) as typeof fs.writeFileSync);
+		return realWriteFileSync.call(
+			fs,
+			path as fs.PathLike,
+			data as string | NodeJS.ArrayBufferView,
+			options as fs.WriteFileOptions | undefined,
+		);
+	}) as typeof fs.writeFileSync);
 
 	try {
 		return await fn();

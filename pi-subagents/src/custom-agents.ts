@@ -22,79 +22,92 @@ import type { AgentConfig, MemoryScope, ThinkingLevel } from "./types.js";
  * Any name is allowed — names matching defaults (e.g. "Explore") override them.
  */
 export function loadCustomAgents(cwd: string): Map<string, AgentConfig> {
-  // GC-2026-020 instrumentation: this is the single entry point every site
-  // in index.ts (and tests) uses to refresh the runtime registry. The
-  // elapsed ms lands in the SC2 summary's `custom_reload_ms_p50` field so
-  // we can spot a fan-out regression without adding console.log.
-  const reloadStart = Date.now();
-  profileInc("custom_agents_reload");
-  const globalDir = join(getAgentDir(), "agents");
-  const workspaceProjectDir = join(cwd, ".agents", "agents");
-  const projectDir = join(cwd, ".pi", "agents");
+	// GC-2026-020 instrumentation: this is the single entry point every site
+	// in index.ts (and tests) uses to refresh the runtime registry. The
+	// elapsed ms lands in the SC2 summary's `custom_reload_ms_p50` field so
+	// we can spot a fan-out regression without adding console.log.
+	const reloadStart = Date.now();
+	profileInc("custom_agents_reload");
+	const globalDir = join(getAgentDir(), "agents");
+	const workspaceProjectDir = join(cwd, ".agents", "agents");
+	const projectDir = join(cwd, ".pi", "agents");
 
-  const agents = new Map<string, AgentConfig>();
-  loadFromDir(globalDir, agents, "global");            // lowest priority
-  loadFromDir(workspaceProjectDir, agents, "project"); // shared workspace
-  loadFromDir(projectDir, agents, "project");          // highest priority (overwrites)
-  profileObserve("custom_reload_ms", Date.now() - reloadStart);
-  return agents;
+	const agents = new Map<string, AgentConfig>();
+	loadFromDir(globalDir, agents, "global"); // lowest priority
+	loadFromDir(workspaceProjectDir, agents, "project"); // shared workspace
+	loadFromDir(projectDir, agents, "project"); // highest priority (overwrites)
+	profileObserve("custom_reload_ms", Date.now() - reloadStart);
+	return agents;
 }
 
 /** Load agent configs from a directory into the map. */
-function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "project" | "global"): void {
-  if (!existsSync(dir)) return;
+function loadFromDir(
+	dir: string,
+	agents: Map<string, AgentConfig>,
+	source: "project" | "global",
+): void {
+	if (!existsSync(dir)) return;
 
-  let files: string[];
-  try {
-    files = readdirSync(dir).filter(f => f.endsWith(".md"));
-  } catch {
-    return;
-  }
+	let files: string[];
+	try {
+		files = readdirSync(dir).filter((f) => f.endsWith(".md"));
+	} catch {
+		return;
+	}
 
-  for (const file of files) {
-    // GC-2026-020: per-file count + duration observation; the SC2 summary
-    // exposes total count and p50 reload ms.
-    profileInc("custom_agents_files_loaded");
-    const name = basename(file, ".md");
+	for (const file of files) {
+		// GC-2026-020: per-file count + duration observation; the SC2 summary
+		// exposes total count and p50 reload ms.
+		profileInc("custom_agents_files_loaded");
+		const name = basename(file, ".md");
 
-    let content: string;
-    try {
-      content = readFileSync(join(dir, file), "utf-8");
-    } catch {
-      continue;
-    }
+		let content: string;
+		try {
+			content = readFileSync(join(dir, file), "utf-8");
+		} catch {
+			continue;
+		}
 
-    const { frontmatter: fm, body } = parseFrontmatter<Record<string, unknown>>(content);
+		const { frontmatter: fm, body } =
+			parseFrontmatter<Record<string, unknown>>(content);
 
-    const { builtinToolNames, extSelectors } = parseToolsField(fm.tools);
+		const { builtinToolNames, extSelectors } = parseToolsField(fm.tools);
 
-    agents.set(name, {
-      name,
-      displayName: str(fm.display_name),
-      description: str(fm.description) ?? name,
-      builtinToolNames,
-      extSelectors,
-      disallowedTools: csvListOptional(fm.disallowed_tools),
-      extensions: inheritField(fm.extensions ?? fm.inherit_extensions),
-      excludeExtensions: csvListOptional(fm.exclude_extensions),
-      skills: inheritField(fm.skills ?? fm.inherit_skills),
-      model: str(fm.model),
-      thinking: str(fm.thinking) as ThinkingLevel | undefined,
-      maxTurns: nonNegativeInt(fm.max_turns),
-      persistSession: fm.persist_session != null ? fm.persist_session === true : undefined,
-      outputTranscript: fm.output_transcript != null ? fm.output_transcript !== false : undefined,
-      sessionDir: str(fm.session_dir),
-      systemPrompt: body.trim(),
-      promptMode: fm.prompt_mode === "append" ? "append" : "replace",
-      inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
-      runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
-      isolated: fm.isolated != null ? fm.isolated === true : undefined,
-      memory: parseMemory(fm.memory),
-      isolation: fm.isolation === "worktree" ? "worktree" : undefined,
-      enabled: fm.enabled !== false,  // default true; explicitly false disables
-      source,
-    });
-  }
+		agents.set(name, {
+			name,
+			displayName: str(fm.display_name),
+			description: str(fm.description) ?? name,
+			builtinToolNames,
+			extSelectors,
+			disallowedTools: csvListOptional(fm.disallowed_tools),
+			extensions: inheritField(fm.extensions ?? fm.inherit_extensions),
+			excludeExtensions: csvListOptional(fm.exclude_extensions),
+			skills: inheritField(fm.skills ?? fm.inherit_skills),
+			model: str(fm.model),
+			thinking: str(fm.thinking) as ThinkingLevel | undefined,
+			maxTurns: nonNegativeInt(fm.max_turns),
+			persistSession:
+				fm.persist_session != null ? fm.persist_session === true : undefined,
+			outputTranscript:
+				fm.output_transcript != null
+					? fm.output_transcript !== false
+					: undefined,
+			sessionDir: str(fm.session_dir),
+			systemPrompt: body.trim(),
+			promptMode: fm.prompt_mode === "append" ? "append" : "replace",
+			inheritContext:
+				fm.inherit_context != null ? fm.inherit_context === true : undefined,
+			runInBackground:
+				fm.run_in_background != null
+					? fm.run_in_background === true
+					: undefined,
+			isolated: fm.isolated != null ? fm.isolated === true : undefined,
+			memory: parseMemory(fm.memory),
+			isolation: fm.isolation === "worktree" ? "worktree" : undefined,
+			enabled: fm.enabled !== false, // default true; explicitly false disables
+			source,
+		});
+	}
 }
 
 // ---- Field parsers ----
@@ -102,23 +115,26 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
 
 /** Extract a string or undefined. */
 function str(val: unknown): string | undefined {
-  return typeof val === "string" ? val : undefined;
+	return typeof val === "string" ? val : undefined;
 }
 
 /** Extract a non-negative integer or undefined. 0 means unlimited for max_turns. */
 function nonNegativeInt(val: unknown): number | undefined {
-  return typeof val === "number" && val >= 0 ? val : undefined;
+	return typeof val === "number" && val >= 0 ? val : undefined;
 }
 
 /**
  * Parse a raw CSV field value into items, or undefined if absent/empty/"none".
  */
 function parseCsvField(val: unknown): string[] | undefined {
-  if (val === undefined || val === null) return undefined;
-  const s = String(val).trim();
-  if (!s || s === "none") return undefined;
-  const items = s.split(",").map(t => t.trim()).filter(Boolean);
-  return items.length > 0 ? items : undefined;
+	if (val === undefined || val === null) return undefined;
+	const s = String(val).trim();
+	if (!s || s === "none") return undefined;
+	const items = s
+		.split(",")
+		.map((t) => t.trim())
+		.filter(Boolean);
+	return items.length > 0 ? items : undefined;
 }
 
 /**
@@ -126,8 +142,8 @@ function parseCsvField(val: unknown): string[] | undefined {
  * omitted → defaults; "none"/empty → []; csv → listed items.
  */
 function csvList(val: unknown, defaults: string[]): string[] {
-  if (val === undefined || val === null) return defaults;
-  return parseCsvField(val) ?? [];
+	if (val === undefined || val === null) return defaults;
+	return parseCsvField(val) ?? [];
 }
 
 /**
@@ -137,16 +153,21 @@ function csvList(val: unknown, defaults: string[]): string[] {
  * selectors parsed later by the runner. omitted → all built-ins, no selectors.
  * `tools:` present with only `ext:` entries → zero built-ins (use `*`).
  */
-function parseToolsField(val: unknown): { builtinToolNames: string[]; extSelectors: string[] | undefined } {
-  const entries = csvList(val, BUILTIN_TOOL_NAMES);
-  const isWildcard = (e: string) => e === "*" || e.toLowerCase() === "all";
-  const hasWildcard = entries.some(isWildcard);
-  const plain = entries.filter(e => !isWildcard(e) && !e.startsWith("ext:"));
-  const extEntries = entries.filter(e => e.startsWith("ext:"));
-  return {
-    builtinToolNames: hasWildcard ? [...new Set([...BUILTIN_TOOL_NAMES, ...plain])] : plain,
-    extSelectors: extEntries.length > 0 ? extEntries : undefined,
-  };
+function parseToolsField(val: unknown): {
+	builtinToolNames: string[];
+	extSelectors: string[] | undefined;
+} {
+	const entries = csvList(val, BUILTIN_TOOL_NAMES);
+	const isWildcard = (e: string) => e === "*" || e.toLowerCase() === "all";
+	const hasWildcard = entries.some(isWildcard);
+	const plain = entries.filter((e) => !isWildcard(e) && !e.startsWith("ext:"));
+	const extEntries = entries.filter((e) => e.startsWith("ext:"));
+	return {
+		builtinToolNames: hasWildcard
+			? [...new Set([...BUILTIN_TOOL_NAMES, ...plain])]
+			: plain,
+		extSelectors: extEntries.length > 0 ? extEntries : undefined,
+	};
 }
 
 /**
@@ -154,7 +175,7 @@ function parseToolsField(val: unknown): { builtinToolNames: string[]; extSelecto
  * omitted → undefined; "none"/empty → undefined; csv → listed items.
  */
 function csvListOptional(val: unknown): string[] | undefined {
-  return parseCsvField(val);
+	return parseCsvField(val);
 }
 
 /**
@@ -162,8 +183,8 @@ function csvListOptional(val: unknown): string[] | undefined {
  * omitted → undefined; "user"/"project"/"local" → MemoryScope.
  */
 function parseMemory(val: unknown): MemoryScope | undefined {
-  if (val === "user" || val === "project" || val === "local") return val;
-  return undefined;
+	if (val === "user" || val === "project" || val === "local") return val;
+	return undefined;
 }
 
 /**
@@ -171,8 +192,8 @@ function parseMemory(val: unknown): MemoryScope | undefined {
  * omitted/true → true (inherit all); false/"none"/empty → false; csv → listed names.
  */
 function inheritField(val: unknown): true | string[] | false {
-  if (val === undefined || val === null || val === true) return true;
-  if (val === false || val === "none") return false;
-  const items = csvList(val, []);
-  return items.length > 0 ? items : false;
+	if (val === undefined || val === null || val === true) return true;
+	if (val === false || val === "none") return false;
+	const items = csvList(val, []);
+	return items.length > 0 ? items : false;
 }
