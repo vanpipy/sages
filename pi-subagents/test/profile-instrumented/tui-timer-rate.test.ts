@@ -41,13 +41,14 @@ vi.mock("@earendil-works/pi-tui", () => ({
 	visibleWidth: (s: string) => [...s].length,
 }));
 
-import type { AgentManager } from "../../src/agent-manager.js";
+import type { AgentManager, AgentRecord } from "../../src/agent-manager.js";
 import { AgentWidget } from "../../src/ui/agent-widget.js";
 import { FleetList } from "../../src/ui/fleet-list.js";
 
 class StubManager {
-	listAgents() {
-		return [];
+	private records: AgentRecord[] = [];
+	listAgents(): AgentRecord[] {
+		return this.records;
 	}
 	getRecord() {
 		return undefined;
@@ -61,6 +62,20 @@ class StubManager {
 	asAgentManager(): AgentManager {
 		return undefined as unknown as AgentManager;
 	}
+	setRecords(records: AgentRecord[]) {
+		this.records = records;
+	}
+}
+
+function makeRunningAgent(): AgentRecord {
+	return {
+		id: "a1",
+		type: "general",
+		status: "running",
+		description: "test",
+		toolUses: 0,
+		startedAt: Date.now(),
+	} as unknown as AgentRecord;
 }
 interface StubActivityEntry {
 	activeTools: Map<string, string>;
@@ -86,6 +101,9 @@ describe("profile-instrumented/tui-timer-rate: agent-widget redraw", () => {
 	it("fires ~12.5 Hz (80ms interval) ±10% over a 5s window", () => {
 		vi.useFakeTimers();
 		const stub = new StubManager();
+		// GC-2026-021: ensureTimer is now gated on hasWork(); provide a
+		// running agent so the timer actually starts.
+		stub.setRecords([makeRunningAgent()]);
 		const activity = new Map<string, StubActivityEntry>();
 		const widget = new AgentWidget(
 			stub as unknown as AgentManager,
@@ -150,6 +168,9 @@ describe("profile-instrumented/tui-timer-rate: fleet-list redraw", () => {
 	it("fires ~5 Hz (200ms interval) ±10% over a 5s window", () => {
 		vi.useFakeTimers();
 		const stub = new StubManager();
+		// GC-2026-021: same gate as the widget — supply a running agent
+		// so the production timer path is exercised.
+		stub.setRecords([makeRunningAgent()]);
 		const activity = new Map<string, StubActivityEntry>();
 		const fleet = new FleetList(
 			stub as unknown as AgentManager,
