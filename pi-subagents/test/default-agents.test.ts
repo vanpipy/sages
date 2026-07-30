@@ -51,6 +51,15 @@ describe("default-agents: roster", () => {
 		// dispatcher.
 		expect(DEFAULT_AGENTS.has("software-developer")).toBe(false);
 	});
+
+	it("registers the canonical `git-expert` agent (GC-2026-030: senior git operator)", () => {
+		// GC-2026-030: the git-expert sub-agent performs deep git
+		// inspection, backtrack archaeology, worktree diagnostics, and
+		// produces git-usage recipes for other subagents. Read-only on
+		// production code; writes confined to
+		// `.pi/git-scratch-<task_id>-<suffix>/`.
+		expect(DEFAULT_AGENTS.has("git-expert")).toBe(true);
+	});
 });
 
 describe("default-agents: developer config", () => {
@@ -248,6 +257,136 @@ describe("default-agents: merger config (GC-2026-prompt-workspace)", () => {
 	});
 });
 
+describe("default-agents: git-expert config (GC-2026-030)", () => {
+	// GC-2026-030: the git-expert is a deterministic git operator.
+	// It is read-only on production code (no `edit` / `write` tools)
+	// and confines all writes to its sandbox under
+	// `.pi/git-scratch-<task_id>-<suffix>/`. The runtime knobs below
+	// pin this contract; the prose in `git-expert.ts` is the
+	// matching half.
+	const gitExpert = DEFAULT_AGENTS.get("git-expert");
+
+	it("is registered with isDefault: true", () => {
+		expect(gitExpert?.isDefault).toBe(true);
+	});
+
+	it("has displayName 'Git Expert' and description referencing git inspection / backtrack", () => {
+		expect(gitExpert?.displayName).toBe("Git Expert");
+		const desc = gitExpert?.description.toLowerCase() ?? "";
+		expect(desc, "must mention inspection").toMatch(/inspection/);
+		expect(desc, "must mention backtrack").toMatch(/backtrack/);
+		// Sandbox path is part of the public contract.
+		expect(gitExpert?.description).toContain(
+			".pi/git-scratch-<task_id>-<suffix>/",
+		);
+	});
+
+	it("uses promptMode: 'replace' (matches all other defaults)", () => {
+		expect(gitExpert?.promptMode).toBe("replace");
+	});
+
+	it("carries the canonical system prompt (non-empty, references R1/R2/R3)", () => {
+		expect(typeof gitExpert?.systemPrompt).toBe("string");
+		expect(gitExpert?.systemPrompt.length).toBeGreaterThan(0);
+		// The three hard rules are the load-bearing taxonomy.
+		expect(gitExpert?.systemPrompt).toMatch(/R1[\s\S]*read/i);
+		expect(gitExpert?.systemPrompt).toContain("/home/leroy/Project/sages/.git");
+		expect(gitExpert?.systemPrompt).toContain(
+			".pi/git-scratch-<task_id>-<suffix>/",
+		);
+		// All 7 scenarios are part of the dispatch surface.
+		for (const s of [
+			"worktree-broken",
+			"lost-commit",
+			"merge-conflict-preview",
+			"bisect",
+			"branch-hygiene",
+			"git-recipe-for-<role>",
+			"general-diagnosis",
+		]) {
+			expect(
+				gitExpert?.systemPrompt,
+				`scenario '${s}' must be named in the prompt`,
+			).toContain(s);
+		}
+	});
+
+	it("builtinToolNames does NOT include `edit` or `write` (read-only on production code)", () => {
+		// git-expert is read-only on production code; all writes
+		// happen via bash inside the sandbox. The tool list must
+		// strip edit/write even if the prompt drifted.
+		const tools = new Set(gitExpert?.builtinToolNames ?? []);
+		expect(
+			tools.has("edit"),
+			"git-expert must NOT have the edit tool (read-only on production code)",
+		).toBe(false);
+		expect(
+			tools.has("write"),
+			"git-expert must NOT have the write tool (read-only on production code)",
+		).toBe(false);
+		// Read-only surface: read, bash, grep, find, ls.
+		for (const t of ["read", "bash", "grep", "find", "ls"]) {
+			expect(tools.has(t), `git-expert must include tool ${t}`).toBe(true);
+		}
+	});
+
+	it("carries the required extensions: aft, pi-mcp-adapter, pi-magic-context", () => {
+		// Symmetric with developer / auditor / merger: git-expert
+		// reaches for the same indexed semantic tools to confirm
+		// findings against non-git file content.
+		const extensions = gitExpert?.extensions;
+		expect(extensions).not.toBe(false);
+		const list =
+			extensions === true || extensions === undefined ? null : extensions;
+		expect(list, "git-expert must pin extensions to a list").not.toBeNull();
+		expect(list).toContain("aft");
+		expect(list).toContain("pi-mcp-adapter");
+		expect(list).toContain("pi-magic-context");
+	});
+
+	it("disables skills (false) — git-expert is a deterministic tool, no project conventions", () => {
+		expect(gitExpert?.skills).toBe(false);
+	});
+
+	it("runInBackground = true (archaeology can run 1–10 min)", () => {
+		expect(gitExpert?.runInBackground).toBe(true);
+	});
+
+	it("inheritContext = false — main agent must send a self-contained git-expert brief", () => {
+		// git-expert is a deterministic tool. It must NOT fork the
+		// parent's chat history; the brief carries the scenario +
+		// repo root + task_id explicitly.
+		expect(gitExpert?.inheritContext).toBe(false);
+	});
+
+	it("sets maxTurns = 120 (archaeology budget; reflog walk + fsck + bisect can run long)", () => {
+		expect(gitExpert?.maxTurns).toBe(120);
+	});
+
+	it("does NOT carry a `model` field — inherits global default per caller request", () => {
+		// The caller explicitly removed the model pin. A future
+		// contributor re-adding the pin would silently bypass the
+		// global default — pin the absence.
+		expect(gitExpert?.model).toBeUndefined();
+	});
+
+	it("does NOT carry an `isolation` policy — git-expert is dispatched from main agent's context", () => {
+		expect(gitExpert?.isolation).toBeUndefined();
+	});
+
+	it("does NOT carry an `aliases` field (GC-2026-014: aliases field removed from AgentConfig)", () => {
+		expect(gitExpert?.aliases).toBeUndefined();
+	});
+
+	it("excludes pi-subagents from its extension set (no recursive Agent dispatch)", () => {
+		const excludes = gitExpert?.excludeExtensions ?? [];
+		expect(
+			excludes.map((s) => s.toLowerCase()),
+			`git-expert.excludeExtensions must include "pi-subagents"`,
+		).toContain("pi-subagents");
+	});
+});
+
 describe("default-agents: subagent isolation", () => {
 	// Every default agent must carry `excludeExtensions: ["pi-subagents"]` so
 	// the Agent tool / get_subagent_result / steer_subagent never load. The
@@ -260,6 +399,7 @@ describe("default-agents: subagent isolation", () => {
 		"developer",
 		"auditor",
 		"merger",
+		"git-expert",
 	] as const) {
 		it(`${name} excludes pi-subagents from its extension set`, () => {
 			const config = DEFAULT_AGENTS.get(name);
@@ -290,6 +430,10 @@ describe("default-agents: per-agent maxTurns budgets", () => {
 		developer: 200,
 		auditor: 200,
 		merger: 80,
+		// git-expert archaeology (reflog walk + fsck + bisect) can
+		// run 1–10 min; bump from merger's 80. Caller may still
+		// override via Agent({ max_turns: ... }) at spawn time.
+		"git-expert": 120,
 	};
 
 	for (const [name, limit] of Object.entries(expected)) {
