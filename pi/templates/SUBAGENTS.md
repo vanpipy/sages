@@ -330,6 +330,97 @@ Each stage gates the next via `depends_on`. The DAG's `batch: N`
 field encodes dependency order — for parallel work, multiple tasks
 share a batch number.
 
+## Git Expert — when to dispatch and how
+
+The orchestrator does not own Git archaeology. Symptom matching → dispatch
+`git-expert` so the orchestrator's chat history doesn't accumulate ad-hoc
+Git reasoning. `git-expert` ships as a built-in of `pi-subagents`
+(GC-2026-030); the Agent tool description renders it via the standard
+`{{typeList}}` mechanism — no manual prompt template maintenance needed.
+
+### Brief format (mandatory fields)
+
+```
+Agent({
+  subagent_type: "git-expert",
+  prompt: [
+    "task_id: GC-2026-030",                 // names the sandbox
+    "scenario: merge-conflict-preview",     // one of the 7 below
+    "repo_root: /home/leroy/Project/sages",
+    "symptom: <one-paragraph concrete observation>",
+  ].join("\n"),
+  description: "Diagnose worktree add failure on DAG-2026-030/P2",
+  run_in_background: true,
+})
+```
+
+If any of `task_id` / `scenario` / `repo_root` is missing, `git-expert`
+returns `BLOCKED: missing <field>` immediately — the orchestrator then
+either fills the gap or escalates.
+
+### Recognized scenarios
+
+| Scenario | When to use |
+|---|---|
+| `worktree-broken` | `git worktree add` failed (bare-repo collision, branch checked-out elsewhere, missing `.git` pointer, etc.) |
+| `lost-commit` | A commit appears missing after rebase / reset / delete-branch; need fsck + reflog recovery plan |
+| `merge-conflict-preview` | Before dispatching `merger`, want an independent classification of conflict shape |
+| `bisect` | "Which commit introduced bug X?" — git-expert prepares a runnable `git bisect run` script |
+| `branch-hygiene` | List stale branches / orphaned worktrees / unreferenced tags for prune review |
+| `git-recipe-for-<role>` | Produce a step-by-step runnable Git procedure for `developer` / `merger` / another subagent |
+| `general-diagnosis` | Free-form investigation under the R1/R2/R3 invariant |
+
+### Runtime knobs
+
+| Knob | Value | Why |
+|---|---|---|
+| `subagent_type` | `"git-expert"` | Built-in to pi-subagents as of GC-2026-030 |
+| `builtinToolNames` | `READ_ONLY_TOOLS` (`read`, `bash`, `grep`, `find`, `ls`) | git-expert has no `edit`/`write` tools; all writes happen via `bash` inside the sandbox |
+| `extensions` | `aft`, `pi-mcp-adapter`, `pi-magic-context` | Indexed semantic tools to confirm findings against non-git file content |
+| `excludeExtensions` | `pi-subagents` | No recursive `Agent` dispatch from git-expert |
+| `run_in_background` | `true` (default) | Archaeology can run 1–10 min; do not block the orchestrator |
+| `maxTurns` | `120` | Wider than `merger`'s 80; caller may still override |
+| `inheritContext` | `false` | Deterministic tool: brief is self-contained, no fork of parent's history |
+| `model` | _unset_ | Inherits global default per caller request — pinning a model would silently bypass that policy |
+| `isolation` | _unset_ | git-expert operates in the orchestrator's cwd; the brief carries the repo root |
+| `skills` | `false` | No project conventions — the prompt carries all rules (R1/R2/R3) |
+
+DAG dispatch: set `task_template: "subagent-git-expert"` on a task node
+(in the whitelist as of GC-2026-030). Ad-hoc dispatch: `subagent_type: "git-expert"`.
+
+### Scratch path invariant (R3)
+
+Every `git-expert` write happens inside the orchestrator's repo root, under:
+
+```
+<repo>/.pi/git-scratch-<task_id>-<suffix>/
+```
+
+The `<task_id>` is the dispatch task id (e.g. `P1`); `<suffix>` is a short
+random string git-expert generates to avoid concurrent collisions. `.pi/`
+is gitignored so the scratch never pollutes the repo, but the orchestrator
+MUST surface the residual path in its response so the user can decide
+whether to `rm -rf` it. `git-expert` may `git init` throwaway repos,
+`git clone --no-checkout`, and run `commit`/`reset`/`rebase`/`merge`
+inside the scratch — but never against the original repository's working
+tree, index, or refs (R1) and never touching `/home/leroy/Project/sages/.git`
+or any active managed worktree (R2).
+
+### Trigger conditions for the orchestrator
+
+| Symptom in chat | Default action (without git-expert) | With git-expert |
+|---|---|---|
+| `git worktree add` failed (any reason) | Retry, fallback, or hand off to user | Diagnose first, then act on the report |
+| Predicting merge conflict shape before `merger` dispatch | Blindly dispatch merger; discover at audit | `merge-conflict-preview` — independent classification |
+| "Commit X appears missing" / ref broken | No procedure | `lost-commit` — fsck + reflog + recovery plan inside sandbox |
+| "When did bug Y appear?" / bisect request | Main agent does ad-hoc `git log` | `bisect` — runnable `git bisect run` script returned |
+| Periodic branch / tag / worktree hygiene | Skip | `branch-hygiene` — prune candidate list (orchestrator executes deletes) |
+| Another subagent (`developer`, `merger`) needs a step-by-step Git procedure | Inline prompt mostly hand-waving | `git-recipe-for-<role>` — format-pinned recipe with pre-conditions / steps / failure modes / verify / forbidden |
+
+For the workflow-level trigger discussion (how this fits into the
+Stage-3 dispatch loop), see `pi/skills/orchestrator/SKILL.md` §
+"When to dispatch git-expert".
+
 ## Git ops from main repo
 
 The bare repository's `.git/` internals (`HEAD`, `refs/`, `objects/`,

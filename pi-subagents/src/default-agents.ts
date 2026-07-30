@@ -7,6 +7,7 @@
 import { AUDITOR_PROMPT } from "./agent-prompts/auditor.js";
 import { DEVELOPER_PROMPT } from "./agent-prompts/developer.js";
 import { EXPLORE_PROMPT } from "./agent-prompts/explore.js";
+import { GIT_EXPERT_PROMPT } from "./agent-prompts/git-expert.js";
 import { MERGER_PROMPT } from "./agent-prompts/merger.js";
 import { PLAN_PROMPT } from "./agent-prompts/plan.js";
 import type { AgentConfig } from "./types.js";
@@ -191,6 +192,69 @@ const MERGER_AGENT: AgentConfig = {
 	inheritContext: false,
 };
 
+/**
+ * Canonical `git-expert` agent.
+ *
+ * Built-in to pi-subagents as of GC-2026-030. The `git-expert`
+ * sub-agent performs deep git inspection (搜查), backtrack
+ * archaeology (回溯), worktree / branch / merge diagnostics, and
+ * produces git-usage recipes for other subagents. It is
+ * read-only on production code (no `edit` / `write` tools); all
+ * write activity happens in
+ * `.pi/git-scratch-<task_id>-<suffix>/`.
+ *
+ * Symmetry with `merger` (both are read-only on production code):
+ *   - same `builtinToolNames: READ_ONLY_TOOLS` (no edit / write)
+ *   - same `extensions` / `excludeExtensions` so git-expert reaches
+ *     for the same indexed semantic tools as the other read-only
+ *     defaults to confirm findings against non-git file content
+ *
+ * git-expert-specific:
+ *   - `runInBackground: true` — archaeology (reflog walk + fsck +
+ *     bisect) can run 1–10 min and must not block the orchestrator
+ *   - `maxTurns: 120` — wider than merger's 80; caller may still
+ *     override via Agent({ max_turns: ... })
+ *   - `inheritContext: false` — deterministic tool; must not fork
+ *     the parent's chat history. The brief carries scenario +
+ *     task_id + repo_root + symptom explicitly.
+ *   - `skills: false` — no project conventions; git-expert is
+ *     dispatched with full input from the orchestrator's brief.
+ *   - **No `model` field** — per caller request, git-expert
+ *     inherits the global default at spawn time. Pinning a model
+ *     would silently bypass that policy.
+ *   - No `isolation` policy — git-expert is dispatched from inside
+ *     the orchestrator's context; the brief carries the repo root.
+ *
+ * Sandbox invariant: every write the agent performs (clone, init,
+ * throwaway commits) must land under
+ * `.pi/git-scratch-<task_id>-<suffix>/` inside the repo root. This
+ * is encoded in the prompt's R3 rule and re-surfaced here as a
+ * sibling comment for the registry reader.
+ */
+const GIT_EXPERT_AGENT: AgentConfig = {
+	name: "git-expert",
+	displayName: "Git Expert",
+	description:
+		"Senior git operator — full inspection/backtrack of git state plus " +
+		"git-usage guidance for other subagents. Read-only on production code; " +
+		"all write activity confined to `.pi/git-scratch-<task_id>-<suffix>/`.",
+	builtinToolNames: READ_ONLY_TOOLS,
+	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
+	excludeExtensions: ["pi-subagents"],
+	skills: false,
+	systemPrompt: GIT_EXPERT_PROMPT,
+	promptMode: "replace",
+	isDefault: true,
+	runInBackground: true,
+	// Archaeology (reflog walk + fsck + bisect) can run long; bump
+	// from merger's 80. Caller may still override via
+	// Agent({ max_turns: ... }) at spawn time.
+	maxTurns: 120,
+	// Deterministic tool: must not fork parent's chat history. The
+	// brief carries scenario + task_id + repo_root + symptom explicitly.
+	inheritContext: false,
+};
+
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	[
 		"Explore",
@@ -270,4 +334,5 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	["developer", DEVELOPER_AGENT],
 	["auditor", AUDITOR_AGENT],
 	["merger", MERGER_AGENT],
+	["git-expert", GIT_EXPERT_AGENT],
 ]);

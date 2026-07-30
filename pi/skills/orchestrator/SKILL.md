@@ -43,6 +43,7 @@ implementation dispatch.
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | **`true`**          | Write production code + tests in a managed worktree, strict TDD                    |
 | 4     | `auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
 | Cross-workspace merge verification | `merger (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatched by the orchestrator after DAG synthesis detects cross-workspace file overlap; reads both diffs, classifies, produces merge commit or escalates hunk-conflict. |
+| Git inspection / archaeology | `git-expert (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatch when `git worktree add` fails, conflict preview is needed before merger, a commit appears lost, a bisect is required, branch hygiene is requested, or another subagent needs a runnable git procedure (see "When to dispatch git-expert" below). Read-only on production code; writes confined to `.pi/git-scratch-<task_id>-<suffix>/`. |
 
 `run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table is the canonical reference; see `pi/templates/SUBAGENTS.md` for full rationale and code examples.
 
@@ -137,8 +138,32 @@ When dispatching via the `Agent` tool, pick the right subagent type:
 | Audit / evidence collection | `auditor` (alias: `auditor`) | none |
 | Quick read-only search | `Explore` | none (built-in) |
 | Planning Brief compilation | `Plan` | none (built-in) |
+| Git inspection / backtrack / cross-subagent recipe | `git-expert` | none (read-only on production code; writes in `.pi/git-scratch-<task_id>-<suffix>/`) |
 
 The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. The `developer` agent now accepts three explicit isolation modes: `{ dag_id, task_id, mode: "create" }` (fresh worktree, default for production code), `{ dag_id, task_id, mode: "reuse" }` (re-enter existing worktree for serial follow-ups), or `"current-workspace"` (no worktree, agent runs in dispatcher's cwd — the explicit opt-out for meta-file edits and design-doc writes). `isolation: undefined` is rejected; every dispatch must name one.
+
+#### When to dispatch `git-expert`
+
+Dispatch `git-expert` whenever the orchestrator would otherwise accumulate
+ad-hoc Git reasoning in chat. Concretely:
+
+| Symptom | Without git-expert | With git-expert |
+|---|---|---|
+| `git worktree add` failed for any reason (path collision, branch already checked-out, missing `.git` pointer, bare-repo format) | Retry / fallback / punt to user | `scenario: worktree-broken` — diagnosis + recommended action |
+| Predicting merge conflict shape before dispatching `merger` | Blind dispatch; discover only at audit | `scenario: merge-conflict-preview` — independent conflict classification |
+| "Commit X is missing" / ref appears broken after a rebase / reset / branch delete | No procedure | `scenario: lost-commit` — fsck + reflog + recovery plan inside scratch |
+| "When did bug Y appear?" / "find the first bad commit" | Main agent does ad-hoc `git log -S` | `scenario: bisect` — runnable `git bisect run` script returned |
+| Periodic prune review (stale branches, orphaned worktrees, unreferenced tags) | Skip | `scenario: branch-hygiene` — prune candidate list (orchestrator executes deletes) |
+| Another subagent (`developer`, `merger`) needs a step-by-step git procedure | Inline hand-waving in dispatch prompt | `scenario: git-recipe-for-<role>` — format-pinned recipe with pre-conditions / steps / failure modes / verify / forbidden |
+
+`git-expert` is read-only on production code (no `edit` / `write` tools; all
+writes happen via `bash` inside `.pi/git-scratch-<task_id>-<suffix>/`,
+which is gitignored). The agent returns `BLOCKED: missing <field>` when
+the brief omits `task_id`, `scenario`, or `repo_root` — fill the gap,
+don't guess. For DAG dispatch, set `task_template: "subagent-git-expert"`
+(in the `KNOWN_TEMPLATES` whitelist as of GC-2026-030); for ad-hoc dispatch,
+use `subagent_type: "git-expert"`. Full brief format and recognized
+scenarios in `pi/templates/SUBAGENTS.md` § "Git Expert".
 
 > **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, dispatch the task in the main session's escape mode (the user types `escape-window`) or use the `auditor` agent with `isolated: true`.
 
@@ -201,6 +226,22 @@ Agent({
 
 // Audit (auditor)
 Agent({ subagent_type: "auditor", prompt: "...", run_in_background: true })
+
+// Git inspection / archaeology / cross-subagent recipe (git-expert)
+// Brief must carry task_id + scenario + repo_root; git-expert returns
+// BLOCKED if any are missing. Read-only on production code; writes
+// happen only inside `.pi/git-scratch-<task_id>-<suffix>/` (gitignored).
+Agent({
+  subagent_type: "git-expert",
+  prompt: [
+    "task_id: GC-2026-031",
+    "scenario: merge-conflict-preview",
+    "repo_root: /home/leroy/Project/sages",
+    "symptom: P2 developer reports 'push fails, non-fast-forward' on DAG-2026-031/P1; we want to classify the upcoming conflict shape BEFORE dispatching merger.",
+  ].join("\n"),
+  description: "Preview merge conflict before dispatching merger",
+  run_in_background: true,
+})
 ```
 
 

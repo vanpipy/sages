@@ -191,10 +191,17 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
   // `subagent-software-auditor` spellings are NOT advertised here — they
   // are rejected as unknown templates. Persisted DAGs that still carry
   // the legacy names fail validation.
+  //
+  // GC-2026-030: `subagent-git-expert` is added so DAGs can dispatch
+  // the senior-git-operator subagent (read-only on production code;
+  // writes only in `.pi/git-scratch-<task_id>-<suffix>/`). The legacy
+  // subagent_type `git-expert` path is still available for ad-hoc
+  // `Agent(...)` calls without going through this whitelist.
   const KNOWN_TEMPLATES = new Set([
     "subagent-developer",
     "subagent-auditor",
     "subagent-explore",
+    "subagent-git-expert",
   ]);
   for (const t of input.tasks as any[]) {
     if (t.task_template && !KNOWN_TEMPLATES.has(t.task_template)) {

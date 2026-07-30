@@ -26,6 +26,7 @@ full protocol.
 - `auditor` — read-only evidence audit
 - `Explore` (L1) — fast searches
 - **Plan** (L1) — bounded Planning Brief compiler; it does not choose architecture or explore.
+- `git-expert` (L1+) — senior git operator: deep inspection (log/blame/grep across refs), backtrack archaeology (reflog/fsck), worktree/branch diagnostics, and cross-subagent git recipes. Dispatch when `git worktree add` fails, conflict preview is needed before merger, a commit appears lost, bisect is required, branch hygiene is requested, or another subagent needs a runnable git procedure. Read-only on production code; all writes confined to `.pi/git-scratch-<task_id>-<suffix>/` inside the repo root (gitignored).
 
 ### Planning Owner
 

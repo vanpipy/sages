@@ -36,7 +36,7 @@ Three hard constraints govern the work:
 
 Load `pi/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 
-## The 4 subagents
+## The 5 subagents
 
 | `subagent_type` | Background | Use | Isolation |
 |---|---:|---|---|
@@ -44,8 +44,14 @@ Load `pi/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 | `Plan` | no | Compile a Planning Brief already decided by main | none |
 | `developer` | yes | TDD implementation or meta-file writing | explicit object or `"current-workspace"` |
 | `auditor` | yes | Re-run verification and certify evidence | read-only |
+| `git-expert` | yes | Senior git inspection / backtrack / cross-subagent recipes | read-only (writes in `.pi/git-scratch-<task_id>-<suffix>/`) |
 
-A fifth built-in, `merger`, handles cross-workspace DAG merges. The complete
+Two additional built-ins extend the roster when needed: `merger` handles
+cross-workspace DAG merges (read-only inspection, writes only merge
+commits into a scratch branch) and `git-expert` performs deep git
+inspection, worktree / branch / merge diagnostics, and produces
+git-usage recipes for other subagents (read-only on production code;
+writes confined to `.pi/git-scratch-<task_id>-<suffix>/`). The complete
 invocation contract, isolation modes, and examples are in
 `pi/templates/SUBAGENTS.md`, installed as `~/.pi/agent/SUBAGENTS.md`.
 `defaultRunInBackground()` in
