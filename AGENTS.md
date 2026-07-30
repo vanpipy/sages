@@ -14,12 +14,16 @@ Three hard constraints govern the work:
    bash guard blocks write-intent commands. Both gates use `canMainAgentWrite`
    in `pi/src/tools/file-gate.ts` as the path-policy source of truth.
 2. **Production code requires managed-worktree dispatch.** For `src/`, `test/`,
-   `lib/`, or root source files, dispatch `developer` with
+   `lib/`, the entire `pi/` tree, every sibling `pi-*/` subpackage, or any
+   root source file, dispatch `developer` with
    `isolation: { dag_id, task_id, mode: "create" }` and use TDD.
-3. **Meta-files use current-workspace dispatch.** For docs, Sages packages, or
-   other approved meta-files, dispatch `developer` with
+3. **Root meta-files use current-workspace dispatch.** For root-level docs
+   and config (`.pi/orchestrator/*`, `.pi/agents/*`, `.claude/`, `.codex/`,
+   root `README.md`, `AGENTS.md`, `package.json`, `tsconfig*.json`,
+   `.gitignore`, `.aft.jsonc`), dispatch `developer` with
    `isolation: "current-workspace"` and `tdd: "none"`; review the diff before
-   committing.
+   committing. **Every Sages package subtree (`pi/`, every `pi-*/`) is
+   production code** — no carve-outs (GC-2026-029).
 
 ## The 4 orchestrator tools
 

@@ -22,6 +22,10 @@ import { describe, it, expect } from "bun:test";
 import { canMainAgentWrite, policyMessage } from "@/tools/file-gate.js";
 
 describe("canMainAgentWrite", () => {
+	// GC-2026-029: the meta-paths allowlist is contracted to root-only.
+	// Every path under `pi/` (src/test/templates/skills/scripts/README/package/tsconfig)
+	// and every sibling subpackage under `pi-*/` is now PRODUCTION code —
+	// it must be edited through the `developer` subagent in a managed worktree.
 	describe("meta paths (allowed)", () => {
 		const allowed = [
 			// Sages runtime state
@@ -32,19 +36,7 @@ describe("canMainAgentWrite", () => {
 			".pi/orchestrator/audit-state-DAG-1.yaml",
 			".pi/orchestrator/designs/2026-01-01-login.md",
 			".pi/orchestrator/task-P1-report.md",
-			// Sages own code
-			"pi/src/extension.ts",
-			"pi/src/tools/orchestrator/index.ts",
-			"pi/src/services/file-service.ts",
-			"pi/test/tools/orchestrator.test.ts",
-			"pi/skills/orchestrator/SKILL.md",
-			"pi/skills/brainstorming/SKILL.md",
-			"pi/templates/SYSTEM.md",
-			"pi/templates/SUBAGENTS.md",
-			"pi/templates/agent-tool-description.md",
-			"pi/templates/subagents.json",
-			"pi/scripts/install.sh",
-			"pi/scripts/install.ps1",
+			".pi/agents/developer.md",
 			// Root meta
 			"README.md",
 			"AGENTS.md",
@@ -53,7 +45,41 @@ describe("canMainAgentWrite", () => {
 			".gitignore",
 			".aft.jsonc",
 			".aft.json",
-			// Sibling subpackages (Sages monorepo)
+			".claude/settings.json",
+			".codex/agents.json",
+		];
+		for (const p of allowed) {
+			it(`allows ${p}`, () => {
+				expect(canMainAgentWrite(p)).toBe(true);
+			});
+		}
+	});
+
+	// GC-2026-029 — every `pi/` and `pi-*/` subtree is production code.
+	// These paths must be DENIED by `canMainAgentWrite`; main-agent direct
+	// writes go through `developer` in a managed worktree (or `tdd: none`
+	// with `isolation: "current-workspace"` for true meta-files only).
+	describe("contracted meta-paths deny (GC-2026-029)", () => {
+		const denied = [
+			// pi/ source
+			"pi/src/extension.ts",
+			"pi/src/tools/orchestrator/index.ts",
+			"pi/src/services/file-service.ts",
+			// pi/ tests
+			"pi/test/tools/orchestrator.test.ts",
+			// pi/ templates + skills + scripts
+			"pi/templates/SYSTEM.md",
+			"pi/templates/SUBAGENTS.md",
+			"pi/templates/agent-tool-description.md",
+			"pi/skills/orchestrator/SKILL.md",
+			"pi/skills/brainstorming/SKILL.md",
+			"pi/scripts/install.sh",
+			"pi/scripts/install.ps1",
+			// pi/ root docs + configs
+			"pi/README.md",
+			"pi/package.json",
+			"pi/tsconfig.json",
+			// Sibling subpackages (Sages monorepo) — every subtree
 			"pi-subagents/src/agent-runner.ts",
 			"pi-subagents/src/agent-prompts/developer.ts",
 			"pi-subagents/package.json",
@@ -64,9 +90,9 @@ describe("canMainAgentWrite", () => {
 			"pi-yunxiao/README.md",
 			"pi-yunxiao/AGENTS.md",
 		];
-		for (const p of allowed) {
-			it(`allows ${p}`, () => {
-				expect(canMainAgentWrite(p)).toBe(true);
+		for (const p of denied) {
+			it(`denies ${p}`, () => {
+				expect(canMainAgentWrite(p)).toBe(false);
 			});
 		}
 	});
@@ -145,14 +171,24 @@ describe("policyMessage", () => {
 		expect(msg).not.toContain("general-purpose");
 	});
 
-	it("lists the meta-path allowlist for general-purpose dispatch", () => {
+	it("lists the contracted (root-only) meta-path allowlist (GC-2026-029)", () => {
 		const msg = policyMessage("src/foo.ts");
-		// Spot-check key allowlist entries
+		// Surviving root-meta entries must still appear
 		expect(msg).toContain(".pi/orchestrator/");
-		expect(msg).toContain("pi/src/");
-		expect(msg).toContain("pi-");
 		expect(msg).toContain("README.md");
 		expect(msg).toContain("AGENTS.md");
+		// Dropped carve-outs must NOT appear in the policy message
+		expect(msg).not.toContain("pi/src/");
+		expect(msg).not.toContain("pi/test/");
+		expect(msg).not.toContain("pi/templates/");
+		expect(msg).not.toContain("pi/skills/");
+		expect(msg).not.toContain("pi/scripts/");
+		expect(msg).not.toContain("pi-*/");
+		expect(msg).not.toContain("pi-subagents");
+		expect(msg).not.toContain("pi-codebase-memory");
+		expect(msg).not.toContain("pi-evaluator");
+		expect(msg).not.toContain("pi-minimax");
+		expect(msg).not.toContain("pi-yunxiao");
 	});
 
 	it("explains that no direct write tool exists (force subagent dispatch)", () => {

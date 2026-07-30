@@ -39,14 +39,29 @@
 
 import { isAbsolute, normalize } from "node:path";
 
-/** L3: Sages meta-files where the main agent can write directly. */
+/** L3: Sages meta-files where the main agent can write directly.
+ *
+ * GC-2026-029 contracted to root-only. Every path under pi/ and every
+ * sibling pi-* subpackage is now PRODUCTION code routed through the
+ * developer subagent in a managed worktree. The carve-outs for
+ * pi/templates/, pi/skills/, pi/scripts/, and pi/README.md are
+ * removed; sibling subpackages (pi-subagents/, pi-codebase-memory/,
+ * pi-evaluator/, pi-minimax/, pi-yunxiao/) are excluded from the
+ * meta-write allowlist alongside the pi/ subtree.
+ */
 export const META_FILE_ALLOWLIST = [
-	".pi/orchestrator/", ".pi/agents/", "pi/templates/", "pi/skills/",
-	"pi/scripts/", "AGENTS.md", "README.md", "pi/README.md", ".gitignore",
-	".aft.jsonc", ".claude/", ".codex/",
+	".pi/orchestrator/", ".pi/agents/", "AGENTS.md", "README.md",
+	".gitignore", ".aft.jsonc", ".claude/", ".codex/",
 ] as const;
 
-/** Returns true when path is an explicitly allowlisted Sages meta-file. */
+/** Returns true when path is an explicitly allowlisted Sages meta-file.
+ *
+ * GC-2026-029 — bare entries (`README.md`, `AGENTS.md`, `package.json`,
+ * `tsconfig*.json`, `.gitignore`, `.aft.jsonc`) match only at the
+ * repository root. A `pi/README.md` or `pi-yunxiao/README.md` does NOT
+ * match `README.md` — every path inside a Sages package subtree is
+ * production code (see the canMainAgentWrite path policy).
+ */
 export function canMainAgentWriteMeta(path: string): boolean {
 	if (!path || path.includes("\0") || path.includes("~") || isAbsolute(path)) return false;
 	if (path.endsWith("/") || path.endsWith("\\")) return false;
@@ -55,7 +70,11 @@ export function canMainAgentWriteMeta(path: string): boolean {
 	for (const entry of META_FILE_ALLOWLIST) {
 		if (entry.endsWith("/")) {
 			if (normalized.startsWith(entry)) return true;
-		} else if (normalized === entry || normalized.endsWith(`/${entry}`)) {
+		} else if (normalized === entry) {
+			// Bare entries match only at the repo root, not under any
+			// package subtree. GC-2026-029 collapses the historical
+			// suffix-match (`/<entry>`) which let `pi/README.md`
+			// pass as a meta-file.
 			return true;
 		}
 	}
@@ -66,11 +85,6 @@ export function canMainAgentWriteMeta(path: string): boolean {
 const META_WRITE_PATTERNS: RegExp[] = [
 	// Orchestrator state (goals, dags, audits, designs, etc.)
 	/^\.pi\//,
-	// Sages own source tree (legacy file-gate policy; bash L4 narrows pi/src
-	// and pi/test before applying the combined L3 allowlists).
-	/^pi\//,
-	// Sibling subpackages (Sages monorepo)
-	/^pi-[a-z0-9-]+\//,
 	// Root meta files
 	/^README\.md$/,
 	/^AGENTS\.md$/,
@@ -142,27 +156,31 @@ export function policyMessage(path: string): string {
 		`Path "${path}" is not main-agent-writable.`,
 		``,
 		`The main agent has NO direct write tools. All file changes must be`,
-		`dispatched to a subagent via the Agent tool:`,
-		`  - For meta-file edits (AGENTS.md, README.md, install scripts,`,
-		`    test files, design-doc writes): dispatch \`developer\` with`,
-		`    \`tdd: none\` (no TDD, just write the design / edit). Review the`,
-		`    diff before committing.`,
-		`  - For production code (src/, test/, lib/, *.ts, *.py, ...):`,
-		`    dispatch \`developer\` with managed worktree isolation`,
-		`    (pass \`isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }\`).`,
+		`dispatched to a subagent via the Agent tool. The path policy is`,
+		`contracted (GC-2026-029) to root-only meta + .pi/orchestrator/*`,
+		`+ .pi/agents/*; every Sages package subtree is production code`,
+		`and routes through the developer subagent in a managed worktree:`,
+		`  - For meta-file edits (AGENTS.md, README.md, config tweaks,`,
+		`    .pi/orchestrator/* / .pi/agents/* design-doc writes): dispatch`,
+		`    developer with isolation: "current-workspace" + tdd: "none"`,
+		`    (no TDD, just write the design / edit). Review the diff before`,
+		`    committing.`,
+		`  - For production code (anything under a Sages package subtree,`,
+		`    src/, test/, lib/, *.ts, *.py, ...): dispatch developer`,
+		`    with managed worktree isolation`,
+		`    (pass isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }).`,
 		``,
-		`Allowed paths for the \`developer\` subagent (with \`tdd: none\` or`,
-		`managed-worktree isolation, depending on task shape):`,
+		`Allowed paths for direct developer dispatch:`,
 		`  - .pi/orchestrator/*  (goal/dag/audit/state/designs)`,
-		`  - pi/src/, pi/test/, pi/skills/, pi/templates/, pi/scripts/`,
-		`  - pi-*/  (sibling subpackages: pi-subagents, pi-codebase-memory, pi-evaluator, pi-minimax, pi-yunxiao)`,
-		`  - README.md, AGENTS.md, package.json, tsconfig.json`,
+		`  - .pi/agents/*         (agent prompts installed to ~/.pi/agent/agents/)`,
+		`  - .claude/, .codex/    (tooling config)`,
+		`  - README.md, AGENTS.md, package.json, tsconfig*.json`,
 		`  - .gitignore, .aft.jsonc`,
-		`  - .claude/, .codex/`,
 		``,
-		`All other paths (production code, user source) require the`,
-		`developer subagent in a managed worktree.`,
+		`Everything else (the entire Sages package subtree plus all user`,
+		`source) is production code and requires the developer subagent`,
+		`in a managed worktree.`,
 		``,
-		`See SYSTEM.md §1 "Action Priority" for the policy.`,
+		`See SYSTEM.md section 1 "Action Priority" for the policy.`,
 	].join("\n");
 }

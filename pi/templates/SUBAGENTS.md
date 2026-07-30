@@ -22,8 +22,8 @@ decisions.
 
 The orchestrator dispatches subagents based on the task shape:
 
-- **Meta-file edits / design-doc writes** → `developer` with `isolation: "current-workspace"` + `tdd: "none"` (no worktree; agent operates in dispatcher's cwd). For git ops that bash-guard would block, also pass `isolated: true` to bypass the bash-guard hook.
-- **Production-code TDD work** → `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree)
+- **Meta-file edits / design-doc writes** → `developer` with `isolation: "current-workspace"` + `tdd: "none"` (no worktree; agent operates in dispatcher's cwd). **Root meta only** (GC-2026-029): `.pi/orchestrator/*`, `.pi/agents/*`, `.claude/`, `.codex/`, root `README.md`, `AGENTS.md`, `package.json`, `tsconfig*.json`, `.gitignore`, `.aft.jsonc`. For git ops that bash-guard would block, also pass `isolated: true` to bypass the bash-guard hook.
+- **Production-code TDD work** → `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree). **Required** for the entire `pi/**` tree, every sibling `pi-*/**` subpackage, and any user source (`src/**`, `test/**`, `lib/**`, …).
 - **Serial follow-up in same workspace** → `developer` with `isolation: { dag_id, task_id, mode: "reuse" }` (reuses the prior worktree)
 - **Audit / verify** → `auditor` (read-only, evidence-based)
 - **Quick search** → `Explore`; **Planning Brief compilation** → `Plan` (bounded, read-only).

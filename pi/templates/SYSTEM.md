@@ -81,14 +81,19 @@ path before picking a subagent**:
 ### Meta-files (use `developer` with `tdd: "none"`)
 
 Allowed paths (also enforced by `canMainAgentWrite` via
-`META_WRITE_PATTERNS`):
+`META_WRITE_PATTERNS` — GC-2026-029 contracted to **root-only**):
 
 | Pattern | Examples |
 |---|---|
 | `.pi/orchestrator/*` | `goal-GC-2026-008.yaml`, `dag-DAG-2026-008.yaml`, `audit-P1.md`, `designs/2026-07-26-foo.md` |
-| `pi/**` | `pi/src/tools/file-gate.ts`, `pi/test/orchestrator.test.ts`, `pi/skills/orchestrator/SKILL.md`, `pi/templates/SYSTEM.md`, `pi/scripts/install.sh` |
-| `pi-*/**` | `pi-subagents/src/default-agents.ts`, `pi-codebase-memory/src/index.ts`, `pi-evaluator/src/foo.py`, `pi-minimax/src/index.ts`, `pi-yunxiao/AGENTS.md` |
-| Top-level docs/configs | `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.aft.jsonc`, `.claude/`, `.codex/` |
+| `.pi/agents/*` | `developer.md`, `auditor.md` (installed to `~/.pi/agent/agents/`) |
+| `.claude/`, `.codex/` | `.claude/settings.json`, `.codex/agents.json` |
+| Top-level docs/configs | `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.aft.jsonc` |
+
+**Everything else — the entire `pi/` tree, every sibling `pi-*/`
+subpackage, and any user source — is PRODUCTION code.** Use
+`developer` with **managed worktree** isolation (see "Production code"
+below).
 
 ### Production code (denied by default — requires `developer` + worktree)
 
@@ -281,9 +286,14 @@ operating in the dispatcher's cwd.
 
 | Subagent | Path scope | Worktree |
 |---|---|---|
-| `developer` (`isolation: "current-workspace"`, `tdd: "none"`) | meta-files: `.pi/orchestrator/*` (excluding orchestrator-tool-managed state), `pi/src/`, `pi/test/`, `pi/skills/`, `pi/templates/`, `pi/scripts/`, `pi-…/`, `README.md`, `AGENTS.md`, `package.json`, `tsconfig.json`, `.gitignore`, `.aft.jsonc`, `.claude/`, `.codex/` | **no** (operates in dispatcher's cwd, lightweight) |
-| `developer` (managed worktree) | any path (TDD discipline applies) | **yes** (`isolation: { dag_id, task_id, worktree_id?, mode: "create" \| "reuse" }`) |
+| `developer` (`isolation: "current-workspace"`, `tdd: "none"`) | root meta-files only: `.pi/orchestrator/*`, `.pi/agents/*`, `.claude/`, `.codex/`, `README.md`, `AGENTS.md`, `package.json`, `tsconfig*.json`, `.gitignore`, `.aft.jsonc` | **no** (operates in dispatcher's cwd, lightweight) |
+| `developer` (managed worktree) | any path — required for `pi/**`, every `pi-*/**`, `src/**`, `test/**`, `lib/**`, etc. (TDD discipline applies) | **yes** (`isolation: { dag_id, task_id, worktree_id?, mode: "create" \| "reuse" }`) |
 | 4 orchestrator tools (built-in) | only `.pi/orchestrator/*` (goal/dag/audit files) | n/a (they're the orchestrator's own state writes) |
+
+The `pi/**` and `pi-*/**` rows of the previous version were
+**removed in GC-2026-029** — every Sages package subtree is now
+production code and must be edited through `developer` in a managed
+worktree.
 
 The `canMainAgentWrite(path)` function in
 `pi/src/tools/file-gate.ts` is the single source of truth — it
