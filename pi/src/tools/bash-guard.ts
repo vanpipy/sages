@@ -832,9 +832,11 @@ function isProductionTarget(target: string, cwd: string): boolean {
 		if (fromRoot === ".." || fromRoot.startsWith("../") || isAbsolute(fromRoot)) return false;
 		policyTarget = fromRoot;
 	}
-	// `canMainAgentWrite` historically allows all Sages package files. L4 is
-	// intentionally narrower: runtime source and tests still require developer.
-	if (/^pi\/(?:src|test)\//.test(policyTarget)) return true;
+	// GC-2026-029 — the legacy L4 narrowing (`^pi/(?:src|test)/`) was
+	// removed: with the upstream `canMainAgentWrite`/`canMainAgentWriteMeta`
+	// contracted to root-only meta, every `pi/src/...` and `pi/test/...`
+	// path is already a production target via default-deny, so this
+	// override is unreachable.
 	return !canMainAgentWrite(policyTarget) && !canMainAgentWriteMeta(policyTarget);
 }
 

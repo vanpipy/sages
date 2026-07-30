@@ -474,14 +474,39 @@ describe("GC-2026-015 four-layer bash guard", () => {
 		expect(result.reason).toContain("destructive:");
 	});
 	const l3Allow = [
-		"echo text > .pi/orchestrator/audit-P1.md", "sed -i 's/foo/bar/' pi/templates/SYSTEM.md",
-		"tee AGENTS.md < /dev/null", "echo text > README.md", "echo text > pi/README.md",
+		"echo text > .pi/orchestrator/audit-P1.md",
+		"tee AGENTS.md < /dev/null", "echo text > README.md",
 		"sed -i 's/x/y/' .gitignore", "echo '{}' > .aft.jsonc", "echo '{}' > .claude/settings.json",
-		"echo text > pi/skills/orchestrator/SKILL.md", "echo text > pi/scripts/install.sh",
-		"mkdir -p .pi/orchestrator/new-dir", "echo 'foo' > pi/templates/new-file.md",
+		"mkdir -p .pi/orchestrator/new-dir",
 	];
 	for (const [index, command] of l3Allow.entries()) it(`T-L3-${String(index + 1).padStart(2, "0")} L3 meta-file allows ${command}`, () => {
 		expect(shouldBlockBashCommand(command, CTX).block).toBe(false);
+	});
+
+	// GC-2026-029 — every `pi/` and `pi-*/` path is now PRODUCTION code.
+	// Write-intent bash targeting these paths must be BLOCKED by the
+	// L3 layer (default-deny) since the upstream meta-write allowlist
+	// no longer covers them. The legacy L4 narrowing at
+	// `bash-guard.ts isProductionTarget()` (`^pi/(?:src|test)/`) is
+	// also removed as redundant.
+	const l3DenyContracted = [
+		"sed -i 's/foo/bar/' pi/templates/SYSTEM.md",
+		"echo text > pi/skills/orchestrator/SKILL.md",
+		"echo text > pi/scripts/install.sh",
+		"echo 'foo' > pi/templates/new-file.md",
+		"echo text > pi/README.md",
+		"cat > pi/src/extension.ts <<EOF\ntext\nEOF",
+		"sed -i 's/x/y/' pi/test/install.test.sh",
+		"echo text > pi/package.json",
+		"echo text > pi-subagents/src/agent-runner.ts",
+		"echo text > pi-subagents/package.json",
+		"echo text > pi-codebase-memory/src/index.ts",
+		"echo text > pi-evaluator/src/evaluator.py",
+		"echo text > pi-minimax/src/index.ts",
+		"echo text > pi-yunxiao/README.md",
+	];
+	for (const [index, command] of l3DenyContracted.entries()) it(`T-L3-C-${String(index + 1).padStart(2, "0")} L3 contracted meta-path denies ${command}`, () => {
+		expect(shouldBlockBashCommand(command, CTX).block).toBe(true);
 	});
 	const l4Deny = ["cat > src/foo.ts <<EOF\ntext\nEOF", "sed -i 's/foo/bar/' pi/src/index.ts", "cat > pi/test/install.test.sh <<EOF\ntext\nEOF", "echo 'foo' > AGENTS.md.bak"];
 	for (const [index, command] of l4Deny.entries()) it(`T-L3-N-${String(index + 1).padStart(2, "0")} L4 production-code denies ${command}`, () => {
@@ -489,7 +514,10 @@ describe("GC-2026-015 four-layer bash guard", () => {
 	});
 	it("exposes the L3 path allowlist", () => {
 		expect(canMainAgentWriteMeta("AGENTS.md")).toBe(true);
-		expect(canMainAgentWriteMeta("pi/templates/SYSTEM.md")).toBe(true);
+		expect(canMainAgentWriteMeta("README.md")).toBe(true);
+		expect(canMainAgentWriteMeta("pi/templates/SYSTEM.md")).toBe(false);
+		expect(canMainAgentWriteMeta("pi/src/extension.ts")).toBe(false);
+		expect(canMainAgentWriteMeta("pi-subagents/src/agent-runner.ts")).toBe(false);
 		expect(canMainAgentWriteMeta("src/foo.ts")).toBe(false);
 		expect(canMainAgentWriteMeta("AGENTS.md.bak")).toBe(false);
 	});
