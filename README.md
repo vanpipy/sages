@@ -18,9 +18,16 @@ developer / auditor  → /tmp/pi-subagents-.../tasks/<id>.output
 orchestrator_audit   → .pi/orchestrator/audit-workflow.md
 ```
 
-The Sages extension owns the four workflow tools and a two-layer gate that
-prevents the main agent from writing production code directly. `pi-subagents`
-owns agent spawning, managed worktrees, background execution, and result
+Under **soft mode** (GC-2026-031) the main agent has full tool access
+(`edit` / `write` / `aft_edit` / `apply_patch`, plus unrestricted `bash`).
+Nothing is mechanically blocked. The Sages extension owns the four
+workflow tools above and a recommendation layer that nudges the main
+agent toward the 4-stage DAG workflow for complex work (>2 items in
+the active todowrite); drift from the recommended pattern is
+auto-steered via a once-per-session system reminder and never
+blocked. The main agent decides whether to dispatch subagents based
+on its own task-count assessment. `pi-subagents` owns agent
+spawning, managed worktrees, background execution, and result
 collection.
 
 ## Quick start
@@ -41,7 +48,7 @@ contracts live in `pi/skills/orchestrator/templates/goals/` and are installed to
 
 | Package | Purpose |
 |---|---|
-| `pi/` | Main orchestrator: four-tool workflow and main-agent safety gates |
+| `pi/` | Main orchestrator: four-tool workflow plus the soft-mode policy (`pi/src/soft-mode.ts`, `pi/src/extension.ts`) |
 | `pi-subagents/` | Agent runtime: subagent lifecycle and managed worktrees |
 | `pi-codebase-memory/` | Code knowledge graph MCP server |
 | `pi-evaluator/` | Evaluation metrics for cost, security, and text quality |
@@ -65,9 +72,15 @@ Plan remain read-only.
 
 ## Security and license
 
-The main agent delegates production changes through managed worktrees rather
-than writing them directly. See [AGENTS.md § Red lines](AGENTS.md#red-lines) for
-the operational constraints.
+Sages runs in **soft mode**: no commands are mechanically blocked and
+the main agent has full tool access. The recommended pattern remains
+the 4-stage DAG workflow (or, equivalently, dispatching `developer`
+with a managed worktree) for production-code changes on workflows
+with >2 items in the active todowrite — this keeps the audit trail,
+TDD discipline, and worktree isolation that the orchestrator was
+designed to provide. For ≤2-item workflows direct editing is also
+acceptable. See [AGENTS.md § Red lines](AGENTS.md#red-lines) for the
+remaining operational constraints.
 
 `MIT` — see [LICENSE](LICENSE).
 
