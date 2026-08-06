@@ -1,40 +1,52 @@
 /**
- * File Gate — path-aware policy for main-agent file writes.
+ * File Gate — path-aware recommendation helper for main-agent file writes
+ * (soft mode, GC-2026-031).
  *
- * The main orchestrator agent CANNOT directly edit ANY file (meta or
- * production). The 4 orchestrator tools (`goal_contract_create`,
- * `dag_synthesize`, `task_dispatch`, `orchestrator_audit`) write
- * orchestrator state under `.pi/orchestrator/`; everything else
- * (AGENTS.md, README.md, install scripts, test files, ...) must go
- * through the `Agent` tool.
+ * The main orchestrator agent has full tool access in soft mode: `edit`,
+ * `write`, `aft_edit`, `apply_patch`, and unrestricted `bash`. Nothing
+ * is blocked at any layer. Subagent dispatch via the 4-stage DAG workflow
+ * is RECOMMENDED (driven by the agent's own todowrite count) but the
+ * agent decides; drift from the recommended pattern is auto-steered
+ * (a system reminder is appended), never blocked.
  *
- * For meta-file edits / design-doc writes, dispatch the `developer`
- * subagent with `tdd: none` (DAG-2026-011 Phase C — the `general-purpose`
- * helper was removed; the developer agent handles design-doc writes
- * for design tasks and code changes for implementation). For production
- * code, dispatch the `developer` subagent in a managed worktree
- * (strict TDD discipline). For ad-hoc work outside the dispatch
- * surface, the user can opt into the main agent's escape mode
- * (see `pi/src/escape-window.ts`) which gives the LLM direct write tools.
+ * This module exposes the **recommendation helper** that downstream
+ * consumers (audit reports, advisory metadata, dashboard widgets) can
+ * query to know whether a path is meta-file or production code:
  *
- * The path policy (`canMainAgentWrite`) is the **single source of
- * truth** for the bash-guard (Layer 2). The bash-guard
- * (`pi/src/tools/bash-guard.ts`) imports and uses the same function so
- * `cat > meta-file` and `sages_write meta-file` would have given the
- * same answer. With `sages_write`/`sages_edit` retired (2026-07-26),
- * the LLM-facing tool surface no longer exposes any direct write — the
- * bash-guard is the only remaining limb-side enforcement. The escape
- * window partially relaxes Layer 1 + Layer 2 for the session — see
- * `escape-window.ts` for the precise carve-out.
+ *   - `canMainAgentWrite(path)` returns true iff path is meta-file
+ *     (root `.pi/orchestrator/`, root `.pi/agents/`, root docs, root
+ *     configs) and not production code (user `src/`, `test/`, `lib/`,
+ *     `*.ts`, `*.py`, ...). GC-2026-029 contracted the meta-write
+ *     allowlist to root-only — every `pi/` and every `pi-X` sibling subtree is
+ *     PRODUCTION code.
+ *   - `canMainAgentWriteMeta(path)` is the explicit meta-file check
+ *     (only root `.pi/...`, `AGENTS.md`, `README.md`, `package.json`,
+ *     `tsconfig*.json`, `.gitignore`, `.aft.jsonc`, `.claude/`,
+ *     `.codex/`). Bare entries match only at the repo root.
+ *   - `policyMessage(path)` returns the human-readable rationale used
+ *     to explain a path's classification.
+ *
+ * Under soft mode the bash-guard no longer consumes `canMainAgentWrite`
+ * for blocking — every bash command returns `{ block: false }` from
+ * `shouldBlockBashCommand`. The function is still imported there for
+ * backward compatibility (the pre-soft-mode code path is preserved
+ * inside `isProductionTarget` for any future advisory consumer that
+ * wants a single "is this a production target?" answer).
  *
  * Read tools (`read`, `aft_read`, `aft_search`, `codebase_*`,
  * `bash` for read-only commands) are intentionally NOT gated — the
  * main agent still needs to read user code to understand context.
  *
- * The policy is enforced at the bash layer; the system prompt
- * (`pi/templates/SYSTEM.md §1`) carries the matching convention so
- * the LLM dispatches `developer` (managed worktree) for production
- * code and `developer` with `tdd: none` for design-doc writes.
+ * Subagent dispatch guidance (now in `pi/src/soft-mode.ts` and surfaced
+ * via `before_agent_start`):
+ *   - For meta-file edits / design-doc writes (AGENTS.md, README.md,
+ *     config tweaks, `.pi/orchestrator/*` / `.pi/agents/*`): dispatch
+ *     `developer` with `isolation: "current-workspace"` + `tdd: "none"`
+ *     (no TDD, just write the design / edit).
+ *   - For production code (anything under a Sages package subtree,
+ *     `src/`, `test/`, `lib/`, `*.ts`, `*.py`, ...): dispatch
+ *     `developer` with managed worktree isolation (pass
+ *     `isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`).
  */
 
 import { isAbsolute, normalize } from "node:path";

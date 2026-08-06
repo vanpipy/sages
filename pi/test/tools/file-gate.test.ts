@@ -1,21 +1,21 @@
 /**
- * Tests for the file-gate: path-aware policy that decides whether
- * the main agent (or any subagent inheriting the bash-guard) can
- * write to a given path.
+ * Tests for the file-gate: path-aware recommendation helper that
+ * classifies paths as meta-file or production code.
  *
- * After commit f7144b2 (2026-07-26), the file-gate is **policy only**:
+ * After GC-2026-031, the file-gate is a **recommendation helper only**:
  *   - `canMainAgentWrite(path)` returns true iff path is meta-file
- *     (`.pi/orchestrator/`, `pi/`, sibling subpackages under `pi-…`, root docs) and not
+ *     (`.pi/orchestrator/`, root docs, root configs) and not
  *     production code (user `src/`, `test/`, `lib/`, `*.ts`, `*.py`, ...).
  *   - `policyMessage(path)` returns the human-readable explanation
- *     used by the bash-guard when a write is blocked.
+ *     used as a recommendation hint for callers.
  *
- * The LLM-facing tool surface (Layer 1) no longer exposes any direct
- * write tool — the bash-guard (Layer 2) is the only remaining
- * limb-side write enforcement. The main agent dispatches
- * `Agent({subagent_type: "general-purpose"})` (no isolation) for
- * meta-file edits and `Agent({subagent_type: "developer", isolation: {...}})`
- * (managed worktree) for production code.
+ * Soft mode: no commands are blocked by the bash-guard. The main agent
+ * has full `edit` / `write` / `aft_edit` / `apply_patch` access. The
+ * file-gate is exposed for downstream consumers (advisory metadata,
+ * audit reports) that want to surface a path-policy recommendation.
+ * Subagent dispatch via the 4-stage DAG workflow is RECOMMENDED for
+ * workflows with >2 items in the agent's active todowrite; the agent
+ * decides.
  */
 
 import { describe, it, expect } from "bun:test";

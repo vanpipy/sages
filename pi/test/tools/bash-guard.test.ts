@@ -1,10 +1,12 @@
 /**
- * Tests for the bash-guard: path-aware policy that classifies bash
- * commands and blocks write-intent operations targeting production
- * code paths. The main agent must dispatch a developer
- * subagent for any change to user source — bash cannot bypass that.
- *
- * RED phase: these tests fail until `bash-guard.ts` is implemented.
+ * Tests for the bash-guard: path-aware classifier that classifies bash
+ * commands. In soft mode (GC-2026-031) `shouldBlockBashCommand` is an
+ * advisory classifier only — it returns `{ block: false }` for every
+ * command. No bash write-intent is denied, including destructive
+ * commands (`rm` / `mv` / `cp` / `unlink` / `rmdir`). The classifier
+ * functions (`classifyBashCommand`, `extractBashTargets`,
+ * `isGitMetaCommand`) remain useful for downstream consumers
+ * (advisory metadata, audit reports) and are tested independently.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -19,35 +21,36 @@ import { canMainAgentWriteMeta } from "@/tools/file-gate.js";
 
 const CTX = { cwd: "/tmp/sages-project" };
 
-describe("GC-2026-028 fail-closed shell syntax", () => {
-	(it as any).each([
-		["newline", "cat README.md\necho bypass"],
-		["pipe", "cat README.md | tee src/bypass.ts"],
-		["command substitution", "echo $(touch src/bypass.ts)"],
-		["backtick substitution", "echo `touch src/bypass.ts`"],
-		["environment wrapper", "env X=1 sed -i 's/a/b/' src/bypass.ts"],
-		["find -exec", "find . -name '*.ts' -exec touch {} +"],
-	] as const)("blocks %s syntax", (_label: string, command: string) => {
-		expect(shouldBlockBashCommand(command, CTX).block).toBe(true);
+describe("shouldBlockBashCommand — soft mode (always { block: false })", () => {
+	it("never blocks — fail-closed shell syntax is no longer enforced", () => {
+		// Soft mode: no commands are blocked.
+		const commands = [
+			"cat README.md\necho bypass",
+			"cat README.md | tee src/bypass.ts",
+			"echo $(touch src/bypass.ts)",
+			"echo `touch src/bypass.ts`",
+			"env X=1 sed -i 's/a/b/' src/bypass.ts",
+			"find . -name '*.ts' -exec touch {} +",
+		];
+		for (const command of commands) {
+			expect(shouldBlockBashCommand(command, CTX)).toEqual({ block: false });
+		}
 	});
 
-	(it as any).each([
-		"chmod 600",
-		"tee",
-		"mkdir -p",
-		"sed -i 's/a/b/'",
-	] as const)("blocks write-intent with no extracted target: %s", (command: string) => {
-		expect(shouldBlockBashCommand(command, CTX).block).toBe(true);
+	it("does NOT block write-intent commands with no extracted target (soft mode)", () => {
+		const commands = ["chmod 600", "tee", "mkdir -p", "sed -i 's/a/b/'"];
+		for (const command of commands) {
+			expect(shouldBlockBashCommand(command, CTX).block).toBe(false);
+		}
 	});
 
-	it("resolves absolute targets under cwd and blocks in-repository writes", () => {
+	it("does NOT block absolute targets under cwd (soft mode)", () => {
 		const target = join(CTX.cwd, "src/absolute-bypass.ts");
 		const result = shouldBlockBashCommand(`echo x > ${target}`, CTX);
-		expect(result.block).toBe(true);
-		expect(result.reason).toContain(target);
+		expect(result.block).toBe(false);
 	});
 
-	it("preserves documented single-command safe reads and out-of-repo temporary redirects", () => {
+	it("returns { block: false } for documented safe reads and out-of-repo redirects", () => {
 		for (const command of [
 			"cat README.md",
 			"ls -la",
@@ -61,23 +64,15 @@ describe("GC-2026-028 fail-closed shell syntax", () => {
 	});
 });
 
-describe("shouldBlockBashCommand — 15 design cases", () => {
-	it("T1: rm src/auth/service.ts → block:true (target denied)", () => {
+describe("shouldBlockBashCommand — 15 design cases (soft mode inverts all blocks)", () => {
+	it("T1 (inverted): rm src/auth/service.ts → block:false", () => {
 		const r = shouldBlockBashCommand("rm src/auth/service.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/auth/service.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T2: rm -rf /tmp/foo → block:true (destructives are always denied, regardless of target)", () => {
-		// Restored in GC-2026-015 follow-up: rm/mv/cp/unlink/rmdir
-		// are always denied. Even on /tmp (which is otherwise
-		// allowed), `rm` triggers the destructive short-circuit.
-		// The /tmp-not-denied carve-out is preserved for
-		// non-destructive write-intents (see T4 below) and for
-		// dangerous-only-not-destructive paths via tar/tee/etc.
+	it("T2 (inverted): rm -rf /tmp/foo → block:false (destructives are no longer denied)", () => {
 		const r = shouldBlockBashCommand("rm -rf /tmp/foo", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
 	it("T3: cat src/foo.ts → block:false (read-only)", () => {
@@ -90,37 +85,29 @@ describe("shouldBlockBashCommand — 15 design cases", () => {
 		expect(r.block).toBe(false);
 	});
 
-	it("T5: echo x > src/foo.ts → block:true (redirect to src/)", () => {
+	it("T5 (inverted): echo x > src/foo.ts → block:false (redirect to src/)", () => {
 		const r = shouldBlockBashCommand("echo x > src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T6: mv src/foo.ts /tmp/ → block:true (src is denied)", () => {
+	it("T6 (inverted): mv src/foo.ts /tmp/ → block:false", () => {
 		const r = shouldBlockBashCommand("mv src/foo.ts /tmp/", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T7: mv /tmp/x.ts src/foo.ts → block:true (destructive — dst argument is now subsumed)", () => {
-		// `mv` is a destructive first-word and is ALWAYS denied
-		// (GC-2026-015 follow-up). The deny's reason is the
-		// destructive prefix rather than the dst path.
+	it("T7 (inverted): mv /tmp/x.ts src/foo.ts → block:false (destructives no longer denied)", () => {
 		const r = shouldBlockBashCommand("mv /tmp/x.ts src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
-	it("T8: git checkout -- src/foo.ts → block:true", () => {
+	it("T8 (inverted): git checkout -- src/foo.ts → block:false", () => {
 		const r = shouldBlockBashCommand("git checkout -- src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T9: git checkout HEAD~1 -- src/foo.ts → block:true", () => {
+	it("T9 (inverted): git checkout HEAD~1 -- src/foo.ts → block:false", () => {
 		const r = shouldBlockBashCommand("git checkout HEAD~1 -- src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
 	it("T10: git status → block:false (read-only)", () => {
@@ -128,9 +115,9 @@ describe("shouldBlockBashCommand — 15 design cases", () => {
 		expect(r.block).toBe(false);
 	});
 
-	it("T11: find . -name \"*.bak\" -delete → block:true (current dir denied)", () => {
+	it("T11 (inverted): find . -name \"*.bak\" -delete → block:false", () => {
 		const r = shouldBlockBashCommand('find . -name "*.bak" -delete', CTX);
-		expect(r.block).toBe(true);
+		expect(r.block).toBe(false);
 	});
 
 	it("T12: npm test → block:false (read-only)", () => {
@@ -138,55 +125,45 @@ describe("shouldBlockBashCommand — 15 design cases", () => {
 		expect(r.block).toBe(false);
 	});
 
-	it("T13: python3 -c \"import os; os.remove('src/x.ts')\" → block:true (unknown + no target)", () => {
+	it("T13 (inverted): python3 -c with os.remove → block:false (soft mode)", () => {
 		const r = shouldBlockBashCommand(
 			`python3 -c "import os; os.remove('src/x.ts')"`,
 			CTX,
 		);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("Unknown bash command");
+		expect(r.block).toBe(false);
 	});
 
-	it("T14: python3 -c \"...\" > block:true (unknown + no extractable target; previously bypassed via escape hatch)", () => {
+	it("T14 (inverted): python3 -c without extractable target → block:false (soft mode)", () => {
 		const r = shouldBlockBashCommand(
 			`python3 -c "import os; os.remove('src/x.ts')"`,
 			CTX,
 		);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("Unknown bash command");
-		});
+		expect(r.block).toBe(false);
+	});
 
-	it("T15: sed -i 's/a/b/' src/foo.ts → block:true (sed -i is write-intent)", () => {
+	it("T15 (inverted): sed -i 's/a/b/' src/foo.ts → block:false (soft mode)", () => {
 		const r = shouldBlockBashCommand(`sed -i 's/a/b/' src/foo.ts`, CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 });
 
 /**
- * Chained-command hardening (T16–T22, added 2026-07-25).
- *
- * Each test pairs with a single known-bypass pattern from the
- * 2026-07-24 audit's "command-chaining gap" minor finding. The
- * implementation splits the command on top-level `&&` / `||` / `;`
- * (respecting quotes + parens) and runs classify + extract targets
- * per segment; if ANY segment is write-intent with a denied target
- * the whole command is blocked.
- *
- * See pi/src/tools/bash-guard.ts `splitChainedCommands` and the
- * rewrite of `shouldBlockBashCommand` for the gate.
+ * Chained-command hardening (T16–T22, 2026-07-25). The chained-command
+ * splitter and per-segment classification are still useful for
+ * downstream consumers (e.g. the bash handler in `extension.ts` uses
+ * `classifyBashCommand` to decide whether to emit the soft-mode
+ * reminder). In soft mode, every command — chained or not — returns
+ * `{ block: false }` regardless of whether any segment was write-intent.
  */
-describe("shouldBlockBashCommand — chained commands (T16–T22)", () => {
-	it("T16: `echo done && rm src/foo.ts` → block (chained rm past read-only echo)", () => {
+describe("shouldBlockBashCommand — chained commands (T16–T22, soft mode inverts blocks)", () => {
+	it("T16 (inverted): `echo done && rm src/foo.ts` → block:false", () => {
 		const r = shouldBlockBashCommand("echo done && rm src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T17: `cat src/foo.ts && rm src/foo.ts` → block (mix of read + write segments)", () => {
+	it("T17 (inverted): `cat src/foo.ts && rm src/foo.ts` → block:false", () => {
 		const r = shouldBlockBashCommand("cat src/foo.ts && rm src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
 	it("T18: `cat src/foo.ts && echo done` → allow (all segments read-only)", () => {
@@ -194,47 +171,32 @@ describe("shouldBlockBashCommand — chained commands (T16–T22)", () => {
 		expect(r.block).toBe(false);
 	});
 
-	it("T19: `rm /tmp/foo && rm src/foo.ts` → block (destructive segment short-circuits)", () => {
-		// Restored invariant (GC-2026-015 follow-up): `rm` always
-		// blocks regardless of target. The first segment's
-		// destructive preview appears in the reason; the second
-		// segment is not evaluated.
+	it("T19 (inverted): `rm /tmp/foo && rm src/foo.ts` → block:false (destructives no longer denied)", () => {
 		const r = shouldBlockBashCommand("rm /tmp/foo && rm src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
-	it("T20: `rm src/foo.ts || echo failed` → block (write intent in first segment of ||)", () => {
+	it("T20 (inverted): `rm src/foo.ts || echo failed` → block:false", () => {
 		const r = shouldBlockBashCommand("rm src/foo.ts || echo failed", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T21: `rm src/foo.ts; echo done` → block (semicolon separator)", () => {
+	it("T21 (inverted): `rm src/foo.ts; echo done` → block:false", () => {
 		const r = shouldBlockBashCommand("rm src/foo.ts; echo done", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T22: `rm src/foo.ts && echo done` > block (chained segment split, no escape hatch)", () => {
-		const r = shouldBlockBashCommand(
-			`rm src/foo.ts && echo done`,
-			CTX,
-		);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
-		});
+	it("T22 (inverted): `rm src/foo.ts && echo done` → block:false", () => {
+		const r = shouldBlockBashCommand(`rm src/foo.ts && echo done`, CTX);
+		expect(r.block).toBe(false);
+	});
 
-	it("T23: `echo \"rm src/foo.ts\" && echo done` → allow (rm is in quoted string, not a command)", () => {
+	it("T23 (inverted): `rm \"src/foo.ts\" && echo done` → block:false", () => {
 		const r = shouldBlockBashCommand(
-			'rm "src/foo.ts" && echo done', // double-quoted path
+			`rm "src/foo.ts" && echo done`,
 			CTX,
 		);
-		// `rm "src/foo.ts"` is write-intent with denied target — BLOCK.
-		// The quoted-string test is separate and only protects against
-		// chain splitting on quoted content. See T23b for the actual
-		// quoted-content test.
-		expect(r.block).toBe(true);
+		expect(r.block).toBe(false);
 	});
 
 	it("T23b: chained command does NOT split on quoted `&&`", () => {
@@ -246,91 +208,62 @@ describe("shouldBlockBashCommand — chained commands (T16–T22)", () => {
 		expect(r.block).toBe(false);
 	});
 
-	it("T24: `(echo done) && rm src/foo.ts` → block (subshell + rm)", () => {
+	it("T24 (inverted): `(echo done) && rm src/foo.ts` → block:false", () => {
 		const r = shouldBlockBashCommand("(echo done) && rm src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T25: `perl -e \"unlink 'src/foo.ts'\"` → block (script unlink targets production)", () => {
-		// F4-1: perl -e "code" with a path literal in the code was not
-		// blocked because `extractBashTargets` had no `perl` case (the
-		// switch fell through to default, returning no targets). The
-		// fix extracts path-like strings from quoted content.
+	it("T25 (inverted): `perl -e \"unlink 'src/foo.ts'\"` → block:false", () => {
 		const r = shouldBlockBashCommand(
 			`perl -e "unlink 'src/foo.ts'"`,
 			CTX,
 		);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T26: `echo x 2> src/foo.ts` → block (fd 2 redirect to production)", () => {
-		// F4-2: `2>file` is a write-redirect (stderr → file) but the
-		// existing regex `(?<![\d&])>(?!>)` excluded any `>` preceded
-		// by a digit, treating all fd-redirects as non-write-targets.
-		// Only fd-duplications (`N>&M`) are not write-targets. The
-		// fix distinguishes the two.
+	it("T26 (inverted): `echo x 2> src/foo.ts` → block:false", () => {
 		const r = shouldBlockBashCommand("echo x 2> src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T25b: `perl -e \"unlink 'src/foo.ts'\"` > block (F4-1 perl path extraction)", () => {
-		// Regression guard: the perl case extracts path-like strings
-		// from quoted content and surfaces them as production targets.
+	it("T25b (inverted): `perl -e \"unlink 'src/foo.ts'\"` → block:false", () => {
 		const r = shouldBlockBashCommand(
 			`perl -e "unlink 'src/foo.ts'"`,
 			CTX,
 		);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
-		});
+		expect(r.block).toBe(false);
+	});
 
-	it("T26b: `echo x 2> src/foo.ts` > block (F4-2 fd-redirect detection)", () => {
+	it("T26b (inverted): `echo x 2> src/foo.ts` → block:false", () => {
 		const r = shouldBlockBashCommand(
 			`echo x 2> src/foo.ts`,
 			CTX,
 		);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
-		});
+		expect(r.block).toBe(false);
+	});
 
 	it("T26c: `echo x 2>&1` → allow (fd duplication, not a file redirect)", () => {
-		// Regression guard: fd duplication (stderr → stdout) must NOT
-		// trip the new fd-redirect handling.
 		const r = shouldBlockBashCommand("echo x 2>&1", CTX);
 		expect(r.block).toBe(false);
 	});
 
-	it("T27: `cd /tmp && cat /etc/hostname` → allow (cd is read-only shell builtin)", () => {
-		// Regression guard: shell builtins `cd`, `pwd`, `printenv` are
-		// common prefixes for chained read-only commands. Treating
-		// them as "unknown" forces the sawUnknown branch and blocks
-		// benign chains like `cd /tmp && cat /etc/hostname`. After
-		// 0b7827d removed the `# sages:safe` escape hatch, this
-		// surfaced as a usability regression for LLM agents using
-		// these idiomatic patterns.
+	it("T27: `cd /tmp && cat /etc/hostname` → block:false (cd is read-only)", () => {
 		const r = shouldBlockBashCommand("cd /tmp && cat /etc/hostname", CTX);
 		expect(r.block).toBe(false);
 	});
 
-	it("T28: `cd /tmp && rm src/foo.ts` → block (chained rm still wins)", () => {
-		// Even with cd added to read-only, the chained rm must still
-		// trip the gate — cd is harmless in isolation but write-intent
-		// commands chained after it must still be guarded.
+	it("T28 (inverted): `cd /tmp && rm src/foo.ts` → block:false", () => {
 		const r = shouldBlockBashCommand("cd /tmp && rm src/foo.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("src/foo.ts");
+		expect(r.block).toBe(false);
 	});
 
-	it("T29: `pwd && echo done` → allow (pwd is read-only)", () => {
+	it("T29: `pwd && echo done` → block:false (pwd is read-only)", () => {
 		const r = shouldBlockBashCommand("pwd && echo done", CTX);
 		expect(r.block).toBe(false);
 	});
 });
 
-describe("classifyBashCommand — selected cases", () => {
+describe("classifyBashCommand — selected cases (unchanged)", () => {
 	it("classifies read-only commands", () => {
 		expect(classifyBashCommand("ls -la")).toBe("read-only");
 		expect(classifyBashCommand("cat foo.ts")).toBe("read-only");
@@ -382,7 +315,7 @@ describe("classifyBashCommand — selected cases", () => {
 	});
 });
 
-describe("extractBashTargets — selected cases", () => {
+describe("extractBashTargets — selected cases (unchanged)", () => {
 	it("rm: extract path args", () => {
 		expect(extractBashTargets("rm src/foo.ts")).toEqual(["src/foo.ts"]);
 		expect(extractBashTargets("rm -rf /tmp/foo")).toEqual(["/tmp/foo"]);
@@ -435,7 +368,7 @@ describe("extractBashTargets — selected cases", () => {
 	});
 });
 
-describe("GC-2026-015 four-layer bash guard", () => {
+describe("isGitMetaCommand — unchanged", () => {
 	const l2Allow = [
 		"git status", "git status -s", "git log", "git log --oneline -5",
 		"git log -1 --format='%H %s'", "git diff", "git diff origin/main..HEAD",
@@ -455,7 +388,6 @@ describe("GC-2026-015 four-layer bash guard", () => {
 	];
 	for (const [index, command] of l2Allow.entries()) it(`T-L2-${String(index + 1).padStart(2, "0")} L2 git-meta allows ${command}`, () => {
 		expect(isGitMetaCommand(command).allow).toBe(true);
-		expect(shouldBlockBashCommand(command, CTX)).toEqual({ block: false });
 	});
 	const l2Deny = [
 		"git checkout -- src/foo.ts", "git restore src/foo.ts", "git rm src/foo.ts",
@@ -469,178 +401,97 @@ describe("GC-2026-015 four-layer bash guard", () => {
 		const verdict = isGitMetaCommand(command);
 		expect(verdict.allow).toBe(false);
 		if (!verdict.allow) expect(verdict.reason).toContain("destructive:");
-		const result = shouldBlockBashCommand(command, CTX);
-		expect(result.block).toBe(true);
-		expect(result.reason).toContain("destructive:");
 	});
-	const l3Allow = [
-		"echo text > .pi/orchestrator/audit-P1.md",
-		"tee AGENTS.md < /dev/null", "echo text > README.md",
-		"sed -i 's/x/y/' .gitignore", "echo '{}' > .aft.jsonc", "echo '{}' > .claude/settings.json",
-		"mkdir -p .pi/orchestrator/new-dir",
-	];
-	for (const [index, command] of l3Allow.entries()) it(`T-L3-${String(index + 1).padStart(2, "0")} L3 meta-file allows ${command}`, () => {
-		expect(shouldBlockBashCommand(command, CTX).block).toBe(false);
-	});
+});
 
-	// GC-2026-029 — every `pi/` and `pi-*/` path is now PRODUCTION code.
-	// Write-intent bash targeting these paths must be BLOCKED by the
-	// L3 layer (default-deny) since the upstream meta-write allowlist
-	// no longer covers them. The legacy L4 narrowing at
-	// `bash-guard.ts isProductionTarget()` (`^pi/(?:src|test)/`) is
-	// also removed as redundant.
-	const l3DenyContracted = [
+describe("soft mode bash-guard — every command returns { block: false }", () => {
+	const allCommands = [
+		"cat src/foo.ts",
+		"rm src/foo.ts",
+		"rm -rf /tmp/foo",
+		"echo x > src/foo.ts",
+		"mv src/foo.ts /tmp/",
+		"git checkout -- src/foo.ts",
+		"find . -name '*.bak' -delete",
+		"sed -i 's/a/b/' src/foo.ts",
+		"python3 -c \"import os; os.remove('src/x.ts')\"",
+		"echo x > .pi/orchestrator/audit-P1.md",
 		"sed -i 's/foo/bar/' pi/templates/SYSTEM.md",
-		"echo text > pi/skills/orchestrator/SKILL.md",
-		"echo text > pi/scripts/install.sh",
-		"echo 'foo' > pi/templates/new-file.md",
-		"echo text > pi/README.md",
-		"cat > pi/src/extension.ts <<EOF\ntext\nEOF",
-		"sed -i 's/x/y/' pi/test/install.test.sh",
-		"echo text > pi/package.json",
+		"echo text > pi/src/extension.ts",
 		"echo text > pi-subagents/src/agent-runner.ts",
-		"echo text > pi-subagents/package.json",
-		"echo text > pi-codebase-memory/src/index.ts",
-		"echo text > pi-evaluator/src/evaluator.py",
-		"echo text > pi-minimax/src/index.ts",
-		"echo text > pi-yunxiao/README.md",
+		"cat > src/foo.ts <<EOF\ntext\nEOF",
+		"rm pi/src/foo.ts && echo done",
+		"env X=1 sed -i 's/a/b/' src/bypass.ts",
+		"find . -name '*.ts' -exec touch {} +",
 	];
-	for (const [index, command] of l3DenyContracted.entries()) it(`T-L3-C-${String(index + 1).padStart(2, "0")} L3 contracted meta-path denies ${command}`, () => {
-		expect(shouldBlockBashCommand(command, CTX).block).toBe(true);
-	});
-	const l4Deny = ["cat > src/foo.ts <<EOF\ntext\nEOF", "sed -i 's/foo/bar/' pi/src/index.ts", "cat > pi/test/install.test.sh <<EOF\ntext\nEOF", "echo 'foo' > AGENTS.md.bak"];
-	for (const [index, command] of l4Deny.entries()) it(`T-L3-N-${String(index + 1).padStart(2, "0")} L4 production-code denies ${command}`, () => {
-		expect(shouldBlockBashCommand(command, CTX).block).toBe(true);
-	});
-	it("exposes the L3 path allowlist", () => {
-		expect(canMainAgentWriteMeta("AGENTS.md")).toBe(true);
-		expect(canMainAgentWriteMeta("README.md")).toBe(true);
-		expect(canMainAgentWriteMeta("pi/templates/SYSTEM.md")).toBe(false);
-		expect(canMainAgentWriteMeta("pi/src/extension.ts")).toBe(false);
-		expect(canMainAgentWriteMeta("pi-subagents/src/agent-runner.ts")).toBe(false);
-		expect(canMainAgentWriteMeta("src/foo.ts")).toBe(false);
-		expect(canMainAgentWriteMeta("AGENTS.md.bak")).toBe(false);
-	});
+	for (const [index, command] of allCommands.entries()) {
+		it(`T-SOFT-${String(index + 1).padStart(3, "0")} allows ${command}`, () => {
+			expect(shouldBlockBashCommand(command, CTX).block).toBe(false);
+		});
+	}
 });
 
-
-describe("shouldBlockBashCommand — reason format", () => {
-	it("includes the production-code targets in the reason (non-destructive write-intent to production)", () => {
-		// Use a non-destructive write-intent so the L4
-		// production-target path surfaces (the destructive
-		// short-circuit would otherwise fire first on `rm`).
-		const r = shouldBlockBashCommand("echo x > src/auth/service.ts", CTX);
-		expect(r.reason).toContain("bash command targets production code:");
-		expect(r.reason).toContain("src/auth/service.ts");
-	});
-
-	it("points at the Agent tool + developer subagent", () => {
-		const r = shouldBlockBashCommand("rm src/foo.ts", CTX);
-		expect(r.reason!.toLowerCase()).toContain("agent");
-		expect(r.reason!.toLowerCase()).toContain("developer");
-	});
-
-});
-
-/**
- * GC-2026-015 follow-up — two regressions introduced by the four-layer
- * bash-guard refactor (698e65c) need fixing:
- *
- *   1. rm/mv/cp/unlink/rmdir on meta-file paths were accidentally
- *      allowed. The L3 canMainAgentWriteMeta allowlist (`rm .pi/orchestrator/x.md`
- *      → both canMainAgentWrite AND canMainAgentWriteMeta true →
- *      isProductionTarget false → L3 lets it through) violated the
- *      anti-goal "destructives stay denied regardless of which layer".
- *
- *   2. extractBashTargets for `rm` over-matched on chain operators:
- *      `rm pi/src/foo.ts 2>&1 | head -5` extracted `2>&1`, `|`, `head`
- *      as targets. Fix: stop at the first shell operator.
- */
-describe("GC-2026-015 follow-up — destructive deny", () => {
-	it("T-D-01: `rm .pi/orchestrator/test.md` → DENY (anti-goal regression on L3 meta-file path)", () => {
+describe("soft mode — destructive commands are no longer denied", () => {
+	it("T-D-INV-01: `rm .pi/orchestrator/test.md` → block:false (destructives allowed)", () => {
 		const r = shouldBlockBashCommand("rm .pi/orchestrator/test.md", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
-		// Must NOT be the L3 allow response (no "bash command targets production" reason).
-		expect(r.reason).toContain(".pi/orchestrator/test.md");
+		expect(r.block).toBe(false);
 	});
 
-	it("T-D-02: `rm AGENTS.md` → DENY", () => {
+	it("T-D-INV-02: `rm AGENTS.md` → block:false", () => {
 		const r = shouldBlockBashCommand("rm AGENTS.md", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
-	it("T-D-03: `mv pi/templates/foo.md pi/templates/bar.md` → DENY", () => {
+	it("T-D-INV-03: `mv pi/templates/foo.md pi/templates/bar.md` → block:false", () => {
 		const r = shouldBlockBashCommand("mv pi/templates/foo.md pi/templates/bar.md", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
-	it("T-D-04: `cp pi/skills/foo.md pi/skills/bar.md` → DENY", () => {
+	it("T-D-INV-04: `cp pi/skills/foo.md pi/skills/bar.md` → block:false", () => {
 		const r = shouldBlockBashCommand("cp pi/skills/foo.md pi/skills/bar.md", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
-	it("T-D-05: `rm -rf .pi/orchestrator` → DENY", () => {
+	it("T-D-INV-05: `rm -rf .pi/orchestrator` → block:false", () => {
 		const r = shouldBlockBashCommand("rm -rf .pi/orchestrator", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
-	it("T-D-06: `rm --force .pi/orchestrator/anything.md` → DENY", () => {
+	it("T-D-INV-06: `rm --force .pi/orchestrator/anything.md` → block:false", () => {
 		const r = shouldBlockBashCommand("rm --force .pi/orchestrator/anything.md", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
-	it("T-D-07: `unlink .pi/orchestrator/foo.md` → DENY", () => {
+	it("T-D-INV-07: `unlink .pi/orchestrator/foo.md` → block:false", () => {
 		const r = shouldBlockBashCommand("unlink .pi/orchestrator/foo.md", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
-	it("T-D-08: `rmdir .pi/orchestrator/subdir` → DENY", () => {
+	it("T-D-INV-08: `rmdir .pi/orchestrator/subdir` → block:false", () => {
 		const r = shouldBlockBashCommand("rmdir .pi/orchestrator/subdir", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 
-	it("T-D-09: `mkdir -p .pi/orchestrator/new-dir` → ALLOW (mkdir is not a destructive first-word)", () => {
-		// Regression guard: the destructive short-circuit must NOT
-		// over-block mkdir / tee / sed / perl etc. L3 meta-file
-		// allowlist must continue to apply to non-destructive
-		// write-intent commands.
+	it("T-D-INV-09: `mkdir -p .pi/orchestrator/new-dir` → block:false", () => {
 		const r = shouldBlockBashCommand("mkdir -p .pi/orchestrator/new-dir", CTX);
 		expect(r.block).toBe(false);
 	});
 
-	it("T-D-10: `tee .pi/orchestrator/foo.md < /dev/null` → ALLOW (tee is not destructive)", () => {
-		// Regression guard: tee is in WRITE_INTENT_FIRST_WORDS but is
-		// not in DESTRUCTIVE_FIRST_WORDS — meta-file tee writes remain
-		// L3-allowed.
+	it("T-D-INV-10: `tee .pi/orchestrator/foo.md < /dev/null` → block:false", () => {
 		const r = shouldBlockBashCommand("tee .pi/orchestrator/foo.md < /dev/null", CTX);
 		expect(r.block).toBe(false);
 	});
 
-	it("T-D-11: `echo done && rm .pi/orchestrator/foo.md` → DENY (destructive segment wins past read-only echo)", () => {
+	it("T-D-INV-11: `echo done && rm .pi/orchestrator/foo.md` → block:false", () => {
 		const r = shouldBlockBashCommand("echo done && rm .pi/orchestrator/foo.md", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("destructive:");
+		expect(r.block).toBe(false);
 	});
 });
 
-describe("GC-2026-015 follow-up — chain-parser correctness", () => {
+describe("extractBashTargets — chain-parser correctness (unchanged)", () => {
 	it("T-CP-01: extractBashTargets(`rm pi/src/test.ts 2>&1 | head -5`) → only [pi/src/test.ts]", () => {
 		const t = extractBashTargets("rm pi/src/test.ts 2>&1 | head -5");
 		expect(t).toEqual(["pi/src/test.ts"]);
-	});
-
-	it("T-CP-01b: shouldBlockBashCommand(`rm pi/src/test.ts 2>&1 | head -5`) → DENY (pipeline fails closed)", () => {
-		const r = shouldBlockBashCommand("rm pi/src/test.ts 2>&1 | head -5", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("pipelines are denied");
 	});
 
 	it("T-CP-02: extractBashTargets(`mv src/foo.ts src/bar.ts && echo done`) → [src/foo.ts, src/bar.ts]", () => {
@@ -649,19 +500,8 @@ describe("GC-2026-015 follow-up — chain-parser correctness", () => {
 	});
 
 	it("T-CP-03: extractBashTargets(`cat > .pi/orchestrator/test.md <<EOF\\nfoo\\nEOF`) → [.pi/orchestrator/test.md]", () => {
-		// L3 meta-file allow path: the `cat >` redirect is captured by
-		// the global redirect extractor; heredoc EOF marker must NOT
-		// be a target.
 		const t = extractBashTargets("cat > .pi/orchestrator/test.md <<EOF\nfoo\nEOF");
 		expect(t).toEqual([".pi/orchestrator/test.md"]);
-	});
-
-	it("T-CP-03b: shouldBlockBashCommand(...) DENY (newline syntax fails closed)", () => {
-		const r = shouldBlockBashCommand(
-			"cat > .pi/orchestrator/test.md <<EOF\nfoo\nEOF",
-			CTX,
-		);
-		expect(r.block).toBe(true);
 	});
 
 	it("T-CP-04: extractBashTargets(`sed -i 's/foo/bar/' pi/src/index.ts`) → [pi/src/index.ts] only", () => {
@@ -669,31 +509,18 @@ describe("GC-2026-015 follow-up — chain-parser correctness", () => {
 		expect(t).toEqual(["pi/src/index.ts"]);
 	});
 
-	it("T-CP-04b: shouldBlockBashCommand(...) → DENY (L4 production-code)", () => {
-		const r = shouldBlockBashCommand("sed -i 's/foo/bar/' pi/src/index.ts", CTX);
-		expect(r.block).toBe(true);
-		expect(r.reason).toContain("pi/src/index.ts");
-	});
-
-	it("T-CP-05: extractBashTargets(`rm -rf /tmp/foo`) → [/tmp/foo] (operator stop doesn't affect /tmp case)", () => {
-		// Regression guard: the operator-stop fix must NOT over-eagerly
-		// strip legitimate non-flag args. /tmp/foo has no operator in
-		// the slice(1) range.
+	it("T-CP-05: extractBashTargets(`rm -rf /tmp/foo`) → [/tmp/foo]", () => {
 		const t = extractBashTargets("rm -rf /tmp/foo");
 		expect(t).toEqual(["/tmp/foo"]);
 	});
 
 	it("T-CP-06: extractBashTargets(`mkdir -p .pi/orchestrator/sub && echo done`) → [.pi/orchestrator/sub]", () => {
-		// mkdir: stop at the `&&` so echo/done are not targets.
 		const t = extractBashTargets("mkdir -p .pi/orchestrator/sub && echo done");
 		expect(t).toEqual([".pi/orchestrator/sub"]);
 	});
 
-	it("T-CP-07: extractBashTargets(`cp src/foo.ts dst/ ; rm bar`) → [dst/] (cp stops at `;`)", () => {
-		// cp: stop at the `;` so the chained `rm bar` is not picked up
-		// as a cp target.
+	it("T-CP-07: extractBashTargets(`cp src/foo.ts dst/ ; rm bar`) → [dst/]", () => {
 		const t = extractBashTargets("cp src/foo.ts dst/ ; rm bar");
 		expect(t).toEqual(["dst/"]);
 	});
 });
-
