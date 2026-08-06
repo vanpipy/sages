@@ -1,5 +1,14 @@
 # Subagent Pipeline — Reference for the Orchestrator
 
+> **Soft mode (GC-2026-031)** — the main agent has full tool access by
+> default (`edit` / `write` / `aft_edit` / `apply_patch` plus
+> unrestricted `bash`). Nothing is blocked. Subagent dispatch via
+> the 4-stage DAG workflow is **RECOMMENDED** for workflows with
+> >2 items in the active todowrite; direct handling is acceptable
+> for ≤2-item workflows. Drift is auto-steered (system reminder
+> via `pi.appendEntry`) and never blocked. No previous-enforcement
+> toggle; soft mode is the only mode.
+
 The orchestrator (main agent) dispatches work to subagents via the `Agent`
 tool. This file is the **deployment reference** for which subagents
 exist, what tools each one has, and how to invoke them. The
@@ -20,27 +29,60 @@ self-contained Planning Brief. `Plan` is only a bounded compilation helper
 after the brief; it is not the architecture stage and must not invent missing
 decisions.
 
-The orchestrator dispatches subagents based on the task shape:
+The orchestrator **RECOMMENDS** subagent dispatch based on the task shape
+and the task-count threshold (>2 items in the active todowrite):
 
-- **Meta-file edits / design-doc writes** → `developer` with `isolation: "current-workspace"` + `tdd: "none"` (no worktree; agent operates in dispatcher's cwd). **Root meta only** (GC-2026-029): `.pi/orchestrator/*`, `.pi/agents/*`, `.claude/`, `.codex/`, root `README.md`, `AGENTS.md`, `package.json`, `tsconfig*.json`, `.gitignore`, `.aft.jsonc`. For git ops that bash-guard would block, also pass `isolated: true` to bypass the bash-guard hook.
-- **Production-code TDD work** → `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree). **Required** for the entire `pi/**` tree, every sibling `pi-*/**` subpackage, and any user source (`src/**`, `test/**`, `lib/**`, …).
-- **Serial follow-up in same workspace** → `developer` with `isolation: { dag_id, task_id, mode: "reuse" }` (reuses the prior worktree)
+- **Meta-file edits / design-doc writes** → RECOMMENDED: `developer`
+  with `isolation: "current-workspace"` + `tdd: "none"` (no worktree;
+  agent operates in dispatcher's cwd). **Root meta only** (GC-2026-029):
+  `.pi/orchestrator/*`, `.pi/agents/*`, `.claude/`, `.codex/`, root
+  `README.md`, `AGENTS.md`, `package.json`, `tsconfig*.json`,
+  `.gitignore`, `.aft.jsonc`. Direct `edit` / `write` in the main session
+  is also acceptable for ≤2-item workflows.
+- **Production-code TDD work** → RECOMMENDED for >2-item workflows:
+  `developer` with `isolation: { dag_id, task_id, mode: "create" }`
+  (managed worktree). Recommended for the entire `pi/**` tree, every
+  sibling `pi-*/**` subpackage, and any user source (`src/**`,
+  `test/**`, `lib/**`, …). For ≤2-item workflows direct editing is also
+  acceptable.
+- **Serial follow-up in same workspace** → `developer` with `isolation:
+  { dag_id, task_id, mode: "reuse" }` (reuses the prior worktree)
 - **Audit / verify** → `auditor` (read-only, evidence-based)
-- **Quick search** → `Explore`; **Planning Brief compilation** → `Plan` (bounded, read-only).
-- **Multi-stage workflows** → `task_dispatch` (orchestrator tool) — emits developer / auditor dispatches automatically
+- **Quick search** → `Explore`; **Planning Brief compilation** → `Plan`
+  (bounded, read-only).
+- **Multi-stage workflows** → `task_dispatch` (orchestrator tool) — emits
+  developer / auditor dispatches automatically
 
-The pipeline is main-agent understanding and decision → Planning Brief → Plan compilation and main-agent review → dispatch → audit.
-- Use `developer` with `isolation: "current-workspace"` + `tdd: "none"` for meta-file edits and design-doc writes (no worktree; agent runs in dispatcher's cwd).
-- Use `developer` with `isolation: { dag_id, task_id, mode: "create" }` (managed worktree) for production-code TDD work.
-- Use `developer` with `isolation: { dag_id, task_id, mode: "reuse" }` to re-enter an existing worktree for serial follow-up tasks in the same DAG.
-- Use `auditor` (read-only) for verification — never modify production code from an auditor dispatch.
+The pipeline is main-agent understanding and decision → Planning Brief →
+Plan compilation and main-agent review → dispatch → audit.
+- Use `developer` with `isolation: "current-workspace"` + `tdd: "none"`
+  for meta-file edits and design-doc writes (no worktree; agent runs in
+  dispatcher's cwd). Recommended pattern; direct `edit` / `write` in the
+  main session is also acceptable for ≤2-item workflows.
+- Use `developer` with `isolation: { dag_id, task_id, mode: "create" }`
+  (managed worktree) for production-code TDD work on >2-item workflows.
+- Use `developer` with `isolation: { dag_id, task_id, mode: "reuse" }`
+  to re-enter an existing worktree for serial follow-up tasks in the
+  same DAG.
+- Use `auditor` (read-only) for verification — never modify production
+  code from an auditor dispatch.
 
 The `developer` agent accepts three explicit isolation modes:
-- `isolation: { dag_id, task_id, mode: "create" }` — fresh managed worktree at `.pi/worktree/<dag>/<task>` from `origin/main`; default for production code. Lease is held for the duration of the task; the developer commits inside the worktree and the orchestrator merges the result branch into main after audit.
-- `isolation: { dag_id, task_id, mode: "reuse" }` — re-enter an existing worktree slot for serial follow-ups (concurrent reuse is rejected).
-- `isolation: "current-workspace"` — opt out of a worktree entirely; the agent runs in the parent's cwd. Used for meta-file edits and design-doc writes; no audit gate.
+- `isolation: { dag_id, task_id, mode: "create" }` — fresh managed
+  worktree at `.pi/worktree/<dag>/<task>` from `origin/main`; recommended
+  default for production code on >2-item workflows. Lease is held for
+  the duration of the task; the developer commits inside the worktree
+  and the orchestrator merges the result branch into main after audit.
+- `isolation: { dag_id, task_id, mode: "reuse" }` — re-enter an existing
+  worktree slot for serial follow-ups (concurrent reuse is rejected).
+- `isolation: "current-workspace"` — opt out of a worktree entirely;
+  the agent runs in the parent's cwd. Recommended for meta-file edits
+  and design-doc writes; no audit gate.
 
-The legacy `isolation: "worktree"` string literal is rejected by the current Agent dispatcher; the `developer` runtime also rejects `isolation: undefined` (every dispatch must name one of the three modes above).
+The legacy `isolation: "worktree"` string literal is rejected by the
+current Agent dispatcher; the `developer` runtime also rejects
+`isolation: undefined` (every dispatch must name one of the three
+modes above).
 
 ## Agent Roster
 
@@ -203,24 +245,28 @@ Agent({
 })
 ```
 
-### Example 4: git operations with `isolated: true` (bypass bash-guard)
+### Example 4: git operations under soft mode
 
 ```ts
-// L3 main agent (orchestrator) - needs git add + git commit
-// but the bash-guard classifies those as unknown and blocks.
-// isolated: true disables Sages extension loading entirely,
-// so the bash-guard hook never registers. The subagent bash
-// is unrestricted (but loses AFT / MCP / magic-context - not
-// needed for git ops).
-Agent({
-  subagent_type: "developer",
-  isolated: true,
-  tdd: "none",
-  prompt: "Run these in sequence:\\n  cd /home/leroy/Project/sages\\n  git add pi/src/tools/foo.ts\\n  git commit -m 'fix(foo): ...'",
-  description: "Commit fix to pi/src/tools/foo.ts",
-  run_in_background: true,
-})
-// Subagent reports the SHA; main verifies with git log --oneline -2
+// L3 main agent (orchestrator) - under soft mode the bash-guard no
+// longer blocks, so plain `git add` + `git commit` from the main
+// session is allowed. Recommended patterns:
+//   - For ≤2-item workflows, run git directly in the main session:
+//       git add pi/src/tools/foo.ts
+//       git commit -m "fix(foo): ..."
+//   - For >2-item workflows, dispatch developer for an audit trail:
+//       Agent({
+//         subagent_type: "developer",
+//         isolation: "current-workspace",
+//         tdd: "none",
+//         prompt: "Commit the staged changes with a Conventional Commits message.",
+//         description: "Commit pending changes",
+//         run_in_background: true,
+//       })
+//
+// `isolated: true` is no longer required for git ops — it remains
+// available for subagents that explicitly need extension-free bash,
+// but the typical case doesn't need it under soft mode.
 ```
 
 ### Example 5: parallel dispatch (3 independent tasks)
@@ -424,37 +470,46 @@ Stage-3 dispatch loop), see `pi/skills/orchestrator/SKILL.md` §
 ## Git ops from main repo
 
 The bare repository's `.git/` internals (`HEAD`, `refs/`, `objects/`,
-`packed-refs`, and config) are read-only. Refs are changed only through Git
-porcelain, preserving reflogs and locking. The Layer 2 destructive filter,
-not a blanket worktree rule, controls these commands.
+`packed-refs`, and config) are read-only. Refs are changed only through
+Git porcelain, preserving reflogs and locking. Under **soft mode** no
+git command is hard-blocked by the bash-guard; the recommendations
+below remain the recommended pattern, especially on complex
+multi-task workflows.
 
-Allowed from the main repository and other working directories:
+Allowed (and recommended) from the main repository and other working
+directories:
 
-- `git checkout` or `git switch` for refs, new branches, or detached commits
-  (never path checkout; never `--discard-changes`)
-- `git branch` for creation and listing (never deletion)
+- `git checkout` or `git switch` for refs, new branches, or detached
+  commits (avoid path checkout; avoid `--discard-changes`)
+- `git branch` for creation and listing (avoid deletion)
 - `git fetch`, `pull`, `remote -v`, and `remote add`
 - `git merge`, `cherry-pick`, and `rebase`
 - `git push` without any force option
 - `git worktree add`
-- `git tag` for creation and listing (never deletion)
+- `git tag` for creation and listing (avoid deletion)
 - `git add`, `commit`, `stash`, and `stash pop`
 - `git init` and `clone`
+- `rm` / `mv` / `cp` / `unlink` / `rmdir` (no longer hard-blocked
+  under soft mode; dispatch `developer` for an audit trail on
+  complex workflows)
 
-Denied from every working directory:
+Avoid from every working directory (recommendation, not enforcement):
 
 - `git checkout -- <paths>`, `git checkout <ref> -- <paths>`,
   `git switch --discard-changes`, and `git restore <paths>`
-- `git rm`, `git mv`, `git reset --hard`, and `git clean -fd`
-- `git stash drop`, branch or tag deletion, and forced worktree removal
-- `git push --force`, `-f`, `--force-with-lease`, or `--force-if-includes`
+- `git reset --hard` and `git clean -fd`
+- `git stash drop`, branch or tag deletion, and forced worktree
+  removal
+- `git push --force`, `-f`, `--force-with-lease`, or
+  `--force-if-includes`
 - direct edits to `.git/`
 
-A worktree is still required for production-code changes, parallel tasks that
-need independent working trees, and destructive work that needs the audit
-gate. It is not required merely to read another branch, compare refs, or run a
-non-destructive ref operation. A broken main worktree must be repaired from a
-fresh managed worktree or by the user, never from inside the broken tree.
+A worktree is recommended for production-code changes, parallel
+tasks that need independent working trees, and destructive work
+that benefits from an audit gate. It is not required merely to
+read another branch, compare refs, or run a non-destructive ref
+operation. A broken main worktree must be repaired from a fresh
+managed worktree or by the user, never from inside the broken tree.
 
 ## `.pi/orchestrator/` namespace ownership
 

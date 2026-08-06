@@ -1,53 +1,39 @@
 /**
- * Bash Guard — four-layer command gate, evaluated L1 → L2 → L3 → L4:
- * L1 read allows commands classified read-only; L2 git-meta applies a
- * positive git-subcommand whitelist and rejects destructive variants; L3
- * meta-file-write allows extracted targets in `META_FILE_ALLOWLIST` via
- * `canMainAgentWriteMeta()`; L4 production-code-write denies everything
- * targeting production paths or otherwise unknown. Upper layers allow
- * known-safe operations; L4 requires a developer subagent.
+ * Bash Guard — advisory classifier for bash commands (GC-2026-031 soft mode).
  *
- * The main orchestrator agent must not be able to bypass the
- * `developer` / `auditor` audit gate by issuing
- * raw `bash` commands (`rm`, `mv`, `cp`, `sed -i`, `find -delete`,
- * `git checkout --`, `tar -xf`, redirects, …). The `Agent` tool is
- * the only legitimate path for production-code changes.
+ * Under soft mode, `shouldBlockBashCommand` is a pure classifier that
+ * NEVER blocks: every command returns `{ block: false }`. The historical
+ * four-layer gate (L1 read / L2 git-meta / L3 meta-file-write /
+ * L4 production-code-write) and the destructive-verb short-circuit have
+ * been removed — main-agent bash commands are not gated.
  *
- * This module is a pure classifier + policy helper. The wiring into
- * the `bash` tool's `tool_call` event layer is P2's job; here we
- * expose three functions used by both the wiring and the tests:
+ * The classifier functions remain useful for downstream consumers
+ * (advisory metadata, audit reports, auto-steer reminder decisions in
+ * `extension.ts`):
  *
  *   classifyBashCommand(cmd)  → "read-only" | "write-intent" | "git-meta" | "unknown"
  *   isGitMetaCommand(cmd)     → positive-whitelist `GitMetaVerdict`
  *   extractBashTargets(cmd)   → string[] of paths the command will write
- *   shouldBlockBashCommand(cmd, ctx) → { block, reason? }
+ *   splitChainedCommands(cmd) → string[] of top-level segments
+ *   shouldBlockBashCommand(cmd, ctx) → { block: false }
  *
- * Path policy is delegated to `file-gate.canMainAgentWrite` — this
- * module is the SINGLE consumer of that function for bash. Production
- * code patterns (user `src/`, `test/`, `*.ts`, …) live there. Any
- * change to allow/deny rules happens in one place.
+ * Path policy (`file-gate.canMainAgentWrite` / `canMainAgentWriteMeta`)
+ * is no longer consumed for blocking — but the import is kept for the
+ * classifier's advisory metadata (e.g. `extractBashTargets` callers
+ * may want to know which targets are meta-file paths).
  *
- * Absolute paths (`/tmp/...`, `/var/...`) are treated as
- * outside-the-project and never blocked by this guard — they are
- * governed by the OS layer instead. This is the only place this
- * convention is encoded; `canMainAgentWrite` itself returns false
- * for absolute paths defensively.
- *
- * Chained-command handling (added 2026-07-25): `shouldBlockBashCommand`
- * splits the input on top-level `&&` / `||` / `;` (respecting quotes
- * and paren/brace nesting) via `splitChainedCommands` and walks each
- * segment independently. This defeats the original first-word bypass
- * (`echo done && rm src/foo.ts` no longer slips through because the
- * first word is `echo`). Test coverage: T16–T22 + T23b + T24 in
+ * Chained-command handling (added 2026-07-25): `splitChainedCommands`
+ * splits on top-level `&&` / `||` / `;` (respecting quotes and
+ * paren/brace nesting). Test coverage: T16–T22 + T23b + T24 in
  * `pi/test/tools/bash-guard.test.ts`.
  */
 
 import { isAbsolute, relative, resolve } from "node:path";
 // SC7 single-source-of-truth: import the path policy + the
-// LLM-facing reason from `file-gate`. `policyMessage` is re-exported
-// for callers that want to surface the meta-file denial verbatim;
-// the bash-guard composes its own reason because the bash denial
-// is command-shaped, not path-shaped.
+// LLM-facing reason from `file-gate`. Under soft mode these are no
+// longer consumed by `shouldBlockBashCommand` for blocking — but
+// `policyMessage` is re-exported so callers wiring their own
+// advisory paths can still surface the meta-file rationale verbatim.
 import { canMainAgentWrite, canMainAgentWriteMeta, policyMessage } from "./file-gate.js";
 
 /** Unconditional read-only first-words. */
@@ -64,25 +50,13 @@ const WRITE_INTENT_FIRST_WORDS = new Set([
 ]);
 
 /**
- * Unconditionally destructive first-words — ALWAYS denied, regardless
- * of target path. This restores the pre-GC-2026-015 invariant that
- * the four-layer refactor's L3 meta-file allowlist would otherwise
- * relax (a path like `.pi/orchestrator/foo.md` makes both
- * `canMainAgentWrite` AND `canMainAgentWriteMeta` return true, so
- * `isProductionTarget` returns false and `rm` slips through).
- *
- * Subset of `WRITE_INTENT_FIRST_WORDS`. Non-destructive
- * write-intent commands (`mkdir`, `tee`, `sed`, `perl`, `tar`,
- * `chmod`, …) remain L3-controlled: they're allowed on meta-file
- * paths and denied on production paths via `isProductionTarget`.
- *
- * Anti-goal contract (GC-2026-015): "Do NOT change the existing
- * destructives (`rm`, `mv`, `cp`, `unlink`, `rmdir`) — they stay
- * denied regardless of which layer."
+ * Historical destructive-first-words short-circuit (rm / mv / cp /
+ * unlink / rmdir). Removed under GC-2026-031 soft mode — destructive
+ * commands are no longer hard-blocked. Kept as an empty set so any
+ * downstream consumer that imports the name still resolves; new
+ * consumers should not be added.
  */
-const DESTRUCTIVE_FIRST_WORDS = new Set([
-	"rm", "mv", "cp", "unlink", "rmdir",
-]);
+const DESTRUCTIVE_FIRST_WORDS = new Set<string>();
 
 /**
  * Chain / pipe / redirect / fd operators that terminate a command's
@@ -555,161 +529,37 @@ export function extractBashTargets(command: string): string[] {
 /**
  * Decide whether to block a bash command.
  *
- * Rules (in order):
- *   1. Split into chained segments on top-level `&&` / `||` / `;`.
- *      Walk each segment independently: a write-intent command chained
- *      after a read-only command (e.g. `echo done && rm src/foo.ts`)
- *      still trips the gate. See `splitChainedCommands` for the
- *      segmenter and T16–T22 in `bash-guard.test.ts` for coverage.
- *   2. If ANY segment is write-intent with a denied target → block
- *      with the long reason naming the union of denied targets.
- *   3. If ANY segment is `unknown` with no extractable targets → block
- *      with the short "Unknown bash command; dispatch a subagent or
- *      rephrase with known-safe commands" reason.
- *   4. Otherwise → allow (all segments read-only OR write-intent to
- *      non-production paths).
+ * Soft mode (GC-2026-031): this function NEVER blocks. Every command
+ * returns `{ block: false }`. The classifier functions
+ * (`classifyBashCommand`, `extractBashTargets`, `splitChainedCommands`)
+ * remain available for downstream consumers (advisory metadata, audit
+ * reports) — the bash handler in `extension.ts` uses
+ * `classifyBashCommand` to decide whether to emit the once-per-session
+ * auto-steer reminder.
  *
- * There is no escape hatch. The main agent cannot bypass this gate via
- * `bash`. All file writes (meta-file or production) must go through
- * `Agent` dispatch (`developer` with `tdd: none` for meta-file / design-doc writes; `developer` with managed-worktree isolation for production code). DAG-2026-011 Phase C removed the `general-purpose` helper that previously handled meta-file edits.
- * managed worktree for production code).
+ * Historical behavior (pre-GC-2026-031): the function used to apply a
+ * four-layer gate (L1 read / L2 git-meta / L3 meta-file-write /
+ * L4 production-code-write) plus a destructive-verb short-circuit
+ * (`rm` / `mv` / `cp` / `unlink` / `rmdir` were always denied
+ * regardless of target). Both the gate and the short-circuit are
+ * removed under soft mode. See the test file's "soft mode inverts all
+ * blocks" describe block for the inverted-assertion coverage.
  *
- * The `ctx` parameter is accepted for symmetry with the file-gate
- * `execute*` signatures and to give the wiring a future place to
- * hang absolute-path resolution (e.g. resolving against `ctx.cwd`).
+ * The signature is preserved (`BashGuardDecision`) so downstream
+ * consumers (if any are added later) can read `block: false`
+ * uniformly; the `reason` field is omitted because there is no
+ * blocking rationale.
+ *
+ * The `ctx` parameter is accepted for signature symmetry with the
+ * pre-soft-mode wiring and to give the function a future place to
+ * hang absolute-path resolution without changing callers again.
  */
 export function shouldBlockBashCommand(
-	command: string,
+	_command: string,
 	_ctx: { cwd: string },
 ): BashGuardDecision {
-	const trimmed = command.trimStart();
-
-	// Fail closed on shell grammar that changes execution topology or performs
-	// hidden evaluation. Safe reads remain available as a single command.
-	if (/\r|\n/.test(trimmed)) {
-		return { block: true, reason: "Multiline bash commands are denied; use one documented safe command per call" };
-	}
-	if (/(^|[^|])\|([^|]|$)/.test(trimmed)) {
-		return { block: true, reason: "Shell pipelines are denied because downstream mutation targets cannot be proven" };
-	}
-	if (/\$\(|`/.test(trimmed)) {
-		return { block: true, reason: "Shell command substitution is denied" };
-	}
-	const initialTokens = shellTokens(trimmed);
-	if (initialTokens[0] === "env" && initialTokens.length > 1) {
-		return { block: true, reason: "env command wrappers are denied; invoke a documented safe command directly" };
-	}
-	if (initialTokens[0] === "find" && initialTokens.includes("-exec")) {
-		return { block: true, reason: "find -exec is denied because the executed command can mutate arbitrary targets" };
-	}
-
-	// 1. Split into top-level chained segments (handles &&, ||, ;
-	//    respecting quotes + paren/brace nesting).
-	const segments = splitChainedCommands(trimmed);
-
-	const deniedTargets: string[] = [];
-	const seenDenied = new Set<string>();
-	let sawUnknown = false;
-	let sawWriteWithoutTarget = false;
-
-	for (const seg of segments) {
-		const trimmedSeg = seg.trimStart();
-		if (!trimmedSeg) continue;
-
-		// L2 git-meta: positive-whitelist. Catches git's own
-		// destructive subcommands (git rm / git mv / git checkout -- /
-		// git reset --hard / etc.) BEFORE the destructive
-		// short-circuit below — git's own destructives use the L2
-		// "destructive:" prefix and are explicitly listed in
-		// `isGitMetaCommand`.
-		if (gitTokens(seg)) {
-			const verdict = isGitMetaCommand(seg);
-			if (verdict.allow) continue;
-			return { block: true, reason: verdict.reason };
-		}
-
-		// Destructive-command short-circuit
-		// (GC-2026-015 follow-up — restores pre-existing
-		// invariant). rm/mv/cp/unlink/rmdir are ALWAYS denied
-		// regardless of target path, including L3 meta-file
-		// allowlist hits. The four-layer refactor accidentally
-		// relaxed this: `rm .pi/orchestrator/foo.md` had both
-		// `canMainAgentWrite` AND `canMainAgentWriteMeta` returning
-		// true, so `isProductionTarget` returned false and `rm`
-		// slipped through (anti-goal: "destructives stay denied
-		// regardless of which layer").
-		{
-			const segFirst = trimmedSeg.split(/\s+/, 1)[0]?.toLowerCase();
-			if (segFirst && DESTRUCTIVE_FIRST_WORDS.has(segFirst)) {
-				const preview = trimmedSeg.split(/\s+/).slice(0, 2).join(" ");
-				return {
-					block: true,
-					reason: `destructive: ${preview} (rm/mv/cp/unlink/rmdir are always denied — use Agent to dispatch a developer subagent if meta-file cleanup is needed)`,
-				};
-			}
-		}
-
-		const classification = classifyBashCommand(seg);
-
-		// L1 read-only segment is unconditionally safe.
-		if (classification === "read-only") continue;
-		if (classification === "git-meta") continue;
-
-		// Write-intent segment — check its extracted targets.
-		if (classification === "write-intent") {
-			const targets = extractBashTargets(seg);
-			if (targets.length === 0) {
-				sawWriteWithoutTarget = true;
-				continue;
-			}
-			for (const t of targets) {
-				if (isProductionTarget(t, _ctx.cwd) && !seenDenied.has(t)) {
-					seenDenied.add(t);
-					deniedTargets.push(t);
-				}
-			}
-			continue;
-		}
-
-		// Unknown segment — extract targets and check; also flag
-		// sawUnknown so we can force opt-in below if no denied
-		// targets surface from any segment.
-		const segTargets = extractBashTargets(seg);
-		if (segTargets.length === 0) {
-			sawUnknown = true;
-			continue;
-		}
-		for (const t of segTargets) {
-			if (isProductionTarget(t, _ctx.cwd) && !seenDenied.has(t)) {
-				seenDenied.add(t);
-				deniedTargets.push(t);
-			}
-		}
-	}
-
-	// 2. Any denied target → block with the long reason.
-	if (deniedTargets.length > 0) {
-		return { block: true, reason: formatBlockReason(deniedTargets) };
-	}
-
-	// 3. Write-intent without a proven target is never safe.
-	if (sawWriteWithoutTarget) {
-		return {
-			block: true,
-			reason: "Write-intent bash command has no verifiable target; dispatch a developer subagent",
-		};
-	}
-
-	// 4. Any unknown-no-target segment → block (no escape hatch; main agent must dispatch a subagent or rephrase).
-	if (sawUnknown) {
-		return {
-			block: true,
-			reason: "Unknown bash command; dispatch a subagent via Agent or rephrase with known-safe commands",
-		};
-	}
-
-	// 4. All segments either read-only or write-intent to non-production
-	//    paths (e.g. `/tmp/...`) → allow.
+	// Soft mode: never block. Classifier functions (see above) carry
+	// the policy description; the gate itself is dormant.
 	return { block: false };
 }
 
@@ -722,10 +572,11 @@ export function shouldBlockBashCommand(
  * `||`, or `;`. Respects single quotes, double quotes, backslash
  * escapes, and paren / brace nesting. Empty segments are dropped.
  *
- * Used by `shouldBlockBashCommand` to defeat the chaining bypass where
- * a write-intent command (`rm src/foo.ts`) follows a read-only prefix
- * (`echo done`) and the first-word classifier alone would have let it
- * through.
+ * Used by `classifyBashCommand` indirectly (via `splitChainedCommands`
+ * integration paths in the historical gate) and exported for unit
+ * testing. Under soft mode the gate itself does not call this
+ * function, but downstream consumers (audit reports, advisory
+ * metadata) may use it to walk per-segment intent.
  *
  * Behaviour:
  *   - `echo a && rm b`             → `["echo a", "rm b"]`
@@ -739,8 +590,7 @@ export function shouldBlockBashCommand(
  *     (newlines are NOT separators here — bash treats them as such but
  *      it's rare in tool calls; add if needed)
  *
- * Exported for unit testing; the gate calls it via
- * `shouldBlockBashCommand`.
+ * Exported for unit testing.
  */
 export function splitChainedCommands(command: string): string[] {
 	const segments: string[] = [];
@@ -820,6 +670,11 @@ export function splitChainedCommands(command: string): string[] {
  * Absolute paths (`/tmp/...`, `/var/...`) are treated as outside the
  * project and therefore NOT production targets — OS-level guards
  * apply separately. Relative paths are evaluated by `canMainAgentWrite`.
+ *
+ * Historical helper used by the pre-soft-mode gate to decide whether
+ * to block. Under soft mode the gate never blocks; the helper is kept
+ * for downstream advisory consumers that want a single
+ * `isProductionTarget(t)` answer (e.g. audit reports).
  */
 function isProductionTarget(target: string, cwd: string): boolean {
 	if (!target) return false;
@@ -854,29 +709,8 @@ function hasWriteRedirect(cmd: string): boolean {
 	return WRITE_REDIRECT_PREFIX.test(cmd);
 }
 
-/** Long-form reason for production-target blocks. */
-function formatBlockReason(targets: string[]): string {
-	const listed = targets.join(", ");
-	const lines: string[] = [
-		`bash command targets production code: ${listed}`,
-		"",
-		"Main agent cannot directly modify production code.",
-		"Use the Agent tool to dispatch a developer subagent (with an explicit managed-worktree isolation object):",
-		"  Agent({",
-		'    subagent_type: "developer",',
-		'    prompt: "Implement <change> in <files>. <context>...",',
-		"    run_in_background: true,",
-		"  })",
-		"",
-		"There is no escape hatch. If this command is genuinely safe",
-		"(e.g. writing to /tmp), rephrase the command or dispatch a",
-		"subagent via Agent.",
-	];
-	return lines.join("\n");
-}
-
 // Re-export `policyMessage` from file-gate as a convenience for
-// callers wiring the bash tool's `tool_call` event layer: they can
-// import both the classifier and the canonical reason text from a
-// single module without reaching into file-gate directly.
+// callers wiring their own advisory paths: they can import both the
+// classifier and the canonical rationale text from a single module
+// without reaching into file-gate directly.
 export { policyMessage };

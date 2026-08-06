@@ -22,7 +22,11 @@ For single trivial tasks (one-line edit, single function), do NOT use this skill
 ## Mode Indicator
 
 ```
-**Orchestrator Mode** (Read + delegate, no direct edits to production code)
+**Orchestrator Mode** (Soft mode — GC-2026-031)
+- Main agent has full tool access (edit / write / aft_edit /
+  apply_patch, unrestricted bash). Nothing is blocked.
+- Subagent dispatch is RECOMMENDED for workflows with >2 items
+  in the active todowrite; direct handling is acceptable for ≤2.
 - Stage 1: goal_contract_create → .pi/orchestrator/goal-{id}.yaml
 - Stage 2: dag_synthesize → .pi/orchestrator/dag-{id}.yaml
 - Stage 3: task_dispatch → for each batch: spawn subagents + wait + audit
@@ -48,23 +52,30 @@ implementation dispatch.
 `run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table is the canonical reference; see `pi/templates/SUBAGENTS.md` for full rationale and code examples.
 
 > **DAG-2026-011 Phase C**: the `general-purpose` subagent was removed.
-> Ad-hoc research that doesn't fit a specific role should be done in the
-> main agent's escape mode (the user types `escape-window` to unlock
-> direct write tools) or by combining Stages 1 (`Explore`) and 2
-> (`Plan`). The `developer` agent handles design-doc writes for
-> design tasks; Stages 3-4 are specialised on purpose.
+> Ad-hoc research that doesn't fit a specific role should be done in
+> the main session (soft mode grants full tool access by default) or
+> by combining Stages 1 (`Explore`) and 2 (`Plan`). The `developer`
+> agent handles design-doc writes for design tasks; Stages 3-4 are
+> specialised on purpose.
 
 #Before dispatching Plan, the main agent must supply a self-contained Planning Brief containing Goal, chosen approach/decisions, scope/exclusions, critical files/symbols, acceptance/verification, dependencies/sequencing, and known risks/open questions. Plan compiles it; incomplete decisions remain with the main agent.
 
-## When each stage is required
+## When each stage is recommended
 
-| Task shape                                  | Required stages              |
+Under soft mode no stage is required. The table below is the
+recommended routing, anchored to the task-count threshold:
+
+| Task shape                                  | Recommended stages (for >2 todowrite items) |
 |----------------------------------------------|------------------------------|
 | Single trivial edit (one-line fix, typo)     | none — edit directly         |
 | Pure research question ("where is X?")       | 1 (`Explore`)                |
 | Architectural decision, no code change       | 1 → 2                        |
 | Refactor with existing plan                  | 3 (skip 1+2)                 |
 | New feature / multi-file / multi-decision    | 1 → 2 → 3 → 4                |
+
+For workflows with **≤2 items** in the active todowrite you may
+handle directly with `edit` / `write` / `bash` in the main
+session — no DAG is required.
 
 **Shortcuts** (skipping research/planning): only when the user provides explicit concrete requirements (file paths, exact change) — never guess what "the user means" in stage 1's place.
 
@@ -165,7 +176,7 @@ don't guess. For DAG dispatch, set `task_template: "subagent-git-expert"`
 use `subagent_type: "git-expert"`. Full brief format and recognized
 scenarios in `pi/templates/SUBAGENTS.md` § "Git Expert".
 
-> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains unrestricted bash (no bash-guard hook). Use this only when the task is git ops or other direct-bash work that bash-guard would block. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, dispatch the task in the main session's escape mode (the user types `escape-window`) or use the `auditor` agent with `isolated: true`.
+> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains extension-free bash. Under soft mode the bash-guard no longer blocks, so `isolated: true` is rarely needed; it remains available for subagents that explicitly require extension-free execution. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, handle directly in the main session (soft mode grants full tool access) or use the `auditor` agent with `isolated: true`.
 
 ### Parallelism
 
@@ -491,11 +502,16 @@ Template substitution uses `{{var}}` for variables and `{{#if var}}...{{else}}..
 
 ## Subagent Boundaries
 
-You do NOT:
-- Edit production code (delegate to `developer`)
+Under soft mode these are guidelines, not hard rules. The
+recommended pattern remains the 4-stage DAG workflow for
+>2-item workflows.
+
+You do NOT (recommended):
+- Edit production code directly when your active todowrite has
+  >2 items (dispatch `developer` with managed worktree instead)
 - Re-decompose after dispatch (use steer_subagent or re-run with force)
 - Override the goal contract without user re-prompt
-- Skip stages (always go 1 → 2 → 3 → 4)
+- Skip stages when complexity warrants (recommended: 1 → 2 → 3 → 4)
 
 You DO:
 - Read + analyze (your job)
@@ -503,6 +519,9 @@ You DO:
 - Run orchestrator_audit on each batch
 - Surface mid-run drift to user
 - Decide retry vs replan on subagent failure
+
+For ≤2-item workflows, direct `edit` / `write` / `bash` in the main
+session is also acceptable. Nothing is blocked.
 
 ## Failure Recovery
 
