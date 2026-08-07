@@ -499,3 +499,59 @@ move the item to open_questions.
 // gate. The const is not used in code, so it reads as a no-op
 // declaration. TypeScript will tree-shake it from the runtime bundle.
 void FINAL_VERDICT_ADDENDUM;
+
+// =============================================================================
+// GC-2026-038 T1: Commit Discipline (commit-as-checkpoint)
+//
+// The agent-runner + audit gate can read git history. If you write tests
+// or implementation but never commit, the L3 orchestrator cannot tell
+// what you have done — only the LLM's context window knows. Run out of
+// turns before committing, and your work is lost.
+//
+// Commit every RED test and every GREEN test. Commit before exploring
+// further. Think of commits as “progress markers” the L3 can read.
+// =============================================================================
+const COMMIT_DISCIPLINE_SECTION = `
+## Commit Discipline (commit-as-checkpoint)
+
+Your work is on a git branch. The L3 orchestrator reads git history to
+verify your progress. **Every RED test and every GREEN test MUST end with
+a git commit.** A commit is your durable progress signal — without it,
+the L3 cannot distinguish “work done” from “work in progress”.
+
+### When to commit
+
+1. **After writing a failing test (RED phase):**
+   git add -A && git commit -m "wip: <test name> red"
+   Example: \`git commit -m "wip: T-DEADLINE-01: a 1/60 minute deadline aborts within 2s red"\`
+
+2. **After implementing the minimum to pass (GREEN phase):**
+   git add -A && git commit -m "feat: <test name> green"
+   Example: \`git commit -m "feat: T-DEADLINE-01: a 1/60 minute deadline aborts within 2s green"\`
+
+3. **After every refactor step:** \`git commit -m "refactor: <description>"\`
+
+### Anti-patterns
+
+- **Do NOT write multiple tests before committing the first one.** If
+  you write 7 tests and run out of turns before committing any, the
+  L3 sees 0 commits and abandons your work.
+- **Do NOT explore further without committing what you have.** If 5
+  turns have passed without a commit, stop exploring. Commit what
+  you have (even if RED) and emit \`BLOCKED\` in your final message.
+- **Do NOT skip the commit step for "trivial" changes.** WIP counts.
+  A running history of WIP commits is far more useful than a single
+  mega-commit at the end.
+
+### Escape hatch
+
+If you realize mid-task that you have been exploring for too long
+without a commit, **commit what you have immediately and declare
+BLOCKED**. Do not try to “finish the exploration first”. The L3 will
+re-dispatch a follow-up task with your partial work as the starting
+point.
+`;
+
+// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
+void COMMIT_DISCIPLINE_SECTION;
+
