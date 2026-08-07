@@ -43,6 +43,28 @@ import {
   atomicWriteOrchestratorText,
 } from "./state-persistence.js";
 import { loadPlan } from "./dag-synthesizer.js";
+// GC-2026-039: Runtime enforcement. The full extractAuditFindings
+// parser lives in pi-subagents/src/agent-runner.ts (5 rules). Calling
+// it from pi/orchestrator-audit.ts would require a cross-package
+// import, but pi/tsconfig.json's rootDir restriction blocks it
+// (TS6059). Instead, we run an inline check on the task report
+// text: 3 lightweight rules that catch the most common governance
+// violations without the full parser. For the full parser, the
+// audit can be re-run from pi-subagents/tests.
+//
+// This inline check is intentionally a SUBSET of extractAuditFindings
+// in pi-subagents. Keep them in sync when adding new rules.
+// GC-2026-039: Runtime enforcement. The full extractAuditFindings
+// parser lives in pi-subagents/src/agent-runner.ts (5 rules). Calling
+// it from pi/orchestrator-audit.ts would require a cross-package
+// import, but pi/tsconfig.json's rootDir restriction blocks it
+// (TS6059). Instead, we run an inline check on the task report
+// text: 3 lightweight rules that catch the most common governance
+// violations without the full parser. For the full parser, the
+// audit can be re-run from pi-subagents/tests.
+//
+// This inline check is intentionally a SUBSET of extractAuditFindings
+// in pi-subagents. Keep them in sync when adding new rules.
 
 const COMPLETE_OBSERVATION = Type.Object({
   verdict: Type.Union([Type.Literal("PASS"), Type.Literal("REVISE"), Type.Literal("REJECT")]),
@@ -301,14 +323,31 @@ async function initAudit(
   const reports = readAuditReports(cwd, tasks);
   const workflowSummary = aggregateTaskAudits(tasks, reports);
 
+  // GC-2026-039: Runtime enforcement. Read each task's report and run
+  // the inline governance check. This catches BLOCKED-no-reason, missing
+  // YAML block, and stuck-checkpoint patterns that the per-task audit
+  // may have missed. The findings are surfaced as audit-gate warnings;
+  // they do NOT block the audit (workflowReady stays as the auditor's
+  // verdict) but they trigger the L3 to record additional findings.
+  const taskReports = readTaskReports(cwd, tasks);
+  const inlineFindings: Array<{ task_id: string; rule: string; severity: "minor" | "major" | "critical"; issue: string; evidence: string; recommendation: string }> = [];
+  for (const t of tasks) {
+    const report = taskReports.get(t.id);
+    if (report == null) continue;
+    const findings = runInlineGovernanceCheck(t.id, report);
+    for (const f of findings) {
+      inlineFindings.push({ task_id: t.id, ...f });
+    }
+  }
+
   return {
     content: [{ type: "text", text: JSON.stringify({
       status: "in_progress",
       phase: "audit-init",
-      intent: `Audit initialized for ${tasks.length} task(s). workflowReady=${workflowSummary.workflowReady}. ${workflowSummary.blockingTasks.length > 0 ? `Blocking: ${workflowSummary.blockingTasks.join(", ")}. Run any remaining tasks + audits, then record findings (≥${findingsRequiredMin(depth)} required) and complete.` : "All tasks certified — record findings (≥" + findingsRequiredMin(depth) + " required for fast depth) and complete."}`,
+      intent: `Audit initialized for ${tasks.length} task(s). workflowReady=${workflowSummary.workflowReady}. ${workflowSummary.blockingTasks.length > 0 ? `Blocking: ${workflowSummary.blockingTasks.join(", ")}. Run any remaining tasks + audits, then record findings (≥${findingsRequiredMin(depth)} required) and complete.` : "All tasks certified — record findings (≥" + findingsRequiredMin(depth) + " required for fast depth) and complete."}` + (inlineFindings.length > 0 ? ` GC-2026-039 runtime enforcement surfaced ${inlineFindings.length} finding(s); the L3 should record them via the observation.findings array.` : ""),
       validation: {
         errors: workflowSummary.workflowReady ? [] : [`tasks not yet certified: ${workflowSummary.blockingTasks.join(", ")}`],
-        warnings: [],
+        warnings: inlineFindings.length > 0 ? [`GC-2026-039: ${inlineFindings.length} runtime enforcement finding(s) surfaced — see inline_findings`]: [],
         files_required: [auditStatePath(cwd, plan.id)],
         findings_required_min: findingsRequiredMin(depth),
       },
@@ -316,6 +355,7 @@ async function initAudit(
       phases,
       phase_guidance: phaseGuidance,
       workflow_summary: workflowSummary,
+      inline_findings: inlineFindings,
       tasks_to_audit: tasks.map(t => ({
         id: t.id,
         description: t.description,
@@ -660,20 +700,106 @@ export function parseAuditReport(
  * LLM can see at a glance whether the workflow is ready to finalize.
  */
 export function aggregateTaskAudits(
-  tasks: TaskNode[],
-  reports: Map<string, string | null>,
+	tasks: TaskNode[],
+	reports: Map<string, string | null>,
 ): WorkflowAuditSummary {
-  const summaries: TaskAuditSummary[] = tasks.map((t) =>
-    parseAuditReport(t.id, reports.get(t.id) ?? null),
-  );
-  const blockingTasks = summaries
-    .filter((s) => !s.has_report || s.verdict !== "CERTIFIED")
-    .map((s) => s.task_id);
-  return {
-    tasks: summaries,
-    workflowReady: blockingTasks.length === 0,
-    blockingTasks,
-  };
+	const summaries: TaskAuditSummary[] = tasks.map((t) =>
+		parseAuditReport(t.id, reports.get(t.id) ?? null),
+	);
+	const blockingTasks = summaries
+		.filter((s) => !s.has_report || s.verdict !== "CERTIFIED")
+		.map((s) => s.task_id);
+	return {
+		tasks: summaries,
+		workflowReady: blockingTasks.length === 0,
+		blockingTasks,
+	};
+}
+
+/**
+ * GC-2026-039: Inline governance check on the agent's task report.
+ *
+ * The full extractAuditFindings parser lives in pi-subagents (5 rules).
+ * The orchestrator cannot statically import it (rootDir restriction
+ * in pi/tsconfig.json produces TS6059). This inline implementation is
+ * a SUBSET covering the 3 most-common violations:
+ *
+ *   - inline_no_commits_block: the task report shows BLOCKED status but
+ *     does not list any commits AND no open_questions.
+ *   - inline_yaml_block_missing: the task report has no parseable
+ *     ```yaml``` fenced block.
+ *   - inline_checkpoint_stuck: 2+ checkpoints in the report with
+ *     the same commit count (no-progress pattern).
+ *
+ * When this gate fires, the orchestrator_audit tool surfaces the
+ * finding in the audit report. The L3 then knows to re-dispatch or
+ * escalate.
+ *
+ * The inline check is intentionally lightweight; the full parser in
+ * pi-subagents/tests/audit-findings.test.ts is the source of truth
+ * for rule definitions. If you add a rule to extractAuditFindings,
+ * mirror it here.
+ */
+export function runInlineGovernanceCheck(
+	taskId: string,
+	taskReportText: string,
+): Array<{ rule: string; severity: "minor" | "major" | "critical"; issue: string; evidence: string; recommendation: string }> {
+	const findings: Array<{ rule: string; severity: "minor" | "major" | "critical"; issue: string; evidence: string; recommendation: string }> = [];
+
+	// Rule: yaml_block_missing — no ```yaml fenced block.
+	const hasYamlBlock = /```yaml[\s\S]+?```/.test(taskReportText);
+	if (!hasYamlBlock) {
+		findings.push({
+			rule: "inline_yaml_block_missing",
+			severity: "major",
+			issue: `task ${taskId} report has no parseable YAML block; L3 cannot verify deliverables mechanically`,
+			evidence: "no ```yaml fence found",
+			recommendation:
+				"task report must include ```yaml block with status / deliverables / test_results / open_questions",
+		});
+	}
+
+	// Rule: checkpoint_stuck — 2+ checkpoints with same commit count.
+	const checkpointLines = [
+		...taskReportText.matchAll(
+			/\[checkpoint\s+\d+\/\d+\s+turns,\s+[\d.mhs]+\]\s+[\s\S]+?\s+(\d+)\s+commits?/gi,
+		),
+	];
+	if (checkpointLines.length >= 2) {
+		const counts = checkpointLines.map((m) => Number.parseInt(m[1] ?? "0", 10));
+		const last = counts[counts.length - 1];
+		const prev = counts[counts.length - 2];
+		if (last !== undefined && prev !== undefined && last === prev) {
+			findings.push({
+				rule: "inline_checkpoint_stuck",
+				severity: "major",
+				issue: `task ${taskId} has 2 consecutive checkpoints with same commit count (${last}); agent is stuck on exploration`,
+				evidence: `last 2 checkpoints both report ${last} commits`,
+				recommendation:
+					"agent should declare BLOCKED with open_questions; L3 should re-dispatch with narrower scope",
+			});
+		}
+	}
+
+	// Rule: blocked_no_reason — status=blocked but no open_questions AND no commits.
+	const blockedStatus = /^\s*status:\s*blocked\s*$/m.test(taskReportText);
+	if (blockedStatus) {
+		const hasCommits = /^\s*commits:\s*\[[^\]]+\]/m.test(taskReportText);
+		const hasOpenQuestions =
+			/^\s*open_questions:\s*[\s\S]+?-\s*question:/m.test(taskReportText);
+		if (!hasCommits && !hasOpenQuestions) {
+			findings.push({
+				rule: "inline_blocked_no_reason",
+				severity: "minor",
+				issue: `task ${taskId} is BLOCKED but has no commits and no open_questions; L3 cannot unblock without a reason`,
+				evidence: "status=blocked + empty commits + empty open_questions",
+				recommendation:
+					"task report must describe what's missing in open_questions when declaring BLOCKED",
+			});
+		}
+	}
+
+	return findings;
 }
 
 /**
@@ -684,20 +810,46 @@ export function aggregateTaskAudits(
  * auditor's per-task reports rather than re-running the audit.
  */
 function readAuditReports(cwd: string, tasks: TaskNode[]): Map<string, string | null> {
-  const reports = new Map<string, string | null>();
-  for (const t of tasks) {
-    const path = taskAuditPath(cwd, t.id);
-    if (existsSync(path)) {
-      try {
-        reports.set(t.id, readFileSync(path, "utf-8"));
-      } catch {
-        reports.set(t.id, null);
-      }
-    } else {
-      reports.set(t.id, null);
-    }
-  }
-  return reports;
+	const reports = new Map<string, string | null>();
+	for (const t of tasks) {
+		const path = taskAuditPath(cwd, t.id);
+		if (existsSync(path)) {
+			try {
+				reports.set(t.id, readFileSync(path, "utf-8"));
+			} catch {
+				reports.set(t.id, null);
+			}
+		} else {
+			reports.set(t.id, null);
+		}
+	}
+	return reports;
+}
+
+/**
+ * GC-2026-039: Read each task's report (task-{id}-report.md) for
+ * runtime enforcement checks. Returns a map keyed by task id; missing
+ * or unreadable files map to null.
+ *
+ * The task report is what the sub-agent developer (or L3 fallback)
+ * writes at the end of a task. It contains the agent's last message
+ * embedded in markdown + a structured summary by the L3.
+ */
+function readTaskReports(cwd: string, tasks: TaskNode[]): Map<string, string | null> {
+	const reports = new Map<string, string | null>();
+	for (const t of tasks) {
+		const path = join(cwd, ".pi", "orchestrator", `task-${t.id}-report.md`);
+		if (existsSync(path)) {
+			try {
+				reports.set(t.id, readFileSync(path, "utf-8"));
+			} catch {
+				reports.set(t.id, null);
+			}
+		} else {
+			reports.set(t.id, null);
+		}
+	}
+	return reports;
 }
 
 /**
