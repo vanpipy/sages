@@ -24,6 +24,40 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isSymlink, isUnsafeName, safeReadFile } from "./memory.js";
+import { inc as profileInc } from "./profile.js";
+
+const SKILL_CACHE_TTL_MS = 5 * 60 * 1000;
+
+interface SkillCacheEntry {
+	loadedAt: number;
+	content: string;
+}
+
+const skillCache = new Map<string, SkillCacheEntry>();
+
+/** Test-only helper. */
+export function _getSkillCacheSize(): number {
+	return skillCache.size;
+}
+
+/** Test-only helper. */
+export function _clearSkillCache(): void {
+	skillCache.clear();
+}
+
+function skillCacheKey(cwd: string, name: string): string {
+	return `${cwd}::${name}`;
+}
+
+function touchCache(
+	cwd: string,
+	name: string,
+	content: string,
+	loadedAt: number,
+): string {
+	skillCache.set(skillCacheKey(cwd, name), { loadedAt, content });
+	return content;
+}
 
 export interface PreloadedSkill {
 	name: string;
@@ -40,10 +74,20 @@ export function preloadSkills(
 	}));
 }
 
-function loadSkillContent(name: string, cwd: string): string {
+export function loadSkillContent(name: string, cwd: string): string {
 	if (isUnsafeName(name)) {
 		return `(Skill "${name}" skipped: name contains path traversal characters)`;
 	}
+
+	const cacheKey = skillCacheKey(cwd, name);
+	const cached = skillCache.get(cacheKey);
+	const now = Date.now();
+	if (cached && now - cached.loadedAt < SKILL_CACHE_TTL_MS) {
+		profileInc("skill_preload_hit");
+		return cached.content;
+	}
+	profileInc("skill_preload_miss");
+
 	const roots = [
 		join(cwd, ".pi", "skills"), // project — Pi standard
 		join(cwd, ".agents", "skills"), // project — Agent Skills spec
@@ -53,9 +97,14 @@ function loadSkillContent(name: string, cwd: string): string {
 	];
 	for (const root of roots) {
 		const content = findInRoot(root, name);
-		if (content !== undefined) return content;
+		if (content !== undefined) return touchCache(cwd, name, content, now);
 	}
-	return `(Skill "${name}" not found in .pi/skills/, .agents/skills/, or global skill locations)`;
+	return touchCache(
+		cwd,
+		name,
+		`(Skill "${name}" not found in .pi/skills/, .agents/skills/, or global skill locations)`,
+		now,
+	);
 }
 
 function findInRoot(root: string, name: string): string | undefined {
