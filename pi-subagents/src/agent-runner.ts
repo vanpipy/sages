@@ -1010,6 +1010,15 @@ export async function runAgent(
 	// Boundary for the history fallback: only assistant text produced from here
 	// on counts as this run's output (a fresh session, so usually 0).
 	const startLen = session.messages.length;
+
+	// GC-2026-042: Per-dispatch advisory state. We track which rules have
+	// already been advised and how many advisories we've sent, so the
+	// advisoryFor helper can dedup and cap per-dispatch.
+	const advisoryCtx: AdvisoryContext = {
+		alreadyAdvisedRules: new Set<string>(),
+		advisoriesSent: 0,
+	};
+
 	try {
 		await session.prompt(effectivePrompt);
 	} catch (err) {
@@ -1028,6 +1037,31 @@ export async function runAgent(
 		unsubTurns();
 		collector.unsubscribe();
 		cleanupAbort();
+	}
+
+	// GC-2026-042: Inject governance advisories after the first prompt
+	// response. We check the assistant's last text for governance
+	// violations; if any major/critical findings would surface in the
+	// audit gate, we send an advisory as a follow-up user message and
+	// let the agent correct. Per-dispatch cap of 2 advisories; dedup by
+	// rule name (no rule is advised twice).
+	if (!aborted) {
+		const firstText = collector.getText().trim() ||
+			getLastAssistantText(session, startLen);
+		const advisories = advisoryFor(firstText, advisoryCtx);
+		for (const advisory of advisories) {
+			try {
+				await session.prompt(advisory);
+				advisoryCtx.advisoriesSent += 1;
+				advisoryCtx.alreadyAdvisedRules; // (read marker; dedup is via AdvisoryContext)
+				const emittedRule = extractAdvisoryRule(advisory);
+				if (emittedRule) advisoryCtx.alreadyAdvisedRules.add(emittedRule);
+			} catch {
+				// best-effort; if the second prompt fails, the audit gate
+				// catches the violation regardless.
+				break;
+			}
+		}
 	}
 
 	const responseText =
@@ -2010,4 +2044,99 @@ export function extractAuditFindings(
 	findings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
 
 	return findings;
+}
+
+// =============================================================================
+// GC-2026-042: Advisory mechanism — pre-message governance warnings.
+//
+// The agent only learns about governance violations AFTER the final
+// message (via the audit gate). This is too late to correct. The
+// advisory mechanism injects warnings into the agent's context DURING
+// the run, so the agent can fix the violation in the next turn.
+//
+// The advisory is gated by:
+//   - Severity filter: only major + critical findings produce advisories.
+//     Minor findings (e.g. "you forgot a comma") are noise.
+//   - Dedup: same rule name does not produce 2 advisories in the same
+//     dispatch. The dispatcher tracks a Set<string> of advised rules.
+//   - Per-dispatch cap: max 2 advisories per dispatch. Beyond that, the
+//     audit gate catches the rest (no need to spam the agent).
+//   - Per-advisory token cap: 200 tokens. We approximate tokens as
+//     text.length / 4 (close enough for advisory text; not a precise
+//     tokenizer). The advisory is truncated if it would exceed the cap.
+//
+// The advisory is text-only and is appended as a synthetic user message
+// between the agent's tool call and the next turn. The agent reads it
+// and decides whether to act on it (commit, add YAML, etc.).
+// =============================================================================
+
+/** Approximate tokens: text.length / 4. */
+function approxTokens(text: string): number {
+	return Math.ceil(text.length / 4);
+}
+
+/** Truncate a string to fit within the token cap. Adds "..." when truncated. */
+function truncateToTokens(text: string, maxTokens: number): string {
+	const maxChars = maxTokens * 4;
+	if (text.length <= maxChars) return text;
+	return text.slice(0, Math.max(0, maxChars - 3)) + "...";
+}
+
+export interface AdvisoryContext {
+	/** Rules already advised in this dispatch. Used to suppress duplicates. */
+	alreadyAdvisedRules: Set<string>;
+	/** Number of advisories already sent in this dispatch. */
+	advisoriesSent: number;
+}
+
+export const ADVISORY_MAX_TOKENS = 200;
+export const ADVISORY_MAX_PER_DISPATCH = 2;
+export const ADVISORY_MIN_SEVERITY: "major" | "critical" = "major";
+
+/**
+ * Build advisory strings for the agent. Returns 0-2 advisory strings,
+ * each capped at ADVISORY_MAX_TOKENS tokens. Filters:
+ *   - severity: only major+critical
+ *   - dedup: skip rules already in ctx.alreadyAdvisedRules
+ *   - cap: at most ADVISORY_MAX_PER_DISPATCH advisories per call
+ *   - token cap: per-advisory text is truncated to ADVISORY_MAX_TOKENS
+ *
+ * Format: [orchestrator audit advisory — N/M] <rule>: <issue>. Fix: <recommendation>.
+ */
+export function advisoryFor(
+	agentMessage: string,
+	ctx: AdvisoryContext = {
+		alreadyAdvisedRules: new Set<string>(),
+		advisoriesSent: 0,
+	},
+): string[] {
+	if (ctx.advisoriesSent >= ADVISORY_MAX_PER_DISPATCH) return [];
+
+	const findings = extractAuditFindings(agentMessage, "");
+	// Filter: severity ≥ major AND not already advised AND not at cap.
+	const eligible = findings.filter(
+		(f) =>
+			(f.severity === "major" || f.severity === "critical") &&
+			!ctx.alreadyAdvisedRules.has(f.rule) &&
+			ctx.advisoriesSent < ADVISORY_MAX_PER_DISPATCH,
+	);
+
+	const out: string[] = [];
+	for (const f of eligible) {
+		if (ctx.advisoriesSent + out.length >= ADVISORY_MAX_PER_DISPATCH) break;
+		const n = ctx.advisoriesSent + out.length + 1;
+		const total = Math.min(eligible.length, ADVISORY_MAX_PER_DISPATCH);
+		const advisory = `[orchestrator audit advisory — ${n}/${total}] ${f.rule}: ${f.issue}. Fix: ${f.recommendation}`;
+		const capped = truncateToTokens(advisory, ADVISORY_MAX_TOKENS);
+		out.push(capped);
+	}
+
+	return out;
+}
+
+// Helper: parse the rule name out of an advisory string for dedup.
+// Format: "[orchestrator audit advisory — N/M] <rule>: <issue>. Fix: <recommendation>"
+function extractAdvisoryRule(advisory: string): string | null {
+	const m = advisory.match(/^\[orchestrator audit advisory — \d+\/\d+\] ([a-z_]+):/);
+	return m ? (m[1] ?? null) : null;
 }
