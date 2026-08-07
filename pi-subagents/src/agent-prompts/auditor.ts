@@ -275,3 +275,45 @@ EVIDENCE: typecheck 0 errors, lint 0 warnings, 14/14 tests pass, SC1-SC5 all PAS
 CONCERNS: UserRepository.findByEmail() not covered by tests (test gap, not a fail)
 \`\`\`
 `;
+
+const FINAL_VERDICT_ADDENDUM = `
+## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
+
+Your final message MUST contain a single YAML fenced block at the end.
+The L3 orchestrator parses it mechanically; a missing or malformed
+block fails the audit gate.
+
+\`\`\`yaml
+status: completed | blocked | partial
+deliverables:
+  files_changed: ["path/relative-to-repo", ...]
+  commits: ["sha1", "sha2", ...]
+  tests_added: ["path::test_name", ...]
+test_results:
+  pass: <number>
+  fail: <number>
+  fail_details:  # optional
+    - file: "test/foo.test.ts"
+      test: "edge case"
+      message: "expected 0 got 1"
+open_questions: []  # optional
+handoff_for_next_task: []  # optional
+\`\`\`
+
+Status values (choose the most honest):
+- completed: every SC verified CERTIFIED, every acceptance_cmd passes.
+- blocked: cannot verify; open_questions describes what is missing.
+- partial: some SCs CERTIFIED, some NEEDS WORK; fail_details lists issues.
+
+Field semantics:
+- files_changed: paths relative to the audited branch's repo root.
+- fail_details: one entry per unverified SC or failing test.
+- open_questions: blocking questions for the L3.
+
+The L3 verifies the YAML against the actual bun test and bun run
+typecheck output. If your YAML says pass: 5 but the test output shows
+4 passing, the audit gate REJECTS the dispatch.
+`;
+
+// See developer.ts for the void FINAL_VERDICT_ADDENDUM rationale.
+void FINAL_VERDICT_ADDENDUM;

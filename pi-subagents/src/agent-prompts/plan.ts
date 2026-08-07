@@ -138,3 +138,30 @@ Missing:
 - Do not propose trade-offs or "consider X vs Y" alternatives — the main agent already chose.
 - Do not request a broader scope than the brief names.
 `;
+
+const FINAL_VERDICT_ADDENDUM = `
+## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
+
+Your final message MUST contain a single YAML fenced block at the end.
+Plan tasks produce a design, not code, so the block is mostly status:
+completed with a list of files you created or read.
+
+\`\`\`yaml
+status: completed | blocked | partial
+deliverables:
+  files_changed: [".pi/orchestrator/designs/2026-XX-XX-foo.md", ...]
+test_results:
+  pass: 0
+  fail: 0
+open_questions: []  # optional
+handoff_for_next_task: []  # optional
+\`\`\`
+
+Status values (choose the most honest):
+- completed: every SC verified CERTIFIED.
+- blocked: cannot verify; open_questions describes what is missing.
+- partial: some SCs CERTIFIED, some NEEDS WORK; fail_details lists the issues.
+
+Reminder: Plan is bounded by a 5-minute wall-clock deadline (per GC-2026-037 T1).
+Do not explore; commit to a plan early.
+`;
