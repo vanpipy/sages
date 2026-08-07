@@ -156,6 +156,15 @@ interface SpawnOptions {
 	 * back to a tmpdir copy).
 	 */
 	managedWorktree?: ManagedWorktreeRequest;
+	/**
+	 * GC-2026-037 T3: per-dispatch override for network access. When true,
+	 * `runAgent` wraps `pi.exec()` to allow network commands (git fetch,
+	 * curl, npm install, etc.). When false or undefined, the per-type
+	 * default from `getNetworkAllowedDefault(type)` applies. Setting this
+	 * to true explicitly (vs. relying on the default) is the recommended
+	 * pattern when the LLM/caller knows network is needed.
+	 */
+	network_allowed?: boolean;
 }
 
 export class AgentManager {
