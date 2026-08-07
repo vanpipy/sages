@@ -2115,6 +2115,24 @@ handoff_for_next_task: []
 \`\`\``;
 
 /**
+ * Per-rule actionable fix text. Generic recommendations in extractAuditFindings
+ * describe the problem in general terms; this map tells the LLM exactly what
+ * to do (shell command, YAML fragment). Compact (30-100 tokens per rule).
+ */
+export const RULE_FIX_DIRECTIVES: Record<string, string> = {
+	missing_yaml_block:
+		"emit a ```yaml ... ``` block at the end of your message (schema below)",
+	completed_no_commits:
+		"run `git log --oneline -5 --format=%H` and put the SHAs in YAML as: commits: [\"sha1\", \"sha2\", ...]",
+	checkpoint_stuck_pattern:
+		"either (a) commit work now: `git add -A && git commit -m \"wip: <task>\"`, or (b) change YAML status to \"blocked\" and explain in open_questions",
+	ask_unanswered:
+		"add the <ASK> question to YAML open_questions as: open_questions: [{question: \"...\", why_blocking: true}]",
+	blocked_without_reason:
+		"add a non-empty open_questions array describing what's missing (e.g. `open_questions: [{question: \"what API?\", why_blocking: true}]`)",
+};
+
+/**
  * Build advisory strings for the agent. Returns 0-2 advisory strings,
  * each capped at ADVISORY_MAX_TOKENS tokens (or ADVISORY_MAX_TOKENS_WITH_SCHEMA
  * when the schema template is included). Filters:
@@ -2125,8 +2143,11 @@ handoff_for_next_task: []
  *   - schema template (optional): when enabled AND finding is
  *     missing_yaml_block, the YAML schema is appended to the advisory so
  *     the agent knows what to emit.
+ *   - per-rule fix directive (always): the fix text in the advisory is
+ *     pulled from RULE_FIX_DIRECTIVES (actionable shell command) instead
+ *     of the generic f.recommendation.
  *
- * Format: [orchestrator audit advisory — N/M] <rule>: <issue>. Fix: <recommendation>.
+ * Format: [orchestrator audit advisory — N/M] <rule>: <issue>. Fix: <directive>.
  * Optional schema appended after the issue/fix line.
  */
 export interface AdvisoryOptions {
@@ -2161,7 +2182,10 @@ export function advisoryFor(
 		if (ctx.advisoriesSent + out.length >= ADVISORY_MAX_PER_DISPATCH) break;
 		const n = ctx.advisoriesSent + out.length + 1;
 		const total = Math.min(eligible.length, ADVISORY_MAX_PER_DISPATCH);
-		let advisory = `[orchestrator audit advisory — ${n}/${total}] ${f.rule}: ${f.issue}. Fix: ${f.recommendation}`;
+		// Per-rule actionable fix directive (replaces the generic f.recommendation).
+		// Falls back to f.recommendation if the rule is not in the map.
+		const fixText = RULE_FIX_DIRECTIVES[f.rule] ?? f.recommendation;
+		let advisory = `[orchestrator audit advisory — ${n}/${total}] ${f.rule}: ${f.issue}. Fix: ${fixText}`;
 		// Schema template only for missing_yaml_block (LLM needs the format)
 		if (includeSchema && f.rule === "missing_yaml_block") {
 			advisory += `\n\nRequired YAML schema (copy this verbatim):\n${ADVISORY_YAML_SCHEMA}`;
