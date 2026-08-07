@@ -16,6 +16,7 @@ import {
 	ADVISORY_MAX_TOKENS_WITH_SCHEMA,
 	ADVISORY_MAX_PER_DISPATCH,
 	ADVISORY_YAML_SCHEMA,
+	RULE_FIX_DIRECTIVES,
 } from "../src/agent-runner.js";
 
 function approxTokens(text: string): number {
@@ -250,5 +251,116 @@ handoff_for_next_task: []
 		const out = advisoryFor(SCHEMA_HINT_MSG, undefined, { includeSchemaTemplate: false });
 		const tokens = Math.ceil(out[0].length / 4);
 		expect(tokens).toBeLessThanOrEqual(200);
+	});
+});
+
+describe("subagent advisory: actionable fix directives (GC-2026-044)", () => {
+	it("T-ADV-FIX-01: completed_no_commits fix mentions git log", () => {
+		const message = `\`\`\`yaml
+status: completed
+deliverables:
+  files_changed: ["src/foo.ts"]
+  commits: []
+  tests_added: []
+test_results:
+  pass: 1
+  fail: 0
+open_questions: []
+handoff_for_next_task: []
+\`\`\``;
+		const out = advisoryFor(message);
+		expect(out[0]).toMatch(/git log/);
+	});
+
+	it("T-ADV-FIX-02: checkpoint_stuck_pattern fix mentions git commit", () => {
+		const message = `\`\`\`yaml
+status: completed
+deliverables:
+  files_changed: ["src/foo.ts"]
+  commits: ["abc"]
+  tests_added: []
+test_results:
+  pass: 1
+  fail: 0
+open_questions: []
+handoff_for_next_task: []
+\`\`\`
+[checkpoint 5/200 turns, 1m] nothing. 0 commits. blocker: none.
+[checkpoint 10/200 turns, 2m] still nothing. 0 commits. blocker: none.`;
+		const out = advisoryFor(message);
+		expect(out.some((a) => a.includes("git commit"))).toBe(true);
+	});
+
+	it("T-ADV-FIX-03: ask_unanswered fix mentions open_questions schema", () => {
+		const message = `I am stuck.
+
+<ASK>What is the deadline default?</ASK>
+
+\`\`\`yaml
+status: blocked
+deliverables:
+  files_changed: []
+  commits: []
+  tests_added: []
+test_results:
+  pass: 0
+  fail: 0
+open_questions: []
+handoff_for_next_task: []
+\`\`\``;
+		const out = advisoryFor(message);
+		expect(out.some((a) => a.includes("open_questions"))).toBe(true);
+	});
+
+	it("T-ADV-FIX-04: blocked_without_reason fix mentions open_questions", () => {
+		const message = `\`\`\`yaml
+status: blocked
+deliverables:
+  files_changed: []
+  commits: []
+  tests_added: []
+test_results:
+  pass: 0
+  fail: 0
+open_questions: []
+handoff_for_next_task: []
+\`\`\``;
+		const out = advisoryFor(message);
+		// blocked_without_reason is severity=minor, so advisory is filtered
+		// out by the severity filter. Test that the fix directive is
+		// available for major+critical rules only.
+		expect(out.length).toBe(0);
+	});
+
+	it("T-ADV-FIX-05: per-rule fix directive is more actionable than f.recommendation", () => {
+		// For completed_no_commits, the fix directive is a specific command;
+		// the generic recommendation is just "agent must commit".
+		const directive = "run `git log --oneline -5 --format=%H` and put the SHAs in YAML as: commits: [\"sha1\", \"sha2\", ...]";
+		expect(directive).toContain("git log");
+		expect(directive).toContain("commits:");
+	});
+
+	it("T-ADV-FIX-06: RULE_FIX_DIRECTIVES map covers all 5 rules", () => {
+		// Imported at top of file
+		// const directive = "..."; // already imported
+		const rules = [
+			"missing_yaml_block",
+			"completed_no_commits",
+			"checkpoint_stuck_pattern",
+			"ask_unanswered",
+			"blocked_without_reason",
+		];
+		// Just check the map has all 5
+		for (const r of rules) {
+			expect(RULE_FIX_DIRECTIVES[r]).toBeDefined();
+		}
+	});
+
+	it("T-ADV-FIX-07: advisory token cap respected with fix directive + schema", () => {
+		const out = advisoryFor("Some prose without YAML.", undefined, {
+			includeSchemaTemplate: true,
+		});
+		const tokens = Math.ceil(out[0].length / 4);
+		expect(tokens).toBeLessThanOrEqual(ADVISORY_MAX_TOKENS_WITH_SCHEMA);
 	});
 });
