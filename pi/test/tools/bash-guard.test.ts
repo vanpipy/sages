@@ -16,7 +16,14 @@ import {
 	extractBashTargets,
 	isGitMetaCommand,
 	shouldBlockBashCommand,
+	__shellTokensCallCount,
 } from "@/tools/bash-guard.js";
+// GC-2026-032 phase-1: `REDIRECT_REGEX` is the new module-level
+// pre-compiled regex added by the SC3 fix. Imported via the
+// namespace so its (RED-state) absence doesn't prevent the file
+// from loading — the test then asserts on the resolved export at
+// runtime and surfaces a clean RED failure.
+import * as bashGuardNs from "@/tools/bash-guard.js";
 import { canMainAgentWriteMeta } from "@/tools/file-gate.js";
 
 const CTX = { cwd: "/tmp/sages-project" };
@@ -522,5 +529,122 @@ describe("extractBashTargets — chain-parser correctness (unchanged)", () => {
 	it("T-CP-07: extractBashTargets(`cp src/foo.ts dst/ ; rm bar`) → [dst/]", () => {
 		const t = extractBashTargets("cp src/foo.ts dst/ ; rm bar");
 		expect(t).toEqual(["dst/"]);
+	});
+});
+
+/**
+ * GC-2026-032 phase-1 — perf regression suite (T-PERF-*).
+ *
+ * `classifyBashCommand` and `extractBashTargets` sit on the
+ * per-bash-tool-call hot path. This block pins the SC2 / SC3
+ * optimizations introduced in phase-1:
+ *
+ *   - SC2: `classifyBashCommand("git …")` must NOT re-tokenize the
+ *     command via `isGitMetaCommand` (which previously called
+ *     `gitTokens` → `shellTokens` a second time).
+ *   - SC3: `extractBashTargets` must reuse a module-level pre-compiled
+ *     `REDIRECT_REGEX` rather than `new RegExp(...)` per call.
+ */
+describe("classifyBashCommand / extractBashTargets — perf regression (GC-2026-032 phase-1)", () => {
+	it("T-PERF-01: classifyBashCommand does NOT double-tokenize a `git status` command (SC2)", () => {
+		const before = __shellTokensCallCount;
+		const verdict = classifyBashCommand("git status");
+		const after = __shellTokensCallCount;
+		expect(verdict).toBe("read-only");
+		// Before phase-1, this was 2 (one direct, one via
+		// isGitMetaCommand → gitTokens → shellTokens). Phase-1
+		// shares the tokens array, so the delta must be 1.
+		expect(after - before).toBe(1);
+	});
+
+	it("T-PERF-02: classifyBashCommand does NOT double-tokenize a `git log --oneline -5` command (SC2)", () => {
+		const before = __shellTokensCallCount;
+		classifyBashCommand("git log --oneline -5");
+		expect(__shellTokensCallCount - before).toBe(1);
+	});
+
+	it("T-PERF-03: classifyBashCommand does NOT double-tokenize a `git checkout main` command (SC2)", () => {
+		const before = __shellTokensCallCount;
+		const verdict = classifyBashCommand("git checkout main");
+		expect(verdict).toBe("git-meta");
+		expect(__shellTokensCallCount - before).toBe(1);
+	});
+
+	it("T-PERF-04: classifyBashCommand still tokenizes a non-git, non-fast-path command exactly once (SC2 control)", () => {
+		// `npm test` falls through every fast-path branch and reaches
+		// the `shellTokens(trimmed)` call at line ~268 then matches
+		// the read-only prefix pattern at line ~307 without going
+		// through `isGitMetaCommand`. Counter must move by exactly 1.
+		const before = __shellTokensCallCount;
+		const verdict = classifyBashCommand("npm test");
+		expect(verdict).toBe("read-only");
+		expect(__shellTokensCallCount - before).toBe(1);
+	});
+
+	it("T-PERF-05: REDIRECT_REGEX is exported as a module-level, pre-compiled, global RegExp (SC3)", () => {
+		// Defer to the namespace import — at RED time this resolves
+		// to undefined and the assertion below surfaces the missing
+		// export as a test failure rather than crashing the file.
+		const REDIRECT_REGEX = (bashGuardNs as { REDIRECT_REGEX?: unknown }).REDIRECT_REGEX;
+		expect(REDIRECT_REGEX instanceof RegExp).toBe(true);
+		const rg = REDIRECT_REGEX as RegExp;
+		expect(rg.flags).toContain("g");
+		// Source must include the redirect-prefix shape used by
+		// WRITE_REDIRECT_PREFIX and the trailing capture group for
+		// the target path (defined as `\\s*(\\S+)` in source text).
+		const src = rg.source;
+		expect(src).toContain("(?:>>|>(?!&))"); // the heart of WRITE_REDIRECT_PREFIX
+		expect(src).toContain("\\s*(\\S+)"); // the target-path capture group
+	});
+
+	it("T-PERF-06: extractBashTargets uses the shared REDIRECT_REGEX — successive calls do NOT lose targets (SC3 lastIndex safety)", () => {
+		// Each call has one or more redirects at different positions.
+		// If extractBashTargets still builds the regex per-call AND
+		// matches every position, all targets appear in the result.
+		// The bigger risk after GREEN is a shared regex whose
+		// `lastIndex` leaks across calls — so we run three distinct
+		// commands and assert each one returns its OWN target list
+		// verbatim.
+		expect(extractBashTargets("echo a > first.ts")).toEqual(["first.ts"]);
+		expect(extractBashTargets("echo b > second.ts")).toEqual(["second.ts"]);
+		expect(extractBashTargets("echo c > third.ts")).toEqual(["third.ts"]);
+		// And a multi-redirect command still gathers all targets.
+		expect(extractBashTargets("cmd > a.ts ; cmd > b.ts ; cmd > c.ts")).toEqual([
+			"a.ts",
+			"b.ts",
+			"c.ts",
+		]);
+	});
+
+	it("T-PERF-07: extractBashTargets no longer constructs a per-call redirect regex (SC3, behavioral via RegExp-construction tally)", () => {
+		// Spy on the global RegExp constructor for the duration of
+		// three `extractBashTargets` calls. We tally ONLY regexes
+		// whose source string contains the redirect-target capture
+		// group `\s*(\S+)` — i.e., the redirect-target extraction
+		// regex. The module-level `REDIRECT_REGEX` is constructed
+		// exactly once at module load, BEFORE this spy is installed,
+		// so subsequent per-call construction is observable.
+		const RealRegExp = globalThis.RegExp;
+		const originalReal = globalThis.RegExp;
+		let constructedDuringCall = 0;
+		function SpyRegExp(this: unknown, pattern?: RegExp | string, flags?: string): RegExp {
+			if (typeof pattern === "string" && pattern.includes("\\s*(\\S+)")) {
+				constructedDuringCall++;
+			}
+			if (pattern === undefined) return new (originalReal as RegExpConstructor)("");
+			if (flags === undefined) return new (originalReal as RegExpConstructor)(pattern);
+			return new (originalReal as RegExpConstructor)(pattern, flags);
+		}
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(globalThis as unknown as { RegExp: unknown }).RegExp = SpyRegExp as unknown as RegExpConstructor;
+		try {
+			extractBashTargets("echo x > out1.ts");
+			extractBashTargets("echo x > out2.ts");
+			extractBashTargets("ls > listing.txt");
+		} finally {
+			(globalThis as unknown as { RegExp: RegExpConstructor }).RegExp = originalReal;
+		}
+		expect(RealRegExp).toBe(originalReal); // sanity
+		expect(constructedDuringCall).toBe(0);
 	});
 });
