@@ -165,3 +165,21 @@ Status values (choose the most honest):
 Reminder: Plan is bounded by a 5-minute wall-clock deadline (per GC-2026-037 T1).
 Do not explore; commit to a plan early.
 `;
+
+const EXPLORATION_BUDGET_SECTION = `
+## Exploration Budget (hard caps on read tools)
+
+Plan is research-driven. Use the budget wisely.
+
+- **read**: max 30 total calls
+- **grep / rg / find**: max 5 total calls
+- **git log / show / blame**: max 3 total calls
+- **AFT / codebase_memory**: max 10 total calls
+- **commits**: UNLIMITED
+
+If you hit a cap, commit your plan (even partial) and declare BLOCKED.
+The L3 will re-dispatch with a narrower scope.
+`;
+
+// See developer.ts for the void pattern.
+void EXPLORATION_BUDGET_SECTION;
