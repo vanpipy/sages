@@ -9,7 +9,7 @@
  * (advisory metadata, audit reports) and are tested independently.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { join } from "node:path";
 import {
 	classifyBashCommand,
@@ -17,12 +17,22 @@ import {
 	isGitMetaCommand,
 	shouldBlockBashCommand,
 	__shellTokensCallCount,
+	// GC-2026-033 phase-2 — LRU memoization test helpers. Importing
+	// them by name would crash the module at RED time (the symbols
+	// don't exist yet), so we go through the namespace and resolve
+	// each call site at test runtime — the same pattern used for
+	// `REDIRECT_REGEX` in phase-1.
 } from "@/tools/bash-guard.js";
 // GC-2026-032 phase-1: `REDIRECT_REGEX` is the new module-level
 // pre-compiled regex added by the SC3 fix. Imported via the
 // namespace so its (RED-state) absence doesn't prevent the file
 // from loading — the test then asserts on the resolved export at
 // runtime and surfaces a clean RED failure.
+// GC-2026-033 phase-2: same namespace-import strategy applies to
+// the new LRU test helpers (`_getClassifyCacheSize`,
+// `_getExtractCacheSize`, `_clearClassifyCache`). They are read
+// off the namespace at runtime, so the file keeps loading while
+// the symbols are still missing during the RED phase.
 import * as bashGuardNs from "@/tools/bash-guard.js";
 import { canMainAgentWriteMeta } from "@/tools/file-gate.js";
 
@@ -546,6 +556,20 @@ describe("extractBashTargets — chain-parser correctness (unchanged)", () => {
  *     `REDIRECT_REGEX` rather than `new RegExp(...)` per call.
  */
 describe("classifyBashCommand / extractBashTargets — perf regression (GC-2026-032 phase-1)", () => {
+	// GC-2026-033 phase-2 — SC1 added an LRU memoization layer in
+	// front of `classifyBashCommand` / `extractBashTargets`. The
+	// SC2/SC3 assertions below count `shellTokens` invocations on a
+	// *miss*, so we must clear the cache before each test to keep
+	// the assertions independent of test ordering (earlier tests
+	// in this file call `classifyBashCommand("git status")`,
+	// `classifyBashCommand("npm test")`, etc. — once those keys
+	// land in the cache, subsequent same-key calls short-circuit
+	// before reaching `shellTokens`).
+	const clearCache = (bashGuardNs as { _clearClassifyCache?: () => void })._clearClassifyCache;
+	beforeEach(() => {
+		clearCache?.();
+	});
+
 	it("T-PERF-01: classifyBashCommand does NOT double-tokenize a `git status` command (SC2)", () => {
 		const before = __shellTokensCallCount;
 		const verdict = classifyBashCommand("git status");
@@ -646,5 +670,112 @@ describe("classifyBashCommand / extractBashTargets — perf regression (GC-2026-
 		}
 		expect(RealRegExp).toBe(originalReal); // sanity
 		expect(constructedDuringCall).toBe(0);
+	});
+});
+
+/**
+ * LRU memoization regression suite for `classifyBashCommand` and
+ * `extractBashTargets` (GC-2026-033 phase-2 — SC1, SC2, SC3).
+ *
+ * Each `classifyBashCommand` / `extractBashTargets` call is a per-tool_call
+ * hot path (the bash handler in `extension.ts` calls `classifyBashCommand`
+ * on every LLM tool invocation). Phase-1 removed the per-call regex /
+ * tokenize duplication inside a single call. Phase-2 layers a Map-based
+ * LRU (cap 256, insertion-order eviction) on top so repeated commands
+ * across the many turns of an LLM session short-circuit entirely.
+ *
+ * Cache state is observable via three test-only exports
+ * (`_getClassifyCacheSize`, `_getExtractCacheSize`,
+ * `_clearClassifyCache`) — underscore-prefixed by convention to signal
+ * test-only intent and to avoid colliding with any future public API.
+ */
+describe("classifyBashCommand / extractBashTargets — LRU memoization (GC-2026-033 phase-2)", () => {
+	// GC-2026-033 SC1/SC2 — the three helpers are read off the
+	// namespace import so a missing symbol produces a clean test
+	// failure at RED time instead of crashing the file at import time.
+	const helpers = bashGuardNs as {
+		_getClassifyCacheSize?: () => number;
+		_getExtractCacheSize?: () => number;
+		_clearClassifyCache?: () => void;
+	};
+	const _getClassifyCacheSize = (): number => {
+		if (typeof helpers._getClassifyCacheSize !== "function") {
+			throw new ReferenceError("_getClassifyCacheSize is not exported (RED: implementation missing)");
+		}
+		return helpers._getClassifyCacheSize();
+	};
+	const _getExtractCacheSize = (): number => {
+		if (typeof helpers._getExtractCacheSize !== "function") {
+			throw new ReferenceError("_getExtractCacheSize is not exported (RED: implementation missing)");
+		}
+		return helpers._getExtractCacheSize();
+	};
+	const _clearClassifyCache = (): void => {
+		if (typeof helpers._clearClassifyCache !== "function") {
+			throw new ReferenceError("_clearClassifyCache is not exported (RED: implementation missing)");
+		}
+		helpers._clearClassifyCache();
+	};
+
+	beforeEach(() => {
+		// Every test starts with an empty cache so size assertions are
+		// independent of test order.
+		_clearClassifyCache();
+	});
+
+	it("T-LRU-01: classifyBashCommand cache size grows on first call, stays the same on a second call with the same key (cache hit)", () => {
+		expect(_getClassifyCacheSize()).toBe(0);
+		classifyBashCommand("git status");
+		expect(_getClassifyCacheSize()).toBe(1);
+		// Same command — must be served from the cache, not re-cached.
+		classifyBashCommand("git status");
+		expect(_getClassifyCacheSize()).toBe(1);
+	});
+
+	it("T-LRU-02: distinct commands occupy distinct cache slots", () => {
+		classifyBashCommand("git status");
+		classifyBashCommand("ls -la");
+		expect(_getClassifyCacheSize()).toBe(2);
+	});
+
+	it("T-LRU-03: classifyBashCommand evicts the oldest entry when the cache exceeds CLASSIFY_CACHE_MAX (256)", () => {
+		// 257 distinct commands: after the loop the size must be capped
+		// at 256 and the very first key (`marker_0`) must have been
+		// evicted. We then re-call `marker_0` — on a miss the cache
+		// briefly holds 257 entries and immediately drops the new
+		// oldest, so the size remains 256.
+		for (let i = 0; i < 257; i++) {
+			classifyBashCommand(`echo marker_${i}`);
+		}
+		expect(_getClassifyCacheSize()).toBe(256);
+		classifyBashCommand("echo marker_0"); // was evicted; re-insert + evict next-oldest
+		expect(_getClassifyCacheSize()).toBe(256);
+	});
+
+	it("T-LRU-04: extractBashTargets uses its own LRU cache (independent of classify cache)", () => {
+		expect(_getExtractCacheSize()).toBe(0);
+		extractBashTargets("rm foo.ts");
+		expect(_getExtractCacheSize()).toBe(1);
+		// Cache hit — size unchanged.
+		extractBashTargets("rm foo.ts");
+		expect(_getExtractCacheSize()).toBe(1);
+		// Different key → second slot.
+		extractBashTargets("rm bar.ts");
+		expect(_getExtractCacheSize()).toBe(2);
+		// Classify cache is independent and stays empty — `extractBashTargets`
+		// does not populate the classify cache (and vice versa).
+		expect(_getClassifyCacheSize()).toBe(0);
+	});
+
+	it("T-LRU-05: _clearClassifyCache resets BOTH the classify and the extract caches", () => {
+		classifyBashCommand("git status");
+		classifyBashCommand("ls -la");
+		extractBashTargets("rm foo.ts");
+		extractBashTargets("rm bar.ts");
+		expect(_getClassifyCacheSize()).toBe(2);
+		expect(_getExtractCacheSize()).toBe(2);
+		_clearClassifyCache();
+		expect(_getClassifyCacheSize()).toBe(0);
+		expect(_getExtractCacheSize()).toBe(0);
 	});
 });

@@ -143,6 +143,72 @@ export interface BashGuardDecision {
  */
 export let __shellTokensCallCount = 0;
 
+/**
+ * GC-2026-033 phase-2 — LRU memoization for the per-tool_call hot path.
+ *
+ * `classifyBashCommand` and `extractBashTargets` are invoked on every
+ * LLM bash tool call (the bash handler in `extension.ts` calls
+ * `classifyBashCommand` on every invocation). In a multi-turn LLM
+ * session, the same commands repeat frequently (`git status`,
+ * `ls -la`, `cat <file>`, `bun test`, …) and each call currently
+ * pays full tokenize + regex + git-meta verdict cost.
+ *
+ * Two independent `Map`s cache the (string → BashClassification) and
+ * (string → string[]) mappings. Insertion-order iteration on `Map`
+ * is guaranteed by the spec, so the oldest entry is `keys().next().value`
+ * and the cache is bounded by `*_CACHE_MAX`. A two-call repetition
+ * on the same key refreshes insertion order (delete + re-set moves
+ * the key to the end) so the working set stays warm.
+ *
+ * Map capacity 256 is the same knob used by `worktree.ts`'s profile
+ * counters (GC-2026-032 phase-1) and is large enough to cover any
+ * realistic single-session working set while bounding memory at a
+ * few KB.
+ */
+const CLASSIFY_CACHE_MAX = 256;
+const EXTRACT_CACHE_MAX = 256;
+const classifyCache = new Map<string, BashClassification>();
+const extractCache = new Map<string, string[]>();
+
+/**
+ * Move-to-end + cap-evict. On a cache hit the caller should have
+ * already done `cache.delete(key); cache.set(key, cached)` to refresh
+ * the LRU position; this helper handles the miss path and the
+ * post-insert eviction when the cache grows past `max`. Returns the
+ * new size of the cache (mostly for test ergonomics — the callers
+ * below don't actually need it).
+ */
+function touchCache<K, V>(cache: Map<K, V>, key: K, value: V, max: number): number {
+	cache.set(key, value);
+	if (cache.size > max) {
+		const firstKey = cache.keys().next().value as K | undefined;
+		if (firstKey !== undefined) cache.delete(firstKey);
+	}
+	return cache.size;
+}
+
+/**
+ * Test-only helpers — underscore-prefixed by convention to signal
+ * test-only intent and to avoid colliding with any future public API.
+ * They expose the cache state directly so tests can assert hit / miss
+ * / eviction behavior without coupling to internals. The
+ * `bash-guard.ts` module sits in the `pi` package, which has no
+ * `profile.ts` counter module (unlike `pi-subagents`), so we use
+ * these exports as the canonical observability seam for the LRU.
+ *
+ * GC-2026-033 phase-2 — SC1, SC2.
+ */
+export function _getClassifyCacheSize(): number {
+	return classifyCache.size;
+}
+export function _getExtractCacheSize(): number {
+	return extractCache.size;
+}
+export function _clearClassifyCache(): void {
+	classifyCache.clear();
+	extractCache.clear();
+}
+
 /** Tokenize the command prefix while preserving spaces inside shell quotes. */
 function shellTokens(command: string): string[] {
 	__shellTokensCallCount++;
@@ -267,8 +333,37 @@ function evaluateGitMetaVerdict(tokens: string[] | undefined): GitMetaVerdict {
  *                      tee, redirects, find -delete, …).
  *   - "unknown"     — anything else (python3 -c, ruby -e, bash -c,
  *                      git checkout/restore/clean/rm, …).
+ *
+ * GC-2026-033 phase-2 — SC1: the result is memoized in
+ * `classifyCache` (Map-based LRU, cap 256). Repeated commands on
+ * subsequent LLM turns short-circuit the entire classification
+ * pipeline (no `shellTokens`, no redirect regex, no git-meta verdict).
+ * The signature is unchanged — callers see a plain classifier; the
+ * cache is purely internal.
  */
 export function classifyBashCommand(command: string): BashClassification {
+	const cached = classifyCache.get(command);
+	if (cached !== undefined) {
+		// Move-to-end refresh: `Map#set` on an existing key does NOT
+		// advance its iteration position, so delete + re-set is the
+		// canonical LRU trick in plain JS Maps.
+		classifyCache.delete(command);
+		classifyCache.set(command, cached);
+		return cached;
+	}
+	const result = classifyUncached(command);
+	touchCache(classifyCache, command, result, CLASSIFY_CACHE_MAX);
+	return result;
+}
+
+/**
+ * Pure (cache-free) classifier logic. Extracted so the cache wrapper
+ * above has a single exit point and so the inner logic can be unit-
+ * tested directly (e.g. by asserting that `classifyBashCommand`'s
+ * `__shellTokensCallCount` delta matches the expected tokenize count
+ * — see T-PERF-* in `pi/test/tools/bash-guard.test.ts`).
+ */
+function classifyUncached(command: string): BashClassification {
 	const trimmed = command.trimStart();
 	if (!trimmed) return "unknown";
 
@@ -361,8 +456,35 @@ export function classifyBashCommand(command: string): BashClassification {
  *   git clean -fd [<paths...>]   → <paths...> or cwd
  *   git rm <paths...>
  *   tar -xf|-xjf|-xzf <arc> [-C <dir>] → <dir> or cwd
+ *
+ * GC-2026-033 phase-2 — SC1: the result is memoized in `extractCache`
+ * (Map-based LRU, cap 256). The signature and return shape are
+ * unchanged — the cache is purely internal. Note that the cached
+ * array is shared by reference with subsequent cache hits; the only
+ * consumer is the soft-mode advisory path and the unit tests, both
+ * of which treat the return value as read-only.
  */
 export function extractBashTargets(command: string): string[] {
+	const cached = extractCache.get(command);
+	if (cached !== undefined) {
+		// Move-to-end refresh (see `classifyBashCommand` for the
+		// rationale: plain JS `set` does NOT advance an existing
+		// key's iteration position, so we delete + re-set).
+		extractCache.delete(command);
+		extractCache.set(command, cached);
+		return cached;
+	}
+	const result = extractBashTargetsUncached(command);
+	touchCache(extractCache, command, result, EXTRACT_CACHE_MAX);
+	return result;
+}
+
+/**
+ * Pure (cache-free) target-extraction logic. Same body as the
+ * pre-phase-2 `extractBashTargets` — extracted so the cache wrapper
+ * has a single exit point.
+ */
+function extractBashTargetsUncached(command: string): string[] {
 	const trimmed = command.trimStart();
 	if (!trimmed) return [];
 
