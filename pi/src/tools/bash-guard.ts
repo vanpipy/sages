@@ -17,24 +17,18 @@
  *   splitChainedCommands(cmd) → string[] of top-level segments
  *   shouldBlockBashCommand(cmd, ctx) → { block: false }
  *
- * Path policy (`file-gate.canMainAgentWrite` / `canMainAgentWriteMeta`)
- * is no longer consumed for blocking — but the import is kept for the
- * classifier's advisory metadata (e.g. `extractBashTargets` callers
- * may want to know which targets are meta-file paths).
- *
+ * Path policy is no longer consumed by this classifier under soft mode.
  * Chained-command handling (added 2026-07-25): `splitChainedCommands`
  * splits on top-level `&&` / `||` / `;` (respecting quotes and
  * paren/brace nesting). Test coverage: T16–T22 + T23b + T24 in
  * `pi/test/tools/bash-guard.test.ts`.
  */
 
-import { isAbsolute, relative, resolve } from "node:path";
-// SC7 single-source-of-truth: import the path policy + the
-// LLM-facing reason from `file-gate`. Under soft mode these are no
-// longer consumed by `shouldBlockBashCommand` for blocking — but
-// `policyMessage` is re-exported so callers wiring their own
-// advisory paths can still surface the meta-file rationale verbatim.
-import { canMainAgentWrite, canMainAgentWriteMeta, policyMessage } from "./file-gate.js";
+// LLM-facing reason from `file-gate`. Under soft mode this is
+// no longer consumed for blocking — `policyMessage` is re-exported
+// so callers wiring their own advisory paths can surface the canonical
+// meta-file rationale verbatim.
+import { policyMessage } from "./file-gate.js";
 
 /** Unconditional read-only first-words. */
 const READ_ONLY_FIRST_WORDS = new Set([
@@ -48,15 +42,6 @@ const WRITE_INTENT_FIRST_WORDS = new Set([
 	"rm", "mv", "cp", "sed", "perl", "tee", "truncate", "mkdir",
 	"chmod", "chown", "tar", "unzip",
 ]);
-
-/**
- * Historical destructive-first-words short-circuit (rm / mv / cp /
- * unlink / rmdir). Removed under GC-2026-031 soft mode — destructive
- * commands are no longer hard-blocked. Kept as an empty set so any
- * downstream consumer that imports the name still resolves; new
- * consumers should not be added.
- */
-const DESTRUCTIVE_FIRST_WORDS = new Set<string>();
 
 /**
  * Chain / pipe / redirect / fd operators that terminate a command's
@@ -848,36 +833,6 @@ export function splitChainedCommands(command: string): string[] {
 	}
 	if (current.trim()) segments.push(current.trim());
 	return segments;
-}
-
-/**
- * True iff `target` is a path the main agent should not write to.
- * Absolute paths (`/tmp/...`, `/var/...`) are treated as outside the
- * project and therefore NOT production targets — OS-level guards
- * apply separately. Relative paths are evaluated by `canMainAgentWrite`.
- *
- * Historical helper used by the pre-soft-mode gate to decide whether
- * to block. Under soft mode the gate never blocks; the helper is kept
- * for downstream advisory consumers that want a single
- * `isProductionTarget(t)` answer (e.g. audit reports).
- */
-function isProductionTarget(target: string, cwd: string): boolean {
-	if (!target) return false;
-	let policyTarget = target;
-	if (isAbsolute(target)) {
-		const root = resolve(cwd);
-		const absolute = resolve(target);
-		const fromRoot = relative(root, absolute).replaceAll("\\", "/");
-		if (fromRoot === "" || fromRoot === ".") return true;
-		if (fromRoot === ".." || fromRoot.startsWith("../") || isAbsolute(fromRoot)) return false;
-		policyTarget = fromRoot;
-	}
-	// GC-2026-029 — the legacy L4 narrowing (`^pi/(?:src|test)/`) was
-	// removed: with the upstream `canMainAgentWrite`/`canMainAgentWriteMeta`
-	// contracted to root-only meta, every `pi/src/...` and `pi/test/...`
-	// path is already a production target via default-deny, so this
-	// override is unreachable.
-	return !canMainAgentWrite(policyTarget) && !canMainAgentWriteMeta(policyTarget);
 }
 
 /**
