@@ -89,3 +89,21 @@ blocked when the question is unanswerable without more info.
 Reminder: Explore is bounded by a 5-minute wall-clock deadline
 (per GC-2026-037 T1). Be efficient.
 `;
+
+const EXPLORATION_BUDGET_SECTION = `
+## Exploration Budget (hard caps on read tools)
+
+Explore is read-heavy by design. Respect the budget or commit early.
+
+- **read**: max 30 total calls
+- **grep / rg / find**: max 5 total calls
+- **git log / show / blame**: max 3 total calls
+- **AFT / codebase_memory**: max 10 total calls
+- **commits**: UNLIMITED
+
+If you hit a cap, commit your findings (even partial) and declare
+BLOCKED. The L3 will re-dispatch with a narrower scope.
+`;
+
+// See developer.ts for the void pattern.
+void EXPLORATION_BUDGET_SECTION;
