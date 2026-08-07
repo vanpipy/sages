@@ -20,7 +20,7 @@
  *     auto-cleans a changed worktree. GC-2026-008 P1.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync, type StdioOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -32,7 +32,24 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
+import { promisify } from "node:util";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
+
+// `promisify(execFile)`'s overload signatures don't expose `stdio` (it's only
+// on the callback-typed overloads), but at runtime it's accepted. Cast the
+// promisified call to a signature that DOES include the options we actually
+// pass — keeps the type contract honest without sprinkling `as any` through
+// the call sites.
+const execFileAsync = promisify(execFile) as (
+	file: string,
+	args: readonly string[],
+	options: {
+		cwd?: string;
+		stdio?: StdioOptions;
+		signal?: AbortSignal;
+		timeout?: number;
+	},
+) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
 
 /**
  * Which managed-worktree lifecycle phase a `runGitIn` call belongs to.
@@ -411,6 +428,43 @@ function detectCurrentBranch(repoRoot: string): {
 			// no upstream — common for newly-created local branches
 		}
 	}
+	return { local, upstream };
+}
+
+/**
+ * Async sibling of {@link detectCurrentBranch}. Same semantics, but fires the
+ * two `rev-parse` reads in parallel via `Promise.all` — saves one round-trip
+ * of git startup latency when the async path is used (GC-2026-035 P1).
+ *
+ * Failures are absorbed wholesale (same policy as the sync helper): "not a
+ * git repo" and "no upstream configured" both surface as `undefined` fields,
+ * not thrown errors. Aborts are NOT swallowed — they propagate to the caller.
+ */
+async function detectCurrentBranchAsync(
+	repoRoot: string,
+): Promise<{ local: string | undefined; upstream: string | undefined }> {
+	let head = "";
+	let upstreamRaw = "";
+	try {
+		[head, upstreamRaw] = await Promise.all([
+			runGitInAsync(
+				["rev-parse", "--abbrev-ref", "HEAD"],
+				repoRoot,
+				true,
+			),
+			runGitInAsync(
+				["rev-parse", "--abbrev-ref", "@{u}"],
+				repoRoot,
+				true,
+			),
+		]);
+	} catch (err) {
+		if (isAbortError(err)) throw err;
+		// Either failed — fall through with both undefined (sync helper's policy).
+	}
+	const local = head && head !== "HEAD" ? head : undefined;
+	const upstream =
+		upstreamRaw && upstreamRaw !== "@{u}" ? upstreamRaw : undefined;
 	return { local, upstream };
 }
 
@@ -930,6 +984,209 @@ export function createManagedWorktree(
 	};
 }
 
+/**
+ * Async sibling of {@link createManagedWorktree}. Same contract, same return
+ * shape, same error semantics — but the read-only pre-check cluster
+ * (`rev-parse --is-inside-work-tree` + `rev-parse --git-common-dir`) and the
+ * base-ref detection cluster (`HEAD` + `@{u}`) fire in parallel via
+ * `Promise.all`. Total git subprocess wait time drops from O(n) to O(1) for
+ * those clusters, and the surrounding work is async-friendly so the
+ * orchestrator's dispatch path no longer blocks the event loop on each
+ * `git` startup.
+ *
+ * GC-2026-035 P1 — new export. The sync `createManagedWorktree` is preserved
+ * unchanged (phase-4 caller migration is a separate goal). Write operations
+ * (`fetch`, `rev-parse --verify`, `worktree add`, `checkout -B`,
+ * `writeMarker`) remain strictly sequential because git's own locking makes
+ * concurrent writes on the same repo unsafe (`.git/index.lock` contention).
+ *
+ * The `reuse: true` branch delegates to the existing sync
+ * {@link reuseManagedWorktree} helper — its own git calls stay serial
+ * (no parallelization opportunity in the reuse contract), and calling sync code
+ * inside an async function is safe.
+ */
+export async function createManagedWorktreeAsync(
+	opts: CreateManagedWorktreeOptions,
+): Promise<ManagedWorktree> {
+	// GC-2026-035 P1: same hot-path marker as the sync version. The async
+	// version contributes to `worktree_create_ms` and `worktree_create_count`
+	// (one observation per call, just like the sync path).
+	const wtCreateT0 = Date.now();
+	validateIdentity(opts.dag, opts.worktree);
+
+	// Pre-check cluster: 3 independent reads fire concurrently. Only the
+	// git calls go through `Promise.all`; `realpathSync` is sync <1ms and
+	// contributes no measurable wait. Errors are handled individually because
+	// the error messages must name the exact check that failed (a bare-repo
+	// refusal from `--git-common-dir` must NOT be conflated with an
+	// `--is-inside-work-tree` failure).
+	let realRoot: string;
+	try {
+		realRoot = realpathSync(opts.repoRoot);
+	} catch (err: any) {
+		if (err?.code === "ENOENT") {
+			throw new Error(
+				`managed-worktree: ${opts.repoRoot} does not exist on disk`,
+			);
+		}
+		throw err;
+	}
+	let commonDir: string;
+	try {
+		[, commonDir] = await Promise.all([
+			runGitInAsync(
+				["rev-parse", "--is-inside-work-tree"],
+				realRoot,
+				true,
+				true,
+				"create",
+			),
+			runGitInAsync(
+				["rev-parse", "--git-common-dir"],
+				realRoot,
+				true,
+				true,
+				"create",
+			),
+		]);
+	} catch (err: any) {
+		// Distinguish the two failure modes by inspecting the rejected error's
+		// message — `formatGitInvocationError` includes the git args, so the
+		// failing call is identifiable from the prefix alone.
+		const msg = err?.message ?? "";
+		if (msg.includes("--is-inside-work-tree")) {
+			throw new Error(
+				`managed-worktree: ${realRoot} is not a git working tree (provide a repository working copy, not a bare repo or random directory)`,
+			);
+		}
+		throw new Error(
+			`managed-worktree: cannot resolve git common dir for ${realRoot}`,
+		);
+	}
+	const absoluteCommonDir = isAbsolute(commonDir)
+		? commonDir
+		: join(realRoot, commonDir);
+	if (normalize(absoluteCommonDir) === normalize(realRoot)) {
+		throw new Error(
+			`managed-worktree: ${realRoot} is a bare repository; managed worktrees need a working tree`,
+		);
+	}
+
+	// Base-ref resolution. The auto-detect path runs the two read-only
+	// `rev-parse` calls in parallel via `detectCurrentBranchAsync` (Promise.all
+	// inside it). When the caller passes an explicit `base_ref` we validate
+	// it verbatim — no git call needed.
+	let resolvedBaseRef: string;
+	if (opts.base_ref !== undefined) {
+		validateBaseRef(opts.base_ref);
+		resolvedBaseRef = opts.base_ref;
+	} else {
+		const { local, upstream } = await detectCurrentBranchAsync(realRoot);
+		resolvedBaseRef = upstream ?? local ?? "origin/main";
+	}
+
+	// Write side: fetch (if remote-tracking) then verify — these MUST stay
+	// sequential. `git fetch` updates `origin/<branch>` in the local repo;
+	// the subsequent `rev-parse --verify` reads that updated ref. Parallel
+	// verification would race the fetch and could observe the stale value.
+	const fetchEnabled = opts.fetch !== false;
+	if (fetchEnabled && resolvedBaseRef.startsWith("origin/")) {
+		const localRef = resolvedBaseRef.slice("origin/".length);
+		try {
+			await runGitInAsync(
+				["fetch", "--no-tags", "origin", localRef],
+				realRoot,
+				true,
+				true,
+				"create",
+			);
+		} catch (err) {
+			throw new Error(
+				`managed-worktree: 'git fetch origin ${localRef}' failed in ${realRoot}: ${formatGitErr(err)}. ` +
+					`Provision refuses to proceed on stale '${resolvedBaseRef}'.`,
+			);
+		}
+	}
+
+	let baseSha: string;
+	try {
+		baseSha = await runGitInAsync(
+			["rev-parse", "--verify", resolvedBaseRef],
+			realRoot,
+			true,
+			true,
+			"create",
+		);
+	} catch {
+		throw new Error(
+			`managed-worktree: '${resolvedBaseRef}' does not resolve in ${realRoot}. ` +
+				`Provision refuses to fall back — ensure the ref exists locally or as a remote-tracking ref ` +
+				`('git fetch origin <branch>') before provisioning.`,
+		);
+	}
+
+	const path = worktreePath(realRoot, opts.dag, opts.worktree);
+	const branch = branchName(opts.dag, opts.worktree);
+
+	const pathExists = existsSync(path);
+	if (pathExists) {
+		if (!opts.reuse) {
+			throw new Error(
+				`managed-worktree: target ${path} already exists. ` +
+					`Pass { reuse: true } to re-enter an existing managed worktree, or remove it first.`,
+			);
+		}
+		// reuse: true — sync helper. Its git calls are read-only and
+		// sequential; safe to call from an async function.
+		return reuseManagedWorktree({
+			repoRoot: realRoot,
+			dag: opts.dag,
+			worktree: opts.worktree,
+			path,
+			branch,
+			recordedBaseRef: resolvedBaseRef,
+		});
+	}
+
+	// Fresh provision: `worktree add` and `checkout -B` are write operations
+	// and MUST stay sequential (same reason as the fetch/verify pair above).
+	await runGitInAsync(
+		["worktree", "add", "--detach", path, resolvedBaseRef],
+		realRoot,
+		true,
+		true,
+		"create",
+	);
+	await runGitInAsync(["checkout", "-B", branch], path, true, true, "create");
+
+	const marker: ManagedWorktreeMarker = {
+		schema: 2,
+		repoRoot: realRoot,
+		dag: opts.dag,
+		worktree: opts.worktree,
+		path,
+		branch,
+		baseSha,
+		baseRef: resolvedBaseRef,
+		createdAt: Date.now(),
+	};
+	writeManagedWorktreeMarker(marker);
+
+	profileObserve("worktree_create_ms", Date.now() - wtCreateT0);
+	profileInc("worktree_create_count");
+
+	return {
+		path,
+		branch,
+		baseSha,
+		baseRef: resolvedBaseRef,
+		dag: opts.dag,
+		worktree: opts.worktree,
+		repoRoot: realRoot,
+		reused: false,
+	};
+}
+
 function reuseManagedWorktree(args: {
 	repoRoot: string;
 	dag: string;
@@ -1239,8 +1496,13 @@ const GIT_TIMEOUT_MS_DEFAULT = 15_000;
  * `phase` is optional GC-2026-032 instrumentation: when supplied, the call is
  * attributed to that managed-worktree lifecycle phase in addition to the
  * process-wide git total. Omitting it still counts toward the total.
+ *
+ * Exported (as of GC-2026-035 P1) for direct unit testing of the sync runner
+ * and as the parallel surface to `runGitInAsync`. Callers should prefer the
+ * named lifecycle functions (`createManagedWorktree`, `inspectManagedWorktree`,
+ * etc.) — the low-level runners are an internal-ish seam.
  */
-function runGitIn(
+export function runGitIn(
 	args: string[],
 	cwd: string,
 	allowEmptyStdout = true,
@@ -1249,17 +1511,7 @@ function runGitIn(
 ): string {
 	// Count the invocation before it runs so failures are represented too — the
 	// subprocess cost is paid whether or not git exits 0.
-	if (phase === undefined) {
-		profileInc("git_call_count_total");
-	} else if (phase === "create") {
-		profileInc("git_call_count_create");
-	} else if (phase === "reuse") {
-		profileInc("git_call_count_reuse");
-	} else if (phase === "inspect") {
-		profileInc("git_call_count_inspect");
-	} else {
-		profileInc("git_call_count_release");
-	}
+	recordGitCallPhase(phase);
 	let out: Buffer;
 	try {
 		const result = execFileSync("git", args, {
@@ -1281,19 +1533,143 @@ function runGitIn(
 	return str.trim();
 }
 
+/**
+ * Record a git-call counter for the given lifecycle `phase`. Shared between
+ * the sync `runGitIn` and the async `runGitInAsync` so both surfaces
+ * contribute to the same profile totals (GC-2026-032 SC3 invariant).
+ *
+ * The counter bumps BEFORE the subprocess runs so failures are still counted
+ * — the subprocess cost is paid whether or not git exits 0.
+ */
+function recordGitCallPhase(phase: GitPhase | undefined): void {
+	if (phase === undefined) {
+		profileInc("git_call_count_total");
+	} else if (phase === "create") {
+		profileInc("git_call_count_create");
+	} else if (phase === "reuse") {
+		profileInc("git_call_count_reuse");
+	} else if (phase === "inspect") {
+		profileInc("git_call_count_inspect");
+	} else {
+		profileInc("git_call_count_release");
+	}
+}
+
+/**
+ * True when `err` originates from an `AbortController` cancellation. The async
+ * runner forwards aborts as-is (does NOT wrap them in `formatGitInvocationError`)
+ * so callers and tests can distinguish "the deadline killed this call" from
+ * "git itself returned a non-zero exit".
+ */
+function isAbortError(err: unknown): boolean {
+	if (!err || typeof err !== "object") return false;
+	const e = err as { code?: string; name?: string; signal?: string };
+	return (
+		e.code === "ABORT_ERR" ||
+		e.name === "AbortError" ||
+		e.signal === "SIGTERM"
+	);
+}
+
+/**
+ * Async sibling of {@link runGitIn}. Same arguments, same error format, but
+ * returns a `Promise<string>` and uses `execFile` (async) so callers can
+ * compose multiple git calls via `Promise.all` and avoid blocking the event
+ * loop on each subprocess.
+ *
+ * GC-2026-035 P1: added as the parallel surface to the sync runner. Profile
+ * counters use the same {@link recordGitCallPhase} helper, so total and
+ * per-phase counts stay consistent across sync + async surfaces.
+ *
+ * Cancellation:
+ *   - Internal {@link AbortController} fires after `GIT_TIMEOUT_MS_DEFAULT`
+ *     (15s) and aborts the subprocess. The timer is cleared in `finally`
+ *     so a fast success doesn't leak a pending abort.
+ *   - Callers may pass an external `signal` via `opts.signal` to cancel
+ *     early (e.g. an outer deadline shorter than the internal default).
+ *     When the external signal aborts, the internal timer is cleared and
+ *     the underlying subprocess is cancelled in the same microtask.
+ *   - Aborts are NOT wrapped in `formatGitInvocationError` — the rejection
+ *     carries the original `code: "ABORT_ERR"` so callers can distinguish
+ *     timeout/cancellation from a real git failure.
+ */
+export async function runGitInAsync(
+	args: string[],
+	cwd: string,
+	allowEmptyStdout = true,
+	allowThrow = true,
+	phase?: GitPhase,
+	opts: { signal?: AbortSignal } = {},
+): Promise<string> {
+	recordGitCallPhase(phase);
+	const controller = new AbortController();
+	if (opts.signal) {
+		if (opts.signal.aborted) {
+			controller.abort();
+		} else {
+			opts.signal.addEventListener(
+				"abort",
+				() => controller.abort(),
+				{ once: true },
+			);
+		}
+	}
+	const timer = setTimeout(() => controller.abort(), GIT_TIMEOUT_MS_DEFAULT);
+	// If anything (internal timer OR external signal) aborts, drop the timer
+	// so the process doesn't keep a pending timeout alive for a settled call.
+	controller.signal.addEventListener("abort", () => clearTimeout(timer), {
+		once: true,
+	});
+	try {
+		const result = await execFileAsync("git", args, {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+			signal: controller.signal,
+		});
+		const stdout = result.stdout;
+		const str = typeof stdout === "string" ? stdout : stdout.toString();
+		if (!allowEmptyStdout && str.trim().length === 0) {
+			throw new Error(
+				`git ${args.join(" ")} (cwd=${cwd}) returned empty stdout unexpectedly`,
+			);
+		}
+		return str.trim();
+	} catch (err: unknown) {
+		if (!allowThrow) return "";
+		if (isAbortError(err)) throw err;
+		throw formatGitInvocationError(args, cwd, err);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 function formatGitInvocationError(
 	args: string[],
 	cwd: string,
 	err: unknown,
 ): Error {
-	const anyErr = err as {
-		stderr?: Buffer | string;
-		stdout?: Buffer | string;
-		message?: string;
+	// Defensive: any field may be missing or non-string/non-Buffer. Coerce
+	// to string and strip empties so a misformed rejection still produces
+	// a useful message instead of "Cannot read properties of undefined".
+	const asText = (v: unknown): string => {
+		if (v == null) return "";
+		if (typeof v === "string") return v.trim();
+		if (Buffer.isBuffer(v)) return v.toString().trim();
+		try {
+			return String(v).trim();
+		} catch {
+			return "";
+		}
 	};
-	const stderr = anyErr?.stderr ? anyErr.stderr.toString().trim() : "";
-	const stdout = anyErr?.stdout ? anyErr.stdout.toString().trim() : "";
-	const detail = stderr || stdout || anyErr?.message || String(err);
+	const anyErr = err as {
+		stderr?: unknown;
+		stdout?: unknown;
+		message?: unknown;
+	};
+	const stderr = asText(anyErr?.stderr);
+	const stdout = asText(anyErr?.stdout);
+	const fallback = typeof anyErr?.message === "string" ? anyErr.message : String(err);
+	const detail = stderr || stdout || fallback;
 	return new Error(`git ${args.join(" ")} (cwd=${cwd}) failed: ${detail}`);
 }
 
