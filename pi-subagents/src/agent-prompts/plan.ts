@@ -183,3 +183,20 @@ The L3 will re-dispatch with a narrower scope.
 
 // See developer.ts for the void pattern.
 void EXPLORATION_BUDGET_SECTION;
+
+// =============================================================================
+// GC-2026-038 T3: Checkpoint Protocol
+// =============================================================================
+const CHECKPOINT_PROTOCOL_SECTION = `
+## Checkpoint Protocol (every 5 turns)
+
+Every 5 turns, emit a one-line progress report:
+
+[checkpoint N/200 turns, Xm] <work summary>. <commit count> commits. blocker: <state>.
+
+If 2 consecutive checkpoints show no new commits, declare BLOCKED.
+The L3 orchestrator can detect this pattern and re-dispatch.
+`;
+
+// See developer.ts for the void pattern.
+void CHECKPOINT_PROTOCOL_SECTION;
