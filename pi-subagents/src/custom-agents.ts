@@ -10,6 +10,56 @@ import { inc as profileInc, observe as profileObserve } from "./profile.js";
 import type { AgentConfig, MemoryScope, ThinkingLevel } from "./types.js";
 
 /**
+ * GC-2026-033-perf-opt-phase-2 — TTL cache for `loadCustomAgents`.
+ *
+ * In an LLM session, `loadCustomAgents(cwd)` is called from `index.ts` once
+ * per prompt invoke (sometimes several times per turn). Without a cache,
+ * every invoke re-walks 3 directories and re-parses every .md frontmatter —
+ * 5–20ms of pure waste when the file set hasn't changed.
+ *
+ * The cache is keyed by `cwd` and is valid for `CUSTOM_AGENTS_CACHE_TTL_MS`
+ * (5s by default — long enough to coalesce a multi-turn LLM reply, short
+ * enough that an out-of-band agent authoring the .md files picks up the
+ * change within a couple of turns). The TTL deliberately does NOT rely on
+ * fs.watch: watch semantics introduce lifecycle and edge-case complexity
+ * not justified for the load profile of this function.
+ *
+ * Returned Map is always a shallow clone — callers may mutate freely without
+ * poisoning the next cache hit. The original `agents` Map is kept inside
+ * the cache entry untouched.
+ */
+const CUSTOM_AGENTS_CACHE_TTL_MS = 5_000;
+
+interface CustomAgentsCacheEntry {
+	loadedAt: number;
+	agents: Map<string, AgentConfig>;
+}
+
+const customAgentsCache = new Map<string, CustomAgentsCacheEntry>();
+
+/** Test-only helper: number of cwd entries currently held in the cache. */
+export function _getCustomAgentsCacheSize(): number {
+	return customAgentsCache.size;
+}
+
+/** Test-only helper: drop every entry. Use between tests for isolation. */
+export function _clearCustomAgentsCache(): void {
+	customAgentsCache.clear();
+}
+
+/**
+ * Internal: store a freshly-built `agents` map under `cwd` with the
+ * current timestamp. Stores a shallow clone so future cache writes
+ * don't mutate the cached snapshot.
+ */
+function touchCache(cwd: string, agents: Map<string, AgentConfig>): void {
+	customAgentsCache.set(cwd, {
+		loadedAt: Date.now(),
+		agents: new Map(agents),
+	});
+}
+
+/**
  * Scan for custom agent .md files from multiple locations.
  * Discovery hierarchy (higher priority wins):
  *   1. Project:   <cwd>/.pi/agents/*.md (authoritative — also where /agents writes)
@@ -26,8 +76,21 @@ export function loadCustomAgents(cwd: string): Map<string, AgentConfig> {
 	// in index.ts (and tests) uses to refresh the runtime registry. The
 	// elapsed ms lands in the SC2 summary's `custom_reload_ms_p50` field so
 	// we can spot a fan-out regression without adding console.log.
-	const reloadStart = Date.now();
 	profileInc("custom_agents_reload");
+
+	// GC-2026-033: TTL cache short-circuit. Hit returns a shallow clone so
+	// caller mutations don't poison subsequent hits; the reload cost is
+	// amortised across the multi-turn LLM session. `now` is read once so the
+	// TTL math stays consistent within a single call.
+	const cached = customAgentsCache.get(cwd);
+	const now = Date.now();
+	if (cached && now - cached.loadedAt < CUSTOM_AGENTS_CACHE_TTL_MS) {
+		profileInc("custom_agents_cache_hit");
+		return new Map(cached.agents);
+	}
+	profileInc("custom_agents_cache_miss");
+
+	const reloadStart = Date.now();
 	const globalDir = join(getAgentDir(), "agents");
 	const workspaceProjectDir = join(cwd, ".agents", "agents");
 	const projectDir = join(cwd, ".pi", "agents");
@@ -37,7 +100,8 @@ export function loadCustomAgents(cwd: string): Map<string, AgentConfig> {
 	loadFromDir(workspaceProjectDir, agents, "project"); // shared workspace
 	loadFromDir(projectDir, agents, "project"); // highest priority (overwrites)
 	profileObserve("custom_reload_ms", Date.now() - reloadStart);
-	return agents;
+	touchCache(cwd, agents);
+	return new Map(agents); // shallow clone — callers may mutate freely
 }
 
 /** Load agent configs from a directory into the map. */
