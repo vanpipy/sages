@@ -1184,6 +1184,12 @@ Terse command-style prompts produce shallow, generic work.
 						maximum: 120,
 					}),
 				),
+				network_allowed: Type.Optional(
+					Type.Boolean({
+						description:
+							"GC-2026-037 T3: when true, allow network-bearing commands (git fetch, curl, npm install, etc.). Default is false (offline-first). The per-agent-type default applies when omitted. The agent's last message must include a structured YAML block explaining why network is needed when overridden.",
+					}),
+				),
 				run_in_background: Type.Optional(
 					Type.Boolean({
 						description:
@@ -1802,6 +1808,7 @@ Terse command-style prompts produce shallow, generic work.
 							isolation,
 							managedWorktree,
 							invocation: agentInvocation,
+							network_allowed: (params as { network_allowed?: boolean }).network_allowed,
 							...bgCallbacks,
 						});
 					} catch (err) {
@@ -1956,6 +1963,7 @@ Terse command-style prompts produce shallow, generic work.
 							managedWorktree,
 							invocation: agentInvocation,
 							signal: mergedSignal,
+							network_allowed: (params as { network_allowed?: boolean }).network_allowed,
 							...fgCallbacks,
 						},
 						(fgAgentId) => {
