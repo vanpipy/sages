@@ -386,3 +386,42 @@ export function resolveDeadlineMs(
 	}
 	return getSubagentDurationDefault(type);
 }
+
+// =============================================================================
+// GC-2026-037 T3: Network gating (per-agent-type + per-dispatch override)
+//
+// `networkAllowed` controls whether subagent dispatches can issue network
+// commands (git fetch / pull / clone, curl, wget, npm install, etc.). The
+// default is `false` (offline-first) for all built-in agent types. The
+// `git-expert` agent and the `merger` agent are NOT gated here — they have
+// their own permission surfaces in default-agents.ts and are explicitly
+// allowed network access at registration time.
+//
+// The agent tool executor reads these via `getNetworkAllowedDefault(type)`
+// and applies them in `pi.exec()` gate logic. The L3 orchestrator can
+// override per-dispatch via `params.network_allowed` (future Agent tool
+// parameter).
+// =============================================================================
+
+const DEFAULT_NETWORK_ALLOWED_BY_TYPE: Record<string, boolean> = {
+	developer: false,
+	auditor: false,
+	Explore: false,
+	Plan: false,
+};
+
+let networkAllowedByType: Record<string, boolean> = {
+	...DEFAULT_NETWORK_ALLOWED_BY_TYPE,
+};
+
+export function getNetworkAllowedDefault(type: string): boolean {
+	return networkAllowedByType[type] ?? false;
+}
+
+export function setNetworkAllowedDefault(type: string, allowed: boolean): void {
+	networkAllowedByType = { ...networkAllowedByType, [type]: allowed };
+}
+
+export function setNetworkAllowedDefaults(d: Record<string, boolean>): void {
+	networkAllowedByType = { ...networkAllowedByType, ...d };
+}
