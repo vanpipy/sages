@@ -165,3 +165,71 @@ Status values (choose the most honest):
 Reminder: Plan is bounded by a 5-minute wall-clock deadline (per GC-2026-037 T1).
 Do not explore; commit to a plan early.
 `;
+
+const EXPLORATION_BUDGET_SECTION = `
+## Exploration Budget (hard caps on read tools)
+
+Plan is research-driven. Use the budget wisely.
+
+- **read**: max 30 total calls
+- **grep / rg / find**: max 5 total calls
+- **git log / show / blame**: max 3 total calls
+- **AFT / codebase_memory**: max 10 total calls
+- **commits**: UNLIMITED
+
+If you hit a cap, commit your plan (even partial) and declare BLOCKED.
+The L3 will re-dispatch with a narrower scope.
+`;
+
+// See developer.ts for the void pattern.
+void EXPLORATION_BUDGET_SECTION;
+
+// =============================================================================
+// GC-2026-038 T3: Checkpoint Protocol
+// =============================================================================
+const CHECKPOINT_PROTOCOL_SECTION = `
+## Checkpoint Protocol (every 5 turns)
+
+Every 5 turns, emit a one-line progress report:
+
+[checkpoint N/200 turns, Xm] <work summary>. <commit count> commits. blocker: <state>.
+
+If 2 consecutive checkpoints show no new commits, declare BLOCKED.
+The L3 orchestrator can detect this pattern and re-dispatch.
+`;
+
+// See developer.ts for the void pattern.
+void CHECKPOINT_PROTOCOL_SECTION;
+
+// =============================================================================
+// GC-2026-038 T4: Uncertainty Threshold
+// =============================================================================
+const UNCERTAINTY_THRESHOLD_SECTION = `
+## Uncertainty Threshold (ask early, ask once)
+
+When you are unsure about a design decision AND cannot resolve it in
+5 turns, emit the question in your final message:
+
+<ASK>What is the contract for X?</ASK>
+
+The L3 orchestrator parses <ASK>...</ASK> blocks. A clean question
+saves the next dispatch from re-deriving the same context.
+`;
+
+// See developer.ts for the void pattern.
+void UNCERTAINTY_THRESHOLD_SECTION;
+
+// =============================================================================
+// GC-2026-038 T5: Bash Timeout Guard
+// =============================================================================
+const BASH_TIMEOUT_SECTION = `
+## Bash Timeout Guard (per-bucket timeouts)
+
+- **read**: 5s timeout
+- **search**: 10s timeout
+- **bun test <single_file>**: 30s timeout
+- **network** (git fetch / curl / npm install): 5s fail-fast
+`;
+
+// See developer.ts for the void pattern.
+void BASH_TIMEOUT_SECTION;

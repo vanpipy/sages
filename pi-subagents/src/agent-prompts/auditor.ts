@@ -317,3 +317,93 @@ typecheck output. If your YAML says pass: 5 but the test output shows
 
 // See developer.ts for the void FINAL_VERDICT_ADDENDUM rationale.
 void FINAL_VERDICT_ADDENDUM;
+
+const EXPLORATION_BUDGET_SECTION = `
+## Exploration Budget (hard caps on read tools)
+
+Reading tools burn turns quickly. The L3 orchestrator monitors your
+tool-call count via the prompts. If you exceed a budget, you are
+SLOWER than if you commit and stop. **You do NOT get extra turns
+for exploration — you get less.**
+
+### Hard caps per dispatch
+
+- **read** (read / cat / head / tail / less): max 30 total calls
+- **grep / rg / awk / sed / find** (code search): max 5 total calls
+- **git log / git show / git blame** (archaeology): max 3 total calls
+- **AFT / codebase_memory** (indexed search): max 10 total calls
+- **writes / commits / edits**: UNLIMITED
+
+### Anti-patterns
+
+- **Do NOT explore just to feel confident.** Most tasks have a single
+  obvious path after the first 3 reads. The remaining 27 reads are
+  diminishing returns.
+- **Do NOT read the same file twice.** AFT indexed-reads are cheap;
+  full reads are not. If you need a section again, use aft_zoom.
+- **Do NOT run git log/show for archaeology.** If you do not know the
+  history, AFT search "<symbol>" + "git blame <symbol>" is faster.
+- **Do NOT run \`git log --all -- <path>\` or \`git log -p\`.** These are
+  archaeology commands, not progress markers.
+
+### Escape hatch
+
+If you hit a budget cap and have not yet produced a commit, **commit
+what you have immediately and declare BLOCKED**. The L3 will
+re-dispatch with a narrower scope. Do not finish reading.
+`;
+
+// See developer.ts COMMIT_DISCIPLINE_SECTION for the void pattern.
+void EXPLORATION_BUDGET_SECTION;
+
+// =============================================================================
+// GC-2026-038 T3: Checkpoint Protocol
+// =============================================================================
+const CHECKPOINT_PROTOCOL_SECTION = `
+## Checkpoint Protocol (every 5 turns)
+
+Every 5 turns, emit a one-line progress report:
+
+[checkpoint N/200 turns, Xm] <work summary>. <commit count> commits. blocker: <state>.
+
+If 2 consecutive checkpoints show no new commits, declare BLOCKED.
+The L3 orchestrator can detect this pattern and re-dispatch.
+`;
+
+// See developer.ts for the void pattern.
+void CHECKPOINT_PROTOCOL_SECTION;
+
+// =============================================================================
+// GC-2026-038 T4: Uncertainty Threshold
+// =============================================================================
+const UNCERTAINTY_THRESHOLD_SECTION = `
+## Uncertainty Threshold (ask early, ask once)
+
+When you are unsure about a design decision AND cannot resolve the
+question in 5 turns of exploration, emit the question in your final
+message using the ASK markup:
+
+<ASK>What is the contract for X? The task brief is ambiguous.</ASK>
+
+The L3 orchestrator parses <ASK>...</ASK> blocks. A clean question
+saves the next dispatch from re-deriving the same context.
+`;
+
+// See developer.ts for the void pattern.
+void UNCERTAINTY_THRESHOLD_SECTION;
+
+// =============================================================================
+// GC-2026-038 T5: Bash Timeout Guard
+// =============================================================================
+const BASH_TIMEOUT_SECTION = `
+## Bash Timeout Guard (per-bucket timeouts)
+
+- **read** (cat / head / tail / less): 5s timeout
+- **search** (grep / rg / awk / sed / find): 10s timeout
+- **bun test <single_file>**: 30s timeout
+- **bun test (no path)**: 90s timeout. Avoid in a loop.
+- **network** (git fetch / curl / npm install): 5s fail-fast
+`;
+
+// See developer.ts for the void pattern.
+void BASH_TIMEOUT_SECTION;
