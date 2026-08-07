@@ -39,6 +39,7 @@ import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
+import { getNetworkAllowedDefault } from "./settings.js";
 import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 import { toolDisplayName } from "./ui/agent-widget.js";
@@ -301,6 +302,14 @@ export interface RunOptions {
 	isolated?: boolean;
 	inheritContext?: boolean;
 	thinkingLevel?: ThinkingLevel;
+	/**
+	 * GC-2026-037 T3: when false, runAgent wraps `pi.exec()` to reject
+	 * network-bearing commands (git fetch, git pull, git clone, git
+	 * ls-remote, curl, wget, npm install, bun install, etc.) with a
+	 * `NetworkNotAllowedError`. Default behavior (when undefined) is
+	 * read from per-type settings via `getNetworkAllowedDefault(type)`.
+	 */
+	network_allowed?: boolean;
 	/** Override working directory (e.g. for worktree isolation). */
 	cwd?: string;
 	/**
@@ -478,7 +487,16 @@ export async function runAgent(
 	// They differ only for SpawnOptions.cwd spawns (config stays with the parent).
 	const configCwd = options.configCwd ?? effectiveCwd;
 
-	const env = await detectEnv(options.pi, effectiveCwd);
+	// GC-2026-037 T3: gate pi.exec() against network commands. Per-type
+	// default is read from settings; the caller can override via
+	// `options.network_allowed`. The wrapped pi is then passed downstream
+	// to createAgentSession (which captures it for the LLM loop) and to
+	// detectEnv (which also calls pi.exec for the environment probe).
+	const networkAllowed =
+		options.network_allowed ?? getNetworkAllowedDefault(type);
+	const pi = wrapPiForNetworkGate(options.pi, networkAllowed);
+
+	const env = await detectEnv(pi, effectiveCwd);
 
 	// Get parent system prompt only for append-mode agents.
 	// Replace-mode agents get a completely fresh prompt and must not inherit
@@ -1584,4 +1602,135 @@ function asHandoffs(v: unknown): SubagentOutputHandoff[] {
 			context: typeof h.context === "string" ? h.context : undefined,
 		}))
 		.filter((h) => h.readFirst !== "");
+}
+
+// =============================================================================
+// GC-2026-037 T3: Network gating
+//
+// `NetworkNotAllowedError` is thrown by the network gate when an agent
+// dispatches a network-bearing command (git fetch, curl, etc.) while
+// `network_allowed` is false. The L3 audit gate distinguishes this
+// failure mode (governance violation) from a generic execution error
+// and reports it separately in the task report.
+//
+// `isNetworkCommand(command, args)` returns true for known-network
+// commands. The list is intentionally narrow — only commands that hit
+// the network are gated. Local git operations (status, diff, commit,
+// branch) are NEVER gated.
+//
+// `wrapPiForNetworkGate(pi, allowed)` returns a Proxy that intercepts
+// `pi.exec()` calls and throws NetworkNotAllowedError for network
+// commands when allowed=false. All other pi methods pass through.
+// =============================================================================
+
+export class NetworkNotAllowedError extends Error {
+	readonly command: string;
+	readonly args: readonly string[];
+	constructor(command: string, args: readonly string[]) {
+		super(
+			`network access disabled: \`${command}${args.length > 0 ? " " + args.join(" ") : ""}\` is a network-bearing command. ` +
+				`Pass network_allowed: true to override per-dispatch.`,
+		);
+		this.name = "NetworkNotAllowedError";
+		this.command = command;
+		this.args = args;
+	}
+}
+
+/**
+ * Detect known network-bearing commands. Conservative list: only mark
+ * commands that demonstrably hit the network. Local git operations
+ * (status, diff, log, commit, branch, checkout, add, reset, revert,
+ * merge, rebase) are NOT in this list.
+ */
+export function isNetworkCommand(command: string, args: readonly string[]): boolean {
+	const c = command.toLowerCase();
+	if (c === "git") {
+		// `git <subcommand>` — only specific subcommands are network.
+		const sub = (args[0] ?? "").toLowerCase();
+		const NETWORK_SUBCMDS = new Set([
+			"fetch",
+			"pull",
+			"clone",
+			"ls-remote",
+			"push",
+			"remote",
+			"request-pull",
+		]);
+		return NETWORK_SUBCMDS.has(sub);
+	}
+	// Direct network tools.
+	if (c === "curl" || c === "wget" || c === "nc" || c === "ncat" || c === "telnet" || c === "ssh" || c === "scp" || c === "rsync" || c === "ftp" || c === "sftp") {
+		return true;
+	}
+	// Package managers — `install`, `add`, `publish`, `login` etc. all
+	// touch the network. `npm ls`, `bun pm ls` etc. don't. The flag
+	// `-h/--help/-v/--version` is a fast local-only path.
+	if (c === "npm" || c === "bun" || c === "pnpm" || c === "yarn" || c === "pip" || c === "pip3" || c === "uv" || c === "poetry") {
+		const sub = (args[0] ?? "").toLowerCase();
+		// First-arg subcommands that are network. Anything else
+		// (including ls, list, config, doctor, etc.) is local and
+		// passes through.
+		const NETWORK_SUB = new Set([
+			"install",
+			"add",
+			"i",
+			"update",
+			"upgrade",
+			"publish",
+			"login",
+			"logout",
+			"uninstall",
+			"remove",
+			"rm",
+			"search",
+			"view",
+			"info",
+			"outdated",
+		]);
+		return NETWORK_SUB.has(sub);
+	}
+	return false;
+}
+
+export function enforceNetworkGate(
+	command: string,
+	args: readonly string[],
+	allowed: boolean,
+): void {
+	if (allowed) return;
+	if (isNetworkCommand(command, args)) {
+		throw new NetworkNotAllowedError(command, args);
+	}
+}
+
+/**
+ * Wrap an `ExtensionAPI` so that `pi.exec()` calls are intercepted and
+ * gated against network commands. The Proxy delegates every other
+ * property access to the original `pi`. When `allowed` is true, the
+ * wrapper is a no-op pass-through (no Proxy overhead in the common
+ * case — callers should skip the wrap when allowed).
+ */
+export function wrapPiForNetworkGate<T extends object>(
+	pi: T,
+	allowed: boolean,
+): T {
+	if (allowed) return pi;
+	return new Proxy(pi, {
+		get(target, prop, receiver) {
+			if (prop === "exec") {
+				return (command: string, args: string[], options?: unknown) => {
+					enforceNetworkGate(command, args, allowed);
+					// @ts-expect-error — generic Proxy delegation
+					return Reflect.get(target, prop, receiver).call(
+						target,
+						command,
+						args,
+						options,
+					);
+				};
+			}
+			return Reflect.get(target, prop, receiver);
+		},
+	}) as T;
 }
