@@ -680,3 +680,53 @@ include in the question, the better the answer.
 
 // The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
 void UNCERTAINTY_THRESHOLD_SECTION;
+
+// =============================================================================
+// GC-2026-038 T5: Bash Timeout Guard
+// =============================================================================
+const BASH_TIMEOUT_SECTION = `
+## Bash Timeout Guard (per-bucket timeouts)
+
+The bash tool has a 15-second foreground timeout. Commands exceeding
+that are auto-promoted to background. The L3 orchestrator's overhead
+per "wait for backgrounded command" is ~5s. Plan your command budget
+to avoid wasting turns waiting.
+
+### Per-bucket timeout guidance
+
+- **read** (cat / head / tail / less): 5s timeout. A slow read means
+  the file is huge — use aft_zoom for a specific symbol instead.
+- **search** (grep / rg / awk / sed / find): 10s timeout. If a search
+  takes too long, your query is too broad — narrow it.
+- **bun test <single_file>**: 30s timeout. Most test files run in <5s;
+  30s catches a hung test process.
+- **bun test (no path, full suite)**: 90s timeout. AVOID running the
+  full suite in a tight loop. Scope your test to a single file.
+- **network** (git fetch / curl / npm install / bun install): 5s
+  fail-fast timeout. The sandbox often has no network — these
+  commands hang until the network layer's internal timeout, which
+  can be 120s+.
+
+### Anti-patterns
+
+- **Do NOT run \`bun test\` (full suite) in a loop.** Each run costs
+  15-30s of foreground time. Scope to a single file with
+  \`bun test test/foo.test.ts\`.
+- **Do NOT run \`git log -p\` or \`git log --all -- <path>\`.** These
+  are archaeology commands, not progress markers. Use AFT or
+  codebase_memory for cross-package work.
+- **Do NOT use bash grep/rg/find/cat for code exploration.** AFT is
+  faster. The bash path is the LAST resort.
+- **Do NOT run network commands without explicit authorization.**
+  Default is OFF. The audit gate flags network calls as suspicious
+  unless the parent overrode the per-dispatch setting.
+
+### Escape hatch
+
+If a bash command times out, KILL the backgrounded task and switch
+to a faster tool. Do not wait — the L3 will detect the no-progress
+checkpoint and re-dispatch.
+`;
+
+// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
+void BASH_TIMEOUT_SECTION;
