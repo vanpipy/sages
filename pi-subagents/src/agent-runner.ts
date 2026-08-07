@@ -1734,3 +1734,80 @@ export function wrapPiForNetworkGate<T extends object>(
 		},
 	}) as T;
 }
+
+// =============================================================================
+// GC-2026-038 T3: parseCheckpoint helper
+//
+// Agent prompts instruct the LLM to emit a checkpoint line every 5 turns:
+//   [checkpoint N/200 turns, Xm] <work summary>. <commit count>. blocker: <state>.
+//
+// `parseCheckpoint(text)` extracts the most recent checkpoint line, returning
+// { turnNumber, timeMinutes, workSummary, commitCount, blocker } | null.
+// The orchestrator (L3) can read this to track progress; future phases may
+// use it to enforce "2 consecutive no-progress checkpoints -> BLOCKED".
+// =============================================================================
+
+export interface SubagentCheckpoint {
+	turnNumber: number;
+	timeMinutes: number;
+	workSummary: string;
+	commitCount: number;
+	blocker: string;
+}
+
+const CHECKPOINT_LINE_RE = /\[checkpoint\s+(\d+)\/(\d+)\s+turns,\s+([\d.mhs]+)\]\s+([^.]+)\.\s+(\d+)\s+commits?\.\s+blocker:\s*([^.]+?)\.?$/i;
+
+/**
+ * Parse the time field of a checkpoint line. Accepts:
+ *   - "5m" -> 5
+ *   - "1.5m" -> 1.5
+ *   - "1m32s" -> 1.533... (1 minute 32 seconds = 1 + 32/60)
+ *   - "2m0s" -> 2
+ * Returns NaN for unparseable input.
+ */
+function parseCheckpointTime(s: string): number {
+	const minMatch = s.match(/(\d+(?:\.\d+)?)\s*m/);
+	const secMatch = s.match(/(\d+(?:\.\d+)?)\s*s/);
+	const minutes = minMatch ? Number.parseFloat(minMatch[1] ?? "0") : 0;
+	const seconds = secMatch ? Number.parseFloat(secMatch[1] ?? "0") : 0;
+	return minutes + seconds / 60;
+}
+
+export function parseCheckpoint(text: string): SubagentCheckpoint | null {
+	// Find the LAST checkpoint line in the text (most recent wins).
+	// Time format: "1m32s" / "5m" / "1.5m" / etc. The `[\d.mhs]+` class accepts all
+	// of these. We capture groups: 1=turn, 2=maxTurns, 3=time, 4=workSummary,
+	// 5=commitCount, 6=blocker.
+	const matches = [...text.matchAll(/\[checkpoint\s+(\d+)\/(\d+)\s+turns,\s+([\d.mhs]+)\]\s+([\s\S]+?)\s+(\d+)\s+commits?\.\s+blocker:\s*([^.\n]+?)\.?\s*(?:\n|$)/gi)];
+	if (matches.length === 0) return null;
+	const last = matches[matches.length - 1];
+	if (!last) return null;
+	return {
+		turnNumber: Number.parseInt(last[1] ?? "0", 10),
+		// last[2] is the max turns (e.g. 200) — we don't currently use it,
+		// but it's part of the schema so extract it for future use.
+		// (Stored in turnNumber-only for now.)
+		timeMinutes: parseCheckpointTime(last[3] ?? "0"),
+		workSummary: (last[4] ?? "").trim(),
+		commitCount: Number.parseInt(last[5] ?? "0", 10),
+		blocker: (last[6] ?? "").trim(),
+	};
+}
+
+// =============================================================================
+// GC-2026-038 T4: extractAsk helper
+//
+// Agent prompts instruct the LLM to emit <ASK>question</ASK> when stuck.
+// `extractAsk(text)` parses all <ASK>...</ASK> blocks and returns the
+// trimmed questions. The L3 orchestrator (or a future dashboard) reads
+// these to surface blockers to the user.
+// =============================================================================
+
+export function extractAsk(text: string): string[] {
+	const matches = [
+		...text.matchAll(/<ASK>([\s\S]+?)<\/ASK>/gi),
+	];
+	return matches
+		.map((m) => (m[1] ?? "").trim())
+		.filter((q) => q.length > 0);
+}

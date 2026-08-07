@@ -499,3 +499,234 @@ move the item to open_questions.
 // gate. The const is not used in code, so it reads as a no-op
 // declaration. TypeScript will tree-shake it from the runtime bundle.
 void FINAL_VERDICT_ADDENDUM;
+
+// =============================================================================
+// GC-2026-038 T1: Commit Discipline (commit-as-checkpoint)
+//
+// The agent-runner + audit gate can read git history. If you write tests
+// or implementation but never commit, the L3 orchestrator cannot tell
+// what you have done — only the LLM's context window knows. Run out of
+// turns before committing, and your work is lost.
+//
+// Commit every RED test and every GREEN test. Commit before exploring
+// further. Think of commits as “progress markers” the L3 can read.
+// =============================================================================
+const COMMIT_DISCIPLINE_SECTION = `
+## Commit Discipline (commit-as-checkpoint)
+
+Your work is on a git branch. The L3 orchestrator reads git history to
+verify your progress. **Every RED test and every GREEN test MUST end with
+a git commit.** A commit is your durable progress signal — without it,
+the L3 cannot distinguish “work done” from “work in progress”.
+
+### When to commit
+
+1. **After writing a failing test (RED phase):**
+   git add -A && git commit -m "wip: <test name> red"
+   Example: \`git commit -m "wip: T-DEADLINE-01: a 1/60 minute deadline aborts within 2s red"\`
+
+2. **After implementing the minimum to pass (GREEN phase):**
+   git add -A && git commit -m "feat: <test name> green"
+   Example: \`git commit -m "feat: T-DEADLINE-01: a 1/60 minute deadline aborts within 2s green"\`
+
+3. **After every refactor step:** \`git commit -m "refactor: <description>"\`
+
+### Anti-patterns
+
+- **Do NOT write multiple tests before committing the first one.** If
+  you write 7 tests and run out of turns before committing any, the
+  L3 sees 0 commits and abandons your work.
+- **Do NOT explore further without committing what you have.** If 5
+  turns have passed without a commit, stop exploring. Commit what
+  you have (even if RED) and emit \`BLOCKED\` in your final message.
+- **Do NOT skip the commit step for "trivial" changes.** WIP counts.
+  A running history of WIP commits is far more useful than a single
+  mega-commit at the end.
+
+### Escape hatch
+
+If you realize mid-task that you have been exploring for too long
+without a commit, **commit what you have immediately and declare
+BLOCKED**. Do not try to “finish the exploration first”. The L3 will
+re-dispatch a follow-up task with your partial work as the starting
+point.
+`;
+
+// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
+void COMMIT_DISCIPLINE_SECTION;
+
+
+// =============================================================================
+// GC-2026-038 T2: Exploration Budget (shared with other agents)
+// =============================================================================
+const EXPLORATION_BUDGET_SECTION = `
+## Exploration Budget (hard caps on read tools)
+
+Reading tools burn turns quickly. The L3 orchestrator monitors your
+tool-call count via the prompts. If you exceed a budget, you are
+SLOWER than if you commit and stop. **You do NOT get extra turns
+for exploration — you get less.**
+
+### Hard caps per dispatch
+
+- **read** (read / cat / head / tail / less): max 30 total calls
+- **grep / rg / awk / sed / find** (code search): max 5 total calls
+- **git log / git show / git blame** (archaeology): max 3 total calls
+- **AFT / codebase_memory** (indexed search): max 10 total calls
+- **writes / commits / edits**: UNLIMITED
+
+### Anti-patterns
+
+- **Do NOT explore just to feel confident.** Most tasks have a single
+  obvious path after the first 3 reads. The remaining 27 reads are
+  diminishing returns.
+- **Do NOT read the same file twice.** AFT indexed-reads are cheap;
+  full reads are not. If you need a section again, use aft_zoom.
+- **Do NOT run git log/show for archaeology.** If you do not know the
+  history, AFT search "<symbol>" + "git blame <symbol>" is faster.
+- **Do NOT run \`git log --all -- <path>\` or \`git log -p\`.** These are
+  archaeology commands, not progress markers.
+
+### Escape hatch
+
+If you hit a budget cap and have not yet produced a commit, **commit
+what you have immediately and declare BLOCKED**. The L3 will
+re-dispatch with a narrower scope. Do not finish reading.
+`;
+
+// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
+void EXPLORATION_BUDGET_SECTION;
+
+// =============================================================================
+// GC-2026-038 T3: Checkpoint Protocol
+// =============================================================================
+const CHECKPOINT_PROTOCOL_SECTION = `
+## Checkpoint Protocol (every 5 turns)
+
+Every 5 turns, emit a one-line progress report in this exact format:
+
+[checkpoint N/200 turns, Xm] <work summary>. <commit count> commits. blocker: <state>.
+
+Examples:
+- [checkpoint 5/200 turns, 1m32s] 1 test written (RED). 0 commits. blocker: none.
+- [checkpoint 10/200 turns, 3m15s] 1 test passing (GREEN). 1 commit. blocker: none.
+- [checkpoint 15/200 turns, 4m50s] Implementation complete. 3 commits. blocker: scope-question.
+
+### When to BLOCKED
+
+If 2 consecutive checkpoints show no new commits, **declare BLOCKED**
+in your final message. The L3 orchestrator reads these checkpoints and
+will detect the no-progress pattern and re-dispatch.
+
+The rule: 2 consecutive checkpoints with the same commit count = BLOCKED.
+
+### Why this matters
+
+The L3 orchestrator runs a checkpoint parser on your last message.
+Without checkpoints, the L3 cannot tell "I am working" from "I am stuck".
+With checkpoints, the L3 can:
+- Detect when you have not yet committed (commit count = 0)
+- Detect when you are stuck (no commits in 2 consecutive checkpoints)
+- Surface blockers to the user
+
+Skipping checkpoints is equivalent to having no progress signal.
+`;
+
+// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
+void CHECKPOINT_PROTOCOL_SECTION;
+
+// =============================================================================
+// GC-2026-038 T4: Uncertainty Threshold
+// =============================================================================
+const UNCERTAINTY_THRESHOLD_SECTION = `
+## Uncertainty Threshold (ask early, ask once)
+
+When you are unsure about a design decision AND cannot resolve the
+question in 5 turns of exploration, **emit the question explicitly**
+in your final message using the ASK markup:
+
+<ASK>What API signature should the deadline hook use: AbortSignal.timeout(deadlineMs) or a manual setTimeout? Look at the existing runAgent signature and the mergedSignal pattern to decide.</ASK>
+
+The L3 orchestrator parses <ASK>...</ASK> blocks. A clean question
+saves the next dispatch from re-deriving the same context.
+
+### When to use <ASK>
+
+- **After 5 turns of exploration** without resolving a design choice,
+  emit the question. Do NOT keep guessing.
+- **When the task brief is ambiguous** (e.g. "refactor X with Y
+  constraint" but Y conflicts with X), emit the question FIRST
+  rather than producing partial work.
+- **When two valid approaches exist** and the task brief does not
+  say which one — emit the question.
+
+### When NOT to use <ASK>
+
+- **For "I'm confused about the test framework"** — the answer is in
+  the project conventions; read AGENTS.md / package.json. Don't ask
+  what you can read.
+- **For a question you can answer with one more read** — read first,
+  ask only if the read is inconclusive.
+- **For a question the L3 already answered** in the task prompt —
+  re-reading the brief is faster than asking.
+
+### Format
+
+The <ASK>...</ASK> markup can appear anywhere in your final message
+(multiple instances OK). The L3 orchestrator extracts all questions
+and surfaces them to the user. Be specific — the more context you
+include in the question, the better the answer.
+`;
+
+// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
+void UNCERTAINTY_THRESHOLD_SECTION;
+
+// =============================================================================
+// GC-2026-038 T5: Bash Timeout Guard
+// =============================================================================
+const BASH_TIMEOUT_SECTION = `
+## Bash Timeout Guard (per-bucket timeouts)
+
+The bash tool has a 15-second foreground timeout. Commands exceeding
+that are auto-promoted to background. The L3 orchestrator's overhead
+per "wait for backgrounded command" is ~5s. Plan your command budget
+to avoid wasting turns waiting.
+
+### Per-bucket timeout guidance
+
+- **read** (cat / head / tail / less): 5s timeout. A slow read means
+  the file is huge — use aft_zoom for a specific symbol instead.
+- **search** (grep / rg / awk / sed / find): 10s timeout. If a search
+  takes too long, your query is too broad — narrow it.
+- **bun test <single_file>**: 30s timeout. Most test files run in <5s;
+  30s catches a hung test process.
+- **bun test (no path, full suite)**: 90s timeout. AVOID running the
+  full suite in a tight loop. Scope your test to a single file.
+- **network** (git fetch / curl / npm install / bun install): 5s
+  fail-fast timeout. The sandbox often has no network — these
+  commands hang until the network layer's internal timeout, which
+  can be 120s+.
+
+### Anti-patterns
+
+- **Do NOT run \`bun test\` (full suite) in a loop.** Each run costs
+  15-30s of foreground time. Scope to a single file with
+  \`bun test test/foo.test.ts\`.
+- **Do NOT run \`git log -p\` or \`git log --all -- <path>\`.** These
+  are archaeology commands, not progress markers. Use AFT or
+  codebase_memory for cross-package work.
+- **Do NOT use bash grep/rg/find/cat for code exploration.** AFT is
+  faster. The bash path is the LAST resort.
+- **Do NOT run network commands without explicit authorization.**
+  Default is OFF. The audit gate flags network calls as suspicious
+  unless the parent overrode the per-dispatch setting.
+
+### Escape hatch
+
+If a bash command times out, KILL the backgrounded task and switch
+to a faster tool. Do not wait — the L3 will detect the no-progress
+checkpoint and re-dispatch.
+`;
+
+// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
+void BASH_TIMEOUT_SECTION;
