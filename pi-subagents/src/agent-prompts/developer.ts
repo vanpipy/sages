@@ -596,3 +596,41 @@ re-dispatch with a narrower scope. Do not finish reading.
 
 // The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
 void EXPLORATION_BUDGET_SECTION;
+
+// =============================================================================
+// GC-2026-038 T3: Checkpoint Protocol
+// =============================================================================
+const CHECKPOINT_PROTOCOL_SECTION = `
+## Checkpoint Protocol (every 5 turns)
+
+Every 5 turns, emit a one-line progress report in this exact format:
+
+[checkpoint N/200 turns, Xm] <work summary>. <commit count> commits. blocker: <state>.
+
+Examples:
+- [checkpoint 5/200 turns, 1m32s] 1 test written (RED). 0 commits. blocker: none.
+- [checkpoint 10/200 turns, 3m15s] 1 test passing (GREEN). 1 commit. blocker: none.
+- [checkpoint 15/200 turns, 4m50s] Implementation complete. 3 commits. blocker: scope-question.
+
+### When to BLOCKED
+
+If 2 consecutive checkpoints show no new commits, **declare BLOCKED**
+in your final message. The L3 orchestrator reads these checkpoints and
+will detect the no-progress pattern and re-dispatch.
+
+The rule: 2 consecutive checkpoints with the same commit count = BLOCKED.
+
+### Why this matters
+
+The L3 orchestrator runs a checkpoint parser on your last message.
+Without checkpoints, the L3 cannot tell "I am working" from "I am stuck".
+With checkpoints, the L3 can:
+- Detect when you have not yet committed (commit count = 0)
+- Detect when you are stuck (no commits in 2 consecutive checkpoints)
+- Surface blockers to the user
+
+Skipping checkpoints is equivalent to having no progress signal.
+`;
+
+// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
+void CHECKPOINT_PROTOCOL_SECTION;
