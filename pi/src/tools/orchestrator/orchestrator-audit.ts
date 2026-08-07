@@ -43,28 +43,15 @@ import {
   atomicWriteOrchestratorText,
 } from "./state-persistence.js";
 import { loadPlan } from "./dag-synthesizer.js";
-// GC-2026-039: Runtime enforcement. The full extractAuditFindings
-// parser lives in pi-subagents/src/agent-runner.ts (5 rules). Calling
-// it from pi/orchestrator-audit.ts would require a cross-package
-// import, but pi/tsconfig.json's rootDir restriction blocks it
-// (TS6059). Instead, we run an inline check on the task report
-// text: 3 lightweight rules that catch the most common governance
-// violations without the full parser. For the full parser, the
-// audit can be re-run from pi-subagents/tests.
-//
-// This inline check is intentionally a SUBSET of extractAuditFindings
-// in pi-subagents. Keep them in sync when adding new rules.
-// GC-2026-039: Runtime enforcement. The full extractAuditFindings
-// parser lives in pi-subagents/src/agent-runner.ts (5 rules). Calling
-// it from pi/orchestrator-audit.ts would require a cross-package
-// import, but pi/tsconfig.json's rootDir restriction blocks it
-// (TS6059). Instead, we run an inline check on the task report
-// text: 3 lightweight rules that catch the most common governance
-// violations without the full parser. For the full parser, the
-// audit can be re-run from pi-subagents/tests.
-//
-// This inline check is intentionally a SUBSET of extractAuditFindings
-// in pi-subagents. Keep them in sync when adding new rules.
+// GC-2026-041: Cross-package import. The full extractAuditFindings
+// parser lives in pi-subagents/src/agent-runner.ts (5 rules). The
+// ambient declaration in pi/types/pi-subagents-audit.d.ts declares
+// the module shape so tsc accepts the import. The ambient declaration
+// + a `// @ts-ignore` on the import line bypass the rootDir check
+// (which would otherwise reject with TS6059). Runtime resolution
+// uses Node ESM (relative path is correct in the monorepo).
+// @ts-ignore -- tsc rejects cross-package imports under rootDir.
+import { extractAuditFindings, type AuditFinding } from "../../../../pi-subagents/src/agent-runner.js";
 
 const COMPLETE_OBSERVATION = Type.Object({
   verdict: Type.Union([Type.Literal("PASS"), Type.Literal("REVISE"), Type.Literal("REJECT")]),
@@ -330,13 +317,16 @@ async function initAudit(
   // they do NOT block the audit (workflowReady stays as the auditor's
   // verdict) but they trigger the L3 to record additional findings.
   const taskReports = readTaskReports(cwd, tasks);
-  const inlineFindings: Array<{ task_id: string; rule: string; severity: "minor" | "major" | "critical"; issue: string; evidence: string; recommendation: string }> = [];
+  // GC-2026-041: Use the full 5-rule extractAuditFindings from pi-subagents.
+  // The inline 3-rule subset is gone. Each task's report is parsed and any
+  // findings are surfaced as inline_findings for the L3 to record.
+  const inlineFindings: Array<{ task_id: string; finding: AuditFinding }> = [];
   for (const t of tasks) {
     const report = taskReports.get(t.id);
     if (report == null) continue;
-    const findings = runInlineGovernanceCheck(t.id, report);
+    const findings = extractAuditFindings(report, "");
     for (const f of findings) {
-      inlineFindings.push({ task_id: t.id, ...f });
+      inlineFindings.push({ task_id: t.id, finding: f });
     }
   }
 
@@ -513,6 +503,43 @@ async function completeAudit(
       `verdict:PASS requires all tasks certified; blocking: ${workflowSummary.blockingTasks.join(", ")}`,
     );
     verdict = "REVISE";
+  }
+
+  // GC-2026-041: Auto-inject inline findings into state.findings.
+  // Re-run extractAuditFindings on each task's report. For any finding
+  // NOT already in state.findings (i.e. the L3 didn't record it via
+  // observation.findings), auto-record it as a synthetic finding with
+  // category=castration (the cross-cutting governance concern) and
+  // severity matching the inline finding's severity. This ensures
+  // computeScore penalizes governance violations even if the L3
+  // forgets to record them. The synthetic findings are visible in the
+  // audit report; the L3 still has the option to add its own findings.
+  const taskReportsAuto = readTaskReports(cwd, state.tasks);
+  for (const t of state.tasks) {
+    const report = taskReportsAuto.get(t.id);
+    if (report == null) continue;
+    const inlineResults = extractAuditFindings(report, "");
+    for (const inf of inlineResults) {
+      // Has the L3 already recorded an equivalent finding? (Match by
+      // rule + task_id.) If yes, skip. If no, auto-inject.
+      const already = state.findings.some(
+        (f) =>
+          (f.task_id === t.id || f.task_id == null) &&
+          f.issue === inf.issue,
+      );
+      if (!already) {
+        state = appendFindings(state, [
+          {
+            task_id: t.id,
+            category: "castration",
+            severity: inf.severity,
+            issue: inf.issue,
+            evidence: inf.evidence,
+            recommendation: inf.recommendation,
+          },
+        ]);
+      }
+    }
   }
 
   // Severity gates only override PASS — the LLM's explicit REVISE/REJECT
@@ -717,89 +744,17 @@ export function aggregateTaskAudits(
 }
 
 /**
- * GC-2026-039: Inline governance check on the agent's task report.
- *
- * The full extractAuditFindings parser lives in pi-subagents (5 rules).
- * The orchestrator cannot statically import it (rootDir restriction
- * in pi/tsconfig.json produces TS6059). This inline implementation is
- * a SUBSET covering the 3 most-common violations:
- *
- *   - inline_no_commits_block: the task report shows BLOCKED status but
- *     does not list any commits AND no open_questions.
- *   - inline_yaml_block_missing: the task report has no parseable
- *     ```yaml``` fenced block.
- *   - inline_checkpoint_stuck: 2+ checkpoints in the report with
- *     the same commit count (no-progress pattern).
- *
- * When this gate fires, the orchestrator_audit tool surfaces the
- * finding in the audit report. The L3 then knows to re-dispatch or
- * escalate.
- *
- * The inline check is intentionally lightweight; the full parser in
- * pi-subagents/tests/audit-findings.test.ts is the source of truth
- * for rule definitions. If you add a rule to extractAuditFindings,
- * mirror it here.
+ * GC-2026-041: Inline governance check is REMOVED. The full 5-rule
+ * extractAuditFindings from pi-subagents is now used directly in the
+ * audit-init flow. The inline subset is gone.
  */
 export function runInlineGovernanceCheck(
-	taskId: string,
-	taskReportText: string,
-): Array<{ rule: string; severity: "minor" | "major" | "critical"; issue: string; evidence: string; recommendation: string }> {
-	const findings: Array<{ rule: string; severity: "minor" | "major" | "critical"; issue: string; evidence: string; recommendation: string }> = [];
-
-	// Rule: yaml_block_missing — no ```yaml fenced block.
-	const hasYamlBlock = /```yaml[\s\S]+?```/.test(taskReportText);
-	if (!hasYamlBlock) {
-		findings.push({
-			rule: "inline_yaml_block_missing",
-			severity: "major",
-			issue: `task ${taskId} report has no parseable YAML block; L3 cannot verify deliverables mechanically`,
-			evidence: "no ```yaml fence found",
-			recommendation:
-				"task report must include ```yaml block with status / deliverables / test_results / open_questions",
-		});
-	}
-
-	// Rule: checkpoint_stuck — 2+ checkpoints with same commit count.
-	const checkpointLines = [
-		...taskReportText.matchAll(
-			/\[checkpoint\s+\d+\/\d+\s+turns,\s+[\d.mhs]+\]\s+[\s\S]+?\s+(\d+)\s+commits?/gi,
-		),
-	];
-	if (checkpointLines.length >= 2) {
-		const counts = checkpointLines.map((m) => Number.parseInt(m[1] ?? "0", 10));
-		const last = counts[counts.length - 1];
-		const prev = counts[counts.length - 2];
-		if (last !== undefined && prev !== undefined && last === prev) {
-			findings.push({
-				rule: "inline_checkpoint_stuck",
-				severity: "major",
-				issue: `task ${taskId} has 2 consecutive checkpoints with same commit count (${last}); agent is stuck on exploration`,
-				evidence: `last 2 checkpoints both report ${last} commits`,
-				recommendation:
-					"agent should declare BLOCKED with open_questions; L3 should re-dispatch with narrower scope",
-			});
-		}
-	}
-
-	// Rule: blocked_no_reason — status=blocked but no open_questions AND no commits.
-	const blockedStatus = /^\s*status:\s*blocked\s*$/m.test(taskReportText);
-	if (blockedStatus) {
-		const hasCommits = /^\s*commits:\s*\[[^\]]+\]/m.test(taskReportText);
-		const hasOpenQuestions =
-			/^\s*open_questions:\s*[\s\S]+?-\s*question:/m.test(taskReportText);
-		if (!hasCommits && !hasOpenQuestions) {
-			findings.push({
-				rule: "inline_blocked_no_reason",
-				severity: "minor",
-				issue: `task ${taskId} is BLOCKED but has no commits and no open_questions; L3 cannot unblock without a reason`,
-				evidence: "status=blocked + empty commits + empty open_questions",
-				recommendation:
-					"task report must describe what's missing in open_questions when declaring BLOCKED",
-			});
-		}
-	}
-
-	return findings;
+	_taskId: string,
+	_taskReportText: string,
+): Array<unknown> {
+	// Deprecated: kept as a no-op stub for backward compat. Use
+	// extractAuditFindings from pi-subagents instead.
+	return [];
 }
 
 /**
