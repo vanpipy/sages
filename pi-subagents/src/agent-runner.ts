@@ -2090,28 +2090,63 @@ export interface AdvisoryContext {
 }
 
 export const ADVISORY_MAX_TOKENS = 200;
+export const ADVISORY_MAX_TOKENS_WITH_SCHEMA = 400;
 export const ADVISORY_MAX_PER_DISPATCH = 2;
 export const ADVISORY_MIN_SEVERITY: "major" | "critical" = "major";
 
+/** The YAML schema the agent is expected to emit. Used in advisory when
+ *  includeSchemaTemplate is enabled AND the finding is missing_yaml_block.
+ *  Compact (~150 tokens) but complete enough to satisfy the audit parser.
+ *  Note: the value of `status` is plain text + a comment to avoid the
+ *  YAML pipe (`|`) character, which the audit's parseYamlSubset does
+ *  not handle. The agent should replace `completed` with `blocked` or
+ *  `partial` as appropriate. */
+export const ADVISORY_YAML_SCHEMA = `\`\`\`yaml
+status: completed  # one of: completed, blocked, partial
+deliverables:
+  files_changed: ["path/to/file.ts"]
+  commits: ["abc1234"]
+  tests_added: ["path/to/test.ts::test name"]
+test_results:
+  pass: 1
+  fail: 0
+open_questions: []
+handoff_for_next_task: []
+\`\`\``;
+
 /**
  * Build advisory strings for the agent. Returns 0-2 advisory strings,
- * each capped at ADVISORY_MAX_TOKENS tokens. Filters:
+ * each capped at ADVISORY_MAX_TOKENS tokens (or ADVISORY_MAX_TOKENS_WITH_SCHEMA
+ * when the schema template is included). Filters:
  *   - severity: only major+critical
  *   - dedup: skip rules already in ctx.alreadyAdvisedRules
  *   - cap: at most ADVISORY_MAX_PER_DISPATCH advisories per call
  *   - token cap: per-advisory text is truncated to ADVISORY_MAX_TOKENS
+ *   - schema template (optional): when enabled AND finding is
+ *     missing_yaml_block, the YAML schema is appended to the advisory so
+ *     the agent knows what to emit.
  *
  * Format: [orchestrator audit advisory — N/M] <rule>: <issue>. Fix: <recommendation>.
+ * Optional schema appended after the issue/fix line.
  */
+export interface AdvisoryOptions {
+	/** When true (default) and the finding is missing_yaml_block, append
+	 *  the YAML schema template to the advisory so the agent knows what
+	 *  to emit. Other findings don't get the schema (token savings). */
+	includeSchemaTemplate?: boolean;
+}
+
 export function advisoryFor(
 	agentMessage: string,
 	ctx: AdvisoryContext = {
 		alreadyAdvisedRules: new Set<string>(),
 		advisoriesSent: 0,
 	},
+	options: AdvisoryOptions = {},
 ): string[] {
 	if (ctx.advisoriesSent >= ADVISORY_MAX_PER_DISPATCH) return [];
 
+	const includeSchema = options.includeSchemaTemplate !== false;
 	const findings = extractAuditFindings(agentMessage, "");
 	// Filter: severity ≥ major AND not already advised AND not at cap.
 	const eligible = findings.filter(
@@ -2126,8 +2161,16 @@ export function advisoryFor(
 		if (ctx.advisoriesSent + out.length >= ADVISORY_MAX_PER_DISPATCH) break;
 		const n = ctx.advisoriesSent + out.length + 1;
 		const total = Math.min(eligible.length, ADVISORY_MAX_PER_DISPATCH);
-		const advisory = `[orchestrator audit advisory — ${n}/${total}] ${f.rule}: ${f.issue}. Fix: ${f.recommendation}`;
-		const capped = truncateToTokens(advisory, ADVISORY_MAX_TOKENS);
+		let advisory = `[orchestrator audit advisory — ${n}/${total}] ${f.rule}: ${f.issue}. Fix: ${f.recommendation}`;
+		// Schema template only for missing_yaml_block (LLM needs the format)
+		if (includeSchema && f.rule === "missing_yaml_block") {
+			advisory += `\n\nRequired YAML schema (copy this verbatim):\n${ADVISORY_YAML_SCHEMA}`;
+		}
+		const maxTokens =
+			includeSchema && f.rule === "missing_yaml_block"
+				? ADVISORY_MAX_TOKENS_WITH_SCHEMA
+				: ADVISORY_MAX_TOKENS;
+		const capped = truncateToTokens(advisory, maxTokens);
 		out.push(capped);
 	}
 

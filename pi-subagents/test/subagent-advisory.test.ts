@@ -10,7 +10,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { advisoryFor, ADVISORY_MAX_TOKENS, ADVISORY_MAX_PER_DISPATCH } from "../src/agent-runner.js";
+import {
+	advisoryFor,
+	ADVISORY_MAX_TOKENS,
+	ADVISORY_MAX_TOKENS_WITH_SCHEMA,
+	ADVISORY_MAX_PER_DISPATCH,
+	ADVISORY_YAML_SCHEMA,
+} from "../src/agent-runner.js";
 
 function approxTokens(text: string): number {
 	return Math.ceil(text.length / 4);
@@ -179,5 +185,70 @@ Done.`;
 		const out = advisoryFor(finalMessage);
 		// Well-formed message -> no advisories
 		expect(out).toEqual([]);
+	});
+});
+
+describe("subagent advisory: schema template (GC-2026-043)", () => {
+	const SCHEMA_HINT_MSG = "TypeScript is statically typed because it performs type checking at compile time.";
+
+	it("T-ADV-SCHEMA-01: missing_yaml_block advisory includes YAML schema by default", () => {
+		const out = advisoryFor(SCHEMA_HINT_MSG);
+		expect(out.length).toBe(1);
+		expect(out[0]).toMatch(/missing_yaml_block/);
+		expect(out[0]).toContain("```yaml"); // schema is fenced
+		expect(out[0]).toContain("status: completed");
+		expect(out[0]).toContain("deliverables:");
+	});
+
+	it("T-ADV-SCHEMA-02: completed_no_commits advisory does NOT include schema", () => {
+		const message = `\`\`\`yaml
+status: completed
+deliverables:
+  files_changed: ["src/foo.ts"]
+  commits: []
+  tests_added: []
+test_results:
+  pass: 1
+  fail: 0
+open_questions: []
+handoff_for_next_task: []
+\`\`\``;
+		const out = advisoryFor(message);
+		expect(out.length).toBe(1);
+		expect(out[0]).toMatch(/completed_no_commits/);
+		expect(out[0]).not.toContain("Required YAML schema"); // token savings
+	});
+
+	it("T-ADV-SCHEMA-03: includeSchemaTemplate=false disables schema", () => {
+		const out = advisoryFor(SCHEMA_HINT_MSG, undefined, { includeSchemaTemplate: false });
+		expect(out.length).toBe(1);
+		expect(out[0]).toMatch(/missing_yaml_block/);
+		expect(out[0]).not.toContain("Required YAML schema");
+	});
+
+	it("T-ADV-SCHEMA-04: schema advisory capped at ADVISORY_MAX_TOKENS_WITH_SCHEMA (400)", () => {
+		const out = advisoryFor(SCHEMA_HINT_MSG);
+		const tokens = Math.ceil(out[0].length / 4);
+		expect(tokens).toBeLessThanOrEqual(ADVISORY_MAX_TOKENS_WITH_SCHEMA);
+	});
+
+	it("T-ADV-SCHEMA-05: schema advisory still capped at ADVISORY_MAX_TOKENS (200) when schema disabled", () => {
+		const out = advisoryFor(SCHEMA_HINT_MSG, undefined, { includeSchemaTemplate: false });
+		const tokens = Math.ceil(out[0].length / 4);
+		expect(tokens).toBeLessThanOrEqual(ADVISORY_MAX_TOKENS);
+	});
+
+	it("T-ADV-SCHEMA-06: ADVISORY_YAML_SCHEMA constant is valid YAML (parser accepts it)", async () => {
+		// Lazy import extractStructuredOutput to verify the schema parses
+		const { extractStructuredOutput } = await import("../src/agent-runner.js");
+		const structured = extractStructuredOutput(`Some prose.\n${ADVISORY_YAML_SCHEMA}\nDone.`);
+		expect(structured).not.toBeNull();
+		expect(structured!.status).toMatch(/completed|blocked|partial/);
+	});
+
+	it("T-ADV-SCHEMA-07: missing_yaml_block + includeSchemaTemplate=false + token cap", () => {
+		const out = advisoryFor(SCHEMA_HINT_MSG, undefined, { includeSchemaTemplate: false });
+		const tokens = Math.ceil(out[0].length / 4);
+		expect(tokens).toBeLessThanOrEqual(200);
 	});
 });
