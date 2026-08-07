@@ -1811,3 +1811,203 @@ export function extractAsk(text: string): string[] {
 		.map((m) => (m[1] ?? "").trim())
 		.filter((q) => q.length > 0);
 }
+
+// =============================================================================
+// GC-2026-039: Runtime enforcement of prompt-layer governance.
+//
+// `extractAuditFindings(agentMessage, taskReport)` is the closed-loop on
+// GC-2026-038's prompt-layer commitments. The agent is told to:
+//   - emit a YAML block (commit count, file changes, open_questions, etc.)
+//   - emit [checkpoint N/200 turns, Xm] lines every 5 turns
+//   - emit <ASK>question</ASK> when stuck
+//   - commit per RED/GREEN test
+//   - declare BLOCKED with a reason if it can't proceed
+//
+// The audit gate cannot enforce these in real-time (the agent is the
+// enforcer for the in-task behavior), but it CAN detect violations
+// post-hoc. The 5 rules below are what the orchestrator_audit tool
+// looks for in the agent's last message and the task report.
+// =============================================================================
+
+export type AuditFindingSeverity = "minor" | "major" | "critical";
+export type AuditFindingCategory = "ink" | "nose" | "foot" | "castration" | "death";
+
+export interface AuditFinding {
+	/** Stable id like "AF-001". */
+	id: string;
+	/** Rule that produced this finding. */
+	rule:
+		| "missing_yaml_block"
+		| "completed_no_commits"
+		| "checkpoint_stuck_pattern"
+		| "ask_unanswered"
+		| "blocked_without_reason";
+	/** Severity (minor / major / critical). */
+	severity: AuditFindingSeverity;
+	/** Short category (castration / death / ink / nose / foot). */
+	category: AuditFindingCategory;
+	/** Human-readable issue description. */
+	issue: string;
+	/** Concrete evidence (path:line, regex match, etc.). */
+	evidence: string;
+	/** Recommended fix. */
+	recommendation: string;
+}
+
+const FINDING_IDS_USED = new Set<string>();
+function nextFindingId(): string {
+	for (let n = 1; n < 1000; n++) {
+		const id = `AF-${String(n).padStart(3, "0")}`;
+		if (!FINDING_IDS_USED.has(id)) {
+			FINDING_IDS_USED.add(id);
+			return id;
+		}
+	}
+	return "AF-999"; // fallback (unreachable in practice)
+}
+
+/**
+ * Extract audit findings from the agent's last message and the task
+ * report. Combines:
+ *   - extractStructuredOutput (YAML block parse)
+ *   - parseCheckpoint (checkpoint line parse)
+ *   - extractAsk (<ASK> block parse)
+ *   - 5 rule-based checks (the governance compliance checks below)
+ *
+ * Returns an array of AuditFinding, sorted by severity (critical > major
+ * > minor). Returns an empty array when the message is well-formed.
+ */
+export function extractAuditFindings(
+	agentMessage: string,
+	taskReport: string = "",
+): AuditFinding[] {
+	FINDING_IDS_USED.clear();
+	const findings: AuditFinding[] = [];
+
+	// 1. Parse the structured output (YAML block).
+	const structured = extractStructuredOutput(agentMessage);
+
+	// 2. Parse the checkpoints (multi-line scan).
+	const checkpointMatches = [
+		...agentMessage.matchAll(
+			/\[checkpoint\s+(\d+)\/(\d+)\s+turns,\s+([\d.mhs]+)\]\s+([\s\S]+?)\s+(\d+)\s+commits?\.\s+blocker:\s*([^.\n]+?)\.?\s*(?:\n|$)/gi,
+		),
+	];
+	const checkpoints = checkpointMatches
+		.map((m) => ({
+			turnNumber: Number.parseInt(m[1] ?? "0", 10),
+			timeMinutes: parseCheckpointTime(m[3] ?? "0"),
+			workSummary: (m[4] ?? "").trim(),
+			commitCount: Number.parseInt(m[5] ?? "0", 10),
+			blocker: (m[6] ?? "").trim(),
+		}))
+		.filter((c) => Number.isFinite(c.turnNumber) && c.turnNumber > 0);
+
+	// 3. Parse the <ASK> blocks.
+	const askQuestions = extractAsk(agentMessage);
+
+	// Rule 1: missing_yaml_block
+	if (structured === null) {
+		findings.push({
+			id: nextFindingId(),
+			rule: "missing_yaml_block",
+			severity: "major",
+			category: "ink",
+			issue:
+				"agent message has no parseable YAML block; L3 cannot verify deliverables mechanically",
+			evidence: "extractStructuredOutput returned null",
+			recommendation:
+				"agent must emit ```yaml ... ``` block with status / deliverables / test_results / open_questions / handoff_for_next_task",
+		});
+	}
+
+	// Only the following rules need the structured block.
+	if (structured !== null) {
+		// Rule 2: completed_no_commits
+		if (
+			structured.status === "completed" &&
+			structured.deliverables.commits.length === 0
+		) {
+			findings.push({
+				id: nextFindingId(),
+				rule: "completed_no_commits",
+				severity: "major",
+				category: "ink",
+				issue:
+					"status=completed but the YAML block lists zero commits; commit-discipline (GC-2026-038 T1) was not followed",
+				evidence: "deliverables.commits is empty",
+				recommendation:
+					"agent must commit RED/GREEN test work; status=completed requires >=1 commit",
+			});
+		}
+
+		// Rule 3: checkpoint_stuck_pattern
+		if (checkpoints.length >= 2) {
+			const lastTwo = checkpoints.slice(-2);
+			if (
+				lastTwo[0] && lastTwo[1] &&
+				lastTwo[0].commitCount === lastTwo[1].commitCount &&
+				lastTwo[0].turnNumber !== lastTwo[1].turnNumber
+			) {
+				findings.push({
+					id: nextFindingId(),
+					rule: "checkpoint_stuck_pattern",
+					severity: "major",
+					category: "castration",
+					issue: `2 consecutive checkpoints with same commit count (${lastTwo[0].commitCount}); agent is stuck on exploration`,
+					evidence: `checkpoints: turn ${lastTwo[0].turnNumber} (${lastTwo[0].commitCount} commits) and turn ${lastTwo[1].turnNumber} (${lastTwo[1].commitCount} commits)`,
+					recommendation:
+						"agent should declare BLOCKED with open_questions; L3 will re-dispatch with narrower scope",
+				});
+			}
+		}
+
+		// Rule 4: ask_unanswered
+		if (askQuestions.length > 0) {
+			// The L3 should have surfaced these in task report's open_questions
+			// or in a separate questions list. Detect if the task report does
+			// NOT mention the asks.
+			const asksNotInReport = askQuestions.filter(
+				(q) => !taskReport.toLowerCase().includes(q.toLowerCase().slice(0, 30)),
+			);
+			if (asksNotInReport.length > 0) {
+				findings.push({
+					id: nextFindingId(),
+					rule: "ask_unanswered",
+					severity: "major",
+					category: "ink",
+					issue: `${asksNotInReport.length} <ASK> question(s) not surfaced in task report`,
+					evidence: asksNotInReport
+						.map((q) => q.slice(0, 60))
+						.join(" | "),
+					recommendation:
+						"L3 should surface <ASK> questions to the user; the task report must include them in open_questions",
+				});
+			}
+		}
+
+		// Rule 5: blocked_without_reason
+		if (structured.status === "blocked" && structured.openQuestions.length === 0) {
+			findings.push({
+				id: nextFindingId(),
+				rule: "blocked_without_reason",
+				severity: "minor",
+				category: "ink",
+				issue: "status=blocked but open_questions is empty; the L3 cannot unblock without a reason",
+				evidence: "deliverables.commits may be empty AND open_questions is empty",
+				recommendation:
+					"agent must describe what's missing in open_questions when declaring BLOCKED",
+			});
+		}
+	}
+
+	// Sort by severity (critical > major > minor).
+	const severityOrder: Record<AuditFindingSeverity, number> = {
+		critical: 0,
+		major: 1,
+		minor: 2,
+	};
+	findings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+
+	return findings;
+}
