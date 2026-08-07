@@ -1793,3 +1793,21 @@ export function parseCheckpoint(text: string): SubagentCheckpoint | null {
 		blocker: (last[6] ?? "").trim(),
 	};
 }
+
+// =============================================================================
+// GC-2026-038 T4: extractAsk helper
+//
+// Agent prompts instruct the LLM to emit <ASK>question</ASK> when stuck.
+// `extractAsk(text)` parses all <ASK>...</ASK> blocks and returns the
+// trimmed questions. The L3 orchestrator (or a future dashboard) reads
+// these to surface blockers to the user.
+// =============================================================================
+
+export function extractAsk(text: string): string[] {
+	const matches = [
+		...text.matchAll(/<ASK>([\s\S]+?)<\/ASK>/gi),
+	];
+	return matches
+		.map((m) => (m[1] ?? "").trim())
+		.filter((q) => q.length > 0);
+}

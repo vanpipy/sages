@@ -200,3 +200,21 @@ The L3 orchestrator can detect this pattern and re-dispatch.
 
 // See developer.ts for the void pattern.
 void CHECKPOINT_PROTOCOL_SECTION;
+
+// =============================================================================
+// GC-2026-038 T4: Uncertainty Threshold
+// =============================================================================
+const UNCERTAINTY_THRESHOLD_SECTION = `
+## Uncertainty Threshold (ask early, ask once)
+
+When you are unsure about a design decision AND cannot resolve it in
+5 turns, emit the question in your final message:
+
+<ASK>What is the contract for X?</ASK>
+
+The L3 orchestrator parses <ASK>...</ASK> blocks. A clean question
+saves the next dispatch from re-deriving the same context.
+`;
+
+// See developer.ts for the void pattern.
+void UNCERTAINTY_THRESHOLD_SECTION;
