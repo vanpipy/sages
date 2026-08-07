@@ -101,6 +101,24 @@ const READ_ONLY_GIT_SUBCOMMANDS = new Set(["status", "log", "diff", "show", "bra
  */
 const WRITE_REDIRECT_PREFIX = /\d*&?(?:>>|>(?!&))/;
 
+/**
+ * Module-level pre-compiled redirect-target extraction regex.
+ *
+ * Built from `WRITE_REDIRECT_PREFIX.source` plus the trailing
+ * `\\s*(\\S+)` capture group (which extracts the destination
+ * path). Compiled ONCE at module load — used to be rebuilt on
+ * every `extractBashTargets` call. Shared across calls via
+ * `String.prototype.matchAll`, which manages the regex's
+ * `lastIndex` internally without leaking state between calls
+ * (MDN: matchAll clones the regexp before iteration).
+ *
+ * GC-2026-032 phase-1 — SC3.
+ */
+export const REDIRECT_REGEX: RegExp = new RegExp(
+	WRITE_REDIRECT_PREFIX.source + "\\s*(\\S+)",
+	"g",
+);
+
 export type BashClassification = "read-only" | "write-intent" | "git-meta" | "unknown";
 
 export type GitMetaVerdict =
@@ -112,8 +130,22 @@ export interface BashGuardDecision {
 	reason?: string;
 }
 
+/**
+ * Test-only instrumentation: monotonically incremented on every
+ * `shellTokens` invocation across the module. Lets tests assert that
+ * `classifyBashCommand` does not re-tokenize when delegating to
+ * `isGitMetaCommand` (which previously triggered a second pass).
+ *
+ * Exported with the leading-underscore convention reserved for
+ * internal/test use; downstream consumers must not rely on it.
+ *
+ * GC-2026-032 phase-1 — SC2 (dedupe shellTokens in classifyBashCommand).
+ */
+export let __shellTokensCallCount = 0;
+
 /** Tokenize the command prefix while preserving spaces inside shell quotes. */
 function shellTokens(command: string): string[] {
+	__shellTokensCallCount++;
 	const tokens: string[] = [];
 	let token = "";
 	let quote: "'" | '"' | undefined;
@@ -159,6 +191,23 @@ function gitTokens(command: string): string[] | undefined {
 /** Classify a git command against the positive L2 whitelist. */
 export function isGitMetaCommand(command: string): GitMetaVerdict {
 	const tokens = gitTokens(command);
+	return evaluateGitMetaVerdict(tokens);
+}
+
+/**
+ * Core git-meta classification. Operates on a pre-tokenized array
+ * (the same shape `gitTokens` produces) so callers that have
+ * already tokenized a command can reuse the result without a
+ * second `shellTokens` pass. `undefined` (i.e. `gitTokens` returned
+ * undefined because the command isn't a git command) yields the
+ * canonical `{ allow: false, reason: "not a git command" }`.
+ *
+ * GC-2026-032 phase-1 — SC2 (dedupe `shellTokens` in
+ * `classifyBashCommand`). The signature is module-internal (not
+ * exported) because it depends on the exact token-shape contract
+ * of `gitTokens`; external callers should use `isGitMetaCommand`.
+ */
+function evaluateGitMetaVerdict(tokens: string[] | undefined): GitMetaVerdict {
 	if (!tokens) return { allow: false, reason: "not a git command" };
 	const sub = tokens[1];
 	const args = tokens.slice(2);
@@ -265,6 +314,12 @@ export function classifyBashCommand(command: string): BashClassification {
 	}
 
 	// 6. Existing read-only git commands remain L1 for API compatibility.
+	//    GC-2026-032 phase-1 — SC2: `shellTokens(trimmed)` is called
+	//    exactly once here; the git-meta verdict below reuses the
+	//    same `tokens` array via `evaluateGitMetaVerdict`, which
+	//    accepts a pre-tokenized input. (Previously this code path
+	//    triggered a second `shellTokens` pass via
+	//    `isGitMetaCommand(trimmed)`.)
 	const tokens = shellTokens(trimmed);
 	const gitIndex = tokens.findIndex(t => t === "git");
 	if (gitIndex >= 0) {
@@ -273,8 +328,11 @@ export function classifyBashCommand(command: string): BashClassification {
 		if (sub === "worktree" && tokens[gitIndex + 2] === "list") return "read-only";
 	}
 
-	// Other whitelisted git-meta subcommands are L2.
-	const gitVerdict = isGitMetaCommand(trimmed);
+	// Other whitelisted git-meta subcommands are L2. The verdict
+	// helper takes the pre-tokenized array directly so we skip a
+	// redundant `shellTokens` call.
+	const gitTokensSlice = gitIndex >= 0 ? tokens.slice(gitIndex) : undefined;
+	const gitVerdict = evaluateGitMetaVerdict(gitTokensSlice);
 	if (gitVerdict.allow) return "git-meta";
 
 	// 7. npm/bun/pytest/cargo/make prefix patterns.
@@ -508,9 +566,14 @@ export function extractBashTargets(command: string): string[] {
 	// duplication). Only `>&` (i.e. `>` immediately followed by `&`)
 	// indicates fd duplication (`2>&1`) and is excluded. Optional
 	// `\d*` / `&?` prefix allows `2>`, `&>`, `2>>`, `&>>`.
-	const redirectRegex = new RegExp(WRITE_REDIRECT_PREFIX.source + "\\s*(\\S+)", "g");
-	let match: RegExpExecArray | null;
-	while ((match = redirectRegex.exec(trimmed)) !== null) {
+	//
+	// GC-2026-032 phase-1 — SC3: use the module-level `REDIRECT_REGEX`
+	// (built once at import time from `WRITE_REDIRECT_PREFIX.source`)
+	// instead of `new RegExp(...)` per call. `String.prototype.matchAll`
+	// manages `lastIndex` internally on a per-iteration clone, so the
+	// shared regex is safe across successive `extractBashTargets`
+	// calls (no state leak between commands).
+	for (const match of trimmed.matchAll(REDIRECT_REGEX)) {
 		targets.push(match[1]);
 	}
 
