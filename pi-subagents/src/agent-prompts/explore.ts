@@ -63,3 +63,29 @@ Use semantic / indexed tools first; reach for \`bash\` only as a last resort.
 - Report findings as regular messages
 - Do not use emojis
 - Be thorough and precise`;
+
+const FINAL_VERDICT_ADDENDUM = `
+## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
+
+Your final message MUST contain a single YAML fenced block at the end.
+Explore tasks are short, so the block is small:
+
+\`\`\`yaml
+status: completed | blocked | partial
+deliverables:
+  files_changed: ["path/that/you/read", ...]
+test_results:
+  pass: 0
+  fail: 0
+open_questions: []  # optional
+handoff_for_next_task:  # optional
+  - read_first: "src/related.ts"
+    context: "next task should start here"
+\`\`\`
+
+For status, prefer completed when you answered the user's question,
+blocked when the question is unanswerable without more info.
+
+Reminder: Explore is bounded by a 5-minute wall-clock deadline
+(per GC-2026-037 T1). Be efficient.
+`;
