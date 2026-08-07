@@ -32,6 +32,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
+import { inc as profileInc, observe as profileObserve } from "./profile.js";
+
+/**
+ * Which managed-worktree lifecycle phase a `runGitIn` call belongs to.
+ * Purely for GC-2026-032 instrumentation — never gates behavior.
+ */
+type GitPhase = "create" | "reuse" | "inspect" | "release";
 
 export interface WorktreeInfo {
 	/** Absolute path to the worktree directory (the copied repo's root). */
@@ -741,6 +748,9 @@ export function branchName(dag: string, worktree: string): string {
 export function createManagedWorktree(
 	opts: CreateManagedWorktreeOptions,
 ): ManagedWorktree {
+	// GC-2026-032: this is the hottest orchestrator dispatch path — every
+	// developer task provisions (or re-enters) a worktree through here.
+	const wtCreateT0 = Date.now();
 	validateIdentity(opts.dag, opts.worktree);
 	let realRoot: string;
 	try {
@@ -756,7 +766,13 @@ export function createManagedWorktree(
 	// Pre-condition: `<repoRoot>` must be a git working tree (not a bare repo).
 	// `--is-inside-work-tree` is exactly the predicate git uses for this.
 	try {
-		runGitIn(["rev-parse", "--is-inside-work-tree"], realRoot);
+		runGitIn(
+			["rev-parse", "--is-inside-work-tree"],
+			realRoot,
+			true,
+			true,
+			"create",
+		);
 	} catch {
 		throw new Error(
 			`managed-worktree: ${realRoot} is not a git working tree (provide a repository working copy, not a bare repo or random directory)`,
@@ -769,7 +785,13 @@ export function createManagedWorktree(
 	// fail against the absolute `realRoot` even when the repo IS bare.
 	let commonDir: string;
 	try {
-		commonDir = runGitIn(["rev-parse", "--git-common-dir"], realRoot);
+		commonDir = runGitIn(
+			["rev-parse", "--git-common-dir"],
+			realRoot,
+			true,
+			true,
+			"create",
+		);
 	} catch {
 		throw new Error(
 			`managed-worktree: cannot resolve git common dir for ${realRoot}`,
@@ -799,7 +821,13 @@ export function createManagedWorktree(
 	if (fetchEnabled && resolvedBaseRef.startsWith("origin/")) {
 		const localRef = resolvedBaseRef.slice("origin/".length);
 		try {
-			runGitIn(["fetch", "--no-tags", "origin", localRef], realRoot);
+			runGitIn(
+				["fetch", "--no-tags", "origin", localRef],
+				realRoot,
+				true,
+				true,
+				"create",
+			);
 		} catch (err) {
 			throw new Error(
 				`managed-worktree: 'git fetch origin ${localRef}' failed in ${realRoot}: ${formatGitErr(err)}. ` +
@@ -811,7 +839,13 @@ export function createManagedWorktree(
 	// Resolve base ref — NEVER fall back. Missing ref => throw.
 	let baseSha: string;
 	try {
-		baseSha = runGitIn(["rev-parse", "--verify", resolvedBaseRef], realRoot);
+		baseSha = runGitIn(
+			["rev-parse", "--verify", resolvedBaseRef],
+			realRoot,
+			true,
+			true,
+			"create",
+		);
 	} catch {
 		throw new Error(
 			`managed-worktree: '${resolvedBaseRef}' does not resolve in ${realRoot}. ` +
@@ -854,8 +888,14 @@ export function createManagedWorktree(
 	// after create returns).
 	// The `<path>` must NOT exist already (checked above) — `git worktree add`
 	// creates it. We create the parent `.pi/worktree/<dag>/` directory lazily.
-	runGitIn(["worktree", "add", "--detach", path, resolvedBaseRef], realRoot);
-	runGitIn(["checkout", "-B", branch], path);
+	runGitIn(
+		["worktree", "add", "--detach", path, resolvedBaseRef],
+		realRoot,
+		true,
+		true,
+		"create",
+	);
+	runGitIn(["checkout", "-B", branch], path, true, true, "create");
 
 	// Persist identity marker so subsequent reuse re-enters deterministically.
 	// `schema: 2` is the dynamic-baseRef format. v1 markers (always
@@ -874,6 +914,9 @@ export function createManagedWorktree(
 		createdAt: Date.now(),
 	};
 	writeManagedWorktreeMarker(marker);
+
+	profileObserve("worktree_create_ms", Date.now() - wtCreateT0);
+	profileInc("worktree_create_count");
 
 	return {
 		path,
@@ -900,6 +943,7 @@ function reuseManagedWorktree(args: {
 	 *  Recorded here for parity with the create call site. */
 	recordedBaseRef: string;
 }): ManagedWorktree {
+	const wtReuseT0 = Date.now();
 	const {
 		repoRoot,
 		dag,
@@ -961,7 +1005,13 @@ function reuseManagedWorktree(args: {
 	//         A branch advanced by the developer is still recoverable, but
 	//         only after an explicit decision the orchestrator makes — not
 	//         silently through `reuse: true`.
-	const currentBranch = runGitIn(["rev-parse", "--abbrev-ref", "HEAD"], path);
+	const currentBranch = runGitIn(
+		["rev-parse", "--abbrev-ref", "HEAD"],
+		path,
+		true,
+		true,
+		"reuse",
+	);
 	if (currentBranch !== branch) {
 		throw new Error(
 			`managed-worktree: cannot reuse ${path} — the worktree's HEAD branch is '${currentBranch}', ` +
@@ -970,7 +1020,7 @@ function reuseManagedWorktree(args: {
 				`at '${marker.baseSha}' to reuse, or refuse reuse.`,
 		);
 	}
-	const currentSha = runGitIn(["rev-parse", "HEAD"], path);
+	const currentSha = runGitIn(["rev-parse", "HEAD"], path, true, true, "reuse");
 	if (currentSha !== marker.baseSha) {
 		throw new Error(
 			`managed-worktree: cannot reuse ${path} — branch tip ${currentSha} moved past recorded baseSha ${marker.baseSha}. ` +
@@ -993,12 +1043,19 @@ function reuseManagedWorktree(args: {
 	(() => {
 		let divergence: string | null = null;
 		try {
-			runGitIn(["fetch", "--no-tags", "origin", branch], repoRoot);
+			runGitIn(
+				["fetch", "--no-tags", "origin", branch],
+				repoRoot,
+				true,
+				true,
+				"reuse",
+			);
 			const remoteSha = runGitIn(
 				["rev-parse", "--verify", `origin/${branch}`],
 				repoRoot,
 				false /* throw on empty */,
 				false /* don't throw on missing ref */,
+				"reuse",
 			);
 			if (remoteSha && remoteSha !== marker.baseSha) {
 				divergence = remoteSha;
@@ -1022,6 +1079,9 @@ function reuseManagedWorktree(args: {
 	//    regardless of how the base ref has moved in the meantime. baseRef
 	//    surfaces the slot's recorded ref so callers can verify the baseline
 	//    without re-reading the marker.
+	profileObserve("worktree_reuse_ms", Date.now() - wtReuseT0);
+	profileInc("worktree_reuse_count");
+
 	return {
 		path,
 		branch,
@@ -1043,6 +1103,7 @@ function reuseManagedWorktree(args: {
 export function inspectManagedWorktree(
 	wt: ManagedWorktree,
 ): ManagedWorktreeInspection {
+	const wtInspectT0 = Date.now();
 	if (!existsSync(wt.path)) {
 		throw new Error(
 			`managed-worktree: cannot inspect ${wt.path} — path no longer exists`,
@@ -1054,14 +1115,24 @@ export function inspectManagedWorktree(
 		["status", "--porcelain"],
 		wt.path,
 		true /* allowEmpty */,
+		true,
+		"inspect",
 	);
-	const currentSha = runGitIn(["rev-parse", "HEAD"], wt.path);
+	const currentSha = runGitIn(
+		["rev-parse", "HEAD"],
+		wt.path,
+		true,
+		true,
+		"inspect",
+	);
 	let commitsAhead = 0;
 	try {
 		const count = runGitIn(
 			["rev-list", "--count", `${wt.baseSha}..HEAD`],
 			wt.path,
 			true,
+			true,
+			"inspect",
 		);
 		commitsAhead = Number.parseInt(count.trim(), 10);
 		if (!Number.isFinite(commitsAhead)) commitsAhead = 0;
@@ -1072,6 +1143,9 @@ export function inspectManagedWorktree(
 		.split("\n")
 		.map((line) => line.replace(/^[ MADU?!]{2} /, "").trim())
 		.filter((line) => line.length > 0);
+
+	profileObserve("worktree_inspect_ms", Date.now() - wtInspectT0);
+	profileInc("worktree_inspect_count");
 
 	return {
 		path: wt.path,
@@ -1093,6 +1167,7 @@ export function releaseManagedWorktree(
 	wt: ManagedWorktree,
 	opts: ManagedWorktreeReleaseOptions = {},
 ): ManagedWorktreeReleaseResult {
+	const wtReleaseT0 = Date.now();
 	const { path, branch } = wt;
 
 	if (!existsSync(path)) {
@@ -1115,12 +1190,22 @@ export function releaseManagedWorktree(
 	// Removal path — only reached when (a) no changes, or (b) force: true.
 	// `git worktree remove` returns empty stdout on success — the default is
 	// `allowEmptyStdout = true`, so we pass nothing else explicitly.
-	runGitIn(["worktree", "remove", "--force", path], wt.repoRoot);
+	runGitIn(
+		["worktree", "remove", "--force", path],
+		wt.repoRoot,
+		true,
+		true,
+		"release",
+	);
 	// Best-effort marker cleanup. A leaked marker file is harmless
 	// (subsequent reuse calls just throw "identity mismatch" because the
 	// on-disk worktree will be gone), but a clean release also tidies the
 	// repoRoot state directory.
 	deleteManagedWorktreeMarker(wt.repoRoot, wt.dag, wt.worktree);
+
+	profileObserve("worktree_release_ms", Date.now() - wtReleaseT0);
+	profileInc("worktree_release_count");
+
 	return {
 		path,
 		branch,
@@ -1150,13 +1235,31 @@ const GIT_TIMEOUT_MS_DEFAULT = 15_000;
  * by default — errors come from git's own exit code (thrown by
  * `execFileSync`). Pass `allowEmptyStdout = false` for the rare caller that
  * specifically wants `""` to fail.
+ *
+ * `phase` is optional GC-2026-032 instrumentation: when supplied, the call is
+ * attributed to that managed-worktree lifecycle phase in addition to the
+ * process-wide git total. Omitting it still counts toward the total.
  */
 function runGitIn(
 	args: string[],
 	cwd: string,
 	allowEmptyStdout = true,
 	allowThrow = true,
+	phase?: GitPhase,
 ): string {
+	// Count the invocation before it runs so failures are represented too — the
+	// subprocess cost is paid whether or not git exits 0.
+	if (phase === undefined) {
+		profileInc("git_call_count_total");
+	} else if (phase === "create") {
+		profileInc("git_call_count_create");
+	} else if (phase === "reuse") {
+		profileInc("git_call_count_reuse");
+	} else if (phase === "inspect") {
+		profileInc("git_call_count_inspect");
+	} else {
+		profileInc("git_call_count_release");
+	}
 	let out: Buffer;
 	try {
 		const result = execFileSync("git", args, {

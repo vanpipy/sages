@@ -268,3 +268,99 @@ describe("profile.overheadDisabled: singleton survives module re-import", () => 
 		expect(mod.snapshot().spawned_total).toBe(before);
 	});
 });
+
+/**
+ * GC-2026-032 phase-1: worktree.ts hot-path instrumentation.
+ *
+ * `worktree.ts:createManagedWorktree` is the most-called dispatch path in the
+ * orchestrator (every developer task provisions a worktree) yet carried zero
+ * instrumentation. These cases pin the counters/reservoirs it feeds so the
+ * snapshot layout stays stable for downstream parsers.
+ */
+describe("profile.worktree: phase counters + duration reservoirs (GC-2026-032 SC4)", () => {
+	beforeEach(() => {
+		_resetForTests();
+		process.env.SAGES_PI_PROFILE = "1";
+	});
+
+	afterEach(() => {
+		_resetForTests();
+		delete process.env.SAGES_PI_PROFILE;
+		stopSummary();
+	});
+
+	it("observe() feeds a p50 reservoir for each worktree phase duration", () => {
+		for (const ms of [10, 30, 50, 70, 90]) observe("worktree_create_ms", ms);
+		for (const ms of [2, 4, 6]) observe("worktree_reuse_ms", ms);
+		for (const ms of [100, 200, 300]) observe("worktree_inspect_ms", ms);
+		for (const ms of [7, 9, 11]) observe("worktree_release_ms", ms);
+
+		const snap = snapshot();
+		expect(snap.worktree_create_ms_p50).toBe(50);
+		expect(snap.worktree_reuse_ms_p50).toBe(4);
+		expect(snap.worktree_inspect_ms_p50).toBe(200);
+		expect(snap.worktree_release_ms_p50).toBe(9);
+	});
+
+	it("inc() increments each per-phase worktree counter independently", () => {
+		inc("worktree_create_count");
+		inc("worktree_create_count", 2);
+		inc("worktree_reuse_count", 5);
+		inc("worktree_inspect_count");
+		inc("worktree_release_count", 4);
+
+		const snap = snapshot();
+		expect(snap.worktree_create_count).toBe(3);
+		expect(snap.worktree_reuse_count).toBe(5);
+		expect(snap.worktree_inspect_count).toBe(1);
+		expect(snap.worktree_release_count).toBe(4);
+	});
+
+	it("git_call_count_total accumulates automatically from per-phase git counters", () => {
+		inc("git_call_count_create", 6);
+		inc("git_call_count_reuse", 3);
+		inc("git_call_count_inspect", 2);
+		inc("git_call_count_release", 1);
+
+		const snap = snapshot();
+		expect(snap.git_call_count_create).toBe(6);
+		expect(snap.git_call_count_reuse).toBe(3);
+		expect(snap.git_call_count_inspect).toBe(2);
+		expect(snap.git_call_count_release).toBe(1);
+		// Per-phase increments roll up into the total without a second call.
+		expect(snap.git_call_count_total).toBe(12);
+	});
+
+	it("git_call_count_total is also incrementable on its own (unphased calls)", () => {
+		inc("git_call_count_total", 4);
+		expect(snapshot().git_call_count_total).toBe(4);
+		// An unphased bump leaves every per-phase counter at 0.
+		const snap = snapshot();
+		expect(snap.git_call_count_create).toBe(0);
+		expect(snap.git_call_count_reuse).toBe(0);
+		expect(snap.git_call_count_inspect).toBe(0);
+		expect(snap.git_call_count_release).toBe(0);
+	});
+
+	it("snapshot() always exposes the 13 new fields as numbers defaulting to 0", () => {
+		const snap: ProfileSnapshot = snapshot();
+		for (const key of [
+			"worktree_create_ms_p50",
+			"worktree_reuse_ms_p50",
+			"worktree_inspect_ms_p50",
+			"worktree_release_ms_p50",
+			"worktree_create_count",
+			"worktree_reuse_count",
+			"worktree_inspect_count",
+			"worktree_release_count",
+			"git_call_count_create",
+			"git_call_count_reuse",
+			"git_call_count_inspect",
+			"git_call_count_release",
+			"git_call_count_total",
+		] as const) {
+			expect(typeof snap[key]).toBe("number");
+			expect(snap[key]).toBe(0);
+		}
+	});
+});

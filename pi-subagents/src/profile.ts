@@ -63,6 +63,21 @@ export type ProfileSnapshot = {
 	explore_spawn_ms_p50: number;
 	custom_reload_count: number;
 	custom_reload_ms_p50: number;
+	// GC-2026-032 phase-1: worktree.ts hot-path instrumentation. Per-phase
+	// wall-clock medians plus the git subprocess fan-out that dominates them.
+	worktree_create_ms_p50: number;
+	worktree_reuse_ms_p50: number;
+	worktree_inspect_ms_p50: number;
+	worktree_release_ms_p50: number;
+	worktree_create_count: number;
+	worktree_reuse_count: number;
+	worktree_inspect_count: number;
+	worktree_release_count: number;
+	git_call_count_create: number;
+	git_call_count_reuse: number;
+	git_call_count_inspect: number;
+	git_call_count_release: number;
+	git_call_count_total: number;
 };
 
 /**
@@ -92,6 +107,23 @@ type Store = {
 	widget_ms: number[];
 	fleet_ms: number[];
 	custom_ms: number[];
+
+	// GC-2026-032 worktree phases
+	wt_create_count: number;
+	wt_reuse_count: number;
+	wt_inspect_count: number;
+	wt_release_count: number;
+
+	git_create_count: number;
+	git_reuse_count: number;
+	git_inspect_count: number;
+	git_release_count: number;
+	git_total_count: number;
+
+	wt_create_ms: number[];
+	wt_reuse_ms: number[];
+	wt_inspect_ms: number[];
+	wt_release_ms: number[];
 
 	summary_timer: ReturnType<typeof setInterval> | undefined;
 	last_summary_at: number;
@@ -138,6 +170,19 @@ function getStore(): Store | undefined {
 			widget_ms: [],
 			fleet_ms: [],
 			custom_ms: [],
+			wt_create_count: 0,
+			wt_reuse_count: 0,
+			wt_inspect_count: 0,
+			wt_release_count: 0,
+			git_create_count: 0,
+			git_reuse_count: 0,
+			git_inspect_count: 0,
+			git_release_count: 0,
+			git_total_count: 0,
+			wt_create_ms: [],
+			wt_reuse_ms: [],
+			wt_inspect_ms: [],
+			wt_release_ms: [],
 			summary_timer: undefined,
 			last_summary_at: Date.now(),
 		};
@@ -202,6 +247,42 @@ export function inc(name: string, n = 1): void {
 		case "custom_agents_reload":
 			s.custom_count += n;
 			break;
+		// GC-2026-032: worktree phase completions.
+		case "worktree_create_count":
+			s.wt_create_count += n;
+			break;
+		case "worktree_reuse_count":
+			s.wt_reuse_count += n;
+			break;
+		case "worktree_inspect_count":
+			s.wt_inspect_count += n;
+			break;
+		case "worktree_release_count":
+			s.wt_release_count += n;
+			break;
+		// GC-2026-032: git subprocess fan-out. Each per-phase bump also rolls
+		// into `git_total_count` so callers never need a second `inc()` — the
+		// total stays consistent even when a phase counter is bumped directly.
+		case "git_call_count_create":
+			s.git_create_count += n;
+			s.git_total_count += n;
+			break;
+		case "git_call_count_reuse":
+			s.git_reuse_count += n;
+			s.git_total_count += n;
+			break;
+		case "git_call_count_inspect":
+			s.git_inspect_count += n;
+			s.git_total_count += n;
+			break;
+		case "git_call_count_release":
+			s.git_release_count += n;
+			s.git_total_count += n;
+			break;
+		// Unphased git calls (callers outside the four instrumented phases).
+		case "git_call_count_total":
+			s.git_total_count += n;
+			break;
 		// Single-shot counters (informational, not on the SC2 snapshot):
 		case "agent_manager_factory_instantiated":
 		case "agent_manager_cleanup_tick":
@@ -242,6 +323,18 @@ export function observe(name: string, ms: number): void {
 		case "custom_reload_ms":
 			reservoir = s.custom_ms;
 			break;
+		case "worktree_create_ms":
+			reservoir = s.wt_create_ms;
+			break;
+		case "worktree_reuse_ms":
+			reservoir = s.wt_reuse_ms;
+			break;
+		case "worktree_inspect_ms":
+			reservoir = s.wt_inspect_ms;
+			break;
+		case "worktree_release_ms":
+			reservoir = s.wt_release_ms;
+			break;
 		default:
 			return;
 	}
@@ -274,6 +367,19 @@ export function snapshot(): ProfileSnapshot {
 			explore_spawn_ms_p50: 0,
 			custom_reload_count: 0,
 			custom_reload_ms_p50: 0,
+			worktree_create_ms_p50: 0,
+			worktree_reuse_ms_p50: 0,
+			worktree_inspect_ms_p50: 0,
+			worktree_release_ms_p50: 0,
+			worktree_create_count: 0,
+			worktree_reuse_count: 0,
+			worktree_inspect_count: 0,
+			worktree_release_count: 0,
+			git_call_count_create: 0,
+			git_call_count_reuse: 0,
+			git_call_count_inspect: 0,
+			git_call_count_release: 0,
+			git_call_count_total: 0,
 		};
 	}
 	const now = Date.now();
@@ -291,6 +397,19 @@ export function snapshot(): ProfileSnapshot {
 		explore_spawn_ms_p50: p50(s.explore_ms),
 		custom_reload_count: s.custom_count,
 		custom_reload_ms_p50: p50(s.custom_ms),
+		worktree_create_ms_p50: p50(s.wt_create_ms),
+		worktree_reuse_ms_p50: p50(s.wt_reuse_ms),
+		worktree_inspect_ms_p50: p50(s.wt_inspect_ms),
+		worktree_release_ms_p50: p50(s.wt_release_ms),
+		worktree_create_count: s.wt_create_count,
+		worktree_reuse_count: s.wt_reuse_count,
+		worktree_inspect_count: s.wt_inspect_count,
+		worktree_release_count: s.wt_release_count,
+		git_call_count_create: s.git_create_count,
+		git_call_count_reuse: s.git_reuse_count,
+		git_call_count_inspect: s.git_inspect_count,
+		git_call_count_release: s.git_release_count,
+		git_call_count_total: s.git_total_count,
 	};
 }
 
