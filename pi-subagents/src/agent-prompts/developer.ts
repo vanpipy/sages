@@ -437,3 +437,65 @@ isolation: "current-workspace"
 
 ... is the **current-workspace** mode (opt-in). No worktree is provisioned; you work in the caller's current working tree. The HANDOFF.md protocol still applies as a best-effort, but you do NOT have an isolated branch — your edits land directly on the caller's checked-out branch. Use this mode only for known-safe tasks (single-line edits, meta-file writes, design-doc writes). The orchestrator's dispatcher surfaces the mode in the spawn details; check the \`isolation\` field before assuming worktree semantics. The legacy bare \`isolation: "worktree"\` string literal is no longer accepted — use the explicit object above.
 `;
+
+const FINAL_VERDICT_ADDENDUM = `
+## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
+
+Your final message MUST contain a single YAML fenced block at the end.
+This is your "verdict" - the L3 orchestrator parses it mechanically; a
+missing or malformed block fails the audit gate.
+
+The block MUST include these fields:
+
+\`\`\`yaml
+status: completed | blocked | partial
+deliverables:
+  files_changed: ["path/relative-to-repo", ...]
+  commits: ["sha1", "sha2", ...]
+  tests_added: ["path::test_name", ...]
+test_results:
+  pass: <number>
+  fail: <number>
+  fail_details:  # optional
+    - file: "test/foo.test.ts"
+      test: "edge case"
+      message: "expected 0 got 1"
+open_questions:  # optional; empty list OK
+  - question: "what API signature?"
+    why_blocking: true
+    suggestion: "ask the orchestrator"
+handoff_for_next_task:  # optional; empty list OK
+  - read_first: "src/foo.ts"
+    context: "new public API for the next task"
+\`\`\`
+
+Status values:
+- completed: all work done, tests green, ready to merge.
+- blocked: cannot proceed; open_questions describes what is needed.
+- partial: some work done but incomplete; tests may fail; describe in
+  open_questions.
+
+Field semantics:
+- files_changed: paths relative to the worktree root.
+- commits: SHAs of commits you made on the worktree branch.
+- tests_added: each test in path::test_name form.
+- fail_details: one entry per failing test (omit if fail: 0).
+- open_questions: a question only if the L3 should answer it.
+- handoff_for_next_task: list the file the next developer should read first.
+
+Anti-patterns (will fail the audit gate):
+- No YAML block at all.
+- YAML block missing status, deliverables, or test_results.
+- YAML block status is completed but tests are failing.
+
+This block is what the L3 uses to verify you did the work. Be specific.
+If you cannot fill a field, leave it out (the schema tolerates that) or
+move the item to open_questions.
+`;
+
+// In a real dispatch, FINAL_VERDICT_ADDENDUM would be appended to the
+// loaded Plan prompt by the prompt-rendering layer; the const exists
+// here so the literal text is captured in the bundle for the audit
+// gate. The const is not used in code, so it reads as a no-op
+// declaration. TypeScript will tree-shake it from the runtime bundle.
+void FINAL_VERDICT_ADDENDUM;

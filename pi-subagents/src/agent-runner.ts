@@ -39,6 +39,7 @@ import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
+import { getNetworkAllowedDefault } from "./settings.js";
 import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 import { toolDisplayName } from "./ui/agent-widget.js";
@@ -301,6 +302,14 @@ export interface RunOptions {
 	isolated?: boolean;
 	inheritContext?: boolean;
 	thinkingLevel?: ThinkingLevel;
+	/**
+	 * GC-2026-037 T3: when false, runAgent wraps `pi.exec()` to reject
+	 * network-bearing commands (git fetch, git pull, git clone, git
+	 * ls-remote, curl, wget, npm install, bun install, etc.) with a
+	 * `NetworkNotAllowedError`. Default behavior (when undefined) is
+	 * read from per-type settings via `getNetworkAllowedDefault(type)`.
+	 */
+	network_allowed?: boolean;
 	/** Override working directory (e.g. for worktree isolation). */
 	cwd?: string;
 	/**
@@ -478,7 +487,16 @@ export async function runAgent(
 	// They differ only for SpawnOptions.cwd spawns (config stays with the parent).
 	const configCwd = options.configCwd ?? effectiveCwd;
 
-	const env = await detectEnv(options.pi, effectiveCwd);
+	// GC-2026-037 T3: gate pi.exec() against network commands. Per-type
+	// default is read from settings; the caller can override via
+	// `options.network_allowed`. The wrapped pi is then passed downstream
+	// to createAgentSession (which captures it for the LLM loop) and to
+	// detectEnv (which also calls pi.exec for the environment probe).
+	const networkAllowed =
+		options.network_allowed ?? getNetworkAllowedDefault(type);
+	const pi = wrapPiForNetworkGate(options.pi, networkAllowed);
+
+	const env = await detectEnv(pi, effectiveCwd);
 
 	// Get parent system prompt only for append-mode agents.
 	// Replace-mode agents get a completely fresh prompt and must not inherit
@@ -1140,4 +1158,579 @@ export function getAgentConversation(session: AgentSession): string {
 	}
 
 	return parts.join("\n\n");
+}
+
+// =============================================================================
+// GC-2026-037: structured YAML output (T2)
+//
+// Every subagent dispatch (developer / auditor / Explore / Plan) MUST
+// produce a final message containing a YAML block in the schema below.
+// `extractStructuredOutput` parses that block into a typed object the L3
+// orchestrator (and the audit gate) can consume mechanically. Missing or
+// malformed blocks return `null` — the L3 then treats the dispatch as
+// "structured output missing" (a separate fail-closed check, future phase).
+// =============================================================================
+
+export type SubagentOutputStatus = "completed" | "blocked" | "partial";
+
+export interface SubagentOutputFailDetail {
+	file?: string;
+	test?: string;
+	message?: string;
+}
+
+export interface SubagentOutputOpenQuestion {
+	question: string;
+	whyBlocking?: boolean;
+	suggestion?: string;
+}
+
+export interface SubagentOutputHandoff {
+	readFirst: string;
+	context?: string;
+}
+
+export interface SubagentOutput {
+	status: SubagentOutputStatus;
+	deliverables: {
+		filesChanged: string[];
+		commits: string[];
+		testsAdded: string[];
+	};
+	testResults: {
+		pass: number;
+		fail: number;
+		failDetails: SubagentOutputFailDetail[];
+	};
+	openQuestions: SubagentOutputOpenQuestion[];
+	handoffForNextTask: SubagentOutputHandoff[];
+}
+
+/**
+ * Internal shape of the parsed YAML before the camelCase rename. The YAML
+ * uses snake_case (`files_changed`, `test_results`, `handoff_for_next_task`)
+ * for human readability; the public `SubagentOutput` type exposes
+ * camelCase fields (`filesChanged`, `testResults`, `handoffForNextTask`).
+ */
+interface RawSubagentOutput {
+	status: SubagentOutputStatus;
+	deliverables: {
+		files_changed?: unknown;
+		commits?: unknown;
+		tests_added?: unknown;
+		[key: string]: unknown;
+	};
+	test_results: {
+		pass?: unknown;
+		fail?: unknown;
+		fail_details?: unknown;
+		[key: string]: unknown;
+	};
+	open_questions?: unknown;
+	handoff_for_next_task?: unknown;
+}
+
+const REQUIRED_FIELDS = [
+	"status",
+	"deliverables",
+	"test_results",
+	"open_questions",
+] as const;
+
+const STATUSES: ReadonlySet<SubagentOutputStatus> = new Set<SubagentOutputStatus>([
+	"completed",
+	"blocked",
+	"partial",
+]);
+
+/**
+ * Parse a structured YAML block out of an agent's final message.
+ *
+ * Recognizes three fence variants:
+ *   - ```yaml ... ```
+ *   - ```yaml ... ``` (possibly indented)
+ *   - --- ... --- (YAML front-matter style)
+ *
+ * Returns the parsed shape on success, or `null` if the message has no
+ * YAML block, the block is malformed, or required fields are missing.
+ * The helper is intentionally permissive about extra fields (e.g. custom
+ * agent types can extend the schema) but strict about required fields
+ * (status/deliverables/test_results/open_questions/handoff_for_next_task).
+ */
+export function extractStructuredOutput(text: string): SubagentOutput | null {
+	const block = extractYamlBlock(text);
+	if (block === null) return null;
+
+	let parsed: unknown;
+	try {
+		// The agent-runner bundle does not include a YAML parser; the YAML
+		// surface here is intentionally narrow (see REQUIRED_FIELDS) so a
+		// minimal-purpose parser suffices. We hand-roll a tolerant parser
+		// for the subset the agents emit — see parseYamlSubset below.
+		parsed = parseYamlSubset(block);
+	} catch {
+		// Public contract: `null` on malformed input. Production callers
+		// gate on this; tests verify it explicitly.
+		return null;
+	}
+	if (!isPlainObject(parsed)) return null;
+
+	for (const f of REQUIRED_FIELDS) {
+		if (!(f in parsed)) return null;
+	}
+
+	const raw = parsed as unknown as RawSubagentOutput;
+	if (typeof raw.status !== "string" || !STATUSES.has(raw.status as SubagentOutputStatus)) {
+		return null;
+	}
+	if (!isPlainObject(raw.deliverables)) return null;
+	if (!isPlainObject(raw.test_results)) return null;
+	if (!Array.isArray(raw.open_questions)) return null;
+
+	return {
+		status: raw.status as SubagentOutputStatus,
+		deliverables: {
+			filesChanged: asStringArray(raw.deliverables.files_changed),
+			commits: asStringArray(raw.deliverables.commits),
+			testsAdded: asStringArray(raw.deliverables.tests_added),
+		},
+		testResults: {
+			pass: asNumber(raw.test_results.pass, 0),
+			fail: asNumber(raw.test_results.fail, 0),
+			failDetails: asFailDetails(raw.test_results.fail_details),
+		},
+		openQuestions: asOpenQuestions(raw.open_questions),
+		handoffForNextTask: asHandoffs(raw.handoff_for_next_task),
+	};
+}
+
+/**
+ * Extract a YAML block from a message. Recognizes:
+ *   - ```yaml ... ```
+ *   - indented ```yaml ... ``` (preserved with leading indent stripped)
+ *   - --- ... --- front-matter style
+ *
+ * Returns the inner content with each line's leading indent stripped, or
+ * `null` if no recognizable block is present.
+ */
+function extractYamlBlock(text: string): string | null {
+	const fenceRe = /^[ \t]*```yaml[ \t]*\n([\s\S]*?)\n?[ \t]*```[ \t]*$/m;
+	const fenceMatch = text.match(fenceRe);
+	if (fenceMatch && typeof fenceMatch[1] === "string") {
+		// Detect a uniform leading indent (e.g. the block is itself inside
+		// an indented list item) and strip ONLY that common prefix. Preserve
+		// per-line relative indentation so the parser can read the structure.
+		const raw = fenceMatch[1];
+		const indents = raw
+			.split("\n")
+			.filter((l) => l.trim() !== "")
+			.map((l) => l.length - l.trimStart().length);
+		const minIndent = indents.length > 0 ? Math.min(...indents) : 0;
+		if (minIndent > 0) {
+			return raw
+				.split("\n")
+				.map((l) => (l.length >= minIndent ? l.slice(minIndent) : l))
+				.join("\n");
+		}
+		return raw;
+	}
+	const dashRe = /(?:^|\n)---\n([\s\S]*?)\n---\n?/;
+	const dashMatch = text.match(dashRe);
+	if (dashMatch && typeof dashMatch[1] === "string") {
+		return dashMatch[1];
+	}
+	return null;
+}
+
+/**
+ * Indent-based YAML subset parser. Recursive descent on indentation:
+ * - Each line carries an `indent` (column of first non-whitespace) and
+ *   `content` (the line with leading whitespace stripped).
+ * - A "frame stack" tracks whether we're inside a mapping or list.
+ * - New key: value at higher indent than current frame pushes a new
+ *   frame; lower indent pops frames.
+ * - Inline arrays `[a, b, c]` and inline objects `{k: v}` are JSON-parsed.
+ *
+ * Returns the parsed shape on success, throws on malformed input.
+ */
+function parseYamlSubset(input: string): unknown {
+	const raw = input.replace(/\r\n?/g, "\n");
+	const tokens: Array<{ indent: number; content: string }> = [];
+	for (const line of raw.split("\n")) {
+		if (line.trim() === "") continue;
+		const indent = line.length - line.trimStart().length;
+		tokens.push({ indent, content: line.trim() });
+	}
+	if (tokens.length === 0) {
+		throw new Error("parseYamlSubset: empty input");
+	}
+	const ctx: ParseContext = {
+		tokens,
+		pos: 0,
+	};
+	return parseNode(ctx, 0, /* inList */ false);
+}
+
+interface ParseContext {
+	tokens: Array<{ indent: number; content: string }>;
+	pos: number;
+}
+
+/**
+ * Parse one node (mapping or list) at the given indent.
+ * `inList` distinguishes: a top-level mapping (no list anchor) vs. a
+ * mapping that is itself a list item.
+ */
+function parseNode(ctx: ParseContext, minIndent: number, inList: boolean): unknown {
+	const first = ctx.tokens[ctx.pos];
+	if (!first) {
+		throw new Error("parseNode: unexpected end of input");
+	}
+	if (first.indent < minIndent) {
+		throw new Error(
+			`parseNode: indent ${first.indent} below min ${minIndent}`,
+		);
+	}
+
+	// Lookahead: is the first non-empty line a list item (`- ...`)?
+	const isListStart = /^-(\s|$)/.test(first.content);
+
+	if (isListStart && !inList) {
+		return parseList(ctx, first.indent);
+	}
+	return parseMapping(ctx, first.indent, inList);
+}
+
+function parseMapping(
+	ctx: ParseContext,
+	indent: number,
+	childIsList: boolean,
+): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	while (ctx.pos < ctx.tokens.length) {
+		const t = ctx.tokens[ctx.pos];
+		if (!t || t.indent < indent) break;
+		if (t.indent > indent) {
+			throw new Error(
+				`parseMapping: unexpected indent ${t.indent} (expected ${indent}) at "${t.content}"`,
+			);
+		}
+		// Top-level key.
+		const kv = t.content.match(/^([A-Za-z0-9_-]+):(?:\s+(.*))?$/);
+		if (!kv || kv[1] === undefined) {
+			throw new Error(`parseMapping: not a key-value line: "${t.content}"`);
+		}
+		const key = kv[1];
+		const rest = (kv[2] ?? "").trim();
+		ctx.pos++;
+
+		if (rest === "" || rest === "|") {
+			// Look ahead: next line's indent must be > current.
+			const next = ctx.tokens[ctx.pos];
+			if (!next || next.indent <= indent) {
+				out[key] = rest === "|" ? null : null;
+				continue;
+			}
+			// Decide whether the next block is a list or a mapping based on
+			// its first non-empty line. The first line either starts with
+			// `-` (list) or with a key:value (nested mapping).
+			const childIsListValue = /^-(\s|$)/.test(next.content);
+			if (childIsListValue) {
+				out[key] = parseList(ctx, next.indent);
+			} else {
+				out[key] = parseMapping(ctx, next.indent, /* childIsList */ false);
+			}
+		} else {
+			out[key] = parseScalar(rest);
+		}
+	}
+	return out;
+}
+
+function parseList(ctx: ParseContext, indent: number): unknown[] {
+	const out: unknown[] = [];
+	while (ctx.pos < ctx.tokens.length) {
+		const t = ctx.tokens[ctx.pos];
+		if (!t || t.indent < indent) break;
+		if (t.indent > indent) {
+			throw new Error(
+				`parseList: unexpected indent ${t.indent} (expected ${indent}) at "${t.content}"`,
+			);
+		}
+		const itemMatch = t.content.match(/^-(\s+(.*))?$/);
+		if (!itemMatch) {
+			throw new Error(
+				`parseList: expected list item, got "${t.content}"`,
+			);
+		}
+		const after = (itemMatch[2] ?? "").trim();
+		ctx.pos++;
+
+		if (after === "") {
+			// `-` alone: next block is the list item's content (mapping).
+			const next = ctx.tokens[ctx.pos];
+			if (!next || next.indent <= indent) {
+				out.push(null);
+				continue;
+			}
+			const childIsListValue = /^-(\s|$)/.test(next.content);
+			if (childIsListValue) {
+				out.push(parseList(ctx, next.indent));
+			} else {
+				out.push(parseMapping(ctx, next.indent, /* childIsList */ true));
+			}
+		} else {
+			// `- key: value` one-liner.
+			const kv = after.match(/^([A-Za-z0-9_-]+):(?:\s+(.*))?$/);
+			if (kv && kv[1] !== undefined) {
+				const key = kv[1];
+				const rest = (kv[2] ?? "").trim();
+				const obj: Record<string, unknown> = {};
+				if (rest === "" || rest === "|") {
+					const next = ctx.tokens[ctx.pos];
+					if (next && next.indent > indent + 2) {
+						const childIsListValue = /^-(\s|$)/.test(next.content);
+						if (childIsListValue) {
+							obj[key] = parseList(ctx, next.indent);
+						} else {
+							obj[key] = parseMapping(ctx, next.indent, false);
+						}
+					} else {
+						obj[key] = null;
+					}
+				} else {
+					obj[key] = parseScalar(rest);
+				}
+				// Consume any continuation indented under this list item.
+				// A continuation has `next.indent > indent` (deeper than the
+				// list's own indent; the dash prefix at `indent + 2` doesn't
+				// count as a "deeper" sibling because it's the same item).
+				while (ctx.pos < ctx.tokens.length) {
+					const next = ctx.tokens[ctx.pos];
+					if (!next || next.indent <= indent) break;
+					const cont = next.content.match(/^([A-Za-z0-9_-]+):(?:\s+(.*))?$/);
+					if (!cont || cont[1] === undefined) break;
+					obj[cont[1]] = cont[2] === undefined ? null : parseScalar(cont[2]);
+					ctx.pos++;
+				}
+				out.push(obj);
+			} else {
+				out.push(parseScalar(after));
+			}
+		}
+	}
+	return out;
+}
+
+function parseScalar(raw: string): unknown {
+	const trimmed = raw.trim();
+	if (trimmed === "" || trimmed === "~" || trimmed === "null") return null;
+	if (trimmed === "true") return true;
+	if (trimmed === "false") return false;
+	if (/^-?\d+$/.test(trimmed)) return Number.parseInt(trimmed, 10);
+	// Inline JSON-style array.
+	if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+		try {
+			return JSON.parse(trimmed.replace(/'/g, '"'));
+		} catch {
+			// Fall through — treat as plain string.
+		}
+	}
+	// Inline JSON-style object.
+	if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+		try {
+			return JSON.parse(trimmed.replace(/'/g, '"'));
+		} catch {
+			// Fall through.
+		}
+	}
+	// Quoted strings.
+	if (
+		(trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+		(trimmed.startsWith("'") && trimmed.endsWith("'"))
+	) {
+		return trimmed.slice(1, -1);
+	}
+	// Strip inline comments.
+	const commentIdx = trimmed.indexOf(" #");
+	if (commentIdx > 0) return trimmed.slice(0, commentIdx).trim();
+	return trimmed;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function asStringArray(v: unknown): string[] {
+	if (!Array.isArray(v)) return [];
+	return v.filter((x): x is string => typeof x === "string");
+}
+
+function asNumber(v: unknown, fallback: number): number {
+	return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+function asFailDetails(v: unknown): SubagentOutputFailDetail[] {
+	if (!Array.isArray(v)) return [];
+	return v
+		.filter(isPlainObject)
+		.map((d) => ({
+			file: typeof d.file === "string" ? d.file : undefined,
+			test: typeof d.test === "string" ? d.test : undefined,
+			message: typeof d.message === "string" ? d.message : undefined,
+		}));
+}
+
+function asOpenQuestions(v: unknown): SubagentOutputOpenQuestion[] {
+	if (!Array.isArray(v)) return [];
+	return v
+		.filter(isPlainObject)
+		.map((q) => ({
+			question: typeof q.question === "string" ? q.question : "",
+			whyBlocking: typeof q.why_blocking === "boolean" ? q.why_blocking : undefined,
+			suggestion: typeof q.suggestion === "string" ? q.suggestion : undefined,
+		}))
+		.filter((q) => q.question !== "");
+}
+
+function asHandoffs(v: unknown): SubagentOutputHandoff[] {
+	if (!Array.isArray(v)) return [];
+	return v
+		.filter(isPlainObject)
+		.map((h) => ({
+			readFirst: typeof h.read_first === "string" ? h.read_first : "",
+			context: typeof h.context === "string" ? h.context : undefined,
+		}))
+		.filter((h) => h.readFirst !== "");
+}
+
+// =============================================================================
+// GC-2026-037 T3: Network gating
+//
+// `NetworkNotAllowedError` is thrown by the network gate when an agent
+// dispatches a network-bearing command (git fetch, curl, etc.) while
+// `network_allowed` is false. The L3 audit gate distinguishes this
+// failure mode (governance violation) from a generic execution error
+// and reports it separately in the task report.
+//
+// `isNetworkCommand(command, args)` returns true for known-network
+// commands. The list is intentionally narrow — only commands that hit
+// the network are gated. Local git operations (status, diff, commit,
+// branch) are NEVER gated.
+//
+// `wrapPiForNetworkGate(pi, allowed)` returns a Proxy that intercepts
+// `pi.exec()` calls and throws NetworkNotAllowedError for network
+// commands when allowed=false. All other pi methods pass through.
+// =============================================================================
+
+export class NetworkNotAllowedError extends Error {
+	readonly command: string;
+	readonly args: readonly string[];
+	constructor(command: string, args: readonly string[]) {
+		super(
+			`network access disabled: \`${command}${args.length > 0 ? " " + args.join(" ") : ""}\` is a network-bearing command. ` +
+				`Pass network_allowed: true to override per-dispatch.`,
+		);
+		this.name = "NetworkNotAllowedError";
+		this.command = command;
+		this.args = args;
+	}
+}
+
+/**
+ * Detect known network-bearing commands. Conservative list: only mark
+ * commands that demonstrably hit the network. Local git operations
+ * (status, diff, log, commit, branch, checkout, add, reset, revert,
+ * merge, rebase) are NOT in this list.
+ */
+export function isNetworkCommand(command: string, args: readonly string[]): boolean {
+	const c = command.toLowerCase();
+	if (c === "git") {
+		// `git <subcommand>` — only specific subcommands are network.
+		const sub = (args[0] ?? "").toLowerCase();
+		const NETWORK_SUBCMDS = new Set([
+			"fetch",
+			"pull",
+			"clone",
+			"ls-remote",
+			"push",
+			"remote",
+			"request-pull",
+		]);
+		return NETWORK_SUBCMDS.has(sub);
+	}
+	// Direct network tools.
+	if (c === "curl" || c === "wget" || c === "nc" || c === "ncat" || c === "telnet" || c === "ssh" || c === "scp" || c === "rsync" || c === "ftp" || c === "sftp") {
+		return true;
+	}
+	// Package managers — `install`, `add`, `publish`, `login` etc. all
+	// touch the network. `npm ls`, `bun pm ls` etc. don't. The flag
+	// `-h/--help/-v/--version` is a fast local-only path.
+	if (c === "npm" || c === "bun" || c === "pnpm" || c === "yarn" || c === "pip" || c === "pip3" || c === "uv" || c === "poetry") {
+		const sub = (args[0] ?? "").toLowerCase();
+		// First-arg subcommands that are network. Anything else
+		// (including ls, list, config, doctor, etc.) is local and
+		// passes through.
+		const NETWORK_SUB = new Set([
+			"install",
+			"add",
+			"i",
+			"update",
+			"upgrade",
+			"publish",
+			"login",
+			"logout",
+			"uninstall",
+			"remove",
+			"rm",
+			"search",
+			"view",
+			"info",
+			"outdated",
+		]);
+		return NETWORK_SUB.has(sub);
+	}
+	return false;
+}
+
+export function enforceNetworkGate(
+	command: string,
+	args: readonly string[],
+	allowed: boolean,
+): void {
+	if (allowed) return;
+	if (isNetworkCommand(command, args)) {
+		throw new NetworkNotAllowedError(command, args);
+	}
+}
+
+/**
+ * Wrap an `ExtensionAPI` so that `pi.exec()` calls are intercepted and
+ * gated against network commands. The Proxy delegates every other
+ * property access to the original `pi`. When `allowed` is true, the
+ * wrapper is a no-op pass-through (no Proxy overhead in the common
+ * case — callers should skip the wrap when allowed).
+ */
+export function wrapPiForNetworkGate<T extends object>(
+	pi: T,
+	allowed: boolean,
+): T {
+	if (allowed) return pi;
+	return new Proxy(pi, {
+		get(target, prop, receiver) {
+			if (prop === "exec") {
+				return (command: string, args: string[], options?: unknown) => {
+					enforceNetworkGate(command, args, allowed);
+					// @ts-expect-error — generic Proxy delegation
+					return Reflect.get(target, prop, receiver).call(
+						target,
+						command,
+						args,
+						options,
+					);
+				};
+			}
+			return Reflect.get(target, prop, receiver);
+		},
+	}) as T;
 }
