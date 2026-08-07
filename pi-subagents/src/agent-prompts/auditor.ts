@@ -391,3 +391,19 @@ saves the next dispatch from re-deriving the same context.
 
 // See developer.ts for the void pattern.
 void UNCERTAINTY_THRESHOLD_SECTION;
+
+// =============================================================================
+// GC-2026-038 T5: Bash Timeout Guard
+// =============================================================================
+const BASH_TIMEOUT_SECTION = `
+## Bash Timeout Guard (per-bucket timeouts)
+
+- **read** (cat / head / tail / less): 5s timeout
+- **search** (grep / rg / awk / sed / find): 10s timeout
+- **bun test <single_file>**: 30s timeout
+- **bun test (no path)**: 90s timeout. Avoid in a loop.
+- **network** (git fetch / curl / npm install): 5s fail-fast
+`;
+
+// See developer.ts for the void pattern.
+void BASH_TIMEOUT_SECTION;
