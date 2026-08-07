@@ -77,6 +77,7 @@ import {
 } from "./profile.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
+import { resolveDeadlineMs } from "./settings.js";
 import {
 	applyAndEmitLoaded,
 	type SubagentsSettings,
@@ -1175,6 +1176,14 @@ Terse command-style prompts produce shallow, generic work.
 						minimum: 1,
 					}),
 				),
+				max_duration_minutes: Type.Optional(
+					Type.Number({
+						description:
+							"GC-2026-037: wall-clock deadline in minutes (0.5-120). Overrides the per-agent-type default. Aborts with reason 'agent duration exceeded' if reached. Default: developer/auditor 20min, Explore/Plan 5min. Caller can still pass 0 to fall back to the per-type default.",
+						minimum: 0.5,
+						maximum: 120,
+					}),
+				),
 				run_in_background: Type.Optional(
 					Type.Boolean({
 						description:
@@ -1446,6 +1455,37 @@ Terse command-style prompts produce shallow, generic work.
 						return textResult(policyError);
 					}
 				}
+
+				// GC-2026-037: wall-clock deadline merge. Resolve the per-type
+				// default (developer/auditor 20min, Explore/Plan 5min) and let
+				// the caller override via params.max_duration_minutes. The
+				// merged signal is propagated to all downstream spawn/spawnAndWait
+				// calls below — the deadline timer fires abortController.abort
+				// with a duration reason, which record.error captures in the
+				// .catch block.
+				const deadlineMs = resolveDeadlineMs(
+					subagentType,
+					(params as { max_duration_minutes?: number }).max_duration_minutes,
+				);
+				const deadlineAbortController = new AbortController();
+				const deadlineTimer = setTimeout(() => {
+					deadlineAbortController.abort(
+						new Error(`agent duration exceeded ${deadlineMs}ms`),
+					);
+				}, deadlineMs);
+				// mergedSignal is what gets passed to manager.spawn/spawnAndWait
+				// instead of the raw `signal`. The deadline timer is cleared
+				// in the finally block at the bottom of this executor.
+				const mergedSignal: AbortSignal = AbortSignal.any([
+					signal ?? new AbortController().signal,
+					deadlineAbortController.signal,
+				]) as unknown as AbortSignal;
+				// Helper to clear the deadline timer once the dispatch has
+				// settled (success, error, foreground, background, resume).
+				// Captured by the inner try/finally so all exit paths release.
+				const clearDeadlineTimer = () => {
+					clearTimeout(deadlineTimer);
+				};
 
 				const displayName = getDisplayName(subagentType);
 
@@ -1915,7 +1955,7 @@ Terse command-style prompts produce shallow, generic work.
 							isolation,
 							managedWorktree,
 							invocation: agentInvocation,
-							signal,
+							signal: mergedSignal,
 							...fgCallbacks,
 						},
 						(fgAgentId) => {

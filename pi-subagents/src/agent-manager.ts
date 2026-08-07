@@ -460,7 +460,11 @@ export class AgentManager {
 		// Wire parent abort signal to stop the subagent when the parent is interrupted
 		let detachParentSignal: (() => void) | undefined;
 		if (options.signal) {
-			const onParentAbort = () => this.abort(id);
+			// GC-2026-037: forward the parent signal's reason so the
+			// record.error capture surfaces the caller's abort cause
+			// (e.g. "agent duration exceeded 20min") instead of a generic
+			// AbortError string.
+			const onParentAbort = () => this.abort(id, options.signal!.reason);
 			options.signal.addEventListener("abort", onParentAbort, { once: true });
 			detachParentSignal = () =>
 				options.signal!.removeEventListener("abort", onParentAbort);
@@ -485,7 +489,11 @@ export class AgentManager {
 			// (incl. relative extension paths and memory) inside the worktree copy.
 			cwd: worktreeCwd ?? customCwd,
 			configCwd: customCwd !== undefined ? ctx.cwd : undefined,
-			signal: record.abortController!.signal,
+			// GC-2026-037: prefer the caller's signal when present so the abort
+			// reason flows through `signal.reason` → `record.error`. Fall back to
+			// the manager's own AbortController for background agents (no
+			// caller-supplied signal) and for `this.abort()`-driven shutdowns.
+			signal: options.signal ?? record.abortController!.signal,
 			onToolActivity: (activity) => {
 				if (activity.type === "end") record.toolUses++;
 				options.onToolActivity?.(activity);
@@ -812,7 +820,7 @@ export class AgentManager {
 		return [...this.agents.values()].sort((a, b) => b.startedAt - a.startedAt);
 	}
 
-	abort(id: string): boolean {
+	abort(id: string, reason?: unknown): boolean {
 		const record = this.agents.get(id);
 		if (!record) return false;
 
@@ -826,7 +834,12 @@ export class AgentManager {
 		}
 
 		if (record.status !== "running") return false;
-		record.abortController?.abort();
+		// GC-2026-037: forward an optional abort reason so callers (the
+		// deadline timer, the parent-signal handler) can preserve context
+		// for the record.error capture in the .catch block. Falls back to
+		// undefined when the caller didn't supply one (preserves prior
+		// behavior — runAgent sees a bare AbortError with no reason).
+		record.abortController?.abort(reason);
 		record.status = "stopped";
 		this.noteFinishOnce(record);
 		record.completedAt = Date.now();

@@ -325,3 +325,64 @@ export function saveAndEmitChanged(
 	emit("subagents:settings_changed", { settings: snapshot, persisted });
 	return persistToastFor(successMsg, persisted);
 }
+
+// =============================================================================
+// GC-2026-037: Wall-clock deadline (per-agent-type + per-dispatch override).
+//
+// The Agent tool executor merges the caller's AbortSignal with a deadline-driven
+// AbortController via AbortSignal.any. The deadline default depends on the
+// agent type (developer/auditor get 20min; Explore/Plan get 5min) and the
+// caller may override via the `max_duration_minutes` Agent tool param.
+//
+// The functions in this block are module-level state, mirroring
+// `setDefaultMaxTurns` / `getDefaultMaxTurns` in agent-runner.ts. They are
+// NOT persisted across sessions — that comes later if needed. The
+// orchestrator-facing API is:
+//   - getSubagentDurationDefault(type) — read a default
+//   - setSubagentDurationDefaults(d)   — override the table (mainly tests)
+//   - resolveDeadlineMs(type, overrideMinutes) — priority chain
+// =============================================================================
+
+/** Hard floor: any unknown agent type or unconfigured default = 20min. */
+const DEFAULT_DURATION_FLOOR_MS = 20 * 60 * 1000;
+
+const DEFAULT_DURATIONS_MS: Record<string, number> = {
+	developer: 20 * 60 * 1000,
+	auditor: 20 * 60 * 1000,
+	Explore: 5 * 60 * 1000,
+	Plan: 5 * 60 * 1000,
+};
+
+let durationDefaultsMs: Record<string, number> = { ...DEFAULT_DURATIONS_MS };
+
+export function getSubagentDurationDefault(type: string): number {
+	return durationDefaultsMs[type] ?? DEFAULT_DURATION_FLOOR_MS;
+}
+
+export function setSubagentDurationDefaults(d: Record<string, number>): void {
+	// Merge — preserve unspecified defaults so callers can override one
+	// type without resetting the rest. The module-level `durationDefaultsMs`
+	// is the source of truth between calls.
+	durationDefaultsMs = { ...durationDefaultsMs, ...d };
+}
+
+/**
+ * Resolve the wall-clock deadline for a subagent dispatch.
+ *
+ * Priority chain:
+ *   1. caller-supplied `overrideMinutes` (in minutes, fractional allowed;
+ *      converted to ms here)
+ *   2. per-type default from getSubagentDurationDefault
+ *   3. 20-minute hard floor (DEFAULT_DURATION_FLOOR_MS)
+ *
+ * Negative or zero override falls through to the per-type default.
+ */
+export function resolveDeadlineMs(
+	type: string,
+	overrideMinutes: number | undefined,
+): number {
+	if (overrideMinutes != null && overrideMinutes > 0) {
+		return Math.round(overrideMinutes * 60 * 1000);
+	}
+	return getSubagentDurationDefault(type);
+}
