@@ -262,3 +262,153 @@ describe("auditor-prompt: MUST/forbidden language for tool preference (GC-2026-0
 		).toMatch(/DO NOT re-read|do not re-read/i);
 	});
 });
+
+describe("auditor-prompt: 🔴/🟡/💭 priority scheme (GC-2026-039 T2)", () => {
+	// The audit report template carries three priority buckets (code-reviewer
+	// pattern from engineering-code-reviewer.md). The orchestrator's audit
+	// reader relies on these headers for structured severity parsing — a
+	// future prose edit that drops one of them surfaces here as a hard
+	// regression.
+
+	function sectionIndex(name: string): number {
+		const re = new RegExp(`^##\\s+.*${name}.*$`, "m");
+		const m = AUDITOR_PROMPT.match(re);
+		return m?.index ?? -1;
+	}
+
+	function sectionBody(name: string): string {
+		const re = new RegExp(`^##\\s+.*${name}.*$`, "m");
+		const m = AUDITOR_PROMPT.match(re);
+		const idx = m?.index ?? -1;
+		expect(idx, `section '${name}' must exist`).toBeGreaterThanOrEqual(0);
+		const after = AUDITOR_PROMPT.slice(idx);
+		const nextMatch = after.slice(2).match(/^##\s/m);
+		const endIdxInner =
+			nextMatch?.index === undefined ? after.length : nextMatch.index + 2;
+		return after.slice(0, endIdxInner);
+	}
+
+	it("Audit Report Template contains a 🔴 Blockers section", () => {
+		expect(AUDITOR_PROMPT).toMatch(/^##\s+🔴\s+Blockers.*$/m);
+	});
+
+	it("Audit Report Template contains a 🟡 Suggestions section", () => {
+		expect(AUDITOR_PROMPT).toMatch(/^##\s+🟡\s+Suggestions.*$/m);
+	});
+
+	it("Audit Report Template contains a 💭 Nits section", () => {
+		expect(AUDITOR_PROMPT).toMatch(/^##\s+💭\s+Nits.*$/m);
+	});
+
+	it("priority sections appear in Blockers → Suggestions → Nits order", () => {
+		const blockers = sectionIndex("🔴 Blockers");
+		const suggestions = sectionIndex("🟡 Suggestions");
+		const nits = sectionIndex("💭 Nits");
+		expect(blockers).toBeGreaterThanOrEqual(0);
+		expect(suggestions).toBeGreaterThanOrEqual(0);
+		expect(nits).toBeGreaterThanOrEqual(0);
+		expect(blockers, "Blockers must come before Suggestions").toBeLessThan(
+			suggestions,
+		);
+		expect(suggestions, "Suggestions must come before Nits").toBeLessThan(nits);
+	});
+
+	it("per-issue template lists the six required fields", () => {
+		// Each priority bucket's template enumerates the issue shape:
+		// Description, Expected, Actual, Evidence, Fix instruction,
+		// File(s) to modify. The orchestrator's report parser keys off
+		// these labels.
+		const blockersSection = sectionBody("🔴 Blockers");
+		expect(blockersSection, "Blockers must define Description").toMatch(
+			/Description:/,
+		);
+		expect(blockersSection, "Blockers must define Expected").toMatch(/Expected:/);
+		expect(blockersSection, "Blockers must define Actual").toMatch(/Actual:/);
+		expect(blockersSection, "Blockers must define Evidence").toMatch(/Evidence:/);
+		expect(blockersSection, "Blockers must define Fix instruction").toMatch(
+			/Fix instruction:/,
+		);
+		expect(blockersSection, "Blockers must define File(s) to modify").toMatch(
+			/File\(s\) to modify:/,
+		);
+	});
+
+	it("Blockers category list names Security, Correctness, Data loss (and adjacent risks)", () => {
+		const section = sectionBody("🔴 Blockers");
+		expect(section, "Blockers must list Security").toMatch(/Security/);
+		expect(section, "Blockers must list Correctness").toMatch(/Correctness/);
+		expect(section, "Blockers must list Data loss").toMatch(/Data loss/);
+		expect(section, "Blockers must list Race/deadlock").toMatch(
+			/Race\/?deadlock|Race condition/,
+		);
+	});
+
+	it("Suggestions category list names missing validation / tests / perf / duplication", () => {
+		const section = sectionBody("🟡 Suggestions");
+		expect(section, "Suggestions must list Missing validation").toMatch(
+			/[Mm]issing validation/,
+		);
+		expect(section, "Suggestions must list Missing tests").toMatch(
+			/[Mm]issing tests/,
+		);
+		expect(section, "Suggestions must list Perf").toMatch(/[Pp]erf/);
+		expect(section, "Suggestions must list Code duplication").toMatch(
+			/[Cc]ode duplication/,
+		);
+	});
+
+	it("Nits category list names style / naming / docs / alternative approaches", () => {
+		const section = sectionBody("💭 Nits");
+		expect(section, "Nits must list Style inconsistency").toMatch(/[Ss]tyle/);
+		expect(section, "Nits must list Minor naming").toMatch(/[Nn]aming/);
+		expect(section, "Nits must list Doc gap").toMatch(/[Dd]oc/);
+		expect(section, "Nits must list Alternative approach").toMatch(
+			/[Aa]lternative/,
+		);
+	});
+
+	it("Communication Style mentions the priority markers consistently", () => {
+		const section = sectionBody("Communication Style");
+		expect(
+			section,
+			"Communication Style must reference priority markers",
+		).toMatch(/🔴|🟡|💭/);
+		// "one-line summaries" is the audit-friendly compression rule
+		expect(
+			section,
+			"Communication Style must require one-line summaries",
+		).toMatch(/[Oo]ne-?line/);
+	});
+
+	it("free-form Concerns section is preserved as escape hatch (regression)", () => {
+		// The Concerns free-form list is kept AFTER the three priority
+		// buckets so non-content findings (architectural concerns, HANDOFF
+		// notes, future risks) still have a place. A future edit that
+		// drops Concerns to make room for priorities surfaces here.
+		expect(AUDITOR_PROMPT).toMatch(/^##\s+Concerns$/m);
+	});
+
+	it("priority buckets are positioned between Diff Inspection and Concerns", () => {
+		const diffInspectionIdx = sectionIndex("Diff Inspection");
+		const blockersIdx = sectionIndex("🔴 Blockers");
+		const concernsIdx = sectionIndex("Concerns");
+		expect(diffInspectionIdx).toBeGreaterThanOrEqual(0);
+		expect(blockersIdx).toBeGreaterThanOrEqual(0);
+		expect(concernsIdx).toBeGreaterThanOrEqual(0);
+		expect(
+			diffInspectionIdx,
+			"Blockers must follow Diff Inspection",
+		).toBeLessThan(blockersIdx);
+		expect(
+			blockersIdx,
+			"Concerns must follow Blockers",
+		).toBeLessThan(concernsIdx);
+	});
+
+	it("Automatic FAIL Triggers section is preserved (regression on overlap)", () => {
+		// Process-violation triggers are complementary to per-issue content
+		// findings. A future edit that conflates them (or drops Automatic
+		// FAIL Triggers to make room for priorities) surfaces here.
+		expect(AUDITOR_PROMPT).toMatch(/^##\s+🚫\s+Automatic FAIL Triggers.*$/m);
+	});
+});
