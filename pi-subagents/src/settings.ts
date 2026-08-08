@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { resolveRunConfig } from "./run-controller.js";
 import type { JoinMode, WidgetMode } from "./types.js";
 
 export interface SubagentsSettings {
@@ -369,13 +370,21 @@ export function setSubagentDurationDefaults(d: Record<string, number>): void {
 /**
  * Resolve the wall-clock deadline for a subagent dispatch.
  *
- * Priority chain:
+ * Priority chain (GC-2026-043, delegates to `resolveRunConfig`):
  *   1. caller-supplied `overrideMinutes` (in minutes, fractional allowed;
- *      converted to ms here)
- *   2. per-type default from getSubagentDurationDefault
- *   3. 20-minute hard floor (DEFAULT_DURATION_FLOOR_MS)
+ *      converted to ms here) — wins for ALL types including unknown.
+ *   2. per-type default via `resolveRunConfig` for canonical types
+ *      (developer / auditor / explorer / merger). `resolveRunConfig`
+ *      reads `DEFAULT_PER_TYPE` and honors per-type / generic env vars.
+ *   3. Legacy `Explore` / `Plan` capitalized names are NOT in
+ *      `DEFAULT_PER_TYPE` — fall back to `getSubagentDurationDefault`
+ *      (the GC-2026-037 table that knows their 5-minute defaults).
+ *   4. Unknown types fall back to the developer default (20min) via
+ *      `resolveRunConfig`'s fallback semantics.
  *
- * Negative or zero override falls through to the per-type default.
+ * Signature kept stable for backward compat with existing callers
+ * (index.ts executor). The body is intentionally short — the actual
+ * resolution logic lives in `resolveRunConfig` / `getSubagentDurationDefault`.
  */
 export function resolveDeadlineMs(
 	type: string,
@@ -384,7 +393,14 @@ export function resolveDeadlineMs(
 	if (overrideMinutes != null && overrideMinutes > 0) {
 		return Math.round(overrideMinutes * 60 * 1000);
 	}
-	return getSubagentDurationDefault(type);
+	// Legacy capitalized names: not in DEFAULT_PER_TYPE, would resolve
+	// to developer defaults (20min) under resolveRunConfig — too long
+	// for these short-lived agents. Use the GC-2026-037 per-type table.
+	if (type === "Explore" || type === "Plan") {
+		return getSubagentDurationDefault(type);
+	}
+	// Canonical types delegate to resolveRunConfig — single source of truth.
+	return resolveRunConfig(type, {}, process.env).deadlineMs;
 }
 
 // =============================================================================
