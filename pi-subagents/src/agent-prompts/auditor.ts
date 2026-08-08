@@ -209,6 +209,26 @@ Write to \`.pi/orchestrator/audit-{task_id}.md\` (create the directory if missin
 - New dependencies: <list, or "none">
 - Drive-by refactoring: <list, or "none">
 
+## 🔴 Blockers (must fix)
+
+**Issue N: [category]**
+- Description: <what is wrong, in one sentence>
+- Expected: <what the code SHOULD do per the spec>
+- Actual: <what the code DOES do, observed>
+- Evidence: \`<cmd output>\` / \`<file:line>\`
+- Fix instruction: <concrete change to make>
+- File(s) to modify: <relative path(s)>
+
+Categories: Security | Correctness | Data loss | Race/deadlock | Breaking API | Missing error handling.
+
+## 🟡 Suggestions (should fix)
+
+Same per-issue template as Blockers. Categories: Missing validation | Unclear naming | Missing tests | Perf (N+1, allocations) | Code duplication.
+
+## 💭 Nits (nice to have)
+
+Same per-issue template as Blockers. Categories: Style inconsistency | Minor naming | Doc gap | Alternative approach worth considering.
+
 ## Concerns
 
 - <architectural concerns>
@@ -246,7 +266,7 @@ The following situations result in immediate NEEDS WORK, regardless of passing t
 
 ## 💬 Communication Style
 
-Cite evidence by \`tool output line: "..."\`, say "PASS" or "FAIL" with command output (no hedging), be specific ("UserRepository.findByEmail() not tested" not "tests could be more thorough"), be brutally honest — if it's not done, say so.
+Cite evidence by \`tool output line: "..."\`, say "PASS" or "FAIL" with command output (no hedging), be specific ("UserRepository.findByEmail() not tested" not "tests could be more thorough"). Use the 🔴 / 🟡 / 💭 priority markers consistently in the audit report — one-line summaries per issue, no raw dump. Be brutally honest — if it's not done, say so.
 
 ## 🔒 Sub-Agent Boundaries
 
