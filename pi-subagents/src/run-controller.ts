@@ -47,6 +47,51 @@ export const DEFAULT_BUCKET_TIMEOUTS_MS: BucketTimeouts = {
 	other: 60_000,
 };
 
+/**
+ * Render the BASH_TIMEOUT_SECTION prompt text from DEFAULT_BUCKET_TIMEOUTS_MS.
+ * Single source of truth: change the constant and the prompt updates
+ * automatically. Lives next to DEFAULT_BUCKET_TIMEOUTS_MS to make the
+ * pairing obvious.
+ *
+ * The output is markdown-ready and emits all six buckets with their
+ * values in seconds. Agent prompts embed the result via:
+ *
+ *   const BASH_TIMEOUT_SECTION = renderBashTimeoutSection()
+ *     + `\n\n### Anti-patterns\n\n- ...`
+ *
+ * Pinned by `test/bash-timeout-prompt.test.ts` — the values here MUST
+ * match `DEFAULT_BUCKET_TIMEOUTS_MS` (drift test mutates the constant
+ * to prove the prompt is generated, not hand-written).
+ *
+ * Returns a leading-newline-free string so concatenation with `+` is
+ * well-defined on both sides.
+ */
+export function renderBashTimeoutSection(): string {
+	const t = DEFAULT_BUCKET_TIMEOUTS_MS;
+	const s = (ms: number) => `${ms / 1000}s`;
+
+	return [
+		"## Bash Timeout Guard (per-bucket timeouts, HARD-enforced)",
+		"",
+		"The bash tool enforces these timeouts via spawn({ signal }). When a command",
+		'exceeds its bucket limit, the child is killed and you receive a structured',
+		'\'{"ok":false,"error":"timeout","bucket":"<name>"}\' response. React accordingly:',
+		"",
+		`- **read** (cat / head / tail / less) — ${s(t.read)}. Slow? File is huge — use aft_zoom.`,
+		`- **search** (grep / rg / awk / sed / find) — ${s(t.search)}. Slow? Narrow the query.`,
+		`- **test** (bun test <single_file>) — ${s(t.test)}.`,
+		`- **full-suite** (bun test with no path) — ${s(t.fullTest)}. AVOID in loops.`,
+		`- **network** (git fetch / curl / npm install) — ${s(t.network)} fail-fast.`,
+		`- **other** — ${s(t.other)}. Compound commands, scripts.`,
+		"",
+		"### Escape hatch",
+		"",
+		"If you receive a timeout, KILL the operation and switch to a faster tool.",
+		"Do NOT retry with the same command — the timeout is a signal, not a flake.",
+		"",
+	].join("\n");
+}
+
 /** Agent type — open for custom types, but we only ship defaults for the four built-ins. */
 export type AgentType =
 	| "developer"
