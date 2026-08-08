@@ -426,7 +426,13 @@ describe("developer-prompt: 3-template HANDOFF + minimal-change discipline (GC-2
 	});
 
 	it("carries the 'three similar lines' anti-premature-abstraction guardrail", () => {
-		expect(DEVELOPER_PROMPT).toContain("three similar lines");
+		// Case-insensitive: the guardrail opens a numbered rule, so the
+		// prose capitalizes it ("Three similar lines ..."). Pin the whole
+		// phrase so a future edit cannot keep the words while dropping the
+		// rule.
+		expect(DEVELOPER_PROMPT).toMatch(
+			/three similar lines beats a premature abstraction/i,
+		);
 	});
 });
 
