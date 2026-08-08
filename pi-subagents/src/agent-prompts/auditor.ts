@@ -413,17 +413,15 @@ saves the next dispatch from re-deriving the same context.
 void UNCERTAINTY_THRESHOLD_SECTION;
 
 // =============================================================================
-// GC-2026-038 T5: Bash Timeout Guard
+// GC-2026-043 T2: Bash Timeout Guard (Phase 4 — generated from DEFAULT_BUCKET_TIMEOUTS_MS)
 // =============================================================================
-const BASH_TIMEOUT_SECTION = `
-## Bash Timeout Guard (per-bucket timeouts)
+// The bucket table is generated from run-controller.ts to keep prompt text
+// in sync with the runtime enforcement. Auditor prompt is intentionally
+// minimal here — the structured timeout error is what the bash wrapper
+// returns; the auditor verifies the agent's actions, not commands.
+import { renderBashTimeoutSection } from "../run-controller.js";
 
-- **read** (cat / head / tail / less): 5s timeout
-- **search** (grep / rg / awk / sed / find): 10s timeout
-- **bun test <single_file>**: 30s timeout
-- **bun test (no path)**: 90s timeout. Avoid in a loop.
-- **network** (git fetch / curl / npm install): 5s fail-fast
-`;
+const BASH_TIMEOUT_SECTION = renderBashTimeoutSection();
 
 // See developer.ts for the void pattern.
 void BASH_TIMEOUT_SECTION;
