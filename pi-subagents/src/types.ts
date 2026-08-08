@@ -3,6 +3,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import type { RunController } from "./run-controller.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { LifetimeUsage } from "./usage.js";
 import type { ManagedWorktreeRequest } from "./worktree-contract.js";
@@ -170,6 +171,15 @@ export interface AgentRecord {
 	completedAt?: number;
 	session?: AgentSession;
 	abortController?: AbortController;
+	/**
+	 * GC-2026-043: single source of truth for per-run timeouts.
+	 *
+	 * When present, `runController.signal` is the composed abort signal
+	 * (parent + run deadline + per-tool bucket timer). `abortController`
+	 * above is the SAME instance as `runController.abortController` —
+	 * kept for backward compat with UI/observability code that reads it.
+	 */
+	runController?: RunController;
 	promise?: Promise<string>;
 	groupId?: string;
 	joinMode?: JoinMode;
