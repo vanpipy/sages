@@ -68,7 +68,9 @@ afterEach(() => {
 
 describe("run-controller: DEFAULT_BUCKET_TIMEOUTS_MS", () => {
 	it("exports the six buckets with the specified values", async () => {
-		const { DEFAULT_BUCKET_TIMEOUTS_MS } = await import("../src/run-controller.js");
+		const { DEFAULT_BUCKET_TIMEOUTS_MS } = await import(
+			"../src/run-controller.js"
+		);
 		expect(DEFAULT_BUCKET_TIMEOUTS_MS.read).toBe(5_000);
 		expect(DEFAULT_BUCKET_TIMEOUTS_MS.search).toBe(10_000);
 		expect(DEFAULT_BUCKET_TIMEOUTS_MS.test).toBe(30_000);
@@ -78,9 +80,18 @@ describe("run-controller: DEFAULT_BUCKET_TIMEOUTS_MS", () => {
 	});
 
 	it("has exactly the six expected bucket keys", async () => {
-		const { DEFAULT_BUCKET_TIMEOUTS_MS } = await import("../src/run-controller.js");
+		const { DEFAULT_BUCKET_TIMEOUTS_MS } = await import(
+			"../src/run-controller.js"
+		);
 		const keys = Object.keys(DEFAULT_BUCKET_TIMEOUTS_MS).sort();
-		expect(keys).toEqual(["fullTest", "network", "other", "read", "search", "test"]);
+		expect(keys).toEqual([
+			"fullTest",
+			"network",
+			"other",
+			"read",
+			"search",
+			"test",
+		]);
 	});
 });
 
@@ -118,37 +129,21 @@ describe("run-controller: resolveRunConfig", () => {
 
 	it("params.max_duration_minutes overrides deadlineMs (positive only)", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig(
-			"developer",
-			{ max_duration_minutes: 15 },
-			{},
-		);
+		const cfg = resolveRunConfig("developer", { max_duration_minutes: 15 }, {});
 		expect(cfg.deadlineMs).toBe(15 * 60_000);
 
 		// Negative values fall through to default
-		const neg = resolveRunConfig(
-			"developer",
-			{ max_duration_minutes: -5 },
-			{},
-		);
+		const neg = resolveRunConfig("developer", { max_duration_minutes: -5 }, {});
 		expect(neg.deadlineMs).toBe(20 * 60_000);
 
 		// Zero falls through to default
-		const zero = resolveRunConfig(
-			"developer",
-			{ max_duration_minutes: 0 },
-			{},
-		);
+		const zero = resolveRunConfig("developer", { max_duration_minutes: 0 }, {});
 		expect(zero.deadlineMs).toBe(20 * 60_000);
 	});
 
 	it("params.max_turns overrides maxTurns", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig(
-			"developer",
-			{ max_turns: 42 },
-			{},
-		);
+		const cfg = resolveRunConfig("developer", { max_turns: 42 }, {});
 		expect(cfg.maxTurns).toBe(42);
 
 		// Zero / negative falls through
@@ -163,14 +158,12 @@ describe("run-controller: resolveRunConfig", () => {
 		expect(cfg.maxTurns).toBe(30);
 	});
 
-	it("env.SAGES_PI_AGENT_BUDGET_TURNS as fallback (when params has nothing)",
-		async () => {
-			const { resolveRunConfig } = await import("../src/run-controller.js");
-			const env = { SAGES_PI_AGENT_BUDGET_TURNS: "42" };
-			const cfg = resolveRunConfig("explorer", {}, env);
-			expect(cfg.maxTurns).toBe(42);
-		},
-	);
+	it("env.SAGES_PI_AGENT_BUDGET_TURNS as fallback (when params has nothing)", async () => {
+		const { resolveRunConfig } = await import("../src/run-controller.js");
+		const env = { SAGES_PI_AGENT_BUDGET_TURNS: "42" };
+		const cfg = resolveRunConfig("explorer", {}, env);
+		expect(cfg.maxTurns).toBe(42);
+	});
 
 	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_TURNS overrides per-type", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");

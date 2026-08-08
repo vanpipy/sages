@@ -88,12 +88,6 @@ function positiveInt(v: string | undefined, fallback: number): number {
 	return n;
 }
 
-function positiveIntOrNull(v: number | undefined): number | null {
-	if (v === undefined) return null;
-	if (!Number.isFinite(v) || v <= 0) return null;
-	return v;
-}
-
 /**
  * Resolve the run config for a given agent type. Precedence:
  *
@@ -111,26 +105,30 @@ export function resolveRunConfig(
 	env: NodeJS.ProcessEnv,
 	identity: RunIdentity = {},
 ): RunConfig {
-	// run_controller_env_resolve: per-type > generic > default.
+	// run_controller_env_resolve: params > per-type env > generic env > default.
 	const base = DEFAULT_PER_TYPE[type] ?? DEFAULT_PER_TYPE.developer;
 	const typeUpper = type.toUpperCase();
 
-	const paramsMinutes = positiveIntOrNull(params.max_duration_minutes);
-	const paramsTurns = positiveIntOrNull(params.max_turns);
+	// Params win when given as a positive number; 0 / negative / undefined
+	// fall through to env (per-type → generic → default).
+	const paramsMinutes = params.max_duration_minutes;
+	const paramsTurns = params.max_turns;
 
 	const deadlineMs =
-		(paramsMinutes !== null ? paramsMinutes * 60_000 : null) ??
-		positiveInt(
-			env[`SAGES_PI_AGENT_${typeUpper}_BUDGET_MS`],
-			positiveInt(env.SAGES_PI_AGENT_BUDGET_MS, base.deadlineMs),
-		);
+		paramsMinutes !== undefined && paramsMinutes > 0
+			? paramsMinutes * 60_000
+			: positiveInt(
+					env[`SAGES_PI_AGENT_${typeUpper}_BUDGET_MS`],
+					positiveInt(env.SAGES_PI_AGENT_BUDGET_MS, base.deadlineMs),
+				);
 
 	const maxTurns =
-		paramsTurns ??
-		positiveInt(
-			env[`SAGES_PI_AGENT_${typeUpper}_BUDGET_TURNS`],
-			positiveInt(env.SAGES_PI_AGENT_BUDGET_TURNS, base.maxTurns),
-		);
+		paramsTurns !== undefined && paramsTurns > 0
+			? paramsTurns
+			: positiveInt(
+					env[`SAGES_PI_AGENT_${typeUpper}_BUDGET_TURNS`],
+					positiveInt(env.SAGES_PI_AGENT_BUDGET_TURNS, base.maxTurns),
+				);
 
 	return {
 		type,
@@ -187,7 +185,9 @@ export class RunController {
 
 		// run_controller_deadline: deadline timer fires at deadlineMs.
 		// Skip if already aborted (parent-aborted case).
-		if (!this.abortController.signal.aborted) {
+		if (this.abortController.signal.aborted) {
+			this.deadlineTimer = null;
+		} else {
 			this.deadlineTimer = setTimeout(() => {
 				// Only fire if still alive (cleanup may have raced).
 				if (!this.abortController.signal.aborted) {
@@ -200,11 +200,7 @@ export class RunController {
 			}, config.deadlineMs);
 			// Don't keep the process alive for the deadline timer (allow
 			// graceful shutdown if cleanup is called via process.exit).
-			if (typeof this.deadlineTimer.unref === "function") {
-				this.deadlineTimer.unref();
-			}
-		} else {
-			this.deadlineTimer = null;
+			this.deadlineTimer.unref();
 		}
 	}
 
@@ -262,9 +258,7 @@ export class RunController {
 				);
 			}
 		}, timeoutMs);
-		if (typeof (toolTimer as { unref?: () => void }).unref === "function") {
-			(toolTimer as { unref: () => void }).unref();
-		}
+		toolTimer.unref();
 		this.toolTimers.add(toolTimer);
 
 		const composed = AbortSignal.any([this.signal, bucketController.signal]);
@@ -301,9 +295,7 @@ export class RunController {
 		if (this.deadlineTimer !== null) {
 			clearTimeout(this.deadlineTimer);
 		}
-		for (const t of this.toolTimers) {
-			clearTimeout(t);
-		}
+		for (const t of this.toolTimers) clearTimeout(t);
 		this.toolTimers.clear();
 	}
 }
