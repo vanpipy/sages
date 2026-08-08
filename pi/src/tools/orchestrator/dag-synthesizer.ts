@@ -66,6 +66,17 @@ export const TaskNodeSchema = Type.Object({
    * of its subagent-type default.
    */
   run_in_background: Type.Optional(Type.Boolean({ description: "Override the subagent-type default for run_in_background" })),
+  /**
+   * GC-2026-039: which HANDOFF.md template the developer uses on exit.
+   * Only meaningful when `subagent_type === "developer"` — auditor /
+   * Explore / Plan don't write HANDOFF.md, so the field is ignored.
+   * The dispatcher defaults missing values to "standard".
+   */
+  handoff_template: Type.Optional(Type.Union([
+    Type.Literal("standard"),
+    Type.Literal("phase-gate"),
+    Type.Literal("escalation"),
+  ], { description: "Which HANDOFF.md template the developer uses (Standard / Phase Gate / Escalation). Defaults to 'standard' at dispatch time." })),
   prompt: Type.String({ description: "Detailed prompt for subagent", minLength: 20 }),
   /** Optional: reference to a template under skills/orchestrator/templates/prompts/ */
   task_template: Type.Optional(Type.String({

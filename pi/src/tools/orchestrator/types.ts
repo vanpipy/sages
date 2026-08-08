@@ -119,6 +119,26 @@ export interface TaskNode {
 	 * Planning Brief; developer/auditor = background).
 	 */
 	run_in_background?: boolean;
+	/**
+	 * GC-2026-039: which HANDOFF.md template the developer must use when
+	 * writing `.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md`
+	 * on exit. Three literal values:
+	 *
+	 *   - "standard"   — Template A (default for most tasks). Five-section
+	 *                    flat structure: Summary / Files / TODOs / Tests / Questions.
+	 *   - "phase-gate" — Template B. Used when this task's workspace will be
+	 *                    merged with another via the merger sub-agent. Adds
+	 *                    Gate Criteria / Documents Carried Forward / Risks.
+	 *   - "escalation" — Template C. Used after 2+ failures; the next
+	 *                    dispatch is a fresh agent reading the escalation.
+	 *                    Adds Failure History / Root Cause / Resolution.
+	 *
+	 * Only meaningful for `subagent_type === "developer"`. The dispatcher
+	 * defaults missing values to "standard" for back-compat with DAGs
+	 * authored before GC-2026-039 and renders the choice into the
+	 * developer's prompt so it knows which template to follow.
+	 */
+	handoff_template?: "standard" | "phase-gate" | "escalation";
 	/** Detailed prompt given to the subagent (assembled by orchestrator from MDD outputs, or rendered from task_template) */
 	prompt: string;
 	/** Optional template reference — if set, dag_synthesizer renders prompt from template + task_params */

@@ -162,11 +162,21 @@ export function buildDispatchPlan(
     const tasks = byBatch.get(batchNum)!;
     const isLastBatch = i === sortedBatches.length - 1;
 
-    const dispatchTasks: DispatchTask[] = tasks.map(t => ({
-      task_id: t.id,
-      subagent_type: t.subagent_type,
-      // Inject upstream task outputs into the prompt
-      prompt: injectUpstreamOutputs(plan, taskById, t),
+    const dispatchTasks: DispatchTask[] = tasks.map(t => {
+      // GC-2026-039: developer tasks declare which HANDOFF.md template
+      // to use on exit. Render the choice into the prompt as a separate
+      // line so the developer picks the right template. Non-developer
+      // tasks ignore handoff_template (they don't write HANDOFF.md), so
+      // we only inject for `subagent_type === "developer"`.
+      const basePrompt = injectUpstreamOutputs(plan, taskById, t);
+      const prompt =
+        t.subagent_type === "developer"
+          ? `${basePrompt}\n\nhandoff_template: ${t.handoff_template ?? "standard"}`
+          : basePrompt;
+      return {
+        task_id: t.id,
+        subagent_type: t.subagent_type,
+        prompt,
       // GC-2026-017: developer-special-case resolution.
       //   1. `"current-workspace"` → pass the literal through (NEW).
       //   2. Object form → pass through as-is (covers both create + reuse).
@@ -186,7 +196,8 @@ export function buildDispatchPlan(
       run_in_background: t.run_in_background ?? defaultRunInBackground(t.subagent_type),
       wait_for: tasks.length > 1 ? "batch_completion" : "completion",
       report_path: `.pi/orchestrator/task-${t.id}-report.md`,
-    }));
+      };
+    });
 
     const parallelSafe = dispatchTasks.length <= maxConcurrent;
 
