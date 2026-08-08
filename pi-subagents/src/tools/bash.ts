@@ -8,33 +8,29 @@
  * Critical invariants (each addresses a specific review finding):
  *
  *   C1 (single kill path). `spawn({ signal })` forwards aborts to the
- *       child (Node sends SIGTERM on abort). The escalation listener
- *       below adds the 2s SIGKILL safety net for SIGTERM-ignoring
- *       children. There is NO separate "belt-and-suspenders" kill path
- *       racing spawn's built-in handler — the listener ONLY escalates.
+ *       child. The escalation listener adds the 2s SIGKILL safety net
+ *       for SIGTERM-ignoring children. No duplicate kill path.
  *
- *   C2 (no hung promise). `spawn()` is wrapped in try/catch so a
- *       synchronous failure (signal already aborted, EACCES, etc.)
- *       rejects the promise. `child.on('error')` covers async spawn
- *       errors (ENOENT, etc.). Either path rejects with `BashError`,
- *       never hangs.
+ *   C2 (no hung promise). Pre-aborted signal rejects synchronously
+ *       with `spawn_failed`. Async spawn errors (ENOENT, etc.) reject
+ *       via `child.on('error')`. ABORT_ERR is filtered (Node emits it
+ *       alongside the exit event when the signal aborts).
  *
- *   C3 (signal-after-exit race). We track `signalFiredAt` and the
- *       child exit timestamp. If the child exited within 100ms after
- *       the signal fired, we do NOT mark as timeout — the signal
- *       arrived during normal shutdown, not because of an abort.
+ *   C3 (signal-after-exit discrimination). Classify as `timeout` only
+ *       when the child exited via SIGTERM/SIGKILL. Natural exits (code
+ *       0 or non-zero without a signal) are NOT timeouts, even if the
+ *       signal fired around the same time. This is a stronger
+ *       discriminator than timing-based grace.
  *
- *   C4 (abort-reason). Documented in the listener comment: when both
- *       the run-deadline and a bucket-timer signal fire, the most
- *       restrictive wins. A 5s bucket abort takes precedence over a
- *       20min run abort because the actionable signal is "the work
- *       was slow for that bucket", not "the run ran out of time".
+ *   C4 (abort-reason). Documented in the listener: when both run-
+ *       deadline and a bucket-timer signal abort, most-restrictive
+ *       wins. A 5s bucket abort takes precedence over a 20min run
+ *       abort because the actionable signal is "this work was slow".
  *
- *   C5 (SIGTERM with grace). On signal abort we send SIGTERM (Node's
- *       spawn({signal}) already does this — the listener is just a
- *       safety net). If the child is still alive 2s later, we send
- *       SIGKILL. Children with cleanup handlers exit cleanly; only
- *       true stuck children get SIGKILL'd.
+ *   C5 (SIGTERM with grace). On signal abort we send SIGTERM (defensive
+ *       — Node 24's spawn({signal}) emits ABORT_ERR but doesn't always
+ *       deliver SIGTERM). If the child is still alive 2s later, we send
+ *       SIGKILL. Children with cleanup handlers exit cleanly.
  *
  * Anti-rule: no new npm dependencies (Node built-ins only).
  */
@@ -77,6 +73,15 @@ export type BashResult =
 export interface BashContext {
 	runController: RunController;
 	cwd: string;
+}
+
+/** Send `sig` to `child`, swallowing "already dead" errors. */
+function safeKill(child: ChildProcess, sig: NodeJS.Signals) {
+	try {
+		child.kill(sig);
+	} catch {
+		// Child already gone — fine.
+	}
 }
 
 /**
@@ -174,22 +179,14 @@ export function bashTool(
 				if (signalFiredAt !== null) return;
 				signalFiredAt = Date.now();
 				timedOut = true;
-				// Send SIGTERM. Node's spawn({signal}) already issued
-				// one; sending another is idempotent for live children
-				// and a no-op for dying ones.
-				try {
-					child.kill("SIGTERM");
-				} catch {
-					// Child already gone — fine.
-				}
-				// Escalate to SIGKILL after 2s if still alive.
+				// Send SIGTERM defensively. Node 24's spawn({signal})
+				// emits ABORT_ERR but doesn't always deliver SIGTERM to
+				// the child, so we issue our own.
+				safeKill(child, "SIGTERM");
+				// Escalate to SIGKILL after 2s if still alive (C5).
 				const escalation = setTimeout(() => {
 					if (child.exitCode === null && child.signalCode === null) {
-						try {
-							child.kill("SIGKILL");
-						} catch {
-							// Already dead — fine.
-						}
+						safeKill(child, "SIGKILL");
 					}
 				}, 2000);
 				escalation.unref();
