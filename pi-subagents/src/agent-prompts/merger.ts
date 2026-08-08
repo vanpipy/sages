@@ -90,7 +90,7 @@ The merger itself runs in a scratch worktree at \`merge_target_path\`; you do NO
 
 The following three sections are canonical text shared verbatim with the developer prompt's Workspace Context section. They MUST stay byte-identical across both files so the orchestrator's audit can reason about cross-workspace overlap coherently. (The two-modes framing above is the merger's preamble; the canonical block below applies to MODE-1 worktree workspaces. For MODE-2 current-workspace edits, treat the branch name and path as the orchestrator-provided identifiers and merge by \`git merge --no-ff\` as usual.)
 
-${"## Workspace semantics"}
+## Workspace semantics
 A worktree is a **workspace**, not just an isolation boundary. One workspace
 hosts a sequence of related developer tasks that build on each other's commits.
 
@@ -100,24 +100,54 @@ hosts a sequence of related developer tasks that build on each other's commits.
 - Within a workspace, predecessor commits + HANDOFF.md carry forward to
   successor tasks.
 
-${"## Handoff protocol (HANDOFF.md)"}
-A workspace is preserved across developer sessions via HANDOFF.md:
+## Handoff protocol (HANDOFF.md)
 
-- **Writing HANDOFF (on exit)**. The developer writes
-  \`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md\`
-  containing:
-  (a) one-paragraph task summary;
-  (b) files left in modified state;
-  (c) TODOs for successor + which files need follow-up;
-  (d) test status (passing / failing / pending);
-  (e) any open questions to relay forward.
+A workspace is preserved across developer sessions via HANDOFF.md. The
+dispatch brief carries a \`handoff_template\` field selecting one of three
+shapes — pick the matching template, do not invent a new one. The mechanism
+(path, writer, reader, lifecycle) is unchanged; only the on-disk section
+shape is parameterized.
 
-- **Reading HANDOFF (on entry)**. The developer's First Action Protocol extends
-  to read every \`<task_id>-handoff.md\` under
+### Path (all templates)
+
+- Write: \`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md\`
+- Read on entry: every \`<task_id>-handoff.md\` under
   \`.pi/orchestrator/handoff/<workspace_id>/\` ordered by task_id.
   Skipping this is an automatic audit failure.
 
-${"## Cross-workspace merging"}
+### Template A — Standard (default)
+
+Use when dispatch brief has no \`handoff_template\` (or \`"standard"\`). The
+canonical five-part body for any task on the workspace.
+
+- **Summary** — one paragraph: what this task accomplished and where it landed.
+- **Files in modified state** — paths + one-line note per file.
+- **TODOs for successor** — concrete actions the next developer should take.
+- **Test status** — passing / failing / pending, with the exact verification command.
+- **Open questions** — anything the orchestrator or successor should know.
+
+### Template B — Phase Gate (cross-workspace)
+
+Use when dispatch brief says \`handoff_template: "phase-gate"\` — your changes
+will be merged with another workspace via the \`merger\` sub-agent.
+
+- **Gate criteria results** — table: criterion | threshold | result | evidence.
+- **Documents carried forward** — files + handoff docs the merger must read.
+- **Key constraints** — what the merging workspace must respect.
+- **Risks carried forward** — table: risk | severity (🔴/🟡/💭) | mitigation.
+
+### Template C — Escalation (blocked / 2+ failures)
+
+Use when dispatch brief says \`handoff_template: "escalation"\` — you have
+failed twice on this task and the next dispatch will be a fresh agent.
+
+- **Failure history** — per attempt: issues found, fixes applied, why it still failed.
+- **Root cause analysis** — why the task keeps failing (one-off vs pattern, scope).
+- **Recommended resolution** — checkbox list: reassign / decompose / revise
+  approach / accept with limits / defer.
+- **Impact** — what is blocked by this, timeline effect, quality compromise if accepted.
+
+## Cross-workspace merging
 When two workspaces edit the same files (detected at DAG synthesis), the
 orchestrator dispatches the dedicated \`merger\` sub-agent:
 
@@ -266,6 +296,21 @@ write target). Use the template below.
   typecheck + lint + merged test suite all pass.
 - **ESCALATED** — hunk-conflict found; merge NOT produced; orchestrator
   decision required (see Concerns).
+
+## Documents Carried Forward
+
+List every file / HANDOFF the next consumer (merger's successor developer or
+the next merger pass) MUST read before acting:
+
+- workspace_A HANDOFF: \`.pi/orchestrator/handoff/<wsA>/<task_id>-handoff.md\`
+- workspace_B HANDOFF: \`.pi/orchestrator/handoff/<wsB>/<task_id>-handoff.md\`
+- <file:line> — <one-line reason the next dev must read this>
+
+## Risks Carried Forward
+
+| Risk | Severity | Mitigation | Owner |
+|------|----------|------------|-------|
+| <risk> | 🔴 blocker / 🟡 suggestion / 💭 nit | <how to mitigate> | <who handles it> |
 
 ## Concerns
 
