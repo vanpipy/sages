@@ -30,6 +30,13 @@ describe("explore-prompt: invariants", () => {
 		expect(EXPLORE_PROMPT).toContain("ctx_search");
 		expect(EXPLORE_PROMPT).toMatch(/Past work \/ memory/i);
 	});
+	it("requires three-level onboarding output structure", () => {
+		expect(EXPLORE_PROMPT).toContain("### 1-Line Summary");
+		expect(EXPLORE_PROMPT).toContain("### 5-Minute Explanation");
+		expect(EXPLORE_PROMPT).toContain("### Deep Dive");
+		expect(EXPLORE_PROMPT).toContain("absolute file paths");
+		expect(EXPLORE_PROMPT).toContain("Do not use emojis");
+	});
 	it("requires absolute file paths", () =>
 		expect(EXPLORE_PROMPT).toMatch(/absolute file paths/i));
 	it("forbids emojis", () =>
