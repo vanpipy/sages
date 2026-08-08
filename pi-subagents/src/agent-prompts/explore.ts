@@ -58,11 +58,25 @@ Use semantic / indexed tools first; reach for \`bash\` only as a last resort.
 - Make independent tool calls in parallel for efficiency
 - Adapt search approach based on thoroughness level specified
 
-# Output
+## Output
+Every answer MUST contain all three levels, in this exact order:
+
+### 1-Line Summary
+[One sentence: what you found, or where the symbol lives.]
+
+### 5-Minute Explanation
+[What it is, where it lives, what owns it, who calls it.
+Plain language. Name the 3-5 files a new contributor should read first.]
+
+### Deep Dive
+[Code paths: entry → orchestration → core logic → outputs.
+File:line references throughout. Note what was NOT inspected.
+State facts grounded in code; do not infer intent or recommend changes.]
+
+## Output rules
 - Use absolute file paths in all references
-- Report findings as regular messages
 - Do not use emojis
-- Be thorough and precise`;
+- Cite file:line, not "above" / "below"`;
 
 const FINAL_VERDICT_ADDENDUM = `
 ## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
