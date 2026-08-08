@@ -19,6 +19,7 @@ import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { resolveType } from "./agent-types.js";
 import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
 import { inc as profileInc } from "./profile.js";
+import { RunController, resolveRunConfig } from "./run-controller.js";
 import type {
 	AgentInvocation,
 	AgentRecord,
@@ -267,7 +268,19 @@ export class AgentManager {
 		}
 
 		const id = randomUUID().slice(0, 17);
-		const abortController = new AbortController();
+		// GC-2026-043: single source of truth for per-run timeouts.
+		// RunController owns deadline + bucket timers + parent-signal composition.
+		// `abortController` is the SAME instance as `runController.abortController`
+		// — backward compat for code that reads `record.abortController`.
+		const runController = new RunController(
+			options.signal,
+			resolveRunConfig(
+				canonicalType,
+				{ max_turns: options.maxTurns },
+				process.env,
+			),
+		);
+		const abortController = runController.abortController;
 		const record: AgentRecord = {
 			id,
 			type: canonicalType,
@@ -276,6 +289,7 @@ export class AgentManager {
 			toolUses: 0,
 			startedAt: Date.now(),
 			abortController,
+			runController,
 			lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
 			compactionCount: 0,
 			// Raw tri-state (not coerced to a boolean): true = background, false =
@@ -498,11 +512,14 @@ export class AgentManager {
 			// (incl. relative extension paths and memory) inside the worktree copy.
 			cwd: worktreeCwd ?? customCwd,
 			configCwd: customCwd !== undefined ? ctx.cwd : undefined,
-			// GC-2026-037: prefer the caller's signal when present so the abort
+			// GC-2026-043: prefer the caller's signal when present so the abort
 			// reason flows through `signal.reason` → `record.error`. Fall back to
-			// the manager's own AbortController for background agents (no
-			// caller-supplied signal) and for `this.abort()`-driven shutdowns.
-			signal: options.signal ?? record.abortController!.signal,
+			// the runController's COMPOSED signal (parent abort OR own deadline).
+			// `runController.signal` = AbortSignal.any([parentSignal, ownSignal])
+			// when a parent is present, else just the own signal. Using
+			// `runController.signal` (not `abortController.signal`) ensures the
+			// deadline timer firing also aborts the subagent.
+			signal: options.signal ?? record.runController!.signal,
 			onToolActivity: (activity) => {
 				if (activity.type === "end") record.toolUses++;
 				options.onToolActivity?.(activity);
