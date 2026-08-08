@@ -5,7 +5,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { validateDAG, buildPlan } from "@/tools/orchestrator/dag-synthesizer.js";
+import { Value } from "typebox/value";
+import { validateDAG, buildPlan, TaskNodeSchema } from "@/tools/orchestrator/dag-synthesizer.js";
 import type { GoalContract } from "@/tools/orchestrator/types.js";
 
 const baseContract: GoalContract = {
@@ -487,5 +488,89 @@ describe("buildPlan", () => {
     );
     expect(plan.tasks.every(t => t.status === "pending")).toBe(true);
     expect(plan.tasks.every(t => t.retry_count === 0 && t.max_retries === 2)).toBe(true);
+  });
+});
+
+describe("TaskNodeSchema — handoff_template (GC-2026-039)", () => {
+  // GC-2026-039: developer tasks declare which HANDOFF.md template to use
+  // when writing `.pi/orchestrator/handoff/<ws>/<task>-handoff.md`:
+  //   - "standard"   — Template A (default for most tasks)
+  //   - "phase-gate" — Template B (workspace will be merged by merger)
+  //   - "escalation" — Template C (after 2+ failures; next agent reads it)
+  //
+  // The schema is the gate: only these three literals are accepted.
+  // The dispatcher defaults missing values to "standard" (back-compat).
+
+  function baseNode(extra: any = {}) {
+    return {
+      id: "P1",
+      description: "task P1",
+      plane: "Business",
+      priority: "medium",
+      depends_on: [],
+      files: [],
+      subagent_type: "developer",
+      batch: 1,
+      isolation: "none",
+      tdd: "strict",
+      prompt: "a sufficiently long prompt for the task that satisfies minLength",
+      // TaskNodeSchema requires output_schema; include it so the
+      // Value.Check rejects/refuses for handoff_template reasons only.
+      output_schema: { kind: "code_changes" },
+      acceptance: { covers: ["SC1"] },
+      ...extra,
+    };
+  }
+
+  it("accepts a developer task with handoff_template: 'standard'", () => {
+    const node = baseNode({ handoff_template: "standard" });
+    expect(Value.Check(TaskNodeSchema, node)).toBe(true);
+  });
+
+  it("accepts a developer task with handoff_template: 'phase-gate'", () => {
+    const node = baseNode({ handoff_template: "phase-gate" });
+    expect(Value.Check(TaskNodeSchema, node)).toBe(true);
+  });
+
+  it("accepts a developer task with handoff_template: 'escalation'", () => {
+    const node = baseNode({ handoff_template: "escalation" });
+    expect(Value.Check(TaskNodeSchema, node)).toBe(true);
+  });
+
+  it("accepts a developer task with handoff_template omitted (defaulted by dispatcher to 'standard')", () => {
+    const node = baseNode();
+    expect(Value.Check(TaskNodeSchema, node)).toBe(true);
+  });
+
+  it("rejects a developer task with an unknown handoff_template value", () => {
+    // The schema is a strict union; "custom" / "phase-gate-v2" / etc.
+    // are not allowed. The dispatcher defaults missing values to
+    // "standard", so authors either pick one of the three or omit it.
+    const node = baseNode({ handoff_template: "custom" });
+    expect(Value.Check(TaskNodeSchema, node)).toBe(false);
+  });
+
+  it("buildPlan preserves handoff_template from input to output (passes through the DAG)", () => {
+    // The dispatcher reads `handoff_template` from the TaskNode, so
+    // buildPlan must NOT drop it during the rendering pass.
+    const plan = buildPlan(
+      {
+        goal_id: "GC-2025-test",
+        tasks: [
+          makeTask("P1", 1, [], {
+            covers: ["SC1"],
+            subagent_type: "developer",
+            handoff_template: "phase-gate",
+          }),
+        ],
+      },
+      baseContract,
+    );
+    // Cast through `any` for the runtime check: the TaskNode interface
+    // doesn't yet declare handoff_template (this is the RED test that
+    // drives the schema + types.ts change). Once types.ts adds the
+    // field, the cast is still valid (it's just a wider type) and the
+    // assertion still locks the runtime behavior.
+    expect((plan.tasks[0] as any).handoff_template).toBe("phase-gate");
   });
 });
