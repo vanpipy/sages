@@ -183,6 +183,91 @@ describe("buildDispatchPlan — isolation resolution (GC-2026-017)", () => {
 	});
 });
 
+describe("buildDispatchPlan — handoff_template (GC-2026-039)", () => {
+	// GC-2026-039: the developer task brief carries a `handoff_template`
+	// field selecting one of three HANDOFF.md templates the developer must
+	// use when writing `.pi/orchestrator/handoff/<ws>/<task>-handoff.md`:
+	//   - "standard"   — Template A. Default for tasks with no special shape.
+	//   - "phase-gate" — Template B. Used when this task's workspace will be
+	//                    merged with another via the merger sub-agent.
+	//   - "escalation" — Template C. Used after 2+ failures; the next
+	//                    dispatch is a fresh agent reading the escalation.
+	//
+	// The dispatcher defaults missing values to "standard" (back-compat
+	// for DAGs authored before GC-2026-039) and injects the choice into
+	// the rendered prompt so the developer sees it. The mechanism is
+	// developer-only — other subagents don't write HANDOFF.md.
+
+	it("developer task without handoff_template defaults to 'standard' in the rendered prompt", () => {
+		const plan = makePlan([makeTask("P1", "developer", 1)]);
+		const d = buildDispatchPlan(plan, "auto", 4);
+		expect(d.batches[0].tasks[0].prompt).toContain("handoff_template: standard");
+	});
+
+	it("developer task with handoff_template: 'phase-gate' renders that value in the prompt", () => {
+		const plan = makePlan([
+			makeTask("P1", "developer", 1, { handoff_template: "phase-gate" }),
+		]);
+		const d = buildDispatchPlan(plan, "auto", 4);
+		expect(d.batches[0].tasks[0].prompt).toContain("handoff_template: phase-gate");
+		expect(d.batches[0].tasks[0].prompt).not.toContain("handoff_template: standard");
+	});
+
+	it("developer task with handoff_template: 'escalation' renders that value in the prompt", () => {
+		const plan = makePlan([
+			makeTask("P1", "developer", 1, { handoff_template: "escalation" }),
+		]);
+		const d = buildDispatchPlan(plan, "auto", 4);
+		expect(d.batches[0].tasks[0].prompt).toContain("handoff_template: escalation");
+	});
+
+	it("non-developer task with handoff_template does NOT inject the handoff line (developer-only)", () => {
+		// Auditor / Explore / Plan don't write HANDOFF.md, so the
+		// handoff_template line is irrelevant. The dispatcher MUST NOT
+		// pollute their briefs with developer-only metadata.
+		const plan = makePlan([
+			makeTask("P1", "Explore", 1, { handoff_template: "phase-gate" }),
+		]);
+		const d = buildDispatchPlan(plan, "auto", 4);
+		expect(d.batches[0].tasks[0].prompt).not.toContain("handoff_template:");
+	});
+
+	it("non-developer task with handoff_template: 'escalation' still ignores it (auditor is not a HANDOFF writer)", () => {
+		const plan = makePlan([
+			makeTask("P1", "auditor", 1, { handoff_template: "escalation" }),
+		]);
+		const d = buildDispatchPlan(plan, "auto", 4);
+		expect(d.batches[0].tasks[0].prompt).not.toContain("handoff_template:");
+	});
+
+	it("handoff_template injection coexists with upstream output injection (both land in the prompt)", () => {
+		// Regression guard: the dispatcher previously only added
+		// upstream outputs. Adding handoff_template injection must NOT
+		// replace that — both must appear when both are relevant.
+		const upstreamTask = makeTask("P0", "Explore", 1);
+		const plan = makePlan([
+			upstreamTask,
+			makeTask("P1", "developer", 2, {
+				depends_on: ["P0"],
+				// `inputs` is what triggers the upstream-output injection in
+				// `injectUpstreamOutputs`; depends_on alone does not. Without
+				// this, the "Context from Upstream Tasks" substring would
+				// never appear and the assertion would fail for the wrong
+				// reason. P0 has no output_path set, so the section renders
+				// a "[upstream output not yet available]" placeholder — but
+				// the section heading still appears, which is what the test
+				// asserts.
+				inputs: [{ from_task: "P0", field: "findings" }],
+				handoff_template: "phase-gate",
+			}),
+		]);
+		const d = buildDispatchPlan(plan, "auto", 4);
+		const prompt = d.batches[1].tasks[0].prompt;
+		expect(prompt).toContain("Context from Upstream Tasks");
+		expect(prompt).toContain("handoff_template: phase-gate");
+	});
+});
+
 describe("buildDispatchPlan — batch metadata", () => {
 	it("audit_after is true on every batch under auto strategy", () => {
 		const plan = makePlan([
