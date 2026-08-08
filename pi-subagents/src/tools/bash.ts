@@ -231,6 +231,24 @@ export function bashTool(
 				});
 				return;
 			}
+			// C2 (reclassify): bash exits 127 universally for "command not
+			// found" — reclassify as spawn_failed so the agent can react
+			// differently from a regular non-zero exit (e.g., check
+			// `which` or install the binary instead of retrying). 127 is
+			// unambiguous in shell context.
+			if (code === 127 && sig === null) {
+				finalize({
+					ok: false,
+					error: new BashError("spawn_failed", {
+						bucket,
+						timeoutMs,
+						cause: new Error(
+							`command not found (bash exit 127): ${stderrStr.trim() || command}`,
+						),
+					}),
+				});
+				return;
+			}
 			finalize({
 				ok: false,
 				error: new BashError("exit", {

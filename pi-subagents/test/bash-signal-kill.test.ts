@@ -21,6 +21,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	DEFAULT_BUCKET_TIMEOUTS_MS,
+	resolveRunConfig,
 	RunController,
 	type BucketTimeouts,
 	type RunConfig,
@@ -222,5 +223,23 @@ describe("bashTool: SIGTERM-then-SIGKILL escalation (C5)", () => {
 						result.error.details.signal === "SIGKILL"),
 			).toBe(true);
 		}
+	});
+});
+
+describe("bash spawn classification (C2 — command not found)", () => {
+	it("bash exit 127 (command not found) is classified as spawn_failed, not exit", async () => {
+		const config = resolveRunConfig("developer", {}, process.env);
+		const rc = new RunController(undefined, config);
+		const result = await bashTool("/nonexistent-binary-xyz123", {
+			runController: rc,
+			cwd: process.cwd(),
+		});
+		// bash exits 127 universally for "command not found" in shell scripts.
+		// We reclassify as spawn_failed so the agent can react differently
+		// from a regular non-zero exit (e.g., check `which` or install the
+		// binary instead of retrying).
+		expect(result.ok).toBe(false);
+		expect(result.error.kind).toBe("spawn_failed");
+		expect(result.error.details.cause).toBeDefined();
 	});
 });
