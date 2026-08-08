@@ -39,6 +39,7 @@ import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
+import type { RunController } from "./run-controller.js";
 import { getNetworkAllowedDefault } from "./settings.js";
 import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
@@ -299,6 +300,15 @@ export interface RunOptions {
 	model?: Model<any>;
 	maxTurns?: number;
 	signal?: AbortSignal;
+	/**
+	 * GC-2026-043: when the caller passes a `RunController`, the runner
+	 * uses `runController.signal` (the composed signal — parent abort OR
+	 * own deadline OR per-tool bucket timer) for session abort forwarding
+	 * and exposes it via the `signal` field below for any downstream
+	 * listener. Optional for backward compat — callers without a
+	 * runController still pass `signal` directly.
+	 */
+	runController?: RunController;
 	isolated?: boolean;
 	inheritContext?: boolean;
 	thinkingLevel?: ThinkingLevel;
@@ -480,6 +490,17 @@ export async function runAgent(
 ): Promise<RunResult> {
 	const config = getConfig(type);
 	const agentConfig = getAgentConfig(type);
+
+	// GC-2026-043: when the caller passes a `runController`, prefer its
+	// composed signal (parent abort + own deadline + bucket timer) over
+	// any bare `signal`. The composed signal is what propagates "this
+	// run's time is up" to the session. Downstream forwardAbortSignal
+	// uses this local `effectiveSignal` (not `options.signal` directly)
+	// so the wiring is explicit.
+	const effectiveSignal =
+		options.runController !== undefined
+			? options.runController.signal
+			: options.signal;
 
 	// Resolve working directory: worktree override > parent cwd
 	const effectiveCwd = options.cwd ?? ctx.cwd;
