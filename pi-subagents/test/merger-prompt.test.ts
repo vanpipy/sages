@@ -101,8 +101,15 @@ describe("merger-prompt: invariants", () => {
 		);
 	});
 
+	it("includes Phase Gate documents carried forward guidance", () => {
+		expect(MERGER_PROMPT).toContain("## Documents Carried Forward");
+	});
+
+	it("includes Phase Gate risks carried forward guidance", () => {
+		expect(MERGER_PROMPT).toContain("## Risks Carried Forward");
+	});
+
 	it("documents the audit-merge-{task_id}.md output target", () => {
-		// The merger's single allowed write target is the merge audit
 		// file, parallel to the auditor's audit-{task_id}.md. Future
 		// prose edits that drop the path surface here.
 		expect(MERGER_PROMPT).toContain("audit-merge-{task_id}.md");
