@@ -46,6 +46,7 @@ import {
 	type HandoffTrigger,
 	writeHandoff,
 } from "./handoff.js";
+import type { RunController } from "./run-controller.js";
 
 export type AgentType = "developer" | "auditor" | "explorer" | "merger";
 
@@ -97,6 +98,11 @@ function positiveInt(v: string | undefined, fallback: number): number {
  * generic, generic wins over the default. `partialTriggerPct` is
  * currently NOT env-overridable (kept stable to avoid silent threshold
  * drift).
+ *
+ * Note: as of GC-2026-043, `loadBudgetFromEnv` is the **fallback** path —
+ * production code derives budget / deadline values from `RunController`
+ * (via `resolveRunConfig`). This function stays for tests and for callers
+ * that need a `Budget` value without instantiating a RunController.
  */
 export function loadBudgetFromEnv(type: AgentType): Budget {
 	const base = defaultBudgets[type];
@@ -176,6 +182,7 @@ export class BudgetTracker {
 	private readonly agentType: AgentType;
 	private readonly startedAt: string;
 	private readonly startNs: bigint;
+	private readonly runController: RunController | undefined;
 	private turns = 0;
 	private status: BudgetStatus = "ok";
 	private partialFired = false;
@@ -183,7 +190,19 @@ export class BudgetTracker {
 	constructor(
 		budget: Budget,
 		handoffPath?: string,
-		opts: { gcId?: string; taskId?: string; agentType?: AgentType } = {},
+		opts: {
+			gcId?: string;
+			taskId?: string;
+			agentType?: AgentType;
+			/**
+			 * GC-2026-043: when provided, `maxTurns` and `maxMs`/`deadlineMs`
+			 * derive from `runController.config` (single source of truth).
+			 * The `Budget` argument is preserved for `snapshotEveryTurns`
+			 * and `partialTriggerPct` (those aren't on RunController) and
+			 * for the legacy / test path (no runController).
+			 */
+			runController?: RunController;
+		} = {},
 	) {
 		this.budget = budget;
 		this.handoffPath =
@@ -194,21 +213,40 @@ export class BudgetTracker {
 		this.agentType = opts.agentType ?? "developer";
 		this.startedAt = new Date().toISOString();
 		this.startNs = process.hrtime.bigint();
+		this.runController = opts.runController;
 	}
 
 	private elapsedMs(): number {
+		// GC-2026-043: when runController is the source of truth, read its
+		// monotonic clock (the same one used by the deadline timer). This
+		// ensures pctMs is computed against the same wall-time reference as
+		// the deadline that actually fires.
+		if (this.runController !== undefined) return this.runController.elapsedMs();
 		return Number(process.hrtime.bigint() - this.startNs) / 1_000_000;
+	}
+
+	/** Effective maxTurns: from runController when set, else from Budget. */
+	private effectiveMaxTurns(): number {
+		if (this.runController !== undefined) return this.runController.config.maxTurns;
+		return this.budget.maxTurns;
+	}
+
+	/** Effective maxMs: runController.config.deadlineMs when set, else Budget.maxMs. */
+	private effectiveMaxMs(): number {
+		if (this.runController !== undefined) return this.runController.config.deadlineMs;
+		return this.budget.maxMs;
 	}
 
 	/** Snapshot of progress. `pct*` is 0..1+ (caller may clamp at 1). */
 	getProgress(): BudgetProgress {
 		const ms = this.elapsedMs();
+		const maxTurns = this.effectiveMaxTurns();
+		const maxMs = this.effectiveMaxMs();
 		return {
 			turns: this.turns,
 			ms,
-			pctTurns:
-				this.budget.maxTurns > 0 ? this.turns / this.budget.maxTurns : 0,
-			pctMs: this.budget.maxMs > 0 ? ms / this.budget.maxMs : 0,
+			pctTurns: maxTurns > 0 ? this.turns / maxTurns : 0,
+			pctMs: maxMs > 0 ? ms / maxMs : 0,
 		};
 	}
 
@@ -238,9 +276,18 @@ export class BudgetTracker {
 				this.writeHandoff("final", "aborted");
 				this.status = "exceeded";
 				const type: "turns" | "ms" = pctTurns >= 1 ? "turns" : "ms";
+				// GC-2026-043: surface the EFFECTIVE budget on the error so
+				// the message reflects the runController's value (when set)
+				// rather than the legacy Budget.maxTurns/maxMs passed in.
+				const effectiveBudget: Budget = {
+					maxTurns: this.effectiveMaxTurns(),
+					maxMs: this.effectiveMaxMs(),
+					snapshotEveryTurns: this.budget.snapshotEveryTurns,
+					partialTriggerPct: this.budget.partialTriggerPct,
+				};
 				throw new BudgetExceededError({
 					type,
-					budget: this.budget,
+					budget: effectiveBudget,
 					used: { turns: this.turns, ms: p.ms },
 					handoffPath: this.handoffPath,
 				});
