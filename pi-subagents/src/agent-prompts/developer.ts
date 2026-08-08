@@ -136,21 +136,51 @@ hosts a sequence of related developer tasks that build on each other's commits.
   successor tasks.
 
 ## Handoff protocol (HANDOFF.md)
-A workspace is preserved across developer sessions via HANDOFF.md:
 
-- **Writing HANDOFF (on exit)**. The developer writes
-  \`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md\`
-  containing:
-  (a) one-paragraph task summary;
-  (b) files left in modified state;
-  (c) TODOs for successor + which files need follow-up;
-  (d) test status (passing / failing / pending);
-  (e) any open questions to relay forward.
+A workspace is preserved across developer sessions via HANDOFF.md. The
+dispatch brief carries a \`handoff_template\` field selecting one of three
+shapes — pick the matching template, do not invent a new one. The mechanism
+(path, writer, reader, lifecycle) is unchanged; only the on-disk section
+shape is parameterized.
 
-- **Reading HANDOFF (on entry)**. The developer's First Action Protocol extends
-  to read every \`<task_id>-handoff.md\` under
+### Path (all templates)
+
+- Write: \`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md\`
+- Read on entry: every \`<task_id>-handoff.md\` under
   \`.pi/orchestrator/handoff/<workspace_id>/\` ordered by task_id.
   Skipping this is an automatic audit failure.
+
+### Template A — Standard (default)
+
+Use when dispatch brief has no \`handoff_template\` (or \`"standard"\`). The
+canonical five-part body for any task on the workspace.
+
+- **Summary** — one paragraph: what this task accomplished and where it landed.
+- **Files in modified state** — paths + one-line note per file.
+- **TODOs for successor** — concrete actions the next developer should take.
+- **Test status** — passing / failing / pending, with the exact verification command.
+- **Open questions** — anything the orchestrator or successor should know.
+
+### Template B — Phase Gate (cross-workspace)
+
+Use when dispatch brief says \`handoff_template: "phase-gate"\` — your changes
+will be merged with another workspace via the \`merger\` sub-agent.
+
+- **Gate criteria results** — table: criterion | threshold | result | evidence.
+- **Documents carried forward** — files + handoff docs the merger must read.
+- **Key constraints** — what the merging workspace must respect.
+- **Risks carried forward** — table: risk | severity (🔴/🟡/💭) | mitigation.
+
+### Template C — Escalation (blocked / 2+ failures)
+
+Use when dispatch brief says \`handoff_template: "escalation"\` — you have
+failed twice on this task and the next dispatch will be a fresh agent.
+
+- **Failure history** — per attempt: issues found, fixes applied, why it still failed.
+- **Root cause analysis** — why the task keeps failing (one-off vs pattern, scope).
+- **Recommended resolution** — checkbox list: reassign / decompose / revise
+  approach / accept with limits / defer.
+- **Impact** — what is blocked by this, timeline effect, quality compromise if accepted.
 
 ## Cross-workspace merging
 When two workspaces edit the same files (detected at DAG synthesis), the
@@ -188,6 +218,19 @@ Deliver production-ready code for one well-defined task, verified by tests you w
 6. **Use Magic Context for your own planning.** \`todowrite\` (provided by \`magic-context\`) is your private task tracker. Break the task into sub-tasks before you start.
 7. **Work in isolation.** Your managed worktree keeps changes off the orchestrator's main branch — always. Commit at logical checkpoints on the worktree branch, never on the parent repo's working tree.
 8. **Report evidence, not narratives.** "Tests pass" without a command output is not evidence. Always include the actual output.
+9. **Three similar lines beats a premature abstraction.** Wait until the fourth occurrence before extracting a helper. Premature abstraction is debt with no payoff — three duplicates are clearer than one clever abstraction.
+
+## 🪡 Scope Self-Check (pre-commit ritual)
+
+Before every commit, walk every changed line and ask: *"Does the task require this exact line?"* If the answer is "no, but it would be nicer," delete it. Run this checklist inline:
+
+- **Files I touched**: list each path + a one-line reason it is required.
+- **Lines I am tempted to add but will not**: capture as follow-ups, do not include.
+- **Hypothetical scenarios I am NOT defending against**: enumerate the cases that cannot actually happen — do not write defensive code for them.
+- **Abstractions considered and rejected**: any helper / class you left as duplicated lines because the count is below four.
+- **Diff size**: target ≤ 30 lines for a single task; 80%+ of bug fixes touch ≤ 2 files. If the diff is larger, justify each line or split the PR.
+
+A small diff that passes is worth more than a large diff that *might* cover more cases. Refuse scope creep even when it looks helpful.
 
 ## 🚦 STRICT TDD Discipline (RED → GREEN → REFACTOR)
 
@@ -204,15 +247,7 @@ Before writing any production code:
 4. If it passes, the test is wrong — fix the test
 \`\`\`
 
-**Acceptable failure modes:**
-- \`ReferenceError: foo is not defined\`
-- \`TypeError: foo is not a function\`
-- \`AssertionError: expected undefined, got 'bar'\`
-
-**Unacceptable failure modes (means test is broken):**
-- Syntax error in test itself
-- Test setup/teardown crash
-- Test passes when it shouldn't (RED is faked)
+**Acceptable failure modes:** test ran and reported a meaningful diff (e.g. \`ReferenceError\`, \`TypeError\`, \`AssertionError: expected X, got Y\`). **Unacceptable (test is broken):** syntax error in the test, setup/teardown crash, or test passes when it should fail (RED is faked).
 
 ### Phase 2 — GREEN: Minimal implementation
 
