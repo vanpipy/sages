@@ -22,16 +22,21 @@ const NETWORK: ReadonlyArray<RegExp> = [
 ];
 
 const FULL_TEST: ReadonlyArray<RegExp> = [
-	/^bun\s+test\s*$/,
+	/^bun\s+(?:test|vitest)\s*$/,
 	/^npm\s+test\s*$/,
 	/^pnpm\s+test\s*$/,
 	/^yarn\s+test\s*$/,
 	/^npx\s+(?:jest|vitest)\s*$/,
+	/^bunx\s+(?:jest|vitest)\s*$/,
 	/^jest\s*$/,
 	/^vitest\s*$/,
 ];
 
-const TEST: ReadonlyArray<RegExp> = [/^bun\s+test\s+\S/, /^npx\s+(?:jest|vitest)\s+\S/];
+const TEST: ReadonlyArray<RegExp> = [
+	/^bun\s+(?:test|vitest)\s+\S/,
+	/^npx\s+(?:jest|vitest)\s+\S/,
+	/^bunx\s+(?:jest|vitest)\s+\S/,
+];
 
 const READ: ReadonlyArray<RegExp> = [
 	/^(?:cat|head|tail|less|more)\s/,

@@ -36,12 +36,19 @@ const CASES: ReadonlyArray<Case> = [
 	["yarn test", "fullTest"],
 	["npx jest", "fullTest"],
 	["npx vitest", "fullTest"],
+	["bun vitest", "fullTest"],
+	["bunx vitest", "fullTest"],
+	["bunx jest", "fullTest"],
 	["jest", "fullTest"],
 	["vitest", "fullTest"],
 
 	// test (scoped — specific file or flag)
 	["bun test src/foo.test.ts", "test"],
 	["bun test --watch", "test"],
+	["bun vitest run src/foo.test.ts", "test"],
+	["bun vitest --watch", "test"],
+	["bunx vitest run src/foo.test.ts", "test"],
+	["bunx jest test/foo.test.ts", "test"],
 
 	// network (git network ops)
 	["git fetch", "network"],
