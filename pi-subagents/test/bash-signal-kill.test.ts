@@ -96,10 +96,12 @@ describe("bashTool: completion", () => {
 });
 
 describe("bashTool: bucket timeout (C5 + signal propagation)", () => {
-	it("T2: sleep 100 with read bucket (5s) returns timeout within 6s", async () => {
+	it("T2: long-running command in read bucket (5s) returns timeout within 6s", { timeout: 10_000 }, async () => {
 		const rc = makeController();
 		const start = Date.now();
-		const result = await bashTool("sleep 100", {
+		// `tail -f /dev/null` detects as 'read' bucket (5s) and never
+		// exits naturally — exercises the per-bucket timeout path.
+		const result = await bashTool("tail -f /dev/null", {
 			runController: rc,
 			cwd: "/tmp",
 		});
