@@ -330,17 +330,35 @@ export class RunController {
 	}
 
 	/**
-	 * Cancel all owned timers. Idempotent — safe to call multiple times.
+	 * Clean up run resources. Idempotent — safe to call multiple times.
 	 * Call from a finally block on run completion.
+	 *
+	 * What it does:
+	 *   - Clears the deadline timer (per-RC wall-clock timer).
+	 *   - Aborts the abortController so any composed signals (used by
+	 *     in-flight bash calls via signalForTool) propagate the abort,
+	 *     killing their child processes.
+	 *
+	 * What it does NOT do:
+	 *   - Cancel bucket timers directly. Bucket timers created via
+	 *     signalForTool self-clear when their composed signal aborts
+	 *     (abort listener in signalForTool calls clearTimeout). Cancelling
+	 *     them here would break in-flight tools — they would lose their
+	 *     per-tool timeout the moment cleanup() runs, even if the tool
+	 *     hasn't completed yet.
 	 */
 	cleanup(): void {
-		// run_controller_cleanup: idempotent timer cleanup.
+		// run_controller_cleanup: idempotent timer + signal cleanup.
 		if (this.cleanedUp) return;
 		this.cleanedUp = true;
 		if (this.deadlineTimer !== null) {
 			clearTimeout(this.deadlineTimer);
 		}
-		for (const t of this.toolTimers) clearTimeout(t);
-		this.toolTimers.clear();
+		// Abort the controller so in-flight children die via signal
+		// propagation. Bucket timers self-clear when their composed
+		// signal aborts (see signalForTool's abort listener).
+		if (!this.abortController.signal.aborted) {
+			this.abortController.abort(new Error("RunController cleanup()"));
+		}
 	}
 }

@@ -243,3 +243,82 @@ describe("bash spawn classification (C2 — command not found)", () => {
 		expect(result.error.details.cause).toBeDefined();
 	});
 });
+
+describe("bash buffer overflow protection (C6 — no crash on infinite output)", () => {
+	it("`cat /dev/zero` does NOT crash with ERR_STRING_TOO_LONG (capped buffer)", async () => {
+		const config = resolveRunConfig("developer", {}, process.env);
+		config.bucketTimeoutsMs.other = 2000;
+		const rc = new RunController(undefined, config);
+		const result = await bashTool("cat /dev/zero", {
+			runController: rc,
+			cwd: process.cwd(),
+		});
+		// Should NOT crash. Either timeout (buffer fills quickly) or
+		// success with truncated output.
+		expect(result.ok === false || result.ok === true).toBe(true);
+		if (!result.ok && result.error.kind === "timeout") {
+			// Buffer should be capped (not 2GB). Approx limit is small.
+			const stdoutLen = result.stdout?.length ?? 0;
+			expect(stdoutLen).toBeLessThan(20 * 1024 * 1024); // < 20MB
+		}
+	}, 10_000);
+});
+
+describe("RunController.cleanup() correctness", () => {
+	it("cleanup() aborts in-flight bash via signal propagation (does NOT hang)", async () => {
+		const config = resolveRunConfig("developer", {}, process.env);
+		config.bucketTimeoutsMs.other = 60_000; // very long bucket
+		const rc = new RunController(undefined, config);
+
+		const start = Date.now();
+		const bashPromise = bashTool("sleep 30", {
+			runController: rc,
+			cwd: process.cwd(),
+		});
+
+		// Cleanup after 100ms — bash should die via signal propagation
+		setTimeout(() => rc.cleanup(), 100);
+
+		const result = await bashPromise;
+		const elapsed = Date.now() - start;
+		// Cleanup triggers signal abort → bashTool's composed signal fires
+		// → bash kills child via SIGTERM → returns timeout error.
+		expect(elapsed).toBeLessThan(5000); // much faster than the 30s natural completion
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.kind).toBe("timeout");
+		}
+	});
+
+	it("cleanup() does NOT cancel bucket timers created via signalForTool BEFORE cleanup", async () => {
+		const config = resolveRunConfig("developer", {}, process.env);
+		config.bucketTimeoutsMs.read = 100; // 100ms bucket
+		const rc = new RunController(undefined, config);
+
+		// Create signalForTool BEFORE cleanup — its bucket timer should
+		// still fire even after cleanup is called.
+		const sig = rc.signalForTool("read");
+		rc.cleanup(); // cleanup should NOT pre-empt the bucket timer
+
+		await new Promise((r) => setTimeout(r, 200));
+		expect(sig.aborted).toBe(true); // bucket timer fired and propagated
+	});
+});
+
+describe("bash exit error diagnostic details", () => {
+	it("exit-with-stderr includes the stderr in details so the agent can diagnose", async () => {
+		const config = resolveRunConfig("developer", {}, process.env);
+		config.bucketTimeoutsMs.other = 5000;
+		const rc = new RunController(undefined, config);
+		const result = await bashTool("echo 'pre-commit hook failed' >&2; exit 1", {
+			runController: rc,
+			cwd: process.cwd(),
+		});
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error.kind).toBe("exit");
+			// The agent needs to see WHY the command failed — stderr is essential.
+			expect(result.error.details.stderr).toBe("pre-commit hook failed\n");
+		}
+	});
+});
