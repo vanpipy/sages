@@ -376,7 +376,7 @@ describe("run-controller: deadline + abort", () => {
 		rc.cleanup();
 	});
 
-	it("cleanup clears the deadline timer (no late aborts)", async () => {
+	it("cleanup clears the deadline timer and explicitly aborts the signal", async () => {
 		const { RunController, DEFAULT_BUCKET_TIMEOUTS_MS } = await import(
 			"../src/run-controller.js"
 		);
@@ -387,12 +387,17 @@ describe("run-controller: deadline + abort", () => {
 			bucketTimeoutsMs: DEFAULT_BUCKET_TIMEOUTS_MS,
 		};
 		const rc = new RunController(undefined, cfg);
-		// Cleanup BEFORE deadline fires
+		// Cleanup BEFORE deadline fires — deadline timer should NOT fire
+		// (so we don't get a "deadline exceeded" abort reason). Instead,
+		// cleanup explicitly aborts the signal so in-flight tools die.
 		rc.cleanup();
 		// Wait past deadline
 		await new Promise((r) => setTimeout(r, 200));
-		// Did not abort because cleanup cleared the timer
-		expect(rc.signal.aborted).toBe(false);
+		// Signal IS aborted (by cleanup, not deadline)
+		expect(rc.signal.aborted).toBe(true);
+		// But the abort reason should be the cleanup reason, not "DeadlineExceeded"
+		const reason = rc.signal.reason as Error;
+		expect(reason?.message).toContain("cleanup");
 	});
 
 	it("deadline timer abort reason is an Error name like 'DeadlineExceeded'", async () => {

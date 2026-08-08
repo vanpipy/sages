@@ -48,6 +48,8 @@ export interface BashErrorDetails {
 	code?: number | null;
 	signal?: NodeJS.Signals | null;
 	cause?: unknown;
+	stdout?: string;
+	stderr?: string;
 }
 
 export class BashError extends Error {
@@ -67,8 +69,23 @@ export class BashError extends Error {
 }
 
 export type BashResult =
-	| { ok: true; stdout: string; stderr: string; elapsedMs: number }
+	| {
+			ok: true;
+			stdout: string;
+			stderr: string;
+			elapsedMs: number;
+			stdoutTruncated?: boolean;
+			stderrTruncated?: boolean;
+	  }
 	| { ok: false; error: BashError };
+
+/**
+ * C6: cap captured stdout/stderr per stream at this many bytes. Anything
+ * beyond is dropped and the corresponding `stdoutTruncated` / `stderrTruncated`
+ * flag is set on the result. Prevents ERR_STRING_TOO_LONG on infinite-output
+ * commands like `cat /dev/zero` or `yes`.
+ */
+const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 export interface BashContext {
 	runController: RunController;
@@ -138,8 +155,31 @@ export function bashTool(
 
 		const stdoutChunks: Buffer[] = [];
 		const stderrChunks: Buffer[] = [];
-		child.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
-		child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+		let stdoutBytes = 0;
+		let stderrBytes = 0;
+		let stdoutTruncated = false;
+		let stderrTruncated = false;
+		child.stdout?.on("data", (chunk: Buffer) => {
+			// C6: drop chunks that would push stdout past the buffer cap.
+			// First over-cap chunk sets the flag; subsequent chunks are
+			// dropped entirely (no point counting).
+			if (stdoutTruncated) return;
+			if (stdoutBytes + chunk.length > MAX_BUFFER_BYTES) {
+				stdoutTruncated = true;
+				return;
+			}
+			stdoutChunks.push(chunk);
+			stdoutBytes += chunk.length;
+		});
+		child.stderr?.on("data", (chunk: Buffer) => {
+			if (stderrTruncated) return;
+			if (stderrBytes + chunk.length > MAX_BUFFER_BYTES) {
+				stderrTruncated = true;
+				return;
+			}
+			stderrChunks.push(chunk);
+			stderrBytes += chunk.length;
+		});
 
 		// C2: async spawn error (rare — ENOENT races past the sync check).
 		// ABORT_ERR is NOT a real spawn error: Node emits it whenever the
@@ -228,6 +268,8 @@ export function bashTool(
 					stdout: stdoutStr,
 					stderr: stderrStr,
 					elapsedMs,
+					stdoutTruncated,
+					stderrTruncated,
 				});
 				return;
 			}
@@ -254,6 +296,8 @@ export function bashTool(
 				error: new BashError("exit", {
 					code: code ?? null,
 					signal: sig ?? null,
+					stdout: stdoutStr,
+					stderr: stderrStr,
 				}),
 			});
 		});
