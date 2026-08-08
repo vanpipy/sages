@@ -36,6 +36,8 @@ const TEST: ReadonlyArray<RegExp> = [
 	/^bun\s+(?:test|vitest)\s+\S/,
 	/^npx\s+(?:jest|vitest)\s+\S/,
 	/^bunx\s+(?:jest|vitest)\s+\S/,
+	/^vitest\s+\S/,
+	/^jest\s+\S/,
 ];
 
 const READ: ReadonlyArray<RegExp> = [
@@ -48,7 +50,18 @@ const SEARCH: ReadonlyArray<RegExp> = [/^(?:grep|rg|awk|sed|find)\b/];
 function firstCommand(command: string): string {
 	const trimmed = command.trim();
 	if (!trimmed) return trimmed;
-	return trimmed.split(/[|&;]/)[0]?.trim() ?? trimmed;
+	const firstSegment = trimmed.split(/[|&;]/)[0]?.trim() ?? trimmed;
+	// Strip leading env-var assignments: `FOO=bar BAZ=qux cmd args` → `cmd args`.
+	// One or more `KEY=val` pairs (val may contain anything except whitespace).
+	const withoutEnv = firstSegment.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]*\s+)+/, "");
+	// Strip path prefix on the command token: `/usr/bin/git fetch` → `git fetch`,
+	// `./node_modules/.bin/vitest run` → `vitest run`, `~/bin/foo` → `foo`.
+	const m = withoutEnv.match(/^(\S+)(\s.*)?$/s);
+	if (!m) return withoutEnv;
+	const firstToken = m[1] ?? "";
+	const rest = m[2] ?? "";
+	const basename = firstToken.replace(/.*\//, "");
+	return basename + rest;
 }
 
 export function detectBucket(command: string): BucketKey {

@@ -84,6 +84,24 @@ const CASES: ReadonlyArray<Case> = [
 	["bash -c 'echo hi'", "other"],
 	["randomcommand arg1 arg2", "other"],
 	["   ", "other"],
+
+	// env-var prefixed commands (very common in CI / dev workflows)
+	["NODE_ENV=test bun test", "fullTest"],
+	["NODE_ENV=test bun vitest run", "test"],
+	["FOO=bar npm test", "fullTest"],
+	["FOO=bar A=1 npx vitest run src/foo.test.ts", "test"],
+	["SOMETHING=1 git fetch origin", "network"],
+	["FOO=bar make", "other"],
+	["A=1 B=2 C=3 echo hello", "other"],
+
+	// path-prefixed binaries
+	["/usr/bin/cat /etc/passwd", "read"],
+	["/usr/local/bin/git fetch", "network"],
+	["./node_modules/.bin/vitest run src/foo.test.ts", "test"],
+	["./node_modules/.bin/jest test/foo.test.ts", "test"],
+	["../scripts/build.sh", "other"],
+	["/bin/echo hello", "other"],
+	["~/bin/my-tool --flag", "other"],
 ];
 
 describe("detectBucket (GC-2026-040 T2)", () => {
