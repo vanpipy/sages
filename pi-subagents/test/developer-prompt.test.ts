@@ -335,6 +335,101 @@ describe("developer-prompt: workspace + HANDOFF invariants (GC-2026-prompt-works
 	});
 });
 
+describe("developer-prompt: 3-template HANDOFF + minimal-change discipline (GC-2026-039)", () => {
+	// GC-2026-039: integrate two agency-agents patterns into the developer
+	// prompt.
+	//
+	//   1. NEXUS `strategy/coordination/handoff-templates.md` — the flat
+	//      five-section HANDOFF body becomes three *named* templates
+	//      (Standard / Phase Gate / Escalation) selected by the dispatch
+	//      brief's `handoff_template` field. The MECHANISM is unchanged:
+	//      same write path, same writer (developer), same reader
+	//      (successor developer + merger), same lifecycle. Only the
+	//      on-disk section shape is parameterized.
+	//
+	//   2. `engineering/engineering-minimal-change-engineer.md` — the
+	//      Scope Self-Check pre-commit ritual and the "three similar
+	//      lines beats a premature abstraction" guardrail, which give
+	//      rule #4 ("no drive-by refactoring") concrete instruments.
+	//
+	// The canonical Handoff-protocol block is shared verbatim with
+	// `merger.ts`; these invariants are the drift guard for the developer
+	// half. The prose may evolve; the template names may not.
+
+	function handoffProtocolIndex(): number {
+		return DEVELOPER_PROMPT.match(/^##\s+Handoff protocol.*$/m)?.index ?? -1;
+	}
+
+	it("names all three HANDOFF templates (Standard / Phase Gate / Escalation)", () => {
+		expect(DEVELOPER_PROMPT).toContain("### Template A — Standard");
+		expect(DEVELOPER_PROMPT).toContain("### Template B — Phase Gate");
+		expect(DEVELOPER_PROMPT).toContain("### Template C — Escalation");
+	});
+
+	it("places the three templates inside the Handoff protocol section", () => {
+		// Anti-drift: the templates are the *body* of the handoff protocol,
+		// not a free-floating appendix. They must appear after the section
+		// heading so the merger's byte-identical copy stays coherent.
+		const protoIdx = handoffProtocolIndex();
+		expect(
+			protoIdx,
+			"'Handoff protocol' section must exist",
+		).toBeGreaterThanOrEqual(0);
+		for (const header of [
+			"### Template A — Standard",
+			"### Template B — Phase Gate",
+			"### Template C — Escalation",
+		]) {
+			expect(
+				DEVELOPER_PROMPT.indexOf(header),
+				`${header} must sit inside the Handoff protocol section`,
+			).toBeGreaterThan(protoIdx);
+		}
+	});
+
+	it("documents the `handoff_template` dispatch-brief selector", () => {
+		// Template selection is dispatch DATA, not agent inference — the
+		// brief carries the field and the developer picks the matching
+		// shape rather than inventing one.
+		expect(DEVELOPER_PROMPT).toContain("handoff_template");
+		expect(DEVELOPER_PROMPT).toContain('handoff_template: "phase-gate"');
+		expect(DEVELOPER_PROMPT).toContain('handoff_template: "escalation"');
+	});
+
+	it("keeps the HANDOFF mechanism unchanged (path + audit-failure language)", () => {
+		// Regression guard: parameterizing the section shape must NOT move
+		// the write path, drop the ordered read-on-entry rule, or soften
+		// the audit-failure consequence.
+		const protoIdx = handoffProtocolIndex();
+		expect(protoIdx).toBeGreaterThanOrEqual(0);
+		const after = DEVELOPER_PROMPT.slice(protoIdx);
+		const nextSection = after.slice(2).match(/^##\s/m);
+		const endIdx =
+			nextSection?.index === undefined ? after.length : nextSection.index + 2;
+		const section = after.slice(0, endIdx);
+		expect(section, "write path must stay in the protocol section").toContain(
+			".pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md",
+		);
+		expect(section, "read-on-entry must stay ordered by task_id").toContain(
+			"ordered by task_id",
+		);
+		expect(
+			section.toLowerCase(),
+			"skipping the read must stay an automatic audit failure",
+		).toContain("automatic audit failure");
+	});
+
+	it("declares a 'Scope Self-Check' pre-commit ritual", () => {
+		expect(DEVELOPER_PROMPT).toContain("Scope Self-Check");
+		// The ritual is a section header, not a passing mention.
+		expect(DEVELOPER_PROMPT).toMatch(/^##\s+.*Scope Self-Check.*$/m);
+	});
+
+	it("carries the 'three similar lines' anti-premature-abstraction guardrail", () => {
+		expect(DEVELOPER_PROMPT).toContain("three similar lines");
+	});
+});
+
 describe("developer-prompt: codebase_memory MCP tool family (post-64eecc5/7b5deeb)", () => {
 	// The developer prompt must reference the modern MCP tool family
 	// (codebase_memory*) - not the retired codebase_search / codebase_refs
