@@ -48,7 +48,9 @@ function override(body: string): string {
 describe("FailureCatalog boot validation (design §5.4, SC3)", () => {
 	it("T-CAT-00: the SHIPPED default catalog loads and schema-validates", () => {
 		const cat = FailureCatalog.load();
-		// The seven modes locked by the goal contract (design §5.3 + Q-F).
+		// The eight modes locked by the goal contract (design §5.3 + Q-F).
+		// The 8th entry, `worktree-concurrency-cap-reached`, was added in
+		// GC-2026-045 T4 to close the design-§7.7 smoke-test gap.
 		expect(cat.allIds().sort()).toEqual(
 			[
 				"author-fabricated",
@@ -57,6 +59,7 @@ describe("FailureCatalog boot validation (design §5.4, SC3)", () => {
 				"pi-orchestrator-leak",
 				"subagent-timeout",
 				"verification-failed",
+				"worktree-concurrency-cap-reached",
 				"worktree-ownership-mismatch",
 			].sort(),
 		);
@@ -304,7 +307,8 @@ modes:
 		const cat = FailureCatalog.load({
 			overridePath: join(dir, "does-not-exist.yaml"),
 		});
-		expect(cat.allIds()).toHaveLength(7);
+		// Updated for GC-2026-045 T4: shipped catalog grew from 7 → 8 modes.
+		expect(cat.allIds()).toHaveLength(8);
 	});
 });
 

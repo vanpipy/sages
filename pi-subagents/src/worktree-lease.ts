@@ -10,6 +10,8 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 
+import { writeDiagnostic, DiagnosticInvalid } from "./diagnostic.js";
+
 export const DEFAULT_WORKTREE_CONCURRENCY_CAP = 3;
 export const DEFAULT_WORKTREE_CONCURRENCY_GATE_ENABLED = false;
 export const WORKTREE_LEASE_STALE_AFTER_MS = 35 * 60 * 1000;
@@ -217,6 +219,45 @@ export async function claimWorktreeLease(
 	);
 	if (args.bypass) warnBypassOnce(canonical);
 	if (gateEnabled && cap > 0 && !args.bypass && repoLeases.length >= cap) {
+		// Emit a mechanism-1.4 diagnostic BEFORE the throw propagates so the
+		// L3 audit roll-up can bucket the refusal from the filesystem rather
+		// than having to re-run the dispatch. writeDiagnostic is sync-and-swallow
+		// for I/O; if it does throw (e.g. catalog drift drops the cause id), warn
+		// to stderr and proceed with the throw — the gate's behavior must not
+		// change because of a diagnostic-write failure (test T4.1-DIAG-05).
+		try {
+			const dispatchId = `${process.pid}-${Date.now()}-${createHash("sha1")
+				.update(`${process.pid}:${Date.now()}:${Math.random()}`)
+				.digest("hex")
+				.slice(0, 8)}`;
+			writeDiagnostic({
+				dispatchId,
+				context: {
+					dagId: args.consumer.dagId,
+					taskId: args.consumer.taskId,
+					worktreeId: args.consumer.worktreeId,
+				},
+				subagentType: "developer",
+				outcome: "needs-work",
+				cause: "worktree-concurrency-cap-reached",
+				detail:
+					`worktree-concurrency-gate: refused — cap=${cap}, live=${repoLeases.length}, ` +
+					`existing owners: ${repoLeases
+						.map(
+							(lease) =>
+								`${lease.consumer.dagId}/${lease.consumer.taskId}` +
+								(lease.consumer.worktreeId ? `/${lease.consumer.worktreeId}` : ""),
+						)
+						.join(", ")}`,
+				retryBudgetLeft: 0,
+				cwd: canonical,
+				catalogCwd: canonical,
+			});
+		} catch (err) {
+			const message =
+				err instanceof DiagnosticInvalid ? err.message : err instanceof Error ? err.message : String(err);
+			process.stderr.write(`[sages:gate-diagnostic-skip] ${message}\n`);
+		}
 		throw new WorktreeConcurrencyGateRefused(
 			cap,
 			repoLeases.map((lease) => lease.consumer),
