@@ -43,9 +43,7 @@ describe("subagent bash timeout guard (GC-2026-038 T5, GC-2026-043 Phase 4)", ()
 			// The rendered output must carry the current values — proves that
 			// each prompt's `BASH_TIMEOUT_SECTION` (which is the function output)
 			// is up to date with the runtime enforcement.
-			expect(rendered).toContain(
-				`${DEFAULT_BUCKET_TIMEOUTS_MS.read / 1000}s`,
-			);
+			expect(rendered).toContain(`${DEFAULT_BUCKET_TIMEOUTS_MS.read / 1000}s`);
 			expect(rendered).toContain(
 				`${DEFAULT_BUCKET_TIMEOUTS_MS.network / 1000}s`,
 			);
@@ -73,7 +71,9 @@ describe("subagent bash timeout guard (GC-2026-038 T5, GC-2026-043 Phase 4)", ()
 		// Anti-patterns stay hand-written — they reference project context the
 		// function output doesn't carry (commands specific to this codebase).
 		// Source uses escaped backticks (`\``) inside the template literal.
-		expect(prompt).toContain("Do NOT run \\`bun test\\` (full suite) in a loop");
+		expect(prompt).toContain(
+			"Do NOT run \\`bun test\\` (full suite) in a loop",
+		);
 		expect(prompt).toContain("Do NOT run \\`git log -p\\`");
 		expect(prompt).toContain("Do NOT use bash grep/rg/find/cat");
 	});

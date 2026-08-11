@@ -322,9 +322,13 @@ describe("auditor-prompt: 🔴/🟡/💭 priority scheme (GC-2026-039 T2)", () =
 		expect(blockersSection, "Blockers must define Description").toMatch(
 			/Description:/,
 		);
-		expect(blockersSection, "Blockers must define Expected").toMatch(/Expected:/);
+		expect(blockersSection, "Blockers must define Expected").toMatch(
+			/Expected:/,
+		);
 		expect(blockersSection, "Blockers must define Actual").toMatch(/Actual:/);
-		expect(blockersSection, "Blockers must define Evidence").toMatch(/Evidence:/);
+		expect(blockersSection, "Blockers must define Evidence").toMatch(
+			/Evidence:/,
+		);
 		expect(blockersSection, "Blockers must define Fix instruction").toMatch(
 			/Fix instruction:/,
 		);
@@ -399,10 +403,9 @@ describe("auditor-prompt: 🔴/🟡/💭 priority scheme (GC-2026-039 T2)", () =
 			diffInspectionIdx,
 			"Blockers must follow Diff Inspection",
 		).toBeLessThan(blockersIdx);
-		expect(
-			blockersIdx,
-			"Concerns must follow Blockers",
-		).toBeLessThan(concernsIdx);
+		expect(blockersIdx, "Concerns must follow Blockers").toBeLessThan(
+			concernsIdx,
+		);
 	});
 
 	it("Automatic FAIL Triggers section is preserved (regression on overlap)", () => {

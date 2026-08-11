@@ -42,7 +42,9 @@ describe("subagent network gate: command detection (GC-2026-037 T3)", () => {
 		expect(isNetworkCommand("git", ["clone", "https://..."])).toBe(true);
 		expect(isNetworkCommand("git", ["ls-remote"])).toBe(true);
 		expect(isNetworkCommand("git", ["push", "origin", "main"])).toBe(true);
-		expect(isNetworkCommand("git", ["remote", "add", "origin", "..."])).toBe(true);
+		expect(isNetworkCommand("git", ["remote", "add", "origin", "..."])).toBe(
+			true,
+		);
 		// direct network tools
 		expect(isNetworkCommand("curl", ["-s", "https://..."])).toBe(true);
 		expect(isNetworkCommand("wget", ["https://..."])).toBe(true);
@@ -75,18 +77,26 @@ describe("subagent network gate: command detection (GC-2026-037 T3)", () => {
 	});
 
 	it("T-NET-03: enforceNetworkGate(allowed: false) throws NetworkNotAllowedError for a network command", () => {
-		expect(() => enforceNetworkGate("git", ["fetch"], false)).toThrow(NetworkNotAllowedError);
-		expect(() => enforceNetworkGate("curl", ["https://..."], false)).toThrow(NetworkNotAllowedError);
+		expect(() => enforceNetworkGate("git", ["fetch"], false)).toThrow(
+			NetworkNotAllowedError,
+		);
+		expect(() => enforceNetworkGate("curl", ["https://..."], false)).toThrow(
+			NetworkNotAllowedError,
+		);
 	});
 
 	it("T-NET-04: enforceNetworkGate(allowed: true) is a no-op even for network commands", () => {
 		expect(() => enforceNetworkGate("git", ["fetch"], true)).not.toThrow();
-		expect(() => enforceNetworkGate("curl", ["https://..."], true)).not.toThrow();
+		expect(() =>
+			enforceNetworkGate("curl", ["https://..."], true),
+		).not.toThrow();
 	});
 
 	it("T-NET-04b: enforceNetworkGate(allowed: false) is a no-op for local commands", () => {
 		expect(() => enforceNetworkGate("git", ["status"], false)).not.toThrow();
-		expect(() => enforceNetworkGate("git", ["commit", "-m", "..."], false)).not.toThrow();
+		expect(() =>
+			enforceNetworkGate("git", ["commit", "-m", "..."], false),
+		).not.toThrow();
 	});
 });
 
@@ -125,20 +135,28 @@ describe("subagent network gate: pi.exec wrapper (GC-2026-037 T3)", () => {
 		// underlying pi.exec is called, so the throw is sync.
 		expect(() =>
 			// @ts-expect-error — proxy exec return type
-			(wrapped.exec as (cmd: string, args: string[]) => Promise<unknown>)("git", ["fetch"]),
+			(wrapped.exec as (cmd: string, args: string[]) => Promise<unknown>)(
+				"git",
+				["fetch"],
+			),
 		).toThrow(/network access disabled/);
 		expect(realExec).not.toHaveBeenCalled();
 
 		// Local call → passes through to realExec.
 		// @ts-expect-error — proxy exec return type
-		return (wrapped.exec as (cmd: string, args: string[]) => Promise<unknown>)("git", ["status"]).then(() => {
+		return (wrapped.exec as (cmd: string, args: string[]) => Promise<unknown>)(
+			"git",
+			["status"],
+		).then(() => {
 			expect(realExec).toHaveBeenCalledTimes(1);
 			expect(realExec).toHaveBeenCalledWith("git", ["status"], undefined);
 		});
 	});
 
 	it("T-NET-06b: wrapPiForNetworkGate(pi, true) is a no-op (returns pi directly)", () => {
-		const pi = { exec: vi.fn() } as unknown as { exec: ReturnType<typeof vi.fn> };
+		const pi = { exec: vi.fn() } as unknown as {
+			exec: ReturnType<typeof vi.fn>;
+		};
 		const wrapped = wrapPiForNetworkGate(pi, true);
 		// Should be the same object reference, not a proxy.
 		expect(wrapped).toBe(pi);

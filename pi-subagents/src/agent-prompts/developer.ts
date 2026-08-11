@@ -592,7 +592,6 @@ point.
 // The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
 void COMMIT_DISCIPLINE_SECTION;
 
-
 // =============================================================================
 // GC-2026-038 T2: Exploration Budget (shared with other agents)
 // =============================================================================

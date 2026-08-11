@@ -458,16 +458,8 @@ async function detectCurrentBranchAsync(
 	let upstreamRaw = "";
 	try {
 		[head, upstreamRaw] = await Promise.all([
-			runGitInAsync(
-				["rev-parse", "--abbrev-ref", "HEAD"],
-				repoRoot,
-				true,
-			),
-			runGitInAsync(
-				["rev-parse", "--abbrev-ref", "@{u}"],
-				repoRoot,
-				true,
-			),
+			runGitInAsync(["rev-parse", "--abbrev-ref", "HEAD"], repoRoot, true),
+			runGitInAsync(["rev-parse", "--abbrev-ref", "@{u}"], repoRoot, true),
 		]);
 	} catch (err) {
 		if (isAbortError(err)) throw err;
@@ -1626,9 +1618,7 @@ function isAbortError(err: unknown): boolean {
 	if (!err || typeof err !== "object") return false;
 	const e = err as { code?: string; name?: string; signal?: string };
 	return (
-		e.code === "ABORT_ERR" ||
-		e.name === "AbortError" ||
-		e.signal === "SIGTERM"
+		e.code === "ABORT_ERR" || e.name === "AbortError" || e.signal === "SIGTERM"
 	);
 }
 
@@ -1668,11 +1658,9 @@ export async function runGitInAsync(
 		if (opts.signal.aborted) {
 			controller.abort();
 		} else {
-			opts.signal.addEventListener(
-				"abort",
-				() => controller.abort(),
-				{ once: true },
-			);
+			opts.signal.addEventListener("abort", () => controller.abort(), {
+				once: true,
+			});
 		}
 	}
 	const timer = setTimeout(() => controller.abort(), GIT_TIMEOUT_MS_DEFAULT);
@@ -1729,7 +1717,8 @@ function formatGitInvocationError(
 	};
 	const stderr = asText(anyErr?.stderr);
 	const stdout = asText(anyErr?.stdout);
-	const fallback = typeof anyErr?.message === "string" ? anyErr.message : String(err);
+	const fallback =
+		typeof anyErr?.message === "string" ? anyErr.message : String(err);
 	const detail = stderr || stdout || fallback;
 	return new Error(`git ${args.join(" ")} (cwd=${cwd}) failed: ${detail}`);
 }

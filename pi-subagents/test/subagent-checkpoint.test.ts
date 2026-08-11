@@ -46,7 +46,8 @@ describe("subagent checkpoint protocol (GC-2026-038 T3)", () => {
 
 describe("parseCheckpoint runtime helper (GC-2026-038 T3)", () => {
 	it("T-CKPT-parse-01: parses a single checkpoint line", () => {
-		const text = "[checkpoint 5/200 turns, 1m32s] 1 test written (RED). 0 commits. blocker: none.";
+		const text =
+			"[checkpoint 5/200 turns, 1m32s] 1 test written (RED). 0 commits. blocker: none.";
 		const out = parseCheckpoint(text);
 		expect(out).not.toBeNull();
 		expect(out!.turnNumber).toBe(5);
@@ -71,13 +72,17 @@ describe("parseCheckpoint runtime helper (GC-2026-038 T3)", () => {
 	});
 
 	it("T-CKPT-parse-04: tolerates varying time formats (m, s, m+s)", () => {
-		const out = parseCheckpoint("[checkpoint 5/200 turns, 5m] 1 test. 0 commits. blocker: none.");
+		const out = parseCheckpoint(
+			"[checkpoint 5/200 turns, 5m] 1 test. 0 commits. blocker: none.",
+		);
 		expect(out).not.toBeNull();
 		expect(out!.timeMinutes).toBe(5);
 	});
 
 	it("T-CKPT-parse-05: parses 'commit' vs 'commits' (singular form)", () => {
-		const out = parseCheckpoint("[checkpoint 5/200 turns, 1m] 1 commit done. 1 commit. blocker: none.");
+		const out = parseCheckpoint(
+			"[checkpoint 5/200 turns, 1m] 1 commit done. 1 commit. blocker: none.",
+		);
 		expect(out).not.toBeNull();
 		expect(out!.commitCount).toBe(1);
 	});

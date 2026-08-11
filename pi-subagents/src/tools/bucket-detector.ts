@@ -53,7 +53,10 @@ function firstCommand(command: string): string {
 	const firstSegment = trimmed.split(/[|&;]/)[0]?.trim() ?? trimmed;
 	// Strip leading env-var assignments: `FOO=bar BAZ=qux cmd args` → `cmd args`.
 	// One or more `KEY=val` pairs (val may contain anything except whitespace).
-	const withoutEnv = firstSegment.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]*\s+)+/, "");
+	const withoutEnv = firstSegment.replace(
+		/^(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]*\s+)+/,
+		"",
+	);
 	// Strip path prefix on the command token: `/usr/bin/git fetch` → `git fetch`,
 	// `./node_modules/.bin/vitest run` → `vitest run`, `~/bin/foo` → `foo`.
 	const m = withoutEnv.match(/^(\S+)(\s.*)?$/s);

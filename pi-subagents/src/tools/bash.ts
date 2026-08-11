@@ -35,7 +35,7 @@
  * Anti-rule: no new npm dependencies (Node built-ins only).
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import type { BucketKey, RunController } from "../run-controller.js";
 import { detectBucket } from "./bucket-detector.js";
 

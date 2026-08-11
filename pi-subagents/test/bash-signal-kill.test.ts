@@ -20,16 +20,13 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
-	DEFAULT_BUCKET_TIMEOUTS_MS,
-	resolveRunConfig,
-	RunController,
 	type BucketTimeouts,
+	DEFAULT_BUCKET_TIMEOUTS_MS,
 	type RunConfig,
+	RunController,
+	resolveRunConfig,
 } from "../src/run-controller.js";
-import {
-	BashError,
-	bashTool,
-} from "../src/tools/bash.js";
+import { BashError, bashTool } from "../src/tools/bash.js";
 
 function makeConfig(overrides: Partial<RunConfig> = {}): RunConfig {
 	return {
@@ -97,7 +94,9 @@ describe("bashTool: completion", () => {
 });
 
 describe("bashTool: bucket timeout (C5 + signal propagation)", () => {
-	it("T2: long-running command in read bucket (5s) returns timeout within 6s", { timeout: 10_000 }, async () => {
+	it("T2: long-running command in read bucket (5s) returns timeout within 6s", {
+		timeout: 10_000,
+	}, async () => {
 		const rc = makeController();
 		const start = Date.now();
 		// `tail -f /dev/null` detects as 'read' bucket (5s) and never
@@ -142,9 +141,9 @@ describe("bashTool: external abort (C1 single path)", () => {
 		expect(elapsed).toBeLessThan(2_000);
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
-			expect(result.error.kind === "timeout" || result.error.kind === "exit").toBe(
-				true,
-			);
+			expect(
+				result.error.kind === "timeout" || result.error.kind === "exit",
+			).toBe(true);
 		}
 	});
 });

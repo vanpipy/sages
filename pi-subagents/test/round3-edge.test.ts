@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 
 import {
 	advisoryFor,
-	extractAuditFindings,
 	extractAsk,
+	extractAuditFindings,
 	extractStructuredOutput,
 	parseCheckpoint,
 } from "../src/agent-runner.js";
@@ -191,7 +191,9 @@ open_questions:
 handoff_for_next_task: []
 \`\`\``;
 		const findings = extractAuditFindings(message, "");
-		const completedNoCommits = findings.find((f) => f.rule === "completed_no_commits");
+		const completedNoCommits = findings.find(
+			(f) => f.rule === "completed_no_commits",
+		);
 		expect(completedNoCommits).toBeUndefined();
 	});
 });

@@ -74,7 +74,7 @@ export function renderBashTimeoutSection(): string {
 		"## Bash Timeout Guard (per-bucket timeouts, HARD-enforced)",
 		"",
 		"The bash tool enforces these timeouts via spawn({ signal }). When a command",
-		'exceeds its bucket limit, the child is killed and you receive a structured',
+		"exceeds its bucket limit, the child is killed and you receive a structured",
 		'\'{"ok":false,"error":"timeout","bucket":"<name>"}\' response. React accordingly:',
 		"",
 		`- **read** (cat / head / tail / less) — ${s(t.read)}. Slow? File is huge — use aft_zoom.`,

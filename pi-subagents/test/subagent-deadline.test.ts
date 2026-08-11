@@ -113,14 +113,16 @@ vi.mock("../src/agent-runner.js", () => ({
 
 import { AgentManager } from "../src/agent-manager.js";
 import * as runnerModule from "../src/agent-runner.js";
+import { registerAgents, setDefaultsDisabled } from "../src/agent-types.js";
 import {
 	getSubagentDurationDefault,
 	resolveDeadlineMs,
 	setSubagentDurationDefaults,
 } from "../src/settings.js";
-import { registerAgents, setDefaultsDisabled } from "../src/agent-types.js";
 
-const stubRunAgent = runnerModule.runAgent as unknown as ReturnType<typeof vi.fn>;
+const stubRunAgent = runnerModule.runAgent as unknown as ReturnType<
+	typeof vi.fn
+>;
 
 beforeEach(() => {
 	stubRunAgent.mockClear();
@@ -191,10 +193,7 @@ describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", ()
 			const deadlineReason = new Error(
 				`agent duration exceeded ${deadlineMs}ms`,
 			);
-			setTimeout(
-				() => externalController.abort(deadlineReason),
-				deadlineMs,
-			);
+			setTimeout(() => externalController.abort(deadlineReason), deadlineMs);
 
 			const { id, record } = await manager.spawnAndWait(
 				{} as never,
@@ -235,9 +234,7 @@ describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", ()
 		try {
 			const parentController = new AbortController();
 			const deadlineController = new AbortController();
-			const deadlineReason = new Error(
-				"agent duration exceeded 50ms",
-			);
+			const deadlineReason = new Error("agent duration exceeded 50ms");
 			setTimeout(() => deadlineController.abort(deadlineReason), 50);
 
 			const mergedSignal = AbortSignal.any([
@@ -247,7 +244,10 @@ describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", ()
 
 			// Parent abort fires after the deadline — verify the deadline part
 			// is what actually trips the abort.
-			setTimeout(() => parentController.abort(new Error("parent cancel")), 5_000);
+			setTimeout(
+				() => parentController.abort(new Error("parent cancel")),
+				5_000,
+			);
 
 			const { record } = await manager.spawnAndWait(
 				{} as never,
@@ -279,21 +279,19 @@ describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", ()
 		const manager = new AgentManager();
 		try {
 			// Force the stub to resolve instead of waiting on abort.
-			stubRunAgent.mockImplementationOnce(
-				async () => ({
-					responseText: "fast",
-					session: {
-						steer: async () => undefined,
-						dispose: () => undefined,
-						messages: [],
-						subscribe: () => () => undefined,
-						prompt: async () => undefined,
-					},
-					aborted: false,
-					steered: false,
-					failure: undefined,
-				}),
-			);
+			stubRunAgent.mockImplementationOnce(async () => ({
+				responseText: "fast",
+				session: {
+					steer: async () => undefined,
+					dispose: () => undefined,
+					messages: [],
+					subscribe: () => () => undefined,
+					prompt: async () => undefined,
+				},
+				aborted: false,
+				steered: false,
+				failure: undefined,
+			}));
 
 			const { record } = await manager.spawnAndWait(
 				{} as never,

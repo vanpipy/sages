@@ -3,8 +3,8 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
-import type { RunController } from "./run-controller.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { RunController } from "./run-controller.js";
 import type { LifetimeUsage } from "./usage.js";
 import type { ManagedWorktreeRequest } from "./worktree-contract.js";
 

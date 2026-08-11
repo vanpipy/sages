@@ -69,20 +69,15 @@ vi.mock("node:fs", async () => {
 				typeof path === "string" ? path : path.toString(),
 			);
 			return (
-				originalReadFileSync as unknown as (
-					...a: unknown[]
-				) => string | Buffer
+				originalReadFileSync as unknown as (...a: unknown[]) => string | Buffer
 			).call(actual, path, ...rest);
 		}) as typeof originalReadFileSync,
 	};
 });
 
 // SUT + helpers — must come AFTER the vi.mock calls above.
-const {
-	loadCustomAgents,
-	_getCustomAgentsCacheSize,
-	_clearCustomAgentsCache,
-} = await import("../src/custom-agents.js");
+const { loadCustomAgents, _getCustomAgentsCacheSize, _clearCustomAgentsCache } =
+	await import("../src/custom-agents.js");
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

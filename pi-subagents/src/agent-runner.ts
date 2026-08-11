@@ -1068,8 +1068,8 @@ export async function runAgent(
 	// let the agent correct. Per-dispatch cap of 2 advisories; dedup by
 	// rule name (no rule is advised twice).
 	if (!aborted) {
-		const firstText = collector.getText().trim() ||
-			getLastAssistantText(session, startLen);
+		const firstText =
+			collector.getText().trim() || getLastAssistantText(session, startLen);
 		const advisories = advisoryFor(firstText, advisoryCtx);
 		for (const advisory of advisories) {
 			try {
@@ -1130,9 +1130,7 @@ function emitRunDiagnostic(
 			outcome: classified.outcome,
 			cause: classified.cause,
 			detail: classified.detail,
-			evidence: result.failure
-				? { stderrDigest: result.failure }
-				: undefined,
+			evidence: result.failure ? { stderrDigest: result.failure } : undefined,
 			cwd,
 			catalogCwd: cwd,
 		});
@@ -1342,11 +1340,8 @@ const REQUIRED_FIELDS = [
 	"open_questions",
 ] as const;
 
-const STATUSES: ReadonlySet<SubagentOutputStatus> = new Set<SubagentOutputStatus>([
-	"completed",
-	"blocked",
-	"partial",
-]);
+const STATUSES: ReadonlySet<SubagentOutputStatus> =
+	new Set<SubagentOutputStatus>(["completed", "blocked", "partial"]);
 
 /**
  * Parse a structured YAML block out of an agent's final message.
@@ -1385,7 +1380,10 @@ export function extractStructuredOutput(text: string): SubagentOutput | null {
 	}
 
 	const raw = parsed as unknown as RawSubagentOutput;
-	if (typeof raw.status !== "string" || !STATUSES.has(raw.status as SubagentOutputStatus)) {
+	if (
+		typeof raw.status !== "string" ||
+		!STATUSES.has(raw.status as SubagentOutputStatus)
+	) {
 		return null;
 	}
 	if (!isPlainObject(raw.deliverables)) return null;
@@ -1486,15 +1484,17 @@ interface ParseContext {
  * `inList` distinguishes: a top-level mapping (no list anchor) vs. a
  * mapping that is itself a list item.
  */
-function parseNode(ctx: ParseContext, minIndent: number, inList: boolean): unknown {
+function parseNode(
+	ctx: ParseContext,
+	minIndent: number,
+	inList: boolean,
+): unknown {
 	const first = ctx.tokens[ctx.pos];
 	if (!first) {
 		throw new Error("parseNode: unexpected end of input");
 	}
 	if (first.indent < minIndent) {
-		throw new Error(
-			`parseNode: indent ${first.indent} below min ${minIndent}`,
-		);
+		throw new Error(`parseNode: indent ${first.indent} below min ${minIndent}`);
 	}
 
 	// Lookahead: is the first non-empty line a list item (`- ...`)?
@@ -1564,9 +1564,7 @@ function parseList(ctx: ParseContext, indent: number): unknown[] {
 		}
 		const itemMatch = t.content.match(/^-(\s+(.*))?$/);
 		if (!itemMatch) {
-			throw new Error(
-				`parseList: expected list item, got "${t.content}"`,
-			);
+			throw new Error(`parseList: expected list item, got "${t.content}"`);
 		}
 		const after = (itemMatch[2] ?? "").trim();
 		ctx.pos++;
@@ -1677,13 +1675,11 @@ function asNumber(v: unknown, fallback: number): number {
 
 function asFailDetails(v: unknown): SubagentOutputFailDetail[] {
 	if (!Array.isArray(v)) return [];
-	return v
-		.filter(isPlainObject)
-		.map((d) => ({
-			file: typeof d.file === "string" ? d.file : undefined,
-			test: typeof d.test === "string" ? d.test : undefined,
-			message: typeof d.message === "string" ? d.message : undefined,
-		}));
+	return v.filter(isPlainObject).map((d) => ({
+		file: typeof d.file === "string" ? d.file : undefined,
+		test: typeof d.test === "string" ? d.test : undefined,
+		message: typeof d.message === "string" ? d.message : undefined,
+	}));
 }
 
 function asOpenQuestions(v: unknown): SubagentOutputOpenQuestion[] {
@@ -1692,7 +1688,8 @@ function asOpenQuestions(v: unknown): SubagentOutputOpenQuestion[] {
 		.filter(isPlainObject)
 		.map((q) => ({
 			question: typeof q.question === "string" ? q.question : "",
-			whyBlocking: typeof q.why_blocking === "boolean" ? q.why_blocking : undefined,
+			whyBlocking:
+				typeof q.why_blocking === "boolean" ? q.why_blocking : undefined,
 			suggestion: typeof q.suggestion === "string" ? q.suggestion : undefined,
 		}))
 		.filter((q) => q.question !== "");
@@ -1748,7 +1745,10 @@ export class NetworkNotAllowedError extends Error {
  * (status, diff, log, commit, branch, checkout, add, reset, revert,
  * merge, rebase) are NOT in this list.
  */
-export function isNetworkCommand(command: string, args: readonly string[]): boolean {
+export function isNetworkCommand(
+	command: string,
+	args: readonly string[],
+): boolean {
 	const c = command.toLowerCase();
 	if (c === "git") {
 		// `git <subcommand>` — only specific subcommands are network.
@@ -1765,13 +1765,33 @@ export function isNetworkCommand(command: string, args: readonly string[]): bool
 		return NETWORK_SUBCMDS.has(sub);
 	}
 	// Direct network tools.
-	if (c === "curl" || c === "wget" || c === "nc" || c === "ncat" || c === "telnet" || c === "ssh" || c === "scp" || c === "rsync" || c === "ftp" || c === "sftp") {
+	if (
+		c === "curl" ||
+		c === "wget" ||
+		c === "nc" ||
+		c === "ncat" ||
+		c === "telnet" ||
+		c === "ssh" ||
+		c === "scp" ||
+		c === "rsync" ||
+		c === "ftp" ||
+		c === "sftp"
+	) {
 		return true;
 	}
 	// Package managers — `install`, `add`, `publish`, `login` etc. all
 	// touch the network. `npm ls`, `bun pm ls` etc. don't. The flag
 	// `-h/--help/-v/--version` is a fast local-only path.
-	if (c === "npm" || c === "bun" || c === "pnpm" || c === "yarn" || c === "pip" || c === "pip3" || c === "uv" || c === "poetry") {
+	if (
+		c === "npm" ||
+		c === "bun" ||
+		c === "pnpm" ||
+		c === "yarn" ||
+		c === "pip" ||
+		c === "pip3" ||
+		c === "uv" ||
+		c === "poetry"
+	) {
 		const sub = (args[0] ?? "").toLowerCase();
 		// First-arg subcommands that are network. Anything else
 		// (including ls, list, config, doctor, etc.) is local and
@@ -1860,7 +1880,8 @@ export interface SubagentCheckpoint {
 	blocker: string;
 }
 
-const CHECKPOINT_LINE_RE = /\[checkpoint\s+(\d+)\/(\d+)\s+turns,\s+([\d.mhs]+)\]\s+([^.]+)\.\s+(\d+)\s+commits?\.\s+blocker:\s*([^.]+?)\.?$/i;
+const CHECKPOINT_LINE_RE =
+	/\[checkpoint\s+(\d+)\/(\d+)\s+turns,\s+([\d.mhs]+)\]\s+([^.]+)\.\s+(\d+)\s+commits?\.\s+blocker:\s*([^.]+?)\.?$/i;
 
 /**
  * Parse the time field of a checkpoint line. Accepts:
@@ -1883,7 +1904,11 @@ export function parseCheckpoint(text: string): SubagentCheckpoint | null {
 	// Time format: "1m32s" / "5m" / "1.5m" / etc. The `[\d.mhs]+` class accepts all
 	// of these. We capture groups: 1=turn, 2=maxTurns, 3=time, 4=workSummary,
 	// 5=commitCount, 6=blocker.
-	const matches = [...text.matchAll(/\[checkpoint\s+(\d+)\/(\d+)\s+turns,\s+([\d.mhs]+)\]\s+([\s\S]+?)\s+(\d+)\s+commits?\.\s+blocker:\s*([^.\n]+?)\.?\s*(?:\n|$)/gi)];
+	const matches = [
+		...text.matchAll(
+			/\[checkpoint\s+(\d+)\/(\d+)\s+turns,\s+([\d.mhs]+)\]\s+([\s\S]+?)\s+(\d+)\s+commits?\.\s+blocker:\s*([^.\n]+?)\.?\s*(?:\n|$)/gi,
+		),
+	];
 	if (matches.length === 0) return null;
 	const last = matches[matches.length - 1];
 	if (!last) return null;
@@ -1909,12 +1934,8 @@ export function parseCheckpoint(text: string): SubagentCheckpoint | null {
 // =============================================================================
 
 export function extractAsk(text: string): string[] {
-	const matches = [
-		...text.matchAll(/<ASK>([\s\S]+?)<\/ASK>/gi),
-	];
-	return matches
-		.map((m) => (m[1] ?? "").trim())
-		.filter((q) => q.length > 0);
+	const matches = [...text.matchAll(/<ASK>([\s\S]+?)<\/ASK>/gi)];
+	return matches.map((m) => (m[1] ?? "").trim()).filter((q) => q.length > 0);
 }
 
 // =============================================================================
@@ -1935,7 +1956,12 @@ export function extractAsk(text: string): string[] {
 // =============================================================================
 
 export type AuditFindingSeverity = "minor" | "major" | "critical";
-export type AuditFindingCategory = "ink" | "nose" | "foot" | "castration" | "death";
+export type AuditFindingCategory =
+	| "ink"
+	| "nose"
+	| "foot"
+	| "castration"
+	| "death";
 
 export interface AuditFinding {
 	/** Stable id like "AF-001". */
@@ -2050,7 +2076,8 @@ export function extractAuditFindings(
 		if (checkpoints.length >= 2) {
 			const lastTwo = checkpoints.slice(-2);
 			if (
-				lastTwo[0] && lastTwo[1] &&
+				lastTwo[0] &&
+				lastTwo[1] &&
 				lastTwo[0].commitCount === lastTwo[1].commitCount &&
 				lastTwo[0].turnNumber !== lastTwo[1].turnNumber
 			) {
@@ -2082,9 +2109,7 @@ export function extractAuditFindings(
 					severity: "major",
 					category: "ink",
 					issue: `${asksNotInReport.length} <ASK> question(s) not surfaced in task report`,
-					evidence: asksNotInReport
-						.map((q) => q.slice(0, 60))
-						.join(" | "),
+					evidence: asksNotInReport.map((q) => q.slice(0, 60)).join(" | "),
 					recommendation:
 						"L3 should surface <ASK> questions to the user; the task report must include them in open_questions",
 				});
@@ -2092,14 +2117,19 @@ export function extractAuditFindings(
 		}
 
 		// Rule 5: blocked_without_reason
-		if (structured.status === "blocked" && structured.openQuestions.length === 0) {
+		if (
+			structured.status === "blocked" &&
+			structured.openQuestions.length === 0
+		) {
 			findings.push({
 				id: nextFindingId(),
 				rule: "blocked_without_reason",
 				severity: "minor",
 				category: "ink",
-				issue: "status=blocked but open_questions is empty; the L3 cannot unblock without a reason",
-				evidence: "deliverables.commits may be empty AND open_questions is empty",
+				issue:
+					"status=blocked but open_questions is empty; the L3 cannot unblock without a reason",
+				evidence:
+					"deliverables.commits may be empty AND open_questions is empty",
 				recommendation:
 					"agent must describe what's missing in open_questions when declaring BLOCKED",
 			});
@@ -2112,7 +2142,9 @@ export function extractAuditFindings(
 		major: 1,
 		minor: 2,
 	};
-	findings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+	findings.sort(
+		(a, b) => severityOrder[a.severity] - severityOrder[b.severity],
+	);
 
 	return findings;
 }
@@ -2194,13 +2226,13 @@ export const RULE_FIX_DIRECTIVES: Record<string, string> = {
 	missing_yaml_block:
 		"emit a ```yaml ... ``` block at the end of your message (schema below)",
 	completed_no_commits:
-		"run `git log --oneline -5 --format=%H` and put the SHAs in YAML as: commits: [\"sha1\", \"sha2\", ...]",
+		'run `git log --oneline -5 --format=%H` and put the SHAs in YAML as: commits: ["sha1", "sha2", ...]',
 	checkpoint_stuck_pattern:
-		"either (a) commit work now: `git add -A && git commit -m \"wip: <task>\"`, or (b) change YAML status to \"blocked\" and explain in open_questions",
+		'either (a) commit work now: `git add -A && git commit -m "wip: <task>"`, or (b) change YAML status to "blocked" and explain in open_questions',
 	ask_unanswered:
-		"add the <ASK> question to YAML open_questions as: open_questions: [{question: \"...\", why_blocking: true}]",
+		'add the <ASK> question to YAML open_questions as: open_questions: [{question: "...", why_blocking: true}]',
 	blocked_without_reason:
-		"add a non-empty open_questions array describing what's missing (e.g. `open_questions: [{question: \"what API?\", why_blocking: true}]`)",
+		'add a non-empty open_questions array describing what\'s missing (e.g. `open_questions: [{question: "what API?", why_blocking: true}]`)',
 };
 
 /**
@@ -2275,6 +2307,8 @@ export function advisoryFor(
 // Helper: parse the rule name out of an advisory string for dedup.
 // Format: "[orchestrator audit advisory — N/M] <rule>: <issue>. Fix: <recommendation>"
 function extractAdvisoryRule(advisory: string): string | null {
-	const m = advisory.match(/^\[orchestrator audit advisory — \d+\/\d+\] ([a-z_]+):/);
+	const m = advisory.match(
+		/^\[orchestrator audit advisory — \d+\/\d+\] ([a-z_]+):/,
+	);
 	return m ? (m[1] ?? null) : null;
 }

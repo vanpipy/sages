@@ -11,7 +11,10 @@
 import { describe, expect, it } from "vitest";
 import { detectBucket } from "../src/tools/bucket-detector.js";
 
-type Case = readonly [string, "read" | "search" | "test" | "fullTest" | "network" | "other"];
+type Case = readonly [
+	string,
+	"read" | "search" | "test" | "fullTest" | "network" | "other",
+];
 
 const CASES: ReadonlyArray<Case> = [
 	// read

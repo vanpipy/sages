@@ -39,9 +39,9 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	type Budget,
 	BudgetTracker,
 	loadBudgetFromEnv,
-	type Budget,
 } from "../src/budget.js";
 import {
 	DEFAULT_BUCKET_TIMEOUTS_MS,

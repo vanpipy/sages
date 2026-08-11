@@ -11,11 +11,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	extractAuditFindings,
-	extractAsk,
-	parseCheckpoint,
 	advisoryFor,
+	extractAsk,
+	extractAuditFindings,
 	extractStructuredOutput,
+	parseCheckpoint,
 } from "../src/agent-runner.js";
 
 describe("Round 2: integration — full audit pipeline", () => {
@@ -94,7 +94,9 @@ handoff_for_next_task: []
 		const findings = extractAuditFindings(report, "");
 		expect(findings.some((f) => f.rule === "completed_no_commits")).toBe(true);
 		const advisories = advisoryFor(report);
-		expect(advisories.some((a) => a.includes("completed_no_commits"))).toBe(true);
+		expect(advisories.some((a) => a.includes("completed_no_commits"))).toBe(
+			true,
+		);
 	});
 
 	it("R2-04: agent stuck (checkpoint_stuck_pattern)", () => {
@@ -115,7 +117,9 @@ open_questions: []
 handoff_for_next_task: []
 \`\`\``;
 		const findings = extractAuditFindings(report, "");
-		expect(findings.some((f) => f.rule === "checkpoint_stuck_pattern")).toBe(true);
+		expect(findings.some((f) => f.rule === "checkpoint_stuck_pattern")).toBe(
+			true,
+		);
 	});
 
 	it("R2-05: agent emits no YAML at all", () => {
