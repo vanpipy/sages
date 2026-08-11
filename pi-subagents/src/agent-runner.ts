@@ -35,6 +35,7 @@ import {
 } from "./budget.js";
 import { buildParentContext, extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
+import { diagnosticForRunResult, writeDiagnostic } from "./diagnostic.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
@@ -1088,7 +1089,56 @@ export async function runAgent(
 	const responseText =
 		collector.getText().trim() || getLastAssistantText(session, startLen);
 	const failure = budgetFailure ?? finalTurnError(session, startLen);
+
+	// GC-2026-044 mechanism 1.4 (design §6.4.1): a non-clean exit leaves a typed
+	// record on disk. Today the only trace of an abort is a string in a tool
+	// result, which is gone as soon as the orchestrator's context is compacted.
+	// Clean runs write nothing — `diagnosticForRunResult` returns null for those.
+	emitRunDiagnostic(
+		{ aborted, steered: softLimitReached, failure },
+		type,
+		options,
+		effectiveCwd,
+	);
+
 	return { responseText, session, aborted, steered: softLimitReached, failure };
+}
+
+/**
+ * Write the mechanism-1.4 diagnostic for a finished run. Best-effort by
+ * construction: `writeDiagnostic` already swallows I/O failures, and the extra
+ * try/catch here covers a malformed-payload throw so that a bug in the
+ * diagnostic path can never turn a completed run into a failed one.
+ *
+ * Off switch: `SAGES_DIAGNOSTIC_WRITE=off` (design §2.5 defaults this ON —
+ * the record is worth more than the microseconds it costs).
+ */
+function emitRunDiagnostic(
+	result: { aborted: boolean; steered: boolean; failure?: string },
+	type: SubagentType,
+	options: RunOptions,
+	cwd: string,
+): void {
+	if (process.env.SAGES_DIAGNOSTIC_WRITE === "off") return;
+	try {
+		const classified = diagnosticForRunResult(result, cwd);
+		if (!classified) return;
+		writeDiagnostic({
+			dispatchId: options.agentId ?? `${type}-${Date.now()}`,
+			context: { taskId: options.agentId },
+			subagentType: type,
+			outcome: classified.outcome,
+			cause: classified.cause,
+			detail: classified.detail,
+			evidence: result.failure
+				? { stderrDigest: result.failure }
+				: undefined,
+			cwd,
+			catalogCwd: cwd,
+		});
+	} catch {
+		/* never let post-mortem bookkeeping fail the run */
+	}
 }
 
 /**

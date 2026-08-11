@@ -1,0 +1,127 @@
+# failure-modes.v1.yaml — GC-2026-044 mechanism 1.3 (design §5.3).
+#
+# The shipped default failure-mode catalog. Adapted from ai-sdlc RFC-0015 §5.1
+# + §Q9: failure classes are DATA, not TypeScript branches, so operators extend
+# the taxonomy by editing a file instead of patching the runtime.
+#
+# Precedence (design §2.6): this file is the base; a project may deep-merge
+# `.pi/failure-modes.yaml` on top of it. Same `id` -> override fields win; new
+# ids are appended; `enabled: false` retires a mode. Renaming an id is a v2
+# bump, never an override.
+#
+# `kind` is the §2.4 discriminator that keeps two different things apart:
+#   spec  — an LLM-side decision that missed a verifiable contract. Retryable.
+#   error — infrastructure reality (git, provider, timeout). Recorded, not retried.
+#
+# Every scalar that can contain a regex metacharacter is double-quoted, and the
+# loader parses double-quoted scalars as JSON strings. Keep it that way: the
+# parser in failure-catalog.ts deliberately implements a small YAML subset
+# rather than pulling in a YAML dependency this package does not have.
+
+schemaVersion: "v1"
+
+modes:
+  - id: "verification-failed"
+    name: "Verify step returned non-zero"
+    description: "A test / lint / typecheck step the task depends on exited non-zero. The most common spec failure and the one worth retrying."
+    kind: "spec"
+    appliesTo: ["implement", "verify"]
+    detection:
+      kind: "regex"
+      pattern: "(^|\\n)\\s*(FAIL|ERROR|✖|×)\\b"
+      against: "verifier-output"
+    handler:
+      kind: "retry-subagent"
+      retryBudget: 2
+      feedbackTemplate: |-
+        Verification failed. Stderr digest:
+
+        {stderr_digest}
+
+        Fix the cause and re-run the verifier before reporting completion.
+    retryBudget: 2
+
+  - id: "commit-message-non-conformant"
+    name: "Commit subject does not match Conventional Commits"
+    description: "The commit subject is missing a Conventional Commits 1.0.0 type prefix. Detection is negated: the mode fires when the pattern is ABSENT from the supplied subject line."
+    kind: "spec"
+    appliesTo: ["commit"]
+    detection:
+      kind: "regex"
+      pattern: "^(feat|fix|docs|refactor|test|perf|chore|style)(\\([^)]*\\))?!?: "
+      against: "free-text"
+      negate: true
+    handler:
+      kind: "retry-subagent"
+      retryBudget: 1
+      feedbackTemplate: |-
+        Commit subject {sha} does not match Conventional Commits 1.0.0.
+        Allowed types: feat|fix|docs|refactor|test|perf|chore|style.
+        Amend the subject and re-run.
+    retryBudget: 1
+
+  - id: "author-fabricated"
+    name: "Commit author was overridden"
+    description: "The commit used --author or a GIT_AUTHOR_* environment override instead of resolving identity from git config. Never retryable — it is a governance breach, not a mistake."
+    kind: "spec"
+    appliesTo: ["commit"]
+    detection:
+      kind: "regex"
+      pattern: "(--author=|GIT_AUTHOR_(NAME|EMAIL)=)"
+      against: "free-text"
+    handler:
+      kind: "escalate-to-l3"
+      note: "Commit author must be resolved from `git config user.name` / `user.email`, never overridden."
+    retryBudget: 0
+
+  - id: "pi-orchestrator-leak"
+    name: "Sub-agent wrote into .pi/orchestrator/"
+    description: "A commit added or modified files under .pi/orchestrator/, which is the L3 orchestrator's namespace. Sub-agents own .pi/diagnostics/ and .pi/worktree-leases/ only."
+    kind: "spec"
+    appliesTo: ["commit"]
+    detection:
+      kind: "structured"
+      matches: ["PiOrchestratorLeak", "pi/orchestrator-leak"]
+    handler:
+      kind: "escalate-to-l3"
+      note: "Memory rule #23: sub-agents must not write .pi/orchestrator/. Revert the leaked paths before re-dispatch."
+    retryBudget: 0
+
+  - id: "worktree-ownership-mismatch"
+    name: "Worktree .git pointer targets a foreign clone"
+    description: "The worktree's .git file resolves to a gitdir under a different clone's common dir. Operating on it would land commits in the wrong repository, silently."
+    kind: "error"
+    appliesTo: ["worktree-provision"]
+    detection:
+      kind: "structured"
+      matches: ["WorktreeOwnershipMismatch"]
+    handler:
+      kind: "escalate-to-l3"
+      note: "Operator must delete the foreign worktree; the sub-agent cannot safely repair this itself."
+    retryBudget: 0
+
+  - id: "subagent-timeout"
+    name: "Sub-agent exceeded its turn or wall budget"
+    description: "The run was hard-aborted after max_turns plus grace, or after the budget tracker tripped. The partial work is on disk; the run is not resumable in place."
+    kind: "error"
+    appliesTo: ["implement"]
+    detection:
+      kind: "structured"
+      matches: ["SubagentTimeout", "BudgetExceededError"]
+    handler:
+      kind: "mark-stalled"
+      note: "Sub-agent hit the hard turn limit. Re-dispatch with a narrower brief or a larger budget."
+    retryBudget: 0
+
+  - id: "infra-unhandled"
+    name: "Unhandled infrastructure failure"
+    description: "The catch-all for an error with no more specific mode: an uncaught exception, a provider error, or a transport failure. Q-F exists so that every diagnostic has a cause and none are written with a null."
+    kind: "error"
+    appliesTo: ["pre-dispatch", "implement", "verify", "commit", "merge", "auditor"]
+    detection:
+      kind: "structured"
+      matches: ["UnhandledException", "UncaughtException"]
+    handler:
+      kind: "escalate-to-l3"
+      note: "No specific failure mode matched. Read the diagnostic's stderr digest before re-dispatching."
+    retryBudget: 0

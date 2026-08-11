@@ -52,6 +52,7 @@ import { loadPlan } from "./dag-synthesizer.js";
 // uses Node ESM (relative path is correct in the monorepo).
 // @ts-ignore -- tsc rejects cross-package imports under rootDir.
 import { extractAuditFindings, type AuditFinding } from "../../../../pi-subagents/src/agent-runner.js";
+import { readAllDiagnostics, DIAGNOSTICS_RELDIR } from "../../../../pi-subagents/src/diagnostic.js";
 
 const COMPLETE_OBSERVATION = Type.Object({
   verdict: Type.Union([Type.Literal("PASS"), Type.Literal("REVISE"), Type.Literal("REJECT")]),
@@ -345,6 +346,7 @@ async function initAudit(
       phases,
       phase_guidance: phaseGuidance,
       workflow_summary: workflowSummary,
+      failure_mode_stats: gatherFailureModeStats(cwd, plan.id),
       inline_findings: inlineFindings,
       tasks_to_audit: tasks.map(t => ({
         id: t.id,
@@ -682,6 +684,22 @@ export interface WorkflowAuditSummary {
   blockingTasks: string[];
 }
 
+/** One failure-catalog id and how often it fired in this workflow. */
+export interface FailureModeStat {
+  id: string;
+  count: number;
+  /** ISO8601 `emittedAt` of the most recent diagnostic in this bucket. */
+  latest: string;
+}
+
+/** GC-2026-044 design §5.6 — failure-mode rollup for a workflow. */
+export interface FailureModeStats {
+  total: number;
+  /** Buckets sorted by count desc, then id, so the report is stable. */
+  byCause: FailureModeStat[];
+  byOutcome: Record<string, number>;
+}
+
 /**
  * Parse an auditor report (markdown) into a structured summary.
  * Pure function — caller handles file I/O.
@@ -741,6 +759,49 @@ export function aggregateTaskAudits(
 		workflowReady: blockingTasks.length === 0,
 		blockingTasks,
 	};
+}
+
+/**
+ * GC-2026-044 mechanism 1.3/1.4 (design §5.6): roll up the diagnostics that
+ * sub-agents wrote during this workflow, bucketed by the failure-mode `cause`.
+ *
+ * The two mechanisms share one vocabulary — `DiagnosticJsonV1.cause` is a
+ * failure-catalog id — which is what makes this aggregation possible at all.
+ * Before it, a failed dispatch left only a string in a tool result, so "which
+ * failure mode dominates this workflow?" was not an answerable question.
+ *
+ * Read-only and never throws: a corrupt or absent diagnostics directory yields
+ * empty stats rather than failing the audit that came to inspect it.
+ */
+export function gatherFailureModeStats(
+	cwd: string,
+	dagId?: string,
+): FailureModeStats {
+	const all = readAllDiagnostics(join(cwd, DIAGNOSTICS_RELDIR));
+	const scoped =
+		dagId === undefined
+			? all
+			: all.filter((d) => d.context?.dagId === dagId);
+
+	const buckets = new Map<string, { count: number; latest: string }>();
+	const byOutcome: Record<string, number> = {};
+
+	for (const d of scoped) {
+		const prior = buckets.get(d.cause);
+		if (prior === undefined) {
+			buckets.set(d.cause, { count: 1, latest: d.emittedAt });
+		} else {
+			prior.count++;
+			if (d.emittedAt > prior.latest) prior.latest = d.emittedAt;
+		}
+		byOutcome[d.outcome] = (byOutcome[d.outcome] ?? 0) + 1;
+	}
+
+	const byCause = [...buckets.entries()]
+		.map(([id, v]) => ({ id, count: v.count, latest: v.latest }))
+		.sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
+
+	return { total: scoped.length, byCause, byOutcome };
 }
 
 /**
