@@ -745,3 +745,49 @@ Plan your command budget accordingly.
 
 // The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
 void BASH_TIMEOUT_SECTION;
+
+// =============================================================================
+// GC-2026-044 T2: Previous-failure context (mechanism 1.3 + 1.4)
+// =============================================================================
+// When a task is re-dispatched after a failure, the host resolves the prior
+// `.pi/diagnostics/<dispatchId>.json` and its catalog mode, then renders this
+// section into the retry prompt. The agent sees WHAT failed in the catalog's
+// vocabulary instead of re-deriving it from a transcript it no longer has.
+//
+// Appended in the same `const` + `void` shape as every other section in this
+// file — the canonical DEVELOPER_PROMPT above is untouched.
+const PREVIOUS_FAILURE_SECTION = `
+## Previous failure
+
+This dispatch is a RETRY. The previous attempt at this task failed and the
+host recorded a diagnostic. Its classification, from the failure-mode
+catalog (\`pi-subagents/src/data/failure-modes.v1.yaml\`):
+
+- **mode**: \`{mode_id}\` — {mode_name}
+- **class**: {mode_kind} (\`spec\` = a contract you missed; \`error\` = infrastructure)
+- **what it means**: {mode_description}
+- **remediation the catalog prescribes**: {handler_note}
+- **retry budget left**: {retry_budget_left}
+
+### Evidence from the failed attempt
+
+\`\`\`
+{stderr_digest}
+\`\`\`
+
+### How to use this
+
+1. **Do not re-run the whole task from scratch.** Read the evidence first and
+   form a hypothesis about the specific cause.
+2. **Honor the prescribed remediation.** The catalog's \`handler\` is the
+   host's decision, not a suggestion — the retry budget decrements whatever
+   you decide, so a repeat of the same failure burns the task.
+3. **If the mode is \`escalate-to-l3\`**, do NOT retry the same approach.
+   State the blocker via <ASK> and stop.
+4. **If the evidence contradicts the classification**, say so explicitly in
+   your final report. A mis-classified failure is a catalog bug worth fixing
+   and the orchestrator can only see it if you name it.
+`;
+
+// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
+void PREVIOUS_FAILURE_SECTION;
