@@ -1,0 +1,126 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://github.com/vanpipy/sages/pi-subagents/failure-modes.v1.schema.json",
+	"title": "Failure-mode catalog v1",
+	"description": "GC-2026-044 mechanism 1.3 (design §5.2). Validates both the shipped default catalog and any project override deep-merged on top of it. Override documents may carry partial mode entries (id plus the fields being overridden), so `modes` items require only `id` here; the MERGED catalog is what gets validated for completeness by FailureCatalog.load().",
+	"type": "object",
+	"additionalProperties": false,
+	"required": ["schemaVersion", "modes"],
+	"properties": {
+		"schemaVersion": { "const": "v1" },
+		"modes": {
+			"type": "array",
+			"items": { "$ref": "#/$defs/modeEntry" }
+		}
+	},
+	"$defs": {
+		"stage": {
+			"enum": [
+				"pre-dispatch",
+				"worktree-provision",
+				"implement",
+				"verify",
+				"commit",
+				"merge",
+				"auditor"
+			]
+		},
+		"detection": {
+			"oneOf": [
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["kind", "pattern", "against"],
+					"properties": {
+						"kind": { "const": "regex" },
+						"pattern": { "type": "string", "minLength": 1 },
+						"flags": { "type": "string", "pattern": "^[dgimsuvy]*$" },
+						"against": { "enum": ["stderr", "verifier-output", "free-text"] },
+						"negate": {
+							"type": "boolean",
+							"description": "When true the mode fires if the pattern is ABSENT. Required to express design §5.3's 'Conventional Commits prefix absent' rule. Negated detections never fall back to another field: the field named by `against` must be present, or the mode does not apply."
+						}
+					}
+				},
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["kind", "matches"],
+					"properties": {
+						"kind": { "const": "structured" },
+						"matches": {
+							"type": "array",
+							"minItems": 1,
+							"items": { "type": "string", "minLength": 1 }
+						}
+					}
+				}
+			]
+		},
+		"handler": {
+			"oneOf": [
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["kind", "note"],
+					"properties": {
+						"kind": { "const": "noop" },
+						"note": { "type": "string", "minLength": 1 }
+					}
+				},
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["kind", "retryBudget", "feedbackTemplate"],
+					"properties": {
+						"kind": { "const": "retry-subagent" },
+						"retryBudget": { "type": "integer", "minimum": 0 },
+						"feedbackTemplate": { "type": "string", "minLength": 1 }
+					}
+				},
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["kind", "note"],
+					"properties": {
+						"kind": { "const": "escalate-to-l3" },
+						"note": { "type": "string", "minLength": 1 }
+					}
+				},
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["kind", "note"],
+					"properties": {
+						"kind": { "const": "mark-stalled" },
+						"note": { "type": "string", "minLength": 1 }
+					}
+				}
+			]
+		},
+		"modeEntry": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id"],
+			"properties": {
+				"id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+				"name": { "type": "string", "minLength": 1 },
+				"description": { "type": "string", "minLength": 1 },
+				"kind": { "enum": ["spec", "error"] },
+				"appliesTo": {
+					"type": "array",
+					"minItems": 1,
+					"items": { "$ref": "#/$defs/stage" }
+				},
+				"detection": { "$ref": "#/$defs/detection" },
+				"handler": { "$ref": "#/$defs/handler" },
+				"retryBudget": { "type": "integer", "minimum": 0 },
+				"supersedes": {
+					"type": "array",
+					"items": { "type": "string", "minLength": 1 }
+				},
+				"enabled": { "type": "boolean" }
+			}
+		}
+	}
+}
