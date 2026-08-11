@@ -34,6 +34,10 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
+import {
+	verifyWorktreeOwnership,
+	WorktreeOwnershipMismatch,
+} from "./worktree-ownership.js";
 
 // `promisify(execFile)`'s overload signatures don't expose `stdio` (it's only
 // on the callback-typed overloads), but at runtime it's accepted. Cast the
@@ -93,6 +97,7 @@ export function createWorktree(
 	// Verify we're in a git repo with at least one commit (HEAD must exist)
 	let baseSha: string;
 	let subdir: string;
+	let expectedRepoRoot: string;
 	try {
 		execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
 			cwd,
@@ -118,6 +123,7 @@ export function createWorktree(
 			.toString()
 			.trim();
 		subdir = relative(realpathSync(topLevel), realpathSync(cwd));
+		expectedRepoRoot = realpathSync(topLevel);
 	} catch {
 		return undefined;
 	}
@@ -133,13 +139,17 @@ export function createWorktree(
 			stdio: "pipe",
 			timeout: 30000,
 		});
+		verifyWorktreeOwnership(worktreePath, expectedRepoRoot);
 		return {
 			path: worktreePath,
 			branch,
 			baseSha,
 			workPath: subdir ? join(worktreePath, subdir) : worktreePath,
 		};
-	} catch {
+	} catch (error) {
+		// An ownership mismatch is a safety refusal, not a recoverable git
+		// provisioning failure. Preserve the typed error for the caller.
+		if (error instanceof WorktreeOwnershipMismatch) throw error;
 		// If worktree creation fails, return undefined (agent runs in normal cwd)
 		return undefined;
 	}
@@ -949,6 +959,7 @@ export function createManagedWorktree(
 		true,
 		"create",
 	);
+	verifyWorktreeOwnership(path, realRoot);
 	runGitIn(["checkout", "-B", branch], path, true, true, "create");
 
 	// Persist identity marker so subsequent reuse re-enters deterministically.
@@ -1250,6 +1261,8 @@ function reuseManagedWorktree(args: {
 				`Pass a matching base_ref (e.g. base_ref: "${marker.baseRef}"), or remove the worktree and re-provision.`,
 		);
 	}
+
+	verifyWorktreeOwnership(path, repoRoot);
 
 	// 2. Reuse contract: the branch on disk MUST still point at the recorded
 	//    baseSha AND be on the recorded branch name. Any of the following is
