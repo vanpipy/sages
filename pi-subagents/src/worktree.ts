@@ -33,6 +33,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
 import { promisify } from "node:util";
+import { writeDiagnostic } from "./diagnostic.js";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
 
 // `promisify(execFile)`'s overload signatures don't expose `stdio` (it's only
@@ -800,6 +801,53 @@ export function branchName(dag: string, worktree: string): string {
  *     expects
  */
 export function createManagedWorktree(
+	opts: CreateManagedWorktreeOptions,
+): ManagedWorktree {
+	try {
+		return createManagedWorktreeInner(opts);
+	} catch (err) {
+		noteWorktreeOwnershipMismatch(err, opts);
+		throw err;
+	}
+}
+
+/**
+ * GC-2026-044 mechanism 1.4 (design §6.4.2): a foreign-worktree refusal is the
+ * one failure whose forensic detail is gone the instant the process exits —
+ * the operator needs to know WHICH gitdir it pointed at, hours later.
+ *
+ * Matches on `err.name` instead of importing `WorktreeOwnershipMismatch`.
+ * The class is owned by the sibling task that adds the guard
+ * (`worktree-ownership.ts`); a name-string match lets the two land in either
+ * order and keeps this module free of a new import edge.
+ */
+function noteWorktreeOwnershipMismatch(
+	err: unknown,
+	opts: CreateManagedWorktreeOptions,
+): void {
+	if ((err as { name?: string } | null)?.name !== "WorktreeOwnershipMismatch") {
+		return;
+	}
+	// writeDiagnostic never throws for I/O; guard anyway so a diagnostic
+	// problem can never mask the ownership error we are re-throwing.
+	try {
+		writeDiagnostic({
+			dispatchId: `${opts.dag}-${opts.worktree}-worktree`,
+			context: { dagId: opts.dag, taskId: opts.worktree },
+			subagentType: "worktree-provision",
+			outcome: "error",
+			cause: "worktree-ownership-mismatch",
+			detail: (err as Error).message,
+			evidence: { stderrDigest: (err as Error).message },
+			cwd: opts.repoRoot,
+			catalogCwd: opts.repoRoot,
+		});
+	} catch {
+		/* the ownership error is the one that matters */
+	}
+}
+
+function createManagedWorktreeInner(
 	opts: CreateManagedWorktreeOptions,
 ): ManagedWorktree {
 	// GC-2026-032: this is the hottest orchestrator dispatch path — every
