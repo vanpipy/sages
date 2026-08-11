@@ -113,6 +113,19 @@ modes:
       note: "Sub-agent hit the hard turn limit. Re-dispatch with a narrower brief or a larger budget."
     retryBudget: 0
 
+  - id: "worktree-concurrency-cap-reached"
+    name: "Worktree concurrency gate refused dispatch"
+    description: "Mechanism 1.1's claimWorktreeLease refused a new claim because the per-repo live-lease count is at or above the configured cap. The dispatch never started; no work was committed."
+    kind: "error"
+    appliesTo: ["worktree-provision"]
+    detection:
+      kind: "structured"
+      matches: ["WorktreeConcurrencyGateRefused"]
+    handler:
+      kind: "mark-stalled"
+      note: "Operator decides: raise the cap, wait for in-flight leases to release, or run the rejected task with bypass=true (emits a stderr warning, audit shows REVISE)."
+    retryBudget: 0
+
   - id: "infra-unhandled"
     name: "Unhandled infrastructure failure"
     description: "The catch-all for an error with no more specific mode: an uncaught exception, a provider error, or a transport failure. Q-F exists so that every diagnostic has a cause and none are written with a null."
