@@ -376,6 +376,110 @@ Each stage gates the next via `depends_on`. The DAG's `batch: N`
 field encodes dependency order — for parallel work, multiple tasks
 share a batch number.
 
+## MANDATORY TERMINAL YAML BLOCK SURFACE
+
+Every dispatch of `developer`, `auditor`, `Explore`, `Plan`,
+`git-expert`, or `merger` MUST terminate its final assistant message
+with the canonical yaml block below. This is not optional — omission
+is the most common castration finding that has dropped workflow
+audit scores by ~50 points in GC-2026-044 and GC-2026-045, and forces
+the orchestrator_audit verdict into `REVISE` even when the substance
+of the work is passing.
+
+### Why
+
+`orchestrator_audit` parses each task's final assistant message
+mechanically (`extractStructuredOutput`) to certify the verdict. A
+prose-only summary cannot be parsed; the audit applies a castration
+finding that lowers the score and prevents promotion to `PASS`. The
+yaml block is the lingua franca that survives a developer sub-agent
+running 17+ minutes, an auditor one running 30+ minutes, or any
+long-running dispatch with multiple RED→GREEN→REFACTOR cycles.
+
+### The canonical block
+
+Every final assistant message MUST end with this exact fenced yaml
+block (named fields, with the listed status enum). The block must
+appear AFTER any prose summary, AFTER any code-fenced samples, and
+immediately before the message ends.
+
+```yaml
+status: completed | blocked | partial | needs-info
+deliverables:
+  files_changed: [<list of paths this task created or modified>]
+  commits: [<list of commit SHA + subject, in chronological order>]
+  tests_added: [<list of test paths + case counts where applicable>]
+test_results:
+  pass: <integer>
+  fail: <integer>
+  fail_details: [<list of failing test names + 1-line reason>]
+open_questions:
+  - <list of decisions needed from L3 / user; empty list if none>
+handoff_for_next_task:
+  - <list of notes for the downstream task, or empty list if none>
+```
+
+### Field semantics
+
+| Field | Required | Semantics |
+|---|---|---|
+| `status` | yes | One of: `completed` (task fully done), `blocked` (cannot proceed, escalate to L3), `partial` (some goals met, others deferred), `needs-info` (waiting on user/L3 input). The orchestrator_audit map-reduces `completed` → CERTIFIED, anything else → NOT-CERTIFIED. |
+| `deliverables.files_changed` | yes | Relative-to-repo-root paths. Empty list is valid (`[]`) only if `status: completed` and the task was a no-op (e.g. pure read/inspect). |
+| `deliverables.commits` | yes | `<sha>` or `<sha> <subject>`. Empty list only if the task does not commit. |
+| `deliverables.tests_added` | no | Convention; recommended when adding tests. |
+| `test_results.pass` | yes (when applicable) | Integer. `0` is valid when the task added no tests. |
+| `test_results.fail` | yes (when applicable) | Integer. Must equal zero for `status: completed`. |
+| `test_results.fail_details` | required when `fail > 0` | One-line per failing test. |
+| `open_questions` | yes (may be empty list) | If non-empty, the L3 must read this list. |
+| `handoff_for_next_task` | no | Conventions guide. Empty list when the task has no successor. |
+
+### Bad vs good examples
+
+**Bad** (prose-only — will be flagged as castration):
+
+> I ran the tests and they pass. The implementation is at
+> `src/foo.ts`. Heads-up: the failure was caused by missing imports.
+> Should be merged shortly.
+
+**Good** (yaml block, audit-tool-parseable):
+
+> Summary: ... [prose explanation, observation details, etc]
+>
+> ```yaml
+> status: completed
+> deliverables:
+>   files_changed: [src/foo.ts, src/bar.ts]
+>   commits: ["abc1234 feat(foo): add baz"]
+>   tests_added: [test/foo.test.ts (3 cases)]
+> test_results:
+>   pass: 3
+>   fail: 0
+>   fail_details: []
+> open_questions: []
+> handoff_for_next_task:
+>   - "T2: verify with auditor — see commit abc1234"
+> ```
+
+### L3 dispatcher responsibilities
+
+The L3 main agent's dispatch prompt template MUST include the
+canonical yaml block verbatim (above). When an L3 prompt omits the
+template, the L3 should reproduce the schema from this section
+rather than dispatching without the surface instruction. Sub-agents
+that hit the default turn envelope and produce a long turn are most
+likely to omit the trailing yaml — including it explicitly in the
+prompt reduces the occurrence rate.
+
+### What this section is NOT
+
+- This is not a castration contract for the OPERATOR (`L3 main
+  agent`); operators remain free to write prose-only responses.
+- This is not a castration contract for short-form dispatch tools
+  (`Read`, `Grep`, `Glob`, etc.); only dispatch agents listed in the
+  status enum above emit the block.
+- This is not a castration contract for LLM-managed ad-hoc sub-agents
+  (Plan / Brainstorm sessions); those are non-dispatch tooling.
+
 ## Git Expert — when to dispatch and how
 
 The orchestrator does not own Git archaeology. Symptom matching → dispatch
