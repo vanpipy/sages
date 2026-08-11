@@ -68,9 +68,8 @@ describe("run-controller: renderBashTimeoutSection", () => {
 	});
 
 	it("renders each bucket's value (in seconds) from DEFAULT_BUCKET_TIMEOUTS_MS", async () => {
-		const { DEFAULT_BUCKET_TIMEOUTS_MS, renderBashTimeoutSection } = await import(
-			"../src/run-controller.js"
-		);
+		const { DEFAULT_BUCKET_TIMEOUTS_MS, renderBashTimeoutSection } =
+			await import("../src/run-controller.js");
 		const text = renderBashTimeoutSection();
 		// Each bucket value is divided by 1000 to render seconds.
 		expect(text).toContain(`${DEFAULT_BUCKET_TIMEOUTS_MS.read / 1000}s`);
@@ -90,9 +89,8 @@ describe("run-controller: renderBashTimeoutSection", () => {
 	});
 
 	it("drift test: mutating DEFAULT_BUCKET_TIMEOUTS_MS.read changes the rendered output", async () => {
-		const { DEFAULT_BUCKET_TIMEOUTS_MS, renderBashTimeoutSection } = await import(
-			"../src/run-controller.js"
-		);
+		const { DEFAULT_BUCKET_TIMEOUTS_MS, renderBashTimeoutSection } =
+			await import("../src/run-controller.js");
 		const originalRead = DEFAULT_BUCKET_TIMEOUTS_MS.read;
 		try {
 			// Mutate to a value that no hand-written text would contain.
@@ -110,9 +108,8 @@ describe("run-controller: renderBashTimeoutSection", () => {
 	});
 
 	it("drift test: mutating DEFAULT_BUCKET_TIMEOUTS_MS.network changes the rendered output", async () => {
-		const { DEFAULT_BUCKET_TIMEOUTS_MS, renderBashTimeoutSection } = await import(
-			"../src/run-controller.js"
-		);
+		const { DEFAULT_BUCKET_TIMEOUTS_MS, renderBashTimeoutSection } =
+			await import("../src/run-controller.js");
 		const originalNetwork = DEFAULT_BUCKET_TIMEOUTS_MS.network;
 		try {
 			DEFAULT_BUCKET_TIMEOUTS_MS.network = 8888;
@@ -147,15 +144,21 @@ describe("agent prompts: each calls renderBashTimeoutSection (source integration
 			// We assert this by checking the source does NOT contain the
 			// legacy hand-written bullets that pre-dated this GC.
 			const prompt = readPrompt(name);
-			expect(prompt).not.toMatch(/^- \*\*read\*\* \(cat \/ head \/ tail \/ less\): 5s timeout$/m);
-			expect(prompt).not.toMatch(/^- \*\*search\*\* \(grep \/ rg \/ awk \/ sed \/ find\): 10s timeout$/m);
+			expect(prompt).not.toMatch(
+				/^- \*\*read\*\* \(cat \/ head \/ tail \/ less\): 5s timeout$/m,
+			);
+			expect(prompt).not.toMatch(
+				/^- \*\*search\*\* \(grep \/ rg \/ awk \/ sed \/ find\): 10s timeout$/m,
+			);
 		});
 
 		it(`${name} source's BASH_TIMEOUT_SECTION references the rendered header`, () => {
 			// The source declares `const BASH_TIMEOUT_SECTION = ... renderBashTimeoutSection() ...`
 			// — proving the new file shape.
 			const prompt = readPrompt(name);
-			expect(prompt).toMatch(/BASH_TIMEOUT_SECTION\s*=[^;]*renderBashTimeoutSection\s*\([^)]*\)/);
+			expect(prompt).toMatch(
+				/BASH_TIMEOUT_SECTION\s*=[^;]*renderBashTimeoutSection\s*\([^)]*\)/,
+			);
 		});
 	}
 });
@@ -176,7 +179,10 @@ describe("agent prompts: each renders the runtime-current values via the functio
 			// The two together prove: prompt file uses the function AND the
 			// function output contains the runtime values — i.e., the prompt
 			// gets the right text.
-			expect(rendered.includes(expected) && prompt.includes("renderBashTimeoutSection()")).toBe(true);
+			expect(
+				rendered.includes(expected) &&
+					prompt.includes("renderBashTimeoutSection()"),
+			).toBe(true);
 		});
 	}
 });

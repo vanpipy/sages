@@ -25,7 +25,9 @@ const DEVELOPER_PROMPT = readFileSync(
 
 describe("subagent commit-discipline (GC-2026-038 T1)", () => {
 	it("T-CD-01: developer.ts contains the commit discipline section header", () => {
-		expect(DEVELOPER_PROMPT).toContain("Commit Discipline (commit-as-checkpoint)");
+		expect(DEVELOPER_PROMPT).toContain(
+			"Commit Discipline (commit-as-checkpoint)",
+		);
 	});
 
 	it("T-CD-02: every RED test ends with wip: <test> red", () => {
@@ -33,7 +35,9 @@ describe("subagent commit-discipline (GC-2026-038 T1)", () => {
 	});
 
 	it("T-CD-03: every GREEN test ends with feat: <test> green", () => {
-		expect(DEVELOPER_PROMPT).toMatch(/feat:\s*<test name> green|feat: <test> green/);
+		expect(DEVELOPER_PROMPT).toMatch(
+			/feat:\s*<test name> green|feat: <test> green/,
+		);
 	});
 
 	it("T-CD-04: 5 turns without a commit -> declare BLOCKED (escape hatch)", () => {

@@ -17,10 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-	createManagedWorktreeAsync,
-	runGitInAsync,
-} from "../src/worktree.js";
+import { createManagedWorktreeAsync, runGitInAsync } from "../src/worktree.js";
 
 // minimal git fixture
 
@@ -30,25 +27,32 @@ interface RepoFixture {
 	dispose(): void;
 }
 
-function execGitOrThrow(
-	args: string[],
-	options: { cwd: string },
-): string {
-	const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+function execGitOrThrow(args: string[], options: { cwd: string }): string {
+	const { execFileSync } =
+		require("node:child_process") as typeof import("node:child_process");
 	return execFileSync("git", args, {
 		cwd: options.cwd,
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 10_000,
-	}).toString().trim();
+	})
+		.toString()
+		.trim();
 }
 
 function makeRepoFixture(): RepoFixture {
 	const parent = mkdtempSync(join(tmpdir(), "pi-async-test-"));
 	const work = join(parent, "work");
 	const origin = join(parent, "origin.git");
-	const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
-	execFileSync("git", ["init", "--bare", "-q", "--initial-branch=main", origin], { stdio: "ignore" });
-	execFileSync("git", ["init", "-q", "--initial-branch=main", work], { stdio: "ignore" });
+	const { execFileSync } =
+		require("node:child_process") as typeof import("node:child_process");
+	execFileSync(
+		"git",
+		["init", "--bare", "-q", "--initial-branch=main", origin],
+		{ stdio: "ignore" },
+	);
+	execFileSync("git", ["init", "-q", "--initial-branch=main", work], {
+		stdio: "ignore",
+	});
 	execGitOrThrow(["config", "user.email", "fixture@pi-test"], { cwd: work });
 	execGitOrThrow(["config", "user.name", "Pi Test Fixture"], { cwd: work });
 	execGitOrThrow(["config", "commit.gpgsign", "false"], { cwd: work });
@@ -75,7 +79,11 @@ function makeRepoFixture(): RepoFixture {
 		dispose() {
 			if (disposed) return;
 			disposed = true;
-			try { rmSync(parent, { recursive: true, force: true }); } catch { /* tmp */ }
+			try {
+				rmSync(parent, { recursive: true, force: true });
+			} catch {
+				/* tmp */
+			}
 		},
 	};
 }
@@ -84,8 +92,12 @@ function makeRepoFixture(): RepoFixture {
 
 describe("worktree-async: runGitInAsync (GC-2026-035)", () => {
 	let fx: RepoFixture;
-	beforeEach(() => { fx = makeRepoFixture(); });
-	afterEach(() => { fx.dispose(); });
+	beforeEach(() => {
+		fx = makeRepoFixture();
+	});
+	afterEach(() => {
+		fx.dispose();
+	});
 
 	it("T-ASYNC-01: returns trimmed stdout identical to a direct git invocation", async () => {
 		const out = await runGitInAsync(["rev-parse", "HEAD"], fx.root);
@@ -119,8 +131,12 @@ describe("worktree-async: runGitInAsync (GC-2026-035)", () => {
 
 describe("worktree-async: createManagedWorktreeAsync (GC-2026-035)", () => {
 	let fx: RepoFixture;
-	beforeEach(() => { fx = makeRepoFixture(); });
-	afterEach(() => { fx.dispose(); });
+	beforeEach(() => {
+		fx = makeRepoFixture();
+	});
+	afterEach(() => {
+		fx.dispose();
+	});
 
 	it("T-ASYNC-03: provisions a worktree and returns the full ManagedWorktree shape", async () => {
 		const wt = await createManagedWorktreeAsync({

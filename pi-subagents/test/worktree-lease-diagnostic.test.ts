@@ -16,20 +16,19 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
 	rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-
+import { getFailureCatalog } from "../src/failure-catalog.js";
 import {
 	claimWorktreeLease,
 	leasePath,
 	WorktreeConcurrencyGateRefused,
 } from "../src/worktree-lease.js";
-import { getFailureCatalog } from "../src/failure-catalog.js";
 
 function fixtureRepo(name: string): string {
 	const root = mkdtempSync(join(tmpdir(), `sages-lease-diag-${name}-`));

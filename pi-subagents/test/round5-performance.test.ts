@@ -93,7 +93,9 @@ handoff_for_next_task: []
 			const messages = [
 				`\`\`\`yaml\nstatus: completed\ndeliverables:\n  files_changed: []\n  commits: ["abc"]\n  tests_added: []\ntest_results:\n  pass: 1\n  fail: 0\nopen_questions: []\nhandoff_for_next_task: []\n\`\`\``,
 				`Some prose.\n[checkpoint 5/200 turns, 1m] nothing. 0 commits. blocker: none.\n<ASK>What?</ASK>\n\n\`\`\`yaml\nstatus: blocked\ndeliverables:\n  files_changed: []\n  commits: []\n  tests_added: []\ntest_results:\n  pass: 0\n  fail: 0\nopen_questions: []\nhandoff_for_next_task: []\n\`\`\``,
-				`x `.repeat(1000) + "\n" + `\`\`\`yaml\nstatus: completed\ndeliverables:\n  files_changed: []\n  commits: ["abc"]\n  tests_added: []\ntest_results:\n  pass: 1\n  fail: 0\nopen_questions: []\nhandoff_for_next_task: []\n\`\`\``,
+				`x `.repeat(1000) +
+					"\n" +
+					`\`\`\`yaml\nstatus: completed\ndeliverables:\n  files_changed: []\n  commits: ["abc"]\n  tests_added: []\ntest_results:\n  pass: 1\n  fail: 0\nopen_questions: []\nhandoff_for_next_task: []\n\`\`\``,
 			];
 			for (const m of messages) {
 				extractAuditFindings(m, "");

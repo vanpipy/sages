@@ -42,9 +42,14 @@ Done.`;
 		const out = extractStructuredOutput(text);
 		expect(out).not.toBeNull();
 		expect(out!.status).toBe("completed");
-		expect(out!.deliverables.filesChanged).toEqual(["src/foo.ts", "test/foo.test.ts"]);
+		expect(out!.deliverables.filesChanged).toEqual([
+			"src/foo.ts",
+			"test/foo.test.ts",
+		]);
 		expect(out!.deliverables.commits).toEqual(["abc1234"]);
-		expect(out!.deliverables.testsAdded).toEqual(["test/foo.test.ts::does the thing"]);
+		expect(out!.deliverables.testsAdded).toEqual([
+			"test/foo.test.ts::does the thing",
+		]);
 		expect(out!.testResults.pass).toBe(5);
 		expect(out!.testResults.fail).toBe(0);
 		expect(out!.openQuestions).toEqual([]);
@@ -97,7 +102,11 @@ handoff_for_next_task: []
 		expect(out).not.toBeNull();
 		expect(out!.status).toBe("partial");
 		expect(out!.testResults.failDetails).toEqual([
-			{ file: "test/foo.test.ts", test: "edge case", message: "expected 0 got 1" },
+			{
+				file: "test/foo.test.ts",
+				test: "edge case",
+				message: "expected 0 got 1",
+			},
 		]);
 	});
 

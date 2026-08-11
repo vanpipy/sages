@@ -75,7 +75,9 @@ handoff_for_next_task: []
 		const findings = extractAuditFindings(message, "");
 		// Document: commits array with empty strings is NOT detected as
 		// completed_no_commits. The gate can't tell if it's malicious.
-		const completedNoCommits = findings.find((f) => f.rule === "completed_no_commits");
+		const completedNoCommits = findings.find(
+			(f) => f.rule === "completed_no_commits",
+		);
 		expect(completedNoCommits).toBeUndefined();
 	});
 
@@ -236,7 +238,8 @@ handoff_for_next_task: []
 
 	it("R4-11: 100 random YAML blocks — robustness", () => {
 		for (let i = 0; i < 100; i++) {
-			const status = i % 3 === 0 ? "completed" : i % 3 === 1 ? "blocked" : "partial";
+			const status =
+				i % 3 === 0 ? "completed" : i % 3 === 1 ? "blocked" : "partial";
 			const commits = i % 5 === 0 ? ["abc"] : [];
 			const message = `\`\`\`yaml
 status: ${status}

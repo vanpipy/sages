@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 
-import { writeDiagnostic, DiagnosticInvalid } from "./diagnostic.js";
+import { DiagnosticInvalid, writeDiagnostic } from "./diagnostic.js";
 
 export const DEFAULT_WORKTREE_CONCURRENCY_CAP = 3;
 export const DEFAULT_WORKTREE_CONCURRENCY_GATE_ENABLED = false;
@@ -246,7 +246,9 @@ export async function claimWorktreeLease(
 						.map(
 							(lease) =>
 								`${lease.consumer.dagId}/${lease.consumer.taskId}` +
-								(lease.consumer.worktreeId ? `/${lease.consumer.worktreeId}` : ""),
+								(lease.consumer.worktreeId
+									? `/${lease.consumer.worktreeId}`
+									: ""),
 						)
 						.join(", ")}`,
 				retryBudgetLeft: 0,
@@ -255,7 +257,11 @@ export async function claimWorktreeLease(
 			});
 		} catch (err) {
 			const message =
-				err instanceof DiagnosticInvalid ? err.message : err instanceof Error ? err.message : String(err);
+				err instanceof DiagnosticInvalid
+					? err.message
+					: err instanceof Error
+						? err.message
+						: String(err);
 			process.stderr.write(`[sages:gate-diagnostic-skip] ${message}\n`);
 		}
 		throw new WorktreeConcurrencyGateRefused(

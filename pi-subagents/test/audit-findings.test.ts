@@ -38,9 +38,7 @@ describe("extractAuditFindings (GC-2026-039)", () => {
 		const message = "I finished the task. No structured report here.";
 		const findings = extractAuditFindings(message);
 		expect(findings.length).toBeGreaterThan(0);
-		const missing = findings.find(
-			(f) => f.rule === "missing_yaml_block",
-		);
+		const missing = findings.find((f) => f.rule === "missing_yaml_block");
 		expect(missing).toBeDefined();
 		expect(missing!.severity).toBe("major");
 	});
@@ -59,9 +57,7 @@ open_questions: []
 handoff_for_next_task: []
 \`\`\``;
 		const findings = extractAuditFindings(message);
-		const violation = findings.find(
-			(f) => f.rule === "completed_no_commits",
-		);
+		const violation = findings.find((f) => f.rule === "completed_no_commits");
 		expect(violation).toBeDefined();
 		expect(violation!.severity).toBe("major");
 	});
@@ -80,9 +76,7 @@ open_questions: []
 handoff_for_next_task: []
 \`\`\``;
 		const findings = extractAuditFindings(message);
-		const violation = findings.find(
-			(f) => f.rule === "completed_no_commits",
-		);
+		const violation = findings.find((f) => f.rule === "completed_no_commits");
 		expect(violation).toBeUndefined();
 	});
 
@@ -176,7 +170,8 @@ open_questions:
 handoff_for_next_task: []
 \`\`\``;
 		// The task report surfaces the question word-for-word (substring match).
-		const taskReport = "Open question: What is the deadline default for auditor agent type?";
+		const taskReport =
+			"Open question: What is the deadline default for auditor agent type?";
 		const findings = extractAuditFindings(message, taskReport);
 		const violation = findings.find((f) => f.rule === "ask_unanswered");
 		expect(violation).toBeUndefined();
@@ -196,9 +191,7 @@ open_questions: []
 handoff_for_next_task: []
 \`\`\``;
 		const findings = extractAuditFindings(message);
-		const violation = findings.find(
-			(f) => f.rule === "blocked_without_reason",
-		);
+		const violation = findings.find((f) => f.rule === "blocked_without_reason");
 		expect(violation).toBeDefined();
 		expect(violation!.severity).toBe("minor");
 	});
@@ -219,9 +212,7 @@ open_questions:
 handoff_for_next_task: []
 \`\`\``;
 		const findings = extractAuditFindings(message);
-		const violation = findings.find(
-			(f) => f.rule === "blocked_without_reason",
-		);
+		const violation = findings.find((f) => f.rule === "blocked_without_reason");
 		expect(violation).toBeUndefined();
 	});
 

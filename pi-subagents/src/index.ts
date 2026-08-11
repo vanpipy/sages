@@ -77,9 +77,9 @@ import {
 } from "./profile.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
-import { resolveDeadlineMs } from "./settings.js";
 import {
 	applyAndEmitLoaded,
+	resolveDeadlineMs,
 	type SubagentsSettings,
 	saveAndEmitChanged,
 	type ToolDescriptionMode,
@@ -1808,7 +1808,8 @@ Terse command-style prompts produce shallow, generic work.
 							isolation,
 							managedWorktree,
 							invocation: agentInvocation,
-							network_allowed: (params as { network_allowed?: boolean }).network_allowed,
+							network_allowed: (params as { network_allowed?: boolean })
+								.network_allowed,
 							...bgCallbacks,
 						});
 					} catch (err) {
@@ -1963,7 +1964,8 @@ Terse command-style prompts produce shallow, generic work.
 							managedWorktree,
 							invocation: agentInvocation,
 							signal: mergedSignal,
-							network_allowed: (params as { network_allowed?: boolean }).network_allowed,
+							network_allowed: (params as { network_allowed?: boolean })
+								.network_allowed,
 							...fgCallbacks,
 						},
 						(fgAgentId) => {

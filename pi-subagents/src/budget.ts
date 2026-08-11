@@ -227,13 +227,15 @@ export class BudgetTracker {
 
 	/** Effective maxTurns: from runController when set, else from Budget. */
 	private effectiveMaxTurns(): number {
-		if (this.runController !== undefined) return this.runController.config.maxTurns;
+		if (this.runController !== undefined)
+			return this.runController.config.maxTurns;
 		return this.budget.maxTurns;
 	}
 
 	/** Effective maxMs: runController.config.deadlineMs when set, else Budget.maxMs. */
 	private effectiveMaxMs(): number {
-		if (this.runController !== undefined) return this.runController.config.deadlineMs;
+		if (this.runController !== undefined)
+			return this.runController.config.deadlineMs;
 		return this.budget.maxMs;
 	}
 
