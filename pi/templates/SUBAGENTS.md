@@ -91,17 +91,23 @@ modes above).
 | 1     | `Explore`            | pi-subagents built-in                | read, bash, grep, find, ls | Fast codebase search. Cheap, fast, **read-only** — inherits the parent registry's cheapest available model when dispatched without `model=`.        |
 | 2     | `Plan`               | pi-subagents built-in                | read | Planning Brief compiler; Haiku/minimal, foreground, 12-turn cap, no extensions/skills or inherited conversation. **Read-only** — never edits. |
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | read, bash, grep, find, ls, edit, write | Strict TDD implementer. Sonnet + high thinking. Host-managed worktree. |
-| 4     | `auditor`   | **shipped** (this repo)              | read, bash, grep, find, ls, aft_* | Evidence-based certifier. **Read-only** — re-runs commands, never modifies production code. |
+| 4     | `auditor`   | **shipped** (pi-subagents built-in) | read, bash, grep, find, ls, edit, write | Evidence-based certifier. Re-runs every verification_cmd; **read-only on production code by policy** — the `edit`/`write` tools are reserved for `.pi/orchestrator/audit-{task_id}.md`. |
+| 5     | `merger`     | **shipped** (pi-subagents built-in) | read, bash, grep, find, ls | Cross-workspace merge: reads both HANDOFF.md + diffs, classifies file overlap (clean / disjoint-hunk / hunk-conflict), produces one merge commit or escalates. Read-only on production code. |
+| 6     | `git-expert`  | **shipped** (pi-subagents built-in, GC-2026-030) | read, bash, grep, find, ls | Senior git operator: deep inspection, backtrack archaeology, worktree/branch/merge diagnostics, runnable git recipes for other subagents. Writes confined to `.pi/git-scratch-<task_id>-<suffix>/` (gitignored). Read-only on production code. |
 
-**Four default agents.** Two built-ins (`Explore`, `Plan`) ship from
-`@tintinweb/pi-subagents`. Two Sages agents (`developer`, `auditor`)
-are installed by sages (`developer` is a Phase A alias of itself — it
-inherits its identity from `~/.pi/agent/agents/` and is the canonical
-strict-TDD implementer; `auditor` is the canonical evidence certifier)
-into `~/.pi/agent/agents/`. Don't re-ship `Explore` / `Plan` —
-overriding with a project-specific copy brings no behaviour change.
-Override them only when project-specific rules are needed (drop a
-`.md` of the same name into `agents/`).
+**Six default agents**, all built into pi-subagents as of GC-2026-030.
+All six share the same `extensions: [aft, pi-mcp-adapter, pi-magic-context]`
+so they reach for the same indexed semantic tools; `developer` and
+`auditor` also carry `edit`/`write` (developer for commits, auditor
+for the audit report only). The four read-only agents (`Explore`,
+`Plan`, `merger`, `git-expert`) use `builtinToolNames: READ_ONLY_TOOLS`
+— no `edit`/`write` available at all.
+
+Don't re-ship any of these in `~/.pi/agent/agents/` — they all ship
+built-in (the templates directory `pi/templates/agents/` is empty as
+of Phase A/B DAG-2026-011). Override them only when project-specific
+rules are needed — drop a `.md` of the same name into
+`~/.pi/agent/agents/` (global) or `.pi/agents/` (project).
 
 ## Dispatch Examples
 
@@ -318,11 +324,14 @@ Agent({ ..., prompt: "git add X && git commit -m 'A'", run_in_background: true }
 Agent({ ..., prompt: "git add Y && git commit -m 'B'", run_in_background: true })
 Agent({ ..., prompt: "git add Z && git commit -m 'C'", run_in_background: true })
 // second and third commits fail (HEAD moved) or produce non-linear history
+```
+
 ```ts
 // ✓ DO — serialize when commits chain
 Agent({ ..., prompt: "git commit A" })  // foreground; wait for SHA
 Agent({ ..., prompt: "git commit B using parent <SHA-A>" })  // chain
 Agent({ ..., prompt: "git commit C using parent <SHA-B>" })  // chain
+```
 
 Other serial-required patterns:
 - Multiple edits to the **same file** (working tree race)

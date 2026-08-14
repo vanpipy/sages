@@ -272,7 +272,9 @@ hard-mode toggle, no escape hatch, and no path gate. The main
 agent decides how to route work based on its own task-count
 assessment; nothing is blocked. For session-startup details and
 the tool warmup that always fires first, see the **Setup**
-section above.
+section above. For the full policy — what soft mode does,
+recommended subagents, and how it is implemented — see
+**Soft Mode (active)** below.
 ---
 
 ## Action Priority
