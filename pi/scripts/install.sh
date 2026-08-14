@@ -3,18 +3,28 @@
 # Four Sages Installation Script for pi
 # Installs to ~/.pi/packages/sages
 #
-# Also installs pi-codebase-memory for codebase indexing/search,
-# and pi-magic-context — CortexKit's persistent memory + context layer.
+# This script owns the full Sages extension stack on Linux/macOS:
 #
-# Note: AFT (pi-code-intel via @cortexkit/aft-pi) is NOT auto-installed.
-# Binary provisioning is owned by the AFT team; users run
-#     npx @cortexkit/aft@latest setup --harness pi
-# manually. pi/templates/aft.jsonc ships as a reference template the
-# user can copy to ~/.config/cortexkit/aft.jsonc after installation.
+#   Local-peer (file-copy) extensions:
+#     sages                → ~/.pi/packages/sages
+#     pi-codebase-memory   → ~/.pi/packages/pi-codebase-memory
+#     pi-subagents         → ~/.pi/packages/pi-subagents
+#
+#   npm-installed extensions (--prefix ~/.pi/agent/npm):
+#     pi-mcp-adapter             → npm:pi-mcp-adapter
+#     @cortexkit/pi-magic-context → CortexKit's cross-session memory layer
+#     @davecodes/pi-routines     → scheduled + event-driven routines
+#
+#   Manual-only carve-out (intentionally NOT auto-installed):
+#     AFT (npm:@cortexkit/aft-pi) — binary provisioning is owned by the
+#     AFT team; users run
+#         npx @cortexkit/aft@latest setup --harness pi
+#     manually. pi/templates/aft.jsonc ships as a reference template the
+#     user can copy to ~/.config/cortexkit/aft.jsonc after installation.
 #
 # Selective install options:
-#   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates)
+#   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates, SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -117,8 +127,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install sages source files (still re-clones; skip pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates)"
+  echo "  --sages-only       Only install sages source files (still re-clones; skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -1120,10 +1130,214 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
+# pi-mcp-adapter — MCP (Model Context Protocol) server adapter for pi
+#
+# Mirrors the install_pi_magic_context npm-install pattern. The
+# `@napi-rs/keyring` native dep compiles via node-gyp on install; the
+# `--ignore-scripts` flag matches magic-context's onnx-postinstall skip
+# (used here for parity and to keep the install offline-safe). If the
+# user later needs OAuth credential storage, they can reinstall without
+# --ignore-scripts to build the native binary.
+# ────────────────────────────────────────────────────────────
+
+PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
+PI_MCP_ADAPTER_NODE_MODULES_DIR="$PI_DIR/agent/npm/node_modules/pi-mcp-adapter"
+
+is_pi_mcp_adapter_installed() {
+  # Auto-recovery invariant (mirrors is_pi_codebase_memory_installed):
+  # require BOTH settings.json registration AND node_modules dir on disk
+  # so a partial install (settings.json registered but files missing)
+  # re-triggers install instead of silently no-op'ing.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+  python3 -c "
+import json, os, sys
+try:
+    d = json.load(open('$settings'))
+    pkg = '$PI_MCP_ADAPTER_PKG'
+    registered = any(p == pkg or p.endswith('/pi-mcp-adapter') for p in d.get('packages', []))
+    if registered and os.path.isdir('$PI_MCP_ADAPTER_NODE_MODULES_DIR'):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_mcp_adapter() {
+  echo "==> Installing pi-mcp-adapter..."
+
+  if is_pi_mcp_adapter_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-mcp-adapter already installed (use --force to reinstall)"
+    return 0
+  fi
+
+  if [[ "${FORCE:-false}" == true ]] && is_pi_mcp_adapter_installed; then
+    echo "  Force-reinstall: removing previous pi-mcp-adapter first"
+    uninstall_pi_mcp_adapter
+  fi
+
+  if command -v pi &>/dev/null; then
+    echo "  Installing pi-mcp-adapter via npm (skipping postinstall scripts)..."
+    # cd to ${TMP_DIR:-/tmp} to match the magic-context pattern; --prefix
+    # governs the install location so cwd is incidental.
+    (cd "${TMP_DIR:-/tmp}" && \
+      npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_MCP_ADAPTER_PKG" 2>&1 | tail -3) || {
+      echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_MCP_ADAPTER_PKG' manually"
+    }
+
+    # Register in settings.json (matches the local-peer pattern).
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_MCP_ADAPTER_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if not any(p == pkg or p.endswith('/pi-mcp-adapter') for p in d.get('packages', [])):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+  else
+    echo "  'pi' command not found; user must install manually"
+  fi
+
+  echo "  pi-mcp-adapter installed"
+}
+
+uninstall_pi_mcp_adapter() {
+  echo "==> Uninstalling pi-mcp-adapter..."
+
+  # Strip from settings.json (handles npm form + any hypothetical local-fork path).
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    new_pkgs = [p for p in pkgs if p != 'npm:pi-mcp-adapter' and not p.endswith('/pi-mcp-adapter')]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open('$settings', 'w'), indent=2)
+        print('  Removed pi-mcp-adapter from settings.json')
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null || true
+
+  # Remove installed package files (best-effort).
+  if [[ -d "$PI_MCP_ADAPTER_NODE_MODULES_DIR" ]]; then
+    rm -rf "$PI_MCP_ADAPTER_NODE_MODULES_DIR"
+    echo "  Removed $PI_MCP_ADAPTER_NODE_MODULES_DIR"
+  fi
+
+  echo "  pi-mcp-adapter uninstalled"
+}
+
+# ────────────────────────────────────────────────────────────
+# pi-routines (@davecodes) — scheduled + event-driven routines
+#
+# Mirrors the install_pi_magic_context npm-install pattern. Pure JS
+# (no native deps — just nanoid + typebox), so --ignore-scripts is
+# purely a network-safety / parity choice rather than a workaround
+# for a failing postinstall. The cli-style install matches the rest
+# of the npm-peer stack.
+# ────────────────────────────────────────────────────────────
+
+PI_ROUTINES_PKG="npm:@davecodes/pi-routines"
+PI_ROUTINES_NODE_MODULES_DIR="$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines"
+
+is_pi_routines_installed() {
+  # Auto-recovery invariant (mirrors is_pi_codebase_memory_installed):
+  # require BOTH settings.json registration AND node_modules dir on disk.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+  python3 -c "
+import json, os, sys
+try:
+    d = json.load(open('$settings'))
+    pkg = '$PI_ROUTINES_PKG'
+    registered = any(p == pkg or p == 'npm:@davecodes/pi-routines' or p.endswith('/pi-routines') or p.endswith('/@davecodes/pi-routines') for p in d.get('packages', []))
+    if registered and os.path.isdir('$PI_ROUTINES_NODE_MODULES_DIR'):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_routines() {
+  echo "==> Installing @davecodes/pi-routines..."
+
+  if is_pi_routines_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  @davecodes/pi-routines already installed (use --force to reinstall)"
+    return 0
+  fi
+
+  if [[ "${FORCE:-false}" == true ]] && is_pi_routines_installed; then
+    echo "  Force-reinstall: removing previous @davecodes/pi-routines first"
+    uninstall_pi_routines
+  fi
+
+  if command -v pi &>/dev/null; then
+    echo "  Installing @davecodes/pi-routines via npm..."
+    (cd "${TMP_DIR:-/tmp}" && \
+      npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_ROUTINES_PKG" 2>&1 | tail -3) || {
+      echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_ROUTINES_PKG' manually"
+    }
+
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_ROUTINES_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if not any(p == pkg or p == 'npm:@davecodes/pi-routines' or p.endswith('/pi-routines') or p.endswith('/@davecodes/pi-routines') for p in d.get('packages', [])):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+  else
+    echo "  'pi' command not found; user must install manually"
+  fi
+
+  echo "  @davecodes/pi-routines installed"
+}
+
+uninstall_pi_routines() {
+  echo "==> Uninstalling @davecodes/pi-routines..."
+
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    new_pkgs = [p for p in pkgs if p != 'npm:@davecodes/pi-routines' and not p.endswith('/pi-routines') and not p.endswith('/@davecodes/pi-routines')]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open('$settings', 'w'), indent=2)
+        print('  Removed @davecodes/pi-routines from settings.json')
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null || true
+
+  if [[ -d "$PI_ROUTINES_NODE_MODULES_DIR" ]]; then
+    rm -rf "$PI_ROUTINES_NODE_MODULES_DIR"
+    echo "  Removed $PI_ROUTINES_NODE_MODULES_DIR"
+  fi
+
+  echo "  @davecodes/pi-routines uninstalled"
+}
+
+# ────────────────────────────────────────────────────────────
 # 模式 1:全量安装(默认)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-codebase-memory + pi-magic-context + 4-agent subagent pipeline..."
+  echo "==> Installing sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + 4-agent subagent pipeline..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1141,6 +1355,12 @@ install() {
 
   # Install pi-magic-context (cross-session memory + context layer)
   install_pi_magic_context || true
+
+  # Install pi-mcp-adapter (MCP server adapter)
+  install_pi_mcp_adapter || true
+
+  # Install @davecodes/pi-routines (scheduled + event-driven routines)
+  install_pi_routines || true
 
   # Install pi-codebase-memory sage peer (file copy from TMP_DIR/pi-codebase-memory + settings.json register).
   # Old design had two steps (install_pi_codebase_memory + install_pi_codebase_memory_files); merged into one
@@ -1187,7 +1407,7 @@ install() {
 # 模式 2:仅更新 sages(跳过 pi-codebase-memory 和 SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates, skip SYSTEM.md)..."
 
   # Pre-flight: pi 仍然需要(sages 是 pi extension)
   install_pi_if_needed
@@ -1200,8 +1420,8 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_codebase_memory / install_pi_magic_context / install_pi_subagents / install_system_prompt
-  echo "  (skipped: pi-codebase-memory, pi-magic-context, pi-subagents, subagent templates, SYSTEM.md)"
+  # 显式不调用 install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_routines / install_pi_subagents / install_system_prompt
+  echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1211,10 +1431,10 @@ install_sages_only() {
 # 模式 3:仅更新 SYSTEM.md(跳过 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, subagent templates)..."
+  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates)..."
   # 不需要 git / pi —— SYSTEM.md 是独立 markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-codebase-memory, subagent templates)"
+  echo "  (skipped: sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1224,7 +1444,7 @@ install_system_only() {
 # 卸载(同时移除 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-codebase-memory + pi-magic-context + 4-agent subagent pipeline..."
+  echo "==> Uninstalling sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + 4-agent subagent pipeline..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1244,6 +1464,12 @@ uninstall() {
 
   # Uninstall pi-magic-context (cross-session memory layer)
   uninstall_pi_magic_context
+
+  # Uninstall pi-mcp-adapter (MCP server adapter)
+  uninstall_pi_mcp_adapter
+
+  # Uninstall @davecodes/pi-routines (scheduled + event-driven routines)
+  uninstall_pi_routines
 
   # Uninstall pi-subagents (subagent extension)
   uninstall_pi_subagents
