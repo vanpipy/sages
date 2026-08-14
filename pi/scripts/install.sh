@@ -5,7 +5,9 @@
 #
 # This script owns the full Sages extension stack on Linux/macOS:
 #
-#   Local-peer (file-copy) extensions:
+#   Local-peer (file-copy) extensions — all three come from one
+#   `git clone $REPO_URL && git checkout $SAGES_REPO_SHA`, so one
+#   ref pins all three together:
 #     sages                → ~/.pi/packages/sages
 #     pi-codebase-memory   → ~/.pi/packages/pi-codebase-memory
 #     pi-subagents         → ~/.pi/packages/pi-subagents
@@ -37,6 +39,19 @@ PI_DIR="${PI_DIR:-$HOME/.pi}"
 PKG_NAME="sages"
 PKG_DIR="$PI_DIR/packages/$PKG_NAME"
 REPO_URL="https://github.com/vanpipy/sages.git"
+# Pinned sage git ref. The local-peer file-copy packages — sages,
+# pi-codebase-memory, pi-subagents — are all sourced from this same
+# clone, so one ref pins all three. Bump + re-run install.sh to
+# upgrade the local-peer stack. Update the matching "Pinned
+# npm-peer versions" comment block below when bumping.
+#
+# Pin policy: reference a SHA that is reachable from origin/main —
+# i.e., already pushed. Bump after the next sage commit lands on
+# the remote (typical flow: push new commit, bump the SHA to that
+# commit's hash in the next install.sh update).
+#
+# Short: 04cc8c1 (fix(pi/install): sync pi-mcp-adapter and ...)
+SAGES_REPO_SHA="04cc8c1d43b56c8fc6194ebe1d6a490d311c5440"
 AGENT_DIR="$PI_DIR/agent"
 
 # Resolve this script's directory (works whether invoked by absolute path, symlink, or relative)
@@ -783,6 +798,19 @@ install_sages_files() {
     return 1
   }
 
+  # Pin the checkout to SAGES_REPO_SHA so the local-peer file-copy
+  # packages (sages, pi-codebase-memory, pi-subagents) all come from
+  # the same sage git ref. One ref pins all three together.
+  # `git checkout <sha>` fails if the SHA isn't reachable from the
+  # default branch; surface that explicitly so a stale pin is loud,
+  # not silent.
+  echo "  Checking out pinned ref $SAGES_REPO_SHA..."
+  (cd "$TMP_DIR" && git checkout --quiet "$SAGES_REPO_SHA") || {
+    echo "Error: Pinned sage ref $SAGES_REPO_SHA not found in $REPO_URL"
+    echo "Bump SAGES_REPO_SHA in install.sh to a ref that exists on the default branch."
+    return 1
+  }
+
   mkdir -p "$PKG_DIR"
   for dir in skills src; do
     local src_dir="$TMP_DIR/pi/$dir"
@@ -989,8 +1017,13 @@ except Exception as e:
 #   @davecodes/pi-routines        → 0.5.1
 #
 # Local-peer (file-copy) packages — sages, pi-codebase-memory,
-# pi-subagents — are NOT pinned here; their versions track the
-# sages git repo (REPO_URL in the header).
+# pi-subagents — are NOT pinned via npm; they are pinned together
+# via the SAGES_REPO_SHA git ref (full:
+# 04cc8c1d43b56c8fc6194ebe1d6a490d311c5440 — short: 04cc8c1).
+# All three are file-copied from one `git clone $REPO_URL &&
+# git checkout $SAGES_REPO_SHA`, so the single ref pins all three.
+#
+#   sages / pi-codebase-memory / pi-subagents → 04cc8c1
 #
 # AFT (@cortexkit/aft-pi) is NOT pinned here; it is intentionally
 # not auto-installed (memory #25) — users run
