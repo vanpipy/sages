@@ -10,10 +10,11 @@
 #     pi-codebase-memory   → ~/.pi/packages/pi-codebase-memory
 #     pi-subagents         → ~/.pi/packages/pi-subagents
 #
-#   npm-installed extensions (--prefix ~/.pi/agent/npm):
-#     pi-mcp-adapter             → npm:pi-mcp-adapter
-#     @cortexkit/pi-magic-context → CortexKit's cross-session memory layer
-#     @davecodes/pi-routines     → scheduled + event-driven routines
+#   npm-installed extensions (--prefix ~/.pi/agent/npm), versions
+#   pinned for reproducibility — see "Pinned npm-peer versions" below:
+#     pi-mcp-adapter@2.25.0              → npm:pi-mcp-adapter@2.25.0
+#     @cortexkit/pi-magic-context@0.36.1 → CortexKit's cross-session memory layer
+#     @davecodes/pi-routines@0.5.1       → scheduled + event-driven routines
 #
 #   Manual-only carve-out (intentionally NOT auto-installed):
 #     AFT (npm:@cortexkit/aft-pi) — binary provisioning is owned by the
@@ -967,25 +968,65 @@ except Exception as e:
 }
 
 # ──────────────────────────────────────────────────────────────────
-# pi-magic-context — CortexKit's persistent memory + context layer
-# (installs via pi; uses @earendil-works/pi-coding-agent as a peer)
+# Pinned npm-peer versions
+#
+# Every npm: extension that install.sh installs has its version
+# locked at the PI_*_PKG constant declaration (e.g.,
+# PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter@2.25.0"). The pinned
+# form is used both for the `npm install` invocation and for the
+# settings.json registration — pi's package manager parses the
+# @version suffix and uses it for installed-vs-configured version
+# checks (parseSource in @earendil-works/pi-coding-agent/dist/core/
+# package-manager.js; `pinned: isExactNpmVersion(version)` and
+# `installedNpmMatchesConfiguredVersion` both key off the suffix).
+#
+# Updating a version is a deliberate change: bump the PI_*_PKG
+# constant, then re-run install.sh to refresh node_modules (use
+# --force to override an already-installed state).
+#
+#   pi-mcp-adapter                → 2.25.0
+#   @cortexkit/pi-magic-context   → 0.36.1
+#   @davecodes/pi-routines        → 0.5.1
+#
+# Local-peer (file-copy) packages — sages, pi-codebase-memory,
+# pi-subagents — are NOT pinned here; their versions track the
+# sages git repo (REPO_URL in the header).
+#
+# AFT (@cortexkit/aft-pi) is NOT pinned here; it is intentionally
+# not auto-installed (memory #25) — users run
+#     npx @cortexkit/aft@latest setup --harness pi
+# manually.
 # ──────────────────────────────────────────────────────────────────
 
-# pi-magic-context package info (npm-installed)
-PI_MAGIC_CONTEXT_PKG="npm:@cortexkit/pi-magic-context"
+# ──────────────────────────────────────────────────────────────────
+# pi-magic-context — CortexKit's persistent memory + context layer
+# (installs via pi; uses @earendil-works/pi-coding-agent as a peer)
+# PINNED: @cortexkit/pi-magic-context@0.36.1
+# ──────────────────────────────────────────────────────────────────
+
+# pi-magic-context package info (npm-installed, version pinned above)
+PI_MAGIC_CONTEXT_PKG="npm:@cortexkit/pi-magic-context@0.36.1"
 MAGIC_CONTEXT_TEMPLATE="$SCRIPT_DIR/../templates/magic-context.jsonc"
 MAGIC_CONTEXT_CONFIG_PATH="$HOME/.config/cortexkit/magic-context.jsonc"
 
 is_pi_magic_context_installed() {
+  # Auto-recovery invariant (mirrors is_pi_codebase_memory_installed):
+  # require BOTH settings.json registration AND node_modules dir on disk.
+  # PKG_PATTERN matches three forms so a legacy version-less entry does
+  # not silently no-op the install:
+  #   1. npm:@cortexkit/pi-magic-context       (legacy version-less)
+  #   2. npm:@cortexkit/pi-magic-context@X.Y.Z (pinned form — see block above)
+  #   3. /path/to/pi-magic-context              (hypothetical local-fork path)
   local settings="$PI_DIR/agent/settings.json"
+  local node_modules_dir="$PI_DIR/agent/npm/node_modules/@cortexkit/pi-magic-context"
   [[ ! -f "$settings" ]] && return 1
-
   python3 -c "
-import json, sys
+import json, os, re, sys
 try:
     d = json.load(open('$settings'))
-    pkgs = d.get('packages', [])
-    if any(p == 'npm:@cortexkit/pi-magic-context' or p == '$PI_MAGIC_CONTEXT_PKG' or p.endswith('/pi-magic-context') for p in pkgs):
+    PKG_PATTERN = re.compile(r'^(npm:@cortexkit/pi-magic-context(@.+)?|.*/pi-magic-context)\$')
+    registered = any(PKG_PATTERN.match(p) for p in d.get('packages', []))
+    if registered and os.path.isdir('$node_modules_dir'):
         sys.exit(0)
     sys.exit(1)
 except Exception:
@@ -1070,18 +1111,23 @@ install_pi_magic_context() {
       echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_MAGIC_CONTEXT_PKG' manually"
     }
     # Register in settings.json (matches the local-peer pattern).
+    # Normalize any legacy form (version-less or /path/...) to the single
+    # pinned form so future installs and updates see the version pin.
     local settings="$PI_DIR/agent/settings.json"
     mkdir -p "$(dirname "$settings")"
     [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
     python3 -c "
-import json
+import json, re
 f, pkg = '$settings', '$PI_MAGIC_CONTEXT_PKG'
+PKG_PATTERN = re.compile(r'^(npm:@cortexkit/pi-magic-context(@.+)?|.*/pi-magic-context)\$')
 try: d = json.load(open(f))
 except: d = {'packages': []}
-if pkg not in d.get('packages', []):
-    d['packages'] = d.get('packages', []) + [pkg]
-    json.dump(d, open(f, 'w'), indent=2)
-    print('  Registered', pkg)
+pkgs = [p for p in d.get('packages', []) if not PKG_PATTERN.match(p)]
+if pkg not in pkgs:
+    pkgs.append(pkg)
+d['packages'] = pkgs
+json.dump(d, open(f, 'w'), indent=2)
+print('  Registered', pkg)
 "
   else
     echo "  'pi' command not found; user must install manually"
@@ -1097,14 +1143,16 @@ if pkg not in d.get('packages', []):
 uninstall_pi_magic_context() {
   echo "==> Uninstalling pi-magic-context..."
 
-  # Manual cleanup: strip from settings.json
+  # Manual cleanup: strip any form (legacy version-less, pinned @version,
+  # or /path/... local-fork) from settings.json.
   local settings="$PI_DIR/agent/settings.json"
   [[ -f "$settings" ]] && python3 -c "
-import json, sys
+import json, re, sys
 try:
     d = json.load(open('$settings'))
     pkgs = d.get('packages', [])
-    new_pkgs = [p for p in pkgs if p != 'npm:@cortexkit/pi-magic-context' and not p.endswith('/pi-magic-context')]
+    PKG_PATTERN = re.compile(r'^(npm:@cortexkit/pi-magic-context(@.+)?|.*/pi-magic-context)\$')
+    new_pkgs = [p for p in pkgs if not PKG_PATTERN.match(p)]
     if len(new_pkgs) != len(pkgs):
         d['packages'] = new_pkgs
         json.dump(d, open('$settings', 'w'), indent=2)
@@ -1131,6 +1179,7 @@ except Exception as e:
 
 # ────────────────────────────────────────────────────────────
 # pi-mcp-adapter — MCP (Model Context Protocol) server adapter for pi
+# PINNED: pi-mcp-adapter@2.25.0  (see "Pinned npm-peer versions" block above)
 #
 # Mirrors the install_pi_magic_context npm-install pattern. The
 # `@napi-rs/keyring` native dep compiles via node-gyp on install; the
@@ -1140,7 +1189,7 @@ except Exception as e:
 # --ignore-scripts to build the native binary.
 # ────────────────────────────────────────────────────────────
 
-PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
+PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter@2.25.0"
 PI_MCP_ADAPTER_NODE_MODULES_DIR="$PI_DIR/agent/npm/node_modules/pi-mcp-adapter"
 
 is_pi_mcp_adapter_installed() {
@@ -1148,14 +1197,19 @@ is_pi_mcp_adapter_installed() {
   # require BOTH settings.json registration AND node_modules dir on disk
   # so a partial install (settings.json registered but files missing)
   # re-triggers install instead of silently no-op'ing.
+  # PKG_PATTERN matches three forms so a legacy version-less entry does
+  # not silently no-op the install:
+  #   1. npm:pi-mcp-adapter        (legacy version-less)
+  #   2. npm:pi-mcp-adapter@X.Y.Z  (pinned form — see block above)
+  #   3. /path/to/pi-mcp-adapter    (hypothetical local-fork path)
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && return 1
   python3 -c "
-import json, os, sys
+import json, os, re, sys
 try:
     d = json.load(open('$settings'))
-    pkg = '$PI_MCP_ADAPTER_PKG'
-    registered = any(p == pkg or p.endswith('/pi-mcp-adapter') for p in d.get('packages', []))
+    PKG_PATTERN = re.compile(r'^(npm:pi-mcp-adapter(@.+)?|.*/pi-mcp-adapter)\$')
+    registered = any(PKG_PATTERN.match(p) for p in d.get('packages', []))
     if registered and os.path.isdir('$PI_MCP_ADAPTER_NODE_MODULES_DIR'):
         sys.exit(0)
     sys.exit(1)
@@ -1187,18 +1241,23 @@ install_pi_mcp_adapter() {
     }
 
     # Register in settings.json (matches the local-peer pattern).
+    # Normalize any legacy form (version-less or /path/...) to the single
+    # pinned form so future installs and updates see the version pin.
     local settings="$PI_DIR/agent/settings.json"
     mkdir -p "$(dirname "$settings")"
     [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
     python3 -c "
-import json
+import json, re
 f, pkg = '$settings', '$PI_MCP_ADAPTER_PKG'
+PKG_PATTERN = re.compile(r'^(npm:pi-mcp-adapter(@.+)?|.*/pi-mcp-adapter)\$')
 try: d = json.load(open(f))
 except: d = {'packages': []}
-if not any(p == pkg or p.endswith('/pi-mcp-adapter') for p in d.get('packages', [])):
-    d['packages'] = d.get('packages', []) + [pkg]
-    json.dump(d, open(f, 'w'), indent=2)
-    print('  Registered', pkg)
+pkgs = [p for p in d.get('packages', []) if not PKG_PATTERN.match(p)]
+if pkg not in pkgs:
+    pkgs.append(pkg)
+d['packages'] = pkgs
+json.dump(d, open(f, 'w'), indent=2)
+print('  Registered', pkg)
 "
   else
     echo "  'pi' command not found; user must install manually"
@@ -1210,14 +1269,16 @@ if not any(p == pkg or p.endswith('/pi-mcp-adapter') for p in d.get('packages', 
 uninstall_pi_mcp_adapter() {
   echo "==> Uninstalling pi-mcp-adapter..."
 
-  # Strip from settings.json (handles npm form + any hypothetical local-fork path).
+  # Strip any form (legacy version-less, pinned @version, or /path/...
+  # local-fork) from settings.json.
   local settings="$PI_DIR/agent/settings.json"
   [[ -f "$settings" ]] && python3 -c "
-import json, sys
+import json, re, sys
 try:
     d = json.load(open('$settings'))
     pkgs = d.get('packages', [])
-    new_pkgs = [p for p in pkgs if p != 'npm:pi-mcp-adapter' and not p.endswith('/pi-mcp-adapter')]
+    PKG_PATTERN = re.compile(r'^(npm:pi-mcp-adapter(@.+)?|.*/pi-mcp-adapter)\$')
+    new_pkgs = [p for p in pkgs if not PKG_PATTERN.match(p)]
     if len(new_pkgs) != len(pkgs):
         d['packages'] = new_pkgs
         json.dump(d, open('$settings', 'w'), indent=2)
@@ -1237,6 +1298,7 @@ except Exception as e:
 
 # ────────────────────────────────────────────────────────────
 # pi-routines (@davecodes) — scheduled + event-driven routines
+# PINNED: @davecodes/pi-routines@0.5.1  (see "Pinned npm-peer versions" block above)
 #
 # Mirrors the install_pi_magic_context npm-install pattern. Pure JS
 # (no native deps — just nanoid + typebox), so --ignore-scripts is
@@ -1245,20 +1307,26 @@ except Exception as e:
 # of the npm-peer stack.
 # ────────────────────────────────────────────────────────────
 
-PI_ROUTINES_PKG="npm:@davecodes/pi-routines"
+PI_ROUTINES_PKG="npm:@davecodes/pi-routines@0.5.1"
 PI_ROUTINES_NODE_MODULES_DIR="$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines"
 
 is_pi_routines_installed() {
   # Auto-recovery invariant (mirrors is_pi_codebase_memory_installed):
   # require BOTH settings.json registration AND node_modules dir on disk.
+  # PKG_PATTERN matches four forms so any legacy form does not silently
+  # no-op the install:
+  #   1. npm:@davecodes/pi-routines                  (legacy version-less)
+  #   2. npm:@davecodes/pi-routines@X.Y.Z            (pinned form — see block above)
+  #   3. /path/to/pi-routines                         (unscoped local-fork path)
+  #   4. /path/to/@davecodes/pi-routines             (scoped local-fork path)
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && return 1
   python3 -c "
-import json, os, sys
+import json, os, re, sys
 try:
     d = json.load(open('$settings'))
-    pkg = '$PI_ROUTINES_PKG'
-    registered = any(p == pkg or p == 'npm:@davecodes/pi-routines' or p.endswith('/pi-routines') or p.endswith('/@davecodes/pi-routines') for p in d.get('packages', []))
+    PKG_PATTERN = re.compile(r'^(npm:@davecodes/pi-routines(@.+)?|.*/pi-routines|.*/@davecodes/pi-routines)\$')
+    registered = any(PKG_PATTERN.match(p) for p in d.get('packages', []))
     if registered and os.path.isdir('$PI_ROUTINES_NODE_MODULES_DIR'):
         sys.exit(0)
     sys.exit(1)
@@ -1291,14 +1359,17 @@ install_pi_routines() {
     mkdir -p "$(dirname "$settings")"
     [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
     python3 -c "
-import json
+import json, re
 f, pkg = '$settings', '$PI_ROUTINES_PKG'
+PKG_PATTERN = re.compile(r'^(npm:@davecodes/pi-routines(@.+)?|.*/pi-routines|.*/@davecodes/pi-routines)\$')
 try: d = json.load(open(f))
 except: d = {'packages': []}
-if not any(p == pkg or p == 'npm:@davecodes/pi-routines' or p.endswith('/pi-routines') or p.endswith('/@davecodes/pi-routines') for p in d.get('packages', [])):
-    d['packages'] = d.get('packages', []) + [pkg]
-    json.dump(d, open(f, 'w'), indent=2)
-    print('  Registered', pkg)
+pkgs = [p for p in d.get('packages', []) if not PKG_PATTERN.match(p)]
+if pkg not in pkgs:
+    pkgs.append(pkg)
+d['packages'] = pkgs
+json.dump(d, open(f, 'w'), indent=2)
+print('  Registered', pkg)
 "
   else
     echo "  'pi' command not found; user must install manually"
@@ -1312,11 +1383,12 @@ uninstall_pi_routines() {
 
   local settings="$PI_DIR/agent/settings.json"
   [[ -f "$settings" ]] && python3 -c "
-import json, sys
+import json, re, sys
 try:
     d = json.load(open('$settings'))
     pkgs = d.get('packages', [])
-    new_pkgs = [p for p in pkgs if p != 'npm:@davecodes/pi-routines' and not p.endswith('/pi-routines') and not p.endswith('/@davecodes/pi-routines')]
+    PKG_PATTERN = re.compile(r'^(npm:@davecodes/pi-routines(@.+)?|.*/pi-routines|.*/@davecodes/pi-routines)\$')
+    new_pkgs = [p for p in pkgs if not PKG_PATTERN.match(p)]
     if len(new_pkgs) != len(pkgs):
         d['packages'] = new_pkgs
         json.dump(d, open('$settings', 'w'), indent=2)
