@@ -74,7 +74,7 @@ if defined SYSTEM_ONLY goto :system_only
 REM ──────────── DEFAULT INSTALL ────────────
 
 echo ==^> Installing sages + subagent templates + subagents doc + SYSTEM.md...
-echo     (npm peers: pi-magic-context, pi-subagents, pi-codebase-memory
+echo     (npm peers: pi-magic-context, pi-subagents, pi-codebase-memory, pi-evaluator
 echo      install those with 'pi install npm:...' after this script)
 
 REM Pre-flight checks
