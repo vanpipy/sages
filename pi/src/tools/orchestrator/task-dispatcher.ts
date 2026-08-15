@@ -39,7 +39,14 @@ export const TaskDispatchParams = Type.Object({
     Type.Literal("review"),     // dispatch + require user approval between batches
   ], { description: "How aggressively to dispatch" }),
   /** Optional override: max parallel agents per batch (defaults to 4) */
-  max_concurrent: Type.Optional(Type.Number({ minimum: 1, maximum: 16 })),
+  max_concurrent: Type.Optional(
+    Type.Number({
+      minimum: 1,
+      maximum: 16,
+      description:
+        "Background concurrency cap for the dispatched batch. Default 6 matches the Sages-wide per-type cap budget (developer: 2 + auditor: 2 + Explore: 4 + Plan: 2 + merger: 1 + git-expert: 1 = 12 across types; 6 is the cross-type ceiling enforced by AgentManager).",
+    }),
+  ),
   /** Optional lifecycle observation. This records Agent results; it never spawns. */
   transition: Type.Optional(Type.Object({
     task_id: Type.String({ minLength: 1 }),
@@ -140,7 +147,7 @@ export function defaultRunInBackground(subagentType: string): boolean {
 export function buildDispatchPlan(
   plan: OrchestrationPlan,
   strategy: "auto" | "step" | "review",
-  maxConcurrent: number = 4,
+  maxConcurrent: number = 6,
 ): DispatchPlan {
   // Group tasks by batch
   const byBatch = new Map<number, TaskNode[]>();
@@ -436,7 +443,7 @@ export async function executeTaskDispatch(params: TaskDispatchInput, ctx: { cwd:
 
   plan.state = "executing";
   plan.updated_at = new Date().toISOString();
-  const dispatch = buildDispatchPlan(plan, params.strategy, params.max_concurrent ?? 4);
+  const dispatch = buildDispatchPlan(plan, params.strategy, params.max_concurrent ?? 6);
   const planPath = savePlan(cwd, plan);
   return {
     content: [{ type: "text", text: JSON.stringify({

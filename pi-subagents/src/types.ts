@@ -121,6 +121,19 @@ export interface AgentConfig {
 	runInBackground?: boolean;
 	/** Default for spawn: no extension tools. undefined = caller decides. */
 	isolated?: boolean;
+	/**
+	 * Per-agent-type background concurrency cap (the third tier in the
+	 * effective-cap merge — see `AgentManager.spawn` for the resolution
+	 * order). When this agent type is spawned as background, the manager
+	 * will queue further spawns once this many of THIS type are already
+	 * running, even if the global `maxConcurrent` budget still has room.
+	 *
+	 * Defaults live in `default-agents.ts` (developer: 2, auditor: 2,
+	 * Explore: 4, Plan: 2, merger: 1, git-expert: 1). User-level overrides
+	 * via `subagents.json`'s `maxConcurrentByType` win over the AgentConfig
+	 * default; either loses to the global cap.
+	 */
+	maxConcurrent?: number;
 	/** Persistent memory scope — agents with memory get a persistent directory and MEMORY.md */
 	memory?: MemoryScope;
 	/** Isolation mode — "worktree" runs the agent in a temporary git worktree */

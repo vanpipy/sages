@@ -41,11 +41,19 @@ const DEFAULT_AGENTS_FILE = join(
 // Explore pins anthropic/claude-haiku-4-5 for cheap read-only search;
 // Plan pins the same model with `thinking: "minimal"` so the main
 // agent's chosen reasoning model never bleeds into the plan compiler
-// (DAG-2026-017-plan-compiler). Every other built-in (developer,
-// auditor) inherits the parent model — pinning a Sonnet-class model
-// on those would override the orchestrator's choice and is a
-// regression.
-const PINNED_MODEL_EXCEPTIONS = new Set(["Explore", "Plan"]);
+// (DAG-2026-017-plan-compiler). developer and auditor pin
+// MiniMax/MiniMax-M3 (Sages house model for implement/audit) with
+// silent fallback to the parent session's model when the registry
+// doesn't have it — see resolveDefaultModel in agent-runner.ts. Every
+// other built-in (merger, git-expert) inherits the parent model —
+// pinning a Sonnet-class model on those would override the
+// orchestrator's choice and is a regression.
+const PINNED_MODEL_EXCEPTIONS = new Set([
+	"Explore",
+	"Plan",
+	"developer",
+	"auditor",
+]);
 
 it("templates/agents/ is EMPTY (no user-level subagent templates are shipped)", () => {
   // Phase A + Phase B + Phase C: every default agent is built-in to

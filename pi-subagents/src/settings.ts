@@ -11,6 +11,15 @@ import type { JoinMode, WidgetMode } from "./types.js";
 export interface SubagentsSettings {
 	maxConcurrent?: number;
 	/**
+	 * Per-agent-type background concurrency overrides. Each entry sets the cap
+	 * for one agent type (developer, auditor, Explore, Plan, merger, git-expert,
+	 * or any user-defined name). The effective per-type cap at spawn time is
+	 * resolved by AgentManager.effectiveMaxFor():
+	 *   AgentConfig.maxConcurrent -> this map -> global maxConcurrent
+	 * Entries must be positive integers; sanitize() drops bad values silently.
+	 */
+	maxConcurrentByType?: Record<string, number>;
+	/**
 	 * 0 = unlimited — the extension's single source of truth for that convention:
 	 * `normalizeMaxTurns()` in agent-runner.ts treats 0 → `undefined`, and the
 	 * `/agents` → Settings input prompt explicitly says "0 = unlimited".
@@ -102,6 +111,12 @@ export type ToolDescriptionMode = "full" | "compact" | "custom";
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
 	setMaxConcurrent: (n: number) => void;
+	/**
+	 * Replace the per-type cap map. Passing `undefined` clears all overrides
+	 * so every type falls through to AgentConfig / global. Passing `{}` is a
+	 * no-op (no overrides to apply).
+	 */
+	setMaxConcurrentByType: (map: Record<string, number> | undefined) => void;
 	setDefaultMaxTurns: (n: number) => void;
 	setGraceTurns: (n: number) => void;
 	setDefaultJoinMode: (mode: JoinMode) => void;
@@ -148,6 +163,27 @@ function sanitize(raw: unknown): SubagentsSettings {
 		(r.maxConcurrent as number) <= MAX_CONCURRENT_CEILING
 	) {
 		out.maxConcurrent = r.maxConcurrent as number;
+	}
+	if (r.maxConcurrentByType && typeof r.maxConcurrentByType === "object") {
+		const raw = r.maxConcurrentByType as Record<string, unknown>;
+		const sanitized: Record<string, number> = {};
+		let kept = 0;
+		for (const [type, cap] of Object.entries(raw)) {
+			// Use MAX_CONCURRENT_CEILING as the per-type ceiling — a per-type cap
+			// larger than the global cap is meaningless, but we don't want to
+			// silently drop high values a user might be migrating in.
+			if (
+				typeof type === "string" &&
+				type.length > 0 &&
+				Number.isInteger(cap) &&
+				(cap as number) >= 1 &&
+				(cap as number) <= MAX_CONCURRENT_CEILING
+			) {
+				sanitized[type] = cap as number;
+				kept++;
+			}
+		}
+		if (kept > 0) out.maxConcurrentByType = sanitized;
 	}
 	if (
 		Number.isInteger(r.defaultMaxTurns) &&
@@ -259,6 +295,8 @@ export function applySettings(
 ): void {
 	if (typeof s.maxConcurrent === "number")
 		appliers.setMaxConcurrent(s.maxConcurrent);
+	if (s.maxConcurrentByType)
+		appliers.setMaxConcurrentByType(s.maxConcurrentByType);
 	if (typeof s.defaultMaxTurns === "number")
 		appliers.setDefaultMaxTurns(s.defaultMaxTurns);
 	if (typeof s.graceTurns === "number") appliers.setGraceTurns(s.graceTurns);
