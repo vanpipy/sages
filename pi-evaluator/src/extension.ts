@@ -22,7 +22,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import { readSagesRewardMode } from "./settings.ts";
 import { REWARD_MODE_SYSTEM_PROMPT } from "./prompts.ts";
-import { createEvalState } from "./state.ts";
+import { createEvalState, reloadCoefficients } from "./state.ts";
 import { registerEvalTools, type HistoricalReport } from "./tools/index.ts";
 
 /**
@@ -50,6 +50,11 @@ export default function registerEvaluatorExtension(pi: ExtensionAPI): void {
 	// ── session_start: read mode exactly once per session ──────────────────
 	pi.on("session_start", () => {
 		state.mode = readSagesRewardMode() ? "on" : "off";
+		// Re-load coefficients at session start so edits to the user's file
+		// during the previous session's lifetime are picked up. The loader is
+		// best-effort — a malformed file falls back to built-in defaults
+		// rather than crashing the session (reward mode is opt-in).
+		reloadCoefficients(state);
 	});
 
 	// ── before_agent_start: augment the system prompt when mode is on ───────
