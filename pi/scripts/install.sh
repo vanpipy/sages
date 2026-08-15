@@ -5,12 +5,13 @@
 #
 # This script owns the full Sages extension stack on Linux/macOS:
 #
-#   Local-peer (file-copy) extensions — all three come from one
+#   Local-peer (file-copy) extensions — all four come from one
 #   `git clone $REPO_URL && git checkout $SAGES_REPO_SHA`, so one
-#   ref pins all three together:
+#   ref pins all four together:
 #     sages                → ~/.pi/packages/sages
 #     pi-codebase-memory   → ~/.pi/packages/pi-codebase-memory
 #     pi-subagents         → ~/.pi/packages/pi-subagents
+#     pi-evaluator         → ~/.pi/packages/pi-evaluator
 #
 #   npm-installed extensions (--prefix ~/.pi/agent/npm), versions
 #   pinned for reproducibility — see "Pinned npm-peer versions" below:
@@ -26,8 +27,8 @@
 #     user can copy to ~/.config/cortexkit/aft.jsonc after installation.
 #
 # Selective install options:
-#   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates, SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates)
+#   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -49,6 +50,11 @@ REPO_URL="https://github.com/vanpipy/sages.git"
 # i.e., already pushed. Bump after the next sage commit lands on
 # the remote (typical flow: push new commit, bump the SHA to that
 # commit's hash in the next install.sh update).
+#
+# The local-peer file-copy packages — sages, pi-codebase-memory,
+# pi-subagents, pi-evaluator — are all sourced from this same clone,
+# so one ref pins all four together. Bump + re-run install.sh to
+# upgrade the local-peer stack.
 #
 # Short: 04cc8c1 (fix(pi/install): sync pi-mcp-adapter and ...)
 SAGES_REPO_SHA="04cc8c1d43b56c8fc6194ebe1d6a490d311c5440"
@@ -129,6 +135,14 @@ PI_SUBAGENTS_SRC_REL="pi-subagents"
 PI_SUBAGENTS_DEST_DIR="$PI_DIR/packages/pi-subagents"
 PI_SUBAGENTS_PKG="$PI_SUBAGENTS_DEST_DIR"
 
+# pi-evaluator package info (sage peer, deployed by file-copy)
+# pi-evaluator is the reward-mode extension (eval_score + eval_trend tools).
+# Default OFF, opt-in via `sages.rewardMode: true` in ~/.pi/agent/settings.json.
+# See pi-evaluator/skills/evaluator/SKILL.md for the 5-dimension scoring model.
+PI_EVALUATOR_SRC_REL="pi-evaluator"
+PI_EVALUATOR_DEST_DIR="$PI_DIR/packages/pi-evaluator"
+PI_EVALUATOR_PKG="$PI_EVALUATOR_DEST_DIR"
+
 # Cleanup trap
 TMP_DIR=""
 cleanup() {
@@ -143,8 +157,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install sages source files (still re-clones; skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates)"
+  echo "  --sages-only       Only install sages source files (still re-clones; skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -863,7 +877,7 @@ install_sages_files() {
 # but `cp -r` then copied those symlinks into $PI_DIR/packages/, where the same
 # relative path resolves to a non-existent `~/.pi/packages/pi/node_modules`.
 setup_peer_node_modules_symlinks() {
-  for peer in pi-codebase-memory pi-subagents; do
+  for peer in pi-codebase-memory pi-subagents pi-evaluator; do
     local peer_dir="$PI_DIR/packages/$peer"
     [[ ! -d "$peer_dir" ]] && continue
     if [[ -L "$peer_dir/node_modules" || -e "$peer_dir/node_modules" ]]; then
@@ -993,6 +1007,119 @@ except Exception as e:
   fi
 
   echo "  pi-subagents uninstalled"
+}
+
+# ──────────────────────────────────────────────────────────────────
+# pi-evaluator — reward-mode extension for pi
+#
+# pi-evaluator adds 2 passive-observer tools (eval_score, eval_trend) that
+# score the active Sages workflow across 5 dimensions (goal, dag, implement,
+# audit, coordination). It is a pure-TS sage peer — file-copied from the same
+# `git clone` that sources sages / pi-codebase-memory / pi-subagents.
+#
+# Reward mode is OFF by default. Users opt in via `sages.rewardMode: true`
+# in ~/.pi/agent/settings.json. The extension itself is always installed;
+# the toggle only controls whether eval_score / eval_trend return data.
+#
+# At runtime pi loads it from $PI_DIR/packages/pi-evaluator, which
+# install.sh deploys by file-copy during the default install path (mirror
+# of the local-peer flow used by pi-codebase-memory / pi-subagents).
+# ──────────────────────────────────────────────────────────────────
+
+is_pi_evaluator_installed() {
+  # Auto-recovery invariant: return true ONLY when both conditions hold —
+  # settings.json registers the package AND the dest dir exists on disk.
+  # Mirrors is_pi_subagents_installed / is_pi_codebase_memory_installed.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+  python3 -c "
+import json, os, sys
+try:
+    d = json.load(open('$settings'))
+    pkg = '$PI_EVALUATOR_PKG'
+    if pkg in d.get('packages', []) and os.path.isdir(pkg):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_evaluator_files() {
+  local src_root="$TMP_DIR/$PI_EVALUATOR_SRC_REL"
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in clone, skipping pi-evaluator files"
+    return 0
+  }
+  if [[ -d "$PI_EVALUATOR_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-evaluator files (exists, use --force)"
+  else
+    rm -rf "$PI_EVALUATOR_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_EVALUATOR_DEST_DIR"
+    echo "  Installed pi-evaluator files to $PI_EVALUATOR_DEST_DIR"
+  fi
+  if [[ -f "$PI_EVALUATOR_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    (cd "$PI_EVALUATOR_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
+  fi
+}
+
+install_pi_evaluator() {
+  echo "==> Installing pi-evaluator..."
+  if is_pi_evaluator_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-evaluator already installed (use --force to reinstall)"
+    return 0
+  fi
+  if ! install_pi_evaluator_files; then
+    echo "  Error: install_pi_evaluator_files failed, aborting"
+    return 1
+  fi
+  if is_pi_evaluator_installed; then
+    echo "  pi-evaluator already registered in settings.json"
+  else
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_EVALUATOR_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+  fi
+  echo "  pi-evaluator installed"
+}
+
+uninstall_pi_evaluator() {
+  echo "==> Uninstalling pi-evaluator..."
+
+  # 1) Strip from settings.json.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    new_pkgs = [p for p in pkgs if not (p == 'npm:@sages/pi-evaluator' or p.endswith('/pi-evaluator') or p.endswith('@sages/pi-evaluator'))]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open(f, 'w'), indent=2)
+        print('  Removed pi-evaluator entries from settings.json')
+except Exception as e:
+    print('  Warning:', e, file=sys.stderr)
+" 2>/dev/null || true
+
+  # 2) Remove the package directory if it exists.
+  if [[ -d "$PI_EVALUATOR_DEST_DIR" ]]; then
+    rm -rf "$PI_EVALUATOR_DEST_DIR"
+    echo "  Removed $PI_EVALUATOR_DEST_DIR"
+  fi
+
+  echo "  pi-evaluator uninstalled"
 }
 
 # ──────────────────────────────────────────────────────────────────
@@ -1442,7 +1569,7 @@ except Exception as e:
 # 模式 1:全量安装(默认)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + 4-agent subagent pipeline..."
+  echo "==> Installing sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1483,6 +1610,11 @@ install() {
   # Install pi-subagents (sage peer, file-copy from ./pi-subagents/ in the clone).
   install_pi_subagents || true
 
+  # Install pi-evaluator (sage peer, file-copy from ./pi-evaluator/ in the clone).
+  # Reward mode (eval_score / eval_trend) is OFF by default — opt in via
+  # `sages.rewardMode: true` in ~/.pi/agent/settings.json after install.
+  install_pi_evaluator || true
+
   # After ALL peer file copies are done, set up node_modules symlinks pointing
   # at sages' shared deps (idempotent — skipped if peers already have node_modules).
   setup_peer_node_modules_symlinks
@@ -1512,7 +1644,7 @@ install() {
 # 模式 2:仅更新 sages(跳过 pi-codebase-memory 和 SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, skip SYSTEM.md)..."
 
   # Pre-flight: pi 仍然需要(sages 是 pi extension)
   install_pi_if_needed
@@ -1525,8 +1657,8 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_routines / install_pi_subagents / install_system_prompt
-  echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates, SYSTEM.md)"
+  # 显式不调用 install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_routines / install_pi_subagents / install_pi_evaluator / install_system_prompt
+  echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1536,10 +1668,10 @@ install_sages_only() {
 # 模式 3:仅更新 SYSTEM.md(跳过 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates)..."
+  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)..."
   # 不需要 git / pi —— SYSTEM.md 是独立 markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, subagent templates)"
+  echo "  (skipped: sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1549,7 +1681,7 @@ install_system_only() {
 # 卸载(同时移除 sages 和 pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + 4-agent subagent pipeline..."
+  echo "==> Uninstalling sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1578,6 +1710,9 @@ uninstall() {
 
   # Uninstall pi-subagents (subagent extension)
   uninstall_pi_subagents
+
+  # Uninstall pi-evaluator (reward-mode extension)
+  uninstall_pi_evaluator
 
   # Uninstall subagent templates we installed (leaves user-customized alone),
   # plus the SUBAGENTS.md doc (only if byte-identical to our template)
