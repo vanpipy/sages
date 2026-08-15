@@ -47,6 +47,18 @@ export interface EvalScoreOutput {
 	workflow_id: string | null;
 	total_score: number;
 	dimensions: Record<Dimension, DimensionScore>;
+	/**
+	 * Optional warning surfaced when the loaded coefficients file's version
+	 * does not match pi-evaluator/package.json#version. Present only when
+	 * `state.coefficients_warning` is set (loaded by createEvalState /
+	 * reloadCoefficients). Callers should display this to the user so they
+	 * know their coefficients may describe a different release's algorithm.
+	 */
+	coefficients_warning?: {
+		file_version: string | undefined;
+		package_version: string;
+		note: string;
+	};
 }
 
 /** Build the all-zero dimensions map (used when no active workflow). */
@@ -74,6 +86,7 @@ export function computeEvalScore(state: EvalState): EvalScoreOutput {
 			workflow_id: null,
 			total_score: 0,
 			dimensions: emptyDimensions(),
+			coefficients_warning: state.coefficients_warning,
 		};
 	}
 
@@ -85,6 +98,7 @@ export function computeEvalScore(state: EvalState): EvalScoreOutput {
 			workflow_id: null,
 			total_score: 0,
 			dimensions: emptyDimensions(),
+			coefficients_warning: state.coefficients_warning,
 		};
 	}
 
@@ -109,6 +123,7 @@ export function computeEvalScore(state: EvalState): EvalScoreOutput {
 		workflow_id: wf.workflow_id,
 		total_score: wf.total_score,
 		dimensions,
+		coefficients_warning: state.coefficients_warning,
 	};
 }
 

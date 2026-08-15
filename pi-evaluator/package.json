@@ -29,6 +29,7 @@
 		"@mariozechner/pi-coding-agent": "*"
 	},
 	"devDependencies": {
+		"@sinclair/typebox": "^0.34.52",
 		"@types/bun": "latest",
 		"bun-types": "latest",
 		"typescript": "^5.0.0"

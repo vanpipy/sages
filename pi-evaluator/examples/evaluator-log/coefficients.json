@@ -1,0 +1,165 @@
+{
+	"$schema_comment": "Copy this file to ~/.pi/agent/evaluator-log/coefficients.json and tune the weights. The schema is enforced by pi-evaluator's TypeBox checker; an invalid file (bad shape, Σ weights ≠ 1.0, etc.) throws on load and pi-evaluator falls back to the built-in defaults. Comments are stripped before validation, so you can keep this file annotated.",
+
+	"version": "0.2.0",
+	"_version_comment": "MUST mirror pi-evaluator/package.json#version. Mismatch triggers a warning surfaced in eval_score output, but the loader still loads the file (strict equality is intentional — drift means your coefficients describe a different release's algorithm). Bump alongside pi-evaluator.",
+
+	"global": {
+		"dimension_weights": {
+			"goal": 0.20,
+			"dag": 0.20,
+			"implement": 0.30,
+			"audit": 0.20,
+			"coordination": 0.10
+		},
+		"_dimension_weights_comment": "These weights sum to 1.0. They are the final-aggregation weights — a per-dimension score is computed first, then combined via these weights into the total_score. Bump 'implement' if you find workflow quality is dominated by code correctness; drop 'coordination' if you want to de-emphasize fan-out efficiency.",
+
+		"thresholds": {
+			"pass": 80,
+			"pass_with_gaps": 50
+		},
+		"_thresholds_comment": "total_score ≥ pass → verdict PASS; pass_with_gaps ≤ total_score < pass → PASS_WITH_GAPS; total_score < pass_with_gaps → FAIL. The invariant pass_with_gaps < pass is checked on load."
+	},
+
+	"dimensions": {
+		"goal": {
+			"_goal_comment": "Did the author write a clear, verifiable spec?",
+			"signals": {
+				"sc_verifiable_pct": {
+					"weight": 0.40,
+					"norm": "ratio_0_1",
+					"direction": "higher_better",
+					"_comment": "fraction of success_criteria with a runnable verification_cmd"
+				},
+				"anti_goals_present": {
+					"weight": 0.20,
+					"norm": "boolean",
+					"direction": "higher_better",
+					"_comment": "1 if anti_goals list is non-empty, else 0 — anti-goals are a quality marker"
+				},
+				"scope_breadth": {
+					"weight": 0.20,
+					"norm": "invert_log_count",
+					"direction": "lower_better",
+					"_comment": "log-scaled count of scope.include dirs — penalize both too-broad and too-narrow"
+				},
+				"sc_count_norm": {
+					"weight": 0.20,
+					"norm": "log_count",
+					"direction": "higher_better",
+					"_comment": "log-scaled SC count — penalize both under-decomposed and over-decomposed"
+				}
+			}
+		},
+
+		"dag": {
+			"_dag_comment": "Is the DAG itself well-formed and well-pipelined?",
+			"signals": {
+				"sc_to_task_coverage_pct": {
+					"weight": 0.35,
+					"norm": "ratio_0_1",
+					"direction": "higher_better",
+					"_comment": "fraction of SCs covered by ≥1 task"
+				},
+				"batch_parallelism_ratio": {
+					"weight": 0.20,
+					"norm": "ratio_0_1",
+					"direction": "higher_better",
+					"_comment": "fraction of batches that are parallel_safe"
+				},
+				"acyclic": {
+					"weight": 0.25,
+					"norm": "boolean",
+					"direction": "higher_better",
+					"_comment": "1 if no cycle violations detected"
+				},
+				"within_batch_independence_pct": {
+					"weight": 0.20,
+					"norm": "ratio_0_1",
+					"direction": "higher_better",
+					"_comment": "fraction of batches where no task depends on another in the same batch"
+				}
+			}
+		},
+
+		"implement": {
+			"_implement_comment": "Did the implementer actually deliver? TDD discipline + isolation adherence.",
+			"signals": {
+				"verification_first_try_rate": {
+					"weight": 0.40,
+					"norm": "ratio_0_1",
+					"direction": "higher_better",
+					"_comment": "fraction of tasks passing their verification_cmd on first attempt"
+				},
+				"isolation_adherence_pct": {
+					"weight": 0.30,
+					"norm": "ratio_0_1",
+					"direction": "higher_better",
+					"_comment": "fraction of tasks that ran in a managed worktree (developer isolation policy)"
+				},
+				"tasks_per_sc_norm": {
+					"weight": 0.30,
+					"norm": "log_count",
+					"direction": "higher_better",
+					"_comment": "log-scaled tasks-per-SC ratio"
+				}
+			}
+		},
+
+		"audit": {
+			"_audit_comment": "Did the auditor verify what implementers claimed, and what did they find?",
+			"signals": {
+				"audit_pass_rate": {
+					"weight": 0.40,
+					"norm": "ratio_0_1",
+					"direction": "higher_better"
+				},
+				"no_critical_findings": {
+					"weight": 0.30,
+					"norm": "boolean",
+					"direction": "higher_better",
+					"_comment": "1 if zero critical findings across all audits — binary cliff"
+				},
+				"evidence_pointers_present_pct": {
+					"weight": 0.20,
+					"norm": "ratio_0_1",
+					"direction": "higher_better",
+					"_comment": "fraction of audit reports with concrete evidence pointers"
+				},
+				"verification_rerun_rate": {
+					"weight": 0.10,
+					"norm": "ratio_0_1",
+					"direction": "higher_better",
+					"_comment": "fraction of audits that re-ran verification_cmd (the auditor's contract)"
+				}
+			}
+		},
+
+		"coordination": {
+			"_coordination_comment": "Did subagent dispatch + isolation work as expected?",
+			"signals": {
+				"dispatch_success_first_try_rate": {
+					"weight": 0.30,
+					"norm": "ratio_0_1",
+					"direction": "higher_better"
+				},
+				"concurrency_utilization_norm": {
+					"weight": 0.20,
+					"norm": "ratio_0_1",
+					"direction": "higher_better"
+				},
+				"cap_violations": {
+					"weight": 0.25,
+					"norm": "boolean",
+					"direction": "lower_better",
+					"_comment": "1 if any subagent hit its per-type concurrency cap (DAG over-fanned)"
+				},
+				"isolation_compliance_pct": {
+					"weight": 0.25,
+					"norm": "ratio_0_1",
+					"direction": "higher_better"
+				}
+			}
+		}
+	}
+}

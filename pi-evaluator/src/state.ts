@@ -19,6 +19,10 @@
  */
 
 import type { Dimension } from "./types.ts";
+import type { CoefficientsConfig } from "./engine/coefficients-schema.ts";
+import type { VersionMismatchWarning } from "./engine/coefficients.ts";
+import { loadCoefficients } from "./engine/coefficients.ts";
+import { DEFAULT_COEFFICIENTS } from "./engine/coefficients-defaults.ts";
 
 /** A single pointer from a score back to a concrete artifact + location. */
 export interface EvidenceRef {
@@ -71,17 +75,69 @@ export interface EvalState {
 	/** Whether reward mode is on for this session. Read on session_start,
 	 *  constant for the session's lifetime. */
 	mode: "on" | "off";
+	/**
+	 * Loaded coefficients — either the user's file at
+	 * `~/.pi/agent/evaluator-log/coefficients.json` or the built-in defaults.
+	 * Populated on session_start alongside `mode`; the scoring engine reads
+	 * from here when computing per-dimension scores.
+	 */
+	coefficients: CoefficientsConfig;
+	/**
+	 * Optional warning surfaced when the coefficients file's `version` did
+	 * not match pi-evaluator/package.json#version at load time. The state
+	 * stores it (not just logs it) so the eval tools can surface it to the
+	 * user inside `eval_score` output. Missing on a clean load.
+	 */
+	coefficients_warning?: VersionMismatchWarning;
 	/** Currently active workflow, or null if no workflow is in flight. */
 	active_workflow: WorkflowScoreState | null;
 }
 
 /**
- * Construct a fresh EvalState. Defaults: mode=off, no active workflow.
- * T3 may extend this signature to read historical reports, etc.
+ * Construct a fresh EvalState. Loads coefficients from
+ * `~/.pi/agent/evaluator-log/coefficients.json` (or falls back to built-in
+ * defaults if the file is missing or invalid). The mode is `off` here;
+ * `extension.ts` flips it to `on` on session_start if the user opted in
+ * via settings.json.
+ *
+ * Why load coefficients here and not in extension.ts: state should be
+ * self-bootstrapping — extension.ts shouldn't need to know how to read
+ * the file. The loader uses the standard `process.env.PI_DIR` /
+ * `$HOME/.pi/agent` resolution, which works in tests too.
  */
 export function createEvalState(): EvalState {
+	const { config, warning } = loadCoefficients();
 	return {
 		mode: "off",
+		coefficients: config,
+		coefficients_warning: warning,
 		active_workflow: null,
 	};
+}
+
+/**
+ * Re-load coefficients from disk and replace the state's copy. Called by
+ * extension.ts on session_start so the latest file wins over whatever was
+ * loaded at module init time. If the file is missing, fall back to the
+ * built-in defaults; if it's broken, fall back too (the loader already
+ * throws — we catch here so a bad file doesn't crash the session).
+ */
+export function reloadCoefficients(state: EvalState): void {
+	try {
+		const { config, warning } = loadCoefficients();
+		state.coefficients = config;
+		state.coefficients_warning = warning;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.warn(
+			`pi-evaluator: failed to reload coefficients.json (${message}); ` +
+				`falling back to built-in defaults for this session.`,
+		);
+		state.coefficients = DEFAULT_COEFFICIENTS;
+		state.coefficients_warning = {
+			file_version: undefined,
+			package_version: config?.version ?? "unknown",
+			note: `coefficients.json failed to load: ${message}`,
+		};
+	}
 }

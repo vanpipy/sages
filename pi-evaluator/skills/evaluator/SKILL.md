@@ -32,9 +32,19 @@ Both tools take no arguments. They always act on the active Sages workflow.
     "implement":    { "score": 0,  "evidence": [] },
     "audit":        { "score": 0,  "evidence": [] },
     "coordination": { "score": 50, "evidence": [] }
+  },
+  "coefficients_warning": {
+    "file_version": "0.2.0",
+    "package_version": "0.3.0",
+    "note": "file version \"0.2.0\" differs from pi-evaluator \"0.3.0\". Format may have drifted; review CHANGELOG.md and re-init if needed."
   }
 }
 ```
+
+`coefficients_warning` is present only when the loaded coefficients file's
+`version` does not match `pi-evaluator/package.json#version` (see
+"Configuring the scoring formula" below). The loader still uses the file —
+mismatch is a soft warning, not a rejection.
 
 `eval_trend()` returns:
 
@@ -79,6 +89,25 @@ To find the current session's live file:
 ```bash
 ls -lt .pi/orchestrator/evals/*.jsonl | head -1
 ```
+
+## Configuring the scoring formula
+
+The reward formula's weights live at `~/.pi/agent/evaluator-log/coefficients.json`.
+The schema is enforced by pi-evaluator; an invalid file (bad shape,
+Σ weights ≠ 1.0, etc.) throws on load and pi-evaluator falls back to the
+built-in defaults. Start from the annotated template at
+`examples/evaluator-log/coefficients.json` in the pi-evaluator source tree.
+
+**The `version` field must mirror `pi-evaluator/package.json#version`.** When
+they differ, `eval_score()` output includes a `coefficients_warning` block so
+the user knows their coefficients may describe a different release's algorithm.
+The loader still loads the file (warn + use-as-is, not reject) so users can
+upgrade pi-evaluator without first re-tuning their coefficients.
+
+Weight invariants (enforced on load):
+- Σ signal weights = 1.0 per dimension
+- Σ dimension_weights = 1.0 globally
+- `thresholds.pass_with_gaps < thresholds.pass`
 
 ## What this extension does NOT do (anti-scope)
 
