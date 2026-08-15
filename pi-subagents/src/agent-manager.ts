@@ -174,26 +174,39 @@ export class AgentManager {
 	private onComplete?: OnAgentComplete;
 	private onStart?: OnAgentStart;
 	private onCompact?: OnAgentCompact;
+	/** Global background concurrency cap (shared across all agent types). */
 	private maxConcurrent: number;
+	/**
+	 * Per-agent-type background concurrency overrides from subagents.json's
+	 * maxConcurrentByType field.
+	 */
+	private maxConcurrentByType = new Map<string, number>();
+	private getAgentMaxConcurrent?: (type: string) => number | undefined;
 	/** Base repos worktrees were created from — so dispose() can prune them all,
 	 *  not just the parent repo (caller-supplied cwd can target other repos). */
 	private worktreeRepos = new Set<string>();
 
 	/** Queue of background agents waiting to start. */
 	private queue: { id: string; args: SpawnArgs }[] = [];
-	/** Number of currently running background agents. */
+	/** Number of currently running background agents (across all types). */
 	private runningBackground = 0;
+	/** Running background count by agent type — mirrors the global counter but
+	 *  partitioned so per-type caps (developer: 2, auditor: 2, etc.) can be
+	 *  enforced independently of the global cap. */
+	private runningBackgroundByType = new Map<string, number>();
 
 	constructor(
 		onComplete?: OnAgentComplete,
 		maxConcurrent = DEFAULT_MAX_CONCURRENT,
 		onStart?: OnAgentStart,
 		onCompact?: OnAgentCompact,
+		getAgentMaxConcurrent?: (type: string) => number | undefined,
 	) {
 		this.onComplete = onComplete;
 		this.onStart = onStart;
 		this.onCompact = onCompact;
 		this.maxConcurrent = maxConcurrent;
+		this.getAgentMaxConcurrent = getAgentMaxConcurrent;
 		// Cleanup completed agents after 10 minutes (but keep sessions for resume)
 		this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
 		this.cleanupInterval.unref();
@@ -226,6 +239,66 @@ export class AgentManager {
 
 	getMaxConcurrent(): number {
 		return this.maxConcurrent;
+	}
+
+	/**
+	 * Update per-agent-type background concurrency overrides. Loaded from
+	 * subagents.json's maxConcurrentByType field. Invalid entries (non-integer,
+	 * < 1) are dropped silently — sanitize() in settings.ts already validates
+	 * upstream; this is a defense-in-depth filter.
+	 */
+	setMaxConcurrentByType(map: Record<string, number> | undefined) {
+		this.maxConcurrentByType.clear();
+		if (!map || typeof map !== "object") {
+			this.drainQueue();
+			return;
+		}
+		for (const [type, cap] of Object.entries(map)) {
+			if (typeof cap === "number" && Number.isInteger(cap) && cap >= 1) {
+				this.maxConcurrentByType.set(type, cap);
+			}
+		}
+		this.drainQueue();
+	}
+
+	getMaxConcurrentByType(): Record<string, number> {
+		const out: Record<string, number> = {};
+		for (const [type, cap] of this.maxConcurrentByType) out[type] = cap;
+		return out;
+	}
+
+	getRunningBackgroundByType(): Record<string, number> {
+		const out: Record<string, number> = {};
+		for (const [type, n] of this.runningBackgroundByType) out[type] = n;
+		return out;
+	}
+
+	/**
+	 * Effective per-type background cap at spawn time. Resolution order:
+	 * AgentConfig.maxConcurrent -> settings.maxConcurrentByType[type] -> global
+	 */
+	private effectiveMaxFor(type: string): number {
+		const fromAgent = this.getAgentMaxConcurrent?.(type);
+		if (typeof fromAgent === "number" && fromAgent >= 1) return fromAgent;
+		const fromSettings = this.maxConcurrentByType.get(type);
+		if (typeof fromSettings === "number" && fromSettings >= 1) return fromSettings;
+		return this.maxConcurrent;
+	}
+
+	private incRunning(canonicalType: string, isBackground: boolean | undefined) {
+		if (!isBackground) return;
+		this.runningBackground++;
+		this.runningBackgroundByType.set(
+			canonicalType,
+			(this.runningBackgroundByType.get(canonicalType) ?? 0) + 1,
+		);
+	}
+
+	private decRunning(canonicalType: string, isBackground: boolean | undefined) {
+		if (!isBackground) return;
+		if (this.runningBackground > 0) this.runningBackground--;
+		const current = this.runningBackgroundByType.get(canonicalType) ?? 0;
+		if (current > 0) this.runningBackgroundByType.set(canonicalType, current - 1);
 	}
 
 	/**
@@ -312,9 +385,12 @@ export class AgentManager {
 		if (
 			options.isBackground &&
 			!options.bypassQueue &&
-			this.runningBackground >= this.maxConcurrent
+			(this.runningBackground >= this.maxConcurrent ||
+				(this.runningBackgroundByType.get(canonicalType) ?? 0) >=
+					this.effectiveMaxFor(canonicalType))
 		) {
-			// Queue it — will be started when a running agent completes
+			// Queue it — will be started when a running agent completes and
+			// the relevant cap (global or per-type) has room again.
 			this.queue.push({ id, args });
 			return id;
 		}
@@ -336,6 +412,10 @@ export class AgentManager {
 		record: AgentRecord,
 		{ pi, ctx, type, prompt, options }: SpawnArgs,
 	) {
+		// Resolve the canonical type for per-type concurrency bookkeeping.
+		// spawn() already validated; this is the cheap re-resolution that
+		// incRunning/decRunning need to key runningBackgroundByType correctly.
+		const canonicalType = resolveType(type) ?? type;
 		// Re-validate a caller-supplied cwd: queued spawns can start minutes after
 		// spawn()'s check, and the directory may be gone by then (TOCTOU). Same
 		// curated errors; drainQueue parks a throw on the record as an error.
@@ -477,7 +557,7 @@ export class AgentManager {
 
 		record.status = "running";
 		record.startedAt = Date.now();
-		if (options.isBackground) this.runningBackground++;
+		this.incRunning(canonicalType, options.isBackground);
 		this.onStart?.(record);
 
 		// Wire parent abort signal to stop the subagent when the parent is interrupted
@@ -629,7 +709,7 @@ export class AgentManager {
 						/* ignore completion side-effect errors */
 					}
 				} else {
-					this.runningBackground--;
+					this.decRunning(canonicalType, options.isBackground);
 					try {
 						this.onComplete?.(record);
 					} catch {
@@ -695,7 +775,7 @@ export class AgentManager {
 					record.resultConsumed = true;
 					this.onComplete?.(record);
 				} else {
-					this.runningBackground--;
+					this.decRunning(canonicalType, options.isBackground);
 					this.onComplete?.(record);
 					this.drainQueue();
 				}
@@ -712,11 +792,18 @@ export class AgentManager {
 
 	/** Start queued agents up to the concurrency limit. */
 	private drainQueue() {
-		while (
-			this.queue.length > 0 &&
-			this.runningBackground < this.maxConcurrent
-		) {
-			const next = this.queue.shift()!;
+		while (this.queue.length > 0 && this.runningBackground < this.maxConcurrent) {
+			// Peek at the head — per-type cap may keep it queued even when global
+			// has room (e.g. 6-cap global, but developer cap = 2 already saturated).
+			// Leaving the head in place is correct: when the running per-type
+			// count drops, the next drain call will pick it up.
+			const next = this.queue[0];
+			const type = next.args.type;
+			const typeRunning = this.runningBackgroundByType.get(type) ?? 0;
+			if (typeRunning >= this.effectiveMaxFor(type)) {
+				break;
+			}
+			this.queue.shift();
 			const record = this.agents.get(next.id);
 			if (!record || record.status !== "queued") continue;
 			try {

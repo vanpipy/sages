@@ -267,6 +267,8 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
     "Plan",
     "developer",
     "auditor",
+    "merger",
+    "git-expert",
   ]);
   for (const t of input.tasks as any[]) {
     if (!knownSubagents.has(t.subagent_type)) {

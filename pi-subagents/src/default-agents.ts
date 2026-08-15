@@ -64,6 +64,13 @@ const DEVELOPER_AGENT: AgentConfig = {
 	// turns is the budget per individual run. Caller may still override via
 	// Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
+	// Default model + per-type cap (part of the Sages-wide concurrency policy:
+	// 2 concurrent developers is the supported DAG fan-out). When
+	// MiniMax/MiniMax-M3 is not in the user's registry, agent-runner.
+	// resolveDefaultModel silently falls back to the parent session's model
+	// (the user chose the parent's model at session start; trust it).
+	model: "MiniMax/MiniMax-M3",
+	maxConcurrent: 2,
 };
 
 /**
@@ -118,6 +125,13 @@ const AUDITOR_AGENT: AgentConfig = {
 	// report write; 200 turns is the per-run budget. Caller may still
 	// override via Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
+	// Default model + per-type cap (developer: 2 / auditor: 2 are part of the
+	// Sages-wide concurrency policy). When MiniMax/MiniMax-M3 is not in the
+	// user's registry, agent-runner.resolveDefaultModel silently falls back to
+	// the parent session's model — see AgentManager.effectiveMaxFor() for the
+	// cap merge order.
+	model: "MiniMax/MiniMax-M3",
+	maxConcurrent: 2,
 };
 
 const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
@@ -186,6 +200,10 @@ const MERGER_AGENT: AgentConfig = {
 	// merge commit or escalate. Going over 80 turns means the brief was
 	// wrong, not that the merger needs more budget.
 	maxTurns: 80,
+	// Per-type concurrency cap: 1 — the merger is stateful (HANDOFF.md +
+	// worktree pairing) and concurrent merge attempts on overlapping
+	// workspaces would race. Single-flight.
+	maxConcurrent: 1,
 	// Deterministic tool: must not fork parent's chat history. The brief
 	// carries the workspace-A + workspace-B branches, SC ids, and worktree
 	// paths explicitly.
@@ -250,6 +268,10 @@ const GIT_EXPERT_AGENT: AgentConfig = {
 	// from merger's 80. Caller may still override via
 	// Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 120,
+	// Per-type concurrency cap: 1 — git-expert shares the orchestrator's
+	// repo state for reflog walks and bisects; concurrent inspections can
+	// produce inconsistent snapshots. Single-flight.
+	maxConcurrent: 1,
 	// Deterministic tool: must not fork parent's chat history. The
 	// brief carries scenario + task_id + repo_root + symptom explicitly.
 	inheritContext: false,
@@ -269,16 +291,21 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			// dispatch further Agent calls — its budget is dedicated to one search job.
 			excludeExtensions: ["pi-subagents"],
 			skills: true,
-			// Fast/cheap model for read-only search. Provider-preferred but resilient:
-			// resolveModel matches this fuzzily (date-stamp optional) and falls back to
-			// the same model under another provider if anthropic doesn't expose it.
-			model: "anthropic/claude-haiku-4-5",
+			// Sages house model for read-only search. When unavailable in the
+			// user's registry, agent-runner.resolveDefaultModel silently falls
+			// back to the parent session's model — see AgentManager
+			// effectiveMaxFor for the per-type cap merge order.
+			model: "minimax-m2.7-highspeed",
 			systemPrompt: EXPLORE_PROMPT,
 			promptMode: "replace",
 			isDefault: true,
 			// Read-only search: 50 turns is the budget for one breadth-bounded lookup.
 			// Caller may still override via Agent({ max_turns: ... }) at spawn time.
 			maxTurns: 50,
+			// Per-type concurrency cap: Explore runs in Stage 1 batches that fan
+			// out for breadth coverage. 4 concurrent is the supported DAG fan-out
+			// (combined with Plan's 2 cap to stay under the global 6 cap).
+			maxConcurrent: 4,
 		},
 	],
 	[
@@ -329,6 +356,9 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			// to send — NOT the entire upstream transcript. Without this
 			// isolation, Plan would re-derive decisions from chat history.
 			inheritContext: false,
+			// Per-type concurrency cap: Plan runs in Stage 2 batches. 2 concurrent
+			// keeps Plan + Explore (4) under the global 6 cap.
+			maxConcurrent: 2,
 		},
 	],
 	["developer", DEVELOPER_AGENT],
