@@ -667,6 +667,11 @@ export default function (pi: ExtensionAPI) {
 				compactionCount: record.compactionCount,
 			});
 		},
+		// getAgentMaxConcurrent: the manager asks this hook for AgentConfig-level
+		// caps at spawn time. Returns `cfg?.maxConcurrent` so default-agents.ts
+		// defaults (developer: 2, auditor: 2, ...) take effect without the
+		// manager importing the agent-config registry directly.
+		(type) => getAgentConfig(type)?.maxConcurrent,
 	);
 
 	// Expose manager via Symbol.for() global registry for cross-package access.
@@ -985,6 +990,7 @@ export default function (pi: ExtensionAPI) {
 	applyAndEmitLoaded(
 		{
 			setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
+			setMaxConcurrentByType: (map) => manager.setMaxConcurrentByType(map),
 			setDefaultMaxTurns,
 			setGraceTurns,
 			setDefaultJoinMode,
