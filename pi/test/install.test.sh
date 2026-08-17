@@ -316,16 +316,20 @@ test ! -f "$SUBAGENT_TEMPLATES_DIR/software-auditor.md" \
   || { echo "❌ FAIL: templates/agents/software-auditor.md should not be shipped (Phase B migrated canonical)"; exit 1; }
 echo "✅ PASS: no shipped software-auditor.md template (canonical lives in pi-subagents; runtime inherits from parent)"
 
-# Test T4.22: the canonical built-in `auditor` in pi-subagents does not
-# pin a model in the agent config — it inherits from the parent session
-# via resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig?.model).
-# Pinning here ensures a future contributor doesn't hardcode Sonnet 4.6
-# for the auditor. (Explore intentionally pins haiku-4-5 for cheap
-# read-only search; that is the exception, not the rule.)
+# Test T4.22: the canonical built-in `auditor` in pi-subagents pins a
+# Sages-house model (MiniMax/MiniMax-M3 as of GC-2026-046); when the
+# registry doesn't have it, resolveDefaultModel silently falls back to
+# the parent session's model. The test enforces that the pinned value is
+# the Sages-approved one — not a future contributor sneaking in
+# claude-sonnet-4-6 or another costly model.
 AUDITOR_BLOCK=$(awk '/name: "auditor"/,/^};?$/' /home/leroy/Project/sages/pi-subagents/src/default-agents.ts)
-echo "$AUDITOR_BLOCK" | grep -qE '^\s*model:\s*"' \
-  && { echo "❌ FAIL: default-agents.ts pins 'model:' for auditor; auditor must inherit parent model"; exit 1; \
-} || echo "✅ PASS: pi-subagents auditor does not pin a model — inherits parent"
+if echo "$AUDITOR_BLOCK" | grep -qE '^\s*model:\s*"[^"]+"'; then
+  echo "$AUDITOR_BLOCK" | grep -qE 'model:\s*"MiniMax/MiniMax-M3"' \
+    || { echo "❌ FAIL: default-agents.ts auditor pins a non-Sages-approved model; expected MiniMax/MiniMax-M3"; exit 1; }
+  echo "✅ PASS: pi-subagents auditor pins MiniMax/MiniMax-M3 (Sages house model, silent fallback to parent)"
+else
+  echo "✅ PASS: pi-subagents auditor does not pin a model — inherits parent"
+fi
 
 # Test T4.22b: Explore intentionally pins haiku-4-5 (cheap read-only
 # search); document the exception so a future contributor doesn't
