@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as yaml from "js-yaml";
 
 import { validateDAG } from "../src/tools/orchestrator/dag-synthesizer.js";
 import {
@@ -252,5 +253,78 @@ describe("registry.yaml ↔ subagent.json cross-consistency (GC-2026-048 T2.2)",
     expect(result.code).toBe(0);
     expect(result.stdout).toMatch(/OK: \d+ catalogues current/);
     expect(result.stdout).toMatch(/registry\.yaml ↔ subagent\.json consistent/);
+  });
+});
+
+/**
+ * Profile coverage of the registry — GC-2026-049 T3.2.
+ *
+ * We pick the more informative variant: every registered subagent id
+ * must appear in at least one built-in profile. An "orphan" id (a
+ * subagent that the registry knows about but no profile whitelists)
+ * is informational (not a blocker) — but if a profile in the future
+ * tightens the whitelist even further, a profile that excludes a
+ * common role would silently surprise users. The smoke test on the
+ * `standard` profile (full roster) keeps the default authoritative.
+ *
+ * Concretely:
+ *   1. The union of every built-in profile's `subagents` list equals
+ *      the registry id set — no orphans, no profile-only ids.
+ *   2. The `standard` profile is exactly the full roster — the
+ *      default never silently loses a role.
+ */
+describe("registry ↔ profile coverage (GC-2026-049 T3.2)", () => {
+  const PROFILES_DIR_FOR_TEST = join(PI_ROOT, "profiles");
+
+  function readAllProfileSubagents(): Set<string> {
+    const union = new Set<string>();
+    const files = readdirSync(PROFILES_DIR_FOR_TEST)
+      .filter((name) => name.endsWith(".yaml") || name.endsWith(".yml"))
+      .sort();
+    for (const file of files) {
+      const parsed = yaml.load(readFileSync(join(PROFILES_DIR_FOR_TEST, file), "utf-8")) as {
+        subagents?: unknown;
+      } | null;
+      if (!parsed || !Array.isArray(parsed.subagents)) continue;
+      for (const candidate of parsed.subagents) {
+        if (typeof candidate === "string" && candidate.length > 0) {
+          union.add(candidate);
+        }
+      }
+    }
+    return union;
+  }
+
+  function readProfileByName(name: string): { subagents: string[] } {
+    const path = join(PROFILES_DIR_FOR_TEST, `${name}.yaml`);
+    if (!existsSync(path)) {
+      throw new Error(`built-in profile missing: ${name}`);
+    }
+    const parsed = yaml.load(readFileSync(path, "utf-8")) as { subagents?: unknown } | null;
+    if (!parsed || !Array.isArray(parsed.subagents)) {
+      throw new Error(`built-in profile '${name}' has no subagents array`);
+    }
+    return { subagents: parsed.subagents.filter((s): s is string => typeof s === "string") };
+  }
+
+  it("the union of every built-in profile's subagents equals the registry id set", () => {
+    // Reads every built-in profile, unions their `subagents` lists,
+    // and confirms the result is exactly the set the registry knows
+    // about. Catches both orphans (registered-but-unused) and
+    // profile-only ids (referenced-but-unregistered), the latter
+    // already being caught by `verifyProfileCrossConsistency` but
+    // worth pinning from the registry's perspective too.
+    const registryIds = knownSubagentIds();
+    const profileUnion = readAllProfileSubagents();
+    expect([...profileUnion].sort()).toEqual([...registryIds].sort());
+  });
+
+  it("the standard profile contains all six subagents (the default is the full roster)", () => {
+    // The `standard` profile is the bundled default when no override
+    // is present. If a subagent is ever removed from `standard`, the
+    // default dispatch policy silently narrows; this smoke test
+    // catches that drift before users notice.
+    const standard = readProfileByName("standard");
+    expect([...standard.subagents].sort()).toEqual([...EXPECTED_IDS].sort());
   });
 });
