@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test ./src ./test --path-ignore-patterns dist/"
+    "test": "bun test ./src ./test --path-ignore-patterns dist/",
+    "gen:catalog": "bun run scripts/gen-catalog.ts",
+    "verify:catalog": "bun run scripts/verify-catalog.ts"
   },
   "keywords": [
     "pi-package",
