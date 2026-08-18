@@ -340,11 +340,30 @@ Do not commit ephemeral `.pi/` state.
 
 ## Verify gates
 
-These gates run automatically via the pre-commit hook (`pi/typecheck` + `pi/test`) and must all pass before commit. Run them locally:
+Sages exposes a layered set of verifiers that run via `bun run <gate>`.
+A `check:all` aggregator wires them into one entry point for CI.
+
+| Gate | Command | Catches |
+|---|---|---|
+| Type check | `bun run typecheck` | Type errors anywhere |
+| Unit suite | `bun test ./src ./test` | Behavior regression |
+| Catalog | `bun run verify:catalog` | Drift between source + `.pi/orchestrator/catalogs/*.json` |
+| Subagent roster | `bun run verify:subagent-roster` | registry ⊄ SUBAGENTS.md table ⊄ dag-synthesizer known roles |
+| Isolation modes | `bun run verify:isolation-modes` | Literal `isolation: "worktree"` (forbidden) |
+| Namespace ownership | `bun run verify:namespace-ownership` | Subagent templates declaring `.pi/orchestrator/...` in files[] |
+| Soft-mode mental model | `bun run verify:soft-mode-mental-model` | Docs "soft mode" mentions vs `pi/src/soft-mode.ts` exports |
+| **All** | `bun run check:all` | Runs every gate above; CI single entry point |
+
+The pre-commit hook (`pi/typecheck` + `pi/test`) still runs automatically and must pass before commit. Run the rest locally:
 
 - `bun run typecheck` — pi typecheck
 - `bun test ./src ./test` — pi unit + integration tests
 - `bun run verify:catalog` — fails when any of the 5 catalogues under `pi/catalogs/` drift from their source files. Run after editing `pi/src/tools/orchestrator/*.ts` or `pi/templates/SUBAGENTS.md`.
+- `bun run verify:subagent-roster` — fails when `pi/subagents/registry.yaml` ids diverge from the roster table in `pi/templates/SUBAGENTS.md` or from the known-roles set inside `pi/src/tools/orchestrator/dag-synthesizer.ts`.
+- `bun run verify:isolation-modes` — fails when any subagent template or worker dispatch uses the literal `isolation: "worktree"` token. Use the explicit managed-worktree object or `"current-workspace"`.
+- `bun run verify:namespace-ownership` — fails when a subagent template declares a `.pi/orchestrator/...` path inside its `files[]` allow-list (cross-namespace overwrites).
+- `bun run verify:soft-mode-mental-model` — fails when docs references to "soft mode" drift from the exports / reminder / suffix strings in `pi/src/soft-mode.ts`.
+- `bun run check:all` — runs every gate above in sequence; exits non-zero on first failure. Use this as the single entry point in CI.
 
 If you change any source file listed in a catalog's `_source_files`, re-run `bun run gen:catalog` and commit the regenerated `pi/catalogs/*.json` along with the source change.
 
