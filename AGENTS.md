@@ -105,6 +105,16 @@ and `style`. Put goal IDs in a `Refs:` footer. Resolve author identity from
 `git config user.name` and `git config user.email`; never use `--author`.
 Do not commit ephemeral `.pi/` state.
 
+## Verify gates
+
+These gates run automatically via the pre-commit hook (`pi/typecheck` + `pi/test`) and must all pass before commit. Run them locally:
+
+- `bun run typecheck` — pi typecheck
+- `bun test ./src ./test` — pi unit + integration tests
+- `bun run verify:catalog` — fails when any of the 5 catalogues under `pi/catalogs/` drift from their source files. Run after editing `pi/src/tools/orchestrator/*.ts` or `pi/templates/SUBAGENTS.md`.
+
+If you change any source file listed in a catalog's `_source_files`, re-run `bun run gen:catalog` and commit the regenerated `pi/catalogs/*.json` along with the source change.
+
 ## Soft mode and task-count threshold
 
 Under soft mode (GC-2026-031) nothing is mechanically blocked. The
