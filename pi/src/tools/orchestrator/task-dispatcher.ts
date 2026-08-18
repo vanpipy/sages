@@ -30,6 +30,7 @@ import type { OrchestrationPlan, TaskNode } from "./types.js";
 import { ORCHESTRATOR_DIR, dagPath } from "./types.js";
 import { loadPlan } from "./dag-synthesizer.js";
 import { atomicWriteOrchestratorFile, isOrchestrationPlanState } from "./state-persistence.js";
+import { lookupSubagent } from "./subagent-registry.js";
 
 export const TaskDispatchParams = Type.Object({
   dag_id: Type.String({ description: "DAG id like 'DAG-2025-001'" }),
@@ -116,31 +117,13 @@ export interface DispatchTask {
   report_path: string;
 }
 
-/**
- * Default `run_in_background` policy by subagent type. The rule mirrors
- * `pi/templates/SUBAGENTS.md` and the SKILL.md Stage 1-2 / 3-4 split:
- *   - Explore, Plan                    → foreground (short, blocking)
- *   - developer, auditor               → background (long, steerable)
- *
- * GC-2026-014: the legacy `software-developer` / `software-auditor`
- * aliases were removed. New authoring MUST use the canonical names.
- *
- * Tasks may override per-task via `TaskNode.run_in_background`.
- */
+/** Default dispatch policy comes from pi/subagents/registry.yaml. */
 export function defaultRunInBackground(subagentType: string): boolean {
-  switch (subagentType) {
-    case "Explore":
-    case "Plan":
-    case "general-purpose":
-      return false;
-    case "developer":
-    case "auditor":
-      return true;
-    default:
-      // Unknown subagent: default to background to avoid surprises;
-      // the LLM can always set run_in_background:false on the task.
-      return true;
-  }
+  const entry = lookupSubagent(subagentType);
+  if (entry) return entry.run_in_background;
+  // Unknown subagent: default to background to avoid surprises;
+  // the LLM can always set run_in_background:false on the task.
+  return true;
 }
 
 /** Build the dispatch plan from a loaded DAG. Injects upstream task outputs into each task's prompt. */
