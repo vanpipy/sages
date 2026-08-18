@@ -29,6 +29,7 @@ import {
   loadYamlOrchestratorFile,
 } from "./state-persistence.js";
 import { renderTaskPrompt, validateTemplateParams } from "./template-loader.js";
+import { knownSubagentIds } from "./subagent-registry.js";
 
 export const TaskNodeSchema = Type.Object({
   id: Type.String({ description: "Semantic id like 'P1', 'P2.a'", pattern: "^[A-Z][0-9]+(\\.[a-z])?$" }),
@@ -256,20 +257,8 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
     }
   }
 
-  // 8. Subagent type referenced (soft check — warn if unknown)
-  //
-  // GC-2026-014: the canonical subagent types are `developer` and
-  // `auditor` (plus pi-subagents built-ins `Explore` / `Plan`).
-  // `general-purpose` was removed in DAG-2026-011 Phase C — persisted
-  // DAGs that use the name get a warning, not an error.
-  const knownSubagents = new Set([
-    "Explore",
-    "Plan",
-    "developer",
-    "auditor",
-    "merger",
-    "git-expert",
-  ]);
+  // 8. Known subagent types come from pi/subagents/registry.yaml.
+  const knownSubagents = knownSubagentIds();
   for (const t of input.tasks as any[]) {
     if (!knownSubagents.has(t.subagent_type)) {
       warnings.push(`task '${t.id}': subagent_type '${t.subagent_type}' is not a known role — verify ~/.pi/agent/agents/${t.subagent_type}.md exists`);
