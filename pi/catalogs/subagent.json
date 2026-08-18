@@ -1,40 +1,125 @@
 {
-  "_source_hash": "e46fb344b33033148b5d85727b3a356e06e172598d335d3a3814dc273b9e50c2",
-  "_generated_at": "2026-08-18T03:15:01.494Z",
+  "_source_hash": "4ab88d3c8cb4042bb2edd4da7cbdf3316cd26dbc867a65b274c921929d439a58",
+  "_generated_at": "2026-08-18T04:11:54.135Z",
   "_source_files": [
-    "src/tools/orchestrator/dag-synthesizer.ts",
-    "src/tools/orchestrator/task-dispatcher.ts"
+    "subagents/registry.yaml"
   ],
   "entries": [
     {
       "id": "Explore",
-      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
-      "run_in_background_default": false
+      "source": "pi/subagents/registry.yaml#subagents",
+      "run_in_background_default": false,
+      "kind": "read-only",
+      "isolation": [
+        "none"
+      ],
+      "gather": true,
+      "artifact_schema": [
+        "status",
+        "findings",
+        "evidence",
+        "validation",
+        "open_questions",
+        "confidence",
+        "what_i_did_not_check"
+      ]
     },
     {
       "id": "Plan",
-      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
-      "run_in_background_default": false
+      "source": "pi/subagents/registry.yaml#subagents",
+      "run_in_background_default": false,
+      "kind": "read-only",
+      "isolation": [
+        "none"
+      ],
+      "gather": true,
+      "artifact_schema": [
+        "status",
+        "findings",
+        "evidence",
+        "validation",
+        "open_questions",
+        "confidence",
+        "what_i_did_not_check"
+      ]
     },
     {
       "id": "developer",
-      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
-      "run_in_background_default": true
+      "source": "pi/subagents/registry.yaml#subagents",
+      "run_in_background_default": true,
+      "kind": "write-isolated",
+      "isolation": [
+        "current-workspace",
+        "worktree"
+      ],
+      "gather": false,
+      "artifact_schema": [
+        "status",
+        "findings",
+        "evidence",
+        "validation",
+        "open_questions",
+        "confidence",
+        "what_i_did_not_check"
+      ]
     },
     {
       "id": "auditor",
-      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
-      "run_in_background_default": true
+      "source": "pi/subagents/registry.yaml#subagents",
+      "run_in_background_default": true,
+      "kind": "read-only",
+      "isolation": [
+        "none"
+      ],
+      "gather": false,
+      "artifact_schema": [
+        "status",
+        "findings",
+        "evidence",
+        "validation",
+        "open_questions",
+        "confidence",
+        "what_i_did_not_check"
+      ]
     },
     {
       "id": "merger",
-      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
-      "run_in_background_default": true
+      "source": "pi/subagents/registry.yaml#subagents",
+      "run_in_background_default": true,
+      "kind": "write-meta",
+      "isolation": [
+        "none"
+      ],
+      "gather": false,
+      "artifact_schema": [
+        "status",
+        "findings",
+        "evidence",
+        "validation",
+        "open_questions",
+        "confidence",
+        "what_i_did_not_check"
+      ]
     },
     {
       "id": "git-expert",
-      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
-      "run_in_background_default": true
+      "source": "pi/subagents/registry.yaml#subagents",
+      "run_in_background_default": true,
+      "kind": "read-only",
+      "isolation": [
+        "none",
+        "current-workspace"
+      ],
+      "gather": false,
+      "artifact_schema": [
+        "status",
+        "findings",
+        "evidence",
+        "validation",
+        "open_questions",
+        "confidence",
+        "what_i_did_not_check"
+      ]
     }
   ]
 }

@@ -6,10 +6,15 @@
  *   - Explore, Plan       → foreground
  *   - developer           → background
  *   - auditor             → background
- *   - general-purpose     → foreground (ad-hoc / planning)
  *
  * GC-2026-014: the `software-auditor` legacy alias was removed. The
  * dispatcher now keys off the canonical name `auditor` only.
+ *
+ * GC-2026-048: the per-stage policy is sourced from
+ * `pi/subagents/registry.yaml` via `defaultRunInBackground()`. Names
+ * not in the registry (e.g. `general-purpose`) fall through to
+ * background — the LLM can override per-task with `run_in_background:
+ * false`. There is no longer a special case for any unregistered name.
  *
  * Per-task override via `TaskNode.run_in_background` is also supported.
  */
@@ -86,10 +91,14 @@ describe("buildDispatchPlan — run_in_background policy", () => {
 		expect(d.batches[0].tasks[0].run_in_background).toBe(true);
 	});
 
-	it("general-purpose tasks default to foreground", () => {
+	it("general-purpose (unregistered name) falls through to the default-background branch", () => {
+		// GC-2026-048: `general-purpose` is no longer a special case in the
+		// dispatcher. It is not registered in `pi/subagents/registry.yaml`,
+		// so `defaultRunInBackground()` returns true (background) for it.
+		// The LLM can still pin foreground per-task via `run_in_background: false`.
 		const plan = makePlan([makeTask("P1", "general-purpose", 1)]);
 		const d = buildDispatchPlan(plan, "auto", 4);
-		expect(d.batches[0].tasks[0].run_in_background).toBe(false);
+		expect(d.batches[0].tasks[0].run_in_background).toBe(true);
 	});
 
 	it("per-task run_in_background override beats default", () => {
