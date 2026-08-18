@@ -8,7 +8,8 @@
     "test": "bun test ./src ./test --path-ignore-patterns dist/",
     "gen:catalog": "bun run scripts/gen-catalog.ts",
     "gen:gcdb": "bun run scripts/gen-gcdb.ts",
-    "verify:catalog": "bun run scripts/verify-catalog.ts"
+    "verify:catalog": "bun run scripts/verify-catalog.ts",
+    "verify:gcdb": "bun run scripts/verify-gcdb.ts"
   },
   "keywords": [
     "pi-package",
