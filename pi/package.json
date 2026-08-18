@@ -13,7 +13,8 @@
     "verify:subagent-roster": "bun run scripts/verify-subagent-roster.ts",
     "verify:isolation-modes": "bun run scripts/verify-isolation-modes.ts",
     "verify:namespace-ownership": "bun run scripts/verify-namespace-ownership.ts",
-    "verify:soft-mode-mental-model": "bun run scripts/verify-soft-mode-mental-model.ts"
+    "verify:soft-mode-mental-model": "bun run scripts/verify-soft-mode-mental-model.ts",
+    "check:all": "bun run scripts/check-all.ts"
   },
   "keywords": [
     "pi-package",
