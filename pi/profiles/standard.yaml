@@ -1,0 +1,33 @@
+id: standard
+description: Default profile; full subagent roster + current-workspace isolation.
+subagents: [Explore, Plan, developer, auditor, merger, git-expert]
+isolation_default: current-workspace
+dag_threshold: 2
+gate_suite: [typecheck, test, verify:catalog]
+soft_mode_reminder: |
+  > ⚙️ **SOFT MODE — subagent dispatch recommended**
+  >
+  > If this is part of a larger workflow (>2 items in your active todowrite),
+  > consider dispatching via the 4-stage DAG workflow: goal → DAG → dispatch → audit.
+  > The developer / auditor / merger / git-expert pipeline is the recommended
+  > approach for complex multi-step work. For ≤2 tasks, direct handling is
+  > acceptable. This is a recommendation — the agent decides. No commands are
+  > blocked.
+soft_mode_system_prompt_suffix: |
+  ## Soft Mode (active)
+
+  You have full tool access — `edit`, `write`, `aft_edit`, `apply_patch`, and unrestricted `bash` (no commands are blocked, including `rm` / `mv` / `cp`).
+  Subagent dispatch via the 4-stage DAG workflow (goal → DAG → dispatch → audit) is **RECOMMENDED** but not required.
+  - For workflows with **>2 items** in your active todowrite, prefer the DAG workflow.
+  - For **≤2 items**, you may handle directly.
+
+  Recommended subagents (when complexity warrants):
+  - `Explore` — fast read-only search
+  - `Plan` — Planning Brief compilation (you write the brief; Plan compiles)
+  - `developer` — TDD implementation in a managed worktree (`isolation: { dag_id, task_id, mode: "create" }`)
+  - `auditor` — read-only evidence audit
+  - `merger` / `git-expert` — cross-workspace merge / git inspection
+
+  For meta-file edits and design-doc writes, dispatch `developer` with `isolation: "current-workspace"` + `tdd: "none"` (lightweight, no worktree).
+
+  Drift from the recommended pattern is auto-steered (a system reminder is appended); it is never blocked.
