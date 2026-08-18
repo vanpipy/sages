@@ -27,9 +27,9 @@
  * after any change to a listed source file MUST exit 1.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, dirname, relative } from "node:path";
+import { join, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as yaml from "js-yaml";
 
@@ -236,6 +236,106 @@ function verifySubagentCrossConsistency(): CrossConsistencyResult {
 	return { ok: false, registryOnly, catalogOnly, mismatched };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GC-2026-049 T3.2 — profile ↔ registry cross-consistency check
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A profile is a named bundle (see `pi/src/profile.ts`) that whitelists
+// subagents. The profile's `subagents` list MUST be a subset of the
+// registry id set — otherwise the profile would dispatch a role the
+// runtime has never heard of, and `validateDAG` would emit "not a known
+// role" warnings on every task.
+//
+// The check reads every `pi/profiles/*.yaml`, parses it, and confirms
+// each `profile.subagents` id appears in `pi/subagents/registry.yaml`.
+// Profiles with no `subagents` array (or any other schema failure) are
+// reported as a failure with a precise file path and reason.
+//
+// Direction: this check is one-directional (profile → registry). A
+// registered subagent that no profile references is *not* an error
+// (profiles intentionally whittle down the full roster). Orphan
+// detection is a separate, informational concern — see the test in
+// `pi/test/subagent-registry.test.ts` for the inverse perspective.
+
+export interface ProfileCrossConsistencyResult {
+	ok: boolean;
+	error?: string;
+	unknown?: Array<{ profile: string; subagent: string }>;
+}
+
+export function verifyProfileCrossConsistency(
+	profilesDir = join(PI_ROOT, "profiles"),
+	registryPath = join(PI_ROOT, "subagents", "registry.yaml"),
+): ProfileCrossConsistencyResult {
+	if (!existsSync(profilesDir)) {
+		return { ok: false, error: `profiles directory missing: ${relative(PI_ROOT, profilesDir)}` };
+	}
+	if (!existsSync(registryPath)) {
+		return { ok: false, error: `registry file missing: ${relative(PI_ROOT, registryPath)}` };
+	}
+
+	let registryIds: Set<string>;
+	try {
+		const parsed = yaml.load(readFileSync(registryPath, "utf-8")) as { subagents?: unknown } | null;
+		if (!parsed || !Array.isArray(parsed.subagents)) {
+			return { ok: false, error: "registry.yaml: 'subagents' is not an array" };
+		}
+		registryIds = new Set<string>();
+		for (const candidate of parsed.subagents) {
+			if (typeof candidate !== "object" || candidate === null) continue;
+			const id = (candidate as { id?: unknown }).id;
+			if (typeof id === "string" && id.length > 0) registryIds.add(id);
+		}
+	} catch (e) {
+		return { ok: false, error: `registry.yaml is not valid YAML: ${(e as Error).message}` };
+	}
+
+	const yamlFiles = readdirSync(profilesDir)
+		.filter((name) => name.endsWith(".yaml") || name.endsWith(".yml"))
+		.sort();
+
+	if (yamlFiles.length === 0) {
+		return { ok: false, error: `no profile YAMLs found in ${relative(PI_ROOT, profilesDir)}` };
+	}
+
+	const unknown: Array<{ profile: string; subagent: string }> = [];
+	for (const file of yamlFiles) {
+		const absPath = resolve(profilesDir, file);
+		const relPath = relative(PI_ROOT, absPath);
+		let profile: unknown;
+		try {
+			profile = yaml.load(readFileSync(absPath, "utf-8"));
+		} catch (e) {
+			return { ok: false, error: `${relPath}: not valid YAML (${(e as Error).message})` };
+		}
+		if (typeof profile !== "object" || profile === null) {
+			return { ok: false, error: `${relPath}: top-level value is not a mapping` };
+		}
+		const subagents = (profile as { subagents?: unknown }).subagents;
+		if (!Array.isArray(subagents)) {
+			return { ok: false, error: `${relPath}: 'subagents' is not an array` };
+		}
+		const profileId = (profile as { id?: unknown }).id;
+		const profileName = typeof profileId === "string" && profileId.length > 0 ? profileId : file;
+		for (const candidate of subagents) {
+			if (typeof candidate !== "string" || candidate.length === 0) {
+				return {
+					ok: false,
+					error: `${relPath}: subagent id must be a non-empty string (got ${JSON.stringify(candidate)})`,
+				};
+			}
+			if (!registryIds.has(candidate)) {
+				unknown.push({ profile: profileName, subagent: candidate });
+			}
+		}
+	}
+
+	if (unknown.length === 0) {
+		return { ok: true };
+	}
+	return { ok: false, unknown };
+}
+
 function main(): void {
 	const results = CATALOG_NAMES.map(verifyCatalog);
 	const passing = results.filter((r) => r.ok);
@@ -276,11 +376,36 @@ function main(): void {
 		process.exit(1);
 	}
 
-	console.log(`OK: ${passing.length} catalogues current (registry.yaml ↔ subagent.json consistent)`);
+	// Per-file + subagent cross-consistency pass — now run the
+	// profile ↔ registry cross-consistency check (GC-2026-049 T3.2).
+	const profileCross = verifyProfileCrossConsistency();
+	if (!profileCross.ok) {
+		console.error(`verify-catalog: FAIL — profile YAMLs reference unknown subagent(s)`);
+		if (profileCross.error) {
+			console.error(`  ✗ ${profileCross.error}`);
+		}
+		if (profileCross.unknown && profileCross.unknown.length > 0) {
+			for (const u of profileCross.unknown) {
+				console.error(
+					`  ✗ profile '${u.profile}' references unknown subagent '${u.subagent}'; add to pi/subagents/registry.yaml or remove from profile`,
+				);
+			}
+		}
+		process.exit(1);
+	}
+
+	console.log(`OK: ${passing.length} catalogues current (registry.yaml ↔ subagent.json consistent; profiles ↔ registry consistent)`);
 	for (const p of passing) {
 		console.log(`  ✓ ${p.name}.json (hash=${p.stored!.slice(0, 12)}…)`);
 	}
 	process.exit(0);
 }
 
-main();
+// Only run main() when this file is the script entrypoint. This
+// allows the cross-consistency check to be imported by tests
+// (`verifyProfileCrossConsistency`) without spawning a subprocess
+// and without `process.exit(0)` terminating the test runner.
+const ENTRY = process.argv[1] ?? "";
+if (ENTRY.endsWith("verify-catalog.ts") || ENTRY.endsWith("verify-catalog.js")) {
+	main();
+}

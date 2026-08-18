@@ -178,3 +178,150 @@ describe("profile.ts — validation (malformed input)", () => {
 		expect(() => loadProfile(path)).toThrow(/dag_threshold/);
 	});
 });
+
+/**
+ * Cross-consistency + override-path tests — GC-2026-049 T3.2.
+ *
+ * These tests pin:
+ *   1. Every built-in profile's `subagents` list is a subset of
+ *      `pi/subagents/registry.yaml`'s id set (the same invariant the
+ *      `verify:catalog` script enforces at the repo level).
+ *   2. `loadProfile(overridePath)` reads the override path directly
+ *      (and re-reads on every call — the cache is bypassed).
+ *   3. `clearProfileCache()` actually clears the cache (a profile
+ *      change between two `loadProfile()` calls is observable).
+ *   4. `verifyProfileCrossConsistency()` (defined in
+ *      `pi/scripts/verify-catalog.ts`) rejects a profile that
+ *      references an unregistered subagent.
+ *
+ * Temp profile files live under `$JCODE_SCRATCH_DIR` when set,
+ * `/tmp` otherwise; the test runner resolves `overridePath` from
+ * `process.cwd()` (which is `pi/` when tests are invoked via
+ * `bun test ./test`).
+ */
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve as pathResolve } from "node:path";
+import { verifyProfileCrossConsistency } from "../scripts/verify-catalog.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PI_ROOT = pathResolve(__dirname, "..");
+const SCRATCH_BASE = process.env.JCODE_SCRATCH_DIR ?? join(tmpdir(), "sages-profiles-test");
+const PROFILES_DIR = join(PI_ROOT, "profiles");
+const REGISTRY_PATH = join(PI_ROOT, "subagents", "registry.yaml");
+
+function tmpProfilePath(name: string): string {
+	return join(SCRATCH_BASE, `profile-${name}-${Math.random().toString(36).slice(2)}.yaml`);
+}
+
+const minimalValidProfile = (subagents: string[]) =>
+	`id: tmp\ndescription: temp profile for cross-consistency test\nsubagents: [${subagents.join(", ")}]\nisolation_default: none\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: ""\nsoft_mode_system_prompt_suffix: ""\n`;
+
+describe("profile ↔ registry cross-consistency (GC-2026-049 T3.2)", () => {
+	it("every built-in profile's subagents list is a subset of registry.yaml ids", () => {
+		const result = verifyProfileCrossConsistency(PROFILES_DIR, REGISTRY_PATH);
+		expect(result.ok).toBe(true);
+		expect(result.unknown ?? []).toEqual([]);
+	});
+
+	it("rejects a profile that references an unregistered subagent", () => {
+		const path = tmpProfilePath("unknown-subagent");
+		try {
+			// 'definitely-not-registered' is not in registry.yaml
+			writeFileSync(path, minimalValidProfile(["Explore", "definitely-not-registered"]), "utf-8");
+			// loadProfile validates the schema but does NOT check
+			// against the registry — that is verifyProfileCrossConsistency's
+			// job. We mirror the check by writing a temp profile to a
+			// scratch directory and pointing the verifier at it.
+			const scratchDir = pathResolve(path, "..");
+			const result = verifyProfileCrossConsistency(scratchDir, REGISTRY_PATH);
+			expect(result.ok).toBe(false);
+			expect(result.error).toBeUndefined();
+			expect(result.unknown).toEqual([
+				{ profile: "tmp", subagent: "definitely-not-registered" },
+			]);
+		} finally {
+			try {
+				rmSync(path, { force: true });
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	});
+
+	it("rejects a profile whose subagents is not an array", () => {
+		const path = tmpProfilePath("bad-shape");
+		try {
+			writeFileSync(
+				path,
+				'id: tmp\ndescription: bad shape\nsubagents: "Explore"\nisolation_default: none\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: ""\nsoft_mode_system_prompt_suffix: ""\n',
+				"utf-8",
+			);
+			const scratchDir = pathResolve(path, "..");
+			const result = verifyProfileCrossConsistency(scratchDir, REGISTRY_PATH);
+			expect(result.ok).toBe(false);
+			expect(result.error).toMatch(/subagents.*not an array/);
+		} finally {
+			try {
+				rmSync(path, { force: true });
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	});
+});
+
+describe("loadProfile — override path (GC-2026-049 T3.2)", () => {
+	beforeEach(() => clearProfileCache());
+	afterEach(() => clearProfileCache());
+
+	it("loadProfile(overridePath) reads the override path directly", () => {
+		const path = tmpProfilePath("override-read");
+		try {
+			writeFileSync(path, minimalValidProfile(["Explore"]), "utf-8");
+			const p = loadProfile(path);
+			expect(p.id).toBe("tmp");
+			expect(p.subagents).toEqual(["Explore"]);
+		} finally {
+			try {
+				rmSync(path, { force: true });
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	});
+
+	it("clearProfileCache forces a fresh read on the next loadProfile() call", () => {
+		const path = tmpProfilePath("cache-invalidation");
+		try {
+			writeFileSync(path, minimalValidProfile(["Explore"]), "utf-8");
+			// Prime the cache via the default lookup (no overridePath).
+			const primed = loadProfile();
+			expect(primed.id).toBe("standard");
+			// Mutate the on-disk temp profile, then clear the cache and
+			// re-load via overridePath. The mutated version should land
+			// because overridePath bypasses the cache regardless.
+			writeFileSync(path, minimalValidProfile(["Plan", "developer"]), "utf-8");
+			const reloaded = loadProfile(path);
+			expect(reloaded.subagents).toEqual(["Plan", "developer"]);
+			// And clearProfileCache() also forces the default path to
+			// re-read: loadProfile() with no args after clearProfileCache
+			// should produce a fresh Profile object (same id, fresh ref).
+			clearProfileCache();
+			const a = loadProfile();
+			clearProfileCache();
+			const b = loadProfile();
+			expect(a.id).toBe(b.id);
+			// Two distinct objects — proof the cache was actually cleared.
+			expect(a).not.toBe(b);
+		} finally {
+			try {
+				rmSync(path, { force: true });
+			} catch {
+				// best-effort cleanup
+			}
+		}
+	});
+});
