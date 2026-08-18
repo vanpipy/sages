@@ -1,0 +1,40 @@
+{
+  "_source_hash": "e46fb344b33033148b5d85727b3a356e06e172598d335d3a3814dc273b9e50c2",
+  "_generated_at": "2026-08-18T03:15:01.494Z",
+  "_source_files": [
+    "src/tools/orchestrator/dag-synthesizer.ts",
+    "src/tools/orchestrator/task-dispatcher.ts"
+  ],
+  "entries": [
+    {
+      "id": "Explore",
+      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
+      "run_in_background_default": false
+    },
+    {
+      "id": "Plan",
+      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
+      "run_in_background_default": false
+    },
+    {
+      "id": "developer",
+      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
+      "run_in_background_default": true
+    },
+    {
+      "id": "auditor",
+      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
+      "run_in_background_default": true
+    },
+    {
+      "id": "merger",
+      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
+      "run_in_background_default": true
+    },
+    {
+      "id": "git-expert",
+      "source": "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
+      "run_in_background_default": true
+    }
+  ]
+}
