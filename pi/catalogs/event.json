@@ -1,16 +1,99 @@
 {
-  "_source_hash": "00ea5caf2c086187b69dee8585707f7026bb588ef89bc71d50f9399bbeabf2b8",
-  "_generated_at": "2026-08-18T06:57:08.140Z",
+  "_source_hash": "604d1560523348df929eb0856e63e72b80e5b1473c4a287a90865defdbf83e79",
+  "_generated_at": "2026-08-18T07:16:19.561Z",
   "_source_files": [
-    "src/extension.ts",
-    "src/soft-mode.ts"
+    "src/observability/events.ts"
   ],
-  "pre_gc_2026_050": true,
   "entries": [
     {
-      "key": "system",
-      "source": "pi/src/extension.ts#appendEntry",
-      "description": "entries appended under \"system\" — currently only SOFT_MODE_REMINDER; full taxonomy is GC-2026-050"
+      "name": "GoalCreated",
+      "id": "run/goal_created",
+      "domain": "run",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "DagSynthesized",
+      "id": "run/dag_synthesized",
+      "domain": "run",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "DispatchStarted",
+      "id": "run/dispatch_started",
+      "domain": "run",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "AuditCompleted",
+      "id": "run/audit_completed",
+      "domain": "run",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "Merged",
+      "id": "run/merged",
+      "domain": "run",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "Preflight",
+      "id": "step/preflight",
+      "domain": "step",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "Spawn",
+      "id": "step/spawn",
+      "domain": "step",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "ArtifactReceived",
+      "id": "step/artifact_received",
+      "domain": "step",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "MergeStart",
+      "id": "step/merge_start",
+      "domain": "step",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "MergeComplete",
+      "id": "step/merge_complete",
+      "domain": "step",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "Retry",
+      "id": "step/retry",
+      "domain": "step",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "Cancel",
+      "id": "step/cancel",
+      "domain": "step",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "Preflight",
+      "id": "seam/preflight",
+      "domain": "seam",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "PreMerge",
+      "id": "seam/pre_merge",
+      "domain": "seam",
+      "source": "src/observability/events.ts"
+    },
+    {
+      "name": "Notify",
+      "id": "seam/notify",
+      "domain": "seam",
+      "source": "src/observability/events.ts"
     }
   ]
 }
