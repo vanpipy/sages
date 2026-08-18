@@ -1,0 +1,12 @@
+id: ci-only
+description: Verifier-only; no spawning; no reminders. For CI environments.
+subagents: [auditor]
+isolation_default: none
+dag_threshold: 99
+gate_suite: [typecheck, test, verify:catalog]
+soft_mode_reminder: ""
+soft_mode_system_prompt_suffix: |
+  ## CI profile active
+
+  Subagent dispatch is disabled in this profile. Run only the gate suite:
+  typecheck + test + verify:catalog. No interactive reminders.

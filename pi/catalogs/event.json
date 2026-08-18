@@ -1,6 +1,6 @@
 {
-  "_source_hash": "c4b1103dcc205f53a892909026d432a3adbc5819bdf540218434feac572d805b",
-  "_generated_at": "2026-08-18T04:11:54.138Z",
+  "_source_hash": "46b1878db38cb4d969f15c199db9347b7d9572c1fc2f9777fe7c0c5e9db4fb56",
+  "_generated_at": "2026-08-18T04:33:39.417Z",
   "_source_files": [
     "src/extension.ts",
     "src/soft-mode.ts"

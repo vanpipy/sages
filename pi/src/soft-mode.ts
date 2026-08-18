@@ -9,20 +9,42 @@
  * pattern is auto-steered (a system reminder is appended via
  * `pi.appendEntry`), never blocked.
  *
- * This module exports the two reminder strings used by the extension:
- *   - SOFT_MODE_REMINDER: shown to the LLM once per session after the
- *     first write-intent bash call. Goal-orientation nudge — does NOT
- *     mention "you wrote production code" (per the user's
- *     GC-2026-031 directive: don't feedback the agent about specific
- *     write actions; just remind it to stay aligned with the goal).
- *   - SOFT_MODE_SYSTEM_PROMPT_SUFFIX: appended to the system prompt
- *     on every `before_agent_start` so the LLM knows the policy from
- *     the first turn.
+ * As of GC-2026-049, the reminder + suffix strings are no longer
+ * static module constants. They are fields on a `Profile` loaded by
+ * `pi/src/profile.ts`. Use `softModeReminder(profile)` and
+ * `softModeSystemPromptSuffix(profile)` to read them.
+ *
+ * Backward-compat shim: the historical `SOFT_MODE_REMINDER` and
+ * `SOFT_MODE_SYSTEM_PROMPT_SUFFIX` constants are preserved at their
+ * pre-GC-2026-049 values so legacy imports (notably
+ * `test/tools/main-agent-toolset.test.ts`) continue to work. New code
+ * MUST go through the profile functions.
  */
 
+import type { Profile } from "./profile.js";
+
 /** Goal-orientation reminder, fired once per session on first write-intent bash. */
-export const SOFT_MODE_REMINDER = `
-> ⚙️ **SOFT MODE — subagent dispatch recommended**
+export function softModeReminder(profile: Profile): string {
+  return profile.soft_mode_reminder;
+}
+
+/** Per-turn system-prompt suffix (soft mode policy description). */
+export function softModeSystemPromptSuffix(profile: Profile): string {
+  return profile.soft_mode_system_prompt_suffix;
+}
+
+// ── Backward-compat shims ────────────────────────────────────────────
+// Pre-GC-2026-049 callers (notably the soft-mode test suite) still
+// import `SOFT_MODE_REMINDER` and `SOFT_MODE_SYSTEM_PROMPT_SUFFIX` as
+// module-level constants. These exports preserve the historical
+// `standard` profile's strings so the legacy test contract holds.
+//
+// @deprecated — new code should call `softModeReminder(profile)` /
+// `softModeSystemPromptSuffix(profile)` instead. Will be removed once
+// the legacy test imports are migrated.
+
+/** @deprecated use `softModeReminder(profile)` instead. */
+export const SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — subagent dispatch recommended**
 >
 > If this is part of a larger workflow (>2 items in your active todowrite),
 > consider dispatching via the 4-stage DAG workflow: goal → DAG → dispatch → audit.
@@ -32,9 +54,8 @@ export const SOFT_MODE_REMINDER = `
 > blocked.
 `;
 
-/** Per-turn system-prompt suffix (soft mode policy description). */
-export const SOFT_MODE_SYSTEM_PROMPT_SUFFIX = `
-## Soft Mode (active)
+/** @deprecated use `softModeSystemPromptSuffix(profile)` instead. */
+export const SOFT_MODE_SYSTEM_PROMPT_SUFFIX = `## Soft Mode (active)
 
 You have full tool access — \`edit\`, \`write\`, \`aft_edit\`, \`apply_patch\`, and unrestricted \`bash\` (no commands are blocked, including \`rm\` / \`mv\` / \`cp\`).
 Subagent dispatch via the 4-stage DAG workflow (goal → DAG → dispatch → audit) is **RECOMMENDED** but not required.
