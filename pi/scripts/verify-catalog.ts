@@ -237,6 +237,87 @@ function verifySubagentCrossConsistency(): CrossConsistencyResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GC-2026-051 T5.2 — cookbook / postmortem consistency check
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `pi/docs/gc-index.md` is the entry point for institutional knowledge
+// — it lists every Goal Contract ever merged, and (by discipline)
+// every postmortem file at `pi/docs/postmortem/<id>.md` should be
+// reachable from the index.
+//
+// The strict gate "every GC id in the index has a postmortem or
+// carve-out" lives in the dedicated `verify:gcdb` command, which
+// walks the *goal directory*. This check in `verify-catalog` is the
+// inverse direction and covers two structural invariants:
+//
+//   1. Postmortem ↔ index alignment: every `docs/postmortem/<id>.md`
+//      file is mentioned in the gc-index. A postmortem that fell
+//      out of the index would be unreachable from the entry point —
+//      fail with the offending id.
+//
+//   2. Cookbook link resolvability: any link in the index that points
+//      into `docs/cookbook/` must resolve on disk. Goal-yaml links
+//      in the table are aspirational (the goal files do not exist on
+//      disk for most historical GCs) and are NOT checked here — the
+//      discipline is enforced upstream by the goal-creation flow.
+//
+// The carve-out section (`## Open / no postmortem`) is read so
+// postmortem-coverage drift can be diagnosed even when the strict
+// `verify:gcdb` gate is scoped to existing goal files.
+
+export interface CookbookPostmortemResult {
+	ok: boolean;
+	error?: string;
+	orphanPostmortems?: string[];
+	missingCookbookLinks?: string[];
+}
+
+export function verifyCookbookPostmortemConsistency(
+	gcIndexPath: string = join(PI_ROOT, "docs", "gc-index.md"),
+	postmortemDir: string = join(PI_ROOT, "docs", "postmortem"),
+): CookbookPostmortemResult {
+	if (!existsSync(gcIndexPath)) {
+		return { ok: false, error: `gc-index.md missing: ${relative(PI_ROOT, gcIndexPath)}` };
+	}
+	if (!existsSync(postmortemDir)) {
+		// No postmortems yet — invariant trivially satisfied.
+		return { ok: true };
+	}
+
+	const raw = readFileSync(gcIndexPath, "utf-8");
+	const indexIds = new Set<string>();
+	for (const m of raw.matchAll(/GC-\d{4}-\d{3,}/g)) indexIds.add(m[0]);
+
+	// 1. Postmortem ↔ index alignment.
+	const orphanPostmortems: string[] = [];
+	for (const file of readdirSync(postmortemDir)) {
+		const m = file.match(/^(GC-\d{4}-\d{3,})\.md$/);
+		if (!m || !m[1]) continue;
+		if (!indexIds.has(m[1])) orphanPostmortems.push(m[1]);
+	}
+
+	// 2. Cookbook link resolvability. The index only links goal
+	// yamls today (no cookbook entries in the table), so this branch
+	// is a no-op on the current tree — but it future-proofs against
+	// a contributor adding a cookbook link that points at a typo.
+	const missingCookbookLinks: string[] = [];
+	const linkRe = /\[[^\]]*\]\(([^)]+)\)/g;
+	for (const m of raw.matchAll(linkRe)) {
+		const target = m[1];
+		if (!target) continue;
+		if (!target.startsWith("../cookbook/") && !target.startsWith("cookbook/")) continue;
+		const tail = target.replace(/^\.\.\//, "").replace(/^cookbook\//, "cookbook/");
+		const abs = join(PI_ROOT, "docs", tail);
+		if (!existsSync(abs)) missingCookbookLinks.push(target);
+	}
+
+	if (orphanPostmortems.length === 0 && missingCookbookLinks.length === 0) {
+		return { ok: true };
+	}
+	return { ok: false, orphanPostmortems, missingCookbookLinks };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GC-2026-049 T3.2 — profile ↔ registry cross-consistency check
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -394,7 +475,37 @@ function main(): void {
 		process.exit(1);
 	}
 
-	console.log(`OK: ${passing.length} catalogues current (registry.yaml ↔ subagent.json consistent; profiles ↔ registry consistent)`);
+	// Profile cross-consistency passes — now run the cookbook /
+	// postmortem consistency check (GC-2026-051 T5.2). This is the
+	// postmortem ↔ index alignment check (orphan detection) plus
+	// cookbook link resolvability. The strict "every GC has a
+	// postmortem" gate is `verify:gcdb`.
+	const cookbookCross = verifyCookbookPostmortemConsistency();
+	if (!cookbookCross.ok) {
+		console.error(`verify-catalog: FAIL — gc-index.md institutional coverage broken`);
+		if (cookbookCross.error) {
+			console.error(`  ✗ ${cookbookCross.error}`);
+		}
+		if (cookbookCross.orphanPostmortems && cookbookCross.orphanPostmortems.length > 0) {
+			console.error(
+				`  ✗ ${cookbookCross.orphanPostmortems.length} postmortem(s) NOT referenced in gc-index.md:`,
+			);
+			for (const id of cookbookCross.orphanPostmortems) {
+				console.error(
+					`      ${id}: postmortem file exists at docs/postmortem/${id}.md but the GC id is missing from gc-index.md`,
+				);
+			}
+		}
+		if (cookbookCross.missingCookbookLinks && cookbookCross.missingCookbookLinks.length > 0) {
+			console.error(`  ✗ ${cookbookCross.missingCookbookLinks.length} broken cookbook link(s):`);
+			for (const target of cookbookCross.missingCookbookLinks) {
+				console.error(`      ${target}`);
+			}
+		}
+		process.exit(1);
+	}
+
+	console.log(`OK: ${passing.length} catalogues current (registry.yaml ↔ subagent.json consistent; profiles ↔ registry consistent; gc-index.md institutional coverage OK)`);
 	for (const p of passing) {
 		console.log(`  ✓ ${p.name}.json (hash=${p.stored!.slice(0, 12)}…)`);
 	}
