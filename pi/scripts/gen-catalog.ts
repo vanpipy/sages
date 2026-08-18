@@ -1,12 +1,11 @@
 #!/usr/bin/env bun
 /**
- * gen-catalog.ts — GC-2026-047 T1.1
+ * gen-catalog.ts — GC-2026-047 T1.1 / GC-2026-048 T2.2
  *
  * Generates five catalog files under `pi/catalogs/` from current source:
- *   - subagent.json   ← pi/src/tools/orchestrator/dag-synthesizer.ts
- *                        (knownSubagents Set) +
- *                        pi/src/tools/orchestrator/task-dispatcher.ts
- *                        (defaultRunInBackground switch)
+ *   - subagent.json   ← pi/subagents/registry.yaml (GC-2026-048 — single
+ *                        source of truth; replaces the pre-T2.1 dual-source
+ *                        extract from dag-synthesizer.ts + task-dispatcher.ts)
  *   - isolation.json  ← pi/src/tools/orchestrator/types.ts
  *                        (TaskNode.isolation union)
  *   - gate.json       ← pi/src/tools/orchestrator/orchestrator-audit.ts
@@ -24,7 +23,7 @@
  * every source file listed in the catalog's allow-list; the verifier
  * recomputes the same chain and exits 1 on mismatch.
  *
- * No external dependencies. bun builtins + `node:crypto` only.
+ * No external dependencies beyond `js-yaml` (already a runtime dep of pi).
  *
  * Extraction is intentionally regex / limited parsing — NOT ts-morph.
  * A future GC (G2 / G4) will replace this with a real AST walker once
@@ -35,6 +34,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as yaml from "js-yaml";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // `pi/scripts/gen-catalog.ts` → `pi/` is the parent
@@ -102,127 +102,104 @@ function writeCatalog(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Extractor 1 — subagent roster
+//
+// GC-2026-048 T2.2: the source of truth is `pi/subagents/registry.yaml`.
+// The runtime registry loader (`pi/src/tools/orchestrator/subagent-registry.ts`)
+// parses the same YAML, validates the same shape, and exposes the same
+// fields — the catalog is a snapshot of that registry's id + run_in_background
+// columns, plus the full set of fields so downstream readers can introspect
+// kind / isolation / gather / artifact_schema without re-parsing YAML.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface SubagentEntry {
 	id: string;
 	source: string;
 	run_in_background_default: boolean;
+	kind: string;
+	isolation: string[];
+	gather: boolean;
+	artifact_schema: string[];
+}
+
+const REGISTRY_REL_PATH = "subagents/registry.yaml";
+
+interface RegistrySubagent {
+	id: string;
+	kind: string;
+	isolation: string[];
+	run_in_background: boolean;
+	gather: boolean;
+	artifact_schema: string[];
+}
+
+function loadRegistry(): RegistrySubagent[] {
+	const raw = readFileSync(join(PI_ROOT, REGISTRY_REL_PATH), "utf-8");
+	const parsed: unknown = yaml.load(raw);
+	if (typeof parsed !== "object" || parsed === null) {
+		throw new Error("subagent: registry.yaml root must be an object");
+	}
+	const subagents = (parsed as { subagents?: unknown }).subagents;
+	if (!Array.isArray(subagents) || subagents.length === 0) {
+		throw new Error("subagent: registry.yaml must contain a non-empty 'subagents' array");
+	}
+	const ids = new Set<string>();
+	const out: RegistrySubagent[] = [];
+	for (const [index, candidate] of subagents.entries()) {
+		const prefix = `subagent: registry.yaml entry ${index}`;
+		if (typeof candidate !== "object" || candidate === null) {
+			throw new Error(`${prefix} must be an object`);
+		}
+		const entry = candidate as RegistrySubagent;
+		if (typeof entry.id !== "string" || entry.id.length === 0) {
+			throw new Error(`${prefix} requires a non-empty string 'id'`);
+		}
+		if (ids.has(entry.id)) {
+			throw new Error(`subagent: registry.yaml contains duplicate id '${entry.id}'`);
+		}
+		ids.add(entry.id);
+		if (
+			!Array.isArray(entry.isolation)
+			|| entry.isolation.length === 0
+			|| entry.isolation.some((mode) => typeof mode !== "string" || mode.length === 0)
+		) {
+			throw new Error(`${prefix} '${entry.id}' requires non-empty string 'isolation' array`);
+		}
+		if (typeof entry.run_in_background !== "boolean") {
+			throw new Error(`${prefix} '${entry.id}' requires boolean 'run_in_background'`);
+		}
+		if (typeof entry.gather !== "boolean") {
+			throw new Error(`${prefix} '${entry.id}' requires boolean 'gather'`);
+		}
+		if (
+			!Array.isArray(entry.artifact_schema)
+			|| entry.artifact_schema.length === 0
+			|| entry.artifact_schema.some((field) => typeof field !== "string" || field.length === 0)
+		) {
+			throw new Error(`${prefix} '${entry.id}' requires non-empty string 'artifact_schema' array`);
+		}
+		out.push(entry);
+	}
+	return out;
 }
 
 function extractSubagent(): {
 	entries: SubagentEntry[];
 	sources: SourceFile[];
 } {
-	const synth = loadSource("src/tools/orchestrator/dag-synthesizer.ts");
-	const dispatcher = loadSource("src/tools/orchestrator/task-dispatcher.ts");
+	const registry = loadSource(REGISTRY_REL_PATH);
+	const subagents = loadRegistry();
 
-	// 1. Parse the `knownSubagents` Set literal in dag-synthesizer.ts.
-	// Match `const knownSubagents = new Set([ ... ])` (whitespace-tolerant).
-	const setMatch = synth.content.match(
-		/const\s+knownSubagents\s*=\s*new\s+Set\(\[([\s\S]*?)\]\)/,
-	);
-	if (!setMatch) {
-		throw new Error(
-			"subagent: `const knownSubagents = new Set([...])` not found in dag-synthesizer.ts",
-		);
-	}
-	const idRegex = /"([A-Za-z][A-Za-z0-9_-]*)"/g;
-	const ids: string[] = [];
-	let m: RegExpExecArray | null;
-	while ((m = idRegex.exec(setMatch[1])) !== null) {
-		ids.push(m[1]);
-	}
-	if (ids.length === 0) {
-		throw new Error("subagent: no ids parsed from knownSubagents Set");
-	}
-
-	// 2. Parse `defaultRunInBackground` switch in task-dispatcher.ts.
-	// The function body is `export function defaultRunInBackground(...) { switch (...) { ... } }`.
-	// We capture the function body then walk the switch statement, tracking
-	// fall-through case labels until the next `return` statement. A single
-	// `return` may serve multiple stacked `case` labels (TypeScript's
-	// fall-through is implicit and silent).
-	const fnMatch = dispatcher.content.match(
-		/export\s+function\s+defaultRunInBackground[\s\S]*?^}/m,
-	);
-	if (!fnMatch) {
-		throw new Error(
-			"subagent: export function defaultRunInBackground not found in task-dispatcher.ts",
-		);
-	}
-	const fnBody = fnMatch[0];
-	const lines = fnBody.split("\n");
-
-	let pendingCases: string[] = [];
-	let defaultReturns: boolean | null = null;
-	const explicitCases: Array<{ ids: string[]; returns: boolean }> = [];
-
-	for (const line of lines) {
-		const caseMatch = line.match(/^\s*case\s+"([^"]+)"\s*:/);
-		if (caseMatch) {
-			pendingCases.push(caseMatch[1]);
-			continue;
-		}
-		const defaultMatch = line.match(/^\s*default\s*:/);
-		if (defaultMatch) {
-			pendingCases.push("__default__");
-			continue;
-		}
-		const returnMatch = line.match(/^\s*return\s+(true|false)\s*;/);
-		if (returnMatch) {
-			const value = returnMatch[1] === "true";
-			const realIds = pendingCases.filter((id) => id !== "__default__");
-			if (pendingCases.includes("__default__")) {
-				defaultReturns = value;
-			}
-			if (realIds.length > 0) {
-				explicitCases.push({ ids: realIds, returns: value });
-			}
-			pendingCases = [];
-			continue;
-		}
-		// Any other top-level token (closing brace, new statement) resets
-		// the pending list — defensive.
-		if (/^\s*[}]/.test(line)) {
-			pendingCases = [];
-		}
-	}
-
-	if (explicitCases.length === 0 && defaultReturns === null) {
-		throw new Error(
-			"subagent: no case label or default returning a value parsed from defaultRunInBackground",
-		);
-	}
-
-	// Build the set of ids with `background = true`:
-	//   - any id in an explicit case that returns true
-	//   - any id in `ids` (knownSubagents) NOT in any explicit case,
-	//     if the default case returns true (fall-through to default).
-	const backgroundIds = new Set<string>();
-	const explicitIds = new Set<string>();
-	for (const c of explicitCases) {
-		for (const id of c.ids) explicitIds.add(id);
-		if (c.returns) {
-			for (const id of c.ids) backgroundIds.add(id);
-		}
-	}
-	if (defaultReturns === true) {
-		for (const id of ids) {
-			if (!explicitIds.has(id)) {
-				backgroundIds.add(id);
-			}
-		}
-	}
-
-	// 3. Build entries. The source pointer is the location in dag-synthesizer.ts.
-	const entries: SubagentEntry[] = ids.map((id) => ({
-		id,
-		source: "pi/src/tools/orchestrator/dag-synthesizer.ts#knownSubagents",
-		run_in_background_default: backgroundIds.has(id),
+	const entries: SubagentEntry[] = subagents.map((entry) => ({
+		id: entry.id,
+		source: `pi/${REGISTRY_REL_PATH}#subagents`,
+		run_in_background_default: entry.run_in_background,
+		kind: entry.kind,
+		isolation: [...entry.isolation],
+		gather: entry.gather,
+		artifact_schema: [...entry.artifact_schema],
 	}));
 
-	return { entries, sources: [synth, dispatcher] };
+	return { entries, sources: [registry] };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
