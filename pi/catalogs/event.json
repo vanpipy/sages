@@ -1,0 +1,16 @@
+{
+  "_source_hash": "c4b1103dcc205f53a892909026d432a3adbc5819bdf540218434feac572d805b",
+  "_generated_at": "2026-08-18T03:15:01.497Z",
+  "_source_files": [
+    "src/extension.ts",
+    "src/soft-mode.ts"
+  ],
+  "pre_gc_2026_050": true,
+  "entries": [
+    {
+      "key": "system",
+      "source": "pi/src/extension.ts#appendEntry",
+      "description": "entries appended under \"system\" — currently only SOFT_MODE_REMINDER; full taxonomy is GC-2026-050"
+    }
+  ]
+}

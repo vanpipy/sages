@@ -1,0 +1,40 @@
+{
+  "_source_hash": "fbb3408dfec84ab6dd67fff6834b4a49a5c5fddc9f6ea1b25dc8df8c7cc978dc",
+  "_generated_at": "2026-08-18T03:15:01.495Z",
+  "_source_files": [
+    "src/tools/orchestrator/types.ts"
+  ],
+  "entries": [
+    {
+      "id": "worktree-create",
+      "kind": "object",
+      "valid_for_subagent": [
+        "developer",
+        "test-writer",
+        "doc-writer",
+        "migrator"
+      ]
+    },
+    {
+      "id": "current-workspace",
+      "kind": "literal",
+      "valid_for_subagent": [
+        "developer",
+        "test-writer",
+        "doc-writer",
+        "migrator"
+      ]
+    },
+    {
+      "id": "none",
+      "kind": "literal",
+      "valid_for_subagent": [
+        "Explore",
+        "Plan",
+        "auditor",
+        "merger",
+        "git-expert"
+      ]
+    }
+  ]
+}
