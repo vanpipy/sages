@@ -137,6 +137,95 @@ drift in either direction (a new id added to one file but not the
 other, or a `run_in_background` mismatch on a shared id) fails the
 verify step with a clear fix-up hint.
 
+## Profiles
+
+A **profile** is a named bundle that captures one coherent Sages
+soft-mode policy (GC-2026-031) plus its dispatch + gate posture in a
+single YAML file. Every profile declares:
+
+- `subagents` — whitelist of subagent ids (must be a subset of
+  `pi/subagents/registry.yaml`'s id set; verified by
+  `verifyProfileCrossConsistency`).
+- `isolation_default` — the default isolation mode for
+  workspace-using subagents (`none`, `current-workspace`, or
+  `worktree`).
+- `dag_threshold` — todo-item count at which the 4-stage DAG
+  workflow is recommended (>2 in `standard`; 1 in `light` /
+  `audit-strict`; ≥99 in `ci-only`).
+- `gate_suite` — which verifications the profile requires (e.g.
+  `typecheck`, `test`, `verify:catalog`, `verify:profile`).
+- `soft_mode_reminder` — string fired once per session on the
+  first write-intent bash call (empty in CI).
+- `soft_mode_system_prompt_suffix` — string appended to every
+  system prompt.
+
+The main-agent extension loads the active profile once at session
+start via `loadProfile()` (in `pi/src/profile.ts`) and threads its
+fields through `soft-mode.ts`. The dispatcher + DAG synthesizer
+treat the whitelist as authoritative.
+
+### The 4 built-in profiles
+
+- **`light`** — read-only, in-process tool families only.
+  `subagents=[Explore]`, `isolation_default: none`, empty
+  `gate_suite`, `dag_threshold: 1`. CI-friendly; recommend DAG
+  for >2-item workflows but never force it.
+- **`standard`** — full subagent roster (all six) with
+  `current-workspace` isolation, `dag_threshold: 2`, and the
+  `typecheck + test + verify:catalog` gate suite. The default
+  when no override is present.
+- **`audit-strict`** — full roster with `worktree`-only isolation,
+  `dag_threshold: 1` (recommend DAG even for ≤2-item tasks),
+  stricter reminder + suffix, and a gate suite that adds
+  `verify:profile`. Use when merge discipline matters more than
+  dispatch speed.
+- **`ci-only`** — `subagents=[auditor]`, `isolation_default: none`,
+  `dag_threshold: 99` (effectively never), empty reminder. For
+  CI environments: run gates, no spawning, no interactive nudges.
+
+### How to override
+
+Write `~/.pi/profile.yaml` with the same schema as a built-in
+profile, e.g.:
+
+```yaml
+id: audit-strict
+description: Personal override; full audit gates
+subagents: [Explore, Plan, developer, auditor, merger, git-expert]
+isolation_default: worktree
+dag_threshold: 1
+gate_suite: [typecheck, test, verify:catalog, verify:profile]
+soft_mode_reminder: ""
+soft_mode_system_prompt_suffix: ""
+```
+
+`loadProfile()` reads it on startup; the built-in `standard`
+profile is the fallback when no home-level override is present.
+
+### How to add a new profile
+
+1. Copy `pi/profiles/standard.yaml` to `pi/profiles/myprofile.yaml`.
+2. Edit the fields. Keep `subagents` ⊆ `registry.yaml`'s id set.
+3. From `pi/`, run `bun run verify:catalog` to confirm the new
+   profile does not break the profile ↔ registry cross-consistency
+   check. If you reference an unregistered subagent, the verifier
+   prints a clear error:
+   ```
+   profile 'myprofile' references unknown subagent 'foo'; add to pi/subagents/registry.yaml or remove from profile
+   ```
+4. Add a smoke test in `pi/test/profiles.test.ts` (one
+   `describe` block per profile is the conventional shape) so the
+   schema and intent are pinned.
+
+### Reference table
+
+| Profile | subagents | isolation_default | dag_threshold | gate_suite |
+|---|---|---:|---:|---|
+| `light` | `[Explore]` | `none` | 1 | `[]` |
+| `standard` | `[Explore, Plan, developer, auditor, merger, git-expert]` | `current-workspace` | 2 | `[typecheck, test, verify:catalog]` |
+| `audit-strict` | `[Explore, Plan, developer, auditor, merger, git-expert]` | `worktree` | 1 | `[typecheck, test, verify:catalog, verify:profile]` |
+| `ci-only` | `[auditor]` | `none` | 99 | `[typecheck, test, verify:catalog]` |
+
 ## Workflow at a glance
 
 1. **Goal:** call `goal_contract_create`; every binary success criterion needs a
