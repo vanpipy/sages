@@ -51,6 +51,15 @@ import { registerOrchestratorTools } from "./tools/orchestrator/index.js";
 import { classifyBashCommand } from "./tools/bash-guard.js";
 import { loadProfile } from "./profile.js";
 import { softModeReminder, softModeSystemPromptSuffix } from "./soft-mode.js";
+import {
+	RunEvent,
+	StepEvent,
+	SeamEvent,
+	emitRunEvent,
+	emitStepEvent,
+	emitSeamEvent,
+	onSeam,
+} from "./observability/index.js";
 
 // Load the active profile once at module load. Resolution order is
 // documented in `profile.ts`; falls back to the `standard` built-in
@@ -62,6 +71,25 @@ const PROFILE = loadProfile();
  */
 export default function registerSagesExtension(pi: ExtensionAPI): void {
 	registerOrchestratorTools(pi);
+
+	// ── Seam event registration (GC-2026-050) ────────────────────────────
+	// Register a no-op seam callback for the Preflight hook so downstream
+	// tools that call `emitSeamEvent(SeamEvent.Preflight, ...)` always
+	// find at least one registered listener at runtime. The actual seam
+	// (preflight) wiring is performed by `tool-fence.ts` once the
+	// orchestrator tools register themselves; this default no-op keeps
+	// the seam dispatcher failure-mode visible (empty registry → silent
+	// success) rather than latent.
+	//
+	// The registry is process-scoped and reset by tests via
+	// `clearSeamCallbacks()`. It is intentionally NOT persisted across
+	// sessions — extension re-registers on every `registerSagesExtension`
+	// call.
+	onSeam(SeamEvent.Preflight, async () => {
+		// Default seam listener: a no-op so the dispatcher always has at
+		// least one callback. Real preflight logic lives in the
+		// orchestrator's tool-fence module.
+	});
 
 	// ── Session-scoped state ──────────────────────────────────────────
 	// Mutable closure: each event handler reads / mutates the same state.
@@ -78,6 +106,14 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 	// The session_start handler only resets the reminder flag so the
 	// first write-intent bash command in a new session emits the
 	// reminder once. Previous-session state is otherwise irrelevant.
+	//
+	// GC-2026-050: run/* event scaffold. The `RunEvent.GoalCreated`
+	// event is NOT emitted here because there is no DAG id at
+	// session_start time. The actual emission happens at goal-creation
+	// time inside `goal_contract_create.ts` (a future orchestrator
+	// follow-up). We deliberately do NOT call `emitRunEvent()` from
+	// session_start — that would (a) require a placeholder dag_id and
+	// (b) race with the orchestrator's real emission.
 	pi.on("session_start", () => {
 		remindedThisSession = false;
 	});
@@ -87,6 +123,14 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 	// so it can fire the once-per-session auto-steer reminder on the
 	// first write-intent bash call. The reminder is goal-orientation,
 	// not "you wrote production code" feedback.
+	//
+	// GC-2026-050: the existing `pi.appendEntry("system", ...)` is
+	// preserved for backward compatibility (the
+	// `test/tools/main-agent-toolset.test.ts` suite asserts on it).
+	// A `step/preflight` event is also emitted so the canonical Sages
+	// observability trace captures the reminder boundary. Both fire in
+	// the same turn; the appendEntry is marked deprecated in favor of
+	// `emitStepEvent(StepEvent.Preflight, ...)`.
 	pi.on("tool_call", (event: any, ctx: any) => {
 		if (event.toolName !== "bash") return;
 		const command: string = event?.input?.command;
@@ -95,6 +139,13 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		const classification = classifyBashCommand(command);
 		if (classification === "write-intent" && !remindedThisSession) {
 			remindedThisSession = true;
+			// Canonical observability trace — the step/* event the Sages
+			// audit pipeline subscribes to.
+			emitStepEvent(StepEvent.Preflight, { profile: PROFILE.id });
+			// @deprecated — kept for backward compatibility with
+			// `test/tools/main-agent-toolset.test.ts`. Will be removed
+			// once that test migrates to assert on `emitStepEvent` /
+			// a stub `StepEvent.Preflight` listener instead.
 			pi.appendEntry("system", softModeReminder(PROFILE));
 		}
 		return undefined;

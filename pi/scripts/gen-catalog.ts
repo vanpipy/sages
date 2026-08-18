@@ -12,9 +12,9 @@
  *                        (g.* category vocabulary) +
  *                        pi/src/tools/orchestrator/goal-contract.ts
  *                        (severity vocabulary)
- *   - event.json      ← pi/src/extension.ts + pi/src/soft-mode.ts
- *                        (current `pi.appendEntry("system", ...)` keys)
- *                        [marked _pre_gc_2026_050 — GC-2026-050 replaces]
+ *   - event.json      ← pi/src/observability/events.ts
+ *                        (RunEvent / StepEvent / SeamEvent enums,
+ *                        GC-2026-050 taxonomy)
  *   - namespace.json  ← pi/src/tools/orchestrator/namespace-ownership.ts
  *                        (L3 / developer / auditor patterns)
  *
@@ -369,51 +369,73 @@ function extractGate(): {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Extractor 4 — event vocabulary
+//
+// GC-2026-050 T4.2: the event taxonomy now lives in
+// `pi/src/observability/events.ts`. Three enums (RunEvent / StepEvent /
+// SeamEvent) cover 5 + 7 + 3 = 15 events, each prefixed with its domain
+// (`run/` / `step/` / `seam/`). This extractor parses the enum-member
+// shape `<Name> = "<domain>/<slug>"` and emits one entry per member.
+//
+// Source-of-truth: `src/observability/events.ts`. The matching emitters
+// (runner.ts / step.ts / seam.ts) write to different storage profiles
+// but are NOT extracted here — the event-catalog surface is the enum
+// taxonomy, not the storage wiring. The producer / consumer matrix lives
+// at `pi/docs/event-producer-consumer.md` (maintained by hand; regenerate
+// when observability/events.ts changes).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * The full event taxonomy is GC-2026-050's job. T1.1 only extracts the
- * `kind` keys that are CURRENTLY emitted via `pi.appendEntry("system", ...)`.
- * The catalog is marked `_pre_gc_2026_050` so downstream readers can detect
- * the pre-2026-050 snapshot.
- */
+interface EventEntry {
+	name: string;
+	id: string;
+	domain: "run" | "step" | "seam";
+	source: string;
+}
+
 function extractEvent(): {
-	pre_gc_2026_050: true;
-	entries: Array<{ key: string; source: string; description: string }>;
+	entries: EventEntry[];
 	sources: SourceFile[];
 } {
-	const extension = loadSource("src/extension.ts");
-	const softMode = loadSource("src/soft-mode.ts");
+	const events = loadSource("src/observability/events.ts");
 
-	// Extract all `pi.appendEntry("system", <EXPR>)` calls.
-	const callRegex = /pi\.appendEntry\(\s*"([a-z]+)"\s*,/g;
-	const keys = new Set<string>();
-	let em: RegExpExecArray | null;
-	while ((em = callRegex.exec(extension.content)) !== null) {
-		keys.add(em[1]);
-	}
-
-	// Currently the only emission is "system" (SOFT_MODE_REMINDER).
-	// This is a snapshot — when GC-2026-050 lands and adds more kinds
-	// (e.g. "user-reminder", "audit-state"), re-run `bun run gen:catalog`
-	// to update this catalog.
-	const entries: Array<{ key: string; source: string; description: string }> = [];
-	for (const key of keys) {
+	// Match enum members shaped `<Name> = "<domain>/<slug>"`. Anchored at
+	// the start of the line so we don't pick up string literals inside
+	// doc-comments or unrelated code. The domain prefix is captured as
+	// group 2 so we can route the entry to its domain without re-parsing.
+	const memberRegex = /^\s*([A-Z][A-Za-z0-9]*)\s*=\s*"(run|step|seam)\/([A-Za-z0-9_]+)"/gm;
+	const entries: EventEntry[] = [];
+	let m: RegExpExecArray | null;
+	while ((m = memberRegex.exec(events.content)) !== null) {
+		const name = m[1];
+		const domain = m[2] as "run" | "step" | "seam";
+		const slug = m[3];
+		if (name === undefined || domain === undefined || slug === undefined) continue;
 		entries.push({
-			key,
-			source: "pi/src/extension.ts#appendEntry",
-			description: `entries appended under "${key}" — currently only SOFT_MODE_REMINDER; full taxonomy is GC-2026-050`,
+			name,
+			id: `${domain}/${slug}`,
+			domain,
+			source: "src/observability/events.ts",
 		});
 	}
-	// Cross-reference: soft-mode.ts defines the SOFT_MODE_REMINDER string.
-	// We don't extract its text; the catalog records the key only.
-	if (!softMode.content.includes("SOFT_MODE_REMINDER")) {
+
+	// Sanity guard: the GC-2026-050 minimum (SC5) is 6 events spanning 3
+	// domains. If the extractor drops below that, either events.ts was
+	// emptied (a regression) or the regex changed shape. Surface the
+	// failure loudly rather than emitting a silently-empty catalog.
+	if (entries.length < 6) {
 		throw new Error(
-			"event: SOFT_MODE_REMINDER constant not found in soft-mode.ts (expected sibling source)",
+			`event: only ${entries.length} enum member(s) extracted from observability/events.ts — expected ≥6 (SC5 minimum)`,
 		);
 	}
+	const domains = new Set(entries.map((e) => e.domain));
+	for (const required of ["run", "step", "seam"]) {
+		if (!domains.has(required as "run" | "step" | "seam")) {
+			throw new Error(
+				`event: domain "${required}" missing from extracted events (got [${[...domains].join(", ")}])`,
+			);
+		}
+	}
 
-	return { pre_gc_2026_050: true, entries, sources: [extension, softMode] };
+	return { entries, sources: [events] };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -503,7 +525,7 @@ const CATALOGS: CatalogDescriptor[] = [
 		name: "event",
 		run: () => {
 			const { entries, sources } = extractEvent();
-			return { payload: { pre_gc_2026_050: true, entries }, sources };
+			return { payload: { entries }, sources };
 		},
 	},
 	{
