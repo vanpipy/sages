@@ -1,0 +1,12 @@
+{
+  "name": "sages-resume",
+  "description": "Session start: surface in-progress DAGs from .pi/orchestrator so the user knows what to pick up. Quiet unless something is in flight.",
+  "trigger": {
+    "kind": "hook",
+    "event": "session_start",
+    "once": "daily"
+  },
+  "prompt": "Sages session resume. The previous session may have left in-progress DAGs in `.pi/orchestrator/`. Surface them so the user can pick up where they left off. Quiet unless there's actually work to resume.\n\nSteps:\n\n1. Read `.pi/orchestrator/goal-*.yaml` and `.pi/orchestrator/dag-*.yaml` directly with the `read` tool. (Do not run find/ls via bash — these paths are well-known.)\n\n2. For each goal, check the matching DAG. If the DAG has any tasks in `in_progress` or `failed` status, the goal is \"active\".\n\n3. If no active goals exist, output `[~]` and exit. This is the most common case and should be silent.\n\n4. If active goals exist, build a session-resume summary:\n   - For each active goal, one line: `GC-{id} '{title}' — {completed}/{total} done, blocked on: {task_ids}`\n   - Plus a recommended next action: `Pick one to resume, or close out blockers before starting new work.`\n\n5. Output the summary as a regular user message in the conversation (it will appear in the transcript and the user sees it on session start). Format:\n   ```\n   [↻ resuming previous work]\n   - GC-2026-XXX 'title' — 2/4 done, blocked on: T3\n   - GC-2026-YYY 'title' — 0/3 done, blocked on: T1, T2\n   Pick one to resume, or close out blockers before starting new work.\n   ```\n\n6. For each active goal, also call `sages_reminder({ type: \"RESUME_REQUIRED\", dag_id: \"GC-{id}\" })` so the reminder surfaces in the LLM context for the rest of the session. This makes the in-progress state sticky across turns.\n\n7. If even one `sages_reminder` call hits an error, do NOT abort — log the error text in the session message and continue. The summary is the primary deliverable; the reminder is best-effort.\n\n8. Do NOT call `dag_synthesize`, `task_dispatch`, or any orchestrator tool that mutates state. This routine is observation-only — it surfaces, it does not act.\n\nReference: `pi/src/tools/orchestrator/sages-reminder.ts` (GC-2026-053). The `RESUME_REQUIRED` reminder type is part of the Sages reminder taxonomy.",
+  "quiet": true,
+  "requiredTools": ["sages_reminder"]
+}
