@@ -52,6 +52,12 @@ import { classifyBashCommand } from "./tools/bash-guard.js";
 import { loadProfile } from "./profile.js";
 import { softModeReminder, softModeSystemPromptSuffix } from "./soft-mode.js";
 import {
+	orchestratorAdvisoryFor,
+	type OrchestratorToolCall,
+	type OrchestratorAdvisoryContext,
+} from "./tools/orchestrator/l1-advisory.js";
+import { loadGoalContract, loadPlan } from "./tools/orchestrator/dag-synthesizer.js";
+import {
 	RunEvent,
 	StepEvent,
 	SeamEvent,
@@ -101,7 +107,19 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 	// session to avoid spamming the LLM with duplicate reminders.
 	let remindedThisSession = false;
 
-	// ── Session start: reset auto-steer throttle ─────────────────────
+	// ── L1 orchestrator advisory state (GC-2026-053) ─────────────────────
+	// Mirror of L2's `AdvisoryContext` but lifted to the root agent so
+	// the orchestrator's own tool-call stream is audited. Reset on
+	// every session_start. The dedup set + dispatch counter suppress
+	// repeat advisories for the same rule across the same session,
+	// matching the L2 dedup/cap contract exactly.
+	let l1History: OrchestratorToolCall[] = [];
+	const l1Ctx: OrchestratorAdvisoryContext = {
+		alreadyAdvisedRules: new Set<string>(),
+		advisoriesSent: 0,
+	};
+
+	// ── Session start: reset auto-steer throttle + L1 advisory state ────
 	// Soft mode does not touch the active toolset (Layer 1 is gone).
 	// The session_start handler only resets the reminder flag so the
 	// first write-intent bash command in a new session emits the
@@ -116,6 +134,9 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 	// (b) race with the orchestrator's real emission.
 	pi.on("session_start", () => {
 		remindedThisSession = false;
+		l1History = [];
+		l1Ctx.alreadyAdvisedRules = new Set<string>();
+		l1Ctx.advisoriesSent = 0;
 	});
 
 	// ── Bash tool_call handler — soft mode ────────────────────────────
@@ -147,6 +168,55 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 			// once that test migrates to assert on `emitStepEvent` /
 			// a stub `StepEvent.Preflight` listener instead.
 			pi.appendEntry("system", softModeReminder(PROFILE));
+		}
+		return undefined;
+	});
+
+	// ── L1 orchestrator tool_call handler (GC-2026-053) ─────────────────
+	// Separate handler so L1 logic stays isolated from the soft-mode
+	// bash classifier. Runs on every orchestrator tool call, not just
+	// bash; appends the call to history then asks `orchestratorAdvisoryFor`
+	// for any advisories that should fire. Caps + dedup mirror L2.
+	pi.on("tool_call", (event: any, ctx: any) => {
+		const toolName: string = event?.toolName;
+		if (typeof toolName !== "string" || toolName.length === 0) return;
+		const input =
+			event?.input && typeof event.input === "object" ? event.input : {};
+		l1History.push({ toolName, input, timestamp: Date.now() });
+
+		const cwd: string = ctx?.cwd ?? process.cwd();
+		const advisories = orchestratorAdvisoryFor(l1History, l1Ctx, {
+			loadGoalScope: (goalId) => {
+				const goal = loadGoalContract(cwd, goalId);
+				if (!goal) return null;
+				return {
+					goal_id: goal.id,
+					scope_include: goal.scope?.include ?? [],
+					scope_exclude: goal.scope?.exclude ?? [],
+				};
+			},
+			loadDagPlan: (dagId) => {
+				const plan = loadPlan(cwd, dagId);
+				if (!plan) return null;
+				return {
+					tasks: plan.tasks.map((t) => ({
+						id: t.id,
+						status: t.status,
+						depends_on: t.depends_on ?? [],
+					})),
+				};
+			},
+		});
+		for (const advisory of advisories) {
+			pi.appendEntry("system", advisory);
+			// Update dedup + cap counters exactly like L2 does.
+			const ruleMatch = advisory.match(
+				/^\[orchestrator audit advisory — \d+\/\d+\] ([a-z_]+):/,
+			);
+			if (ruleMatch && ruleMatch[1]) {
+				l1Ctx.alreadyAdvisedRules.add(ruleMatch[1]);
+			}
+			l1Ctx.advisoriesSent += 1;
 		}
 		return undefined;
 	});
