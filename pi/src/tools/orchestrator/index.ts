@@ -26,6 +26,7 @@ import { registerGoalContractTool } from "./goal-contract.js";
 import { registerDAGSynthesizerTool } from "./dag-synthesizer.js";
 import { registerTaskDispatcherTool } from "./task-dispatcher.js";
 import { registerOrchestratorAuditTool } from "./orchestrator-audit.js";
+import { registerSagesReminderTool } from "./sages-reminder.js";
 
 export {
   buildGoalContract,
@@ -100,4 +101,5 @@ export function registerOrchestratorTools(pi: any): void {
   registerDAGSynthesizerTool(pi);
   registerTaskDispatcherTool(pi);
   registerOrchestratorAuditTool(pi);
+  registerSagesReminderTool(pi);
 }
