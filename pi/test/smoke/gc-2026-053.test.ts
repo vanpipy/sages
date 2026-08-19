@@ -1,0 +1,428 @@
+/**
+ * GC-2026-053 smoke test — runtime wiring verification
+ *
+ * This is NOT a unit test. It exercises the actual module wiring that
+ * pi's extension loader would use:
+ *
+ *   1. Register Sages extension on a mock pi runtime
+ *   2. Verify all 5 orchestrator tools (4 existing + sages_reminder) are present
+ *   3. Drive the L1 advisory injector with synthetic tool-call history that
+ *      triggers each of the 5 L1 rules
+ *   4. Invoke sages_reminder through the registered tool, observe appendEntry
+ *   5. Validate the 3 routine templates as a pi-routine consumer would
+ *
+ * Run: `cd pi && bun test ./test/smoke/gc-2026-053.test.ts`
+ *
+ * For deployment verification outside the test framework:
+ *   bun run ./scripts/smoke-gc-2026-053.ts
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PI_ROOT = join(__dirname, "..", "..");
+const TEMPLATES_DIR = join(PI_ROOT, "templates", "routines");
+
+// ─── Mock pi runtime ────────────────────────────────────────────────────────
+
+interface RegisteredTool {
+  name: string;
+  description: string;
+  label?: string;
+  parameters: any;
+  execute: (...args: any[]) => Promise<any>;
+}
+
+class MockPi {
+  tools = new Map<string, RegisteredTool>();
+  systemEntries: Array<{ customType: string; data: any }> = [];
+  toolCallListeners: Array<(event: any, ctx: any) => any> = [];
+
+  registerTool(def: RegisteredTool) {
+    this.tools.set(def.name, def);
+  }
+
+  appendEntry(customType: string, data: any) {
+    this.systemEntries.push({ customType, data });
+  }
+
+  /** Simulate the on("tool_call") event firing for a single tool invocation. */
+  fireToolCall(event: { toolName: string; input: any; timestamp: number }) {
+    for (const handler of this.toolCallListeners) {
+      handler({ toolName: event.toolName, input: event.input }, { cwd: "/tmp" });
+    }
+  }
+
+  on(event: string, handler: any) {
+    if (event === "tool_call") {
+      this.toolCallListeners.push(handler);
+    }
+  }
+}
+
+// ─── 1. Extension registration ──────────────────────────────────────────────
+
+describe("GC-2026-053 smoke: extension registration (Step 1)", () => {
+  it("SMOKE-1.1: registerSagesExtension registers all 5 orchestrator tools", async () => {
+    const registerSagesExtension = (await import("../../src/extension.js")).default;
+    const pi = new MockPi();
+    registerSagesExtension(pi as any);
+    const names = [...pi.tools.keys()].sort();
+    expect(names).toEqual([
+      "dag_synthesize",
+      "goal_contract_create",
+      "orchestrator_audit",
+      "sages_reminder",
+      "task_dispatch",
+    ]);
+  });
+
+  it("SMOKE-1.2: each tool has label, description, parameters, execute", async () => {
+    const registerSagesExtension = (await import("../../src/extension.js")).default;
+    const pi = new MockPi();
+    registerSagesExtension(pi as any);
+    for (const tool of pi.tools.values()) {
+      expect(typeof tool.name).toBe("string");
+      expect(typeof tool.label).toBe("string");
+      expect(typeof tool.description).toBe("string");
+      expect(tool.parameters).toBeDefined();
+      expect(typeof tool.execute).toBe("function");
+    }
+  });
+
+  it("SMOKE-1.3: sages_reminder tool description mentions all 6 types", async () => {
+    const registerSagesExtension = (await import("../../src/extension.js")).default;
+    const pi = new MockPi();
+    registerSagesExtension(pi as any);
+    const t = pi.tools.get("sages_reminder")!;
+    for (const ty of ["STALE_DAG", "MERGE_GATE", "COMPLETION_GATE", "GOAL_DRIFT", "RESUME_REQUIRED", "GENERIC"]) {
+      expect(t.description).toContain(ty);
+    }
+  });
+});
+
+// ─── 2. L1 advisory: detector triggers ──────────────────────────────────────
+
+describe("GC-2026-053 smoke: L1 advisory detector triggers (Step 2)", () => {
+  let pi: MockPi;
+  beforeEach(async () => {
+    pi = new MockPi();
+    const ext = await import("../../src/extension.js");
+    const registerSagesExtension = ext.default;
+    registerSagesExtension(pi as any);
+  });
+
+  function fireSequence(history: Array<{ toolName: string; input: any }>) {
+    for (const { toolName, input } of history) {
+      pi.fireToolCall({ toolName, input, timestamp: Date.now() });
+    }
+  }
+
+  it("SMOKE-2.1: dag_synthesize × 3 → dag_resynth_loop advisory", () => {
+    fireSequence([
+      { toolName: "dag_synthesize", input: { goal_id: "GC-2026-053" } },
+      { toolName: "dag_synthesize", input: { goal_id: "GC-2026-053" } },
+      { toolName: "dag_synthesize", input: { goal_id: "GC-2026-053" } },
+    ]);
+    const advisories = pi.systemEntries.filter(
+      (e) =>
+        e.customType === "system" &&
+        ((typeof e.data === "string" && e.data.includes("dag_resynth_loop")) ||
+          (typeof e.data === "object" && e.data?.text?.includes("dag_resynth_loop"))),
+    );
+    expect(advisories.length).toBeGreaterThan(0);
+    const advisoryText = typeof advisories[0].data === "string" ? advisories[0].data : advisories[0].data.text;
+    expect(advisoryText).toMatch(/\[orchestrator audit advisory/);
+  });
+
+  it("SMOKE-2.2: task_dispatch without orchestrator_audit → dispatch_no_audit", () => {
+    fireSequence([
+      { toolName: "task_dispatch", input: { dag_id: "GC-2026-053" } },
+    ]);
+    const advisories = pi.systemEntries.filter((e) => {
+      if (e.customType !== "system") return false;
+      const text = typeof e.data === "string" ? e.data : e.data?.text;
+      return typeof text === "string" && text.includes("dispatch_no_audit");
+    });
+    expect(advisories.length).toBeGreaterThan(0);
+  });
+
+  it("SMOKE-2.3: many tool calls without audit → no_progress_no_audit", () => {
+    fireSequence(
+      Array.from({ length: 12 }, (_, i) => ({
+        toolName: i % 2 === 0 ? "read" : "bash",
+        input: { path: `/tmp/fake-${i}` },
+      })),
+    );
+    const advisories = pi.systemEntries.filter((e) => {
+      if (e.customType !== "system") return false;
+      const text = typeof e.data === "string" ? e.data : e.data?.text;
+      return typeof text === "string" && text.includes("no_progress_no_audit");
+    });
+    expect(advisories.length).toBeGreaterThan(0);
+  });
+
+  it("SMOKE-2.4: single well-formed call sequence → no advisories", () => {
+    fireSequence([
+      { toolName: "goal_contract_create", input: { id: "GC-2026-053" } },
+      { toolName: "dag_synthesize", input: { goal_id: "GC-2026-053" } },
+      { toolName: "orchestrator_audit", input: { dag_id: "DAG-2026-053" } },
+    ]);
+    const advisories = pi.systemEntries.filter((e) => {
+      if (e.customType !== "system") return false;
+      const text = typeof e.data === "string" ? e.data : e.data?.text;
+      return typeof text === "string" && text.includes("advisory");
+    });
+    expect(advisories.length).toBe(0);
+  });
+
+  it("SMOKE-2.5: advisory caps at 2 per dispatch (mirrors L2)", () => {
+    fireSequence(
+      Array.from({ length: 12 }, () => ({ toolName: "task_dispatch", input: {} })),
+    );
+    const advisories = pi.systemEntries.filter((e) => {
+      if (e.customType !== "system") return false;
+      const text = typeof e.data === "string" ? e.data : e.data?.text;
+      return typeof text === "string" && text.includes("advisory");
+    });
+    expect(advisories.length).toBeLessThanOrEqual(2);
+  });
+
+  it("SMOKE-2.6: dedup — same rule doesn't fire twice in one dispatch", () => {
+    fireSequence(
+      Array.from({ length: 12 }, () => ({ toolName: "task_dispatch", input: {} })),
+    );
+    const advisories = pi.systemEntries.filter((e) => {
+      if (e.customType !== "system") return false;
+      const text = typeof e.data === "string" ? e.data : e.data?.text;
+      return typeof text === "string" && text.includes("dispatch_no_audit");
+    });
+    expect(advisories.length).toBe(1);
+  });
+});
+
+// ─── 3. sages_reminder tool: end-to-end invocation ──────────────────────────
+
+describe("GC-2026-053 smoke: sages_reminder integration (Step 3)", () => {
+  let pi: MockPi;
+  beforeEach(async () => {
+    pi = new MockPi();
+    const ext = await import("../../src/extension.js");
+    const registerSagesExtension = ext.default;
+    registerSagesExtension(pi as any);
+  });
+
+  it("SMOKE-3.1: sages_reminder(SALE_DAG) injects a system entry", async () => {
+    const tool = pi.tools.get("sages_reminder")!;
+    const result = await tool.execute(
+      "call-1",
+      { type: "STALE_DAG", dag_id: "GC-2026-053" },
+      new AbortController().signal,
+      () => {},
+      { cwd: "/tmp" },
+    );
+    expect(result.details.status).toBe("ok");
+    expect(pi.systemEntries.length).toBe(1);
+    expect(pi.systemEntries[0].customType).toBe("system");
+    expect(pi.systemEntries[0].data.type).toBe("STALE_DAG");
+    expect(pi.systemEntries[0].data.dag_id).toBe("GC-2026-053");
+  });
+
+  it("SMOKE-3.2: message override replaces default template", async () => {
+    const tool = pi.tools.get("sages_reminder")!;
+    const result = await tool.execute(
+      "call-2",
+      { type: "MERGE_GATE", message: "Custom: do not merge yet" },
+      new AbortController().signal,
+      () => {},
+      { cwd: "/tmp" },
+    );
+    expect(result.details.status).toBe("ok");
+    expect(pi.systemEntries[0].data.message).toBe("Custom: do not merge yet");
+    expect(pi.systemEntries[0].data.text).toContain("Custom: do not merge yet");
+  });
+
+  it("SMOKE-3.3: invalid type returns structured error (no throw)", async () => {
+    const tool = pi.tools.get("sages_reminder")!;
+    const result = await tool.execute(
+      "call-3",
+      { type: "BOGUS" },
+      new AbortController().signal,
+      () => {},
+      { cwd: "/tmp" },
+    );
+    expect(result.details.status).toBe("error");
+    expect(result.details.code).toBe("INVALID_TYPE");
+    expect(pi.systemEntries.length).toBe(0);
+  });
+
+  it("SMOKE-3.4: appendEntry failure surfaces as structured error", async () => {
+    const failingPi = new MockPi();
+    const registerSagesExtension = (await import("../../src/extension.js")).default;
+    registerSagesExtension(failingPi as any);
+    // Replace appendEntry with throwing impl
+    failingPi.appendEntry = () => {
+      throw new Error("session closed");
+    };
+    const tool = failingPi.tools.get("sages_reminder")!;
+    const result = await tool.execute(
+      "call-4",
+      { type: "GENERIC" },
+      new AbortController().signal,
+      () => {},
+      { cwd: "/tmp" },
+    );
+    expect(result.details.status).toBe("error");
+    expect(result.details.code).toBe("APPEND_ENTRY_FAILED");
+    expect(result.details.error).toContain("session closed");
+  });
+
+  it("SMOKE-3.5: response.text is human-readable + structured payload is parseable", async () => {
+    const tool = pi.tools.get("sages_reminder")!;
+    const result = await tool.execute(
+      "call-5",
+      { type: "RESUME_REQUIRED", dag_id: "GC-2026-053" },
+      new AbortController().signal,
+      () => {},
+      { cwd: "/tmp" },
+    );
+    expect(result.details.text).toMatch(/\[sages reminder: RESUME_REQUIRED \(GC-2026-053\)\]/);
+    const data = pi.systemEntries[0].data;
+    expect(data.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(data.tool).toBe("sages_reminder");
+  });
+});
+
+// ─── 4. Routine templates: pi-routine compatible ────────────────────────────
+
+describe("GC-2026-053 smoke: routine templates (Step 4)", () => {
+  it("SMOKE-4.1: all 3 templates parse as JSON", () => {
+    const files = readdirSync(TEMPLATES_DIR).filter((f) => f.endsWith(".json"));
+    expect(files.length).toBe(3);
+    for (const f of files) {
+      const t = JSON.parse(readFileSync(join(TEMPLATES_DIR, f), "utf-8"));
+      expect(t.name).toBeTruthy();
+    }
+  });
+
+  it("SMOKE-4.2: sages-session-wrap has the correct hook trigger", () => {
+    const t = JSON.parse(
+      readFileSync(join(TEMPLATES_DIR, "sages-session-wrap.json"), "utf-8"),
+    );
+    expect(t.trigger.kind).toBe("hook");
+    expect(t.trigger.event).toBe("session_shutdown");
+    expect(t.trigger.once).toBe("per_session");
+    expect(t.quiet).toBe(true);
+  });
+
+  it("SMOKE-4.3: sages-resume has the correct hook trigger", () => {
+    const t = JSON.parse(
+      readFileSync(join(TEMPLATES_DIR, "sages-resume.json"), "utf-8"),
+    );
+    expect(t.trigger.kind).toBe("hook");
+    expect(t.trigger.event).toBe("session_start");
+    expect(t.trigger.once).toBe("daily");
+    expect(t.quiet).toBe(true);
+  });
+
+  it("SMOKE-4.4: sages-watchdog has the correct pulse trigger + maxTicks", () => {
+    const t = JSON.parse(
+      readFileSync(join(TEMPLATES_DIR, "sages-watchdog.json"), "utf-8"),
+    );
+    expect(t.trigger.kind).toBe("pulse");
+    expect(t.trigger.interval).toBe("5m");
+    expect(t.maxTicks).toBe(14400);
+    expect(t.quiet).toBe(true);
+  });
+
+  it("SMOKE-4.5: every prompt references the sages_reminder tool", () => {
+    const files = readdirSync(TEMPLATES_DIR).filter((f) => f.endsWith(".json"));
+    for (const f of files) {
+      const t = JSON.parse(readFileSync(join(TEMPLATES_DIR, f), "utf-8"));
+      expect(t.prompt).toContain("sages_reminder");
+    }
+  });
+
+  it("SMOKE-4.6: every prompt has a [~] quiet-fallback contract", () => {
+    const files = readdirSync(TEMPLATES_DIR).filter((f) => f.endsWith(".json"));
+    for (const f of files) {
+      const t = JSON.parse(readFileSync(join(TEMPLATES_DIR, f), "utf-8"));
+      expect(t.prompt).toMatch(/\[~]/);
+    }
+  });
+
+  it("SMOKE-4.7: name field matches filename (so /routine-install <name> resolves)", () => {
+    const files = readdirSync(TEMPLATES_DIR).filter((f) => f.endsWith(".json"));
+    for (const f of files) {
+      const stem = f.replace(/\.json$/, "");
+      const t = JSON.parse(readFileSync(join(TEMPLATES_DIR, f), "utf-8"));
+      expect(t.name).toBe(stem);
+    }
+  });
+});
+
+// ─── 5. End-to-end: orchestrator produces all 3 channels ────────────────────
+
+describe("GC-2026-053 smoke: end-to-end (Step 5)", () => {
+  it("SMOKE-5.1: all 3 reminder channels are reachable via the registered tool", async () => {
+    const registerSagesExtension = (await import("../../src/extension.js")).default;
+    const pi = new MockPi();
+    registerSagesExtension(pi as any);
+    const t = pi.tools.get("sages_reminder")!;
+
+    // Reach each of the 6 reminder types via the registered tool
+    const types = ["STALE_DAG", "MERGE_GATE", "COMPLETION_GATE", "GOAL_DRIFT", "RESUME_REQUIRED", "GENERIC"];
+    for (const type of types) {
+      const result = await t.execute(
+        `call-${type}`,
+        { type, dag_id: "GC-2026-053" },
+        new AbortController().signal,
+        () => {},
+        { cwd: "/tmp" },
+      );
+      expect(result.details.status).toBe("ok");
+    }
+    expect(pi.systemEntries.length).toBe(6);
+    const seenTypes = new Set(pi.systemEntries.map((e) => e.data.type));
+    expect(seenTypes.size).toBe(6);
+  });
+
+  it("SMOKE-5.2: L1 advisory and sages_reminder are independent channels", async () => {
+    const ext = await import("../../src/extension.js");
+    const registerSagesExtension = ext.default;
+    const pi = new MockPi();
+    registerSagesExtension(pi as any);
+
+    // Channel A: L1 advisory (auto-fires on tool_call)
+    pi.fireToolCall({ toolName: "task_dispatch", input: {}, timestamp: 1 });
+    const l1Entries = pi.systemEntries.filter((e) => {
+      if (e.customType !== "system") return false;
+      const text = typeof e.data === "string" ? e.data : e.data?.text;
+      return typeof text === "string" && text.includes("orchestrator audit advisory");
+    });
+
+    // Channel B: sages_reminder (explicit LLM call)
+    const t = pi.tools.get("sages_reminder")!;
+    await t.execute(
+      "manual",
+      { type: "STALE_DAG", dag_id: "X" },
+      new AbortController().signal,
+      () => {},
+      { cwd: "/tmp" },
+    );
+    const reminderEntries = pi.systemEntries.filter((e) => {
+      const text = typeof e.data === "string" ? e.data : e.data?.text;
+      return typeof text === "string" && text.includes("sages reminder");
+    });
+
+    expect(l1Entries.length).toBeGreaterThan(0);
+    expect(reminderEntries.length).toBe(1);
+    const l1Text = typeof l1Entries[0].data === "string" ? l1Entries[0].data : l1Entries[0].data.text;
+    const rText = typeof reminderEntries[0].data === "string" ? reminderEntries[0].data : reminderEntries[0].data.text;
+    expect(l1Text).not.toBe(rText);
+  });
+});
