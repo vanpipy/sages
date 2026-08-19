@@ -1,0 +1,12 @@
+{
+  "name": "sages-session-wrap",
+  "description": "Session shutdown: scan .pi/orchestrator for in-progress DAGs and persist state to Magic Context so the next session can resume.",
+  "trigger": {
+    "kind": "hook",
+    "event": "session_shutdown",
+    "once": "per_session"
+  },
+  "prompt": "Sages session wrap. Before this session ends, persist the workflow state so the next session can resume without losing context. Quiet unless something changed.\n\nSteps:\n\n1. Scan the orchestrator state directory. Read every file matching `.pi/orchestrator/goal-*.yaml` and `.pi/orchestrator/dag-*.yaml`. Use the `read` tool — do not run bash to list files, prefer direct file reads of the known names.\n\n2. For each goal YAML, check whether the corresponding DAG plan has any tasks in `in_progress` or `failed` status. If yes, the goal is \"active\".\n\n3. For each active goal, compute a summary string:\n   `GC-{id} '{title}' — {completed}/{total} tasks completed, last update {modified_at}, blocked on: {in_progress_task_ids}`\n\n4. For each active goal, write a `ctx_memory` entry with:\n   - `category`: \"PROJECT_RULES\"\n   - `content`: the summary string above\n   - `surface_condition`: `When session_start and goal GC-{id} exists` (so the next session's resume routine can pick it up)\n\n5. If any tasks are in `failed` status, write a `ctx_note` with `priority: high` that hints at the failure cause:\n   - task_id: failed task id\n   - content: 1-line failure summary\n\n6. If no active goals were found, output `[~]` and exit. Do not write empty memory entries.\n\n7. If memory writes succeed, output `[~]` (the prompt is quiet — the user only sees this if there's a notification).\n\nThis routine depends on the `sages_reminder` tool ONLY if you need to surface a sticky reminder in the conversation transcript. Routine persistence to Magic Context is the primary mechanism; reminders are secondary.\n\nReference: `pi/src/tools/orchestrator/sages-reminder.ts` (GC-2026-053).",
+  "quiet": true,
+  "requiredTools": ["ctx_memory", "ctx_note"]
+}
