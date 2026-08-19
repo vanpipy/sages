@@ -36,5 +36,8 @@
 | GC-2026-047 | G1 catalog generator + verifier chain | [.pi/orchestrator/goal-GC-2026-047.yaml](../../.pi/orchestrator/goal-GC-2026-047.yaml) |
 | GC-2026-048 | G2 subagent registry — capability seam | [.pi/orchestrator/goal-GC-2026-048.yaml](../../.pi/orchestrator/goal-GC-2026-048.yaml) |
 | GC-2026-049 | G3 profile / bundle composition | [.pi/orchestrator/goal-GC-2026-049.yaml](../../.pi/orchestrator/goal-GC-2026-049.yaml) |
+| GC-2026-050 | G4 event three-domain split — observability/ module + audit-state | [.pi/orchestrator/goal-GC-2026-050.yaml](../../.pi/orchestrator/goal-GC-2026-050.yaml) |
+| GC-2026-051 | G5 cookbook + postmortem + gc-index + verify:gcdb | [.pi/orchestrator/goal-GC-2026-051.yaml](../../.pi/orchestrator/goal-GC-2026-051.yaml) |
+| GC-2026-052 | G6 verify matrix hardening — 4 new verifiers + check:all aggregator | [.pi/orchestrator/goal-GC-2026-052.yaml](../../.pi/orchestrator/goal-GC-2026-052.yaml) |
 
-_Total: 30 GCs_
+_Total: 33 GCs_
