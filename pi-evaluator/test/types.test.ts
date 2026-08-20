@@ -164,7 +164,7 @@ const critiqueWorkflowInput: CritiqueWorkflowInput = {
 	workflow_path: "/tmp/example",
 };
 
-const overallVerdict: OverallVerdict = "局部有效但 X 有缺口";
+const overallVerdict: OverallVerdict = "partially effective with gaps in X";
 const confidence: Confidence = "high";
 
 const reinforcedObservation: ReinforcedObservation = {
