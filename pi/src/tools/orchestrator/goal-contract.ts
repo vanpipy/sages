@@ -166,13 +166,19 @@ export function validateGoalContractWithVerifierLinter(
 }
 
 /** Serialize goal contract to YAML (minimal hand-rolled serializer for portability). */
-export function goalContractToYaml(gc: GoalContract): string {
+export function goalContractToYaml(gc: GoalContract & { _lock_hash?: string }): string {
   const lines: string[] = [];
   lines.push("# Goal Contract");
   lines.push(`id: ${gc.id}`);
   lines.push(`title: "${escapeYaml(gc.title)}"`);
   if (gc.rationale) lines.push(`rationale: "${escapeYaml(gc.rationale)}"`);
   lines.push(`created_at: "${gc.created_at}"`);
+  if (gc._lock_hash) {
+    // GC-2026-057: persist the lock hash so reads can verify integrity.
+    // The hash covers all SC-relevant fields; editing any of them
+    // invalidates the hash.
+    lines.push(`_lock_hash: "${gc._lock_hash}"`);
+  }
   lines.push("");
 
   lines.push("success_criteria:");
@@ -240,6 +246,25 @@ export function buildGoalContract(input: GoalContractInput): GoalContract {
     done_definition: input.done_definition,
     created_at: new Date().toISOString(),
   };
+}
+
+/**
+ * GC-2026-057: build + lock. Same as `buildGoalContract` but also
+ * computes and attaches a SHA-256 lock hash so the LLM cannot
+ * silently modify the goal after creation. The hash is computed
+ * over the canonical JSON form of the contract (sorted keys, no
+ * whitespace) — it is independent of YAML formatting and is
+ * sensitive to any SC / scope / title / anti_goals change.
+ *
+ * The locked contract is what gets serialized to disk. Any read
+ * that wants to verify the lock should use `checkGoalLock` from
+ * `./goal-lock.js`.
+ */
+export function buildLockedGoalContract(input: GoalContractInput): GoalContract & { _lock_hash: string } {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { lockGoal } = require("./goal-lock.js") as typeof import("./goal-lock.js");
+  const base = buildGoalContract(input);
+  return lockGoal(base);
 }
 
 /**
