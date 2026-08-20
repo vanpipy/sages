@@ -29,10 +29,17 @@ import { findSagesRoot } from "../orchestrator/template-loader.js";
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 export type TodoPriority = "high" | "medium" | "low";
+/** GC-2026-061: kind "task" marks a dispatchable DAG task; "plan" a plain action. */
+export type TodoKind = "plan" | "task";
 
 /**
  * One todo. `id`/`priority` are optional so the shape stays compatible
  * with the pi built-in `todowrite` tool's items.
+ *
+ * GC-2026-061 (additive): structured todos — those carrying `kind`,
+ * `depends_on`, or `batch` — are the plan definition: the extension
+ * compiles them into a DAG (see dag-compile.ts). `dag_id`/`goal_id`
+ * name the compiled DAG (todo field → session default → 'DAG-todos').
  */
 export interface TodoItem {
   /** Stable identity — when present, matching is by id, not content. */
@@ -41,6 +48,20 @@ export interface TodoItem {
   content: string;
   status: TodoStatus;
   priority?: TodoPriority;
+  /** "task" = dispatchable DAG task; "plan" = plain action. */
+  kind?: TodoKind;
+  /** DAG dependency edges — task ids this task depends on. */
+  depends_on?: string[];
+  /** Explicit concurrency group (1-based). Omitted → auto-assigned by topology. */
+  batch?: number;
+  /** DAG id for the compiled plan (else session default / 'DAG-todos'). */
+  dag_id?: string;
+  /** Goal contract id for the compiled plan. */
+  goal_id?: string;
+  /** Detailed prompt for the subagent; defaults to content. */
+  prompt?: string;
+  /** Files this task touches. */
+  files?: string[];
 }
 
 /** Result of one whole-list replacement (or programmatic update). */
@@ -132,6 +153,22 @@ function validateTodoItem(value: unknown): TodoItem {
   const item: TodoItem = { content: raw.content, status: raw.status };
   if (typeof raw.id === "string" && raw.id.length > 0) item.id = raw.id;
   if (isTodoPriority(raw.priority)) item.priority = raw.priority;
+  // GC-2026-061: preserve structured (DAG-compile) fields so a persisted
+  // task-level todo survives a store round-trip with its structure.
+  // Invalid values are silently dropped, mirroring id/priority handling.
+  if (raw.kind === "plan" || raw.kind === "task") item.kind = raw.kind;
+  if (Array.isArray(raw.depends_on) && raw.depends_on.every((d) => typeof d === "string")) {
+    item.depends_on = raw.depends_on as string[];
+  }
+  if (typeof raw.batch === "number" && Number.isInteger(raw.batch) && raw.batch >= 1) {
+    item.batch = raw.batch;
+  }
+  if (typeof raw.dag_id === "string" && raw.dag_id.length > 0) item.dag_id = raw.dag_id;
+  if (typeof raw.goal_id === "string" && raw.goal_id.length > 0) item.goal_id = raw.goal_id;
+  if (typeof raw.prompt === "string" && raw.prompt.length > 0) item.prompt = raw.prompt;
+  if (Array.isArray(raw.files) && raw.files.every((f) => typeof f === "string")) {
+    item.files = raw.files as string[];
+  }
   return item;
 }
 
