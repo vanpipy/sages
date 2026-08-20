@@ -45,6 +45,8 @@ interface GcRow {
   id: string;
   title: string;
   sha: string;
+  /** Original commit subject — kept for selection logic. */
+  subject?: string;
 }
 
 const GC_ID_REGEX = /GC-\d{4}-\d{3,}/;
@@ -98,23 +100,70 @@ function extractTitle(subject: string): string {
 }
 
 function rows(): GcRow[] {
+  // `%H %s%n%b%n--END--`: SHA + subject on line 1, body on subsequent
+  // lines, terminated by --END-- sentinel. The newline-format trick
+  // lets us scan the FULL commit message (subject + body) for GC IDs,
+  // so commits that reference `GC-2026-NNN` only in the footer (e.g.
+  // `Refs: GC-2026-053`) are picked up, not just those with the ID
+  // in the subject.
   const raw = execSync(
-    "git log --all --grep='GC-' --format='%H %s'",
+    "git log --all --format='%H %s%n%b%n--END--'",
     { encoding: "utf-8" },
   );
-  const seen = new Map<string, GcRow>();
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    const spaceIdx = line.indexOf(" ");
+  // Per-GC-ID list of candidate rows. We pick the best commit later,
+  // preferring `feat:` / `fix:` / `merge:` / `refactor:` / `perf:` over
+  // `test:` / `docs:` / `chore:` / `style:`. The reason: a GC branch
+  // often has a final `test(smoke):` or `docs:` commit that mentions
+  // the GC ID, but the canonical title should come from the original
+  // feature commit (or the merge commit when one exists).
+  const candidates = new Map<string, GcRow[]>();
+  for (const block of raw.split("--END--")) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+    const firstLineEnd = trimmed.indexOf("\n");
+    const header = firstLineEnd >= 0 ? trimmed.slice(0, firstLineEnd) : trimmed;
+    const spaceIdx = header.indexOf(" ");
     if (spaceIdx < 0) continue;
-    const sha = line.slice(0, spaceIdx);
-    const subject = line.slice(spaceIdx + 1);
-    const m = subject.match(GC_ID_REGEX);
+    const sha = header.slice(0, spaceIdx);
+    const subject = header.slice(spaceIdx + 1);
+    const fullMessage = trimmed; // includes subject + body
+    const m = fullMessage.match(GC_ID_REGEX);
     if (!m) continue;
     const id = m[0];
-    if (seen.has(id)) continue;
     const title = extractTitle(subject);
-    seen.set(id, { id, title, sha });
+    const row: GcRow = { id, title, sha, subject };
+    const list = candidates.get(id) ?? [];
+    list.push(row);
+    candidates.set(id, list);
+  }
+
+  // Priority for picking the canonical title. Higher wins.
+  const PRIMARY = /^merge[\s(:]/i;
+  const FEATURE = /^(feat|fix|refactor|perf)[\s(:]/i;
+
+  // Pick the canonical title for each GC ID.
+  // Strategy: prefer the most recent commit that has a "primary" prefix
+  // (merge / feat / fix / refactor / perf). If none, fall back to the
+  // earliest commit in the list (chronologically first), which is the
+  // last entry of `candidates.get(id)` since git log returns newest-first.
+  const seen = new Map<string, GcRow>();
+  for (const [id, list] of candidates) {
+    // `list` is newest-first. We prefer the most recent merge/feat/fix
+    // commit for the canonical title. If none, fall back to the oldest
+    // commit (chronologically first).
+    let chosen: GcRow | null = null;
+    for (const candidate of list) {
+      const subject = candidate.subject;
+      if (PRIMARY.test(subject) || FEATURE.test(subject)) {
+        chosen = candidate;
+        break;
+      }
+    }
+    if (!chosen) {
+      // Fall through to the chronologically earliest commit (last entry).
+      chosen = list[list.length - 1];
+    }
+    seen.set(id, chosen);
   }
   return Array.from(seen.values()).sort((a, b) => a.id.localeCompare(b.id));
 }
