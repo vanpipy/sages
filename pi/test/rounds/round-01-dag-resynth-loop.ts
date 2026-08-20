@@ -55,4 +55,17 @@ describe("Round 1: L1 advisory — dag_resynth_loop", () => {
     const findings = extractOrchestratorFindings(history);
     expect(findings.find((f) => f.rule === "dag_resynth_loop")).toBeUndefined();
   });
+
+  it("does NOT fire when same goal is resynthesized with DIFFERENT args (refinement, GC-2026-059 chain-key)", () => {
+    // The killer use case for chain-key: legitimate refinement.
+    // Pre-GC-2026-059, the per-goal counter would fire here. With
+    // chain-key, only identical-args repeats trigger.
+    const history = [
+      { toolName: "dag_synthesize", input: { goal_id: "GC-2026-TEST", refine: "iteration 1" }, timestamp: 1 },
+      { toolName: "dag_synthesize", input: { goal_id: "GC-2026-TEST", refine: "iteration 2" }, timestamp: 2 },
+      { toolName: "dag_synthesize", input: { goal_id: "GC-2026-TEST", refine: "iteration 3" }, timestamp: 3 },
+    ];
+    const findings = extractOrchestratorFindings(history);
+    expect(findings.find((f) => f.rule === "dag_resynth_loop")).toBeUndefined();
+  });
 });

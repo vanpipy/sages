@@ -151,13 +151,18 @@ describe("GC-2026-053 smoke: L1 advisory detector triggers (Step 2)", () => {
     expect(advisories.length).toBeGreaterThan(0);
   });
 
-  it("SMOKE-2.3: many tool calls without audit → no_progress_no_audit", () => {
-    fireSequence(
-      Array.from({ length: 12 }, (_, i) => ({
+  it("SMOKE-2.3: many tool calls without audit AND a chain at length >= 3 → no_progress_no_audit", () => {
+    // GC-2026-059: the rule now requires a chain at length >= 3. Use
+    // 9 distinct reads + 3 reads of the same path (chain length 3).
+    fireSequence([
+      ...Array.from({ length: 9 }, (_, i) => ({
         toolName: i % 2 === 0 ? "read" : "bash",
         input: { path: `/tmp/fake-${i}` },
       })),
-    );
+      { toolName: "read", input: { path: "/tmp/looped.ts" } },
+      { toolName: "read", input: { path: "/tmp/looped.ts" } },
+      { toolName: "read", input: { path: "/tmp/looped.ts" } },
+    ]);
     const advisories = pi.systemEntries.filter((e) => {
       if (e.customType !== "system") return false;
       const text = typeof e.data === "string" ? e.data : e.data?.text;
