@@ -214,8 +214,8 @@ const MERGER_AGENT: AgentConfig = {
  * Canonical `git-expert` agent.
  *
  * Built-in to pi-subagents as of GC-2026-030. The `git-expert`
- * sub-agent performs deep git inspection (搜查), backtrack
- * archaeology (回溯), worktree / branch / merge diagnostics, and
+ * sub-agent performs deep git inspection, backtrack
+ * archaeology, worktree / branch / merge diagnostics, and
  * produces git-usage recipes for other subagents. It is
  * read-only on production code (no `edit` / `write` tools); all
  * write activity happens in
