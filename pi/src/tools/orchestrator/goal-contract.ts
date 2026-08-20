@@ -128,6 +128,43 @@ export function validateGoalContract(input: GoalContractInput): ValidationResult
   return { valid: errors.length === 0, errors, warnings };
 }
 
+/**
+ * GC-2026-056: stricter verification_cmd validation. Rejects placeholder
+ * commands at goal-creation time. The LLM cannot submit `echo "yes"`
+ * or `pwd` as a verifiable success criterion — it must produce an
+ * observable signal.
+ *
+ * This wraps {@link validateGoalContract} and adds an additional pass:
+ *   1. Heuristic check on each SC's verification_cmd (sync)
+ *   2. (optional) Execution probe — see {@link validateVerificationCmd}
+ *
+ * The heuristic check is the primary gate; it's the same check the
+ * probe runs but without I/O. Pure-validate mode (the default) keeps
+ * goal-contract creation synchronous and fast.
+ */
+export function validateGoalContractWithVerifierLinter(
+  input: GoalContractInput,
+): ValidationResult {
+  // Run the existing sync validation first.
+  const result = validateGoalContract(input);
+  if (!result.valid) return result;
+
+  // GC-2026-056: heuristic check on each SC's verification_cmd.
+  // Lazy import to avoid circular dependency at module load time.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isPlaceholderVerificationCmd } = require("./verification-cmd-linter.js") as typeof import("./verification-cmd-linter.js");
+  for (const sc of input.success_criteria) {
+    if (isPlaceholderVerificationCmd(sc.verification_cmd)) {
+      result.errors.push(
+        `SC ${sc.id}: verification_cmd looks like a placeholder: '${sc.verification_cmd}'. ` +
+          "Write something that produces an observable signal (e.g. a test command, a typecheck, a file-existence check).",
+      );
+    }
+  }
+  result.valid = result.errors.length === 0;
+  return result;
+}
+
 /** Serialize goal contract to YAML (minimal hand-rolled serializer for portability). */
 export function goalContractToYaml(gc: GoalContract): string {
   const lines: string[] = [];
