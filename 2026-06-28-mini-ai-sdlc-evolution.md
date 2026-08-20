@@ -1,172 +1,172 @@
-# Sages 演进路线：迈向 `mini-ai-sdlc`
+# Sages Evolution Roadmap: Toward `mini-ai-sdlc`
 
-**日期**: 2026-06-28
-**作者**: pi-coding-agent 协作产出
-**状态**: Approved (脑暴完成,待实施)
-**目标品牌名**: `mini-ai-sdlc`(详见 §2.4)
-**关联项目**: `~/Project/sages/pi` (Four Sages 当前实现)、`~/Project/ai-sdlc` (参照目标)
-
----
-
-## 1. 概述
-
-本文档定义 `sages` 项目从当前"四贤仪式化工作流"演进为 **`mini-ai-sdlc`** 的演进路线。`mini-ai-sdlc` 是本次演进的目标品牌名(详见 §2.4),代表"以 pi-coding-agent 规模重新表达的轻量级 AI SDLC 治理框架"。目标是让 sages 在保留 pi-coding-agent 简洁性的同时,获得 ai-sdlc 的核心治理能力:**声明式 pipeline、可插拔代理、可验证质量门、可审计产物**。
-
-**核心判断**: sages 不需要变成 ai-sdlc(那是 ~3,904 文件、11 包 monorepo、9 个专用子代理的庞然大物),也不需要兼容 ai-sdlc 的所有 YAML 资源。**正确目标是捕获 ai-sdlc 的"治理精华"——声明式 + 可审计 + 可组合——并以 pi-coding-agent 的规模重新表达**。
+**Date**: 2026-06-28
+**Author**: produced collaboratively by pi-coding-agent
+**Status**: Approved (brainstorming complete, pending implementation)
+**Target brand name**: `mini-ai-sdlc` (see §2.4)
+**Related projects**: `~/Project/sages/pi` (current Four Sages implementation), `~/Project/ai-sdlc` (reference target)
 
 ---
 
-## 2. 背景与动机
+## 1. Overview
 
-### 2.1 sages 当前形态
+This document defines the evolution roadmap for the `sages` project from its current "Four Sages ritualized workflow" to **`mini-ai-sdlc`**. `mini-ai-sdlc` is the target brand name for this evolution (see §2.4), representing "a lightweight AI SDLC governance framework re-expressed at pi-coding-agent scale". The goal is to give sages the core governance capabilities of ai-sdlc while preserving pi-coding-agent's simplicity: **declarative pipelines, pluggable agents, verifiable quality gates, auditable artifacts**.
+
+**Core judgment**: sages does not need to become ai-sdlc (that is a ~3,904-file, 11-package monorepo with 9 dedicated sub-agents), nor does it need to be compatible with all of ai-sdlc's YAML resources. **The right goal is to capture ai-sdlc's "governance essence" — declarative + auditable + composable — and re-express it at pi-coding-agent scale**.
+
+---
+
+## 2. Background and motivation
+
+### 2.1 sages' current form
 
 ```
-sages/pi/  (121 文件,单 npm 包 @sages/pi-four-sages)
-├── extensions/sages-extension.ts    # pi ExtensionAPI 入口
-├── prompts/four-sages-workflow.md   # slash 命令帮助
+sages/pi/  (121 files, single npm package @sages/pi-four-sages)
+├── extensions/sages-extension.ts    # pi ExtensionAPI entry point
+├── prompts/four-sages-workflow.md   # slash command help
 ├── skills/{fuxi,qiaochui,luban,gaoyao,brainstorming}/SKILL.md
-├── src/tools/                      # 4 贤者 + brainstorming 共 ~20 TS 文件
+├── src/tools/                      # 4 sages + brainstorming, ~20 TS files total
 └── src/orchestrator/workflow-orchestrator.ts
 ```
 
-**特点**:
-- 工作流**硬编码**为 4 阶段(Fuxi → QiaoChui → LuBan → GaoYao)
-- 配置**全在代码里**——无 YAML、无声明式资源、无 schema
-- 子代理**只有 4 个**——不可扩展、不可替换
-- 状态在 `.sages/workspace/` ——纯文本,无签名、无审计链
-- 测试**仅 30 个 Bun 单测**——无端到端、无 schema 合规性测试
+**Characteristics**:
+- The workflow is **hardcoded** to 4 stages (Fuxi → QiaoChui → LuBan → GaoYao)
+- Configuration is **all in code** — no YAML, no declarative resources, no schema
+- There are **only 4 sub-agents** — not extensible, not replaceable
+- State lives in `.sages/workspace/` — plain text, no signatures, no audit chain
+- Tests are **only 30 Bun unit tests** — no end-to-end, no schema conformance tests
 
-### 2.2 ai-sdlc 的"治理精华"
+### 2.2 ai-sdlc's "governance essence"
 
-ai-sdlc 有 **3,904 文件**、**11 个 package.json**(pnpm monorepo)、**60 个 YAML 一致性 fixture** 跨 6 类(`pipeline/quality-gate/agent-role/autonomy-policy/adapter/behavioral`)、DSSE v6 Merkle 签名、**11+ 个 contrib adapter + github(3 个 SDK 实现)**、**9 个 .md 形式的专用子代理**(`ai-sdlc-plugin/agents/*.md`)。但**真正有杠杆的部分**集中在 5 类声明式资源 + 治理原语:
+ai-sdlc has **3,904 files**, **11 package.json files** (pnpm monorepo), **60 YAML conformance fixtures** across 6 categories (`pipeline/quality-gate/agent-role/autonomy-policy/adapter/behavioral`), DSSE v6 Merkle signatures, **11+ contrib adapters + github (3 SDK implementations)**, **9 dedicated sub-agents in .md form** (`ai-sdlc-plugin/agents/*.md`). But the parts with **real leverage** concentrate in 5 categories of declarative resources + governance primitives:
 
-| ai-sdlc 精华 | 在 sages 的对应物 | 演进目标 |
+| ai-sdlc essence | sages counterpart | Evolution goal |
 |---|---|---|
-| `kind: Pipeline` 声明式工作流 | 硬编码 `workflow-orchestrator.ts` | 替换 |
-| `kind: AgentRole` 角色定义 | 硬编码 `src/tools/fuxi-tools.ts` 等 | 抽象化 |
-| `kind: QualityGate` 规则门 | 仅 GaoYao 事后审计 | 前置门 |
-| `kind: AdapterBinding` 外部集成 | 完全无 | 新增 |
-| `kind: AutonomyPolicy` 权限分层 | 完全无 | 新增 |
-| 60 YAML 一致性 fixture(pipeline+adapter+agent-role+quality-gate+autonomy-policy,**不含 behavioral 23 个**——见 §2.3 "不做") | 仅 30 Bun 单测 | 配套 |
+| `kind: Pipeline` declarative workflow | hardcoded `workflow-orchestrator.ts` | replace |
+| `kind: AgentRole` role definitions | hardcoded `src/tools/fuxi-tools.ts` etc. | abstract |
+| `kind: QualityGate` rule gates | only GaoYao post-hoc audit | pre-flight gates |
+| `kind: AdapterBinding` external integrations | none at all | add |
+| `kind: AutonomyPolicy` permission tiers | none at all | add |
+| 60 YAML conformance fixtures (pipeline+adapter+agent-role+quality-gate+autonomy-policy, **excluding the 23 behavioral ones** — see §2.3 "what we won't do") | only 30 Bun unit tests | match |
 
-### 2.3 为什么不做"完整 ai-sdlc 兼容"
+### 2.3 Why not "full ai-sdlc compatibility"
 
-| 不做的部分 | 理由 |
+| Not doing | Reason |
 |---|---|
-| DSSE v6 Merkle 签名 | pi-coding-agent 单用户本地运行,无多签需求。简单 HMAC + 哈希链足够 |
-| `AutonomyPolicy.levels[]` 完整 tier ladder | 4 层级(Observer/Assistant/Engineer/Autonomous)已够 |
-| 12 个 adapter | 只需 git + github + filesystem |
-| 完整 RFC 流程 | sages 是单人/小团队,不需要 RFC-0011 那种 DoR gate |
-| 14 步 Step 0-13 流水线 | 当前 4 阶段够,可在 YAML 里组合 |
-| Conformance 60 全部 fixture | 20-30 个核心 fixture 已能验证 80% 路径;**特别拒绝 `behavioral/` 23 个**(依赖 multi-agent orchestration,违背 §2.4 简化原则) |
+| DSSE v6 Merkle signatures | pi-coding-agent runs locally for a single user; no multi-signature need. Simple HMAC + hash chain is enough |
+| Full `AutonomyPolicy.levels[]` tier ladder | 4 tiers (Observer/Assistant/Engineer/Autonomous) are enough |
+| 12 adapters | only need git + github + filesystem |
+| Full RFC process | sages is single-person/small-team; doesn't need RFC-0011-style DoR gates |
+| 14-step Step 0-13 pipeline | the current 4 stages are enough; can be composed in YAML |
+| All 60 conformance fixtures | 20-30 core fixtures already validate 80% of paths; **explicitly reject the 23 `behavioral/` fixtures** (they depend on multi-agent orchestration, contradicting the §2.4 simplification principle) |
 
-### 2.4 目标品牌定义:`mini-ai-sdlc`
+### 2.4 Target brand definition: `mini-ai-sdlc`
 
-为避免后续文档混用"轻量 ai-sdlc" / "迷你版" 等口语化表述,本文档正式以 **`mini-ai-sdlc`** 作为演进目标的品牌名。定义如下:
+To avoid later documents mixing informal phrasings like "lightweight ai-sdlc" / "mini version", this document formally adopts **`mini-ai-sdlc`** as the brand name for the evolution target. Defined as follows:
 
-| 项 | 内容 |
+| Item | Content |
 |---|---|
-| **品牌名** | `mini-ai-sdlc` |
-| **正式定位** | "Sages mini-ai-sdlc" —— 以 pi-coding-agent 规模重新表达的轻量级 AI SDLC 治理框架 |
-| **一句话** | sages 是 `mini-ai-sdlc` —— 一个声明式 AI SDLC 治理框架 |
-| **是** | ai-sdlc 治理哲学(声明式 + 可审计 + 可组合)在 pi 规模上的重新表达 |
-| **不是** | ai-sdlc 的子集、超集,或兼容实现 |
-| **目标规模** | ~150-180 文件 / 单 npm 包(对比 ai-sdlc 现状 3,904 文件 / 11 包 pnpm monorepo) |
-| **核心交付物** | 声明式 Pipeline、4 类治理资源(Pipeline/QualityGate/AutonomyPolicy/AdapterBinding)、conformance 测试 |
+| **Brand name** | `mini-ai-sdlc` |
+| **Formal positioning** | "Sages mini-ai-sdlc" — a lightweight AI SDLC governance framework re-expressed at pi-coding-agent scale |
+| **One-liner** | sages is `mini-ai-sdlc` — a declarative AI SDLC governance framework |
+| **Is** | ai-sdlc's governance philosophy (declarative + auditable + composable) re-expressed at pi scale |
+| **Is not** | a subset, superset, or compatible implementation of ai-sdlc |
+| **Target size** | ~150-180 files / single npm package (vs ai-sdlc's current 3,904 files / 11-package pnpm monorepo) |
+| **Core deliverables** | declarative Pipeline, 4 categories of governance resources (Pipeline/QualityGate/AutonomyPolicy/AdapterBinding), conformance tests |
 
-后续章节凡提及"演进目标" / "阶段 2 完成" 等里程碑,均指达成上述 `mini-ai-sdlc` 标签的全部验收。
+All later references to milestones such as "evolution target" / "phase 2 complete" mean meeting all acceptance criteria for the `mini-ai-sdlc` label above.
 
 ---
 
-## 3. 演进策略决策
+## 3. Evolution strategy decisions
 
-### 3.1 三大候选路径(已评估)
+### 3.1 Three candidate paths (evaluated)
 
-| 路径 | 描述 | 工作量 | 杠杆 | 决策 |
+| Path | Description | Effort | Leverage | Decision |
 |---|---|---|---|---|
-| **A. 声明式 Pipeline** | 加 `.sages/pipeline.yaml` 替换硬编码工作流 | 1-2 周 | **最高** | ✅ 采用 |
-| **B. ai-sdlc 完全兼容** | 能解析运行 ai-sdlc 的 `.ai-sdlc/pipeline.yaml` | 1-3 月 | 中等 | ❌ 拒绝 |
-| **C. 治理覆盖层** | 在 A 之上加 QualityGate/Attestation/Autonomy/Adapter | 2-4 周 | **高** | ✅ 采用(第二阶段) |
+| **A. Declarative Pipeline** | add `.sages/pipeline.yaml` to replace the hardcoded workflow | 1-2 weeks | **Highest** | ✅ Adopt |
+| **B. Full ai-sdlc compatibility** | able to parse and run ai-sdlc's `.ai-sdlc/pipeline.yaml` | 1-3 months | Medium | ❌ Reject |
+| **C. Governance overlay** | add QualityGate/Attestation/Autonomy/Adapter on top of A | 2-4 weeks | **High** | ✅ Adopt (phase 2) |
 
-**路径 B 被拒绝的具体原因**:
-1. ai-sdlc 有 `AutonomyPolicy.levels[]` / `AdapterBinding` 9 接口 / DSSE 签名 / backlog 工作流等 pi 没有等价物的概念,要做就是造半个 ai-sdlc
-2. 收益边际递减——会得到"两个系统的合并",而非"一个更完整的系统"
-3. 锁定在 ai-sdlc 的 RFC 流程债务中,违背 pi 的简洁哲学
+**Specific reasons path B was rejected**:
+1. ai-sdlc has concepts pi has no equivalent for — `AutonomyPolicy.levels[]` / 9 AdapterBinding interfaces / DSSE signatures / backlog workflows — implementing it would mean building half of ai-sdlc
+2. Diminishing returns — you'd get "a merger of two systems", not "one more complete system"
+3. Locked into ai-sdlc's RFC process debt, contradicting pi's simplicity philosophy
 
-### 3.2 关键决策记录
+### 3.2 Key decision records
 
-| 决策 | 选择 | 理由 |
+| Decision | Choice | Reason |
 |---|---|---|
-| 配置格式 | YAML + JSON Schema 校验 | 与 ai-sdlc 对齐,生态可读 |
-| Schema 库 | `typebox`(已有依赖)+ `typebox/value` 子路径 | 已在 deps,无需新增(`Value` 必须从 `/value` 子路径导入,主入口无导出) |
-| Schema 版本 | `sages.io/v1alpha1` | 与 ai-sdlc 风格对齐但独立 |
-| 默认回退 | 无 `.sages/pipeline.yaml` → 当前 4 阶段硬编码 | 向后兼容 |
-| Attestation | v1: 简单 SHA-256 + 元数据 JSONL;v2: HMAC 签名 | 单用户本地不需要 v1 即用公钥 |
-| Autonomy tier | 0/1/2/3 四级 | 与 pi 的 read/write 工具模型对齐 |
-| Adapter 接口 | `read/write/list/exists` 4 方法 | 最小可用,易于扩展 |
-| 一致性测试 | 复用 ai-sdlc fixture 风格,新建 `conformance/tests/sages-v1alpha1/` | 标准化测试入口 |
-| 多 sage 并行 | 仅 LuBan 阶段支持(对齐现状) | 不扩大破坏面 |
+| Config format | YAML + JSON Schema validation | aligned with ai-sdlc, ecosystem-readable |
+| Schema library | `typebox` (existing dependency) + `typebox/value` subpath | already in deps, no new addition needed (`Value` must be imported from the `/value` subpath; the main entry does not export it) |
+| Schema version | `sages.io/v1alpha1` | aligned with ai-sdlc style but independent |
+| Default fallback | no `.sages/pipeline.yaml` → current 4-stage hardcode | backward compatible |
+| Attestation | v1: simple SHA-256 + metadata JSONL; v2: HMAC signing | single-user local doesn't need public-key crypto at v1 |
+| Autonomy tier | 4 levels 0/1/2/3 | aligned with pi's read/write tool model |
+| Adapter interface | `read/write/list/exists` 4 methods | minimal viable, easy to extend |
+| Conformance tests | reuse ai-sdlc fixture style, new `conformance/tests/sages-v1alpha1/` | standardized test entry point |
+| Parallel sages | only LuBan stage supports it (aligned with current state) | don't widen the blast radius |
 
 ---
 
-## 4. 目标与非目标
+## 4. Goals and non-goals
 
-### 4.1 目标
+### 4.1 Goals
 
-**核心目标**: sages 在 1-2 月内具备 **`mini-ai-sdlc` 治理能力**(详见 §2.4),具体为:
+**Core goal**: sages gains **`mini-ai-sdlc` governance capabilities** (see §2.4) within 1-2 months, specifically:
 
-1. **声明式 pipeline**: 用户可通过 `.sages/pipeline.yaml` 自由组合阶段、定义质量门、配置重试
-2. **可扩展代理**: 用户可在 YAML 中新增自定义 sage(走 pi 的 tool 协议),无需修改 sages 源码
-3. **预检质量门**: 阶段运行**前**自动评估规则,不通过则跳过该 sage(替代目前 GaoYao 事后审计)
-4. **可审计产物**: 每个 sage 产出经哈希后落入 `.sages/attestations/`,跨阶段可追溯
-5. **自治层级**: 通过 `.sages/autonomy.yaml` 控制每个 sage 能写哪些路径,默认采用保守策略
-6. **外部适配器**: 通过 `.sages/adapters/*.yaml` 让 sage 读取 GitHub issue、读写 git 仓库等
-7. **合规性测试**: 用户写错 YAML 时,启动时报错并指出错误位置(schema 合规性)
+1. **Declarative pipeline**: users can freely compose stages, define quality gates, and configure retries via `.sages/pipeline.yaml`
+2. **Extensible agents**: users can add custom sages in YAML (via pi's tool protocol) without modifying sages source
+3. **Pre-flight quality gates**: rules are evaluated automatically **before** a stage runs; failure skips that sage (replacing the current GaoYao post-hoc audit)
+4. **Auditable artifacts**: every sage output is hashed and lands in `.sages/attestations/`, traceable across stages
+5. **Autonomy tiers**: `.sages/autonomy.yaml` controls which paths each sage can write; conservative by default
+6. **External adapters**: `.sages/adapters/*.yaml` lets sages read GitHub issues, read/write git repos, etc.
+7. **Conformance tests**: when users write invalid YAML, startup fails with the error location (schema conformance)
 
-### 4.2 非目标(本次演进**不做**)
+### 4.2 Non-goals (NOT doing in this evolution)
 
-- ❌ 完整 ai-sdlc v1alpha1 兼容(原因见 §3.1)
-- ❌ DSSE v6 Merkle 签名(单用户本地不需要)
-- ❌ 跨主机 multi-agent 编排(用 Pattern X/Z/Y 太重)
-- ❌ RFC-0011 DoR gate、RFC-0035 Decision Catalog(pi 不需要这种治理形式)
-- ❌ Enterprise 插件、SIEM 导出、License 校验
-- ❌ 沙箱隔离(Landlock/seccomp/OpenShell)——pi 在用户机器上跑,信任边界不同
-- ❌ Conformance 测试与 ai-sdlc 互操作(各自独立维护)
-- ❌ 实时 TUI 状态显示(RFC-0023)——pi 的 status bar 已够
+- ❌ Full ai-sdlc v1alpha1 compatibility (reason in §3.1)
+- ❌ DSSE v6 Merkle signatures (not needed for single-user local)
+- ❌ Cross-host multi-agent orchestration (Pattern X/Z/Y too heavy)
+- ❌ RFC-0011 DoR gate, RFC-0035 Decision Catalog (pi doesn't need this form of governance)
+- ❌ Enterprise plugins, SIEM export, License validation
+- ❌ Sandbox isolation (Landlock/seccomp/OpenShell) — pi runs on the user's machine; trust boundary differs
+- ❌ Conformance test interop with ai-sdlc (each maintained independently)
+- ❌ Real-time TUI status display (RFC-0023) — pi's status bar is enough
 
 ---
 
-## 5. 整体架构
+## 5. Overall architecture
 
-### 5.1 演进后的 sages 结构
+### 5.1 sages structure after the evolution
 
 ```
 sages/pi/
-├── extensions/sages-extension.ts          # [改] 加载 .sages/pipeline.yaml
-├── prompts/                               # [不改]
-├── skills/                                # [不改] (用户仍可在 YAML 里引用)
+├── extensions/sages-extension.ts          # [modified] load .sages/pipeline.yaml
+├── prompts/                               # [unchanged]
+├── skills/                                # [unchanged] (users can still reference them in YAML)
 ├── src/
 │   ├── config/
-│   │   ├── yaml-loader.ts                 # [新] YAML 加载 + schema 校验
-│   │   ├── defaults.ts                    # [新] 当前 4 阶段作为默认 pipeline
-│   │   └── typebox-schemas.ts             # [新] typebox schema 定义
+│   │   ├── yaml-loader.ts                 # [new] YAML loading + schema validation
+│   │   ├── defaults.ts                    # [new] current 4 stages as default pipeline
+│   │   └── typebox-schemas.ts             # [new] typebox schema definitions
 │   ├── orchestrator/
-│   │   ├── workflow-orchestrator.ts       # [改] 读 YAML,转为阶段序列
-│   │   └── stage-runner.ts                # [新] 通用阶段执行器
-│   ├── governance/                        # [新目录] 阶段二
-│   │   ├── quality-gate.ts                # [新] 预检规则
-│   │   ├── attestation.ts                 # [新] 哈希 + 元数据
-│   │   ├── autonomy.ts                    # [新] tier 检查
-│   │   └── adapter-loader.ts              # [新] 加载 .sages/adapters/*.yaml
-│   └── tools/                             # [不改] (sage 实现)
+│   │   ├── workflow-orchestrator.ts       # [modified] read YAML, convert to stage sequence
+│   │   └── stage-runner.ts                # [new] generic stage executor
+│   ├── governance/                        # [new dir] phase 2
+│   │   ├── quality-gate.ts                # [new] pre-flight rules
+│   │   ├── attestation.ts                 # [new] hashing + metadata
+│   │   ├── autonomy.ts                    # [new] tier checks
+│   │   └── adapter-loader.ts              # [new] load .sages/adapters/*.yaml
+│   └── tools/                             # [unchanged] (sage implementations)
 ├── schemas/
-│   ├── pipeline.v1.schema.json            # [新]
-│   ├── agent-role.v1.schema.json          # [新]
-│   ├── quality-gate.v1.schema.json        # [新]
-│   ├── autonomy.v1.schema.json            # [新]
-│   └── adapter-binding.v1.schema.json     # [新]
-├── conformance/                            # [新目录]
-│   ├── runner.ts                          # [新] Bun 测试驱动
+│   ├── pipeline.v1.schema.json            # [new]
+│   ├── agent-role.v1.schema.json          # [new]
+│   ├── quality-gate.v1.schema.json        # [new]
+│   ├── autonomy.v1.schema.json            # [new]
+│   └── adapter-binding.v1.schema.json     # [new]
+├── conformance/                            # [new dir]
+│   ├── runner.ts                          # [new] Bun test driver
 │   └── tests/
 │       └── sages-v1alpha1/
 │           ├── pipeline/
@@ -176,172 +176,172 @@ sages/pi/
 │           ├── agent-role/
 │           ├── quality-gate/
 │           └── autonomy/
-├── test/                                  # [扩] 增加 schema/governance 测试
+├── test/                                  # [expanded] add schema/governance tests
 ├── .sages/
-│   ├── pipeline.yaml.example              # [新] 可复制 starter
-│   ├── quality-gate.yaml.example          # [新]
-│   ├── autonomy.yaml.example              # [新]
-│   └── adapters/                          # [新] git.yaml, github.yaml 等
-└── package.json                           # [改] 加 schemas, conformance scripts
+│   ├── pipeline.yaml.example              # [new] copyable starter
+│   ├── quality-gate.yaml.example          # [new]
+│   ├── autonomy.yaml.example              # [new]
+│   └── adapters/                          # [new] git.yaml, github.yaml etc.
+└── package.json                           # [modified] add schemas, conformance scripts
 ```
 
-### 5.2 数据流(阶段二完成后)
+### 5.2 Data flow (after phase 2 completes)
 
 ```mermaid
 flowchart TB
-    User[开发者] -->|slash command| Ext[extensions/sages-extension.ts]
+    User[Developer] -->|slash command| Ext[extensions/sages-extension.ts]
     Ext -->|ctx.cwd| Orch[workflow-orchestrator.ts]
 
     Orch --> Loader[config/yaml-loader.ts]
-    Loader -->|无 .sages/pipeline.yaml| Default[config/defaults.ts<br/>4 阶段硬编码]
-    Loader -->|有 .sages/pipeline.yaml| Schema[typebox-schemas.ts<br/>JSON Schema 校验]
-    Schema -->|校验失败| Error[启动报错+文件位置]
-    Schema -->|校验通过| Pipeline[Pipeline 对象]
+    Loader -->|no .sages/pipeline.yaml| Default[config/defaults.ts<br/>4-stage hardcode]
+    Loader -->|has .sages/pipeline.yaml| Schema[typebox-schemas.ts<br/>JSON Schema validation]
+    Schema -->|validation failed| Error[startup error + file location]
+    Schema -->|validation passed| Pipeline[Pipeline object]
 
     Pipeline --> Runner[orchestrator/stage-runner.ts]
 
-    Runner --> G1{quality-gate.ts<br/>预检?}
-    G1 -->|不通过| Skip[跳过本 sage<br/>写 attestation]
-    G1 -->|通过| Sage[Sage 执行]
+    Runner --> G1{quality-gate.ts<br/>pre-flight?}
+    G1 -->|failed| Skip[skip this sage<br/>write attestation]
+    G1 -->|passed| Sage[Sage execution]
 
-    Sage --> A1{autonomy.ts<br/>tier 检查?}
-    A1 -->|越权| Refuse[拒绝写入]
-    A1 -->|通过| Adapters[adapter-loader.ts<br/>git/github/file]
+    Sage --> A1{autonomy.ts<br/>tier check?}
+    A1 -->|violation| Refuse[refuse write]
+    A1 -->|passed| Adapters[adapter-loader.ts<br/>git/github/file]
 
     Adapters --> Outputs[.sages/workspace/<br/>draft.md/plan.md/execution.yaml]
-    Sage --> Attest[governance/attestation.ts<br/>SHA-256 哈希 → .sages/attestations/]
-    Attest --> Next[下一阶段]
+    Sage --> Attest[governance/attestation.ts<br/>SHA-256 hash → .sages/attestations/]
+    Attest --> Next[next stage]
 
-    Conformance[conformance/runner.ts<br/>Bun 测试] -.验证.-> Loader
-    Conformance -.验证.-> Schema
+    Conformance[conformance/runner.ts<br/>Bun test] -.validates.-> Loader
+    Conformance -.validates.-> Schema
 ```
 
-### 5.3 关键设计原则
+### 5.3 Key design principles
 
-| 原则 | 体现 |
+| Principle | Manifestation |
 |---|---|
-| **向后兼容** | 无 `.sages/pipeline.yaml` 时,行为完全等同于当前 4 阶段 |
-| **声明优先** | 配置错配时**立即报错**且附文件:行号,不静默回退 |
-| **类型共享** | typebox schema 是唯一真相,TypeScript 类型从 schema 派生 |
-| **最小特权** | autonomy tier 默认严格,需用户显式放宽 |
-| **审计可追溯** | 每个 sage 产出都哈希落盘,跨阶段可对照 |
-| **零改动迁移** | 用户已有 `.sages/workspace/` 状态自动兼容,不破坏工作流 |
+| **Backward compatibility** | without `.sages/pipeline.yaml`, behavior is exactly the current 4 stages |
+| **Declarative first** | misconfigured YAML errors **immediately** with file:line, no silent fallback |
+| **Type sharing** | typebox schema is the single source of truth; TypeScript types derive from the schema |
+| **Least privilege** | autonomy tiers are strict by default; users must explicitly relax |
+| **Audit traceability** | every sage output is hashed to disk, comparable across stages |
+| **Zero-change migration** | existing `.sages/workspace/` state remains compatible automatically; no workflow breakage |
 
 ---
 
-## 6. 阶段路线图
+## 6. Phase roadmap
 
-### 6.1 总览
+### 6.1 Overview
 
-| 阶段 | 名称 | 工作量 | 累计 | 关键交付物 |
+| Phase | Name | Effort | Cumulative | Key deliverables |
 |---|---|---|---|---|
-| **阶段 1** | 声明式 Pipeline | **3-5 周** | 3-5 周 | YAML 工作流 + schema + 一致性测试(修正自 §16.3) |
-| **阶段 2** | 治理覆盖层 | **3-5 周** | **6-10 周** | QualityGate + Attestation + Autonomy + Adapter(修正自 §16.3) |
-| **(可选 3)** | 生态扩展 | 2-4 周 | 8-14 周 | 高级 adapter、多机编排 |
+| **Phase 1** | Declarative Pipeline | **3-5 weeks** | 3-5 weeks | YAML workflow + schema + conformance tests (corrected from §16.3) |
+| **Phase 2** | Governance overlay | **3-5 weeks** | **6-10 weeks** | QualityGate + Attestation + Autonomy + Adapter (corrected from §16.3) |
+| **(Optional 3)** | Ecosystem expansion | 2-4 weeks | 8-14 weeks | advanced adapters, multi-machine orchestration |
 
-**停靠点**: 阶段 2 完成后 sages 即可贴上 `mini-ai-sdlc` 标签(详见 §2.4)。阶段 3 视需求决定。
+**Docking point**: after phase 2 completes, sages can be labeled `mini-ai-sdlc` (see §2.4). Phase 3 depends on demand.
 
-### 6.2 阶段 1 详细分解
+### 6.2 Phase 1 detailed breakdown
 
-| 子任务 | 文件 | 工作量 |
+| Subtask | Files | Effort |
 |---|---|---|
-| 1.1 Schema 定义 | `schemas/pipeline.v1.schema.json` + `src/config/typebox-schemas.ts` | 2-3 天 |
-| 1.2 YAML 加载器 | `src/config/yaml-loader.ts` | 2 天 |
-| 1.3 默认回退 | `src/config/defaults.ts` | 1 天 |
-| 1.4 通用 stage-runner | `src/orchestrator/stage-runner.ts` | 2-3 天 |
-| 1.5 orchestrator 改造 | `src/orchestrator/workflow-orchestrator.ts`(改) | 1-2 天 |
-| 1.6 extension 钩子 | `extensions/sages-extension.ts`(改, **534 行 slash command 路由**——工作量重估 3-5 天,见 §16.2 row 2) | 3-5 天 |
-| 1.7 一致性测试 | `conformance/` 全套 + **15-25 fixture**(pipeline 8 + agent-role/quality-gate/autonomy 留阶段 2) | 2-3 天 |
-| 1.8 文档与示例 | `.sages/pipeline.yaml.example` + README 更新 | 1 天 |
+| 1.1 Schema definitions | `schemas/pipeline.v1.schema.json` + `src/config/typebox-schemas.ts` | 2-3 days |
+| 1.2 YAML loader | `src/config/yaml-loader.ts` | 2 days |
+| 1.3 Default fallback | `src/config/defaults.ts` | 1 day |
+| 1.4 Generic stage-runner | `src/orchestrator/stage-runner.ts` | 2-3 days |
+| 1.5 Orchestrator rework | `src/orchestrator/workflow-orchestrator.ts` (modified) | 1-2 days |
+| 1.6 Extension hooks | `extensions/sages-extension.ts` (modified, **534-line slash command routing** — effort re-estimated to 3-5 days, see §16.2 row 2) | 3-5 days |
+| 1.7 Conformance tests | full `conformance/` suite + **15-25 fixtures** (8 pipeline + agent-role/quality-gate/autonomy deferred to phase 2) | 2-3 days |
+| 1.8 Docs and examples | `.sages/pipeline.yaml.example` + README update | 1 day |
 
-### 6.3 阶段 2 详细分解
+### 6.3 Phase 2 detailed breakdown
 
-| 子任务 | 文件 | 工作量 |
+| Subtask | Files | Effort |
 |---|---|---|
-| 2.1 QualityGate 预检 | `src/governance/quality-gate.ts` + `schemas/quality-gate.v1.schema.json` | 2-3 天 |
-| 2.2 Attestation 哈希链 | `src/governance/attestation.ts` + `.sages/attestations/` | 2 天 |
-| 2.3 Autonomy tier | `src/governance/autonomy.ts` + `schemas/autonomy.v1.schema.json` | 2-3 天 |
-| 2.4 Adapter 加载器 | `src/governance/adapter-loader.ts` + `schemas/adapter-binding.v1.schema.json` | 3-4 天 |
-| 2.5 git/github adapter | `.sages/adapters/git.yaml` + `src/adapters/git.ts` | 2-3 天 |
-| 2.6 README 与示例 | 全套示例 + 教程 | 1-2 天 |
-| 2.7 一致性测试 | governance + adapter 各自 5-10 fixture | 2 天 |
+| 2.1 QualityGate pre-flight | `src/governance/quality-gate.ts` + `schemas/quality-gate.v1.schema.json` | 2-3 days |
+| 2.2 Attestation hash chain | `src/governance/attestation.ts` + `.sages/attestations/` | 2 days |
+| 2.3 Autonomy tier | `src/governance/autonomy.ts` + `schemas/autonomy.v1.schema.json` | 2-3 days |
+| 2.4 Adapter loader | `src/governance/adapter-loader.ts` + `schemas/adapter-binding.v1.schema.json` | 3-4 days |
+| 2.5 git/github adapter | `.sages/adapters/git.yaml` + `src/adapters/git.ts` | 2-3 days |
+| 2.6 README and examples | full examples + tutorial | 1-2 days |
+| 2.7 Conformance tests | 5-10 fixtures each for governance and adapters | 2 days |
 
 ---
 
-## 7. 阶段 1 详细设计:声明式 Pipeline
+## 7. Phase 1 detailed design: Declarative Pipeline
 
-### 7.1 设计目标
+### 7.1 Design goals
 
-1. 用户可在 `.sages/pipeline.yaml` 自由组合阶段
-2. YAML 错配立即报错(启动时校验,不延迟到运行时)
-3. 无 YAML 时回退到当前 4 阶段行为
-4. 支持 YAML 引用 sage 名(`fuxi/qiaochui/luban/gaoyao`)和自定义名(用户提供的工具名)
-5. 每阶段可声明 qualityGates、retry、approval、并行度
+1. Users can freely compose stages in `.sages/pipeline.yaml`
+2. YAML misconfiguration errors immediately (validated at startup, not deferred to runtime)
+3. Without YAML, fall back to the current 4-stage behavior
+4. YAML can reference sage names (`fuxi/qiaochui/luban/gaoyao`) and custom names (user-provided tool names)
+5. Each stage can declare qualityGates, retry, approval, and parallelism
 
-### 7.2 YAML Schema 设计
+### 7.2 YAML Schema design
 
-#### 7.2.1 顶层 envelope
+#### 7.2.1 Top-level envelope
 
 ```yaml
-apiVersion: sages.io/v1alpha1    # 固定
-kind: Pipeline                    # 固定
+apiVersion: sages.io/v1alpha1    # fixed
+kind: Pipeline                    # fixed
 metadata:
   name: <string,required>         # kebab-case
   labels: { ... }                 # optional
 spec:
-  triggers: [ ... ]               # optional,见 §7.2.2
-  stages: [ ... ]                 # required,至少 1 个
-  defaults: { ... }               # optional,见 §7.2.5
+  triggers: [ ... ]               # optional, see §7.2.2
+  stages: [ ... ]                 # required, at least 1
+  defaults: { ... }               # optional, see §7.2.5
 ```
 
-#### 7.2.2 触发器
+#### 7.2.2 Triggers
 
 ```yaml
 spec:
   triggers:
-    - event: slash.command        # slash 命令触发
+    - event: slash.command        # slash command trigger
       filter:
         commands: [fuxi-start, fuxi-request]
-    - event: file.changed         # 文件变化触发(可选,阶段 1 不实现)
+    - event: file.changed         # file-change trigger (optional, not implemented in phase 1)
 ```
 
-**阶段 1 简化**: 只支持 `slash.command`,其他 event 报错提示"未实现"。
+**Phase 1 simplification**: only `slash.command` is supported; other events error with "not implemented".
 
-#### 7.2.3 阶段定义(stages[])
+#### 7.2.3 Stage definitions (stages[])
 
 ```yaml
 spec:
   stages:
     - name: design                # required, kebab-case
-      sage: fuxi                  # required, fuxi|qiaochui|luban|gaoyao|自定义
-      input:                      # optional, 传给 sage 的参数
-        request: "${userRequest}" # 支持变量插值
-      output:                     # optional, sage 产出落点
+      sage: fuxi                  # required, fuxi|qiaochui|luban|gaoyao|custom
+      input:                      # optional, parameters passed to the sage
+        request: "${userRequest}" # variable interpolation supported
+      output:                     # optional, where the sage output lands
         file: draft.md
-      parallel: 1                 # optional, default 1; LuBan 阶段可设 3
-      qualityGates:               # optional, 见 §阶段 2 详述
+      parallel: 1                 # optional, default 1; LuBan stage can be 3
+      qualityGates:               # optional, detailed in §Phase 2
         - name: design-not-empty
           rule: { metric: file-size, path: draft.md, operator: '>=', threshold: 100 }
       onFailure:                  # optional
         strategy: abort           # abort|retry|continue|skip
-        maxRetries: 2             # 仅 retry 时有效
+        maxRetries: 2             # only valid for retry
         retryDelay: PT1M          # ISO 8601 duration
-      approval:                   # optional, 阶段 2 实现
+      approval:                   # optional, implemented in phase 2
         required: true
         blocking: true
         timeout: PT24H
 ```
 
-#### 7.2.4 内置 sage 列表
+#### 7.2.4 Built-in sage list
 
-| name | 类型 | 默认输入 | 默认产出 |
+| name | type | default input | default output |
 |---|---|---|---|
 | `fuxi` | design | `{ request }` | `draft.md` |
-| `qiaochui` | review | `{ draftPath }` | `plan.md`, `execution.yaml`, 更新 `state.json.score` |
-| `luban` | execute | `{ executionYamlPath, parallel }` | 源代码 + 测试 |
+| `qiaochui` | review | `{ draftPath }` | `plan.md`, `execution.yaml`, updates `state.json.score` |
+| `luban` | execute | `{ executionYamlPath, parallel }` | source code + tests |
 | `gaoyao` | audit | `{ scope }` | `audit.md` |
 
-#### 7.2.5 全局默认值
+#### 7.2.5 Global defaults
 
 ```yaml
 spec:
@@ -349,17 +349,17 @@ spec:
     onFailure: { strategy: abort }
     retryDelay: PT1M
     timeout: PT24H
-    qualityGates: []             # 默认无门
+    qualityGates: []             # no gates by default
 ```
 
-每个 stage 可单独覆盖。
+Each stage can override individually.
 
-### 7.3 加载器实现要点
+### 7.3 Loader implementation notes
 
 ```typescript
-// src/config/yaml-loader.ts (示意)
+// src/config/yaml-loader.ts (illustrative)
 import { Type, type Static } from "typebox";
-import { Value } from "typebox/value";   // 注意:主入口不导出 Value,必须用 /value 子路径
+import { Value } from "typebox/value";   // note: the main entry does not export Value; the /value subpath is required
 
 export const PipelineSchema = Type.Object({
   apiVersion: Type.Literal("sages.io/v1alpha1"),
@@ -380,7 +380,7 @@ export type Pipeline = Static<typeof PipelineSchema>;
 export async function loadPipeline(cwd: string): Promise<Pipeline> {
   const path = path.join(cwd, ".sages/pipeline.yaml");
   if (!await fs.pathExists(path)) {
-    return getDefaultPipeline();  // 当前 4 阶段硬编码
+    return getDefaultPipeline();  // current 4-stage hardcode
   }
   const raw = await fs.readFile(path, "utf-8");
   const parsed = YAML.parse(raw);
@@ -392,22 +392,22 @@ export async function loadPipeline(cwd: string): Promise<Pipeline> {
 }
 ```
 
-### 7.4 Stage Runner 设计
+### 7.4 Stage Runner design
 
 ```typescript
-// src/orchestrator/stage-runner.ts (示意)
+// src/orchestrator/stage-runner.ts (illustrative)
 export async function runStage(
   stage: Stage,
   ctx: PipelineContext,
 ): Promise<StageResult> {
-  // 1. 解析输入(支持 ${var} 插值)
+  // 1. resolve inputs (support ${var} interpolation)
   const input = interpolate(stage.input, ctx);
 
-  // 2. 调用 sage
+  // 2. invoke the sage
   const sage = ctx.sages.get(stage.sage);
   if (!sage) throw new UnknownSageError(stage.sage);
 
-  // 3. 失败重试
+  // 3. retry on failure
   let lastError: Error | undefined;
   for (let attempt = 0; attempt <= (stage.onFailure?.maxRetries ?? 0); attempt++) {
     try {
@@ -427,20 +427,20 @@ export async function runStage(
 }
 ```
 
-### 7.5 Orchestrator 改造
+### 7.5 Orchestrator rework
 
 ```typescript
-// src/orchestrator/workflow-orchestrator.ts (改)
+// src/orchestrator/workflow-orchestrator.ts (modified)
 export async function runWorkflow(cwd: string, userRequest: string) {
-  const pipeline = await loadPipeline(cwd);  // [新] 取代硬编码 4 阶段
+  const pipeline = await loadPipeline(cwd);  // [new] replaces the hardcoded 4 stages
   const ctx = createContext(pipeline, { userRequest });
 
-  // 加载每个 sage
+  // load each sage
   for (const stage of pipeline.spec.stages) {
     ctx.sages.set(stage.sage, resolveSage(stage.sage));
   }
 
-  // 顺序执行(parallel > 1 在 stage-runner 内部分发)
+  // execute sequentially (parallel > 1 is dispatched inside stage-runner)
   for (const stage of pipeline.spec.stages) {
     ctx.state = await transitionPhase(ctx.state, stage.name);
     await runStage(stage, ctx);
@@ -450,48 +450,48 @@ export async function runWorkflow(cwd: string, userRequest: string) {
 }
 ```
 
-### 7.6 迁移计划
+### 7.6 Migration plan
 
-**完全向后兼容**——本次改动对现有用户零影响:
+**Fully backward compatible** — zero impact on existing users:
 
-| 用户类型 | 行为 |
+| User type | Behavior |
 |---|---|
-| 无 `.sages/pipeline.yaml` | 完全等同于当前 4 阶段(代码路径:`defaults.ts` 返回硬编码 pipeline) |
-| 有 YAML 但 schema 错 | 启动时报错,指明文件:行号,不进入 workflow |
-| 有 YAML 且合法 | 走新代码路径 |
+| No `.sages/pipeline.yaml` | exactly the current 4 stages (code path: `defaults.ts` returns the hardcoded pipeline) |
+| Has YAML but schema-invalid | startup error pointing to file:line; workflow does not start |
+| Has valid YAML | new code path |
 
-**迁移步骤**(开发者侧,无需用户操作):
-1. 在 `defaults.ts` 提取当前 4 阶段为 `getDefaultPipeline()` 函数
-2. `workflow-orchestrator.ts` 把直接调用 sage 改为 `runStage(stage, ctx)` 循环
-3. 加 `yaml-loader.ts` + schema
-4. 加 conformance 测试
-5. 跑现有 30 个 Bun 单测,确认全绿(零行为变更)
+**Migration steps** (developer side; no user action needed):
+1. Extract the current 4 stages into a `getDefaultPipeline()` function in `defaults.ts`
+2. `workflow-orchestrator.ts` replaces direct sage calls with a `runStage(stage, ctx)` loop
+3. Add `yaml-loader.ts` + schema
+4. Add conformance tests
+5. Run the existing 30 Bun unit tests, confirm all green (zero behavior change)
 
-### 7.7 一致性测试设计
+### 7.7 Conformance test design
 
-`conformance/tests/sages-v1alpha1/` 目录结构:
+`conformance/tests/sages-v1alpha1/` directory structure:
 
 ```
 sages-v1alpha1/
 ├── pipeline/
-│   ├── valid-minimal.yaml          # 仅 1 阶段,无 gates
-│   ├── valid-full.yaml             # 4 阶段 + gates + retry + approval
-│   ├── valid-custom-sage.yaml      # 引用未内置的 sage 名(用户自定义)
+│   ├── valid-minimal.yaml          # 1 stage only, no gates
+│   ├── valid-full.yaml             # 4 stages + gates + retry + approval
+│   ├── valid-custom-sage.yaml      # references a non-built-in sage name (user custom)
 │   ├── invalid-empty-stages.yaml   # stages: []
-│   ├── invalid-bad-sage-name.yaml  # sage: "" 或带特殊字符
+│   ├── invalid-bad-sage-name.yaml  # sage: "" or with special characters
 │   ├── invalid-bad-api-version.yaml
-│   ├── invalid-bad-duration.yaml   # retryDelay: "1m"(应为 PT1M)
+│   ├── invalid-bad-duration.yaml   # retryDelay: "1m" (should be PT1M)
 │   └── invalid-missing-metadata.yaml
-├── agent-role/                     # 阶段 2 详述
-├── quality-gate/                   # 阶段 2 详述
-├── autonomy/                       # 阶段 2 详述
-└── (拒绝) behavioral/             # ai-sdlc 有 23 个 fixture,依赖 multi-agent orchestration, mini-ai-sdlc 不实现(详见 §2.3)
+├── agent-role/                     # detailed in phase 2
+├── quality-gate/                   # detailed in phase 2
+├── autonomy/                       # detailed in phase 2
+└── (rejected) behavioral/          # ai-sdlc has 23 fixtures; they depend on multi-agent orchestration, which mini-ai-sdlc does not implement (see §2.3)
 ```
 
-**Runner 设计**(Bun 跑):
+**Runner design** (Bun):
 
 ```typescript
-// conformance/runner.ts (示意)
+// conformance/runner.ts (illustrative)
 import { test, expect } from "bun:test";
 import { loadPipeline } from "../src/config/yaml-loader";
 
@@ -512,11 +512,11 @@ test("pipeline-invalid-empty-stages", async () => {
 
 ---
 
-## 8. 阶段 2 详细设计:治理覆盖层
+## 8. Phase 2 detailed design: Governance overlay
 
-### 8.1 QualityGate 预检
+### 8.1 QualityGate pre-flight
 
-**目标**: 在 sage 运行**前**自动评估规则,不通过则跳过该 sage。
+**Goal**: rules are evaluated automatically **before** the sage runs; failure skips that sage.
 
 #### 8.1.1 YAML schema
 
@@ -526,7 +526,7 @@ kind: QualityGate
 metadata:
   name: design-not-empty
 spec:
-  scope:                           # optional,限定 gate 适用范围
+  scope:                           # optional, limits where the gate applies
     stages: [design]
     sageAuthors: [ai-agent]        # ai-agent | human | external
   gates:
@@ -541,59 +541,59 @@ spec:
         requiredRole: maintainer
 ```
 
-#### 8.1.2 内置 metric
+#### 8.1.2 Built-in metrics
 
-| metric | 含义 | 适用 |
+| metric | meaning | applies to |
 |---|---|---|
-| `file-exists` | 路径是否存在 | draft.md, plan.md |
-| `file-size` | 文件字节数 | draft.md |
-| `test-result` | `bun test` 通过/失败 | LuBan 后置 |
-| `git-status` | `git status --porcelain` 为空 | 所有阶段 |
-| `shell` | 任意 shell 命令 exit code | 通用 |
+| `file-exists` | whether the path exists | draft.md, plan.md |
+| `file-size` | file size in bytes | draft.md |
+| `test-result` | `bun test` pass/fail | LuBan post-check |
+| `git-status` | `git status --porcelain` empty | all stages |
+| `shell` | exit code of any shell command | generic |
 
-#### 8.1.3 强制级别语义
+#### 8.1.3 Enforcement level semantics
 
-| enforcement | 失败时行为 |
+| enforcement | behavior on failure |
 |---|---|
-| `advisory` | 记录警告,sage 继续跑 |
-| `soft-mandatory` | sage 跳过,但记录 attempt;override 角色可手动继续 |
-| `hard-mandatory` | sage 跳过,**不可 override**,workflow abort |
+| `advisory` | records a warning; the sage keeps running |
+| `soft-mandatory` | sage skipped, but the attempt is recorded; an override role can manually continue |
+| `hard-mandatory` | sage skipped, **no override**, workflow aborts |
 
-### 8.2 Attestation 审计哈希链
+### 8.2 Attestation audit hash chain
 
-**目标**: 每个 sage 产出经哈希后落入 `.sages/attestations/`,跨阶段可追溯。
+**Goal**: every sage output is hashed and lands in `.sages/attestations/`, traceable across stages.
 
-#### 8.2.1 v1 设计(单用户本地,无签名)
+#### 8.2.1 v1 design (single-user local, no signatures)
 
 ```typescript
-// src/governance/attestation.ts (示意)
+// src/governance/attestation.ts (illustrative)
 interface Attestation {
   version: "v1";
   planName: string;
   stageName: string;
   sageName: string;
-  inputs: Record<string, string>;        // 各输入的 SHA-256
-  outputs: Record<string, string>;       // 各输出的 SHA-256
+  inputs: Record<string, string>;        // SHA-256 of each input
+  outputs: Record<string, string>;       // SHA-256 of each output
   startedAt: string;                     // ISO 8601
   finishedAt: string;
   status: "ok" | "failed" | "skipped";
-  previousAttestation: string | null;    // 上一条 attestation hash(链式)
-  hash: string;                          // 本条 attestation 自身的 SHA-256
+  previousAttestation: string | null;    // hash of the previous attestation (chained)
+  hash: string;                          // SHA-256 of this attestation itself
 }
 ```
 
-**存储**: `.sages/attestations/<planName>-<timestamp>.jsonl`(每行一条 JSON)
+**Storage**: `.sages/attestations/<planName>-<timestamp>.jsonl` (one JSON per line)
 
-**链式**: `previousAttestation` 引用上一条 hash,形成类 git commit 的链。可在 saga 跨阶段失败时定位"哪一步出的问题"。
+**Chaining**: `previousAttestation` references the previous hash, forming a git-commit-like chain. When a stage fails mid-run, you can locate "which step went wrong".
 
-#### 8.2.2 v2 路线(可选,阶段 3+)
+#### 8.2.2 v2 roadmap (optional, phase 3+)
 
-- HMAC 签名(用户的 pi host secret)
-- 不上 DSSE(单用户不需要多签)
+- HMAC signing (user's pi host secret)
+- No DSSE (single-user doesn't need multi-signature)
 
-### 8.3 Autonomy 自治层级
+### 8.3 Autonomy tiers
 
-**目标**: 控制每个 sage 能读/写哪些路径,默认保守。
+**Goal**: control which paths each sage can read/write; conservative by default.
 
 #### 8.3.1 YAML schema
 
@@ -607,9 +607,9 @@ spec:
     fuxi:
       tier: 0                       # 0=Observer, 1=Assistant, 2=Engineer, 3=Autonomous
       read: ['**/*']                # glob
-      write: []                     # 默认不写
-      execute: ['analyze']          # 允许的 shell 类别
-      blockedPaths: ['.sages/pipeline.yaml']  # 即使 tier 允许也不准
+      write: []                     # no writes by default
+      execute: ['analyze']          # allowed shell categories
+      blockedPaths: ['.sages/pipeline.yaml']  # denied even if the tier allows
     qiaochui:
       tier: 1
       read: ['**/*']
@@ -622,27 +622,27 @@ spec:
       execute: ['code-edit', 'test-run']
       blockedPaths: ['.github/**', '.sages/**', 'package-lock.json']
     gaoyao:
-      tier: 0                       # GaoYao 只读,不写
+      tier: 0                       # GaoYao is read-only, no writes
       read: ['**/*']
       write: []
       execute: ['analyze']
 ```
 
-#### 8.3.2 Tier 语义
+#### 8.3.2 Tier semantics
 
-| tier | 别名 | 允许 |
+| tier | alias | allowed |
 |---|---|---|
-| 0 | Observer | 只读,可执行 analyze |
-| 1 | Assistant | 可写 `.sages/workspace/`,可执行 lint |
-| 2 | Engineer | 可写 `src/`/`test/`,可执行 test-run |
-| 3 | Autonomous | 全权(需用户显式开启) |
+| 0 | Observer | read-only, may run analyze |
+| 1 | Assistant | may write `.sages/workspace/`, may run lint |
+| 2 | Engineer | may write `src/`/`test/`, may run test-run |
+| 3 | Autonomous | full authority (must be explicitly enabled by the user) |
 
-**默认策略**: 已写在 `.sages/autonomy.yaml.example`,所有 sage 默认 tier ≤ 2,且 Luban 强制 blockedPaths 包含 `.github/**` 和 `.sages/**`。
+**Default policy**: already in `.sages/autonomy.yaml.example`; all sages default to tier ≤ 2, and LuBan's blockedPaths mandatorily includes `.github/**` and `.sages/**`.
 
-#### 8.3.3 Tier 检查实现
+#### 8.3.3 Tier check implementation
 
 ```typescript
-// src/governance/autonomy.ts (示意)
+// src/governance/autonomy.ts (illustrative)
 export function checkAutonomy(sage: string, action: "read"|"write"|"execute", target: string, policy: AutonomyPolicy): void {
   const sagePolicy = policy.spec.sages[sage];
   if (!sagePolicy) throw new NoPolicyError(sage);
@@ -657,13 +657,13 @@ export function checkAutonomy(sage: string, action: "read"|"write"|"execute", ta
 }
 ```
 
-**钩入点**: 在 sage 工具的 PreToolUse hook(pi 提供)中拦截。
+**Hook point**: intercepted in the sage tools' PreToolUse hook (provided by pi).
 
-### 8.4 Adapter 适配器加载
+### 8.4 Adapter loading
 
-**目标**: sage 能读 GitHub issue、读写 git 仓库、读文件——通过 `.sages/adapters/*.yaml` 声明。
+**Goal**: sages can read GitHub issues, read/write git repos, and read files — declared via `.sages/adapters/*.yaml`.
 
-#### 8.4.1 Adapter 声明格式
+#### 8.4.1 Adapter declaration format
 
 ```yaml
 # .sages/adapters/git.yaml
@@ -690,12 +690,12 @@ spec:
   type: github
   version: 0.1.0
   config:
-    token: ${GITHUB_TOKEN}      # 直接 env 变量插值; ai-sdlc 用 secretRef 引用 secret manager,本设计简化(单用户本地无需 secret 抽象)
+    token: ${GITHUB_TOKEN}      # direct env-var interpolation; ai-sdlc uses secretRef to reference a secret manager, this design simplifies (single-user local needs no secret abstraction)
     org: my-org
     repo: my-repo
 ```
 
-#### 8.4.2 Adapter 接口(基础 4 方法)
+#### 8.4.2 Adapter interface (base 4 methods)
 
 ```typescript
 // src/adapters/types.ts
@@ -709,16 +709,16 @@ export interface Adapter {
 }
 ```
 
-**与 ai-sdlc 的设计偏离**: ai-sdlc 定义 5 类接口(`IssueTracker` / `SourceControl` / `CIPipeline` / `Messenger` / `FileStore`,参见 `sdk-python/src/ai_sdlc/adapters/interfaces.py`),每类含丰富方法(`list_issues`、`create_pr`、`merge`、`commit` 等)。本文档采用 4-方法 **最小子集**,仅对齐 ai-sdlc 的 `FileStore` 接口:
+**Design deviation from ai-sdlc**: ai-sdlc defines 5 interface categories (`IssueTracker` / `SourceControl` / `CIPipeline` / `Messenger` / `FileStore`, see `sdk-python/src/ai_sdlc/adapters/interfaces.py`), each with rich methods (`list_issues`, `create_pr`, `merge`, `commit`, etc.). This document adopts a 4-method **minimal subset**, aligned only with ai-sdlc's `FileStore` interface:
 
-- 阶段 2 交付范围内仅 `filesystem` adapter 需 4-方法全实现
-- `git` adapter 在 4-方法框架下仅能提供 `read/write/list/exists`(读 commit、读 diff);`create_branch` / `commit` / `merge` 不在阶段 2 范围
-- `github` adapter 同理,阶段 2 仅提供 issue `read`/`list`,无 `create_issue` / `add_comment`
-- 阶段 3 评估是否扩展为 `IssueTracker` / `SourceControl` 独立接口
+- Within phase 2's delivery scope, only the `filesystem` adapter needs the full 4-method implementation
+- Under the 4-method framework, the `git` adapter can only provide `read/write/list/exists` (read commits, read diffs); `create_branch` / `commit` / `merge` are out of phase 2 scope
+- Same for the `github` adapter: phase 2 only provides issue `read`/`list`, no `create_issue` / `add_comment`
+- Phase 3 evaluates whether to extend into standalone `IssueTracker` / `SourceControl` interfaces
 
-#### 8.4.3 Sage 引用 adapter
+#### 8.4.3 Sages reference adapters
 
-sage 通过 pi 工具参数引用 adapter(无需自己加载):
+Sages reference adapters via pi tool arguments (no self-loading needed):
 
 ```yaml
 spec:
@@ -727,152 +727,152 @@ spec:
       sage: luban
       input:
         task: read GitHub issue #1 and implement"
-        adapter: github        # 引用 .sages/adapters/github.yaml
+        adapter: github        # references .sages/adapters/github.yaml
 ```
 
-sage 代码侧:
+On the sage code side:
 ```typescript
 const adapter = ctx.adapters.get(input.adapter);
 const issue = await adapter.read("issues/1");
 ```
 
-#### 8.4.4 内置 adapter(阶段 2 交付)
+#### 8.4.4 Built-in adapters (phase 2 delivery)
 
-| adapter | interface | 阶段 2 范围(基于 4-方法框架) |
+| adapter | interface | phase 2 scope (4-method framework) |
 |---|---|---|
-| `git` | SourceControl | **仅读**(`read` diff / `list` 分支);**不实现** `create_branch` / `commit` / `merge`(阶段 3 扩展) |
-| `filesystem` | FileStore | full(`read` / `write` / `list` / `exists`) |
-| `github` | IssueTracker | **仅读**(`read` issue / `list` issues);**不实现** `create_issue` / `add_comment` / `create_pr` |
-| `slack`(阶段 3) | Messenger | stub |
+| `git` | SourceControl | **read-only** (`read` diffs / `list` branches); **does not implement** `create_branch` / `commit` / `merge` (phase 3 extension) |
+| `filesystem` | FileStore | full (`read` / `write` / `list` / `exists`) |
+| `github` | IssueTracker | **read-only** (`read` issues / `list` issues); **does not implement** `create_issue` / `add_comment` / `create_pr` |
+| `slack` (phase 3) | Messenger | stub |
 
-### 8.5 阶段 2 验收路径
+### 8.5 Phase 2 acceptance paths
 
-跑通以下场景即视为阶段 2 完成:
+Phase 2 is considered complete when the following scenarios pass:
 
-1. **场景 A**:`.sages/quality-gate.yaml` 写一个 `design-not-empty` 门,删掉 draft.md 后跑 `fuxi-request`,LuBan 不应启动(GaoYao 之前)
-2. **场景 B**:跑完整 4 阶段,`.sages/attestations/` 出现 4 条链式 JSON 记录
-3. **场景 C**:`.sages/autonomy.yaml` 把 LuBan tier 设为 0,LuBan 不应能写 `src/`
-4. **场景 D**:`.sages/adapters/github.yaml` 配置好 token,LuBan 能读 issue 内容并据此执行
+1. **Scenario A**: write a `design-not-empty` gate in `.sages/quality-gate.yaml`, delete draft.md, run `fuxi-request` — LuBan must not start (before GaoYao)
+2. **Scenario B**: run the full 4 stages — `.sages/attestations/` contains 4 chained JSON records
+3. **Scenario C**: set LuBan's tier to 0 in `.sages/autonomy.yaml` — LuBan must not be able to write `src/`
+4. **Scenario D**: configure the token in `.sages/adapters/github.yaml` — LuBan can read the issue content and execute based on it
 
 ---
 
-## 9. 阶段 3(可选):生态扩展
+## 9. Phase 3 (optional): ecosystem expansion
 
-| 子任务 | 描述 | 工作量 |
+| Subtask | Description | Effort |
 |---|---|---|
-| 3.1 Slack adapter | 实现 `.sages/adapters/slack.yaml` | 1 周 |
-| 3.2 多机编排 | 跨机器分发 sage(用 SSH 或 socket) | 2-3 周 |
-| 3.3 v2 Attestation | HMAC 签名 | 0.5 周 |
-| 3.4 Conformance 扩展 | 20+ fixture 覆盖边界 | 1 周 |
-| 3.5 文档站点 | 把 README + 示例 + 教程搬到独立 docs/ | 1 周 |
+| 3.1 Slack adapter | implement `.sages/adapters/slack.yaml` | 1 week |
+| 3.2 Multi-machine orchestration | distribute sages across machines (via SSH or socket) | 2-3 weeks |
+| 3.3 v2 Attestation | HMAC signing | 0.5 week |
+| 3.4 Conformance expansion | 20+ fixtures covering edge cases | 1 week |
+| 3.5 Docs site | move README + examples + tutorial to a standalone docs/ | 1 week |
 
-**不做除非用户明确需要**。
+**Not done unless the user explicitly needs it**.
 
 ---
 
-## 10. 风险与缓解
+## 10. Risks and mitigations
 
-| 风险 | 影响 | 缓解 |
+| Risk | Impact | Mitigation |
 |---|---|---|
-| 向后兼容破坏 | 现有用户 workflow 异常 | 默认回退路径完全保留旧行为;新增 50 个单测覆盖旧路径 |
-| YAML schema 限制过度 | 用户写不出想要的 workflow | typebox schema 支持 `additionalProperties` 在 metadata.labels;提供"逃生口"`spec.raw` 字段透传原始配置(标注 advanced) |
-| Autonomy 检查太严 | sage 无法完成合理操作 | 默认策略只覆盖"明显危险"路径(`/.github/**`, `/.sages/**`);用户改 `.sages/autonomy.yaml` 一行即可放宽 |
-| Adapter 加载器性能 | 每次 sage run 都读 YAML | 缓存策略:启动时一次性加载到 `ctx.adapters`,运行期不再读 |
-| Conformance fixture 维护成本 | 改 schema 时 fixture 全失效 | 用脚本生成 fixture 而非手写;schema 变更必须同步更新 fixture |
+| Backward compatibility breakage | existing users' workflows break | the default fallback path fully preserves old behavior; add 50 unit tests covering the old path |
+| YAML schema too restrictive | users can't express the workflow they want | typebox schema allows `additionalProperties` in metadata.labels; provide an "escape hatch" `spec.raw` field to pass through raw config (marked advanced) |
+| Autonomy checks too strict | sages can't complete legitimate operations | default policy only covers "obviously dangerous" paths (`/.github/**`, `/.sages/**`); users relax it by changing one line in `.sages/autonomy.yaml` |
+| Adapter loader performance | reads YAML on every sage run | caching strategy: load once into `ctx.adapters` at startup; no reads at runtime |
+| Conformance fixture maintenance cost | schema changes invalidate all fixtures | generate fixtures with a script instead of hand-writing; schema changes must update fixtures in sync |
 
 ---
 
-## 11. 开放问题
+## 11. Open questions
 
-按"何时必须决定"分层组织。**开工前 blocker 见 §16.5(8 题)**;此处集中记录开工后阶段性决策。
+Organized by "when a decision must be made". **Pre-work blockers in §16.5 (8 questions)**; this section records phased decisions to be made after work starts.
 
-### 11.1 开工前 blocker(汇总)
+### 11.1 Pre-work blockers (summary)
 
-详见 **§16.5 8 题**——本节不重复。
+See **§16.5's 8 questions** — not repeated here.
 
-### 11.2 Phase 1 中段决策(schema 验证后)
+### 11.2 Mid-phase-1 decisions (after schema validation)
 
-| # | 问题 | 推荐方案 | 决策时机 |
+| # | Question | Recommended | Decision timing |
 |---|---|---|---|
-| **D9** | state.json 与 `.sages/workspace/` 产物命名归属 | YAML stage 是否应有 `output.files: [name1, name2]` 字段? 或者约定固定命名(来自 `defaults.ts` 默认 pipeline) | 阶段 1.1 schema 定义后 |
-| **D10** | Brainstorming 集成开关是否进 YAML (`fuxi_request --no-brainstorm`) | 作为 `stage.input.noBrainstorm: true` 透传即可, 无需 schema 改动 | 阶段 1.2 yaml-loader 时 |
-| **D11** | sage 注册机制——保留 `registerTool` monkey-patch vs 动态加载 | 当前 `extensions/sages-extension.ts:66-86` monkey-patch `pi.registerTool` 是 hack; **推荐**: 保留 monkey-patch, 把"sage 注册"逻辑抽到 `src/registry/`, YAML 加载后注入 registry | 阶段 1.6 extension 改造时 |
+| **D9** | state.json and `.sages/workspace/` output naming/ownership | should YAML stages have an `output.files: [name1, name2]` field? Or use a fixed naming convention (from the `defaults.ts` default pipeline)? | after phase 1.1 schema definitions |
+| **D10** | whether the Brainstorming integration toggle goes into YAML (`fuxi_request --no-brainstorm`) | pass through as `stage.input.noBrainstorm: true`; no schema change needed | at phase 1.2 yaml-loader |
+| **D11** | sage registration mechanism — keep the `registerTool` monkey-patch vs dynamic loading | the current monkey-patch of `pi.registerTool` at `extensions/sages-extension.ts:66-86` is a hack; **recommended**: keep the monkey-patch, extract the "sage registration" logic into `src/registry/`, inject into the registry after YAML loading | at phase 1.6 extension rework |
 
-### 11.3 Phase 2 启动决策(阶段 1 验收后)
+### 11.3 Phase 2 kickoff decisions (after phase 1 acceptance)
 
-| # | 问题 | 推荐方案 | 决策时机 |
+| # | Question | Recommended | Decision timing |
 |---|---|---|---|
-| **D12** | Adapter 4-方法 vs 5 类接口的最终形态 | §8.4.2 已定为 4 方法(对齐 FileStore), `git/github` adapter 仅读; **推荐**: YAML adapter schema 预留 `extendedMethods: [commit, create_issue]` 字段作为 escape hatch, 阶段 2 实现只交付核心 4 方法, 扩展按需追加 | 阶段 2.4 adapter-loader 设计时 |
-| **D13** | Attestation 与现有 `audit.md` 的兼容性 | `fuxi-end` 当前用正则 `**Verdict**: PASS` 解析 audit.md; **推荐**: `audit.md` **保留**为人类可读报告, Attestation 是机器可读的并行产物, `fuxi-end` 不变 | 阶段 2.2 attestation.ts 设计时 |
-| **D14** | Autonomy 检查钩入点(pi PreToolUse vs sage 内部) | §16.4 验证 B 已确认 `pi.on("tool_call")` 可行; **推荐**: 双层—— pi PreToolUse 拦截**写操作**(write/edit/bash), 硬执行 policy; sage 内部 `checkAutonomy()` 提供更细粒度 file-read gate | 阶段 2.3 autonomy.ts 设计时 |
+| **D12** | final form of the Adapter 4-method vs 5-category interface | §8.4.2 already settles on 4 methods (aligned with FileStore); `git`/`github` adapters read-only; **recommended**: reserve an `extendedMethods: [commit, create_issue]` field in the YAML adapter schema as an escape hatch; phase 2 only delivers the core 4 methods, extensions appended on demand | at phase 2.4 adapter-loader design |
+| **D13** | Attestation compatibility with the existing `audit.md` | `fuxi-end` currently parses audit.md with the regex `**Verdict**: PASS`; **recommended**: keep `audit.md` as the human-readable report; Attestation is a parallel machine-readable artifact; `fuxi-end` unchanged | at phase 2.2 attestation.ts design |
+| **D14** | Autonomy check hook point (pi PreToolUse vs inside the sage) | §16.4 validation B confirmed `pi.on("tool_call")` works; **recommended**: two layers — pi PreToolUse intercepts **write operations** (write/edit/bash), enforcing the policy hard; the in-sage `checkAutonomy()` provides finer-grained file-read gates | at phase 2.3 autonomy.ts design |
 
-### 11.4 推迟到阶段 3+ 的决策
+### 11.4 Decisions deferred to phase 3+
 
-| # | 问题 | 待定方案 | 决策时机 |
+| # | Question | Pending plan | Decision timing |
 |---|---|---|---|
-| **D15** | 是否支持 YAML 嵌套引用 (`${stages.design.output}`)? | 阶段 1 不支持, 阶段 3 评估 | 阶段 1 完成后 |
-| **D16** | 是否支持多 pipeline 文件(profile-based)? | 阶段 1 不支持, 阶段 3 评估 | 阶段 1 完成后 |
-| **D17** | Attestation v2 是否上 HMAC? | 用户明确需求时上 | 阶段 3 |
-| **D18** | `pi.on("tool_call")` 是否完全替代 `pi.registerCommand` 的最终形态? | 未讨论 | 阶段 2 中段 |
+| **D15** | support YAML nested references (`${stages.design.output}`)? | not in phase 1; evaluate in phase 3 | after phase 1 |
+| **D16** | support multiple pipeline files (profile-based)? | not in phase 1; evaluate in phase 3 | after phase 1 |
+| **D17** | HMAC for Attestation v2? | only when the user has an explicit need | phase 3 |
+| **D18** | does `pi.on("tool_call")` fully replace `pi.registerCommand` in the final form? | not discussed | mid-phase 2 |
 
-### 11.5 已决策(无需重新评估)
+### 11.5 Already decided (no re-evaluation needed)
 
-| 问题 | 决策 | 理由 |
+| Question | Decision | Reason |
 |---|---|---|
-| 是否做 Sages→ai-sdlc 兼容层(反向)? | ❌ **不做** | §3.1 路径 B 已拒绝; ai-sdlc 是参照目标不是互操作对象 |
-| `AutonomyPolicy.levels[]` 是否完整实现? | ❌ 4 tier 已够(Observer/Assistant/Engineer/Autonomous) | §2.3 已说明 |
-| DSSE v6 Merkle 签名? | ❌ 不做 | §2.3 单用户本地不需要 |
-| Conformance 60 fixture 是否全部移植? | ❌ 仅 15-25 fixture, 拒绝 `behavioral/` 23 个 | §2.3 |
-| 是否做完整 ai-sdlc v1alpha1 兼容? | ❌ 不做 | §3.1 路径 B 已拒绝 |
-| 沙箱隔离(Landlock/seccomp/OpenShell)? | ❌ 不做 | §2.3 pi 在用户机器上跑, 信任边界不同 |
+| Build a Sages→ai-sdlc compatibility layer (reverse direction)? | ❌ **No** | §3.1 path B already rejected; ai-sdlc is a reference target, not an interop target |
+| Fully implement `AutonomyPolicy.levels[]`? | ❌ 4 tiers are enough (Observer/Assistant/Engineer/Autonomous) | explained in §2.3 |
+| DSSE v6 Merkle signatures? | ❌ No | §2.3; single-user local doesn't need them |
+| Port all 60 conformance fixtures? | ❌ only 15-25 fixtures; reject the 23 `behavioral/` ones | §2.3 |
+| Full ai-sdlc v1alpha1 compatibility? | ❌ No | §3.1 path B already rejected |
+| Sandbox isolation (Landlock/seccomp/OpenShell)? | ❌ No | §2.3; pi runs on the user's machine; trust boundary differs |
 
 ---
 
-## 12. 验收标准
+## 12. Acceptance criteria
 
-### 12.1 阶段 1 完成的标志
+### 12.1 Phase 1 completion signals
 
-- [ ] **开工前 blocker 已决**: §16.5 八题 + §17 三题元决策 (M1/M2/M3) 均有明确选择
-- [ ] **Phase 1 中段决策已决**: §11.2 D9(state 命名)/ D10(brainstorming flag)/ D11(registerTool) 均有明确选择
-- [ ] `schemas/pipeline.v1.schema.json` 存在且 `typebox-schemas.ts` 导出对应 TS 类型
-- [ ] `src/config/yaml-loader.ts` 实现 `loadPipeline(cwd)`,失败抛 `PipelineSchemaError` 含文件:行号
-- [ ] `src/config/defaults.ts` 提取当前 4 阶段为 `getDefaultPipeline()`
-- [ ] `src/orchestrator/stage-runner.ts` 实现 `runStage(stage, ctx)`
-- [ ] `src/orchestrator/workflow-orchestrator.ts` 改为读 pipeline 并迭代 `runStage`
-- [ ] 现有 **488** 个 Bun 单测全绿(零行为变更证明;§16.1 实测基线)
-- [ ] `conformance/` 目录新增 **15+ fixture**(8 valid + 7 invalid, 不含 behavioral)
-- [ ] `conformance/runner.ts` 跑通所有 fixture
-- [ ] `.sages/pipeline.yaml.example` 写好且被 README 引用
-- [ ] README 更新"自定义 pipeline"小节
-- [ ] `bun test` 全绿 + conformance test 全绿
+- [ ] **Pre-work blockers decided**: §16.5's eight questions + §17's three meta-decisions (M1/M2/M3) all have explicit choices
+- [ ] **Mid-phase-1 decisions decided**: §11.2 D9 (state naming) / D10 (brainstorming flag) / D11 (registerTool) all have explicit choices
+- [ ] `schemas/pipeline.v1.schema.json` exists and `typebox-schemas.ts` exports the corresponding TS types
+- [ ] `src/config/yaml-loader.ts` implements `loadPipeline(cwd)`, throwing `PipelineSchemaError` with file:line on failure
+- [ ] `src/config/defaults.ts` extracts the current 4 stages into `getDefaultPipeline()`
+- [ ] `src/orchestrator/stage-runner.ts` implements `runStage(stage, ctx)`
+- [ ] `src/orchestrator/workflow-orchestrator.ts` changed to read the pipeline and iterate `runStage`
+- [ ] existing **488** Bun unit tests all green (proof of zero behavior change; §16.1 measured baseline)
+- [ ] `conformance/` adds **15+ fixtures** (8 valid + 7 invalid, excluding behavioral)
+- [ ] `conformance/runner.ts` runs all fixtures
+- [ ] `.sages/pipeline.yaml.example` written and referenced by README
+- [ ] README updated with a "custom pipeline" section
+- [ ] `bun test` all green + conformance tests all green
 
-### 12.2 阶段 2 完成的标志
+### 12.2 Phase 2 completion signals
 
-- [ ] **Phase 2 启动决策已决**: §11.3 D12(adapter 范围)/ D13(Attestation vs audit.md)/ D14(autonomy hook) 均有明确选择
-- [ ] `schemas/quality-gate.v1.schema.json` + `src/governance/quality-gate.ts` 实现(**注意 §16.5 D6: 与 GaoYao 正交, 不替代 INK/NOSE/FOOT/CASTRATION/DEATH**)
-- [ ] `src/governance/attestation.ts` 实现链式哈希记录(**注意 §11.3 D13: audit.md 保留为人类可读报告, fuxi-end 不变**)
-- [ ] `src/governance/autonomy.ts` 实现 tier 检查(**注意 §11.3 D14: pi PreToolUse 拦截写操作 + sage 内部 read gate 双层**)
-- [ ] `src/governance/adapter-loader.ts` 实现 4 方法接口(**注意 §11.3 D12: YAML adapter 预留 extendedMethods escape hatch**)
-- [ ] `.sages/adapters/{git,filesystem,github}.yaml` example 写好(仅读, 不实现 commit/create_issue)
-- [ ] 跑通 §8.5 四个验收场景
-- [ ] conformance 新增 10+ fixture(governance + adapter)
-- [ ] README 新增"治理覆盖层"小节
-- [ ] 全套单测 + 一致性测试通过
+- [ ] **Phase 2 kickoff decisions decided**: §11.3 D12 (adapter scope) / D13 (Attestation vs audit.md) / D14 (autonomy hook) all have explicit choices
+- [ ] `schemas/quality-gate.v1.schema.json` + `src/governance/quality-gate.ts` implemented (**note §16.5 D6: orthogonal to GaoYao; does not replace INK/NOSE/FOOT/CASTRATION/DEATH**)
+- [ ] `src/governance/attestation.ts` implements chained hash records (**note §11.3 D13: audit.md stays as the human-readable report; fuxi-end unchanged**)
+- [ ] `src/governance/autonomy.ts` implements tier checks (**note §11.3 D14: pi PreToolUse intercepts write operations + in-sage read gate, two layers**)
+- [ ] `src/governance/adapter-loader.ts` implements the 4-method interface (**note §11.3 D12: YAML adapter reserves the extendedMethods escape hatch**)
+- [ ] `.sages/adapters/{git,filesystem,github}.yaml` examples written (read-only; no commit/create_issue)
+- [ ] the four §8.5 acceptance scenarios pass
+- [ ] conformance adds 10+ fixtures (governance + adapter)
+- [ ] README adds a "governance overlay" section
+- [ ] full unit test + conformance test suite passes
 
-### 12.3 整体完成(到 `mini-ai-sdlc` 标签)的标志
+### 12.3 Overall completion (reaching the `mini-ai-sdlc` label) signals
 
-- [ ] 阶段 1 + 阶段 2 全验收
-- [ ] README 顶部一句话:"**sages 是 `mini-ai-sdlc` —— 一个声明式 AI SDLC 治理框架**"
-- [ ] 用户可仅通过 `.sages/pipeline.yaml` + `.sages/autonomy.yaml` + `.sages/adapters/*.yaml` 三类文件描述完整 workflow,无需修改任何 TS 代码
-- [ ] 与 ai-sdlc 的对比表(本文 §2.1)从"硬编码 vs 声明"翻转为"声明 vs 声明"(`mini-ai-sdlc` 与 ai-sdlc 治理核心对齐,但规模、协议、信任边界均独立)
-- [ ] **版本策略对齐 §17 M1**: 如选 v2 major, 则 package.json version=2.0.0, CHANGELOG 标明 breaking change
-- [ ] **旧 hardcoded 4-stage 路径保留期符合 §17 M2**: 默认行为无 `.sages/pipeline.yaml` 时回退, 至 v3.0 才删除
+- [ ] phase 1 + phase 2 fully accepted
+- [ ] README top one-liner: "**sages is `mini-ai-sdlc` — a declarative AI SDLC governance framework**"
+- [ ] users can describe a complete workflow with only `.sages/pipeline.yaml` + `.sages/autonomy.yaml` + `.sages/adapters/*.yaml` — no TS code changes needed
+- [ ] the comparison table with ai-sdlc (this document's §2.1) flips from "hardcoded vs declarative" to "declarative vs declarative" (`mini-ai-sdlc` and ai-sdlc align on the governance core, but scale, protocol, and trust boundary are independent)
+- [ ] **version strategy aligned with §17 M1**: if v2 major is chosen, package.json version=2.0.0 and CHANGELOG marks the breaking change
+- [ ] **legacy hardcoded 4-stage path retention follows §17 M2**: default behavior falls back when `.sages/pipeline.yaml` is absent; deleted only at v3.0
 
 ---
 
-## 13. 附录 A:文件清单(预计新增/修改)
+## 13. Appendix A: file inventory (expected new/modified)
 
-### 13.1 新增文件(总计 ~30)
+### 13.1 New files (~30 total)
 
 ```
 sages/pi/src/config/
@@ -883,7 +883,7 @@ sages/pi/src/config/
 sages/pi/src/orchestrator/
 └── stage-runner.ts
 
-sages/pi/src/governance/                [阶段 2]
+sages/pi/src/governance/                [phase 2]
 ├── quality-gate.ts
 ├── attestation.ts
 ├── autonomy.ts
@@ -891,118 +891,118 @@ sages/pi/src/governance/                [阶段 2]
 
 sages/pi/schemas/
 ├── pipeline.v1.schema.json
-├── agent-role.v1.schema.json          [阶段 2]
-├── quality-gate.v1.schema.json        [阶段 2]
-├── autonomy.v1.schema.json            [阶段 2]
-└── adapter-binding.v1.schema.json     [阶段 2]
+├── agent-role.v1.schema.json          [phase 2]
+├── quality-gate.v1.schema.json        [phase 2]
+├── autonomy.v1.schema.json            [phase 2]
+└── adapter-binding.v1.schema.json     [phase 2]
 
 sages/pi/conformance/
 ├── runner.ts
 └── tests/sages-v1alpha1/
     ├── pipeline/  (8 files)
-    ├── quality-gate/  (5 files, 阶段 2)
-    ├── autonomy/  (4 files, 阶段 2)
-    └── adapter/  (4 files, 阶段 2)
+    ├── quality-gate/  (5 files, phase 2)
+    ├── autonomy/  (4 files, phase 2)
+    └── adapter/  (4 files, phase 2)
 
 sages/pi/.sages/
 ├── pipeline.yaml.example
-├── quality-gate.yaml.example          [阶段 2]
-├── autonomy.yaml.example              [阶段 2]
-└── adapters/                          [阶段 2]
+├── quality-gate.yaml.example          [phase 2]
+├── autonomy.yaml.example              [phase 2]
+└── adapters/                          [phase 2]
     ├── git.yaml
     ├── filesystem.yaml
     └── github.yaml
 ```
 
-### 13.2 修改文件(总计 ~5)
+### 13.2 Modified files (~5 total)
 
 ```
-sages/pi/extensions/sages-extension.ts       # 钩入 yaml-loader
-sages/pi/src/orchestrator/workflow-orchestrator.ts  # 改读 pipeline
-sages/pi/package.json                        # 加 conformance script
-sages/pi/README.md                           # 新增"声明式 pipeline"章节
-sages/pi/test/*.test.ts                      # 新增 yaml-loader / stage-runner 单测
+sages/pi/extensions/sages-extension.ts       # hook into yaml-loader
+sages/pi/src/orchestrator/workflow-orchestrator.ts  # modified to read pipeline
+sages/pi/package.json                        # add conformance script
+sages/pi/README.md                           # add "declarative pipeline" chapter
+sages/pi/test/*.test.ts                      # add yaml-loader / stage-runner unit tests
 ```
 
-### 13.3 不动的文件
+### 13.3 Untouched files
 
 ```
-sages/pi/prompts/                  # 完全不动
-sages/pi/skills/                   # 完全不动
-sages/pi/src/tools/                # 不动(sage 实现)
-sages/pi/src/state/                # 不动(state manager)
-sages/pi/src/services/             # 不动(file service)
-sages/pi/src/utils/                # 不动(analyzer 等)
+sages/pi/prompts/                  # completely untouched
+sages/pi/skills/                   # completely untouched
+sages/pi/src/tools/                # untouched (sage implementations)
+sages/pi/src/state/                # untouched (state manager)
+sages/pi/src/services/             # untouched (file service)
+sages/pi/src/utils/                # untouched (analyzer etc.)
 ```
 
 ---
 
-## 14. 附录 B:与 ai-sdlc 对比表(演进后)
+## 14. Appendix B: comparison table with ai-sdlc (after the evolution)
 
-| 维度 | 当前 sages | `mini-ai-sdlc` sages | ai-sdlc (参照) |
+| Dimension | Current sages | `mini-ai-sdlc` sages | ai-sdlc (reference) |
 |---|---|---|---|
-| 工作流定义 | 硬编码 4 阶段 | **YAML 声明** | YAML 声明 |
-| Sage 数 | 4(固定) | **4 + 用户自定义** | 9(.md agent) |
-| 配置格式 | 无 | **YAML + JSON Schema** | YAML + JSON Schema |
-| QualityGate | 事后(GaoYao) | **预检 + 事后** | 预检 + 多级 enforcement |
-| Attestation | 无 | **哈希链(v1)→ HMAC(v2)** | DSSE v6 Merkle |
-| Autonomy | 无 | **4 tier** | N tier + RFC-0022 |
-| Adapter | 无 | **git + filesystem + github(只读,4-方法框架)** | 11+ contrib + github(3 SDK 实现),5 类接口 |
-| 一致性测试 | 488 Bun 单测 | **488 单测 + 15-25 fixture(不含 behavioral)** | 60 fixture + Vitest |
-| 沙箱隔离 | 无 | **无(信任边界不同)** | OpenShell + Landlock + seccomp |
-| 多用户 | 无 | **无(单 pi session)** | RFC-0043 + lifecycle-approvers |
-| RFC 流程 | 无 | **无** | RFC-0011/0035 等 |
-| 部署 | npm 包 | **npm 包(不变)** | pnpm monorepo **11 包** |
-| 文件数 | 121 | **~150-180** | 3,904 |
+| Workflow definition | hardcoded 4 stages | **YAML declarative** | YAML declarative |
+| Sage count | 4 (fixed) | **4 + user-defined** | 9 (.md agents) |
+| Config format | none | **YAML + JSON Schema** | YAML + JSON Schema |
+| QualityGate | post-hoc (GaoYao) | **pre-flight + post-hoc** | pre-flight + multi-level enforcement |
+| Attestation | none | **hash chain (v1) → HMAC (v2)** | DSSE v6 Merkle |
+| Autonomy | none | **4 tiers** | N tiers + RFC-0022 |
+| Adapter | none | **git + filesystem + github (read-only, 4-method framework)** | 11+ contrib + github (3 SDK implementations), 5 interface categories |
+| Conformance tests | 488 Bun unit tests | **488 unit tests + 15-25 fixtures (excluding behavioral)** | 60 fixtures + Vitest |
+| Sandbox isolation | none | **none (trust boundary differs)** | OpenShell + Landlock + seccomp |
+| Multi-user | none | **none (single pi session)** | RFC-0043 + lifecycle-approvers |
+| RFC process | none | **none** | RFC-0011/0035 etc. |
+| Deployment | npm package | **npm package (unchanged)** | pnpm monorepo **11 packages** |
+| File count | 121 | **~150-180** | 3,904 |
 
-**定位总结**: `mini-ai-sdlc` 不是 ai-sdlc 的子集,也不是超集,而是 **ai-sdlc 治理哲学在 pi-coding-agent 规模上的重新表达**——更小、更轻、更符合 pi 的"less is more"哲学。
+**Positioning summary**: `mini-ai-sdlc` is not a subset of ai-sdlc, nor a superset — it is **ai-sdlc's governance philosophy re-expressed at pi-coding-agent scale** — smaller, lighter, and more in line with pi's "less is more" philosophy.
 
 ---
 
-## 15. 附录 C:参考资料
+## 15. Appendix C: references
 
-- **ai-sdlc 仓库**: `~/Project/ai-sdlc/` —— 完整治理框架参照
-- **ai-sdlc RFC 索引**: `~/Project/ai-sdlc/spec/rfcs/` —— RFC-0011 (DoR)、RFC-0015 (orchestrator)、RFC-0022 (reviewer authority)、RFC-0035 (decision catalog)、RFC-0041 (conductor/worker)、RFC-0042 (attestation)
-- **ai-sdlc 一致性测试**: `~/Project/ai-sdlc/conformance/tests/v1alpha1/` —— 60 fixture 的设计风格
-- **pi-coding-agent 文档**: https://pi.dev —— ExtensionAPI、registerTool、PreToolUse hook
-- **brainstorming skill**: `~/.pi/packages/sages/skills/brainstorming/SKILL.md` —— 本次设计的产出流程
+- **ai-sdlc repository**: `~/Project/ai-sdlc/` — full governance framework reference
+- **ai-sdlc RFC index**: `~/Project/ai-sdlc/spec/rfcs/` — RFC-0011 (DoR), RFC-0015 (orchestrator), RFC-0022 (reviewer authority), RFC-0035 (decision catalog), RFC-0041 (conductor/worker), RFC-0042 (attestation)
+- **ai-sdlc conformance tests**: `~/Project/ai-sdlc/conformance/tests/v1alpha1/` — the design style of the 60 fixtures
+- **pi-coding-agent docs**: https://pi.dev — ExtensionAPI, registerTool, PreToolUse hook
+- **brainstorming skill**: `~/.pi/packages/sages/skills/brainstorming/SKILL.md` — the output process of this design
 
-## 16. 附录 D:可行性审计(基于 sages/pi 现状)
+## 16. Appendix D: feasibility audit (based on the current sages/pi)
 
-**日期**: 2026-06-28(同脑暴日)
-**方法**: 通读 `pi/` 全部源文件 + 跑通基线 + 跑 typebox demo + 查 pi ExtensionAPI 文档
-**状态**: 实施前必读,6 处偏差需在开工前消化
+**Date**: 2026-06-28 (same day as the brainstorming)
+**Method**: read all source files under `pi/` + run the baseline + run the typebox demo + check the pi ExtensionAPI docs
+**Status**: must-read before implementation; 6 deviations need to be digested before work starts
 
-### 16.1 基线确认
+### 16.1 Baseline confirmation
 
-| 项 | 实测 | 设计稿假设 | 偏差 |
+| Item | Measured | Design-doc assumption | Deviation |
 |---|---|---|---|
-| `bun run typecheck` | ✅ 通过 | — | — |
-| `bun test` | ✅ **488 pass / 0 fail** / 30 test files / 969 expect() | "30 个 Bun 单测" | **低估 16×** |
-| 依赖变化需求 | ✅ **零新增**(`typebox` 内置 `/value` 子路径) | "typebox + @sinclair/typebox" | `@sinclair/typebox` 不需安装;`Value` 必须从 `typebox/value` 子路径导入(`typebox` 主入口不导出 `Value`) |
+| `bun run typecheck` | ✅ passes | — | — |
+| `bun test` | ✅ **488 pass / 0 fail** / 30 test files / 969 expect() | "30 Bun unit tests" | **underestimated 16×** |
+| dependency changes needed | ✅ **zero new** (`typebox` has a built-in `/value` subpath) | "typebox + @sinclair/typebox" | `@sinclair/typebox` doesn't need to be installed; `Value` must be imported from the `typebox/value` subpath (the `typebox` main entry does not export `Value`) |
 
-### 16.2 设计稿 6 处偏差(必须重新校核)
+### 16.2 The 6 deviations in the design doc (must be re-checked)
 
-| # | 设计稿说 | 实际 | 修正方向 |
+| # | The design doc says | Reality | Correction direction |
 |---|---|---|---|
-| 1 | "硬编码 4 阶段" | **7 阶段 enum**:`idle / design / review / plan / execute / audit / complete`,`plan` 是 review-execute 之间的审批门 | §6 路线图阶段计数应改为 5 + 2(收尾) |
-| 2 | "WorkflowOrchestrator 替换为 runStage 循环" | `WorkflowOrchestrator`(249 行)**只是消息生成器**,不驱动流程;流程完全靠用户在聊天中跑 slash command | **改造真实目标是 `sages-extension.ts`(534 行 slash command 路由)**,不是 orchestrator |
-| 3 | "fuxi 是 1 个 sage" | `fuxi-tools.ts` **1037 行**,内含 8 个独立 tool(fuxi_start/request/plan/recover/end/get_status/update_score/brainstorm_recovery) | "sage 抽象"指 **单个 tool** 而非"fuxi"整体 |
-| 4 | "4 贤者规模相当" | **修正实测**: fuxi 1037 / qiaochui 1247 (214+360+615+58) / **luban 1610 (90+316+225+280+501+198)** / **gaoyao 1778 (39+401+573+720+45)**;原表中 luban 1096 / gaoyao 1694 漏算了 `luban/scheduler.ts` (280) + `luban/conflict-detector.ts` (90) + `gaoyao-tools.ts` (45) 等 | 各 sage 内部已模块化,真正要抽象的是 **tool 层** |
-| 5 | "现有工具未用 typebox" | **已用**:fuxi / qiaochui / luban / gaoyao 入口文件都 `import { Type } from "typebox"` 定义 tool params(`parameters: Type.Object({...})`) | typebox schema 模板已存在 4 份可直接借鉴 |
-| 6 | "现有无 YAML,无 schema 校验" | **严重失实**:`luban/plan-parser.ts` (225 行) 是**手写行扫描解析**(`if (line.startsWith(...))` 字符串匹配),**零 typebox 引用,无 schema 校验**;`luban/types.ts` (198 行) 定义 `ExecutionPlan` interface 但也不含 typebox | **Pipeline YAML 校验需从零实现,无现成模板可复用**;开工后首项任务应考虑重构 plan-parser.ts 以验证 schema 模式可行性(详见 §16.5 D4) |
+| 1 | "hardcoded 4 stages" | **7-stage enum**: `idle / design / review / plan / execute / audit / complete`; `plan` is an approval gate between review and execute | §6 roadmap stage counts should be 5 + 2 (wrap-up) |
+| 2 | "replace WorkflowOrchestrator with a runStage loop" | `WorkflowOrchestrator` (249 lines) **is only a message generator**; it does not drive the flow; the flow is entirely driven by the user running slash commands in chat | **the real rework target is `sages-extension.ts` (534-line slash command routing)**, not the orchestrator |
+| 3 | "fuxi is 1 sage" | `fuxi-tools.ts` is **1037 lines**, containing 8 standalone tools (fuxi_start/request/plan/recover/end/get_status/update_score/brainstorm_recovery) | the "sage abstraction" means a **single tool**, not "fuxi" as a whole |
+| 4 | "the 4 sages are comparable in size" | **corrected measurements**: fuxi 1037 / qiaochui 1247 (214+360+615+58) / **luban 1610 (90+316+225+280+501+198)** / **gaoyao 1778 (39+401+573+720+45)**; the original table's luban 1096 / gaoyao 1694 omitted `luban/scheduler.ts` (280) + `luban/conflict-detector.ts` (90) + `gaoyao-tools.ts` (45) etc. | each sage is already modularized internally; what really needs abstraction is the **tool layer** |
+| 5 | "existing tools don't use typebox" | **they already do**: the fuxi / qiaochui / luban / gaoyao entry files all `import { Type } from "typebox"` to define tool params (`parameters: Type.Object({...})`) | 4 ready-made typebox schema templates can be borrowed directly |
+| 6 | "no YAML, no schema validation today" | **seriously inaccurate**: `luban/plan-parser.ts` (225 lines) is a **hand-written line-scanning parser** (`if (line.startsWith(...))` string matching), **zero typebox references, no schema validation**; `luban/types.ts` (198 lines) defines the `ExecutionPlan` interface but also has no typebox | **Pipeline YAML validation must be implemented from scratch; no existing template to reuse**; the first task after kickoff should consider refactoring plan-parser.ts to validate the schema pattern's feasibility (see §16.5 D4) |
 
-### 16.3 阶段 1+2 工作量修正
+### 16.3 Phase 1+2 effort corrections
 
-| 设计稿估计 | 修正后 | 增量来源 |
+| Design-doc estimate | Corrected | Source of the increase |
 |---|---|---|
-| 阶段 1: 1-2 周 | **3-5 周** | sages-extension.ts 改造 0.5→3-5 天(原严重低估);**plan-parser.ts 重构需 2-3 天**(新增见 §16.5 D4) |
-| 阶段 2: 2-4 周 | **3-5 周** | PreToolUse 误判已消除(见 §16.4),但 adapter github 鉴权 + QualityGate 与现有 GaoYao phase-guided 语义重叠需重定义;**Adapter 4-方法框架 → 5 类接口扩展需 3-5 天**(阶段 3 范围,阶段 2 仅 4-方法) |
-| **合计** | 原 3-6 周 → **6-10 周** | 补全了 plan-parser 重构 + Adapter 扩展两项增量 |
+| Phase 1: 1-2 weeks | **3-5 weeks** | sages-extension.ts rework 0.5→3-5 days (originally badly underestimated); **plan-parser.ts refactor needs 2-3 days** (new addition, see §16.5 D4) |
+| Phase 2: 2-4 weeks | **3-5 weeks** | PreToolUse false positives eliminated (see §16.4), but github adapter auth + QualityGate's semantic overlap with the existing GaoYao phase-guided audit need redefinition; **Adapter 4-method framework → 5-category interface extension needs 3-5 days** (phase 3 scope; phase 2 is only 4-method) |
+| **Total** | original 3-6 weeks → **6-10 weeks** | the two increments (plan-parser refactor + Adapter extension) filled in |
 
-### 16.4 两个关键验证结果
+### 16.4 Two key validation results
 
-#### 验证 A:typebox/value 运行期校验(零新增依赖)
+#### Validation A: typebox/value runtime validation (zero new dependencies)
 
 ```js
 import { Type } from "typebox";
@@ -1021,16 +1021,16 @@ const Pipeline = Type.Object({
 // -> [{ keyword, schemaPath, instancePath: "/apiVersion", params, message }, ...]
 ```
 
-**结论**: ✅ `instancePath` 天然是 JSON pointer,可直接转 YAML 行号;无需 yaml 库自带的位置追踪
+**Conclusion**: ✅ `instancePath` is naturally a JSON pointer and can be converted directly to YAML line numbers; no need for the yaml library's own position tracking
 
-#### 验证 B:PreToolUse 等价机制(`pi.on("tool_call", ...)` 支持拦截 + 阻止)
+#### Validation B: PreToolUse equivalent mechanism (`pi.on("tool_call", ...)` supports interception + blocking)
 
-未找到 `pi.beforeToolCall` / `pi.afterToolCall`(那是 agent-core 内部,不在 ExtensionAPI)。
+`pi.beforeToolCall` / `pi.afterToolCall` were not found (those are internal to agent-core, not in the ExtensionAPI).
 
-**但找到了等价机制**——两个官方示例确认 `pi.on("tool_call", ...)` 可返回 `{ block: true, reason: ... }`:
+**But an equivalent mechanism was found** — two official examples confirm `pi.on("tool_call", ...)` can return `{ block: true, reason: ... }`:
 
 ```typescript
-// permission-gate.ts (官方示例)
+// permission-gate.ts (official example)
 pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
     if (dangerous(event.input.command)) {
@@ -1039,7 +1039,7 @@ pi.on("tool_call", async (event, ctx) => {
     return undefined;
 });
 
-// protected-paths.ts (官方示例,直接对位 autonomy 设计)
+// protected-paths.ts (official example, directly maps to the autonomy design)
 pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "write" && event.toolName !== "edit") return undefined;
     if (protectedPaths.some(p => event.input.path.includes(p))) {
@@ -1049,92 +1049,92 @@ pi.on("tool_call", async (event, ctx) => {
 });
 ```
 
-**结论**: ✅ §8.3 autonomy tier 检查**完全可行**;语义清晰;不需要等新版本或换库
+**Conclusion**: ✅ the §8.3 autonomy tier check is **fully feasible**; semantics are clear; no need to wait for a new version or switch libraries
 
-### 16.5 开工前必须澄清的 8 个决策(均为 blocker)
+### 16.5 The 8 decisions that must be clarified before work starts (all blockers)
 
-**编号约定**: 文档统一用 **D1-D18** 编号所有决策(D1-D8 在本节; D9-D14 见 §11.2-11.3; D15-D18 见 §11.4), **M1-M3** 编号元决策见 §17。
+**Numbering convention**: this document uniformly numbers all decisions **D1-D18** (D1-D8 in this section; D9-D14 in §11.2-11.3; D15-D18 in §11.4), and meta-decisions are numbered **M1-M3** in §17.
 
-#### schema 与运行时(D1-D4)
+#### schema and runtime (D1-D4)
 
-1. **"零行为变更"的定义** (D1)——保留所有 **18 个 slash command**(fuxi 6 + qiaochui 2 + luban 3 + gaoyao 7) + 24 个 tool 行为不变?还是允许把参数来源从硬编码 args 改为 YAML + args?
-2. **WorkflowOrchestrator 的角色** (D2)——保留(只做消息)还是删除(完全靠 YAML 驱动)?保留 = YAML 装饰;删除 = YAML 控制流
-3. **schema 单源 vs 双轨** (D3)——typebox TS schema 是唯一真相(运行时校验直接用 `Value.Errors`,**注意主入口 `typebox` 不导出 `Value`,必须用 `typebox/value` 子路径**)?还是同时维护 `pipeline.v1.schema.json` 静态文件(供外部 IDE/校验工具消费)?
-4. **plan-parser.ts 是否重构为 typebox 校验** (D4)—— 选项 A: 保持手写解析, Pipeline YAML 走独立 schema 路径;选项 B: 重构 plan-parser 为 typebox 校验作为阶段 1.1 的概念验证, 顺带修复 execution.yaml 现有解析脆弱性;选项 B 增加 2-3 天但获得 schema 模板与回归保证
+1. **Definition of "zero behavior change"** (D1) — keep all **18 slash commands** (fuxi 6 + qiaochui 2 + luban 3 + gaoyao 7) + 24 tools behaving identically? Or allow parameter sources to change from hardcoded args to YAML + args?
+2. **WorkflowOrchestrator's role** (D2) — keep (message-only) or delete (fully YAML-driven)? Keep = YAML decoration; delete = YAML control flow
+3. **Schema single-source vs dual-track** (D3) — is the typebox TS schema the single source of truth (runtime validation uses `Value.Errors` directly; **note the main `typebox` entry does not export `Value`; the `typebox/value` subpath is required**)? Or also maintain a static `pipeline.v1.schema.json` file (for external IDE/validation tools to consume)?
+4. **Refactor plan-parser.ts to typebox validation?** (D4) — Option A: keep the hand-written parser; Pipeline YAML goes through a separate schema path. Option B: refactor plan-parser to typebox validation as the phase 1.1 proof of concept, incidentally fixing the existing execution.yaml parsing fragility. Option B costs 2-3 extra days but yields the schema template and regression guarantees.
 
-#### stage sage 拆解(D5-D8,基于跨审发现的隐藏点)
+#### stage sage decomposition (D5-D8, based on hidden points found in the cross-review)
 
-5. **sage 多 tool 拆解的 schema 设计** (D5) ⚠️ **critical** —— `Pipeline.spec.stages[].sage` 字段过于模糊: fuxi 实际含 **8** 个独立 tool(fuxi_start/request/plan/recover/end/get_status/update_score/brainstorm_recovery), qiaochui **2** 个, luban **3** 个, gaoyao **7** 个。三种方案:
-   - **A 隐式**：`sage: fuxi` 默认跑 fuxi_request, 复杂流程靠 `input.params` 控制行为
-   - **B 显式**：新增 `tool:` 子字段(`sage: fuxi, tool: fuxi_request`), 最符合 slash command 直觉
-   - **C 列表**：`sages: [fuxi_start, fuxi_request]`, 将"fuxi 阶段"展开为多 tool 序列
-   - **推荐**: B (最简单、最符合 18 个 slash command 的语义)
-6. **QualityGate 与 GaoYao phase-guided audit 的关系** (D6) ⚠️ **critical** —— QualityGate(新, 前置门, file/shell 类检查)与 GaoYao(现有, 事后审计, 5 阶段: INK/NOSE/FOOT/CASTRATION/DEATH)语义不重叠但需明确边界: INK/NOSE 不可被 QG 替代(QG 只跑 cheap checks), CASTRATION/DEATH 只能由 GaoYao 判定。**决策: QG 与 GaoYao 正交, QG 是 "pre-flight", GaoYao 是 "post-mortem"; 但 QG 输出的 severity 不等同于 GaoYao 的 critical/major/minor, 需在 §8.1 schema 加 `phaseHint` 字段标记 QG 与 GaoYao 的对应关系**
-7. **Luban `execute_batch` 语义已变, YAML schema 必须同步** (D7) ⚠️ **critical** —— `luban_execute_all` 已在 2026-06-27 重构为 `luban_execute_batch`, 行为: `mode: 'serial'|'parallel'` + `degraded: boolean` + `conflicts: string[]`。文档 §7.2.3 的 `parallel: 1` 字段与新 execute_batch 不直接兼容。**决策: 保持 YAML stage 字段 `parallel`, 运行时合并到 `execution.yaml` settings.maxParallel(已存在), Qiaochui 在 decompose 时需写入完整 batch config, 而非仅 maxParallel**
-8. **Slash command 与 YAML 的关系模型** (D8) ⚠️ **critical** —— 保留(完全绕过 YAML)/ 装饰(slash command 加载 YAML 预填参数, YAML 可选)/ 旁路(slash 是 YAML stage 快捷方式, YAML 是真相源)。**推荐装饰模型, 分阶段实施**: Phase 1 装饰主要 8 个 (`fuxi-start`/`fuxi-request`/`qiaochui-review`/`qiaochui-decompose`/`luban-execute-task`/`luban-execute-all`/`luban-get-status`/`gaoyao-init`), 辅助 10 个 (status 类) 保持硬编码
+5. **Schema design for multi-tool sage decomposition** (D5) ⚠️ **critical** — `Pipeline.spec.stages[].sage` is too vague: fuxi actually contains **8** standalone tools (fuxi_start/request/plan/recover/end/get_status/update_score/brainstorm_recovery), qiaochui **2**, luban **3**, gaoyao **7**. Three options:
+   - **A implicit**: `sage: fuxi` runs fuxi_request by default; complex flows are controlled via `input.params`
+   - **B explicit**: add a `tool:` subfield (`sage: fuxi, tool: fuxi_request`); best matches slash-command intuition
+   - **C list**: `sages: [fuxi_start, fuxi_request]`, expanding the "fuxi stage" into a multi-tool sequence
+   - **Recommended**: B (simplest, best matches the semantics of the 18 slash commands)
+6. **QualityGate's relationship with GaoYao's phase-guided audit** (D6) ⚠️ **critical** — QualityGate (new, pre-flight, file/shell-style checks) and GaoYao (existing, post-hoc audit, 5 phases: INK/NOSE/FOOT/CASTRATION/DEATH) don't overlap semantically but the boundary must be explicit: INK/NOSE cannot be replaced by QG (QG only runs cheap checks); CASTRATION/DEATH can only be judged by GaoYao. **Decision: QG and GaoYao are orthogonal — QG is "pre-flight", GaoYao is "post-mortem"; but QG's output severity does not equal GaoYao's critical/major/minor, so the §8.1 schema needs a `phaseHint` field marking the QG↔GaoYao correspondence**
+7. **Luban's `execute_batch` semantics have changed; the YAML schema must follow** (D7) ⚠️ **critical** — `luban_execute_all` was refactored to `luban_execute_batch` on 2026-06-27, with behavior: `mode: 'serial'|'parallel'` + `degraded: boolean` + `conflicts: string[]`. The `parallel: 1` field in §7.2.3 is not directly compatible with the new execute_batch. **Decision: keep the YAML stage field `parallel`, merge into `execution.yaml`'s settings.maxParallel at runtime (already exists); Qiaochui must write the full batch config at decompose time, not just maxParallel**
+8. **Relationship model between slash commands and YAML** (D8) ⚠️ **critical** — preserve (completely bypass YAML) / decorate (slash commands load YAML to prefill parameters; YAML optional) / bypass (slash is a shortcut for YAML stages; YAML is the source of truth). **Recommended: the decorate model, implemented in phases**: Phase 1 decorates the main 8 (`fuxi-start`/`fuxi-request`/`qiaochui-review`/`qiaochui-decompose`/`luban-execute-task`/`luban-execute-all`/`luban-get-status`/`gaoyao-init`); the auxiliary 10 (status-type) stay hardcoded
 
-### 16.6 修正后的开工清单
+### 16.6 Corrected kickoff checklist
 
-| 顺序 | 任务 | 文件 | 工作量 |
+| Order | Task | Files | Effort |
 |---|---|---|---|
-| 1 | 决策 §16.5 八题(含 plan-parser 重构) + §17 元决策 M1-M3 | (用户) | — |
-| 2 | §1.1 typebox schema (TS) | `src/config/typebox-schemas.ts` | 2 天 |
-| 3 | §1.2 yaml-loader | `src/config/yaml-loader.ts` | 2 天 |
-| 4 | §1.3 defaults | `src/config/defaults.ts` | 1 天 |
-| 5 | §1.4 stage-runner | `src/orchestrator/stage-runner.ts` | 2-3 天 |
-| 6 | §1.5 orchestrator 注释化 | `src/orchestrator/workflow-orchestrator.ts`(不改逻辑,加注释指明已废弃) | 0.5 天 |
-| 7 | §1.6 **extension 改造** | `extensions/sages-extension.ts`(核心工作量, 534 行 slash command 路由) | 3-5 天 |
-| 8 | §1.7 conformance + fixture | `conformance/` + 15-25 fixture | 2-3 天 |
-| 9 | §1.8 文档 + 示例 | `.sages/pipeline.yaml.example` + README | 1 天 |
-| **阶段 1 合计** | | | **14-19 天 ≈ 3-4 周** |
-| 阶段 2 | 治理覆盖层(8 个子任务,见 §6.3) | `src/governance/*` + `.sages/adapters/*` | 15-25 天 ≈ 3-5 周 |
-| **阶段 1+2 总计** | | | **29-44 天 ≈ 6-10 周** |
+| 1 | decide the §16.5 eight questions (incl. plan-parser refactor) + §17 meta-decisions M1-M3 | (user) | — |
+| 2 | §1.1 typebox schema (TS) | `src/config/typebox-schemas.ts` | 2 days |
+| 3 | §1.2 yaml-loader | `src/config/yaml-loader.ts` | 2 days |
+| 4 | §1.3 defaults | `src/config/defaults.ts` | 1 day |
+| 5 | §1.4 stage-runner | `src/orchestrator/stage-runner.ts` | 2-3 days |
+| 6 | §1.5 orchestrator deprecation annotations | `src/orchestrator/workflow-orchestrator.ts` (no logic change; add comments marking it deprecated) | 0.5 day |
+| 7 | §1.6 **extension rework** | `extensions/sages-extension.ts` (core effort; 534-line slash command routing) | 3-5 days |
+| 8 | §1.7 conformance + fixtures | `conformance/` + 15-25 fixtures | 2-3 days |
+| 9 | §1.8 docs + examples | `.sages/pipeline.yaml.example` + README | 1 day |
+| **Phase 1 total** | | | **14-19 days ≈ 3-4 weeks** |
+| Phase 2 | governance overlay (8 subtasks, see §6.3) | `src/governance/*` + `.sages/adapters/*` | 15-25 days ≈ 3-5 weeks |
+| **Phase 1+2 grand total** | | | **29-44 days ≈ 6-10 weeks** |
 
 ---
 
-## 17. 元决策(贯穿全阶段的架构性问题)
+## 17. Meta-decisions (cross-phase architectural questions)
 
-跨阶段的架构选型, **决定后影响版本号策略、兼容期、CI 集成、发布包结构**。建议与 §16.5 同期决策。
+Cross-phase architectural choices whose **decision affects version-number strategy, compatibility period, CI integration, and release package structure**. Recommended to be decided at the same time as §16.5.
 
-### M1. `mini-ai-sdlc` 是独立 npm 包还是 `@sages/pi-four-sages` v2 minor?
+### M1. Is `mini-ai-sdlc` a standalone npm package or `@sages/pi-four-sages` v2 minor?
 
-| 方案 | 描述 | 优势 | 劣势 |
+| Option | Description | Pros | Cons |
 |---|---|---|---|
-| **A 独立包** | 新包 `@sages/pi-mini-ai-sdlc`(或 `mini-ai-sdlc`), 与 `@sages/pi-four-sages` 并存 | 干净语义边界; 不携带 v1 代码; 独立 semver | 两个包维护负担; 用户需重装 |
-| **B v2 major** | `@sages/pi-four-sages@2.0.0`, 同包主版本升级 | 单包体验一致; 升级路径简单 | v1 依赖者强制迁移; breaking change 责任 |
-| **C v1.1 minor** | `@sages/pi-four-sages@1.1.0`, YAML 路径作为可选加成 | 零摩擦; 旧路径不动 | "装饰 vs 真相" 问题复杂; 文档难写 |
+| **A standalone package** | a new package `@sages/pi-mini-ai-sdlc` (or `mini-ai-sdlc`) alongside `@sages/pi-four-sages` | clean semantic boundary; doesn't carry v1 code; independent semver | two-package maintenance burden; users must reinstall |
+| **B v2 major** | `@sages/pi-four-sages@2.0.0`, major version bump in the same package | consistent single-package experience; simple upgrade path | v1 dependents forced to migrate; breaking-change responsibility |
+| **C v1.1 minor** | `@sages/pi-four-sages@1.1.0`, YAML path as an optional addition | zero friction; old path untouched | "decoration vs truth" complexity; hard to document |
 
-**推荐**: **B**(v2 major)。理由: YAML 工作流是结构性变化,不是新功能加法; 同时 `mini-ai-sdlc` 品牌定位(§2.4)已经隐含"v2 升级"的语义。
+**Recommended**: **B** (v2 major). Reason: a YAML workflow is a structural change, not a feature addition; the `mini-ai-sdlc` brand positioning (§2.4) already implies a "v2 upgrade".
 
-### M2. 旧 4-stage hardcoded 模式何时 deprecate?
+### M2. When should the old 4-stage hardcoded mode be deprecated?
 
-| 方案 | 描述 | 影响 |
+| Option | Description | Impact |
 |---|---|---|
-| **A 立即废弃** | v2 发布即删除 hardcoded 4-stage | 用户升级即破坏; 测试套件 488 个需重跑 |
-| **B 2 个 minor 后废弃** | v2.x 默认走 YAML; 若无 `.sages/pipeline.yaml` 则走 hardcoded; v3.0 删除 hardcoded | 平滑过渡 6-12 个月 |
-| **C 永久保留** | hardcoded 模式作为 "YAML-less starter", 永远可选 | 维护成本; 但用户体验双轨 |
+| **A deprecate immediately** | delete the hardcoded 4-stage at v2 release | upgrading breaks users; the 488-test suite must be re-run |
+| **B deprecate after 2 minors** | v2.x defaults to YAML; without `.sages/pipeline.yaml` falls back to hardcoded; v3.0 deletes hardcoded | smooth 6-12 month transition |
+| **C keep forever** | hardcoded mode stays as a "YAML-less starter", always available | maintenance cost; but users get a dual-track experience |
 
-**推荐**: **B**(2 个 minor 后废弃)。理由: `mini-ai-sdlc` 的核心是 YAML 化, 但保留 starter 模式有助於用户逐阶段迁移; v3 删除时已积累足够的 YAML 案例与文档。
+**Recommended**: **B** (deprecate after 2 minors). Reason: the core of `mini-ai-sdlc` is YAML-ization, but keeping the starter mode helps users migrate stage by stage; by the v3 deletion, enough YAML cases and docs will have accumulated.
 
-### M3. Conformance test runner 架构?
+### M3. Conformance test runner architecture?
 
-| 方案 | 描述 | 影响 |
+| Option | Description | Impact |
 |---|---|---|
-| **A bun:test 内嵌** | `conformance/runner.ts` 用 `bun:test`, 与 sages 单测同 runtime | CI 与单测一致; 无新增依赖 |
-| **B vitest 独立** | 类似 ai-sdlc 用 vitest, conformance 跑在独立进程 | 与 ai-sdlc 互操作可能; 但需新增 vitest 依赖 |
-| **C 混合** | 单测用 bun:test, conformance 用 vitest(隔离 pi runtime) | 工程复杂; 双维护 |
+| **A embedded in bun:test** | `conformance/runner.ts` uses `bun:test`, same runtime as sages unit tests | CI consistent with unit tests; no new dependencies |
+| **B standalone vitest** | like ai-sdlc, use vitest; conformance runs in a separate process | possible interop with ai-sdlc; but requires a new vitest dependency |
+| **C hybrid** | unit tests use bun:test; conformance uses vitest (isolating the pi runtime) | engineering complexity; dual maintenance |
 
-**推荐**: **A**(bun:test 内嵌)。理由: sages 全栈用 bun, conformance 不需要脱离 pi 跑(它是 sages 自身规范验证); 引入 vitest 仅为了"与 ai-sdlc 对齐"代价过高。
+**Recommended**: **A** (embedded in bun:test). Reason: sages is full-stack Bun; conformance doesn't need to run outside pi (it validates sages' own spec); introducing vitest merely "to align with ai-sdlc" costs too much.
 
 ---
 
-### 元决策汇总表
+### Meta-decision summary table
 
-| # | 问题 | 推荐方案 | 影响范围 | 决策时机 |
+| # | Question | Recommended | Scope of impact | Decision timing |
 |---|---|---|---|---|
-| **M1** | 包版本策略 | B (v2 major) | semver / 安装路径 / 文档结构 | 与 §16.5 D1-D8 同期 |
-| **M2** | hardcoded 模式保留期 | B (2 minor 后废弃) | 兼容期 ~6-12 个月 | 与 §16.5 D1 同期 |
-| **M3** | Conformance runner | A (bun:test 内嵌) | CI / 依赖 | 阶段 1.7 fixture 设计时 |
+| **M1** | package version strategy | B (v2 major) | semver / install path / docs structure | same time as §16.5 D1-D8 |
+| **M2** | hardcoded mode retention period | B (deprecate after 2 minors) | compatibility period ~6-12 months | same time as §16.5 D1 |
+| **M3** | Conformance runner | A (embedded in bun:test) | CI / dependencies | at phase 1.7 fixture design |
 
 ---
 
