@@ -134,17 +134,17 @@ export const ADVISORY_MIN_SEVERITY: L1Severity = "major";
  *  shape so both layers are introspectable in the same way. */
 export const RULE_FIX_DIRECTIVES: Record<L1RuleId, string> = {
 	dag_resynth_loop:
-		"上一次 DAG 合成失败因 X；要么 amend goal({scope, criteria})，要么显式修订当前 DAG 而不是再次 dag_synthesize（如果 args 每次相同）",
+		"The previous DAG synthesis failed due to X; either amend goal({scope, criteria}), or explicitly revise the current DAG instead of calling dag_synthesize again (if args are identical each time)",
 	dispatch_no_audit:
-		"调 orchestrator_audit({ dag_id: '<active_dag_id>' }) 验证本次 dispatch 的产物；audit 是 Sages 4-stage 闭环的最后一环",
+		"Call orchestrator_audit({ dag_id: '<active_dag_id>' }) to verify this dispatch's output; audit is the final step of the Sages 4-stage loop",
 	transition_skip_failed:
-		"T_dep 已 failed；显式回 T_dep 修复，或在 DAG 上把 T_dep 标记为 skipped 后再 dispatch 当前 task；不能跳过 failed dep",
+		"T_dep is failed; explicitly go back and fix T_dep, or mark T_dep as skipped in the DAG before dispatching the current task; you cannot skip a failed dependency",
 	goal_drift_detected:
-		"检查 task.files 是否在 goal-{id}.yaml 的 scope.include 内；如果是新文件，先调 goal_contract_create 修订 scope 而不是直接 dispatch",
+		"Check whether task.files are inside goal-{id}.yaml's scope.include; if they are new files, first call goal_contract_create to amend the scope instead of dispatching directly",
 	no_progress_no_audit:
-		"停下来调 orchestrator_audit({ dag_id })；如果 audit 通过，再继续——audit 是 orchestrator 自我验证的唯一手段",
+		"Stop and call orchestrator_audit({ dag_id }); if the audit passes, continue — audit is the orchestrator's only means of self-verification",
 	repeat_call_chain:
-		"你用相同的 args 重复调同一个工具 ≥3 次——这说明卡住了。停下，re-read 上次 result，决定是换 approach 还是 conclude。不要继续重复同一调用",
+		"You called the same tool with identical args ≥3 times — this indicates you are stuck. Stop, re-read the last result, and decide whether to change approach or conclude. Do not keep repeating the same call",
 };
 
 // =============================================================================
