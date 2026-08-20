@@ -46,11 +46,12 @@
 | GC-2026-050 | G4 event three-domain split — observability/ module + audit-state | [.pi/orchestrator/goal-GC-2026-050.yaml](../../.pi/orchestrator/goal-GC-2026-050.yaml) |
 | GC-2026-051 | G5 cookbook + postmortem + gc-index + verify:gcdb | [.pi/orchestrator/goal-GC-2026-051.yaml](../../.pi/orchestrator/goal-GC-2026-051.yaml) |
 | GC-2026-052 | G6 verify matrix hardening — 4 new verifiers + check:all aggregator | [.pi/orchestrator/goal-GC-2026-052.yaml](../../.pi/orchestrator/goal-GC-2026-052.yaml) |
-| GC-2026-053 | postmortem for GC-2026-053 + gen-gcdb improvements | [.pi/orchestrator/goal-GC-2026-053.yaml](../../.pi/orchestrator/goal-GC-2026-053.yaml) |
+| GC-2026-053 | chain-key detection — kill false positives from legit refinement | [.pi/orchestrator/goal-GC-2026-053.yaml](../../.pi/orchestrator/goal-GC-2026-053.yaml) |
 | GC-2026-054 | postmortem for GC-2026-053 + gen-gcdb improvements | [.pi/orchestrator/goal-GC-2026-054.yaml](../../.pi/orchestrator/goal-GC-2026-054.yaml) |
 | GC-2026-055 | SAGES_REMINDER_FIXDIRECTIVES + auto-install routines on session_start | [.pi/orchestrator/goal-GC-2026-055.yaml](../../.pi/orchestrator/goal-GC-2026-055.yaml) |
 | GC-2026-056 | verification_cmd linter | [.pi/orchestrator/goal-GC-2026-056.yaml](../../.pi/orchestrator/goal-GC-2026-056.yaml) |
 | GC-2026-057 | goal lock — anti-cheat SHA-256 hash detects silent SC modification | [.pi/orchestrator/goal-GC-2026-057.yaml](../../.pi/orchestrator/goal-GC-2026-057.yaml) |
 | GC-2026-058 | verdict enforcement — machine-enforced gate against silent REVISE/REJECT bypass | [.pi/orchestrator/goal-GC-2026-058.yaml](../../.pi/orchestrator/goal-GC-2026-058.yaml) |
+| GC-2026-059 | L1 advisory chain-key detection | [.pi/orchestrator/goal-GC-2026-059.yaml](../../.pi/orchestrator/goal-GC-2026-059.yaml) |
 
-_Total: 46 GCs_
+_Total: 47 GCs_
