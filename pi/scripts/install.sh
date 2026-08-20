@@ -801,7 +801,7 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
-# 共享:克隆 + 复制 sages 文件
+# Shared: clone + copy sages files
 # ────────────────────────────────────────────────────────────
 install_sages_files() {
   check_git
@@ -1566,7 +1566,7 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
-# 模式 1:全量安装(默认)
+# Mode 1: full install (default)
 # ────────────────────────────────────────────────────────────
 install() {
   echo "==> Installing sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
@@ -1641,23 +1641,23 @@ install() {
 }
 
 # ────────────────────────────────────────────────────────────
-# 模式 2:仅更新 sages(跳过 pi-codebase-memory 和 SYSTEM.md)
+# Mode 2: update sages only (skip pi-codebase-memory and SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
   echo "==> Installing sages only (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, skip SYSTEM.md)..."
 
-  # Pre-flight: pi 仍然需要(sages 是 pi extension)
+  # Pre-flight: pi is still required (sages is a pi extension)
   install_pi_if_needed
   if ! command -v pi &>/dev/null; then
     echo "Error: pi not found after installation"
     exit 1
   fi
 
-  # 仅安装 sages 文件
+  # Install only the sages files
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # 显式不调用 install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_routines / install_pi_subagents / install_pi_evaluator / install_system_prompt
+  # Explicitly do NOT call install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_routines / install_pi_subagents / install_pi_evaluator / install_system_prompt
   echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
 
   echo ""
@@ -1665,11 +1665,11 @@ install_sages_only() {
 }
 
 # ────────────────────────────────────────────────────────────
-# 模式 3:仅更新 SYSTEM.md(跳过 sages 和 pi-codebase-memory)
+# Mode 3: update SYSTEM.md only (skip sages and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
   echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)..."
-  # 不需要 git / pi —— SYSTEM.md 是独立 markdown
+  # No git / pi needed — SYSTEM.md is standalone markdown
   install_system_prompt
   echo "  (skipped: sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)"
 
@@ -1678,7 +1678,7 @@ install_system_only() {
 }
 
 # ────────────────────────────────────────────────────────────
-# 卸载(同时移除 sages 和 pi-codebase-memory)
+# Uninstall (removes both sages and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
   echo "==> Uninstalling sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
@@ -1747,7 +1747,7 @@ main() {
     esac
   done
 
-  # 互斥校验:一次只能选一种模式
+  # Mutual-exclusion check: only one mode may be selected at a time
   if [[ "$MODE_COUNT" -gt 1 ]]; then
     echo "Error: --uninstall, --sages-only, --system-only are mutually exclusive"
     echo "Pick at most one of them (or none for full install)."
