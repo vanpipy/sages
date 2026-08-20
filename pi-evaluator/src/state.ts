@@ -123,8 +123,10 @@ export function createEvalState(): EvalState {
  * throws — we catch here so a bad file doesn't crash the session).
  */
 export function reloadCoefficients(state: EvalState): void {
+	let config: CoefficientsConfig;
+	let warning: VersionMismatchWarning | undefined;
 	try {
-		const { config, warning } = loadCoefficients();
+		({ config, warning } = loadCoefficients());
 		state.coefficients = config;
 		state.coefficients_warning = warning;
 	} catch (err) {
@@ -136,7 +138,7 @@ export function reloadCoefficients(state: EvalState): void {
 		state.coefficients = DEFAULT_COEFFICIENTS;
 		state.coefficients_warning = {
 			file_version: undefined,
-			package_version: config?.version ?? "unknown",
+			package_version: DEFAULT_COEFFICIENTS.version,
 			note: `coefficients.json failed to load: ${message}`,
 		};
 	}
