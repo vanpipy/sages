@@ -8,7 +8,7 @@
  * every built-in must satisfy.
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import {
 	loadProfile,
 	loadBuiltInProfile,
@@ -213,6 +213,8 @@ const PROFILES_DIR = join(PI_ROOT, "profiles");
 const REGISTRY_PATH = join(PI_ROOT, "subagents", "registry.yaml");
 
 function tmpProfilePath(name: string): string {
+	// Ensure the scratch dir exists before writing into it (idempotent).
+	mkdirSync(SCRATCH_BASE, { recursive: true });
 	return join(SCRATCH_BASE, `profile-${name}-${Math.random().toString(36).slice(2)}.yaml`);
 }
 
