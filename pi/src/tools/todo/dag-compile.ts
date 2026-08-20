@@ -21,6 +21,7 @@
  */
 
 import * as yaml from "js-yaml";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { planToYaml } from "../orchestrator/dag-synthesizer.js";
 import {
@@ -38,23 +39,15 @@ import type { TodoItem } from "./todo-state.js";
 // ─── Types ────────────────────────────────────────────────────────────────
 
 /**
- * Todo item extended with the DAG-structure fields the compile bridge
- * understands. A superset of TodoItem: plain TodoItem[] call sites keep
- * working (structural subtyping), and structured entries only exist when
- * the root agent opts in.
+ * Todo item as understood by the compile bridge. GC-2026-061 moved the
+ * DAG-structure fields (kind / depends_on / batch / prompt / files /
+ * dag_id / goal_id) onto `TodoItem` itself so they survive the todo
+ * store's persistence round-trip. This alias is retained as the named
+ * compile-bridge type: plain TodoItem[] call sites keep working
+ * (identical structure), and structured entries only exist when the
+ * root agent opts in.
  */
-export interface DagTodoItem extends TodoItem {
-  /** "task" marks a dispatchable task; "plan" marks a plain action. */
-  kind?: "plan" | "task";
-  /** DAG dependency edges — task ids this task depends on. */
-  depends_on?: string[];
-  /** Explicit concurrency group (1-based). Omitted → auto-assigned by topology. */
-  batch?: number;
-  /** Detailed prompt for the subagent; defaults to content. */
-  prompt?: string;
-  /** Files this task touches. */
-  files?: string[];
-}
+export type DagTodoItem = TodoItem;
 
 /** Options for compileDagFromTodos. */
 export interface CompileDagOptions {
@@ -70,6 +63,27 @@ export interface CompiledDag {
   dagId: string;
   goalId?: string;
 }
+
+/** Options for maybeCompileDagFromTodos (the extension trigger policy). */
+export interface CompileTriggerOptions {
+  /**
+   * Extension session default dag id — the most recent orchestrator
+   * tool call's dag_id/goal_id. Used when no todo carries `dag_id`.
+   */
+  sessionDagId?: string | null;
+  /** Extension session default goal id — used when no todo carries `goal_id`. */
+  sessionGoalId?: string | null;
+}
+
+/**
+ * Top-level marker written into every compiled dag yaml. dag_synthesize
+ * output never carries it, so callers can tell todo-compiled plans apart
+ * from authoritative dag_synthesize plans.
+ */
+export const COMPILED_FROM_TODOS_MARKER = "compiled_from_todos";
+
+/** DAG id fallback when neither todos nor the session provide one. */
+export const DEFAULT_COMPILED_DAG_ID = "DAG-todos";
 
 // ─── Constants + helpers ──────────────────────────────────────────────────
 
@@ -338,8 +352,124 @@ export function dagToPlanYaml(dag: CompiledDag): string {
     updated_at: now,
     state: "approved",
     prompts,
+    // GC-2026-061: every serialized compiled plan is tagged so the
+    // extension can distinguish it from dag_synthesize output.
+    [COMPILED_FROM_TODOS_MARKER]: true,
   };
   return planToYaml(plan);
+}
+
+/** True when a parsed OrchestrationPlan was produced by todo compilation. */
+export function isCompiledFromTodos(plan: OrchestrationPlan): boolean {
+  return (plan as unknown as Record<string, unknown>)[COMPILED_FROM_TODOS_MARKER] === true;
+}
+
+/** True when the dag yaml at `path` carries the compiled-from-todos marker. */
+export function isCompiledFromTodosFile(path: string): boolean {
+  try {
+    if (!existsSync(path)) return false;
+    const parsed: unknown = yaml.load(readFileSync(path, "utf8"));
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      (parsed as Record<string, unknown>)[COMPILED_FROM_TODOS_MARKER] === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a compiled plan and a freshly compiled DAG describe the same
+ * structure. Timestamps are excluded — a recompile of unchanged todos
+ * must be a byte-identical no-op, not a rewrite with a new timestamp.
+ */
+function compiledDagMatches(existing: OrchestrationPlan, dag: CompiledDag): boolean {
+  if (existing.id !== dag.dagId) return false;
+  if (existing.goal_id !== (dag.goalId ?? dag.dagId)) return false;
+  if (existing.tasks.length !== dag.tasks.length) return false;
+  const normalize = (t: TaskNode): Record<string, unknown> => ({
+    id: t.id,
+    description: t.description,
+    plane: t.plane,
+    priority: t.priority,
+    depends_on: t.depends_on,
+    files: t.files,
+    subagent_type: t.subagent_type,
+    batch: t.batch,
+    tdd: t.tdd,
+    prompt: t.prompt,
+    output_schema: t.output_schema,
+    acceptance: t.acceptance,
+    isolation: t.isolation,
+  });
+  const a = existing.tasks.map(normalize);
+  const b = dag.tasks.map(normalize);
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** First string field `name` on any todo ('' when absent). */
+function firstTodoField(todos: TodoItem[], name: keyof TodoItem): string | undefined {
+  for (const todo of todos) {
+    const value = todo[name];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+/**
+ * The extension's compile trigger: turn structured todos into a DAG
+ * when — and only when — the resulting dag file is absent or was
+ * itself compiled from todos.
+ *
+ * Policy (GC-2026-061):
+ *  - Plan-level todos only (no kind 'task' / depends_on / batch): no-op
+ *    — never writes or wipes a dag yaml.
+ *  - dagId resolution: first todo's `dag_id` → session default →
+ *    'DAG-todos'. goalId likewise via `goal_id` → session default.
+ *  - An existing dag WITHOUT the compiled marker is dag_synthesize's
+ *    authoritative plan — never overwritten.
+ *  - An existing compiled dag with an identical structure is left
+ *    untouched (byte-identical idempotence); a changed structure is
+ *    recompiled in place.
+ *
+ * Returns the path of the (possibly already-existing) compiled dag, or
+ * null when nothing was written (plan-level only / authoritative dag
+ * exists / malformed input). Pure policy + IO — no pi API.
+ */
+export function maybeCompileDagFromTodos(
+  todos: DagTodoItem[],
+  repoRoot: string,
+  opts: CompileTriggerOptions = {},
+): string | null {
+  const structured = todos.filter(isStructured);
+  if (structured.length === 0) return null;
+
+  const dagId = firstTodoField(todos, "dag_id") ?? opts.sessionDagId ?? DEFAULT_COMPILED_DAG_ID;
+  const goalId = firstTodoField(todos, "goal_id") ?? opts.sessionGoalId ?? undefined;
+  const target = compiledDagPath(repoRoot, dagId);
+
+  // dag_synthesize's authoritative plan wins — never overwrite it.
+  if (existsSync(target) && !isCompiledFromTodosFile(target)) return null;
+
+  const compiled = compileDagFromTodos(todos, { dagId, goalId });
+  const yamlText = dagToPlanYaml(compiled);
+
+  if (existsSync(target)) {
+    // Idempotence: unchanged structure → skip the rewrite entirely
+    // (the file stays byte-identical, mtime untouched). A corrupt
+    // compiled dag falls through to a rewrite — recovery beats
+    // preserving a broken file.
+    try {
+      const existing = yaml.load(readFileSync(target, "utf8")) as OrchestrationPlan;
+      if (compiledDagMatches(existing, compiled)) return target;
+    } catch {
+      // fall through to rewrite below
+    }
+  }
+
+  writeCompiledDag(yamlText, repoRoot);
+  return target;
 }
 
 /** `<cwd>/.pi/orchestrator/dag-<dagId>.yaml` — the file writeCompiledDag writes. */
