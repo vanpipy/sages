@@ -41,12 +41,16 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
 
 Load `pi/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 
-### Auto-todowrite (GC-2026-060)
+### Auto-todowrite (GC-2026-060/061)
 
 `todowrite` calls are mirrored into a durable root-agent todo store
 (`sages_todo`: sync/get/auto-plan) and injected as a per-turn block with
 stale-todo reminders on `turn_end` — **root-agent only**, subagents have
-no path into the store (see `pi/src/tools/todo/`).
+no path into the store (see `pi/src/tools/todo/`). Structured todo
+entries (`kind: 'task'` + `depends_on`/`batch`) compile into
+`dag-<id>.yaml`: the todo list is the edit interface, dag yaml the
+single structural source (`compiled_from_todos` marker; authoritative
+dag_synthesize plans are never overwritten).
 
 ## The 5 subagents
 
