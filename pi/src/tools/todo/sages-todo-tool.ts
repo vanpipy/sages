@@ -52,6 +52,34 @@ const TodoItemParams = Type.Object({
   priority: Type.Optional(
     Type.Union([Type.Literal("high"), Type.Literal("medium"), Type.Literal("low")]),
   ),
+  // GC-2026-061: structured todo fields — task-level entries (kind
+  // 'task', depends_on, or batch) compile into a DAG via
+  // dag-compile.ts. Declared here so the pi validation boundary never
+  // strips them from a sages_todo sync payload.
+  kind: Type.Optional(
+    Type.Union([Type.Literal("plan"), Type.Literal("task")], {
+      description: "'task' marks a dispatchable DAG task; 'plan' a plain action",
+    }),
+  ),
+  depends_on: Type.Optional(
+    Type.Array(Type.String(), { description: "DAG dependency edges — task ids this task depends on" }),
+  ),
+  batch: Type.Optional(
+    Type.Integer({ minimum: 1, description: "Explicit concurrency group (1-based)" }),
+  ),
+  dag_id: Type.Optional(
+    Type.String({
+      pattern: "^[A-Za-z0-9_-]+$",
+      description: "DAG id for the compiled plan (else session default / 'DAG-todos')",
+    }),
+  ),
+  goal_id: Type.Optional(
+    Type.String({ description: "Goal contract id for the compiled plan" }),
+  ),
+  prompt: Type.Optional(
+    Type.String({ description: "Detailed prompt for the subagent; defaults to content" }),
+  ),
+  files: Type.Optional(Type.Array(Type.String(), { description: "Files this task touches" })),
 });
 
 export const SagesTodoParams = Type.Object({
@@ -63,8 +91,10 @@ export const SagesTodoParams = Type.Object({
     ],
     {
       description:
-        "sync: replace the whole todo list. get: return the current list. " +
-        "auto-plan: derive batch-level todos from the active DAG (dag_id) or no-op.",
+        "sync: replace the whole todo list (task-level entries — kind 'task', " +
+        "depends_on, batch — compile into a DAG via .pi/orchestrator/dag-<id>.yaml). " +
+        "get: return the current list. auto-plan: derive batch-level todos from the " +
+        "active DAG (dag_id) or no-op.",
     },
   ),
   todos: Type.Optional(
