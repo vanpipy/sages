@@ -113,8 +113,27 @@ export const CoefficientsConfigSchema = Type.Object({
 	),
 });
 
-/** Inferred TypeScript type for a valid coefficients config. */
-export type CoefficientsConfig = Static<typeof CoefficientsConfigSchema>;
+/** Per-dimension config for each of the five canonical dimensions. */
+export type DimensionsConfig = {
+	goal: DimensionConfig;
+	dag: DimensionConfig;
+	implement: DimensionConfig;
+	audit: DimensionConfig;
+	coordination: DimensionConfig;
+};
+
+/**
+ * Inferred TypeScript type for a valid coefficients config.
+ *
+ * Intersected with `DimensionsConfig`: TypeBox's `Static` type for
+ * `Type.Record(Type.Union(...))` degrades the union-keyed record to `{}`,
+ * which makes `dimensions[name]` unusable at compile time. Re-declaring the
+ * five concrete keys restores the static type. The schema value is unchanged
+ * (validation semantics are byte-identical) — this only fixes the type.
+ */
+export type CoefficientsConfig = Static<typeof CoefficientsConfigSchema> & {
+	dimensions: DimensionsConfig;
+};
 export type SignalConfig = Static<typeof SignalConfigSchema>;
 export type DimensionConfig = Static<typeof DimensionConfigSchema>;
 export type GlobalConfig = Static<typeof GlobalConfigSchema>;
