@@ -1,5 +1,5 @@
 /**
- * l1-advisory.ts — GC-2026-053
+ * l1-advisory.ts — GC-2026-053 + GC-2026-059
  *
  * L1 (orchestrator self-audit) advisory mirror. This is the L2 advisory
  * pattern from `pi-subagents/src/agent-runner.ts:advisoryFor`, applied to
@@ -10,11 +10,14 @@
  * L1 layer audits the orchestrator's tool-call stream for the same
  * class of problems at the orchestrator's own layer:
  *
- *   - dag_resynth_loop        — same goal re-synthesized > N times
+ *   - dag_resynth_loop        — same (tool, args) re-synthesized > N times
  *   - dispatch_no_audit       — task dispatched but never audited
  *   - transition_skip_failed  — task dispatched while dep is failed
  *   - goal_drift_detected     — tool input references out-of-scope paths
  *   - no_progress_no_audit    — many tool calls without an audit pass
+ *   - repeat_call_chain       — same (tool, args) called N+ times (general
+ *                                stuck-on-same-call detector, mirrors dsh
+ *                                repeat-tool-reminder chain-key semantics)
  *
  * Output contract mirrors L2 exactly:
  *
@@ -30,16 +33,35 @@
  * helper stays pure (no fs reads in the helper itself; the runtime
  * registers a thin wrapper in `extension.ts` that supplies real
  * loaders).
+ *
+ * GC-2026-059: chain-key detection
+ * ----------------------------------
+ * Pre-GC-2026-059, dag_resynth_loop used `per-goal_id` counter as a
+ * partial chain-key. This still produced false positives: a model that
+ * legitimately refines a goal (different args on each
+ * `dag_synthesize` call) gets flagged after 3 calls. The new
+ * implementation uses full `(toolName, canonicalized-args)` chain-keys
+ * — mirroring deepseek-harness's `repeat-tool-reminder` design.
+ * Same args = stuck. Different args = progress.
  */
 
 export type L1Severity = "minor" | "major" | "critical";
+
+import {
+	chainKey,
+	tallyChainCounts,
+	findMaxChain,
+	chainCountAtLeast,
+	type ChainToolCall,
+} from "./chain-key.js";
 
 export type L1RuleId =
 	| "dag_resynth_loop"
 	| "dispatch_no_audit"
 	| "transition_skip_failed"
 	| "goal_drift_detected"
-	| "no_progress_no_audit";
+	| "no_progress_no_audit"
+	| "repeat_call_chain";
 
 export interface L1Finding {
 	rule: L1RuleId;
@@ -112,7 +134,7 @@ export const ADVISORY_MIN_SEVERITY: L1Severity = "major";
  *  shape so both layers are introspectable in the same way. */
 export const RULE_FIX_DIRECTIVES: Record<L1RuleId, string> = {
 	dag_resynth_loop:
-		"上一次 DAG 合成失败因 X；要么 amend goal({scope, criteria})，要么显式修订当前 DAG 而不是再次 dag_synthesize",
+		"上一次 DAG 合成失败因 X；要么 amend goal({scope, criteria})，要么显式修订当前 DAG 而不是再次 dag_synthesize（如果 args 每次相同）",
 	dispatch_no_audit:
 		"调 orchestrator_audit({ dag_id: '<active_dag_id>' }) 验证本次 dispatch 的产物；audit 是 Sages 4-stage 闭环的最后一环",
 	transition_skip_failed:
@@ -121,6 +143,8 @@ export const RULE_FIX_DIRECTIVES: Record<L1RuleId, string> = {
 		"检查 task.files 是否在 goal-{id}.yaml 的 scope.include 内；如果是新文件，先调 goal_contract_create 修订 scope 而不是直接 dispatch",
 	no_progress_no_audit:
 		"停下来调 orchestrator_audit({ dag_id })；如果 audit 通过，再继续——audit 是 orchestrator 自我验证的唯一手段",
+	repeat_call_chain:
+		"你用相同的 args 重复调同一个工具 ≥3 次——这说明卡住了。停下，re-read 上次 result，决定是换 approach 还是 conclude。不要继续重复同一调用",
 };
 
 // =============================================================================
@@ -169,34 +193,65 @@ function tallyCounters(
 	return c;
 }
 
-/** Detect `dag_resynth_loop`: same goal_id synthesized more than the threshold. */
+/** Detect `dag_resynth_loop`: same (tool, args) chain-key for dag_synthesize
+ *  seen more than the threshold. GC-2026-059 changed this from
+ *  `per-goal_id` to full chain-key — different args means progress,
+ *  same args means stuck. */
 function detectDagResynthLoop(
 	history: OrchestratorToolCall[],
 	dagToolName: string,
 	threshold: number,
 ): L1Finding | null {
-	const perGoal = new Map<string, number>();
+	const calls: ChainToolCall[] = [];
 	for (const call of history) {
 		if (call.toolName !== dagToolName) continue;
-		const goalId = typeof call.input.goal_id === "string" ? call.input.goal_id : "<unknown>";
-		perGoal.set(goalId, (perGoal.get(goalId) ?? 0) + 1);
+		calls.push({ toolName: call.toolName, input: call.input });
 	}
-	let worstGoal: string | null = null;
-	let worstCount = 0;
-	for (const [goalId, count] of perGoal) {
-		if (count > worstCount) {
-			worstCount = count;
-			worstGoal = goalId;
-		}
-	}
-	if (!worstGoal || worstCount <= threshold) return null;
+	if (calls.length <= threshold) return null;
+	const counts = tallyChainCounts(calls);
+	const top = findMaxChain(counts);
+	if (!top) return null;
+	// Need strictly more than threshold (e.g. threshold=2 → fire on 3+).
+	if (top.count <= threshold) return null;
 	return {
 		rule: "dag_resynth_loop",
 		severity: "major",
-		issue: `dag_synthesize called ${worstCount} times for goal ${worstGoal} (>${threshold})`,
-		evidence: `${worstCount} dag_synthesize calls observed for goal_id=${worstGoal}`,
+		issue: `dag_synthesize called ${top.count} times with identical args (>${threshold})`,
+		evidence: `chain ${top.sample.toolName}(${JSON.stringify(top.sample.input).slice(0, 80)}) × ${top.count}`,
 		recommendation:
-			"orchestrator is re-synthesizing the same goal instead of amending it; stop and revise either the goal contract or the existing DAG",
+			"orchestrator is re-synthesizing the same DAG with identical arguments; stop and revise either the goal contract or the existing DAG",
+	};
+}
+
+/** Detect `repeat_call_chain`: same (tool, args) called ≥ threshold times.
+ *  General stuck-on-same-call detector. Mirrors dsh's
+ *  `repeat-tool-reminder` chain-key semantics without porting the
+ *  full configuration system. */
+function detectRepeatCallChain(
+	history: OrchestratorToolCall[],
+	threshold: number,
+): L1Finding | null {
+	const calls: ChainToolCall[] = history.map((c) => ({
+		toolName: c.toolName,
+		input: c.input,
+	}));
+	const counts = tallyChainCounts(calls);
+	if (!chainCountAtLeast(counts, threshold)) return null;
+	const top = findMaxChain(counts);
+	if (!top) return null;
+	// Suppress if the worst chain is dag_synthesize with the same args —
+	// that's already covered by dag_resynth_loop, which has a more
+	// specific fix-directive. Avoid double-firing.
+	if (top.sample.toolName === "dag_synthesize") {
+		return null;
+	}
+	return {
+		rule: "repeat_call_chain",
+		severity: "major",
+		issue: `${top.count} identical calls to ${top.sample.toolName} with the same args (>=${threshold})`,
+		evidence: `chain ${top.sample.toolName}(${JSON.stringify(top.sample.input).slice(0, 80)}) × ${top.count}`,
+		recommendation:
+			"orchestrator is calling the same tool with identical arguments repeatedly; this suggests it is stuck. Re-read the last result, change approach, or conclude",
 	};
 }
 
@@ -319,14 +374,32 @@ function isPathInScope(path: string, scope: GoalScopeSnapshot): boolean {
 }
 
 /** Detect `no_progress_no_audit`: many tool calls observed since the last audit
- *  (or since session start if no audit yet). */
-function detectNoProgressNoAudit(counters: Counters, threshold: number): L1Finding | null {
+ *  (or since session start if no audit yet). GC-2026-059 tightened
+ *  this to require at least one chain at length ≥ 3 (otherwise the
+ *  rule would fire on any 10+ tool calls regardless of pattern). */
+function detectNoProgressNoAudit(
+	counters: Counters,
+	history: OrchestratorToolCall[],
+	threshold: number,
+	chainKeyThreshold: number = 3,
+): L1Finding | null {
 	if (counters.totalToolCallsSinceLastAudit <= threshold) return null;
+	// Tighten: also require at least one chain at length ≥ chainKeyThreshold.
+	// This means the rule fires when the LLM is genuinely stuck on a
+	// pattern (e.g. re-reading the same file 3+ times) AND has gone
+	// many calls without an audit. Without the chain-key, the rule
+	// would fire on any 10+ calls regardless of repetition.
+	const calls: ChainToolCall[] = history.map((c) => ({
+		toolName: c.toolName,
+		input: c.input,
+	}));
+	const counts = tallyChainCounts(calls);
+	if (!chainCountAtLeast(counts, chainKeyThreshold)) return null;
 	return {
 		rule: "no_progress_no_audit",
 		severity: "major",
-		issue: `${counters.totalToolCallsSinceLastAudit} tool call(s) since last orchestrator_audit (>${threshold})`,
-		evidence: `totalToolCallsSinceLastAudit=${counters.totalToolCallsSinceLastAudit}, threshold=${threshold}, audits=${counters.orchestratorAuditCalls}`,
+		issue: `${counters.totalToolCallsSinceLastAudit} tool call(s) since last orchestrator_audit (>${threshold}), with at least one chain at length ≥${chainKeyThreshold}`,
+		evidence: `totalToolCallsSinceLastAudit=${counters.totalToolCallsSinceLastAudit}, threshold=${threshold}, audits=${counters.orchestratorAuditCalls}, maxChainCount=${Math.max(0, ...Array.from(counts.values()).map((c) => c.count))}`,
 		recommendation:
 			"stop and call orchestrator_audit to verify the current state before making more changes",
 	};
@@ -368,8 +441,16 @@ export function extractOrchestratorFindings(
 	const f4 = detectGoalDrift(history, opts.loadGoalScope);
 	if (f4) findings.push(f4);
 
-	const f5 = detectNoProgressNoAudit(counters, opts.progressThreshold);
+	const f5 = detectNoProgressNoAudit(counters, history, opts.progressThreshold);
 	if (f5) findings.push(f5);
+
+	// GC-2026-059: general "stuck on same call" detector. Fires when any
+	// (tool, args) chain-key is at length ≥ repeatThreshold. Mirror of
+	// dsh's `repeat-tool-reminder`. Threshold defaults to 3 (matching
+	// dsh's first-level nudge). Can be lower than the dag_resynth_loop
+	// threshold because this is the more general rule.
+	const f6 = detectRepeatCallChain(history, 3);
+	if (f6) findings.push(f6);
 
 	// Sort by severity (critical > major > minor).
 	findings.sort((a, b) => sevRank[b.severity] - sevRank[a.severity]);
