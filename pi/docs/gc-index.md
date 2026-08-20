@@ -30,6 +30,7 @@
 | GC-2026-033 | phase-2 P1 — LRU memoize classifyBashCommand + extractBashTargets | [.pi/orchestrator/goal-GC-2026-033.yaml](../../.pi/orchestrator/goal-GC-2026-033.yaml) |
 | GC-2026-034 | phase-3 P2 — TTL cache skill-loader | [.pi/orchestrator/goal-GC-2026-034.yaml](../../.pi/orchestrator/goal-GC-2026-034.yaml) |
 | GC-2026-035 | add worktree-async baseline scripts — phase-4 capture | [.pi/orchestrator/goal-GC-2026-035.yaml](../../.pi/orchestrator/goal-GC-2026-035.yaml) |
+| GC-2026-036 | SpawnCapable.spawn returns Promise<string> — closes T3 typecheck gap | [.pi/orchestrator/goal-GC-2026-036.yaml](../../.pi/orchestrator/goal-GC-2026-036.yaml) |
 | GC-2026-037 | BudgetTracker + resolveDeadlineMs accept RunController | [.pi/orchestrator/goal-GC-2026-037.yaml](../../.pi/orchestrator/goal-GC-2026-037.yaml) |
 | GC-2026-038 | phase-4c prompt-layer governance | [.pi/orchestrator/goal-GC-2026-038.yaml](../../.pi/orchestrator/goal-GC-2026-038.yaml) |
 | GC-2026-039 | integrate T5 — merger Phase Gate tables + byte-identical HANDOFF | [.pi/orchestrator/goal-GC-2026-039.yaml](../../.pi/orchestrator/goal-GC-2026-039.yaml) |
@@ -40,9 +41,9 @@
 | GC-2026-044 | SAGES_REMINDER_FIXDIRECTIVES + auto-install on session_start | [.pi/orchestrator/goal-GC-2026-044.yaml](../../.pi/orchestrator/goal-GC-2026-044.yaml) |
 | GC-2026-045 | T4 follow-up — 8th catalog mode + diagnostic wire | [.pi/orchestrator/goal-GC-2026-045.yaml](../../.pi/orchestrator/goal-GC-2026-045.yaml) |
 | GC-2026-046 | pin npm-peer versions for reproducible installs | [.pi/orchestrator/goal-GC-2026-046.yaml](../../.pi/orchestrator/goal-GC-2026-046.yaml) |
-| GC-2026-047 | G1 catalog generator + verifier chain | [.pi/orchestrator/goal-GC-2026-047.yaml](../../.pi/orchestrator/goal-GC-2026-047.yaml) |
-| GC-2026-048 | G2 subagent registry — capability seam | [.pi/orchestrator/goal-GC-2026-048.yaml](../../.pi/orchestrator/goal-GC-2026-048.yaml) |
-| GC-2026-049 | G3 profile / bundle composition | [.pi/orchestrator/goal-GC-2026-049.yaml](../../.pi/orchestrator/goal-GC-2026-049.yaml) |
+| GC-2026-047 | translate OverallVerdict literals to English | [.pi/orchestrator/goal-GC-2026-047.yaml](../../.pi/orchestrator/goal-GC-2026-047.yaml) |
+| GC-2026-048 | resolve pre-existing typecheck errors in coefficients + state | [.pi/orchestrator/goal-GC-2026-048.yaml](../../.pi/orchestrator/goal-GC-2026-048.yaml) |
+| GC-2026-049 | create profile-test scratch dir before writing temp profiles | [.pi/orchestrator/goal-GC-2026-049.yaml](../../.pi/orchestrator/goal-GC-2026-049.yaml) |
 | GC-2026-050 | G4 event three-domain split — observability/ module + audit-state | [.pi/orchestrator/goal-GC-2026-050.yaml](../../.pi/orchestrator/goal-GC-2026-050.yaml) |
 | GC-2026-051 | G5 cookbook + postmortem + gc-index + verify:gcdb | [.pi/orchestrator/goal-GC-2026-051.yaml](../../.pi/orchestrator/goal-GC-2026-051.yaml) |
 | GC-2026-052 | G6 verify matrix hardening — 4 new verifiers + check:all aggregator | [.pi/orchestrator/goal-GC-2026-052.yaml](../../.pi/orchestrator/goal-GC-2026-052.yaml) |
@@ -53,5 +54,6 @@
 | GC-2026-057 | goal lock — anti-cheat SHA-256 hash detects silent SC modification | [.pi/orchestrator/goal-GC-2026-057.yaml](../../.pi/orchestrator/goal-GC-2026-057.yaml) |
 | GC-2026-058 | verdict enforcement — machine-enforced gate against silent REVISE/REJECT bypass | [.pi/orchestrator/goal-GC-2026-058.yaml](../../.pi/orchestrator/goal-GC-2026-058.yaml) |
 | GC-2026-059 | L1 advisory chain-key detection | [.pi/orchestrator/goal-GC-2026-059.yaml](../../.pi/orchestrator/goal-GC-2026-059.yaml) |
+| GC-2026-060 | merge auto-todowrite + todo reminder | [.pi/orchestrator/goal-GC-2026-060.yaml](../../.pi/orchestrator/goal-GC-2026-060.yaml) |
 
-_Total: 47 GCs_
+_Total: 49 GCs_
