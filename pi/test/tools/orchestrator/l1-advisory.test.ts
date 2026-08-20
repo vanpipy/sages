@@ -270,7 +270,23 @@ describe("l1 orchestrator advisory: 5 rules (GC-2026-053)", () => {
 		expect(findings.some((f) => f.rule === "goal_drift_detected")).toBe(false);
 	});
 
-	it("T-L1-R5: no_progress_no_audit fires after > 10 tool calls without audit", () => {
+	it("T-L1-R5: no_progress_no_audit fires after > 10 tool calls without audit AND a chain at length >= 3", () => {
+		// 9 distinct reads + 3 reads of the SAME file (chain length 3)
+		const history: OrchestratorToolCall[] = [
+			...Array.from({ length: 9 }, (_, i) => makeCall("read", { path: `src/file${i}.ts` }, 1000 + i)),
+			makeCall("read", { path: "/tmp/looped.ts" }, 2000),
+			makeCall("read", { path: "/tmp/looped.ts" }, 3000),
+			makeCall("read", { path: "/tmp/looped.ts" }, 4000),
+		];
+		const findings = extractOrchestratorFindings(history, {
+			...DEFAULT_OPTS,
+			loadDagPlan: () => ({ tasks: [] }),
+		});
+		expect(findings.some((f) => f.rule === "no_progress_no_audit")).toBe(true);
+	});
+
+	it("T-L1-R5-NO-CHAIN: no_progress_no_audit does NOT fire when all calls are distinct (no chain >= 3)", () => {
+		// 12 distinct paths — no chain at length >= 3, even though total > 10
 		const history: OrchestratorToolCall[] = Array.from({ length: 12 }, (_, i) =>
 			makeCall("read", { path: `src/file${i}.ts` }, 1000 + i),
 		);
@@ -278,7 +294,7 @@ describe("l1 orchestrator advisory: 5 rules (GC-2026-053)", () => {
 			...DEFAULT_OPTS,
 			loadDagPlan: () => ({ tasks: [] }),
 		});
-		expect(findings.some((f) => f.rule === "no_progress_no_audit")).toBe(true);
+		expect(findings.some((f) => f.rule === "no_progress_no_audit")).toBe(false);
 	});
 
 	it("T-L1-R5-NEG: no_progress_no_audit does NOT fire when audit was called recently", () => {
@@ -289,6 +305,71 @@ describe("l1 orchestrator advisory: 5 rules (GC-2026-053)", () => {
 		];
 		const findings = extractOrchestratorFindings(history, DEFAULT_OPTS);
 		expect(findings.some((f) => f.rule === "no_progress_no_audit")).toBe(false);
+	});
+});
+
+describe("l1 orchestrator advisory: repeat_call_chain (GC-2026-059)", () => {
+	it("RCC-01: fires when same (read, path) called 3+ times", () => {
+		const history: OrchestratorToolCall[] = Array.from({ length: 4 }, (_, i) =>
+			makeCall("read", { path: "/tmp/looped.ts" }, 1000 + i),
+		);
+		const findings = extractOrchestratorFindings(history, DEFAULT_OPTS);
+		const rcc = findings.find((f) => f.rule === "repeat_call_chain");
+		expect(rcc).toBeDefined();
+		expect(rcc?.severity).toBe("major");
+	});
+
+	it("RCC-02: does NOT fire when read paths differ (3 distinct calls)", () => {
+		const history: OrchestratorToolCall[] = [
+			makeCall("read", { path: "/tmp/a" }, 1000),
+			makeCall("read", { path: "/tmp/b" }, 2000),
+			makeCall("read", { path: "/tmp/c" }, 3000),
+		];
+		const findings = extractOrchestratorFindings(history, DEFAULT_OPTS);
+		expect(findings.find((f) => f.rule === "repeat_call_chain")).toBeUndefined();
+	});
+
+	it("RCC-03: does NOT fire on only 2 calls (need 3+)", () => {
+		const history: OrchestratorToolCall[] = [
+			makeCall("read", { path: "/tmp/looped.ts" }, 1000),
+			makeCall("read", { path: "/tmp/looped.ts" }, 2000),
+		];
+		const findings = extractOrchestratorFindings(history, DEFAULT_OPTS);
+		expect(findings.find((f) => f.rule === "repeat_call_chain")).toBeUndefined();
+	});
+
+	it("RCC-04: fires on task_dispatch with same args 3+ times", () => {
+		const history: OrchestratorToolCall[] = [
+			makeCall("task_dispatch", { dag_id: "DAG-X", task_id: "T1" }, 1000),
+			makeCall("task_dispatch", { dag_id: "DAG-X", task_id: "T1" }, 2000),
+			makeCall("task_dispatch", { dag_id: "DAG-X", task_id: "T1" }, 3000),
+		];
+		const findings = extractOrchestratorFindings(history, DEFAULT_OPTS);
+		const rcc = findings.find((f) => f.rule === "repeat_call_chain");
+		expect(rcc).toBeDefined();
+	});
+
+	it("RCC-05: suppressed when chain is dag_synthesize (covered by dag_resynth_loop)", () => {
+		// When dag_synthesize is the worst chain, repeat_call_chain is
+		// suppressed — dag_resynth_loop has a more specific fixdirective.
+		const history: OrchestratorToolCall[] = Array.from({ length: 3 }, (_, i) =>
+			makeCall("dag_synthesize", { goal_id: "GC-1" }, 1000 + i),
+		);
+		const findings = extractOrchestratorFindings(history, DEFAULT_OPTS);
+		// dag_resynth_loop should fire
+		expect(findings.find((f) => f.rule === "dag_resynth_loop")).toBeDefined();
+		// repeat_call_chain should be suppressed (not both fire for same chain)
+		expect(findings.find((f) => f.rule === "repeat_call_chain")).toBeUndefined();
+	});
+
+	it("RCC-06: arg key order does NOT matter (canonical form)", () => {
+		const history: OrchestratorToolCall[] = [
+			makeCall("read", { path: "/tmp/x", encoding: "utf-8" }, 1000),
+			makeCall("read", { encoding: "utf-8", path: "/tmp/x" }, 2000),
+			makeCall("read", { path: "/tmp/x", encoding: "utf-8" }, 3000),
+		];
+		const findings = extractOrchestratorFindings(history, DEFAULT_OPTS);
+		expect(findings.find((f) => f.rule === "repeat_call_chain")).toBeDefined();
 	});
 });
 
@@ -313,13 +394,14 @@ describe("l1 orchestrator advisory: rule fix directives (GC-2026-053)", () => {
 		expect(RULE_FIX_DIRECTIVES.no_progress_no_audit).toMatch(/audit|verif/i);
 	});
 
-	it("T-L1-FIX-6: RULE_FIX_DIRECTIVES map covers all 5 L1 rules", () => {
+	it("T-L1-FIX-6: RULE_FIX_DIRECTIVES map covers all 6 L1 rules (5 original + repeat_call_chain)", () => {
 		const rules: Array<keyof typeof RULE_FIX_DIRECTIVES> = [
 			"dag_resynth_loop",
 			"dispatch_no_audit",
 			"transition_skip_failed",
 			"goal_drift_detected",
 			"no_progress_no_audit",
+			"repeat_call_chain",
 		];
 		for (const r of rules) {
 			expect(RULE_FIX_DIRECTIVES[r]).toBeDefined();
