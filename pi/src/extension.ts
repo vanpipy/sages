@@ -46,6 +46,8 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 import { registerOrchestratorTools } from "./tools/orchestrator/index.js";
 import { classifyBashCommand } from "./tools/bash-guard.js";
@@ -57,6 +59,7 @@ import {
 	type OrchestratorAdvisoryContext,
 } from "./tools/orchestrator/l1-advisory.js";
 import { loadGoalContract, loadPlan } from "./tools/orchestrator/dag-synthesizer.js";
+import { ORCHESTRATOR_DIR } from "./tools/orchestrator/types.js";
 import {
 	RunEvent,
 	StepEvent,
@@ -67,6 +70,23 @@ import {
 	onSeam,
 } from "./observability/index.js";
 import { installSagesRoutines } from "./tools/routines/sages-routines-install.js";
+import {
+	buildTurnTodoBlock,
+	advanceStale,
+	staleReminderFor,
+	resetStale,
+	type StaleTracker,
+} from "./tools/todo/todo-reminder.js";
+import {
+	TodoStateManager,
+	loadTodoState,
+	resolveRepoRoot,
+	saveTodoState,
+	todoStateDir,
+	type TodoDiff,
+	type TodoItem,
+} from "./tools/todo/todo-state.js";
+import { deriveDagTodos, registerSagesTodoTool } from "./tools/todo/sages-todo-tool.js";
 
 // Load the active profile once at module load. Resolution order is
 // documented in `profile.ts`; falls back to the `standard` built-in
@@ -78,6 +98,10 @@ const PROFILE = loadProfile();
  */
 export default function registerSagesExtension(pi: ExtensionAPI): void {
 	registerOrchestratorTools(pi);
+	// GC-2026-060: the root-agent todo tool (sync/get/auto-plan).
+	// Registered on the root extension only — subagent toolsets never
+	// include it, and the store rejects any non-root owner.
+	registerSagesTodoTool(pi);
 
 	// ── Seam event registration (GC-2026-050) ────────────────────────────
 	// Register a no-op seam callback for the Preflight hook so downstream
@@ -120,6 +144,21 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		advisoriesSent: 0,
 	};
 
+	// ── GC-2026-060 auto-todowrite session state ────────────────────────
+	// The pi built-in `todowrite` tool keeps its list only in LLM
+	// context; the extension mirrors each call into a durable
+	// TodoStateManager (persisted to <repo>/.pi/orchestrator/
+	// todo-state.json) so before_agent_start can inject the current
+	// list + change highlight every turn and turn_end can remind about
+	// stale in_progress todos. Root-agent-only: subagent sessions never
+	// reach this extension's listeners, and the store itself rejects
+	// any non-root owner (defense-in-depth).
+	let todoState = new TodoStateManager();
+	let staleTracker: StaleTracker = { increments: {} };
+	let lastTodoChange: TodoDiff | null = null;
+	// Rate limit: one reminder per stale todo identity per session.
+	const remindedTodoKeys = new Set<string>();
+
 	// ── Session start: reset auto-steer throttle + L1 advisory state ────
 	// Soft mode does not touch the active toolset (Layer 1 is gone).
 	// The session_start handler only resets the reminder flag so the
@@ -133,11 +172,20 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 	// follow-up). We deliberately do NOT call `emitRunEvent()` from
 	// session_start — that would (a) require a placeholder dag_id and
 	// (b) race with the orchestrator's real emission.
-	pi.on("session_start", () => {
+	pi.on("session_start", (event: any, ctx: any) => {
 		remindedThisSession = false;
 		l1History = [];
 		l1Ctx.alreadyAdvisedRules = new Set<string>();
 		l1Ctx.advisoriesSent = 0;
+
+		// GC-2026-060: reset + restore the root todo state. A persisted
+		// <repo>/.pi/orchestrator/todo-state.json survives compaction and
+		// process restarts, so the todo list resumes across sessions.
+		const cwd: string = typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd();
+		todoState = loadTodoState(todoStateDir(resolveRepoRoot(cwd))) ?? new TodoStateManager();
+		staleTracker = { increments: {} };
+		lastTodoChange = null;
+		remindedTodoKeys.clear();
 		// GC-2026-055: auto-install the 3 Sages routine templates
 		// (sages-session-wrap / sages-resume / sages-watchdog) into
 		// the pi-routines store at session_start. Idempotent on
@@ -235,17 +283,161 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		return undefined;
 	});
 
-	// ── before_agent_start: surface soft-mode policy in the system prompt ─
-	// Every turn, prepend the profile's system-prompt suffix to the
-	// system prompt so the LLM knows the soft-mode policy from the
-	// first turn. The suffix describes the recommendation thresholds,
-	// the available subagents, and the auto-steer behavior.
+	// ── GC-2026-060 todo mirror tool_call handler ────────────────────────
+	// Third tool_call handler (registration order matters: the bash
+	// classifier + L1 advisory stay first and keep their exact
+	// behavior). Mirrors the built-in `todowrite` calls into the root
+	// todo store and triggers an auto-plan sync when the orchestrator
+	// synthesizes a DAG or runs an audit. sages_todo is NOT mirrored —
+	// it writes the store directly.
+	pi.on("tool_call", (event: any, ctx: any) => {
+		const toolName: string = event?.toolName;
+		if (typeof toolName !== "string" || toolName.length === 0) return undefined;
+		const input: Record<string, unknown> =
+			event?.input && typeof event.input === "object" ? event.input : {};
+
+		// Root-only defensive guard: an explicit non-root owner marker is
+		// rejected before any state mutation (subagent session guard).
+		if (input.owner !== undefined && input.owner !== "root") return undefined;
+
+		const cwd: string = typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd();
+		const repoRoot = resolveRepoRoot(cwd);
+		const stateDir = todoStateDir(repoRoot);
+
+		try {
+			if (toolName === "todowrite") {
+				const rawTodos = input.todos;
+				if (!Array.isArray(rawTodos) || rawTodos.length === 0) return undefined;
+				const items = rawTodos
+					.filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
+					.filter(
+						(t) =>
+							typeof t.content === "string" &&
+							t.content.length > 0 &&
+							(t.status === "pending" ||
+								t.status === "in_progress" ||
+								t.status === "completed"),
+					)
+					.map((t) => {
+						const item: TodoItem = {
+							content: t.content as string,
+							status: t.status as TodoItem["status"],
+						};
+						if (typeof t.id === "string" && t.id.length > 0) item.id = t.id;
+						if (t.priority === "high" || t.priority === "medium" || t.priority === "low") {
+							item.priority = t.priority;
+						}
+						return item;
+					});
+				if (items.length === 0) return undefined; // all entries malformed
+				lastTodoChange = todoState.apply(items);
+				saveTodoState(stateDir, todoState);
+				return undefined;
+			}
+
+			if (toolName === "dag_synthesize" || toolName === "orchestrator_audit") {
+				const dagId =
+					typeof input.dag_id === "string" && input.dag_id.length > 0
+						? input.dag_id
+						: toolName === "dag_synthesize" &&
+							  typeof input.goal_id === "string" &&
+							  input.goal_id.length > 0
+							? input.goal_id
+							: newestDagId(repoRoot);
+				if (dagId === null) return undefined;
+				const derived = deriveDagTodos(dagId, repoRoot);
+				if (derived.length === 0) return undefined; // no DAG → never wipe the list
+				lastTodoChange = todoState.apply(derived);
+				saveTodoState(stateDir, todoState);
+				return undefined;
+			}
+		} catch {
+			// Best-effort observability: a malformed mirror must never
+			// break the agent's tool execution.
+		}
+		return undefined;
+	});
+
+	// ── before_agent_start: surface soft-mode policy + todo state ────────
+	// Every turn, append the profile's system-prompt suffix, then the
+	// compact per-turn todo block when the root todo list is non-empty
+	// OR a change diff is pending (an empty list with no pending diff
+	// injects nothing — avoid noise). The diff is one-shot: it is
+	// cleared after this turn's injection so the highlight appears
+	// exactly once.
 	pi.on("before_agent_start", (event: any) => {
 		const base: string = event?.systemPrompt ?? "";
-		return {
-			systemPrompt: `${base}${base ? "\n\n" : ""}${softModeSystemPromptSuffix(PROFILE)}`,
-		};
+		let prompt = `${base}${base ? "\n\n" : ""}${softModeSystemPromptSuffix(PROFILE)}`;
+		const todos = todoState.getTodos();
+		const diffPending = lastTodoChange !== null && todoDiffHasChanges(lastTodoChange);
+		if (todos.length > 0 || diffPending) {
+			prompt = `${prompt}\n\n${buildTurnTodoBlock(todos, lastTodoChange ?? undefined)}`;
+		}
+		lastTodoChange = null;
+		return { systemPrompt: prompt };
 	});
+
+	// ── GC-2026-060 input reset ─────────────────────────────────────────
+	// A user interjection resets the staleness clock (mirroring the
+	// deepseek-harness repeat-tool-reminder reset contract) and drops
+	// any pending change diff (the user's message supersedes it).
+	pi.on("input", () => {
+		staleTracker = resetStale(staleTracker);
+		lastTodoChange = null;
+	});
+
+	// ── GC-2026-060 turn_end stale advance ──────────────────────────────
+	// After each turn, advance the stale tracker for todos that are
+	// still in_progress and append a system reminder when an item has
+	// been active for `gentle` (3) / `detailed` (5) consecutive turns
+	// without progress. Rate-limited: each todo identity gets at most
+	// one reminder per session.
+	pi.on("turn_end", () => {
+		const todos = todoState.getTodos();
+		const activeIds = todoState.getInProgress().map((t) => t.id ?? t.content);
+		staleTracker = advanceStale(staleTracker, todos, activeIds);
+		const reminder = staleReminderFor(staleTracker, { gentle: 3, detailed: 5 });
+		if (reminder === null) return;
+		const staleKeys = Object.keys(staleTracker.increments).filter(
+			(key) => staleTracker.increments[key] >= 3,
+		);
+		const newKeys = staleKeys.filter((key) => !remindedTodoKeys.has(key));
+		if (newKeys.length === 0) return;
+		for (const key of staleKeys) remindedTodoKeys.add(key);
+		pi.appendEntry("system", `[sages todo reminder] ${reminder}`);
+	});
+}
+
+// ── GC-2026-060 helpers ────────────────────────────────────────────────────
+
+/** True when a whole-list diff contains at least one visible change. */
+function todoDiffHasChanges(diff: TodoDiff): boolean {
+	return (
+		diff.added.length > 0 ||
+		diff.removed.length > 0 ||
+		diff.completed.length > 0 ||
+		diff.reopened.length > 0
+	);
+}
+
+/**
+ * Newest `.pi/orchestrator/dag-*.yaml` id by mtime, or null when no DAG
+ * file exists. Used as the auto-plan fallback when a tool call does not
+ * carry an explicit dag_id / goal_id.
+ */
+function newestDagId(repoRoot: string): string | null {
+	try {
+		const dir = join(repoRoot, ORCHESTRATOR_DIR);
+		if (!existsSync(dir)) return null;
+		const newest = readdirSync(dir)
+			.filter((f) => f.startsWith("dag-") && f.endsWith(".yaml"))
+			.map((f) => ({ f, mtime: statSync(join(dir, f)).mtimeMs }))
+			.sort((a, b) => b.mtime - a.mtime)[0];
+		if (!newest) return null;
+		return newest.f.slice("dag-".length, -".yaml".length);
+	} catch {
+		return null;
+	}
 }
 
 // Exported for tests that want to assert which profile the extension

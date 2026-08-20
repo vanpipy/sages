@@ -41,6 +41,14 @@ pi/
 └── scripts/                       # install.sh / install.bat / install.ps1
 ```
 
+**Auto-todowrite (GC-2026-060):** the `sages_todo` tool (sync / get /
+auto-plan) plus a compact per-turn todo block injected by
+`before_agent_start`, stale-todo reminders on `turn_end`, and a
+`tool_call` mirror that persists the built-in `todowrite` calls to
+`<repo>/.pi/orchestrator/todo-state.json` (survives compaction /
+restarts). **Root-agent only** — subagents have no path into the store.
+See `pi/src/tools/todo/` and `pi/test/tools/todo/`.
+
 Peer extensions in the same monorepo (each has its own `pi/`
 package, see their own `README.md`):
 
