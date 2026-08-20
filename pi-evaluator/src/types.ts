@@ -229,10 +229,9 @@ export interface CritiqueWorkflowInput {
 
 /**
  * One-line overall verdict from the LLM judge.
- * strings (the tool's eval output is Chinese per design). The literal
- * union keeps the judge prompt honest.
+ * The literal union keeps the judge prompt honest.
  */
-export type OverallVerdict = "有效" | "局部有效但 X 有缺口" | "未达成目标";
+export type OverallVerdict = "effective" | "partially effective with gaps in X" | "goal not met";
 
 /** Judge's confidence in its own critique. */
 export type Confidence = "high" | "medium" | "low";
