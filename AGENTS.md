@@ -14,8 +14,8 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
    access (`edit`, `write`, `aft_edit`, `apply_patch`, unrestricted `bash`)
    — nothing is stripped on session startup and no bash command is blocked
    (including `rm` / `mv` / `cp` / `unlink` / `rmdir`). The bash-guard is
-   a classifier under soft mode, not a gate. See "Soft mode and task-count
-   threshold" below for the recommendation mechanism.
+    a classifier under soft mode, not a gate. See "Soft mode and dag_threshold"
+    below for the recommendation mechanism.
 2. **Production code uses managed-worktree dispatch.** RECOMMENDED for
    `src/`, `test/`, `lib/`, the entire `pi/` tree, every sibling `pi-*/`
    subpackage, or any root source file: dispatch `developer` with
@@ -367,12 +367,13 @@ The pre-commit hook (`pi/typecheck` + `pi/test`) still runs automatically and mu
 
 If you change any source file listed in a catalog's `_source_files`, re-run `bun run gen:catalog` and commit the regenerated `pi/catalogs/*.json` along with the source change.
 
-## Soft mode and task-count threshold
+## Soft mode and dag_threshold
 
 Under soft mode (GC-2026-031) nothing is mechanically blocked. The
-recommendation mechanism is the **task-count threshold**:
+recommendation mechanism is the profile-driven **dag_threshold**:
 
-- If your active `todowrite` has **>2 items**, the recommended pattern is
+- If your active `todowrite` has **>2 items** (the standard profile's
+  `dag_threshold: 2`), the recommended pattern is
   the 4-stage DAG workflow (`goal_contract_create` → `dag_synthesize` →
   `task_dispatch` → `orchestrator_audit`) — or, equivalently, dispatching
   `developer` with managed-worktree isolation for production code. The

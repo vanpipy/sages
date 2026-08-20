@@ -111,13 +111,51 @@ const DEFAULT_REMINDER_TEMPLATES: Record<SagesReminderType, string> = {
 };
 
 /**
+ * Per-type actionable fix directives (GC-2026-055). Mirrors L2's
+ * `RULE_FIX_DIRECTIVES` (pi-subagents/src/agent-runner.ts:2225). When the
+ * reminder is injected without a `message` override, the call site can
+ * prefer the fixdirective over the generic default template — the
+ * directive is a concrete shell command the LLM can run, not a generic
+ * "we found a problem" message.
+ *
+ * Keep these to single-line shell invocations where possible. Tokens
+ * are capped by the same 200-token limit as L2's advisories.
+ */
+export const SAGES_REMINDER_FIXDIRECTIVES: Record<SagesReminderType, string> = {
+  STALE_DAG:
+    "run `ls -lt .pi/orchestrator/audit-state-*.yaml | head -1` to see the most-recently-modified " +
+    "audit state; if its mtime is > 15 min old, the DAG is genuinely stale. " +
+    "Then `git log --oneline -10 -- .pi/orchestrator/` to see what moved.",
+  MERGE_GATE:
+    "before merging, run `cd pi && bun test ./src ./test` to re-run the failing task — " +
+    "the audit's REVISE verdict is the source of truth, not a stale local view.",
+  COMPLETION_GATE:
+    "before declaring done, run the goal's `verification_cmd` exactly as written — " +
+    "find it via `grep verification_cmd .pi/orchestrator/goal-*.yaml` and execute the command.",
+  GOAL_DRIFT:
+    "run `cat .pi/orchestrator/goal-*.yaml | grep -A 10 scope:` to see the include/exclude lists; " +
+    "either update the goal contract (goal_contract_create with revision) or stay within scope.",
+  RESUME_REQUIRED:
+    "run `ls -la .pi/orchestrator/audit-state-*.yaml` to see active DAGs; " +
+    "then `cat` the most recent one to inspect in-progress tasks before resuming.",
+  GENERIC:
+    "no specific fixdirective — re-read the surrounding context (L1 advisory, recent audit) " +
+    "for actionable next steps.",
+};
+
+/**
  * Render the reminder text. The result is what the LLM sees in the
  * conversation transcript; the structured payload is what observers can
  * read on the session entry.
  */
 export function formatReminderText(input: SagesReminderInput): string {
-  const template = DEFAULT_REMINDER_TEMPLATES[input.type];
-  const body = input.message?.trim() || template;
+  // Prefer the per-type fixdirective over the default template when no
+  // message override is provided. The fixdirective is actionable shell
+  // commands; the template is a generic prose description. The LLM can
+  // run the directive verbatim.
+  const directive = SAGES_REMINDER_FIXDIRECTIVES[input.type];
+  const fallback = DEFAULT_REMINDER_TEMPLATES[input.type];
+  const body = input.message?.trim() || directive || fallback;
   const dagSuffix = input.dag_id ? ` (${input.dag_id})` : "";
   return `[sages reminder: ${input.type}${dagSuffix}] ${body}`;
 }

@@ -66,6 +66,7 @@ import {
 	emitSeamEvent,
 	onSeam,
 } from "./observability/index.js";
+import { installSagesRoutines } from "./tools/routines/sages-routines-install.js";
 
 // Load the active profile once at module load. Resolution order is
 // documented in `profile.ts`; falls back to the `standard` built-in
@@ -137,6 +138,19 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		l1History = [];
 		l1Ctx.alreadyAdvisedRules = new Set<string>();
 		l1Ctx.advisoriesSent = 0;
+		// GC-2026-055: auto-install the 3 Sages routine templates
+		// (sages-session-wrap / sages-resume / sages-watchdog) into
+		// the pi-routines store at session_start. Idempotent on
+		// subsequent loads (existing routines skipped by name).
+		// Synchronous: small templates, no fs read on the hot path.
+		try {
+			installSagesRoutines();
+		} catch (err) {
+			// Don't fail session_start; just log and continue.
+			console.error(
+				`[sages] installSagesRoutines failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
 	});
 
 	// ── Bash tool_call handler — soft mode ────────────────────────────
