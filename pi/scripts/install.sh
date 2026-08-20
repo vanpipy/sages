@@ -56,8 +56,8 @@ REPO_URL="https://github.com/vanpipy/sages.git"
 # so one ref pins all four together. Bump + re-run install.sh to
 # upgrade the local-peer stack.
 #
-# Short: 35509e0 (chore(pi/install): bump SAGES_REPO_SHA to a94ce27 ...)
-SAGES_REPO_SHA="35509e0962ecf9f38d618316a4f271c4565d3b04"
+# Short: f8e5321 (chore(pi/install): pin SAGES_REPO_SHA to tip)
+SAGES_REPO_SHA="f8e53213559830b934396eceb2fab5a3d0940002"
 AGENT_DIR="$PI_DIR/agent"
 
 # Resolve this script's directory (works whether invoked by absolute path, symlink, or relative)
