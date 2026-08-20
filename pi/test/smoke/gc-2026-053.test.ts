@@ -67,7 +67,7 @@ class MockPi {
 // ─── 1. Extension registration ──────────────────────────────────────────────
 
 describe("GC-2026-053 smoke: extension registration (Step 1)", () => {
-  it("SMOKE-1.1: registerSagesExtension registers all 5 orchestrator tools", async () => {
+  it("SMOKE-1.1: registerSagesExtension registers all 6 tools (4 orchestrator + reminders/todo)", async () => {
     const registerSagesExtension = (await import("../../src/extension.js")).default;
     const pi = new MockPi();
     registerSagesExtension(pi as any);
@@ -77,6 +77,7 @@ describe("GC-2026-053 smoke: extension registration (Step 1)", () => {
       "goal_contract_create",
       "orchestrator_audit",
       "sages_reminder",
+      "sages_todo",
       "task_dispatch",
     ]);
   });
