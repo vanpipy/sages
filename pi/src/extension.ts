@@ -87,6 +87,7 @@ import {
 	type TodoItem,
 } from "./tools/todo/todo-state.js";
 import { deriveDagTodos, registerSagesTodoTool } from "./tools/todo/sages-todo-tool.js";
+import { maybeCompileDagFromTodos } from "./tools/todo/dag-compile.js";
 
 // Load the active profile once at module load. Resolution order is
 // documented in `profile.ts`; falls back to the `standard` built-in
@@ -158,6 +159,11 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 	let lastTodoChange: TodoDiff | null = null;
 	// Rate limit: one reminder per stale todo identity per session.
 	const remindedTodoKeys = new Set<string>();
+	// GC-2026-061: session defaults for compiled dag identity — the most
+	// recent orchestrator tool call's dag/goal, used when structured
+	// todos carry no explicit dag_id / goal_id.
+	let sessionDagId: string | null = null;
+	let sessionGoalId: string | null = null;
 
 	// ── Session start: reset auto-steer throttle + L1 advisory state ────
 	// Soft mode does not touch the active toolset (Layer 1 is gone).
@@ -186,6 +192,8 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		staleTracker = { increments: {} };
 		lastTodoChange = null;
 		remindedTodoKeys.clear();
+		sessionDagId = null;
+		sessionGoalId = null;
 		// GC-2026-055: auto-install the 3 Sages routine templates
 		// (sages-session-wrap / sages-resume / sages-watchdog) into
 		// the pi-routines store at session_start. Idempotent on
@@ -305,33 +313,16 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		const stateDir = todoStateDir(repoRoot);
 
 		try {
-			if (toolName === "todowrite") {
-				const rawTodos = input.todos;
-				if (!Array.isArray(rawTodos) || rawTodos.length === 0) return undefined;
-				const items = rawTodos
-					.filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
-					.filter(
-						(t) =>
-							typeof t.content === "string" &&
-							t.content.length > 0 &&
-							(t.status === "pending" ||
-								t.status === "in_progress" ||
-								t.status === "completed"),
-					)
-					.map((t) => {
-						const item: TodoItem = {
-							content: t.content as string,
-							status: t.status as TodoItem["status"],
-						};
-						if (typeof t.id === "string" && t.id.length > 0) item.id = t.id;
-						if (t.priority === "high" || t.priority === "medium" || t.priority === "low") {
-							item.priority = t.priority;
-						}
-						return item;
-					});
-				if (items.length === 0) return undefined; // all entries malformed
+			if (toolName === "todowrite" || (toolName === "sages_todo" && input.action === "sync")) {
+				const items = todoItemsFromRaw(input.todos);
+				if (items.length === 0) return undefined; // empty / all entries malformed
 				lastTodoChange = todoState.apply(items);
 				saveTodoState(stateDir, todoState);
+				// GC-2026-061: structured todos (kind 'task' / depends_on /
+				// batch) compile into a DAG. dag_synthesize's plan is
+				// authoritative and is never overwritten — see the policy in
+				// maybeCompileDagFromTodos.
+				maybeCompileDagFromTodos(items, repoRoot, { sessionDagId, sessionGoalId });
 				return undefined;
 			}
 
@@ -345,6 +336,13 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 							? input.goal_id
 							: newestDagId(repoRoot);
 				if (dagId === null) return undefined;
+				// GC-2026-061: remember the most recent orchestrator dag/goal
+				// so structured todos without an explicit dag_id compile under
+				// the same plan identity.
+				sessionDagId = dagId;
+				if (typeof input.goal_id === "string" && input.goal_id.length > 0) {
+					sessionGoalId = input.goal_id;
+				}
 				const derived = deriveDagTodos(dagId, repoRoot);
 				if (derived.length === 0) return undefined; // no DAG → never wipe the list
 				lastTodoChange = todoState.apply(derived);
@@ -409,6 +407,51 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 }
 
 // ── GC-2026-060 helpers ────────────────────────────────────────────────────
+
+/**
+ * Normalize raw todowrite / sages_todo sync entries into TodoItems.
+ * Validates content + status, preserves id / priority and the
+ * GC-2026-061 structured fields (kind / depends_on / batch / dag_id /
+ * goal_id / prompt / files) so the compile trigger can see them.
+ * Malformed entries are dropped; returns [] when nothing is usable.
+ */
+function todoItemsFromRaw(rawTodos: unknown): TodoItem[] {
+	if (!Array.isArray(rawTodos) || rawTodos.length === 0) return [];
+	return rawTodos
+		.filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
+		.filter(
+			(t) =>
+				typeof t.content === "string" &&
+				t.content.length > 0 &&
+				(t.status === "pending" ||
+					t.status === "in_progress" ||
+					t.status === "completed"),
+		)
+		.map((t) => {
+			const item: TodoItem = {
+				content: t.content as string,
+				status: t.status as TodoItem["status"],
+			};
+			if (typeof t.id === "string" && t.id.length > 0) item.id = t.id;
+			if (t.priority === "high" || t.priority === "medium" || t.priority === "low") {
+				item.priority = t.priority;
+			}
+			if (t.kind === "plan" || t.kind === "task") item.kind = t.kind;
+			if (Array.isArray(t.depends_on) && t.depends_on.every((d) => typeof d === "string")) {
+				item.depends_on = t.depends_on as string[];
+			}
+			if (typeof t.batch === "number" && Number.isInteger(t.batch) && t.batch >= 1) {
+				item.batch = t.batch;
+			}
+			if (typeof t.dag_id === "string" && t.dag_id.length > 0) item.dag_id = t.dag_id;
+			if (typeof t.goal_id === "string" && t.goal_id.length > 0) item.goal_id = t.goal_id;
+			if (typeof t.prompt === "string" && t.prompt.length > 0) item.prompt = t.prompt;
+			if (Array.isArray(t.files) && t.files.every((f) => typeof f === "string")) {
+				item.files = t.files as string[];
+			}
+			return item;
+		});
+}
 
 /** True when a whole-list diff contains at least one visible change. */
 function todoDiffHasChanges(diff: TodoDiff): boolean {
