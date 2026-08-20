@@ -7,28 +7,53 @@ and audits the result before declaring the workflow complete.
 ## How it works
 
 ```text
-goal_contract_create → .pi/orchestrator/goal-{id}.yaml
+goal_contract_create → .pi/orchestrator/goal-{id}.yaml (with _lock_hash)
         ↓
 dag_synthesize       → .pi/orchestrator/dag-{id}.yaml
         ↓
-task_dispatch        → Agent-call plan (the main agent executes it)
-        ↓
+task_dispatch        → Agent-call plan (the main agent executes it;
+        ↓               verdict gate blocks until latest audit ack'd)
 developer / auditor  → /tmp/pi-subagents-.../tasks/<id>.output
         ↓
 orchestrator_audit   → .pi/orchestrator/audit-workflow.md
+        ↓
+L1 advisory          → "[orchestrator audit advisory — N/M] <rule>: ..."
+        ↓                 (mirrors L2 advisory; 5 rules, auto-injected
+sages_reminder         on tool_call, dedup + cap + token-cap)
+        ↓                 (LLM-callable tool that wraps pi.appendEntry
+                          for system reminders; 6 types, per-type
+                          fixdirectives, informational only)
 ```
 
-Under **soft mode** (GC-2026-031) the main agent has full tool access
+### Self-feedback loop (GC-2026-053 / 054-058)
+
+The 4-stage DAG workflow above is augmented with a **self-feedback
+loop** so the orchestrator can detect and recover from its own
+mistakes:
+
+| Layer | Module | Purpose |
+|---|---|---|
+| L2 advisory | `pi-subagents/src/agent-runner.ts:advisoryFor` | Subagent message-text validator (5 rules, dedup + cap + token-cap) |
+| L1 advisory | `pi/src/tools/orchestrator/l1-advisory.ts` | **NEW** — orchestrator tool-call history validator (5 rules, mirrors L2) |
+| Reminder | `pi/src/tools/orchestrator/sages-reminder.ts` | **NEW** — LLM-callable bridge to `pi.appendEntry` (6 reminder types) |
+| Verifier lint | `pi/src/tools/orchestrator/verification-cmd-linter.ts` | **NEW** — rejects placeholder `verification_cmd` (heuristics + execution probe) |
+| Goal lock | `pi/src/tools/orchestrator/goal-lock.ts` | **NEW** — SHA-256 anti-cheat; detects silent SC modification |
+| Verdict gate | `pi/src/tools/orchestrator/verdict-enforcement.ts` | **NEW** — machine-enforced gate: REVISE/REJECT blocks `task_dispatch` until acknowledged |
+| Routines | `pi/src/tools/routines/sages-routines-install.ts` | **NEW** — auto-installs 3 Sages routines (session-wrap / resume / watchdog) on `session_start` |
+
+### Soft mode policy (GC-2026-031)
+
+Under soft mode (GC-2026-031) the main agent has full tool access
 (`edit` / `write` / `aft_edit` / `apply_patch`, plus unrestricted `bash`).
 Nothing is mechanically blocked. The Sages extension owns the four
 workflow tools above and a recommendation layer that nudges the main
-agent toward the 4-stage DAG workflow for complex work (>2 items in
-the active todowrite); drift from the recommended pattern is
-auto-steered via a once-per-session system reminder and never
-blocked. The main agent decides whether to dispatch subagents based
-on its own task-count assessment. `pi-subagents` owns agent
-spawning, managed worktrees, background execution, and result
-collection.
+agent toward the 4-stage DAG workflow for complex work (when the
+active profile's `dag_threshold` is exceeded; default `2` items);
+drift from the recommended pattern is auto-steered via a
+once-per-session system reminder and never blocked. The main agent
+decides whether to dispatch subagents based on its own task-count
+assessment. `pi-subagents` owns agent spawning, managed worktrees,
+background execution, and result collection.
 
 ## Quick start
 
@@ -66,8 +91,10 @@ contracts live in `pi/skills/orchestrator/templates/goals/` and are installed to
 
 Developers may write `task-{task_id}-report.md` and
 `handoff/{workspace_id}/{task_id}-handoff.md`; auditors may write
-`audit-{task_id}.md`. L3 alone owns `goal-{id}.yaml`, DAG, audit-state, and
-workflow rollup files. Cross-namespace overwrites are prohibited; Explore and
+`audit-{task_id}.md`. L3 alone owns `goal-{id}.yaml` (with
+`_lock_hash`), `dag-{id}.yaml`, `audit-state-{dag_id}.yaml`,
+`verdict-state-{dag_id}.yaml` (GC-2026-058), and workflow rollup
+files. Cross-namespace overwrites are prohibited; Explore and
 Plan remain read-only.
 
 ## Security and license
@@ -90,3 +117,24 @@ Earlier versions used four role-named tools inspired by the four sages of
 Chinese mythology, plus an FSM-style orchestrator. The current four-tool DAG
 runtime replaced that design on 2026-07-24; migration notes live in
 `pi/skills/audit-notes/`.
+
+### Recent: orchestrator self-feedback (GC-2026-053 → 058, 2026-08-20)
+
+Five GCs in one session, in order:
+
+1. **GC-2026-053** — L1 advisory mirror + `sages_reminder` tool + 3
+   routine templates + smoke test (4 commits, +906 tests)
+2. **GC-2026-054** — Postmortem for GC-2026-053 + `gen-gcdb` body-scan
+   fix (drift detection, 5 previously-missed GCs now appear)
+3. **GC-2026-055** — Routine auto-install on `session_start` +
+   per-type `SAGES_REMINDER_FIXDIRECTIVES` + cleanup of 2 pre-existing
+   `task-count threshold` WARNs in `AGENTS.md` / `SUBAGENTS.md`
+4. **GC-2026-056** — `verification_cmd` linter (heuristics + execution
+   probe; rejects placeholders like `echo yes`, `pwd`, `true`)
+5. **GC-2026-057** — Goal lock (SHA-256 anti-cheat; detects silent
+   SC modification after the goal is created)
+6. **GC-2026-058** — Verdict enforcement (machine-enforced gate;
+   REVISE/REJECT blocks `task_dispatch` until acknowledged)
+
+Together: 6 new modules, 236 new tests (790 → 1026), 5 new
+postmortems, 6 new feature branches all merged to main.

@@ -127,14 +127,20 @@ function rows(): GcRow[] {
     const sha = header.slice(0, spaceIdx);
     const subject = header.slice(spaceIdx + 1);
     const fullMessage = trimmed; // includes subject + body
-    const m = fullMessage.match(GC_ID_REGEX);
-    if (!m) continue;
-    const id = m[0];
+    // Match ALL GC IDs in the message (subject + body). A merge commit
+    // that mentions both GC-2026-053 and GC-2026-054 should contribute
+    // a candidate to BOTH gc-ids' lists. Previously, only the first
+    // match was used (m[0]), which left merge commits under-counted.
+    // `matchAll` requires a /g regex; create a global variant inline.
+    const allIds = [...fullMessage.matchAll(/GC-\d{4}-\d{3,}/g)].map((m) => m[0]);
+    if (allIds.length === 0) continue;
     const title = extractTitle(subject);
-    const row: GcRow = { id, title, sha, subject };
-    const list = candidates.get(id) ?? [];
-    list.push(row);
-    candidates.set(id, list);
+    for (const id of allIds) {
+      const row: GcRow = { id, title, sha, subject };
+      const list = candidates.get(id) ?? [];
+      list.push(row);
+      candidates.set(id, list);
+    }
   }
 
   // Priority for picking the canonical title. Higher wins.
