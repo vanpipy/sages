@@ -188,7 +188,7 @@ describe("git-expert-prompt: invariants", () => {
 		expect(GIT_EXPERT_PROMPT).not.toMatch(/model[:\s]/i);
 	});
 
-	it("declares inspect capability (搜查) — log/grep/blame/ls-files/diff-tree across refs", () => {
+	it("declares inspect capability — log/grep/blame/ls-files/diff-tree across refs", () => {
 		// The "Inspect" capability surfaces the search semantics:
 		// `git log` / `git grep` / `git blame` / `git ls-files` across
 		// refs. Pin the verbs.
@@ -198,7 +198,7 @@ describe("git-expert-prompt: invariants", () => {
 		expect(GIT_EXPERT_PROMPT.toLowerCase()).toContain("grep");
 	});
 
-	it("declares backtrack capability (回溯) — reflog/fsck/cat-file for lost state", () => {
+	it("declares backtrack capability — reflog/fsck/cat-file for lost state", () => {
 		// The "Backtrack" capability is the archaeology path:
 		// reflog + fsck + cat-file. Pin the commands.
 		expect(GIT_EXPERT_PROMPT.toLowerCase()).toContain("backtrack");
@@ -207,7 +207,7 @@ describe("git-expert-prompt: invariants", () => {
 		expect(GIT_EXPERT_PROMPT.toLowerCase()).toContain("cat-file");
 	});
 
-	it("declares cross-subagent guidance capability (跨 subagent 指导)", () => {
+	it("declares cross-subagent guidance capability", () => {
 		// Cross-subagent guidance is the recipe-for-role path.
 		// Pin that the capability is named so a future edit can't
 		// drop the dispatcher surface.
