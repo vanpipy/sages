@@ -55,5 +55,6 @@
 | GC-2026-058 | verdict enforcement — machine-enforced gate against silent REVISE/REJECT bypass | [.pi/orchestrator/goal-GC-2026-058.yaml](../../.pi/orchestrator/goal-GC-2026-058.yaml) |
 | GC-2026-059 | L1 advisory chain-key detection | [.pi/orchestrator/goal-GC-2026-059.yaml](../../.pi/orchestrator/goal-GC-2026-059.yaml) |
 | GC-2026-060 | merge auto-todowrite + todo reminder | [.pi/orchestrator/goal-GC-2026-060.yaml](../../.pi/orchestrator/goal-GC-2026-060.yaml) |
+| GC-2026-061 | merge todo-as-DAG compile bridge | [.pi/orchestrator/goal-GC-2026-061.yaml](../../.pi/orchestrator/goal-GC-2026-061.yaml) |
 
-_Total: 49 GCs_
+_Total: 50 GCs_
