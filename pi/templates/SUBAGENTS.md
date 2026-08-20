@@ -30,7 +30,7 @@ after the brief; it is not the architecture stage and must not invent missing
 decisions.
 
 The orchestrator **RECOMMENDS** subagent dispatch based on the task shape
-and the task-count threshold (>2 items in the active todowrite):
+and the profile's `dag_threshold` (>2 items in the active todowrite by default):
 
 - **Meta-file edits / design-doc writes** → RECOMMENDED: `developer`
   with `isolation: "current-workspace"` + `tdd: "none"` (no worktree;
