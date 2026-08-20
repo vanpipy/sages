@@ -142,9 +142,12 @@ describe("sages_reminder: formatReminderText (pure)", () => {
     }
   });
 
-  it("T-FMT-06: GENERIC type uses the generic default", () => {
+  it("T-FMT-06: GENERIC type uses the fixdirective (no specific command)", () => {
     const text = formatReminderText({ type: "GENERIC" });
-    expect(text).toContain("Reminder from Sages");
+    // GENERIC's fixdirective is a meta-instruction (no specific shell
+    // command). The default template still serves as fallback.
+    expect(text).toContain("no specific fixdirective");
+    expect(text).toContain("[sages reminder: GENERIC]");
   });
 });
 
