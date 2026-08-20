@@ -2,122 +2,122 @@
 description: codebase-memory-mcp integration for pi - full graph-based code intelligence (14 first-class tools + proxy)
 ---
 
-# pi-codebase-memory - Knowledge Graph 代码智能
+# pi-codebase-memory - Knowledge Graph Code Intelligence
 
-> 把 [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) 的 14 个 MCP 工具暴露为 first-class pi tool + proxy 兜底。基于 tree-sitter AST，158 种语言，**Linux kernel (28M LOC) 索引 3 分钟，查询 < 1ms**。
+> Expose the 14 MCP tools of [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) as first-class pi tools with a proxy fallback. Built on tree-sitter ASTs, 158 languages, **Linux kernel (28M LOC) indexed in 3 minutes, queries < 1ms**.
 
-## 工作流决策
+## Workflow decision
 
 ```
-User 输入自然语言
+User inputs natural language
   ↓
-LLM 读 SKILL.md
+LLM reads SKILL.md
   ↓
-┌─ "谁调用了 X / callers of X / call chain"     → mcp_trace_path
-├─ "改这个函数会炸哪些 / git diff 有什么影响"    → mcp_detect_changes
-├─ "代码库长什么样 / 整体架构 / packages"          → mcp_get_architecture
-├─ "按函数名读源码 / get function body"            → mcp_get_code_snippet
-├─ "找符号 / search symbol / find function"        → mcp_search_graph
-├─ "看 graph 怎么 query / cypher / schema"         → mcp_query_graph / mcp_get_graph_schema
-├─ "扫整个项目 / grep-like / search code"          → mcp_search_code
-├─ "有没有索引过 / 索引状态 / 重新建索引"          → mcp_index_status / mcp_index_repository
-└─ 其它 (manage_adr, list_projects, delete_project, ingest_traces)
+┌─ "who calls X / callers of X / call chain"     → mcp_trace_path
+├─ "what breaks if I change this function / git diff impact"    → mcp_detect_changes
+├─ "what does the codebase look like / overall architecture / packages"          → mcp_get_architecture
+├─ "read source by function name / get function body"            → mcp_get_code_snippet
+├─ "find symbol / search symbol / find function"        → mcp_search_graph
+├─ "how to query the graph / cypher / schema"         → mcp_query_graph / mcp_get_graph_schema
+├─ "scan the whole project / grep-like / search code"          → mcp_search_code
+├─ "is it indexed / index status / rebuild index"          → mcp_index_status / mcp_index_repository
+└─ everything else (manage_adr, list_projects, delete_project, ingest_traces)
                                                → mcp({ tool: "..." })
 ```
 
-## 14 个 first-class 工具速查
+## 14 first-class tools quick reference
 
-> LLM 直接看 system prompt 就能选，不需要先 `mcp({search: "..."})`。
+> The LLM can pick directly from the system prompt without needing `mcp({search: "..."})` first.
 
-### 🔍 索引管理（Indexing）
+### 🔍 Indexing
 
-| 工具 | 用途 | 典型调用 |
+| Tool | Purpose | Typical call |
 |------|------|---------|
-| `mcp_list_projects` | 列出所有已索引项目 + node/edge counts | `mcp_list_projects()` |
-| `mcp_index_status` | 检查某个项目的索引状态 | `mcp_index_status({ project: "." })` |
-| `mcp_index_repository` | 建/重建索引（首次慢，大仓库可能几分钟） | `mcp_index_repository({ project: "." })` |
-| `mcp_delete_project` | 删项目 + 所有 graph 数据 | `mcp_delete_project({ project: "." })` |
+| `mcp_list_projects` | List all indexed projects + node/edge counts | `mcp_list_projects()` |
+| `mcp_index_status` | Check a project's index status | `mcp_index_status({ project: "." })` |
+| `mcp_index_repository` | Create/rebuild an index (slow on first run; large repos may take minutes) | `mcp_index_repository({ project: "." })` |
+| `mcp_delete_project` | Delete a project + all graph data | `mcp_delete_project({ project: "." })` |
 
-### 🔎 查询（Querying — sage workflow 高频）
+### 🔎 Querying (high frequency in sage workflows)
 
-| 工具 | 用途 | 典型调用 |
+| Tool | Purpose | Typical call |
 |------|------|---------|
-| `mcp_search_graph` | 结构化搜索（label/name/pattern/degree + 分页） | `mcp_search_graph({ label: "Function", name_pattern: "execute.*", limit: 20 })` |
-| `mcp_trace_path` | **调用图 BFS 遍历** — sage 最常用 | `mcp_trace_path({ name: "executeTask", direction: "callers", depth: 3 })` |
-| `mcp_detect_changes` | **git diff → 受影响符号 + blast radius** | `mcp_detect_changes({ base: "main" })` |
-| `mcp_get_code_snippet` | 按 qualified name 拿函数完整源码 | `mcp_get_code_snippet({ name: "executeTask" })` |
-| `mcp_get_architecture` | 代码库全景（语言/包/路由/hotspot/cluster/ADR） | `mcp_get_architecture()` |
-| `mcp_query_graph` | Cypher-like 图查询（read-only） | `mcp_query_graph({ query: "MATCH (f:Function)-[:CALLS]->(g:Function) WHERE f.name='executeTask' RETURN g LIMIT 10" })` |
-| `mcp_get_graph_schema` | Node/edge types + property 定义 | `mcp_get_graph_schema()` |
-| `mcp_search_code` | 索引内全文搜索（比 grep 快） | `mcp_search_code({ query: "TODO", regex: true })` |
+| `mcp_search_graph` | Structured search (label/name/pattern/degree + pagination) | `mcp_search_graph({ label: "Function", name_pattern: "execute.*", limit: 20 })` |
+| `mcp_trace_path` | **Call-graph BFS traversal** — most used in sage | `mcp_trace_path({ name: "executeTask", direction: "callers", depth: 3 })` |
+| `mcp_detect_changes` | **git diff → affected symbols + blast radius** | `mcp_detect_changes({ base: "main" })` |
+| `mcp_get_code_snippet` | Get a function's full source by qualified name | `mcp_get_code_snippet({ name: "executeTask" })` |
+| `mcp_get_architecture` | Codebase overview (languages/packages/routes/hotspots/clusters/ADRs) | `mcp_get_architecture()` |
+| `mcp_query_graph` | Cypher-like graph queries (read-only) | `mcp_query_graph({ query: "MATCH (f:Function)-[:CALLS]->(g:Function) WHERE f.name='executeTask' RETURN g LIMIT 10" })` |
+| `mcp_get_graph_schema` | Node/edge types + property definitions | `mcp_get_graph_schema()` |
+| `mcp_search_code` | Full-text search within the index (faster than grep) | `mcp_search_code({ query: "TODO", regex: true })` |
 
-### 📝 高级（少用，但需要时直接有）
+### 📝 Advanced (rarely used, but there when needed)
 
-| 工具 | 用途 | 典型调用 |
+| Tool | Purpose | Typical call |
 |------|------|---------|
 | `mcp_manage_adr` | CRUD Architecture Decision Records | `mcp_manage_adr({ action: "create", title: "...", content: "..." })` |
-| `mcp_ingest_traces` | 运行时 trace 入图（验证 HTTP_CALLS edge） | `mcp_ingest_traces({ project: ".", trace_file: "..." })` |
+| `mcp_ingest_traces` | Ingest runtime traces into the graph (validates HTTP_CALLS edges) | `mcp_ingest_traces({ project: ".", trace_file: "..." })` |
 
-## `mcp` proxy 工具
+## `mcp` proxy tool
 
-非 first-class 的边角用法通过 proxy：
+Non-first-class edge cases go through the proxy:
 
 ```js
-mcp({ search: "codebase" })                              // 列所有 14 个 first-class tool 名
-mcp({ describe: "mcp_trace_path" })                       // 看参数 schema
-mcp({ tool: "mcp_index_repository", args: '{"project":"."}' })  // 走具体 tool
+mcp({ search: "codebase" })                              // list all 14 first-class tool names
+mcp({ describe: "mcp_trace_path" })                       // inspect the parameter schema
+mcp({ tool: "mcp_index_repository", args: '{"project":"."}' })  // invoke a specific tool
 ```
 
-## ⚠️ 何时用 serena vs codebase-memory-mcp
+## ⚠️ When to use serena vs codebase-memory-mcp
 
-| 场景 | 用 | 原因 |
+| Scenario | Use | Why |
 |------|-----|------|
-| **快速找一个函数体**（< 100 文件项目） | **codebase-memory-mcp** (`mcp_get_code_snippet`) | 索引后 < 1ms |
-| **快速编辑函数体** | **pi-serena** (`mcp_replace_symbol_body`) | LSP 维护缩进 |
-| **大项目找 caller**（> 1k 文件） | **codebase-memory-mcp** (`mcp_trace_path`) | 图遍历 vs grep |
-| **改代码后看影响面** | **codebase-memory-mcp** (`mcp_detect_changes`) | git diff → 自动算 blast radius |
-| **精确编辑（保持语法正确）** | **pi-serena** (`mcp_replace_symbol_body`) | AST-aware 编辑 |
-| **架构理解 / 跨包分析** | **codebase-memory-mcp** (`mcp_get_architecture`) | 跨包概览 |
-| **LSP 语义（类型/继承）** | **pi-serena** (`mcp_find_symbol`) | 真实 LSP，不是 regex |
+| **Quickly find a function body** (< 100 file project) | **codebase-memory-mcp** (`mcp_get_code_snippet`) | < 1ms after indexing |
+| **Quickly edit a function body** | **pi-serena** (`mcp_replace_symbol_body`) | LSP maintains indentation |
+| **Find callers in a large project** (> 1k files) | **codebase-memory-mcp** (`mcp_trace_path`) | graph traversal vs grep |
+| **See impact after changing code** | **codebase-memory-mcp** (`mcp_detect_changes`) | git diff → automatic blast radius |
+| **Precise edits (keep syntax correct)** | **pi-serena** (`mcp_replace_symbol_body`) | AST-aware edits |
+| **Architecture understanding / cross-package analysis** | **codebase-memory-mcp** (`mcp_get_architecture`) | cross-package overview |
+| **LSP semantics (types/inheritance)** | **pi-serena** (`mcp_find_symbol`) | real LSP, not regex |
 
-## 配合 orchestrator 工作流
+## Working with orchestrator workflows
 
-| Orchestrator 阶段 | 推荐 codebase-memory-mcp 用法 |
+| Orchestrator stage | Recommended codebase-memory-mcp usage |
 |----------|----------------------------------|
-| **Goal（1. goal_contract_create）** | `mcp_get_architecture()` — 自动拿到代码库 overview，跳过手写调研 |
-| **DAG（2. dag_synthesize）** | `mcp_detect_changes({base: "main"})` — 提前知道任务影响面 |
-| **Dispatch（3. task_dispatch）** | `mcp_trace_path({direction: "callers", depth: 2})` — 改前看下游 |
-| **Audit（4. orchestrator_audit）** | `mcp_detect_changes` + `mcp_query_graph` — 验证 commit 是否安全 |
+| **Goal (1. goal_contract_create)** | `mcp_get_architecture()` — get the codebase overview automatically, skip manual research |
+| **DAG (2. dag_synthesize)** | `mcp_detect_changes({base: "main"})` — know the task's blast radius up front |
+| **Dispatch (3. task_dispatch)** | `mcp_trace_path({direction: "callers", depth: 2})` — see downstream before changing |
+| **Audit (4. orchestrator_audit)** | `mcp_detect_changes` + `mcp_query_graph` — verify the commit is safe |
 
-## 首次使用（first-session initialization）
+## First use (first-session initialization)
 
-进入一个新 workspace 时：
+When entering a new workspace:
 
-1. **检测**：`mcp_index_status({project: "."})` → 看 "no index" 表示需要建
-2. **建索引**：`mcp_index_repository({project: "."})` → 大仓库 ~几分钟，小仓库秒级
-3. **开始用**：`mcp_search_graph`, `mcp_trace_path`, ...
+1. **Detect**: `mcp_index_status({project: "."})` → a "no index" result means you need to build one
+2. **Build the index**: `mcp_index_repository({project: "."})` → large repos take ~minutes, small repos seconds
+3. **Start using**: `mcp_search_graph`, `mcp_trace_path`, ...
 
-> 注：上游 `codebase-memory-mcp` 是独立进程 (C + 薄 Go wrapper)，第一次 mcp 调用会触发进程启动 (~1s cold start)。
+> Note: upstream `codebase-memory-mcp` is a standalone process (C + thin Go wrapper); the first mcp call triggers process startup (~1s cold start).
 
-## 安全约束
+## Safety constraints
 
-| 约束 | 原因 |
+| Constraint | Reason |
 |------|------|
-| `excludeTools: []` (空) | 上游纯 graph 操作，无 shell exec / 无文件写入（除 `index_*` / `manage_adr`） |
-| 工具调用 sandboxed | codebase-memory-mcp 只读 graph，**不能改你的代码** |
-| 写入操作需要显式调用 | `index_repository` / `delete_project` / `manage_adr` 都是独立 tool，不会意外触发 |
+| `excludeTools: []` (empty) | upstream is pure graph operations — no shell exec / no file writes (except `index_*` / `manage_adr`) |
+| Tool calls sandboxed | codebase-memory-mcp only reads the graph; **cannot modify your code** |
+| Write operations require explicit calls | `index_repository` / `delete_project` / `manage_adr` are standalone tools; nothing triggers them accidentally |
 
-## 故障排查
+## Troubleshooting
 
-| 症状 | 原因 | 解决 |
+| Symptom | Cause | Fix |
 |------|------|------|
-| `mcp_*` tool 找不到 | `pi-mcp-adapter` 未装 | `pi install npm:pi-mcp-adapter` |
-| `codebase-memory-mcp: command not found` | 二进制未装 | `./pi/scripts/install.sh --force` |
-| `mcp_index_repository` 超时 (>2 min) | 大项目首次扫描 | 等待；状态用 `mcp_index_status` |
-| `mcp_*` 返回空结果 | 项目未索引 | `mcp_index_repository({project: "."})` |
-| `command not found` 在 PATH 里 | binary 装到 `~/.local/bin/` 但 PATH 没含 | `export PATH="$HOME/.local/bin:$PATH"` |
+| `mcp_*` tool not found | `pi-mcp-adapter` not installed | `pi install npm:pi-mcp-adapter` |
+| `codebase-memory-mcp: command not found` | binary not installed | `./pi/scripts/install.sh --force` |
+| `mcp_index_repository` times out (>2 min) | first scan of a large project | wait; check status with `mcp_index_status` |
+| `mcp_*` returns empty results | project not indexed | `mcp_index_repository({project: "."})` |
+| `command not found` with binary in PATH | binary installed to `~/.local/bin/` but PATH doesn't include it | `export PATH="$HOME/.local/bin:$PATH"` |
 
-## 更多信息
+## More info
 
 - upstream: https://github.com/DeusData/codebase-memory-mcp
 - paper: [Codebase-Memory: Tree-Sitter-Based Knowledge Graphs for LLM Code Exploration via MCP](https://arxiv.org/abs/2603.27277)
