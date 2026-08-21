@@ -57,5 +57,6 @@
 | GC-2026-060 | merge auto-todowrite + todo reminder | [.pi/orchestrator/goal-GC-2026-060.yaml](../../.pi/orchestrator/goal-GC-2026-060.yaml) |
 | GC-2026-061 | merge todo-as-DAG compile bridge | [.pi/orchestrator/goal-GC-2026-061.yaml](../../.pi/orchestrator/goal-GC-2026-061.yaml) |
 | GC-2026-062 | T4 template-loader module-relative | [.pi/orchestrator/goal-GC-2026-062.yaml](../../.pi/orchestrator/goal-GC-2026-062.yaml) |
+| GC-2026-063 | T3 audit init summary | [.pi/orchestrator/goal-GC-2026-063.yaml](../../.pi/orchestrator/goal-GC-2026-063.yaml) |
 
-_Total: 51 GCs_
+_Total: 52 GCs_
