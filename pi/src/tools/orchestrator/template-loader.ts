@@ -5,41 +5,56 @@
  *                   (or wherever the sages package is installed)
  *
  * Used by dag_synthesizer to render TaskNode.prompt from `task_template` + `task_params`.
+ *
+ * Resolution (GC-2026-062): sages is a GLOBAL pi extension, so the package
+ * must resolve from any cwd on any machine. The module knows its own
+ * location — PACKAGE_ROOT is the source of truth: it is the package root
+ * in the installed copy (<pkg>/) and the `pi/` directory in the source
+ * checkout. No machine-specific or cwd-derived paths are ever assumed.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 
-/** Locations to search for the sages package, in priority order. */
-const SAGES_LOCATIONS = [
-  process.env.SAGES_PATH,
-  join(process.env.HOME || "/root", ".pi", "packages", "sages"),
-  "/home/leroy/.pi/packages/sages",
-];
+/** The sages package root: <pkg>/ in the installed copy, <repo>/pi in the source tree. */
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
-/** Resolve the installed sages root. */
+/**
+ * Resolve the sages root, in priority order:
+ *   1. SAGES_PATH — explicit user override
+ *   2. PACKAGE_ROOT — the running package (module-relative; primary source of truth)
+ *   3. ~/.pi/packages/sages — standard install fallback
+ * Evaluated per call so env overrides apply at runtime.
+ */
 export function findSagesRoot(): string | null {
-  for (const loc of SAGES_LOCATIONS) {
+  const locations = [
+    process.env.SAGES_PATH,
+    PACKAGE_ROOT,
+    join(process.env.HOME || homedir(), ".pi", "packages", "sages"),
+  ];
+  for (const loc of locations) {
     if (loc && existsSync(join(loc, "package.json"))) return loc;
   }
   return null;
 }
 
 /**
- * Dev/test fallback: cwd itself (e.g. when running tests from the source repo).
+ * Explicit dev-only escape hatch: cwd-based resolution, gated on SAGES_DEV=1.
  *
- * SECURITY: only enabled when SAGES_DEV=1 is set, or NODE_ENV !== "production",
- * or the cwd contains a `pi/package.json` (i.e. the user is in the sages
- * source tree). Otherwise, production callers must use SAGES_PATH or the
- * default install location.
+ * Module-relative PACKAGE_ROOT already serves both dev (the source tree is
+ * the module's own location) and production (the installed package), so the
+ * cwd fallback is only for running a COPY of the package from a different
+ * cwd. Without SAGES_DEV=1 this returns null unconditionally — template
+ * resolution must never depend on process.cwd() implicitly.
  */
 function cwdFallbackSagesRoot(): string | null {
-  const isDev = process.env.SAGES_DEV === "1" || process.env.NODE_ENV !== "production";
+  if (process.env.SAGES_DEV !== "1") return null;
 
   // Heuristic: cwd looks like the sages source tree (has pi/package.json)
   const cwdIsSagesSrc = existsSync(join(process.cwd(), "pi", "package.json"));
-
-  if (!isDev && !cwdIsSagesSrc) return null;
+  if (!cwdIsSagesSrc) return null;
 
   const cwdTemplates = join(process.cwd(), "skills", "orchestrator", "templates");
   if (existsSync(cwdTemplates)) return process.cwd();
@@ -52,12 +67,12 @@ function cwdFallbackSagesRoot(): string | null {
   return existsSync(cwdTemplatesPi) ? process.cwd() : null;
 }
 
-/** Resolve the orchestrator templates root. Falls back to cwd only in dev. */
+/** Resolve the orchestrator templates root. Falls back to cwd only with SAGES_DEV=1. */
 export function findTemplatesRoot(): string | null {
   // Try each candidate sages root — return the first one that actually has templates.
-  // In development, prefer the active source worktree over any stale package
-  // installed under ~/.pi. Production has no cwd fallback, so SAGES_PATH and
-  // the normal install locations retain their existing priority.
+  // Module-relative resolution serves dev (the source tree is the module's own
+  // location) and production (the installed package) alike; the cwd fallback is
+  // an explicit escape hatch gated on SAGES_DEV=1.
   const candidates = [cwdFallbackSagesRoot(), findSagesRoot()].filter(
     (r): r is string => r !== null,
   );
