@@ -88,6 +88,7 @@ import {
 } from "./tools/todo/todo-state.js";
 import { deriveDagTodos, registerSagesTodoTool } from "./tools/todo/sages-todo-tool.js";
 import { maybeCompileDagFromTodos } from "./tools/todo/dag-compile.js";
+import { buildSessionDigest, formatSessionDigest } from "./observability/digest.js";
 
 // Load the active profile once at module load. Resolution order is
 // documented in `profile.ts`; falls back to the `standard` built-in
@@ -205,6 +206,24 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 			// Don't fail session_start; just log and continue.
 			console.error(
 				`[sages] installSagesRoutines failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+
+		// GC-2026-067 T2: surface a one-shot `[sages session digest]`
+		// reminder listing in-flight goals, pending audit verdicts,
+		// unmerged branches, and todo state. The digest scans the
+		// orchestrator state directory + runs `git worktree list` /
+		// `git rev-list --count` for branch-ahead detection. Failure
+		// modes (no orchestrator dir, no git, corrupt yaml) all
+		// degrade to empty sections — never throw out of session_start.
+		try {
+			const digest = buildSessionDigest(cwd);
+			if (digest !== null) {
+				pi.appendEntry("system", formatSessionDigest(digest));
+			}
+		} catch (err) {
+			console.error(
+				`[sages] buildSessionDigest failed: ${err instanceof Error ? err.message : String(err)}`,
 			);
 		}
 	});
