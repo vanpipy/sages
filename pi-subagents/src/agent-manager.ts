@@ -1,7 +1,7 @@
 /**
  * agent-manager.ts — Tracks agents, background execution, resume support.
  *
- * Background agents are subject to a configurable concurrency limit (default: 4).
+ * Background agents are subject to a configurable concurrency limit (default: 6).
  * Excess agents are queued and auto-started as running agents complete.
  * Foreground agents bypass the queue (they block the parent anyway).
  */
@@ -60,7 +60,7 @@ export type CompactionInfo = {
 };
 
 /** Default max concurrent background agents. */
-const DEFAULT_MAX_CONCURRENT = 4;
+const DEFAULT_MAX_CONCURRENT = 6;
 
 /**
  * Validate a caller-supplied SpawnOptions.cwd. `undefined`/`null` mean "unset"
