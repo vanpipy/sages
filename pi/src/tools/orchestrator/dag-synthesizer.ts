@@ -123,6 +123,7 @@ export const DAGParams = Type.Object({
   goal_id: Type.String({ description: "Goal contract id (e.g. 'GC-2025-001')" }),
   tasks: Type.Array(TaskNodeSchema, { description: "TaskNode[] forming the DAG", minItems: 1, maxItems: 30 }),
   parallelism_notes: Type.Optional(Type.String({ description: "Why this batch design maximizes parallelism" })),
+  verbose: Type.Optional(Type.Boolean({ description: "Return the full plan (with task prompts). Default false returns a task summary." })),
 });
 
 export type DAGInput = Static<typeof DAGParams>;
@@ -378,6 +379,92 @@ export function loadPlan(cwd: string, dagId: string): OrchestrationPlan | null {
 }
 
 /**
+ * GC-2026-063: compact summary of a plan for the default (non-verbose)
+ * tool response. The full plan (incl. every task's `prompt`) is already
+ * persisted to .pi/orchestrator/dag-{id}.yaml, so echoing it back to the
+ * LLM is pure redundancy.
+ */
+export function summaryForPlan(plan: OrchestrationPlan) {
+  return {
+    id: plan.id,
+    goal_id: plan.goal_id,
+    batch_count: plan.tasks.reduce((max, t) => Math.max(max, t.batch), 0),
+    tasks: plan.tasks.map((t) => ({
+      id: t.id,
+      description: t.description,
+      batch: t.batch,
+      subagent_type: t.subagent_type,
+      depends_on: t.depends_on,
+      covers: t.acceptance?.covers ?? [],
+    })),
+  };
+}
+
+/**
+ * Pure (well — file I/O only) entry point for dag_synthesize.
+ * Extracted from the registered tool so it can be unit-tested directly
+ * without going through pi.registerTool.
+ */
+export async function executeDAGSynthesize(
+  params: DAGInput,
+  ctx: { cwd: string },
+): Promise<{ content: { type: "text"; text: string }[]; details?: { path: string; plan: OrchestrationPlan } }> {
+  const cwd: string = ctx.cwd;
+
+  // Load goal contract
+  const contract = loadGoalContract(cwd, params.goal_id);
+  if (!contract) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        intent: `Goal contract ${params.goal_id} not found. Run goal_contract_create first.`,
+        validation: { errors: ["goal contract not found — create it with goal_contract_create"] },
+      }) }],
+    };
+  }
+
+  // Validate DAG
+  const result = validateDAG(params, contract);
+  if (!result.valid) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        intent: "Fix DAG errors and re-call.",
+        validation: { errors: result.errors, warnings: result.warnings, files_required: [] },
+      }) }],
+    };
+  }
+
+  // Build plan and write
+  const plan = buildPlan(params, contract);
+  const path = atomicWriteOrchestratorFile(cwd, `dag-${plan.id}.yaml`, planToYaml(plan), {
+    owner: "l3",
+    validate: isOrchestrationPlanState,
+  });
+
+  const response: Record<string, unknown> = {
+    status: "in_progress",
+    intent: "DAG saved. Next: call task_dispatch with this dag_id to begin execution.",
+    validation: {
+      errors: [],
+      warnings: result.warnings,
+      files_required: [path],
+    },
+    summary: summaryForPlan(plan),
+    plan_path: path,
+    next_step: `task_dispatch({ dag_id: "${plan.id}", strategy: "auto" })`,
+  };
+  if (params.verbose === true) {
+    response.plan = plan;
+  }
+
+  return {
+    content: [{ type: "text", text: JSON.stringify(response) }],
+    details: { path, plan },
+  };
+}
+
+/**
  * Tool registration.
  */
 export function registerDAGSynthesizerTool(pi: any): void {
@@ -388,54 +475,7 @@ export function registerDAGSynthesizerTool(pi: any): void {
     parameters: DAGParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      const cwd: string = ctx.cwd;
-
-      // Load goal contract
-      const contract = loadGoalContract(cwd, params.goal_id);
-      if (!contract) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            intent: `Goal contract ${params.goal_id} not found. Run goal_contract_create first.`,
-            validation: { errors: ["goal contract not found — create it with goal_contract_create"] },
-          }) }],
-        };
-      }
-
-      // Validate DAG
-      const result = validateDAG(params, contract);
-      if (!result.valid) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            intent: "Fix DAG errors and re-call.",
-            validation: { errors: result.errors, warnings: result.warnings, files_required: [] },
-          }) }],
-        };
-      }
-
-      // Build plan and write
-      const plan = buildPlan(params, contract);
-      const path = atomicWriteOrchestratorFile(cwd, `dag-${plan.id}.yaml`, planToYaml(plan), {
-        owner: "l3",
-        validate: isOrchestrationPlanState,
-      });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          status: "in_progress",
-          intent: "DAG saved. Next: call task_dispatch with this dag_id to begin execution.",
-          validation: {
-            errors: [],
-            warnings: result.warnings,
-            files_required: [path],
-          },
-          plan: plan,
-          plan_path: path,
-          next_step: `task_dispatch({ dag_id: "${plan.id}", strategy: "auto" })`,
-        }) }],
-        details: { path, plan },
-      };
+      return executeDAGSynthesize(params, { cwd: ctx.cwd });
     },
   });
 }
