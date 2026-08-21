@@ -12,6 +12,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import {
 	loadProfile,
 	loadBuiltInProfile,
+	builtinProfileDir,
+	STANDARD_PROFILE,
 	clearProfileCache,
 	type Profile,
 } from "@/profile.js";
@@ -199,7 +201,7 @@ describe("profile.ts — validation (malformed input)", () => {
  * `process.cwd()` (which is `pi/` when tests are invoked via
  * `bun test ./test`).
  */
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve as pathResolve } from "node:path";
@@ -325,5 +327,38 @@ describe("loadProfile — override path (GC-2026-049 T3.2)", () => {
 				// best-effort cleanup
 			}
 		}
+	});
+});
+
+/**
+ * GC-2026-062 — module-relative built-in resolution + in-code fallback.
+ *
+ * These tests pin the two new profile.ts exports:
+ *   1. `builtinProfileDir()` — resolves the directory holding the
+ *      built-in profile YAMLs from ANY cwd (module-relative package
+ *      root first, legacy cwd-relative candidates as fallbacks).
+ *   2. `STANDARD_PROFILE` — the in-code `standard` profile used when
+ *      no built-in YAML can be found (missing/partial install). It
+ *      must match the on-disk `standard.yaml` field-for-field so the
+ *      fallback is never a drift risk.
+ */
+describe("builtin profile dir + STANDARD_PROFILE fallback (GC-2026-062)", () => {
+	it("builtinProfileDir() resolves to a directory containing standard.yaml", () => {
+		const dir = builtinProfileDir();
+		expect(existsSync(join(dir, "standard.yaml"))).toBe(true);
+	});
+
+	it("STANDARD_PROFILE matches loadBuiltInProfile('standard') field-for-field", () => {
+		const fromDisk = loadBuiltInProfile("standard");
+		expect(STANDARD_PROFILE.id).toBe(fromDisk.id);
+		expect(STANDARD_PROFILE.description).toBe(fromDisk.description);
+		expect(STANDARD_PROFILE.subagents).toEqual(fromDisk.subagents);
+		expect(STANDARD_PROFILE.isolation_default).toBe(fromDisk.isolation_default);
+		expect(STANDARD_PROFILE.dag_threshold).toBe(fromDisk.dag_threshold);
+		expect(STANDARD_PROFILE.gate_suite).toEqual(fromDisk.gate_suite);
+		expect(STANDARD_PROFILE.soft_mode_reminder).toBe(fromDisk.soft_mode_reminder);
+		expect(STANDARD_PROFILE.soft_mode_system_prompt_suffix).toBe(
+			fromDisk.soft_mode_system_prompt_suffix,
+		);
 	});
 });
