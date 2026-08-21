@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as yaml from "js-yaml";
 
 export type SubagentKind = "read-only" | "write-isolated" | "write-meta";
@@ -21,14 +22,29 @@ export interface Registry {
 const SUBAGENT_KINDS = new Set<SubagentKind>(["read-only", "write-isolated", "write-meta"]);
 const ISOLATION_MODES = new Set<IsolationMode>(["none", "current-workspace", "worktree"]);
 
+/**
+ * Package root: from `src/tools/orchestrator/` this is `pi/` in the
+ * repo checkout and `<pkg>/` in the installed package at
+ * `~/.pi/packages/sages`. Module-relative, so the bundled registry
+ * resolves from ANY cwd.
+ */
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
 let cached: Registry | undefined;
 
 function registryPath(): string {
   if (process.env.SUBAGENT_REGISTRY_PATH) return process.env.SUBAGENT_REGISTRY_PATH;
 
-  // The daemon runs from the repository root, while package scripts run from pi/.
-  const repositoryPath = resolve("pi/subagents/registry.yaml");
-  return existsSync(repositoryPath) ? repositoryPath : resolve("subagents/registry.yaml");
+  // Module-relative package root first — works from any cwd, including
+  // the installed package at ~/.pi/packages/sages and the repo
+  // checkout pi/. The daemon's repo root and pi/ remain as
+  // cwd-relative fallbacks for compatibility.
+  const candidates = [
+    join(PACKAGE_ROOT, "subagents", "registry.yaml"),
+    resolve("pi/subagents/registry.yaml"),
+    resolve("subagents/registry.yaml"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
 }
 
 function validateRegistry(value: unknown): asserts value is Registry {
