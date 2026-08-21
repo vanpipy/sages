@@ -30,6 +30,8 @@ import {
 } from "./state-persistence.js";
 import { renderTaskPrompt, validateTemplateParams } from "./template-loader.js";
 import { knownSubagentIds } from "./subagent-registry.js";
+import { RunEvent } from "../../observability/events.js";
+import { emitRunEvent } from "../../observability/runner.js";
 
 export const TaskNodeSchema = Type.Object({
   id: Type.String({ description: "Semantic id like 'P1', 'P2.a'", pattern: "^[A-Z][0-9]+(\\.[a-z])?$" }),
@@ -440,6 +442,13 @@ export async function executeDAGSynthesize(
   const path = atomicWriteOrchestratorFile(cwd, `dag-${plan.id}.yaml`, planToYaml(plan), {
     owner: "l3",
     validate: isOrchestrationPlanState,
+  });
+
+  // GC-2026-067 T1: emit run/dag_synthesized. Without this the watchdog
+  // has no audit-state-{dag_id}.yaml fingerprint to track.
+  emitRunEvent(plan.id, RunEvent.DagSynthesized, {
+    goal_id: plan.goal_id,
+    task_count: plan.tasks.length,
   });
 
   const response: Record<string, unknown> = {
