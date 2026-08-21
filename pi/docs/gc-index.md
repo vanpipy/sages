@@ -2,7 +2,7 @@
 
 > **Maintained by:** `bun run gen:gcdb` (run from `pi/`).
 > **Source:** `git log --all --grep='GC-'`
-> **Last generated:** 2026-08-20
+> **Last generated:** 2026-08-21
 
 | ID | Title | Goal contract |
 | --- | --- | --- |
@@ -56,5 +56,6 @@
 | GC-2026-059 | L1 advisory chain-key detection | [.pi/orchestrator/goal-GC-2026-059.yaml](../../.pi/orchestrator/goal-GC-2026-059.yaml) |
 | GC-2026-060 | merge auto-todowrite + todo reminder | [.pi/orchestrator/goal-GC-2026-060.yaml](../../.pi/orchestrator/goal-GC-2026-060.yaml) |
 | GC-2026-061 | merge todo-as-DAG compile bridge | [.pi/orchestrator/goal-GC-2026-061.yaml](../../.pi/orchestrator/goal-GC-2026-061.yaml) |
+| GC-2026-062 | T4 template-loader module-relative | [.pi/orchestrator/goal-GC-2026-062.yaml](../../.pi/orchestrator/goal-GC-2026-062.yaml) |
 
-_Total: 50 GCs_
+_Total: 51 GCs_
