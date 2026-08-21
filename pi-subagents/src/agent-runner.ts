@@ -1131,10 +1131,10 @@ export async function runAgent(
 	//   2. Post-check: after session.prompt resolves, if the signal became
 	//      aborted during the run, mark `aborted=true` so the agent
 	//      record surfaces the deadline breach instead of looking complete.
-	if (effectiveSignal?.aborted) {
+	if (options.runController?.signal.aborted) {
 		aborted = true;
 		budgetFailure = `agent aborted before run start: ${String(
-			effectiveSignal.reason ?? "deadline exceeded",
+			options.runController.signal.reason ?? "deadline exceeded",
 		)}`;
 	} else {
 		try {
@@ -1160,10 +1160,10 @@ export async function runAgent(
 		// session.prompt and the LLM loop ignored the signal, mark the
 		// agent as aborted so the orchestrator records it correctly rather
 		// than treating a deadline breach as a clean completion.
-		if (effectiveSignal?.aborted && !aborted) {
+		if (options.runController?.signal.aborted && !aborted) {
 			aborted = true;
 			budgetFailure = `agent aborted during run: ${String(
-				effectiveSignal.reason ?? "deadline exceeded",
+				options.runController.signal.reason ?? "deadline exceeded",
 			)}`;
 		}
 	}
