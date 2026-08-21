@@ -31,6 +31,8 @@ import { ORCHESTRATOR_DIR, dagPath } from "./types.js";
 import { loadPlan } from "./dag-synthesizer.js";
 import { atomicWriteOrchestratorFile, isOrchestrationPlanState } from "./state-persistence.js";
 import { lookupSubagent } from "./subagent-registry.js";
+import { RunEvent } from "../../observability/events.js";
+import { emitRunEvent } from "../../observability/runner.js";
 
 export const TaskDispatchParams = Type.Object({
   dag_id: Type.String({ description: "DAG id like 'DAG-2025-001'" }),
@@ -487,6 +489,14 @@ export async function executeTaskDispatch(params: TaskDispatchInput, ctx: { cwd:
   plan.updated_at = new Date().toISOString();
   const dispatch = buildDispatchPlan(plan, params.strategy, params.max_concurrent ?? 6);
   const planPath = savePlan(cwd, plan);
+
+  // GC-2026-067 T1: emit run/dispatch_started. Without this the watchdog
+  // and session digest have no per-batch event to detect active dispatch.
+  emitRunEvent(plan.id, RunEvent.DispatchStarted, {
+    strategy: params.strategy,
+    batch_count: dispatch.batches.length,
+    task_count: dispatch.total_tasks,
+  });
   const verbose = params.verbose === true;
   return {
     content: [{ type: "text", text: JSON.stringify({
