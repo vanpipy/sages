@@ -59,6 +59,7 @@ export const GoalContractParams = Type.Object({
     lint_required: Type.Optional(Type.Boolean()),
   }, { additionalProperties: true }),
   done_definition: Type.String({ description: "When is this considered done", minLength: 10 }),
+  verbose: Type.Optional(Type.Boolean({ description: "Return the full goal contract. Default false returns a compact summary." })),
 });
 
 export type GoalContractInput = Static<typeof GoalContractParams>;
@@ -268,6 +269,81 @@ export function buildLockedGoalContract(input: GoalContractInput): GoalContract 
 }
 
 /**
+ * GC-2026-063: compact summary of a goal contract for the default
+ * (non-verbose) tool response. The full contract is already persisted to
+ * .pi/orchestrator/goal-{id}.yaml, so echoing it back to the LLM is pure
+ * redundancy — the summary carries the shape + counts instead.
+ */
+export function summaryForGoal(contract: GoalContract) {
+  return {
+    id: contract.id,
+    title: contract.title,
+    success_criteria: contract.success_criteria.length,
+    anti_goals: contract.anti_goals.length,
+    scope_include: contract.scope.include.length,
+    scope_exclude: contract.scope.exclude.length,
+  };
+}
+
+/**
+ * Pure (well — file I/O only) entry point for goal_contract_create.
+ * Extracted from the registered tool so it can be unit-tested directly
+ * without going through pi.registerTool.
+ */
+export async function executeGoalContractCreate(
+  params: GoalContractInput,
+  ctx: { cwd: string },
+): Promise<{ content: { type: "text"; text: string }[]; details?: { path: string; contract: GoalContract } }> {
+  const cwd: string = ctx.cwd;
+
+  // Validate
+  const result = validateGoalContract(params);
+  if (!result.valid) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "error",
+        intent: "Fix the validation errors below and call again.",
+        validation: {
+          errors: result.errors,
+          warnings: result.warnings,
+          files_required: [],
+        },
+      }) }],
+    };
+  }
+
+  // Build and write
+  const contract = buildGoalContract(params);
+  const path = atomicWriteOrchestratorFile(
+    cwd,
+    `goal-${contract.id}.yaml`,
+    yaml.dump(contract, { indent: 2, lineWidth: 120, noRefs: true }),
+    { owner: "l3", validate: isGoalContractState },
+  );
+
+  const response: Record<string, unknown> = {
+    status: "in_progress",
+    intent: "Goal contract saved. Next: call dag_synthesize with this goal_id to decompose into a task DAG.",
+    validation: {
+      errors: [],
+      warnings: result.warnings,
+      files_required: [path],
+    },
+    summary: summaryForGoal(contract),
+    goal_contract_path: path,
+    next_step: `dag_synthesize({ goal_id: "${contract.id}" })`,
+  };
+  if (params.verbose === true) {
+    response.goal_contract = contract;
+  }
+
+  return {
+    content: [{ type: "text", text: JSON.stringify(response) }],
+    details: { path, contract },
+  };
+}
+
+/**
  * Tool registration. Caller passes the pi extension API.
  */
 export function registerGoalContractTool(pi: any): void {
@@ -278,48 +354,7 @@ export function registerGoalContractTool(pi: any): void {
     parameters: GoalContractParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      const cwd: string = ctx.cwd;
-
-      // Validate
-      const result = validateGoalContract(params);
-      if (!result.valid) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            status: "error",
-            intent: "Fix the validation errors below and call again.",
-            validation: {
-              errors: result.errors,
-              warnings: result.warnings,
-              files_required: [],
-            },
-          }) }],
-        };
-      }
-
-      // Build and write
-      const contract = buildGoalContract(params);
-      const path = atomicWriteOrchestratorFile(
-        cwd,
-        `goal-${contract.id}.yaml`,
-        yaml.dump(contract, { indent: 2, lineWidth: 120, noRefs: true }),
-        { owner: "l3", validate: isGoalContractState },
-      );
-
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          status: "in_progress",
-          intent: "Goal contract saved. Next: call dag_synthesize with this goal_id to decompose into a task DAG.",
-          validation: {
-            errors: [],
-            warnings: result.warnings,
-            files_required: [path],
-          },
-          goal_contract: contract,
-          goal_contract_path: path,
-          next_step: `dag_synthesize({ goal_id: "${contract.id}" })`,
-        }) }],
-        details: { path, contract },
-      };
+      return executeGoalContractCreate(params, { cwd: ctx.cwd });
     },
   });
 }
