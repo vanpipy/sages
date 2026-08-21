@@ -323,7 +323,7 @@ function install {
     # Install sages
     $null = New-Item -ItemType Directory -Path $PKG_DIR -Force -ErrorAction SilentlyContinue
 
-    $dirs = @("prompts", "skills", "extensions", "src")
+    $dirs = @("prompts", "skills", "extensions", "src", "profiles", "subagents", "templates")
     foreach ($dir in $dirs) {
         $srcDir = Join-Path $script:TMP_DIR "pi\$dir"
         $destDir = Join-Path $PKG_DIR $dir
@@ -409,7 +409,7 @@ function install_sages_only {
 
     $null = New-Item -ItemType Directory -Path $PKG_DIR -Force -ErrorAction SilentlyContinue
 
-    $dirs = @("prompts", "skills", "extensions", "src")
+    $dirs = @("prompts", "skills", "extensions", "src", "profiles", "subagents", "templates")
     foreach ($dir in $dirs) {
         $srcDir = Join-Path $script:TMP_DIR "pi\$dir"
         $destDir = Join-Path $PKG_DIR $dir
