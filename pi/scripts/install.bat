@@ -119,7 +119,7 @@ if errorlevel 1 (
 REM Install sages
 if not exist "%PKG_DIR%" mkdir "%PKG_DIR%" >nul 2>&1
 
-for %%D in (prompts skills extensions src) do (
+for %%D in (prompts skills extensions src profiles subagents templates) do (
     set "SRC_DIR=%TMP_DIR%\pi\%%D"
     set "DEST_DIR=%PKG_DIR%\%%D"
 
@@ -260,7 +260,7 @@ if errorlevel 1 (
 
 if not exist "%PKG_DIR%" mkdir "%PKG_DIR%" >nul 2>&1
 
-for %%D in (prompts skills extensions src) do (
+for %%D in (prompts skills extensions src profiles subagents templates) do (
     set "SRC_DIR=%TMP_DIR%\pi\%%D"
     set "DEST_DIR=%PKG_DIR%\%%D"
     if exist "!SRC_DIR!" (
