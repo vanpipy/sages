@@ -983,6 +983,7 @@ export async function runAgent(
 	const sessionOpts: Parameters<typeof createAgentSession>[0] & {
 		modelRegistry: ExtensionContext["modelRegistry"];
 		modelRuntime?: unknown;
+		signal?: AbortSignal;
 	} = {
 		cwd: effectiveCwd,
 		agentDir,
@@ -996,6 +997,14 @@ export async function runAgent(
 		tools: allowedTools,
 		resourceLoader: loader,
 	};
+	// GC-2026-065: thread the composed abort signal (parent abort + own
+	// deadline) into the agent session so the LLM loop can honour it. The
+	// session may or may not inspect this — it's a forward-compat hook. The
+	// real enforcement is the entry/exit abort checks below the prompt
+	// block (effectiveSignal is always consulted by runAgent itself).
+	if (effectiveSignal !== undefined) {
+		sessionOpts.signal = effectiveSignal;
+	}
 	if (thinkingLevel) {
 		sessionOpts.thinkingLevel = thinkingLevel;
 	}
@@ -1176,24 +1185,52 @@ export async function runAgent(
 		advisoriesSent: 0,
 	};
 
-	try {
-		await session.prompt(effectivePrompt);
-	} catch (err) {
-		// GC-2026-022: a budget-throw from the subscriber means the run
-		// exceeded its hard turn / wall budget. Convert it to a graceful
-		// `aborted=true` exit so the SDK cleans up the session without
-		// re-entering pi-mono's prompt loop. The handoff file the tracker
-		// already wrote is what the orchestrator reads to resume.
-		if (err instanceof BudgetExceededError) {
-			aborted = true;
-			budgetFailure = `budget exceeded: ${err.message}`;
-		} else {
-			throw err;
+	// GC-2026-065: deadline abort propagation. The deadline timer in
+	// RunController fires the abort signal at `deadlineMs`; the existing
+	// path just sets `runController.signal.aborted = true` but nothing in
+	// the LLM loop honours it (session.prompt() runs to natural completion
+	// even with an aborted signal). This block:
+	//   1. Pre-check: skip session.prompt entirely if the signal was
+	//      already aborted before we started (deadline fired before the
+	//      run was dispatched, parent signal cancelled us mid-prompt, etc).
+	//   2. Post-check: after session.prompt resolves, if the signal became
+	//      aborted during the run, mark `aborted=true` so the agent
+	//      record surfaces the deadline breach instead of looking complete.
+	if (options.runController?.signal.aborted) {
+		aborted = true;
+		budgetFailure = `agent aborted before run start: ${String(
+			options.runController.signal.reason ?? "deadline exceeded",
+		)}`;
+	} else {
+		try {
+			await session.prompt(effectivePrompt);
+		} catch (err) {
+			// GC-2026-022: a budget-throw from the subscriber means the run
+			// exceeded its hard turn / wall budget. Convert it to a graceful
+			// `aborted=true` exit so the SDK cleans up the session without
+			// re-entering pi-mono's prompt loop. The handoff file the tracker
+			// already wrote is what the orchestrator reads to resume.
+			if (err instanceof BudgetExceededError) {
+				aborted = true;
+				budgetFailure = `budget exceeded: ${err.message}`;
+			} else {
+				throw err;
+			}
+		} finally {
+			unsubTurns();
+			collector.unsubscribe();
+			cleanupAbort();
 		}
-	} finally {
-		unsubTurns();
-		collector.unsubscribe();
-		cleanupAbort();
+		// GC-2026-065: post-prompt abort check. If the deadline fired DURING
+		// session.prompt and the LLM loop ignored the signal, mark the
+		// agent as aborted so the orchestrator records it correctly rather
+		// than treating a deadline breach as a clean completion.
+		if (options.runController?.signal.aborted && !aborted) {
+			aborted = true;
+			budgetFailure = `agent aborted during run: ${String(
+				options.runController.signal.reason ?? "deadline exceeded",
+			)}`;
+		}
 	}
 
 	// GC-2026-042: Inject governance advisories after the first prompt
