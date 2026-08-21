@@ -30,7 +30,6 @@
 | GC-2026-033 | phase-2 P1 — LRU memoize classifyBashCommand + extractBashTargets | [.pi/orchestrator/goal-GC-2026-033.yaml](../../.pi/orchestrator/goal-GC-2026-033.yaml) |
 | GC-2026-034 | phase-3 P2 — TTL cache skill-loader | [.pi/orchestrator/goal-GC-2026-034.yaml](../../.pi/orchestrator/goal-GC-2026-034.yaml) |
 | GC-2026-035 | add worktree-async baseline scripts — phase-4 capture | [.pi/orchestrator/goal-GC-2026-035.yaml](../../.pi/orchestrator/goal-GC-2026-035.yaml) |
-| GC-2026-036 | SpawnCapable.spawn returns Promise<string> — closes T3 typecheck gap | [.pi/orchestrator/goal-GC-2026-036.yaml](../../.pi/orchestrator/goal-GC-2026-036.yaml) |
 | GC-2026-037 | BudgetTracker + resolveDeadlineMs accept RunController | [.pi/orchestrator/goal-GC-2026-037.yaml](../../.pi/orchestrator/goal-GC-2026-037.yaml) |
 | GC-2026-038 | phase-4c prompt-layer governance | [.pi/orchestrator/goal-GC-2026-038.yaml](../../.pi/orchestrator/goal-GC-2026-038.yaml) |
 | GC-2026-039 | integrate T5 — merger Phase Gate tables + byte-identical HANDOFF | [.pi/orchestrator/goal-GC-2026-039.yaml](../../.pi/orchestrator/goal-GC-2026-039.yaml) |
@@ -54,9 +53,13 @@
 | GC-2026-057 | goal lock — anti-cheat SHA-256 hash detects silent SC modification | [.pi/orchestrator/goal-GC-2026-057.yaml](../../.pi/orchestrator/goal-GC-2026-057.yaml) |
 | GC-2026-058 | verdict enforcement — machine-enforced gate against silent REVISE/REJECT bypass | [.pi/orchestrator/goal-GC-2026-058.yaml](../../.pi/orchestrator/goal-GC-2026-058.yaml) |
 | GC-2026-059 | L1 advisory chain-key detection | [.pi/orchestrator/goal-GC-2026-059.yaml](../../.pi/orchestrator/goal-GC-2026-059.yaml) |
-| GC-2026-060 | merge auto-todowrite + todo reminder | [.pi/orchestrator/goal-GC-2026-060.yaml](../../.pi/orchestrator/goal-GC-2026-060.yaml) |
+| GC-2026-060 | sages_todo persistence + TodoWrite mirror module (GC-2026-067 T3) | [.pi/orchestrator/goal-GC-2026-060.yaml](../../.pi/orchestrator/goal-GC-2026-060.yaml) |
 | GC-2026-061 | merge todo-as-DAG compile bridge | [.pi/orchestrator/goal-GC-2026-061.yaml](../../.pi/orchestrator/goal-GC-2026-061.yaml) |
 | GC-2026-062 | T4 template-loader module-relative | [.pi/orchestrator/goal-GC-2026-062.yaml](../../.pi/orchestrator/goal-GC-2026-062.yaml) |
 | GC-2026-063 | T3 audit init summary | [.pi/orchestrator/goal-GC-2026-063.yaml](../../.pi/orchestrator/goal-GC-2026-063.yaml) |
+| GC-2026-064 | cap-and-poc | [.pi/orchestrator/goal-GC-2026-064.yaml](../../.pi/orchestrator/goal-GC-2026-064.yaml) |
+| GC-2026-065 | poc-phase-2 | [.pi/orchestrator/goal-GC-2026-065.yaml](../../.pi/orchestrator/goal-GC-2026-065.yaml) |
+| GC-2026-066 | reminders | [.pi/orchestrator/goal-GC-2026-066.yaml](../../.pi/orchestrator/goal-GC-2026-066.yaml) |
+| GC-2026-067 | reminders | [.pi/orchestrator/goal-GC-2026-067.yaml](../../.pi/orchestrator/goal-GC-2026-067.yaml) |
 
-_Total: 52 GCs_
+_Total: 55 GCs_
