@@ -95,7 +95,15 @@ describe("registerSagesExtension — soft mode (no Layer 1 strip)", () => {
         expect(sessionStart).toBeDefined();
         // First session_start — flag is fresh, no prior reminder.
         sessionStart!();
-        expect(mock.appendedEntries).toHaveLength(0);
+        // session_start may inject the GC-2026-067 session digest (a
+        // `system` channel entry) — we don't assert the absolute count
+        // because future digest changes would break the test. The
+        // auto-steer reminder (SOFT_MODE_REMINDER) is what we care
+        // about here, and it should NOT have fired yet.
+        const steerEntries = mock.appendedEntries.filter(
+            (e) => e.text === SOFT_MODE_REMINDER,
+        );
+        expect(steerEntries).toHaveLength(0);
     });
 });
 
@@ -172,13 +180,18 @@ describe("registerSagesExtension — soft mode bash handler (no Layer 2 block)",
         );
         expect(mock.appendedEntries).toHaveLength(1);
 
-        // session_start — throttle resets.
+        // session_start — throttle resets. (Also appends the GC-2026-067
+        // session digest; we filter to the auto-steer reminder below so
+        // digest changes don't break this assertion.)
         sessionStart!();
         await handler(
             { toolName: "bash", input: { command: "echo z > src/baz.ts" } },
             { cwd: "/home/leroy/sages-worktrees/main" },
         );
-        expect(mock.appendedEntries).toHaveLength(2);
+        const steerEntries = mock.appendedEntries.filter(
+            (e) => e.text === SOFT_MODE_REMINDER,
+        );
+        expect(steerEntries).toHaveLength(2);
     });
 
     it("T-D (preserved): passes through non-bash events (returns undefined)", async () => {
