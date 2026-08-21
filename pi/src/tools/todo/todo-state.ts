@@ -23,7 +23,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ORCHESTRATOR_DIR } from "../orchestrator/types.js";
-import { findSagesRoot } from "../orchestrator/template-loader.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -415,11 +414,7 @@ export function todoStatePath(repoRoot: string): string {
  *   1. The nearest ancestor of `cwd` (or process.cwd()) that contains
  *      `.pi/orchestrator` or `.git` — the extension's session cwd is the
  *      authoritative repo root.
- *   2. findSagesRoot() when it resolves to a self-hosted sages repo
- *      (a package root that carries its own `.pi` dir). This is the
- *      "if available" fallback: an installed package copy has no `.pi`
- *      directory, so it can never be mistaken for the repo.
- *   3. `cwd` itself (last resort).
+ *   2. `cwd` itself (last resort).
  */
 export function resolveRepoRoot(cwd?: string): string {
   const start = resolve(cwd ?? process.cwd());
@@ -431,10 +426,6 @@ export function resolveRepoRoot(cwd?: string): string {
     const parent = dirname(cursor);
     if (parent === cursor) break;
     cursor = parent;
-  }
-  const sagesRoot = findSagesRoot();
-  if (sagesRoot !== null && existsSync(join(sagesRoot, ".pi"))) {
-    return sagesRoot;
   }
   return start;
 }
