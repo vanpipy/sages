@@ -58,6 +58,17 @@ export const TaskDispatchParams = Type.Object({
   })),
   /** Reset all task lifecycle fields before returning a fresh planner output. */
   force: Type.Optional(Type.Boolean()),
+  /**
+   * Return the full dispatch with task prompts. Default false returns a
+   * compact summary (task_id/subagent_type/isolation/run_in_background/
+   * prompt_preview).
+   */
+  verbose: Type.Optional(
+    Type.Boolean({
+      description:
+        "Return full dispatch with task prompts. Default false returns a compact summary (task_id/subagent_type/isolation/run_in_background/prompt_preview).",
+    }),
+  ),
 });
 
 export type TaskDispatchInput = Static<typeof TaskDispatchParams>;
@@ -115,6 +126,54 @@ export interface DispatchTask {
   wait_for: "completion" | "batch_completion" | "background";
   /** Where the report should be written */
   report_path: string;
+}
+
+/** Compact per-task summary returned by default (GC-2026-063). */
+export interface DispatchTaskSummary {
+  task_id: string;
+  subagent_type: string;
+  isolation: DispatchTask["isolation"];
+  run_in_background: boolean;
+  prompt_preview: string;
+}
+
+/** Compact dispatch plan returned by default (GC-2026-063). */
+export interface DispatchPlanSummary {
+  total_tasks: number;
+  batches: Array<{
+    batch: number;
+    parallel_safe: boolean;
+    tasks: DispatchTaskSummary[];
+  }>;
+}
+
+const PROMPT_PREVIEW_CHARS = 120;
+
+function previewPrompt(prompt: string): string {
+  if (prompt.length <= PROMPT_PREVIEW_CHARS) return prompt;
+  return prompt.slice(0, PROMPT_PREVIEW_CHARS) + "...";
+}
+
+/**
+ * Reduce a full dispatch plan to a compact summary, dropping the full
+ * task prompts (which the LLM already authored in dag_synthesize and are
+ * persisted in .pi/orchestrator/dag-*.yaml).
+ */
+export function summarizeDispatch(dispatch: DispatchPlan): DispatchPlanSummary {
+  return {
+    total_tasks: dispatch.total_tasks,
+    batches: dispatch.batches.map((batch) => ({
+      batch: batch.batch,
+      parallel_safe: batch.parallel_safe,
+      tasks: batch.tasks.map((t) => ({
+        task_id: t.task_id,
+        subagent_type: t.subagent_type,
+        isolation: t.isolation,
+        run_in_background: t.run_in_background,
+        prompt_preview: previewPrompt(t.prompt),
+      })),
+    })),
+  };
 }
 
 /** Default dispatch policy comes from pi/subagents/registry.yaml. */
@@ -428,6 +487,7 @@ export async function executeTaskDispatch(params: TaskDispatchInput, ctx: { cwd:
   plan.updated_at = new Date().toISOString();
   const dispatch = buildDispatchPlan(plan, params.strategy, params.max_concurrent ?? 6);
   const planPath = savePlan(cwd, plan);
+  const verbose = params.verbose === true;
   return {
     content: [{ type: "text", text: JSON.stringify({
       status: "in_progress",
@@ -437,7 +497,7 @@ export async function executeTaskDispatch(params: TaskDispatchInput, ctx: { cwd:
         warnings: dispatch.batches.some((batch) => !batch.parallel_safe) ? ["some batches exceed max_concurrent; tasks within will serialize"] : [],
         files_required: [planPath],
       },
-      dispatch,
+      dispatch: verbose ? dispatch : summarizeDispatch(dispatch),
       plan_state: plan.state,
       next_step: `For batch 1: call Agent tool ${dispatch.batches[0]?.tasks.length ?? 0} times, then record each lifecycle transition with task_dispatch.`,
     }) }],
