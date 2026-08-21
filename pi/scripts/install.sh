@@ -826,7 +826,7 @@ install_sages_files() {
   }
 
   mkdir -p "$PKG_DIR"
-  for dir in skills src; do
+  for dir in skills src profiles subagents templates; do
     local src_dir="$TMP_DIR/pi/$dir"
     local dest_dir="$PKG_DIR/$dir"
 
