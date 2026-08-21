@@ -69,6 +69,13 @@ export const OrchestratorAuditParams = Type.Object({
   /** Sub-mode: 'fast' = quick checks (ink+nose+foot); 'full' = all 5 phases */
   depth: Type.Optional(Type.Union([Type.Literal("fast"), Type.Literal("full")])),
   /**
+   * Return the full init payload (phase_guidance, tasks_to_audit,
+   * inline_findings, failure_mode_stats, phases). Default false returns a
+   * compact summary (status/phase/intent/validation/audit_identity/
+   * workflow_summary).
+   */
+  verbose: Type.Optional(Type.Boolean({ description: "Return the full init payload (phase_guidance, tasks_to_audit, inline_findings, failure_mode_stats, phases). Default false returns a compact summary." })),
+  /**
    * Observation mode: omit for first call (audit-init), then pass on follow-up
    * calls to record findings / complete the audit. The state is persisted to
    * disk between calls so the LLM can resume after context compaction.
@@ -343,19 +350,24 @@ async function initAudit(
         findings_required_min: findingsRequiredMin(depth),
       },
       audit_identity: identity,
-      phases,
-      phase_guidance: phaseGuidance,
       workflow_summary: workflowSummary,
-      failure_mode_stats: gatherFailureModeStats(cwd, plan.id),
-      inline_findings: inlineFindings,
-      tasks_to_audit: tasks.map(t => ({
-        id: t.id,
-        description: t.description,
-        subagent_type: t.subagent_type,
-        acceptance_covers: t.acceptance.covers,
-        self_check_cmd: t.acceptance.self_check_cmd,
-        report_path: taskAuditPath(cwd, t.id),
-      })),
+      // GC-2026-063: verbose-only guidance/report fields. Dropped from the
+      // default compact summary; still computed (inlineFindings/phaseGuidance
+      // above) and included when `verbose: true`.
+      ...(params.verbose === true ? {
+        phases,
+        phase_guidance: phaseGuidance,
+        failure_mode_stats: gatherFailureModeStats(cwd, plan.id),
+        inline_findings: inlineFindings,
+        tasks_to_audit: tasks.map(t => ({
+          id: t.id,
+          description: t.description,
+          subagent_type: t.subagent_type,
+          acceptance_covers: t.acceptance.covers,
+          self_check_cmd: t.acceptance.self_check_cmd,
+          report_path: taskAuditPath(cwd, t.id),
+        })),
+      } : {}),
     }) }],
   };
 }
