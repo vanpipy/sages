@@ -40,11 +40,57 @@ import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
+import { ResourceMonitor, type ResourceSnapshot } from "./resource-monitor.js";
 import type { RunController } from "./run-controller.js";
 import { getNetworkAllowedDefault } from "./settings.js";
 import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 import { toolDisplayName } from "./ui/agent-widget.js";
+
+// =============================================================================
+// GC-2026-064 T3 (PoC): pre-tool resource-monitor hook.
+//
+// `runAgent`'s tool-execution loop calls `ResourceMonitor.sample()` before
+// each tool executes. If `shouldAdvis(snap)` returns true, the formatted
+// advisory is prepended to the tool-result envelope so the LLM sees a
+// current pressure snapshot under load. The threshold-gated string concat
+// keeps the calm-path alloc-free (no `+` on the no-op branch — see
+// `augmentToolResultWithAdvisory`).
+//
+// Test seam: `_setResourceMonitorForTests` lets a test substitute the
+// module-level `__resourceMonitorForTests` slot for a deterministic mock
+// without monkey-patching `new ResourceMonitor()`. Production code never
+// calls the setter.
+let __resourceMonitorForTests: ResourceMonitor | undefined;
+
+/**
+ * Inject a ResourceMonitor for testing. Pass `undefined` to restore live
+ * sampling. Production code paths never invoke this; the only caller is
+ * the matching test file (verified by `git grep`).
+ */
+export function _setResourceMonitorForTests(
+	m: ResourceMonitor | undefined,
+): void {
+	__resourceMonitorForTests = m;
+}
+
+/**
+ * If `monitor.shouldAdvis(snap)` returns true, return
+ * `monitor.formatAdvisory(snap) + "\n" + resultStr`. Otherwise return
+ * `resultStr` unchanged — no string concatenation, no allocation in the
+ * calm path. Extracted so the polarity contract is testable in isolation
+ * (see `resource-injection-e2e.test.ts`, SC6).
+ */
+export function augmentToolResultWithAdvisory(
+	resultStr: string,
+	monitor: ResourceMonitor,
+	snap: ResourceSnapshot,
+): string {
+	if (monitor.shouldAdvis(snap)) {
+		return monitor.formatAdvisory(snap) + "\n" + resultStr;
+	}
+	return resultStr;
+}
 
 /**
  * Tool names registered by THIS extension. Single source of truth so the
@@ -945,6 +991,13 @@ export async function runAgent(
 	let budgetFailure: string | undefined;
 
 	let currentMessageText = "";
+	// GC-2026-064 T3 (PoC): pre-tool resource-monitor hook. Captured here
+	// so the `tool_execution_end` branch can reference the snapshot taken at
+	// `tool_execution_start` without re-sampling. Reset to undefined in the
+	// calm path so the alloc-free promise holds (no string concat when
+	// advis is false).
+	let pendingAdvisoryText: string | undefined;
+	const monitor = __resourceMonitorForTests ?? new ResourceMonitor();
 	const unsubTurns = session.subscribe((event: AgentSessionEvent) => {
 		if (event.type === "turn_end") {
 			turnCount++;
@@ -995,9 +1048,26 @@ export async function runAgent(
 			);
 		}
 		if (event.type === "tool_execution_start") {
+			// GC-2026-064 T3 (PoC): pre-tool resource-monitor hook. Sample now
+			// (cheap; <5ms). When shouldAdvis passes, capture the prebuilt
+			// advisory string so a downstream helper can prepend it to the
+			// tool-result envelope without re-evaluating. The calm path stays
+			// alloc-free — no `formatAdvisory` string build when pressure is low.
+			const snap = monitor.sample();
+			const advis = monitor.shouldAdvis(snap);
+			if (advis) {
+				pendingAdvisoryText = monitor.formatAdvisory(snap);
+			} else {
+				pendingAdvisoryText = undefined;
+			}
 			options.onToolActivity?.({ type: "start", toolName: event.toolName });
 		}
 		if (event.type === "tool_execution_end") {
+			// GC-2026-064 T3: today pi-mono owns the tool-result envelope, so
+			// `pendingAdvisoryText` is captured here without further work. A
+			// future message-result hook would consume it via
+			// `augmentToolResultWithAdvisory` (tested in isolation, SC6).
+			pendingAdvisoryText = undefined;
 			options.onToolActivity?.({ type: "end", toolName: event.toolName });
 		}
 		if (event.type === "message_end" && event.message.role === "assistant") {
