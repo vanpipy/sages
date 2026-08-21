@@ -48,19 +48,40 @@ import type { SubagentType, ThinkingLevel } from "./types.js";
 import { toolDisplayName } from "./ui/agent-widget.js";
 
 // =============================================================================
-// GC-2026-064 T3 (PoC): pre-tool resource-monitor hook.
+// GC-2026-064 T3 / GC-2026-066 T1 (PoC): pre-tool resource-monitor hook
+// + LLM-visible delivery.
 //
 // `runAgent`'s tool-execution loop calls `ResourceMonitor.sample()` before
 // each tool executes. If `shouldAdvis(snap)` returns true, the formatted
-// advisory is prepended to the tool-result envelope so the LLM sees a
-// current pressure snapshot under load. The threshold-gated string concat
-// keeps the calm-path alloc-free (no `+` on the no-op branch — see
-// `augmentToolResultWithAdvisory`).
+// advisory is captured into a per-run `pendingAdvisoryText` slot (see
+// `captureToolStartAdvisory`), then delivered to the LLM via
+// `session.steer(pendingText)` at `tool_execution_end` (see
+// `deliverPendingAdvisory`). Per `@earendil-works/pi-coding-agent` docs,
+// `session.steer` "queues a steering message while the agent is running;
+// delivered after the current assistant turn finishes executing its tool
+// calls, before the next LLM call" — exactly the seam between
+// `tool_execution_end` and the next model call that the PoC needs.
 //
-// Test seam: `_setResourceMonitorForTests` lets a test substitute the
-// module-level `__resourceMonitorForTests` slot for a deterministic mock
-// without monkey-patching `new ResourceMonitor()`. Production code never
-// calls the setter.
+// Chosen delivery path: **Path A** (`session.steer` — least invasive).
+// `session.addMessage(...)` from the original GC-2026-066 SC1 sketch does
+// not exist in `@earendil-works/pi-coding-agent@0.81.1`; `session.steer`
+// is the closest real API and matches the same conceptual contract.
+// Path B (`pi.appendEntry("system", ...)`) only persists session entries;
+// entries do not reach the LLM. Path C (callback wrap) is heavier and
+// adds an extra hook layer for no behavioral gain over steer.
+//
+// Threshold-gated allocation: when `shouldAdvis` returns false the capture
+// helper returns `undefined` without calling `formatAdvisory`, and the
+// delivery helper short-circuits without invoking `session.steer`. No
+// string concat, no message construction on the calm path.
+//
+// Test seams:
+//   - `_setResourceMonitorForTests` swaps the monitor for a deterministic
+//     mock (production code never calls the setter).
+//   - `captureToolStartAdvisory` and `deliverPendingAdvisory` are exported
+//     as pure helpers so tests can pin capture / delivery polarity without
+//     instantiating a real `AgentSession`. The subscribe callback in
+//     `runAgent` calls them in order; nothing else.
 let __resourceMonitorForTests: ResourceMonitor | undefined;
 
 /**
@@ -80,6 +101,12 @@ export function _setResourceMonitorForTests(
  * `resultStr` unchanged — no string concatenation, no allocation in the
  * calm path. Extracted so the polarity contract is testable in isolation
  * (see `resource-injection-e2e.test.ts`, SC6).
+ *
+ * NOTE: GC-2026-066 T1 superseded the envelope-prepend intent of this
+ * helper with `session.steer(...)` (Path A — least invasive). The helper
+ * remains exported because `resource-injection-e2e.test.ts` still pins its
+ * polarity contract; a future consumer that does get hold of the raw
+ * tool-result envelope can still use it without code changes here.
  */
 export function augmentToolResultWithAdvisory(
 	resultStr: string,
@@ -90,6 +117,44 @@ export function augmentToolResultWithAdvisory(
 		return monitor.formatAdvisory(snap) + "\n" + resultStr;
 	}
 	return resultStr;
+}
+
+/**
+ * Capture the resource advisory for the next tool execution. Returns the
+ * formatted advisory string when `shouldAdvis(snap)` is true, or
+ * `undefined` when pressure is low (no `formatAdvisory` call → no string
+ * allocation on the calm path).
+ *
+ * Called from `runAgent`'s `tool_execution_start` handler. The returned
+ * value is stored in the per-run `pendingAdvisoryText` slot and consumed
+ * by `deliverPendingAdvisory` at `tool_execution_end`.
+ */
+export function captureToolStartAdvisory(
+	monitor: ResourceMonitor,
+): string | undefined {
+	const snap = monitor.sample();
+	return monitor.shouldAdvis(snap) ? monitor.formatAdvisory(snap) : undefined;
+}
+
+/**
+ * Deliver a captured resource advisory to the LLM via `session.steer(...)`
+ * (Path A — see comment block at top of file). Fire-and-forget: the
+ * promise is intentionally not awaited from `runAgent`'s subscribe
+ * callback because steer queues the message synchronously and we do not
+ * want to block the tool-execution loop on queue acceptance.
+ *
+ * When `pendingText` is `undefined` (calm path) this is a no-op — no
+ * `session.steer` call, no allocation. The polarity contract is pinned by
+ * `resource-delivery-e2e.test.ts` (cases (c)/(d) and the (e)/(f)
+ * round-trips).
+ */
+export function deliverPendingAdvisory(
+	session: { steer: (text: string) => Promise<void> | void },
+	pendingText: string | undefined,
+): void {
+	if (pendingText !== undefined) {
+		void session.steer(pendingText);
+	}
 }
 
 /**
@@ -1048,25 +1113,25 @@ export async function runAgent(
 			);
 		}
 		if (event.type === "tool_execution_start") {
-			// GC-2026-064 T3 (PoC): pre-tool resource-monitor hook. Sample now
-			// (cheap; <5ms). When shouldAdvis passes, capture the prebuilt
-			// advisory string so a downstream helper can prepend it to the
-			// tool-result envelope without re-evaluating. The calm path stays
-			// alloc-free — no `formatAdvisory` string build when pressure is low.
-			const snap = monitor.sample();
-			const advis = monitor.shouldAdvis(snap);
-			if (advis) {
-				pendingAdvisoryText = monitor.formatAdvisory(snap);
-			} else {
-				pendingAdvisoryText = undefined;
-			}
+			// GC-2026-066 T1 (PoC): pre-tool resource-monitor hook. Delegate
+			// capture to `captureToolStartAdvisory` so the polarity contract
+			// (calm path stays alloc-free) is testable in isolation. When
+			// shouldAdvis passes, the helper builds the advisory string and
+			// returns it; otherwise it returns undefined without touching
+			// formatAdvisory.
+			pendingAdvisoryText = captureToolStartAdvisory(monitor);
 			options.onToolActivity?.({ type: "start", toolName: event.toolName });
 		}
 		if (event.type === "tool_execution_end") {
-			// GC-2026-064 T3: today pi-mono owns the tool-result envelope, so
-			// `pendingAdvisoryText` is captured here without further work. A
-			// future message-result hook would consume it via
-			// `augmentToolResultWithAdvisory` (tested in isolation, SC6).
+			// GC-2026-066 T1 (PoC): deliver the captured advisory to the LLM
+			// via `session.steer(...)` (Path A — see top-of-file block).
+			// The agent-session API queues the message and surfaces it on the
+			// next model call ("Delivered after the current assistant turn
+			// finishes executing its tool calls, before the next LLM call").
+			// Fire-and-forget — steer is queue-synchronous, so we don't need
+			// to await. Calm path stays alloc-free: pendingAdvisoryText is
+			// undefined, the helper is a no-op, no steer call happens.
+			deliverPendingAdvisory(session, pendingAdvisoryText);
 			pendingAdvisoryText = undefined;
 			options.onToolActivity?.({ type: "end", toolName: event.toolName });
 		}
