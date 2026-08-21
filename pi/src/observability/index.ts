@@ -45,3 +45,14 @@ export {
   onSeam,
   clearSeamCallbacks,
 } from "./seam.js";
+
+export {
+  buildSessionDigest,
+  formatSessionDigest,
+  attachSessionDigest,
+  type SessionDigest,
+  type InflightGoal,
+  type PendingAuditVerdict,
+  type UnmergedBranch,
+  type TodoStateSummary,
+} from "./digest.js";
