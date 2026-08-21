@@ -4,9 +4,11 @@
  * A profile is a named bundle that captures the Sages soft-mode policy
  * (GC-2026-031) plus its dispatch + gate posture in a single YAML file.
  *
- * Built-in profiles live in `pi/profiles/<id>.yaml`. A user override at
+ * Built-in profiles live in `<pkg>/profiles/<id>.yaml` (module-relative
+ * to this file, so resolution works from any cwd). A user override at
  * `~/.pi/profile.yaml` takes precedence. If neither is present, the
- * `standard` profile is loaded.
+ * `standard` profile is loaded — from YAML when available, otherwise
+ * from the in-code `STANDARD_PROFILE` constant.
  *
  * The main-agent extension reads the profile once at module load via
  * `loadProfile()` and uses its fields:
@@ -20,8 +22,10 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as yaml from "js-yaml";
+import { SOFT_MODE_REMINDER, SOFT_MODE_SYSTEM_PROMPT_SUFFIX } from "./soft-mode.js";
 
 export type IsolationDefault = "none" | "current-workspace" | "worktree";
 
@@ -48,17 +52,71 @@ const REQUIRED_FIELDS = [
   "soft_mode_system_prompt_suffix",
 ] as const;
 
-const BUILTIN_PROFILE_DIR = "pi/profiles";
 const BUILTIN_DEFAULT = "standard";
 
+/**
+ * Package root: from `pi/src/profile.ts` this is `pi/` in the repo
+ * checkout and `<pkg>/` in the installed package at
+ * `~/.pi/packages/sages`. Module-relative, so built-in resource
+ * resolution works from ANY cwd.
+ */
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
 let cached: Profile | undefined;
+let warnedBuiltinMissing = false;
+
+/**
+ * In-code `standard` profile — the fallback used when no built-in
+ * YAML can be found (missing/partial install). The extension must
+ * never crash at module load for a missing policy file. The string
+ * fields are imported from soft-mode.ts's backward-compat shims
+ * (byte-identical to standard.yaml) rather than re-typed.
+ */
+export const STANDARD_PROFILE: Profile = {
+  id: "standard",
+  description: "Default profile; full subagent roster + current-workspace isolation.",
+  subagents: ["Explore", "Plan", "developer", "auditor", "merger", "git-expert"],
+  isolation_default: "current-workspace",
+  dag_threshold: 2,
+  gate_suite: ["typecheck", "test", "verify:catalog"],
+  soft_mode_reminder: SOFT_MODE_REMINDER,
+  soft_mode_system_prompt_suffix: SOFT_MODE_SYSTEM_PROMPT_SUFFIX,
+};
+
+/**
+ * Resolve the directory holding the built-in profile YAMLs.
+ *
+ * Resolution order (first existing candidate wins):
+ *   1. `join(PACKAGE_ROOT, "profiles")` — module-relative; correct in
+ *      the repo checkout (`pi/profiles`) and the installed package
+ *      (`~/.pi/packages/sages/profiles`) from any cwd.
+ *   2. `pi/profiles` — legacy cwd-relative, from the repo root.
+ *   3. `profiles` — legacy cwd-relative, from `pi/`.
+ *
+ * When none exists (missing/partial install) candidates[0] is
+ * returned so callers get a stable, reportable path.
+ */
+export function builtinProfileDir(): string {
+  const candidates = [
+    join(PACKAGE_ROOT, "profiles"),
+    resolve("pi/profiles"),
+    resolve("profiles"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
 
 /**
  * Load the active profile.
  *
  * Resolution order (when no `overridePath` is given):
  *   1. `~/.pi/profile.yaml` — user override.
- *   2. `pi/profiles/standard.yaml` — built-in default.
+ *   2. `<pkg>/profiles/standard.yaml` (module-relative) — built-in
+ *      default. Falls back to the cwd-relative candidates
+ *      (`pi/profiles` from the repo root, `profiles` from `pi/`)
+ *      for compatibility.
+ *   3. `STANDARD_PROFILE` — in-code fallback when no built-in YAML
+ *      can be found (missing/partial install); warns once instead of
+ *      throwing so the extension never crashes at module load.
  *
  * When `overridePath` is supplied, the file at that path is read
  * directly. The cache is bypassed for explicit overrides so tests
@@ -80,7 +138,20 @@ export function loadProfile(overridePath?: string): Profile {
     return cached;
   }
 
-  cached = loadFromPath(join(BUILTIN_PROFILE_DIR, `${BUILTIN_DEFAULT}.yaml`));
+  const builtinPath = join(builtinProfileDir(), `${BUILTIN_DEFAULT}.yaml`);
+  if (!existsSync(builtinPath)) {
+    // Missing/partial install: degrade to the in-code default rather
+    // than crashing the extension at module load.
+    if (!warnedBuiltinMissing) {
+      warnedBuiltinMissing = true;
+      console.warn(
+        `[sages] built-in profile not found at ${builtinPath}; using in-code STANDARD_PROFILE fallback.`,
+      );
+    }
+    return STANDARD_PROFILE;
+  }
+
+  cached = loadFromPath(builtinPath);
   return cached;
 }
 
@@ -90,7 +161,7 @@ export function loadProfile(overridePath?: string): Profile {
  * downstream consumers that want to enumerate the bundled profiles.
  */
 export function loadBuiltInProfile(id: string): Profile {
-  return loadFromPath(join(BUILTIN_PROFILE_DIR, `${id}.yaml`));
+  return loadFromPath(join(builtinProfileDir(), `${id}.yaml`));
 }
 
 /**
