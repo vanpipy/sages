@@ -5,9 +5,11 @@
 #
 # This script owns the full Sages extension stack on Linux/macOS:
 #
-#   Local-peer (file-copy) extensions — all four come from one
-#   `git clone $REPO_URL && git checkout $SAGES_REPO_SHA`, so one
-#   ref pins all four together:
+#   Local-peer (file-copy) extensions — all four are sourced from the
+#   local sages repo (the parent directory of pi/scripts/install.sh).
+#   No `git clone`, no remote ref pin: install.sh reads the source
+#   files from its own containing repo (LOCAL_REPO_ROOT, derived from
+#   ${BASH_SOURCE[0]}). Bump versions in the local repo and re-run.
 #     sages                → ~/.pi/packages/sages
 #     pi-codebase-memory   → ~/.pi/packages/pi-codebase-memory
 #     pi-subagents         → ~/.pi/packages/pi-subagents
@@ -27,7 +29,7 @@
 #     user can copy to ~/.config/cortexkit/aft.jsonc after installation.
 #
 # Selective install options:
-#   --sages-only   only install sages source files (still re-clones repo; skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
+#   --sages-only   only install sages source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
 #   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)
 #
 # These flags are mutually exclusive with --uninstall and each other.
@@ -39,29 +41,27 @@ set -euo pipefail
 PI_DIR="${PI_DIR:-$HOME/.pi}"
 PKG_NAME="sages"
 PKG_DIR="$PI_DIR/packages/$PKG_NAME"
-REPO_URL="https://github.com/vanpipy/sages.git"
-# Pinned sage git ref. The local-peer file-copy packages — sages,
-# pi-codebase-memory, pi-subagents — are all sourced from this same
-# clone, so one ref pins all three. Bump + re-run install.sh to
-# upgrade the local-peer stack. Update the matching "Pinned
-# npm-peer versions" comment block below when bumping.
-#
-# Pin policy: reference a SHA that is reachable from origin/main —
-# i.e., already pushed. Bump after the next sage commit lands on
-# the remote (typical flow: push new commit, bump the SHA to that
-# commit's hash in the next install.sh update).
-#
-# The local-peer file-copy packages — sages, pi-codebase-memory,
-# pi-subagents, pi-evaluator — are all sourced from this same clone,
-# so one ref pins all four together. Bump + re-run install.sh to
-# upgrade the local-peer stack.
-#
-# Short: f8e5321 (chore(pi/install): pin SAGES_REPO_SHA to tip)
-SAGES_REPO_SHA="f8e53213559830b934396eceb2fab5a3d0940002"
 AGENT_DIR="$PI_DIR/agent"
 
 # Resolve this script's directory (works whether invoked by absolute path, symlink, or relative)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+# Local sages repo root — parent directory of pi/. install.sh no longer
+# clones; it sources all four peer packages from this directory. The
+# sanity check below fails loud if install.sh was misplaced (e.g.,
+# copied to /tmp without the surrounding repo tree) so the install
+# never silently skips a missing peer.
+LOCAL_REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+if [[ ! -d "$LOCAL_REPO_ROOT/pi" \
+   || ! -d "$LOCAL_REPO_ROOT/pi-codebase-memory" \
+   || ! -d "$LOCAL_REPO_ROOT/pi-subagents" \
+   || ! -d "$LOCAL_REPO_ROOT/pi-evaluator" ]]; then
+  echo "Error: LOCAL_REPO_ROOT sanity check failed" >&2
+  echo "  Expected: <repo>/{pi,pi-codebase-memory,pi-subagents,pi-evaluator}/" >&2
+  echo "  Got: $LOCAL_REPO_ROOT" >&2
+  echo "  install.sh must live at <repo>/pi/scripts/install.sh" >&2
+  exit 1
+fi
 
 # SYSTEM.md template (single source of truth for all three install scripts: .sh / .ps1 / .bat)
 SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
@@ -143,12 +143,8 @@ PI_EVALUATOR_SRC_REL="pi-evaluator"
 PI_EVALUATOR_DEST_DIR="$PI_DIR/packages/pi-evaluator"
 PI_EVALUATOR_PKG="$PI_EVALUATOR_DEST_DIR"
 
-# Cleanup trap
-TMP_DIR=""
-cleanup() {
-  [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]] && rm -rf "$TMP_DIR"
-}
-trap cleanup EXIT
+# No temp dir to clean up — install.sh sources files from LOCAL_REPO_ROOT
+# (derived above), so the historical TMP_DIR + clone trap is obsolete.
 
 usage() {
   echo "Usage: $0 [OPTIONS]"
@@ -157,16 +153,14 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install sages source files (still re-clones; skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
+  echo "  --sages-only       Only install sages source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
   echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
 }
 
-check_git() {
-  command -v git &>/dev/null || { echo "Error: git is required"; exit 1; }
-}
+
 
 install_pi_if_needed() {
   if ! command -v pi &>/dev/null; then
@@ -218,12 +212,12 @@ install_pi_codebase_memory() {
     return 0
   fi
 
-  # Copy source files (from the freshly-cloned TMP_DIR; may be skipped if dir exists)
-  # Note: `${TMP_DIR:-}` defaults to empty string when unset (e.g. in unit-test isolation),
-  # making the path `"/pi-codebase-memory"` which won't exist → the ! -d branch triggers.
-  local src_root="${TMP_DIR:-}/$PI_CODEBASE_MEMORY_SRC_REL"
+  # Copy source files from LOCAL_REPO_ROOT. The sanity check at script
+  # entry guarantees all four peer dirs exist; if a future refactor
+  # removes that check, this guard still surfaces a missing source loud.
+  local src_root="$LOCAL_REPO_ROOT/$PI_CODEBASE_MEMORY_SRC_REL"
   if [[ ! -d "$src_root" ]]; then
-    echo "  Warning: $src_root not found in clone, skipping file copy (settings.json registration still happens)"
+    echo "  Warning: $src_root not found in local sages repo, skipping file copy (settings.json registration still happens)"
   elif [[ -d "$PI_CODEBASE_MEMORY_DEST_DIR" && "${FORCE:-false}" != true ]]; then
     echo "  Skipping pi-codebase-memory files (exists, use --force)"
   else
@@ -298,8 +292,8 @@ write_codebase_memory_mcp_config() {
   local template=""
   if [[ -f "$PI_CODEBASE_MEMORY_DEST_DIR/templates/mcp.json" ]]; then
     template="$PI_CODEBASE_MEMORY_DEST_DIR/templates/mcp.json"
-  elif [[ -f "$TMP_DIR/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json" ]]; then
-    template="$TMP_DIR/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json"
+  elif [[ -f "$LOCAL_REPO_ROOT/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json" ]]; then
+    template="$LOCAL_REPO_ROOT/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json"
   fi
   [[ -z "$template" ]] && { echo "  Warning: codebase-memory-mcp mcp.json template not found"; return 0; }
   # NEVER-TOUCH policy (v3): NEVER-TOUCH comment in install_*_config for the matching
@@ -801,33 +795,24 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
-# Shared: clone + copy sages files
+# Shared: copy sages files from the local sages repo
 # ────────────────────────────────────────────────────────────
 install_sages_files() {
-  check_git
-  TMP_DIR=$(mktemp -d)
-  echo "  Cloning from $REPO_URL..."
-  git clone "$REPO_URL" "$TMP_DIR" || {
-    echo "Error: Failed to clone sages repository"
+  # No clone: source files come from LOCAL_REPO_ROOT (the parent
+  # directory of pi/, derived at script entry + sanity-checked). The
+  # user controls which commit is installed by where their local repo
+  # is checked out — `git checkout` in the sages repo, then re-run
+  # install.sh. Pin policy is gone (no SAGES_REPO_SHA, no remote ref).
+  local src_root="$LOCAL_REPO_ROOT/pi"
+  if [[ ! -d "$src_root" ]]; then
+    echo "Error: sages source tree not found at $src_root"
+    echo "  LOCAL_REPO_ROOT sanity check passed earlier — this is unexpected."
     return 1
-  }
-
-  # Pin the checkout to SAGES_REPO_SHA so the local-peer file-copy
-  # packages (sages, pi-codebase-memory, pi-subagents) all come from
-  # the same sage git ref. One ref pins all three together.
-  # `git checkout <sha>` fails if the SHA isn't reachable from the
-  # default branch; surface that explicitly so a stale pin is loud,
-  # not silent.
-  echo "  Checking out pinned ref $SAGES_REPO_SHA..."
-  (cd "$TMP_DIR" && git checkout --quiet "$SAGES_REPO_SHA") || {
-    echo "Error: Pinned sage ref $SAGES_REPO_SHA not found in $REPO_URL"
-    echo "Bump SAGES_REPO_SHA in install.sh to a ref that exists on the default branch."
-    return 1
-  }
+  fi
 
   mkdir -p "$PKG_DIR"
   for dir in skills src profiles subagents templates; do
-    local src_dir="$TMP_DIR/pi/$dir"
+    local src_dir="$src_root/$dir"
     local dest_dir="$PKG_DIR/$dir"
 
     if [[ ! -d "$src_dir" ]]; then
@@ -843,12 +828,11 @@ install_sages_files() {
     fi
   done
 
-
   # Handle package.json
   if [[ -f "$PKG_DIR/package.json" && "${FORCE:-false}" != true ]]; then
     echo "  Keeping existing package.json"
-  elif [[ -f "$TMP_DIR/pi/package.json" ]]; then
-    cp "$TMP_DIR/pi/package.json" "$PKG_DIR/package.json"
+  elif [[ -f "$src_root/package.json" ]]; then
+    cp "$src_root/package.json" "$PKG_DIR/package.json"
     echo "  Installed package.json"
   fi
 
@@ -872,10 +856,9 @@ install_sages_files() {
 # has its own node_modules (e.g., populated by `bun install` in install_*_files).
 #
 # IMPORTANT: this must run AFTER all peer file copies (in install()) — not in
-# install_sages_files(). The previous implementation ran inside the clone where
-# the symlink target `../pi/node_modules` was correct relative to $TMP_DIR/pi/,
-# but `cp -r` then copied those symlinks into $PI_DIR/packages/, where the same
-# relative path resolves to a non-existent `~/.pi/packages/pi/node_modules`.
+# install_sages_files(). Peer source dirs are read straight from $LOCAL_REPO_ROOT
+# (no clone staging dir involved), so there is no longer a risk of copying stale
+# relative-path symlinks into $PI_DIR/packages/.
 setup_peer_node_modules_symlinks() {
   for peer in pi-codebase-memory pi-subagents pi-evaluator; do
     local peer_dir="$PI_DIR/packages/$peer"
@@ -933,9 +916,9 @@ except Exception:
 }
 
 install_pi_subagents_files() {
-  local src_root="$TMP_DIR/$PI_SUBAGENTS_SRC_REL"
+  local src_root="$LOCAL_REPO_ROOT/$PI_SUBAGENTS_SRC_REL"
   [[ ! -d "$src_root" ]] && {
-    echo "  Warning: $src_root not found in clone, skipping pi-subagents files"
+    echo "  Warning: $src_root not found in local sages repo, skipping pi-subagents files"
     return 0
   }
   if [[ -d "$PI_SUBAGENTS_DEST_DIR" && "${FORCE:-false}" != true ]]; then
@@ -1014,8 +997,9 @@ except Exception as e:
 #
 # pi-evaluator adds 2 passive-observer tools (eval_score, eval_trend) that
 # score the active Sages workflow across 5 dimensions (goal, dag, implement,
-# audit, coordination). It is a pure-TS sage peer — file-copied from the same
-# `git clone` that sources sages / pi-codebase-memory / pi-subagents.
+# audit, coordination). It is a pure-TS sage peer — file-copied from the
+# local sages repo at $LOCAL_REPO_ROOT/pi-evaluator alongside the other
+# three peers.
 #
 # Reward mode is OFF by default. Users opt in via `sages.rewardMode: true`
 # in ~/.pi/agent/settings.json. The extension itself is always installed;
@@ -1046,9 +1030,9 @@ except Exception:
 }
 
 install_pi_evaluator_files() {
-  local src_root="$TMP_DIR/$PI_EVALUATOR_SRC_REL"
+  local src_root="$LOCAL_REPO_ROOT/$PI_EVALUATOR_SRC_REL"
   [[ ! -d "$src_root" ]] && {
-    echo "  Warning: $src_root not found in clone, skipping pi-evaluator files"
+    echo "  Warning: $src_root not found in local sages repo, skipping pi-evaluator files"
     return 0
   }
   if [[ -d "$PI_EVALUATOR_DEST_DIR" && "${FORCE:-false}" != true ]]; then
@@ -1144,13 +1128,14 @@ except Exception as e:
 #   @davecodes/pi-routines        → 0.5.1
 #
 # Local-peer (file-copy) packages — sages, pi-codebase-memory,
-# pi-subagents — are NOT pinned via npm; they are pinned together
-# via the SAGES_REPO_SHA git ref (full:
-# 04cc8c1d43b56c8fc6194ebe1d6a490d311c5440 — short: 04cc8c1).
-# All three are file-copied from one `git clone $REPO_URL &&
-# git checkout $SAGES_REPO_SHA`, so the single ref pins all three.
+# pi-subagents, pi-evaluator — are NOT pinned via npm and have NO
+# remote ref pin. They are sourced directly from the local sages repo
+# (the parent directory of pi/scripts/install.sh, derived as
+# LOCAL_REPO_ROOT at script entry). "Versioning" is whatever commit
+# the local repo is checked out to — `git checkout <sha>` in the
+# sages repo, then re-run install.sh to roll the deployed peers.
 #
-#   sages / pi-codebase-memory / pi-subagents → 04cc8c1
+#   sages / pi-codebase-memory / pi-subagents / pi-evaluator → local HEAD
 #
 # AFT (@cortexkit/aft-pi) is NOT pinned here; it is intentionally
 # not auto-installed (memory #25) — users run
@@ -1266,7 +1251,7 @@ install_pi_magic_context() {
   #    so semantic search stays off until ONNX can be installed manually.
   if command -v pi &>/dev/null; then
     echo "  Installing @cortexkit/pi-magic-context via pi (skipping onnx postinstall)..."
-    (cd "$TMP_DIR" && \
+    (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
       npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_MAGIC_CONTEXT_PKG" 2>&1 | tail -3) || {
       echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_MAGIC_CONTEXT_PKG' manually"
     }
@@ -1393,9 +1378,9 @@ install_pi_mcp_adapter() {
 
   if command -v pi &>/dev/null; then
     echo "  Installing pi-mcp-adapter via npm (skipping postinstall scripts)..."
-    # cd to ${TMP_DIR:-/tmp} to match the magic-context pattern; --prefix
+    # cd to ${LOCAL_REPO_ROOT:-/tmp} to match the magic-context pattern; --prefix
     # governs the install location so cwd is incidental.
-    (cd "${TMP_DIR:-/tmp}" && \
+    (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
       npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_MCP_ADAPTER_PKG" 2>&1 | tail -3) || {
       echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_MCP_ADAPTER_PKG' manually"
     }
@@ -1510,7 +1495,7 @@ install_pi_routines() {
 
   if command -v pi &>/dev/null; then
     echo "  Installing @davecodes/pi-routines via npm..."
-    (cd "${TMP_DIR:-/tmp}" && \
+    (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
       npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_ROUTINES_PKG" 2>&1 | tail -3) || {
       echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_ROUTINES_PKG' manually"
     }
@@ -1581,7 +1566,7 @@ install() {
   fi
 
 
-  # Install sages first (git clone populates TMP_DIR)
+  # Install sages first (sources files from $LOCAL_REPO_ROOT/pi/).
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
@@ -1594,7 +1579,7 @@ install() {
   # Install @davecodes/pi-routines (scheduled + event-driven routines)
   install_pi_routines || true
 
-  # Install pi-codebase-memory sage peer (file copy from TMP_DIR/pi-codebase-memory + settings.json register).
+  # Install pi-codebase-memory sage peer (file copy from $LOCAL_REPO_ROOT/pi-codebase-memory + settings.json register).
   # Old design had two steps (install_pi_codebase_memory + install_pi_codebase_memory_files); merged into one
   # after we dropped the npm:pi-codebase-memory (R-Dson) variant in favor of the local peer only.
   install_pi_codebase_memory || true
@@ -1607,10 +1592,10 @@ install() {
     echo "  To retry: bash <(curl -fsSL https://raw.githubusercontent.com/${CBM_REPO}/main/install.sh)"
   }
 
-  # Install pi-subagents (sage peer, file-copy from ./pi-subagents/ in the clone).
+  # Install pi-subagents (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-subagents).
   install_pi_subagents || true
 
-  # Install pi-evaluator (sage peer, file-copy from ./pi-evaluator/ in the clone).
+  # Install pi-evaluator (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-evaluator).
   # Reward mode (eval_score / eval_trend) is OFF by default — opt in via
   # `sages.rewardMode: true` in ~/.pi/agent/settings.json after install.
   install_pi_evaluator || true
