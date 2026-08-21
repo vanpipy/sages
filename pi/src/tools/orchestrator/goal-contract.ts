@@ -23,6 +23,8 @@ import { Type, type Static } from "typebox";
 import * as yaml from "js-yaml";
 import type { GoalContract, SuccessCriterion } from "./types.js";
 import { atomicWriteOrchestratorFile, isGoalContractState } from "./state-persistence.js";
+import { RunEvent } from "../../observability/events.js";
+import { emitRunEvent } from "../../observability/runner.js";
 
 /** Tool input schema. */
 export const GoalContractParams = Type.Object({
@@ -320,6 +322,12 @@ export async function executeGoalContractCreate(
     yaml.dump(contract, { indent: 2, lineWidth: 120, noRefs: true }),
     { owner: "l3", validate: isGoalContractState },
   );
+
+  // GC-2026-067 T1: emit run/goal_created so the orchestrator-state
+  // directory has an audit-state-{goal_id}.yaml for the watchdog + session
+  // digest to read. Without this, the watchdog has no file to fingerprint
+  // and the session digest has no in-flight goals to surface.
+  emitRunEvent(contract.id, RunEvent.GoalCreated, { goal_id: contract.id });
 
   const response: Record<string, unknown> = {
     status: "in_progress",
