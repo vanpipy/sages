@@ -59,6 +59,15 @@ export const SignalConfigSchema = Type.Object({
 		description:
 			"Semantic direction of the signal after normalization. Currently advisory — kept on the schema so future scoring engines can cross-check the implied direction vs the chosen norm.",
 	}),
+	/**
+	 * Optional per-signal input. Schema-version 0.3.0+ only; 0.2.0 files
+	 * parse without it (backward-compatible). The `with` field is the
+	 * opt-in gate for per-metric configuration (e.g.
+	 * `with: { budgetPerTask: 30 }` for Step Efficiency, or
+	 * `with: { from: 'llm', criteria: '...' }` for hybrid heuristic+LLM
+	 * metrics that activate the LLM judge branch).
+	 */
+	with: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 });
 
 /** Per-dimension config: a named map of signals. */
