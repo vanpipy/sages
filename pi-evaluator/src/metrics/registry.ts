@@ -33,13 +33,21 @@ export function clearMetrics(): void {
 }
 
 /**
- * Single entry point for "register everything we ship". T1 calls this with
- * no-op (no metrics ship in T1); T2-T6 extend this to import and register
- * their own metrics. The extension calls `registerBuiltinMetrics()` once on
- * `session_start`.
+ * Single entry point for "register everything we ship". The extension calls
+ * `registerBuiltinMetrics()` once on `session_start`. T1 shipped with zero
+ * built-ins; T2 registers 3 heuristic metrics; T3 registers 2 hybrid
+ * metrics. T4 will add 2 LLM-only metrics.
  */
+import { StepEfficiency } from "./step-efficiency.ts";
+import { ArgumentCorrectness } from "./argument-correctness.ts";
+import { PlanAdherence } from "./plan-adherence.ts";
+import { GoalAccuracy } from "./goal-accuracy.ts";
+import { TaskCompletion } from "./task-completion.ts";
+
 export function registerBuiltinMetrics(): void {
-	// T1 ships with zero metrics — the engine + runner alone. T2-T6 register
-	// the 7 metrics (Step Efficiency, Argument Correctness, Plan Adherence,
-	// Goal Accuracy, Task Completion, Plan Quality, Tool Use) here.
+	registerMetric(new StepEfficiency());
+	registerMetric(new ArgumentCorrectness());
+	registerMetric(new PlanAdherence());
+	registerMetric(new GoalAccuracy());
+	registerMetric(new TaskCompletion());
 }
