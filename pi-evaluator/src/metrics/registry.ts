@@ -9,6 +9,15 @@
  * at startup. Tests use `clearMetrics` to reset between cases.
  */
 import type { Metric } from "./types.ts";
+import { StepEfficiency } from "./step-efficiency.ts";
+import { ArgumentCorrectness } from "./argument-correctness.ts";
+import { PlanAdherence } from "./plan-adherence.ts";
+import { GoalAccuracy } from "./goal-accuracy.ts";
+import { TaskCompletion } from "./task-completion.ts";
+import { PlanQuality } from "./plan-quality.ts";
+import { ToolUse } from "./tool-use.ts";
+import { setJudgeFn } from "./llm-judge/seam.ts";
+import { defaultJudgeFn } from "./llm-judge/judge.ts";
 
 const REGISTRY = new Map<string, Metric>();
 
@@ -33,21 +42,25 @@ export function clearMetrics(): void {
 }
 
 /**
- * Single entry point for "register everything we ship". The extension calls
- * `registerBuiltinMetrics()` once on `session_start`. T1 shipped with zero
- * built-ins; T2 registers 3 heuristic metrics; T3 registers 2 hybrid
- * metrics. T4 will add 2 LLM-only metrics.
+ * Single entry point for "register everything we ship". Called once from
+ * extension.ts on session_start. Idempotent (the underlying registry throws
+ * on duplicate ids); tests that need a clean registry call `clearMetrics()`
+ * first.
+ *
+ * Also installs the real LLM-judge function via the seam, so hybrid metrics
+ * (Goal Accuracy, Task Completion) get real scores when the user opts in via
+ * `with.from = 'llm'` in their coefficient override AND the provider's env
+ * var is set (e.g. ANTHROPIC_API_KEY). If the env var is missing, the
+ * `defaultJudgeFn` throws → seam returns `data_missing:true` → caller falls
+ * back to the heuristic branch.
  */
-import { StepEfficiency } from "./step-efficiency.ts";
-import { ArgumentCorrectness } from "./argument-correctness.ts";
-import { PlanAdherence } from "./plan-adherence.ts";
-import { GoalAccuracy } from "./goal-accuracy.ts";
-import { TaskCompletion } from "./task-completion.ts";
-
 export function registerBuiltinMetrics(): void {
+	setJudgeFn(defaultJudgeFn);
 	registerMetric(new StepEfficiency());
 	registerMetric(new ArgumentCorrectness());
 	registerMetric(new PlanAdherence());
 	registerMetric(new GoalAccuracy());
 	registerMetric(new TaskCompletion());
+	registerMetric(new PlanQuality());
+	registerMetric(new ToolUse());
 }

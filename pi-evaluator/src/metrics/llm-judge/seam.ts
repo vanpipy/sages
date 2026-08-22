@@ -19,7 +19,13 @@ export interface JudgeInput {
 	evidence: string;
 	/** Human-readable criteria string ("Does the task report indicate the SC is met?"). */
 	criteria: string;
-	/** Optional provider + modelId override; T4 will use this when picking the Model. */
+	/**
+	 * Caller's opt-in signal. Hybrid metrics only invoke judge() when the user
+	 * has overridden the signal with `with.from === 'llm'` in coefficients.json.
+	 * Pure-LLM metrics always pass `'llm'`.
+	 */
+	from?: "llm" | "heuristic";
+	/** Optional provider + modelId override; default = anthropic/claude-sonnet-4-5. */
 	provider?: string;
 	modelId?: string;
 }

@@ -61,8 +61,9 @@ describe("MetricRegistry", () => {
 		expect(getMetric("a")).toBeUndefined();
 	});
 
-	test("registerBuiltinMetrics registers the 5 T2/T3 built-ins", () => {
-		// T1 shipped with zero built-ins; T2/T3 register 5.
+	test("registerBuiltinMetrics registers the 7 T2/T3/T4 built-ins", () => {
+		// T1 shipped with zero built-ins; T2 registers 3 heuristics; T3 registers
+		// 2 hybrid; T4 registers 2 LLM-only.
 		registerBuiltinMetrics();
 		const ids = listMetricIds();
 		expect(ids).toContain("step_efficiency");
@@ -70,7 +71,9 @@ describe("MetricRegistry", () => {
 		expect(ids).toContain("plan_adherence");
 		expect(ids).toContain("goal_accuracy");
 		expect(ids).toContain("task_completion");
-		expect(ids).toHaveLength(5);
+		expect(ids).toContain("plan_quality");
+		expect(ids).toContain("tool_use");
+		expect(ids).toHaveLength(7);
 	});
 });
 
