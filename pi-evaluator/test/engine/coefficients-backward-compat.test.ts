@@ -118,14 +118,15 @@ function v030Fixture(): string {
 }
 
 describe("0.2.0 → 0.3.0 backward compatibility", () => {
-	test("0.2.0 fixture (no `with` field) loads and parses — matches current package, no warning", () => {
+	test("0.2.0 fixture (no `with` field) loads and parses — version mismatch warning produced", () => {
 		const path = join(tmpDir, "coefficients.json");
 		writeFileSync(path, v020Fixture("0.2.0"));
 		const { config, warning } = loadCoefficientsAt(path);
 		expect(config.version).toBe("0.2.0");
-		// Package version is 0.2.0 at this point in the GC (chunk 5 bumps to 0.3.0).
-		// Until then, 0.2.0 file matches → no warning.
-		expect(warning).toBeUndefined();
+		// After chunk 5 bumped the package to 0.3.0, a 0.2.0 file produces a
+		// version-mismatch warning. The warning is non-fatal — the file still loads.
+		expect(warning).toBeDefined();
+		expect(warning?.file_version).toBe("0.2.0");
 	});
 
 	test("0.3.0 fixture (with `with` field) loads and parses", () => {
