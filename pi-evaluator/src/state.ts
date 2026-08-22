@@ -91,6 +91,15 @@ export interface EvalState {
 	coefficients_warning?: VersionMismatchWarning;
 	/** Currently active workflow, or null if no workflow is in flight. */
 	active_workflow: WorkflowScoreState | null;
+	/**
+	 * Optional path to the active workflow's orchestrator dir (e.g. `.pi/orchestrator/`).
+	 * Set by extension.ts's `tool_call` listener (T1b). When `active_workflow` is
+	 * null but `active_workflow_path` is set, `computeEvalScore` self-cooks by
+	 * running the scoring engine over the artifacts in that dir.
+	 */
+	active_workflow_path?: string;
+	/** Optional workflow id paired with `active_workflow_path` (e.g. "DAG-2026-063"). */
+	active_workflow_id?: string;
 }
 
 /**
