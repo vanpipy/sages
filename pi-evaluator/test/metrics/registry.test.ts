@@ -61,10 +61,16 @@ describe("MetricRegistry", () => {
 		expect(getMetric("a")).toBeUndefined();
 	});
 
-	test("registerBuiltinMetrics is a no-op (T1 ships zero built-ins)", () => {
-		// Should not throw, should leave the registry empty.
+	test("registerBuiltinMetrics registers the 5 T2/T3 built-ins", () => {
+		// T1 shipped with zero built-ins; T2/T3 register 5.
 		registerBuiltinMetrics();
-		expect(listMetricIds()).toEqual([]);
+		const ids = listMetricIds();
+		expect(ids).toContain("step_efficiency");
+		expect(ids).toContain("argument_correctness");
+		expect(ids).toContain("plan_adherence");
+		expect(ids).toContain("goal_accuracy");
+		expect(ids).toContain("task_completion");
+		expect(ids).toHaveLength(5);
 	});
 });
 
