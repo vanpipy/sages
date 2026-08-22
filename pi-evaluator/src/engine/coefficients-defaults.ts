@@ -13,11 +13,10 @@
  *      cause the loader to throw on first run — that's intentional (fail
  *      loud, not silent).
  *
- * The signal list below is intentionally minimal (3-5 per dimension). The
- * signal engine (T3) hasn't shipped yet, so we ship only the signals whose
- * values can be derived from the orchestrator artifacts that already exist
- * (goal-{id}.yaml, dag-{id}.yaml, task reports, audit reports). New
- * signals get added as the engine grows.
+ * v0.3.0 change: 7 disabled (weight=0) signal-name placeholders added — one
+ * per metric that T2-T4 ship. Users opt-in by setting `weight > 0` in their
+ * override file. The default scoring is byte-identical to v0.2.0 because
+ * weight=0 placeholders contribute 0 to the weighted sum.
  *
  * To tune: copy `examples/evaluator-log/coefficients.json` to
  * `~/.pi/agent/evaluator-log/coefficients.json` and edit. The file path
@@ -27,8 +26,9 @@ import { PI_EVALUATOR_VERSION } from "./package-version.ts";
 import type { CoefficientsConfig } from "./coefficients-schema.ts";
 
 /**
- * Built-in v0.2.0 defaults. Σ weights per dimension = 1.0; Σ
- * dimension_weights = 1.0; thresholds: pass ≥ 80, pass_with_gaps ≥ 50.
+ * Built-in v0.3.0 defaults. Σ weights per dimension = 1.0 (placeholders
+ * contribute 0); Σ dimension_weights = 1.0; thresholds: pass ≥ 80,
+ * pass_with_gaps ≥ 50.
  *
  * What each signal represents is documented in SKILL.md §"Signal catalog".
  */
@@ -108,6 +108,20 @@ export const DEFAULT_COEFFICIENTS: CoefficientsConfig = {
 					norm: "ratio_0_1",
 					direction: "higher_better",
 				},
+				// DISABLED placeholder (T2 ships the metric; opt-in via override).
+				// Heuristic: n-gram match between task report text and DAG's acceptance.covers[].
+				plan_adherence: {
+					weight: 0,
+					norm: "ratio_0_1",
+					direction: "higher_better",
+				},
+				// DISABLED placeholder (T4 ships the metric; opt-in via override).
+				// LLM-only: subjective quality of the DAG plan itself.
+				plan_quality: {
+					weight: 0,
+					norm: "ratio_0_1",
+					direction: "higher_better",
+				},
 			},
 		},
 
@@ -130,6 +144,27 @@ export const DEFAULT_COEFFICIENTS: CoefficientsConfig = {
 				tasks_per_sc_norm: {
 					weight: 0.30,
 					norm: "log_count",
+					direction: "higher_better",
+				},
+				// DISABLED placeholder (T2 ships the metric; opt-in via override).
+				// Heuristic: tool calls where toolResult.isError === true, by tool name.
+				argument_correctness: {
+					weight: 0,
+					norm: "ratio_0_1",
+					direction: "lower_better",
+				},
+				// DISABLED placeholder (T3/T4 ship the metric; opt-in via override).
+				// Heuristic+LLM hybrid: covers[] fully verified by audit (heuristic branch).
+				task_completion: {
+					weight: 0,
+					norm: "ratio_0_1",
+					direction: "higher_better",
+				},
+				// DISABLED placeholder (T4 ships the metric; opt-in via override).
+				// LLM-only: quality of tool usage (judges intent + correctness together).
+				tool_use: {
+					weight: 0,
+					norm: "ratio_0_1",
 					direction: "higher_better",
 				},
 			},
@@ -159,6 +194,13 @@ export const DEFAULT_COEFFICIENTS: CoefficientsConfig = {
 				// ratio of audits that re-ran verification_cmd (the auditor's contract)
 				verification_rerun_rate: {
 					weight: 0.10,
+					norm: "ratio_0_1",
+					direction: "higher_better",
+				},
+				// DISABLED placeholder (T3/T4 ship the metric; opt-in via override).
+				// Heuristic+LLM hybrid: workflowReady binary from audit-state + LLM branch.
+				goal_accuracy: {
+					weight: 0,
 					norm: "ratio_0_1",
 					direction: "higher_better",
 				},
@@ -193,6 +235,13 @@ export const DEFAULT_COEFFICIENTS: CoefficientsConfig = {
 					weight: 0.25,
 					norm: "ratio_0_1",
 					direction: "higher_better",
+				},
+				// DISABLED placeholder (T2 ships the metric; opt-in via override).
+				// Heuristic: tool calls per task normalized to a soft budget.
+				step_efficiency: {
+					weight: 0,
+					norm: "ratio_0_1",
+					direction: "lower_better",
 				},
 			},
 		},
