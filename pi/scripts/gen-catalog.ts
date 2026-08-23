@@ -3,9 +3,9 @@
  * gen-catalog.ts — GC-2026-047 T1.1 / GC-2026-048 T2.2
  *
  * Generates five catalog files under `pi/catalogs/` from current source:
- *   - subagent.json   ← pi/subagents/registry.yaml (GC-2026-048 — single
- *                        source of truth; replaces the pre-T2.1 dual-source
- *                        extract from dag-synthesizer.ts + task-dispatcher.ts)
+ *   - subagent.json   ← @sages/pi-subagents (DEFAULT_AGENTS, single
+ *                        source of truth for subagent registration;
+ *                        replaces GC-2026-048 subagents/registry.yaml)
  *   - isolation.json  ← pi/src/tools/orchestrator/types.ts
  *                        (TaskNode.isolation union)
  *   - gate.json       ← pi/src/tools/orchestrator/orchestrator-audit.ts
@@ -13,8 +13,7 @@
  *                        pi/src/tools/orchestrator/goal-contract.ts
  *                        (severity vocabulary)
  *   - event.json      ← pi/src/observability/events.ts
- *                        (RunEvent / StepEvent / SeamEvent enums,
- *                        GC-2026-050 taxonomy)
+ *                        (RunEvent enum, GC-2026-050 taxonomy)
  *   - namespace.json  ← pi/src/tools/orchestrator/namespace-ownership.ts
  *                        (L3 / developer / auditor patterns)
  *
@@ -23,7 +22,10 @@
  * every source file listed in the catalog's allow-list; the verifier
  * recomputes the same chain and exits 1 on mismatch.
  *
- * No external dependencies beyond `js-yaml` (already a runtime dep of pi).
+ * Subagent catalog is a thin snapshot of pi-subagents' DEFAULT_AGENTS
+ * — downstream tools can read it without importing the pi-subagents
+ * package. The runtime also imports pi-subagents directly via the
+ * `KNOWN_SUBAGENT_IDS` / `defaultRunInBackground` exports.
  *
  * Extraction is intentionally regex / limited parsing — NOT ts-morph.
  * A future GC (G2 / G4) will replace this with a real AST walker once
@@ -35,6 +37,7 @@ import { createHash } from "node:crypto";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as yaml from "js-yaml";
+import { KNOWN_SUBAGENT_IDS, defaultRunInBackground } from "@sages/pi-subagents";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // `pi/scripts/gen-catalog.ts` → `pi/` is the parent
@@ -103,103 +106,48 @@ function writeCatalog(
 // ─────────────────────────────────────────────────────────────────────────────
 // Extractor 1 — subagent roster
 //
-// GC-2026-048 T2.2: the source of truth is `pi/subagents/registry.yaml`.
-// The runtime registry loader (`pi/src/tools/orchestrator/subagent-registry.ts`)
-// parses the same YAML, validates the same shape, and exposes the same
-// fields — the catalog is a snapshot of that registry's id + run_in_background
-// columns, plus the full set of fields so downstream readers can introspect
-// kind / isolation / gather / artifact_schema without re-parsing YAML.
+// GC-2026-XXX: pi-subagents owns subagent registration. We import
+// DEFAULT_AGENTS (the canonical Map<string, AgentConfig>) and project
+// just the two fields sages consumes (id + runInBackground) into a
+// minimal catalog. Fields like kind / gather / artifact_schema used
+// to live in a duplicate subagents/registry.yaml — that file was
+// removed; if a downstream tool needs richer metadata, it should
+// import pi-subagents directly.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface SubagentEntry {
 	id: string;
 	source: string;
 	run_in_background_default: boolean;
-	kind: string;
-	isolation: string[];
-	gather: boolean;
-	artifact_schema: string[];
 }
 
-const REGISTRY_REL_PATH = "subagents/registry.yaml";
-
-interface RegistrySubagent {
-	id: string;
-	kind: string;
-	isolation: string[];
-	run_in_background: boolean;
-	gather: boolean;
-	artifact_schema: string[];
-}
-
-function loadRegistry(): RegistrySubagent[] {
-	const raw = readFileSync(join(PI_ROOT, REGISTRY_REL_PATH), "utf-8");
-	const parsed: unknown = yaml.load(raw);
-	if (typeof parsed !== "object" || parsed === null) {
-		throw new Error("subagent: registry.yaml root must be an object");
-	}
-	const subagents = (parsed as { subagents?: unknown }).subagents;
-	if (!Array.isArray(subagents) || subagents.length === 0) {
-		throw new Error("subagent: registry.yaml must contain a non-empty 'subagents' array");
-	}
-	const ids = new Set<string>();
-	const out: RegistrySubagent[] = [];
-	for (const [index, candidate] of subagents.entries()) {
-		const prefix = `subagent: registry.yaml entry ${index}`;
-		if (typeof candidate !== "object" || candidate === null) {
-			throw new Error(`${prefix} must be an object`);
-		}
-		const entry = candidate as RegistrySubagent;
-		if (typeof entry.id !== "string" || entry.id.length === 0) {
-			throw new Error(`${prefix} requires a non-empty string 'id'`);
-		}
-		if (ids.has(entry.id)) {
-			throw new Error(`subagent: registry.yaml contains duplicate id '${entry.id}'`);
-		}
-		ids.add(entry.id);
-		if (
-			!Array.isArray(entry.isolation)
-			|| entry.isolation.length === 0
-			|| entry.isolation.some((mode) => typeof mode !== "string" || mode.length === 0)
-		) {
-			throw new Error(`${prefix} '${entry.id}' requires non-empty string 'isolation' array`);
-		}
-		if (typeof entry.run_in_background !== "boolean") {
-			throw new Error(`${prefix} '${entry.id}' requires boolean 'run_in_background'`);
-		}
-		if (typeof entry.gather !== "boolean") {
-			throw new Error(`${prefix} '${entry.id}' requires boolean 'gather'`);
-		}
-		if (
-			!Array.isArray(entry.artifact_schema)
-			|| entry.artifact_schema.length === 0
-			|| entry.artifact_schema.some((field) => typeof field !== "string" || field.length === 0)
-		) {
-			throw new Error(`${prefix} '${entry.id}' requires non-empty string 'artifact_schema' array`);
-		}
-		out.push(entry);
-	}
-	return out;
-}
+const SUBAGENT_SOURCE_REL_PATH = "../pi-subagents/src/default-agents.ts";
 
 function extractSubagent(): {
 	entries: SubagentEntry[];
 	sources: SourceFile[];
 } {
-	const registry = loadSource(REGISTRY_REL_PATH);
-	const subagents = loadRegistry();
+	const entries: SubagentEntry[] = [];
+	for (const id of KNOWN_SUBAGENT_IDS) {
+		entries.push({
+			id,
+			source: `@sages/pi-subagents#KNOWN_SUBAGENT_IDS`,
+			run_in_background_default: defaultRunInBackground(id),
+		});
+	}
+	entries.sort((a, b) => a.id.localeCompare(b.id));
 
-	const entries: SubagentEntry[] = subagents.map((entry) => ({
-		id: entry.id,
-		source: `pi/${REGISTRY_REL_PATH}#subagents`,
-		run_in_background_default: entry.run_in_background,
-		kind: entry.kind,
-		isolation: [...entry.isolation],
-		gather: entry.gather,
-		artifact_schema: [...entry.artifact_schema],
-	}));
+	// For the SHA-256 hash chain, also include the source file from
+	// pi-subagents. We compute the hash against the on-disk source so
+	// the verifier can re-check after edits.
+	const sourceAbs = join(PI_ROOT, "..", "pi-subagents", "src", "default-agents.ts");
+	const sources: SourceFile[] = [{
+		relPath: SUBAGENT_SOURCE_REL_PATH,
+		absPath: sourceAbs,
+		content: readFileSync(sourceAbs, "utf-8"),
+	}];
 
-	return { entries, sources: [registry] };
+	return { entries, sources };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -376,18 +324,17 @@ function extractGate(): {
 // (`run/` / `step/` / `seam/`). This extractor parses the enum-member
 // shape `<Name> = "<domain>/<slug>"` and emits one entry per member.
 //
-// Source-of-truth: `src/observability/events.ts`. The matching emitters
-// (runner.ts / step.ts / seam.ts) write to different storage profiles
-// but are NOT extracted here — the event-catalog surface is the enum
-// taxonomy, not the storage wiring. The producer / consumer matrix lives
-// at `pi/docs/event-producer-consumer.md` (maintained by hand; regenerate
-// when observability/events.ts changes).
+// Source-of-truth: `src/observability/events.ts`. The matching emitter
+// (runner.ts) writes run/* events to the durable audit-state file.
+// The step/* and seam/* domains were dropped when their corresponding
+// observability surface was removed; this extractor now only emits
+// run/* entries.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface EventEntry {
 	name: string;
 	id: string;
-	domain: "run" | "step" | "seam";
+	domain: "run";
 	source: string;
 }
 
@@ -409,30 +356,22 @@ function extractEvent(): {
 		const domain = m[2] as "run" | "step" | "seam";
 		const slug = m[3];
 		if (name === undefined || domain === undefined || slug === undefined) continue;
-		entries.push({
+	entries.push({
 			name,
 			id: `${domain}/${slug}`,
-			domain,
+			domain: domain as "run",
 			source: "src/observability/events.ts",
 		});
 	}
 
-	// Sanity guard: the GC-2026-050 minimum (SC5) is 6 events spanning 3
-	// domains. If the extractor drops below that, either events.ts was
-	// emptied (a regression) or the regex changed shape. Surface the
-	// failure loudly rather than emitting a silently-empty catalog.
-	if (entries.length < 6) {
+	// Sanity guard: events.ts was emptied of the step + seam domains
+	// when the corresponding observability surface was dropped. Only
+	// the run/* domain remains. If the extractor drops below 1, the
+	// events file has been emptied — surface loudly.
+	if (entries.length < 1) {
 		throw new Error(
-			`event: only ${entries.length} enum member(s) extracted from observability/events.ts — expected ≥6 (SC5 minimum)`,
+			`event: no enum members extracted from observability/events.ts — at least 1 required`,
 		);
-	}
-	const domains = new Set(entries.map((e) => e.domain));
-	for (const required of ["run", "step", "seam"]) {
-		if (!domains.has(required as "run" | "step" | "seam")) {
-			throw new Error(
-				`event: domain "${required}" missing from extracted events (got [${[...domains].join(", ")}])`,
-			);
-		}
 	}
 
 	return { entries, sources: [events] };

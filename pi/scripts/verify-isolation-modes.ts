@@ -24,7 +24,6 @@
  *
  * Scan scope:
  *   - `src/`        — production TypeScript code
- *   - `subagents/`  — registry YAML
  *   - `profiles/`   — built-in + override profile YAML
  *
  * Explicitly excluded (the literal is intentionally present here):
@@ -55,7 +54,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PI_ROOT = join(__dirname, "..");
 
-const SCAN_DIRS = ["src", "subagents", "profiles"];
+const SCAN_DIRS = ["src", "profiles"];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".pi", "fixtures"]);
 const FILE_RE = /\.(ts|tsx|js|jsx|mjs|cjs|json|yaml|yml)$/;
 

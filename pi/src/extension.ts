@@ -15,8 +15,8 @@
  *
  *   - The main agent has full tool access (`edit`, `write`, `aft_edit`,
  *     `apply_patch`, unrestricted `bash`). Nothing is stripped from
- *     the active toolset on session_start, and no bash command is
- *     blocked at the `tool_call` layer.
+ *     the active toolset, and no bash command is blocked at the
+ *     `tool_call` layer.
  *
  *   - Subagent dispatch via the 4-stage DAG workflow (goal → DAG →
  *     dispatch → audit) is RECOMMENDED for workflows whose todowrite
@@ -25,18 +25,14 @@
  *
  *   - Drift from the recommended pattern is auto-steered via a
  *     `pi.appendEntry("system", softModeReminder(profile))` once per
- *     session (fired on the first write-intent bash command). The
+ *     process (fired on the first write-intent bash command). The
  *     reminder is goal-orientation — it does NOT mention "you wrote
  *     production code" (per the user's directive). Drift is never
  *     blocked.
  *
- *   - The `before_agent_start` listener appends
- *     `softModeSystemPromptSuffix(profile)` to the system prompt so
- *     the LLM knows the soft-mode policy from the first turn.
- *
- * As of GC-2026-049, the reminder + suffix are sourced from the active
- * profile (loaded once at module load via `loadProfile()`). The
- * profile is also the source of truth for `subagents` (whitelist),
+ * As of GC-2026-049, the reminder is sourced from the active profile
+ * (loaded once at module load via `loadProfile()`). The profile is
+ * also the source of truth for `subagents` (whitelist),
  * `isolation_default`, `dag_threshold`, and `gate_suite`.
  *
  * Subagent dispatch and lifecycle are owned by `@tintinweb/pi-subagents`
@@ -52,43 +48,20 @@ import { join } from "node:path";
 import { registerOrchestratorTools } from "./tools/orchestrator/index.js";
 import { classifyBashCommand } from "./tools/bash-guard.js";
 import { loadProfile } from "./profile.js";
-import { softModeReminder, softModeSystemPromptSuffix } from "./soft-mode.js";
+import { softModeReminder } from "./soft-mode.js";
 import {
 	orchestratorAdvisoryFor,
+	preToolBlockDecision,
 	type OrchestratorToolCall,
+	type OrchestratorToolResult,
 	type OrchestratorAdvisoryContext,
 } from "./tools/orchestrator/l1-advisory.js";
 import { loadGoalContract, loadPlan } from "./tools/orchestrator/dag-synthesizer.js";
 import { ORCHESTRATOR_DIR } from "./tools/orchestrator/types.js";
 import {
 	RunEvent,
-	StepEvent,
-	SeamEvent,
 	emitRunEvent,
-	emitStepEvent,
-	emitSeamEvent,
-	onSeam,
 } from "./observability/index.js";
-import { installSagesRoutines } from "./tools/routines/sages-routines-install.js";
-import {
-	buildTurnTodoBlock,
-	advanceStale,
-	staleReminderFor,
-	resetStale,
-	type StaleTracker,
-} from "./tools/todo/todo-reminder.js";
-import {
-	TodoStateManager,
-	loadTodoState,
-	resolveRepoRoot,
-	saveTodoState,
-	todoStateDir,
-	type TodoDiff,
-	type TodoItem,
-} from "./tools/todo/todo-state.js";
-import { deriveDagTodos } from "./tools/todo/derive-dag-todos.js";
-import { maybeCompileDagFromTodos } from "./tools/todo/dag-compile.js";
-import { buildSessionDigest, formatSessionDigest } from "./observability/digest.js";
 
 // Load the active profile once at module load. Resolution order is
 // documented in `profile.ts`; falls back to the `standard` built-in
@@ -104,142 +77,60 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 	// The LLM-facing todo tool is now Magic Context's `todowrite`, mirrored
 	// into the Sages store by the tool_call listener below.
 
-	// ── Seam event registration (GC-2026-050) ────────────────────────────
-	// Register a no-op seam callback for the Preflight hook so downstream
-	// tools that call `emitSeamEvent(SeamEvent.Preflight, ...)` always
-	// find at least one registered listener at runtime. The actual seam
-	// (preflight) wiring is performed by `tool-fence.ts` once the
-	// orchestrator tools register themselves; this default no-op keeps
-	// the seam dispatcher failure-mode visible (empty registry → silent
-	// success) rather than latent.
-	//
-	// The registry is process-scoped and reset by tests via
-	// `clearSeamCallbacks()`. It is intentionally NOT persisted across
-	// sessions — extension re-registers on every `registerSagesExtension`
-	// call.
-	onSeam(SeamEvent.Preflight, async () => {
-		// Default seam listener: a no-op so the dispatcher always has at
-		// least one callback. Real preflight logic lives in the
-		// orchestrator's tool-fence module.
-	});
-
 	// ── Session-scoped state ──────────────────────────────────────────
 	// Mutable closure: each event handler reads / mutates the same state.
 	// pi's extension API is single-threaded (events fire serially), so no
-	// lock is needed. The state is reset on every session_start.
+	// lock is needed. State persists for the lifetime of the registered
+	// extension process — it is NOT reset per session.
 	//
-	// Under soft mode the only session-scoped flag is the auto-steer
-	// throttle: the soft-mode reminder is appended at most once per
-	// session to avoid spamming the LLM with duplicate reminders.
+	// `remindedThisSession` is the auto-steer throttle: the soft-mode
+	// reminder is appended at most once per process on the first
+	// write-intent bash command. In a long-running pi process with
+	// multiple sessions, only the first session sees the reminder.
 	let remindedThisSession = false;
+
+// Cap on the rolling `l1History` ring. The longest chain-detection
+// rule threshold (`repeatCallChain` with default 5) needs ~5 entries
+// to fire reliably; 50 leaves ~10× headroom for cross-tool chains
+// without letting a long-running session grow the array unbounded.
+const L1_HISTORY_CAP = 50;
 
 	// ── L1 orchestrator advisory state (GC-2026-053) ─────────────────────
 	// Mirror of L2's `AdvisoryContext` but lifted to the root agent so
-	// the orchestrator's own tool-call stream is audited. Reset on
-	// every session_start. The dedup set + dispatch counter suppress
-	// repeat advisories for the same rule across the same session,
-	// matching the L2 dedup/cap contract exactly.
+	// the orchestrator's own tool-call stream is audited. The dedup set
+	// + dispatch counter suppress repeat advisories for the same rule
+	// across the same session, matching the L2 dedup/cap contract
+	// exactly. Like `remindedThisSession`, this state is process-scoped.
 	let l1History: OrchestratorToolCall[] = [];
 	const l1Ctx: OrchestratorAdvisoryContext = {
 		alreadyAdvisedRules: new Set<string>(),
-		advisoriesSent: 0,
+		advisoriesBySeverity: { critical: 0, major: 0, minor: 0 },
 	};
-
-	// ── GC-2026-060 auto-todowrite session state ────────────────────────
-	// The pi built-in `todowrite` tool keeps its list only in LLM
-	// context; the extension mirrors each call into a durable
-	// TodoStateManager (persisted to <repo>/.pi/orchestrator/
-	// todo-state.json) so before_agent_start can inject the current
-	// list + change highlight every turn and turn_end can remind about
-	// stale in_progress todos. Root-agent-only: subagent sessions never
-	// reach this extension's listeners, and the store itself rejects
-	// any non-root owner (defense-in-depth).
-	let todoState = new TodoStateManager();
-	let staleTracker: StaleTracker = { increments: {} };
-	let lastTodoChange: TodoDiff | null = null;
-	// Rate limit: one reminder per stale todo identity per session.
-	const remindedTodoKeys = new Set<string>();
-	// GC-2026-061: session defaults for compiled dag identity — the most
-	// recent orchestrator tool call's dag/goal, used when structured
-	// todos carry no explicit dag_id / goal_id.
-	let sessionDagId: string | null = null;
-	let sessionGoalId: string | null = null;
-
-	// ── Session start: reset auto-steer throttle + L1 advisory state ────
-	// Soft mode does not touch the active toolset (Layer 1 is gone).
-	// The session_start handler only resets the reminder flag so the
-	// first write-intent bash command in a new session emits the
-	// reminder once. Previous-session state is otherwise irrelevant.
-	//
-	// GC-2026-050: run/* event scaffold. The `RunEvent.GoalCreated`
-	// event is NOT emitted here because there is no DAG id at
-	// session_start time. The actual emission happens at goal-creation
-	// time inside `goal_contract_create.ts` (a future orchestrator
-	// follow-up). We deliberately do NOT call `emitRunEvent()` from
-	// session_start — that would (a) require a placeholder dag_id and
-	// (b) race with the orchestrator's real emission.
-	pi.on("session_start", (event: any, ctx: any) => {
-		remindedThisSession = false;
-		l1History = [];
-		l1Ctx.alreadyAdvisedRules = new Set<string>();
-		l1Ctx.advisoriesSent = 0;
-
-		// GC-2026-060: reset + restore the root todo state. A persisted
-		// <repo>/.pi/orchestrator/todo-state.json survives compaction and
-		// process restarts, so the todo list resumes across sessions.
-		const cwd: string = typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd();
-		todoState = loadTodoState(todoStateDir(resolveRepoRoot(cwd))) ?? new TodoStateManager();
-		staleTracker = { increments: {} };
-		lastTodoChange = null;
-		remindedTodoKeys.clear();
-		sessionDagId = null;
-		sessionGoalId = null;
-		// GC-2026-055: auto-install the 3 Sages routine templates
-		// (sages-session-wrap / sages-resume / sages-watchdog) into
-		// the pi-routines store at session_start. Idempotent on
-		// subsequent loads (existing routines skipped by name).
-		// Synchronous: small templates, no fs read on the hot path.
-		try {
-			installSagesRoutines();
-		} catch (err) {
-			// Don't fail session_start; just log and continue.
-			console.error(
-				`[sages] installSagesRoutines failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		}
-
-		// GC-2026-067 T2: surface a one-shot `[sages session digest]`
-		// reminder listing in-flight goals, pending audit verdicts,
-		// unmerged branches, and todo state. The digest scans the
-		// orchestrator state directory + runs `git worktree list` /
-		// `git rev-list --count` for branch-ahead detection. Failure
-		// modes (no orchestrator dir, no git, corrupt yaml) all
-		// degrade to empty sections — never throw out of session_start.
-		try {
-			const digest = buildSessionDigest(cwd);
-			if (digest !== null) {
-				pi.appendEntry("system", formatSessionDigest(digest));
-			}
-		} catch (err) {
-			console.error(
-				`[sages] buildSessionDigest failed: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		}
-	});
+	// ── L1 error + assistant-message context (Items 2 & 3) ───────────────
+	// errorHistory is populated by the `tool_result` listener below and
+	// passed to detectors via `OrchestratorAdvisoryOptions.errorHistory`.
+	// It gates stuck-loop advisories: a successful call in the chain
+	// means the LLM is intentionally re-running, not stuck.
+	const errorHistory: OrchestratorToolResult[] = [];
+	// lastAssistantMessage is populated by the `message_end` listener
+	// below. Detectors scan it for retry-intent markers (e.g. "retrying",
+	// "amending the goal") to suppress stuck-loop advisories when the
+	// LLM has explicitly signalled intent to retry with reasoning.
+	let lastAssistantMessage: string | null = null;
+	// ── L1 pre-tool blocker (Item 4) ─────────────────────────────────────
+	// Pre-tool blockers run BEFORE the tool executes. When the upcoming
+	// call would create a CRITICAL finding, return `{ block: true }` so
+	// pi's tool_call loop returns the block without invoking the tool.
+	// This is the strongest gate — critical mistakes must not happen at
+	// all. Major findings still post-call advise but don't pre-block.
 
 	// ── Bash tool_call handler — soft mode ────────────────────────────
 	// Soft mode: NEVER block. The handler still classifies each command
-	// so it can fire the once-per-session auto-steer reminder on the
+	// so it can fire the once-per-process auto-steer reminder on the
 	// first write-intent bash call. The reminder is goal-orientation,
-	// not "you wrote production code" feedback.
-	//
-	// GC-2026-050: the existing `pi.appendEntry("system", ...)` is
-	// preserved for backward compatibility (the
-	// `test/tools/main-agent-toolset.test.ts` suite asserts on it).
-	// A `step/preflight` event is also emitted so the canonical Sages
-	// observability trace captures the reminder boundary. Both fire in
-	// the same turn; the appendEntry is marked deprecated in favor of
-	// `emitStepEvent(StepEvent.Preflight, ...)`.
+	// not "you wrote production code" feedback — it nudges the LLM back
+	// toward DAG workflow when its todowrite has grown past the
+	// profile's `dag_threshold`.
 	pi.on("tool_call", (event: any, ctx: any) => {
 		if (event.toolName !== "bash") return;
 		const command: string = event?.input?.command;
@@ -248,13 +139,6 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		const classification = classifyBashCommand(command);
 		if (classification === "write-intent" && !remindedThisSession) {
 			remindedThisSession = true;
-			// Canonical observability trace — the step/* event the Sages
-			// audit pipeline subscribes to.
-			emitStepEvent(StepEvent.Preflight, { profile: PROFILE.id });
-			// @deprecated — kept for backward compatibility with
-			// `test/tools/main-agent-toolset.test.ts`. Will be removed
-			// once that test migrates to assert on `emitStepEvent` /
-			// a stub `StepEvent.Preflight` listener instead.
 			pi.appendEntry("system", softModeReminder(PROFILE));
 		}
 		return undefined;
@@ -271,6 +155,12 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		const input =
 			event?.input && typeof event.input === "object" ? event.input : {};
 		l1History.push({ toolName, input, timestamp: Date.now() });
+		// Cap the rolling history at the longest chain threshold
+		// (50 ≈ 5× the longest detect threshold) so the chain-detection
+		// counter has enough signal without unbounded growth across a
+		// long-running pi session. LRU eviction is fine — only the most
+		// recent calls matter for repeat / resynth-loop detection.
+		if (l1History.length > L1_HISTORY_CAP) l1History.splice(0, l1History.length - L1_HISTORY_CAP);
 
 		const cwd: string = ctx?.cwd ?? process.cwd();
 		const advisories = orchestratorAdvisoryFor(l1History, l1Ctx, {
@@ -296,210 +186,112 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 			},
 		});
 		for (const advisory of advisories) {
-			pi.appendEntry("system", advisory);
-			// Update dedup + cap counters exactly like L2 does.
-			const ruleMatch = advisory.match(
-				/^\[orchestrator audit advisory — \d+\/\d+\] ([a-z_]+):/,
-			);
-			if (ruleMatch && ruleMatch[1]) {
-				l1Ctx.alreadyAdvisedRules.add(ruleMatch[1]);
-			}
-			l1Ctx.advisoriesSent += 1;
+			pi.appendEntry("system", advisory.text);
+			// Per-severity budget — critical fires freely (cap = ∞), major
+			// capped at 4. Dedup via alreadyAdvisedRules prevents the same
+			// rule from re-firing; the budget prevents noise from distinct
+			// major findings.
+			l1Ctx.alreadyAdvisedRules.add(advisory.rule);
+			l1Ctx.advisoriesBySeverity[advisory.severity] =
+				(l1Ctx.advisoriesBySeverity[advisory.severity] ?? 0) + 1;
 		}
 		return undefined;
 	});
 
-	// ── GC-2026-060 todo mirror tool_call handler ────────────────────────
-	// Third tool_call handler (registration order matters: the bash
-	// classifier + L1 advisory stay first and keep their exact
-	// behavior). Mirrors the built-in `todowrite` calls into the root
-	// todo store and triggers an auto-plan sync when the orchestrator
-	// synthesizes a DAG or runs an audit. (The legacy `sages_todo` mirror
-	// branch was removed in the GC-2026-068 reversal.)
-	// it writes the store directly.
+	// L1 pre-tool blocker (Item 4) — runs BEFORE the tool executes.
+	// Critically, this handler returns `{ block: true, reason }` if the
+	// upcoming call would create a critical advisory. When `block: true`
+	// is returned, pi's tool_call loop short-circuits without invoking
+	// the tool AND without running subsequent tool_call handlers for
+	// this event. Therefore this handler must run BEFORE the L1
+	// history-tracker below — registration order matters.
 	pi.on("tool_call", (event: any, ctx: any) => {
 		const toolName: string = event?.toolName;
-		if (typeof toolName !== "string" || toolName.length === 0) return undefined;
-		const input: Record<string, unknown> =
+		if (typeof toolName !== "string" || toolName.length === 0) return;
+		const toolCallId: string | undefined =
+			typeof event?.toolCallId === "string" ? event.toolCallId : undefined;
+		const input =
 			event?.input && typeof event.input === "object" ? event.input : {};
+		const upcoming: OrchestratorToolCall = {
+			toolName,
+			input,
+			timestamp: Date.now(),
+			callId: toolCallId,
+		};
 
-		// Root-only defensive guard: an explicit non-root owner marker is
-		// rejected before any state mutation (subagent session guard).
-		if (input.owner !== undefined && input.owner !== "root") return undefined;
-
-		const cwd: string = typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd();
-		const repoRoot = resolveRepoRoot(cwd);
-		const stateDir = todoStateDir(repoRoot);
-
-		try {
-			if (toolName === "todowrite") {
-				const items = todoItemsFromRaw(input.todos);
-				if (items.length === 0) return undefined; // empty / all entries malformed
-				lastTodoChange = todoState.apply(items);
-				saveTodoState(stateDir, todoState);
-				// GC-2026-061: structured todos (kind 'task' / depends_on /
-				// batch) compile into a DAG. dag_synthesize's plan is
-				// authoritative and is never overwritten — see the policy in
-				// maybeCompileDagFromTodos.
-				maybeCompileDagFromTodos(items, repoRoot, { sessionDagId, sessionGoalId });
-				return undefined;
-			}
-
-			if (toolName === "dag_synthesize" || toolName === "orchestrator_audit") {
-				const dagId =
-					typeof input.dag_id === "string" && input.dag_id.length > 0
-						? input.dag_id
-						: toolName === "dag_synthesize" &&
-							  typeof input.goal_id === "string" &&
-							  input.goal_id.length > 0
-							? input.goal_id
-							: newestDagId(repoRoot);
-				if (dagId === null) return undefined;
-				// GC-2026-061: remember the most recent orchestrator dag/goal
-				// so structured todos without an explicit dag_id compile under
-				// the same plan identity.
-				sessionDagId = dagId;
-				if (typeof input.goal_id === "string" && input.goal_id.length > 0) {
-					sessionGoalId = input.goal_id;
-				}
-				const derived = deriveDagTodos(dagId, repoRoot);
-				if (derived.length === 0) return undefined; // no DAG → never wipe the list
-				lastTodoChange = todoState.apply(derived);
-				saveTodoState(stateDir, todoState);
-				return undefined;
-			}
-		} catch {
-			// Best-effort observability: a malformed mirror must never
-			// break the agent's tool execution.
-		}
-		return undefined;
-	});
-
-	// ── before_agent_start: surface soft-mode policy + todo state ────────
-	// Every turn, append the profile's system-prompt suffix, then the
-	// compact per-turn todo block when the root todo list is non-empty
-	// OR a change diff is pending (an empty list with no pending diff
-	// injects nothing — avoid noise). The diff is one-shot: it is
-	// cleared after this turn's injection so the highlight appears
-	// exactly once.
-	pi.on("before_agent_start", (event: any) => {
-		const base: string = event?.systemPrompt ?? "";
-		let prompt = `${base}${base ? "\n\n" : ""}${softModeSystemPromptSuffix(PROFILE)}`;
-		const todos = todoState.getTodos();
-		const diffPending = lastTodoChange !== null && todoDiffHasChanges(lastTodoChange);
-		if (todos.length > 0 || diffPending) {
-			prompt = `${prompt}\n\n${buildTurnTodoBlock(todos, lastTodoChange ?? undefined)}`;
-		}
-		lastTodoChange = null;
-		return { systemPrompt: prompt };
-	});
-
-	// ── GC-2026-060 input reset ─────────────────────────────────────────
-	// A user interjection resets the staleness clock (mirroring the
-	// deepseek-harness repeat-tool-reminder reset contract) and drops
-	// any pending change diff (the user's message supersedes it).
-	pi.on("input", () => {
-		staleTracker = resetStale(staleTracker);
-		lastTodoChange = null;
-	});
-
-	// ── GC-2026-060 turn_end stale advance ──────────────────────────────
-	// After each turn, advance the stale tracker for todos that are
-	// still in_progress and append a system reminder when an item has
-	// been active for `gentle` (3) / `detailed` (5) consecutive turns
-	// without progress. Rate-limited: each todo identity gets at most
-	// one reminder per session.
-	pi.on("turn_end", () => {
-		const todos = todoState.getTodos();
-		const activeIds = todoState.getInProgress().map((t) => t.id ?? t.content);
-		staleTracker = advanceStale(staleTracker, todos, activeIds);
-		const reminder = staleReminderFor(staleTracker, { gentle: 3, detailed: 5 });
-		if (reminder === null) return;
-		const staleKeys = Object.keys(staleTracker.increments).filter(
-			(key) => staleTracker.increments[key] >= 3,
-		);
-		const newKeys = staleKeys.filter((key) => !remindedTodoKeys.has(key));
-		if (newKeys.length === 0) return;
-		for (const key of staleKeys) remindedTodoKeys.add(key);
-		pi.appendEntry("system", `[sages todo reminder] ${reminder}`);
-	});
-}
-
-// ── GC-2026-060 helpers ────────────────────────────────────────────────────
-
-/**
- * Normalize raw todowrite entries into TodoItems.
- * Validates content + status, preserves id / priority and the
- * GC-2026-061 structured fields (kind / depends_on / batch / dag_id /
- * goal_id / prompt / files) so the compile trigger can see them.
- * Malformed entries are dropped; returns [] when nothing is usable.
- */
-function todoItemsFromRaw(rawTodos: unknown): TodoItem[] {
-	if (!Array.isArray(rawTodos) || rawTodos.length === 0) return [];
-	return rawTodos
-		.filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
-		.filter(
-			(t) =>
-				typeof t.content === "string" &&
-				t.content.length > 0 &&
-				(t.status === "pending" ||
-					t.status === "in_progress" ||
-					t.status === "completed"),
-		)
-		.map((t) => {
-			const item: TodoItem = {
-				content: t.content as string,
-				status: t.status as TodoItem["status"],
-			};
-			if (typeof t.id === "string" && t.id.length > 0) item.id = t.id;
-			if (t.priority === "high" || t.priority === "medium" || t.priority === "low") {
-				item.priority = t.priority;
-			}
-			if (t.kind === "plan" || t.kind === "task") item.kind = t.kind;
-			if (Array.isArray(t.depends_on) && t.depends_on.every((d) => typeof d === "string")) {
-				item.depends_on = t.depends_on as string[];
-			}
-			if (typeof t.batch === "number" && Number.isInteger(t.batch) && t.batch >= 1) {
-				item.batch = t.batch;
-			}
-			if (typeof t.dag_id === "string" && t.dag_id.length > 0) item.dag_id = t.dag_id;
-			if (typeof t.goal_id === "string" && t.goal_id.length > 0) item.goal_id = t.goal_id;
-			if (typeof t.prompt === "string" && t.prompt.length > 0) item.prompt = t.prompt;
-			if (Array.isArray(t.files) && t.files.every((f) => typeof f === "string")) {
-				item.files = t.files as string[];
-			}
-			return item;
+		const cwd: string = ctx?.cwd ?? process.cwd();
+		const decision = preToolBlockDecision(upcoming, l1History, {
+			errorHistory,
+			lastAssistantMessage: lastAssistantMessage ?? undefined,
+			loadGoalScope: (goalId) => {
+				const goal = loadGoalContract(cwd, goalId);
+				if (!goal) return null;
+				return {
+					goal_id: goal.id,
+					scope_include: goal.scope?.include ?? [],
+					scope_exclude: goal.scope?.exclude ?? [],
+				};
+			},
+			loadDagPlan: (dagId) => {
+				const plan = loadPlan(cwd, dagId);
+				if (!plan) return null;
+				return {
+					tasks: plan.tasks.map((t) => ({
+						id: t.id,
+						status: t.status,
+						depends_on: t.depends_on ?? [],
+					})),
+				};
+			},
 		});
-}
+		if (decision) {
+			const ruleMatch = decision.reason.match(/pre-tool block\] (\w+)/);
+			const ruleId = ruleMatch?.[1];
+			// Dedup at the block level: emit the rationale only once per
+			// rule (matching post-tool advisory dedup). The block itself
+			// always returns so the critical mistake is always prevented,
+			// but the conversation stream isn't spammed with repeats.
+			if (ruleId && !l1Ctx.alreadyAdvisedRules.has(ruleId)) {
+				pi.appendEntry("system", decision.reason);
+				l1Ctx.alreadyAdvisedRules.add(ruleId);
+				l1Ctx.advisoriesBySeverity.critical =
+					(l1Ctx.advisoriesBySeverity.critical ?? 0) + 1;
+			} else if (ruleId) {
+				l1Ctx.alreadyAdvisedRules.add(ruleId);
+			}
+		}
+		return decision;
+	});
 
-/** True when a whole-list diff contains at least one visible change. */
-function todoDiffHasChanges(diff: TodoDiff): boolean {
-	return (
-		diff.added.length > 0 ||
-		diff.removed.length > 0 ||
-		diff.completed.length > 0 ||
-		diff.reopened.length > 0
-	);
-}
+	// L1 tool_result listener (Item 2) — error tracking.
+	// Populates errorHistory keyed by toolCallId. Detectors compare each
+	// call in a chain against this map: if any call succeeded, the chain
+	// is not "stuck" and the corresponding advisory is suppressed.
+	pi.on("tool_result", (event: any) => {
+		const toolCallId: string | undefined =
+			typeof event?.toolCallId === "string" ? event.toolCallId : undefined;
+		const isError: boolean = event?.isError === true;
+		if (!toolCallId) return;
+		errorHistory.push({ toolCallId, isError });
+		// Bound the array to match L1_HISTORY_CAP. Old entries age out.
+		if (errorHistory.length > L1_HISTORY_CAP) errorHistory.shift();
+	});
 
-/**
- * Newest `.pi/orchestrator/dag-*.yaml` id by mtime, or null when no DAG
- * file exists. Used as the auto-plan fallback when a tool call does not
- * carry an explicit dag_id / goal_id.
- */
-function newestDagId(repoRoot: string): string | null {
-	try {
-		const dir = join(repoRoot, ORCHESTRATOR_DIR);
-		if (!existsSync(dir)) return null;
-		const newest = readdirSync(dir)
-			.filter((f) => f.startsWith("dag-") && f.endsWith(".yaml"))
-			.map((f) => ({ f, mtime: statSync(join(dir, f)).mtimeMs }))
-			.sort((a, b) => b.mtime - a.mtime)[0];
-		if (!newest) return null;
-		return newest.f.slice("dag-".length, -".yaml".length);
-	} catch {
-		return null;
-	}
+	// L1 message_end listener (Item 3) — assistant-message context.
+	// Captures the last assistant message text. Detectors scan it for
+	// retry-intent markers ("retrying", "amending the goal", "fixing
+	// the issue") so stuck-loop advisories don't fire when the LLM has
+	// explicitly signalled intent to retry with reasoning.
+	pi.on("message_end", (event: any) => {
+		const msg = event?.message;
+		if (!msg || msg.role !== "assistant") return;
+		const content = Array.isArray(msg.content) ? msg.content : [];
+		const text = content
+			.filter((c: any) => c && c.type === "text" && typeof c.text === "string")
+			.map((c: any) => c.text)
+			.join(" ");
+		if (text.length > 0) lastAssistantMessage = text;
+	});
 }
 
 // Exported for tests that want to assert which profile the extension

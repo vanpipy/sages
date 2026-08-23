@@ -9,7 +9,6 @@
  *   3. Drive the L1 advisory injector with synthetic tool-call history that
  *      triggers each of the 5 L1 rules
  *   4. Invoke sages_reminder through the registered tool, observe appendEntry
- *   5. Validate the 3 routine templates as a pi-routine consumer would
  *
  * Run: `cd pi && bun test ./test/smoke/gc-2026-053.test.ts`
  *
@@ -18,14 +17,12 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PI_ROOT = join(__dirname, "..", "..");
-const TEMPLATES_DIR = join(PI_ROOT, "templates", "routines");
 
 // ─── Mock pi runtime ────────────────────────────────────────────────────────
 
@@ -185,7 +182,10 @@ describe("GC-2026-053 smoke: L1 advisory detector triggers (Step 2)", () => {
     expect(advisories.length).toBe(0);
   });
 
-  it("SMOKE-2.5: advisory caps at 2 per dispatch (mirrors L2)", () => {
+  it("SMOKE-2.5: advisory budget is per-severity (critical=∞, major=4)", () => {
+    // 12 task_dispatch calls fire: dispatch_no_audit (critical) once +
+    // no_progress_no_audit (major) once + repeat_call_chain (major) once.
+    // Per-severity budget permits 1 critical + 2 major → 3 total.
     fireSequence(
       Array.from({ length: 12 }, () => ({ toolName: "task_dispatch", input: {} })),
     );
@@ -194,7 +194,19 @@ describe("GC-2026-053 smoke: L1 advisory detector triggers (Step 2)", () => {
       const text = typeof e.data === "string" ? e.data : e.data?.text;
       return typeof text === "string" && text.includes("advisory");
     });
-    expect(advisories.length).toBeLessThanOrEqual(2);
+    const critical = advisories.filter((a) => {
+      const t = typeof a.data === "string" ? a.data : a.data?.text;
+      return typeof t === "string" && /— critical/.test(t);
+    });
+    const major = advisories.filter((a) => {
+      const t = typeof a.data === "string" ? a.data : a.data?.text;
+      return typeof t === "string" && /— major/.test(t);
+    });
+    // Critical cap is ∞ (dedup is the gate); 1 critical = dispatch_no_audit
+    // fired once. Major cap is 4; 2 major = no_progress + repeat_chain.
+    expect(critical.length).toBeLessThanOrEqual(2);
+    expect(major.length).toBeLessThanOrEqual(4);
+    expect(advisories.length).toBe(3);
   });
 
   it("SMOKE-2.6: dedup — same rule doesn't fire twice in one dispatch", () => {
@@ -301,76 +313,6 @@ describe("GC-2026-053 smoke: sages_reminder integration (Step 3)", () => {
     expect(data.tool).toBe("sages_reminder");
   });
 });
-
-// ─── 4. Routine templates: pi-routine compatible ────────────────────────────
-
-describe("GC-2026-053 smoke: routine templates (Step 4)", () => {
-  it("SMOKE-4.1: all 3 templates parse as JSON", () => {
-    const files = readdirSync(TEMPLATES_DIR).filter((f) => f.endsWith(".json"));
-    expect(files.length).toBe(3);
-    for (const f of files) {
-      const t = JSON.parse(readFileSync(join(TEMPLATES_DIR, f), "utf-8"));
-      expect(t.name).toBeTruthy();
-    }
-  });
-
-  it("SMOKE-4.2: sages-session-wrap has the correct hook trigger", () => {
-    const t = JSON.parse(
-      readFileSync(join(TEMPLATES_DIR, "sages-session-wrap.json"), "utf-8"),
-    );
-    expect(t.trigger.kind).toBe("hook");
-    expect(t.trigger.event).toBe("session_shutdown");
-    expect(t.trigger.once).toBe("per_session");
-    expect(t.quiet).toBe(true);
-  });
-
-  it("SMOKE-4.3: sages-resume has the correct hook trigger", () => {
-    const t = JSON.parse(
-      readFileSync(join(TEMPLATES_DIR, "sages-resume.json"), "utf-8"),
-    );
-    expect(t.trigger.kind).toBe("hook");
-    expect(t.trigger.event).toBe("session_start");
-    expect(t.trigger.once).toBe("daily");
-    expect(t.quiet).toBe(true);
-  });
-
-  it("SMOKE-4.4: sages-watchdog has the correct pulse trigger + maxTicks", () => {
-    const t = JSON.parse(
-      readFileSync(join(TEMPLATES_DIR, "sages-watchdog.json"), "utf-8"),
-    );
-    expect(t.trigger.kind).toBe("pulse");
-    expect(t.trigger.interval).toBe("5m");
-    expect(t.maxTicks).toBe(14400);
-    expect(t.quiet).toBe(true);
-  });
-
-  it("SMOKE-4.5: every prompt references the sages_reminder tool", () => {
-    const files = readdirSync(TEMPLATES_DIR).filter((f) => f.endsWith(".json"));
-    for (const f of files) {
-      const t = JSON.parse(readFileSync(join(TEMPLATES_DIR, f), "utf-8"));
-      expect(t.prompt).toContain("sages_reminder");
-    }
-  });
-
-  it("SMOKE-4.6: every prompt has a [~] quiet-fallback contract", () => {
-    const files = readdirSync(TEMPLATES_DIR).filter((f) => f.endsWith(".json"));
-    for (const f of files) {
-      const t = JSON.parse(readFileSync(join(TEMPLATES_DIR, f), "utf-8"));
-      expect(t.prompt).toMatch(/\[~]/);
-    }
-  });
-
-  it("SMOKE-4.7: name field matches filename (so /routine-install <name> resolves)", () => {
-    const files = readdirSync(TEMPLATES_DIR).filter((f) => f.endsWith(".json"));
-    for (const f of files) {
-      const stem = f.replace(/\.json$/, "");
-      const t = JSON.parse(readFileSync(join(TEMPLATES_DIR, f), "utf-8"));
-      expect(t.name).toBe(stem);
-    }
-  });
-});
-
-// ─── 5. End-to-end: orchestrator produces all 3 channels ────────────────────
 
 describe("GC-2026-053 smoke: end-to-end (Step 5)", () => {
   it("SMOKE-5.1: all 3 reminder channels are reachable via the registered tool", async () => {

@@ -12,8 +12,7 @@
  *
  * The main-agent extension reads the profile once at module load via
  * `loadProfile()` and uses its fields:
- *   - `soft_mode_reminder` — fired once per session on the first write-intent bash call
- *   - `soft_mode_system_prompt_suffix` — appended to every system prompt
+ *   - `soft_mode_reminder` — fired once per process on the first write-intent bash call
  *   - `subagents` — whitelist for downstream dispatchers
  *   - `isolation_default` — default isolation mode for subagents
  *   - `dag_threshold` — todo-item count at which to recommend DAG workflow
@@ -25,7 +24,28 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as yaml from "js-yaml";
-import { SOFT_MODE_REMINDER, SOFT_MODE_SYSTEM_PROMPT_SUFFIX } from "./soft-mode.js";
+
+/**
+ * Default `standard` profile's soft-mode reminder string. Lives here
+ * (instead of `soft-mode.ts`) so it has zero module-load coupling —
+ * `STANDARD_PROFILE.soft_mode_reminder` resolves this constant
+ * directly, and `softModeReminder(profile)` just returns whatever the
+ * profile carries (this default for built-in standard, an override
+ * from user YAML, or a per-profile custom string).
+ *
+ * The `profiles/standard.yaml` field must stay byte-identical to this
+ * literal (the `STANDARD_PROFILE matches loadBuiltInProfile('standard')
+ * field-for-field` test pins it).
+ */
+export const DEFAULT_SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — subagent dispatch recommended**
+>
+> If this is part of a larger workflow (>2 items in your active todowrite),
+> consider dispatching via the 4-stage DAG workflow: goal → DAG → dispatch → audit.
+> The developer / auditor / merger / git-expert pipeline is the recommended
+> approach for complex multi-step work. For ≤2 tasks, direct handling is
+> acceptable. This is a recommendation — the agent decides. No commands are
+> blocked.
+`;
 
 export type IsolationDefault = "none" | "current-workspace" | "worktree";
 
@@ -37,7 +57,6 @@ export interface Profile {
   dag_threshold: number;
   gate_suite: string[];
   soft_mode_reminder: string;
-  soft_mode_system_prompt_suffix: string;
 }
 
 const VALID_ISOLATION: IsolationDefault[] = ["none", "current-workspace", "worktree"];
@@ -49,7 +68,6 @@ const REQUIRED_FIELDS = [
   "dag_threshold",
   "gate_suite",
   "soft_mode_reminder",
-  "soft_mode_system_prompt_suffix",
 ] as const;
 
 const BUILTIN_DEFAULT = "standard";
@@ -68,9 +86,7 @@ let warnedBuiltinMissing = false;
 /**
  * In-code `standard` profile — the fallback used when no built-in
  * YAML can be found (missing/partial install). The extension must
- * never crash at module load for a missing policy file. The string
- * fields are imported from soft-mode.ts's backward-compat shims
- * (byte-identical to standard.yaml) rather than re-typed.
+ * never crash at module load for a missing policy file.
  */
 export const STANDARD_PROFILE: Profile = {
   id: "standard",
@@ -79,8 +95,7 @@ export const STANDARD_PROFILE: Profile = {
   isolation_default: "current-workspace",
   dag_threshold: 2,
   gate_suite: ["typecheck", "test", "verify:catalog"],
-  soft_mode_reminder: SOFT_MODE_REMINDER,
-  soft_mode_system_prompt_suffix: SOFT_MODE_SYSTEM_PROMPT_SUFFIX,
+  soft_mode_reminder: DEFAULT_SOFT_MODE_REMINDER,
 };
 
 /**

@@ -1,125 +1,39 @@
 {
-  "_source_hash": "4ab88d3c8cb4042bb2edd4da7cbdf3316cd26dbc867a65b274c921929d439a58",
-  "_generated_at": "2026-08-23T10:35:07.538Z",
+  "_source_hash": "20b7f88ec0c96e06590ab111de6c82eadf1f1087a6aa88695fd60598ed1eef57",
+  "_generated_at": "2026-08-23T14:21:13.408Z",
   "_source_files": [
-    "subagents/registry.yaml"
+    "../pi-subagents/src/default-agents.ts"
   ],
   "entries": [
     {
-      "id": "Explore",
-      "source": "pi/subagents/registry.yaml#subagents",
-      "run_in_background_default": false,
-      "kind": "read-only",
-      "isolation": [
-        "none"
-      ],
-      "gather": true,
-      "artifact_schema": [
-        "status",
-        "findings",
-        "evidence",
-        "validation",
-        "open_questions",
-        "confidence",
-        "what_i_did_not_check"
-      ]
-    },
-    {
-      "id": "Plan",
-      "source": "pi/subagents/registry.yaml#subagents",
-      "run_in_background_default": false,
-      "kind": "read-only",
-      "isolation": [
-        "none"
-      ],
-      "gather": true,
-      "artifact_schema": [
-        "status",
-        "findings",
-        "evidence",
-        "validation",
-        "open_questions",
-        "confidence",
-        "what_i_did_not_check"
-      ]
+      "id": "auditor",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
     },
     {
       "id": "developer",
-      "source": "pi/subagents/registry.yaml#subagents",
-      "run_in_background_default": true,
-      "kind": "write-isolated",
-      "isolation": [
-        "current-workspace",
-        "worktree"
-      ],
-      "gather": false,
-      "artifact_schema": [
-        "status",
-        "findings",
-        "evidence",
-        "validation",
-        "open_questions",
-        "confidence",
-        "what_i_did_not_check"
-      ]
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
     },
     {
-      "id": "auditor",
-      "source": "pi/subagents/registry.yaml#subagents",
-      "run_in_background_default": true,
-      "kind": "read-only",
-      "isolation": [
-        "none"
-      ],
-      "gather": false,
-      "artifact_schema": [
-        "status",
-        "findings",
-        "evidence",
-        "validation",
-        "open_questions",
-        "confidence",
-        "what_i_did_not_check"
-      ]
-    },
-    {
-      "id": "merger",
-      "source": "pi/subagents/registry.yaml#subagents",
-      "run_in_background_default": true,
-      "kind": "write-meta",
-      "isolation": [
-        "none"
-      ],
-      "gather": false,
-      "artifact_schema": [
-        "status",
-        "findings",
-        "evidence",
-        "validation",
-        "open_questions",
-        "confidence",
-        "what_i_did_not_check"
-      ]
+      "id": "Explore",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": false
     },
     {
       "id": "git-expert",
-      "source": "pi/subagents/registry.yaml#subagents",
-      "run_in_background_default": true,
-      "kind": "read-only",
-      "isolation": [
-        "none",
-        "current-workspace"
-      ],
-      "gather": false,
-      "artifact_schema": [
-        "status",
-        "findings",
-        "evidence",
-        "validation",
-        "open_questions",
-        "confidence",
-        "what_i_did_not_check"
-      ]
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
+      "id": "merger",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
+      "id": "Plan",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": false
     }
   ]
 }

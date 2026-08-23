@@ -34,22 +34,24 @@ $PKG_DIR = "$PI_DIR\packages\$PKG_NAME"
 $REPO_URL = "https://github.com/vanpipy/sages.git"
 $AGENT_DIR = "$PI_DIR\agent"
 
-# Subagent template install info (mirrors install.sh).
-# Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
-# subagent (Explore, Plan, developer, auditor) is a
-# canonical built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
-# No user-level template is shipped; SUBAGENT_NAMES is empty and the
-# install path is a no-op for subagent templates. Pre-existing user-
-# level `developer.md` and `auditor.md` (if installed
-# by older install.sh / install.ps1 / install.bat versions) are LEFT IN
-# PLACE for the user to remove manually — auto-backup-and-remove was
-# removed because the user-level file is theirs to manage. New user
-# customizations go in `~/.pi/agent/agents/` (global) or `.pi/agents/`
-# (project) and override the built-in via direct registry-hit
-# precedence in `registerAgents` (see agent-types.ts).
-$SUBAGENT_TEMPLATE_DIR = Join-Path (Split-Path -Parent $PSCommandPath) "..\templates\agents"
-$SUBAGENT_TARGET_DIR = "$AGENT_DIR\agents"
-$SUBAGENT_NAMES = @()
+# Subagent template install info (GC-2026-066 reversal).
+#
+# Every default subagent (Explore, Plan, developer, auditor) is a
+# canonical built-in in pi-subagents — see
+# `pi-subagents/src/default-agents.ts`. No user-level template is
+# shipped, and there is no install / uninstall path for subagent
+# templates anymore. Pre-existing user-level developer.md /
+# auditor.md (if installed by older install.sh / install.ps1 /
+# install.bat versions) are LEFT IN PLACE for the user to remove
+# manually. New user customizations go in `~/.pi/agent/agents/`
+# (global) or `.pi/agents/` (project) and override the built-in via
+# direct registry-hit precedence in `registerAgents` (see
+# agent-types.ts).
+#
+# The `$SUBAGENT_SENTINEL` constant below stays — it's stamped into
+# the agent-tool-description.md template so its uninstall path can tell
+# which copy is ours.
+
 $SUBAGENT_SENTINEL = "SAGES_TEMPLATE_V1"
 
 # Subagent pipeline doc — installed alongside agent .md files. Plain markdown,
@@ -103,95 +105,14 @@ function install_pi_if_needed {
 }
 
 # True if $File exists and carries our SAGES_TEMPLATE_V1 sentinel.
-# Mirrors is_subagent_template_installed() in install.sh — uses a grep
-# equivalent (Select-String) so user-written agent files (no sentinel)
-# are preserved on re-install.
-function IsSubagentTemplateInstalled {
+# Used by the agent-tool-description.md install path to detect user-
+# customized copies (mirrors `is_*_installed` patterns in install.sh).
+function IsAgentToolDescriptionInstalled {
     param([string]$File)
     if (-not (Test-Path $File)) { return $false }
     $content = Get-Content $File -Raw -ErrorAction SilentlyContinue
     if (-not $content) { return $false }
     return $content.Contains($SUBAGENT_SENTINEL)
-}
-# Phase A + Phase B (DAG-2026-011) — done. The canonical `developer` and
-# `auditor` agents are both built-in to pi-subagents. Pre-existing
-# user-level `developer.md` and `auditor.md` files
-# (if installed by older install.sh / install.ps1 / install.bat versions)
-# are left in place for the user to remove manually. The user-level file
-# shadows the built-in alias via direct registry hit precedence in
-# `registerAgents` (see agent-types.ts), so removing it is a deliberate
-# user choice — auto-backup-and-remove adds complexity the user doesn't
-# need.
-
-# Phase B (DAG-2026-011): the canonical `auditor` is now built-in to
-# pi-subagents; the legacy `auditor.md` (if previously installed
-# by an older install.ps1) is left in place for the user to remove
-# manually. The user-level file shadows the built-in alias via direct
-# registry hit precedence (see agent-types.ts > registerAgents), so
-# removing it is a deliberate user choice — auto-backup-and-remove
-# adds complexity the user doesn't need.
-
-# Copy each $SUBAGENT_NAMES template to $SUBAGENT_TARGET_DIR. Idempotent:
-#   - missing → install from template
-#   - file exists with sentinel → skip (already installed by us)
-#   - file exists without sentinel → user-customized; skip unless -Force
-function Install-SubagentTemplates {
-    if (-not (Test-Path $SUBAGENT_TEMPLATE_DIR)) {
-        Write-Host "  Warning: subagent template dir not found at $SUBAGENT_TEMPLATE_DIR"
-        Write-Host "  (Re-download the sages repo or restore templates/agents/)"
-        return
-    }
-
-    $null = New-Item -ItemType Directory -Path $SUBAGENT_TARGET_DIR -Force -ErrorAction SilentlyContinue
-
-    foreach ($name in $SUBAGENT_NAMES) {
-        $template = Join-Path $SUBAGENT_TEMPLATE_DIR "$name.md"
-        $target = Join-Path $SUBAGENT_TARGET_DIR "$name.md"
-
-        if (-not (Test-Path $template)) {
-            Write-Host "  Warning: template not found: $template (skipping $name)"
-            continue
-        }
-
-        if ((Test-Path $target) -and (IsSubagentTemplateInstalled $target) -and -not $Force) {
-            Write-Host "  $name.md already installed (use -Force to reinstall)"
-            continue
-        }
-        if ((Test-Path $target) -and -not (IsSubagentTemplateInstalled $target) -and -not $Force) {
-            $backupName = Backup-PhaseASubagentTemplate `
-                -File $target `
-                -Name $name `
-                -Classification "user-customized" `
-                -Reason "existing canonical target lacks SAGES_TEMPLATE_V1 sentinel; skipped install"
-            Write-Host "  $name.md exists with user customization — backed up to .phase-a-migration/$backupName (use -Force to overwrite)"
-            continue
-        }
-
-        if (Test-Path $target) { Remove-Item -Force $target }
-        Copy-Item $template $target
-        Write-Host "  Installed $name.md (subagent template)"
-    }
-}
-
-# Remove agent files in $SUBAGENT_TARGET_DIR ONLY if they carry our sentinel.
-# Iterates $SUBAGENT_NAMES (empty post-Phase B) PLUS the historical
-# filenames the previous install shipped (auditor, developer),
-# so a user upgrading from a pre-Phase-A/Phase-B install can cleanly remove
-# the leftover Sages-managed file. User-written or hand-edited agent files
-# are left alone (NEVER-TOUCH policy).
-function Uninstall-SubagentTemplates {
-    $historicalNames = @("auditor", "developer")
-    $allNames = @($SUBAGENT_NAMES + $historicalNames) | Select-Object -Unique
-    foreach ($name in $allNames) {
-        $target = Join-Path $SUBAGENT_TARGET_DIR "$name.md"
-        if (-not (Test-Path $target)) { continue }
-        if (IsSubagentTemplateInstalled $target) {
-            Remove-Item -Force $target
-            Write-Host "  Removed $name.md (was our template)"
-        } else {
-            Write-Host "  $name.md is user-customized, leaving alone"
-        }
-    }
 }
 
 # Install the 4-agent pipeline doc (SUBAGENTS.md). Idempotent:
@@ -358,11 +279,8 @@ function install {
     # Register in settings
     register_settings
 
-    # Install subagent templates (4-agent pipeline Stages 3-4)
-    Write-Host "==> Installing subagent templates..."
-    Install-SubagentTemplates
-
-    # Install SUBAGENTS.md (4-agent pipeline doc)
+    # Install SUBAGENTS.md (4-agent pipeline doc). Subagent templates
+    # themselves are pi-subagents built-ins — no installer step.
     Write-Host "==> Installing subagents doc..."
     Install-SubagentsDoc
 
@@ -470,8 +388,8 @@ function uninstall {
     # Unregister sages
     unregister_settings
 
-    # Remove subagent templates (only if our sentinel) + SUBAGENTS.md (only if matches template)
-    Uninstall-SubagentTemplates
+    # Remove SUBAGENTS.md (only if matches template). Subagent templates
+    # are pi-subagents built-ins — no uninstall path for them.
     Uninstall-SubagentsDoc
 
     # SYSTEM.md is plain markdown with no sentinel — leave it alone unless no sage

@@ -31,6 +31,10 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	KNOWN_SUBAGENT_IDS,
+	defaultRunInBackground,
+} from "@sages/pi-subagents";
 import * as yaml from "js-yaml";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -130,16 +134,17 @@ function verifyCatalog(name: CatalogName): VerifyResult {
 // GC-2026-048 T2.2 — cross-consistency check
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// `pi/subagents/registry.yaml` is the runtime source of truth; the
-// `subagent.json` catalog is a snapshot. After per-file hash verification
-// passes, this check confirms they agree on:
-//   1. The set of subagent ids present in each file.
+// pi-subagents (`@sages/pi-subagents#KNOWN_SUBAGENT_IDS`) is the runtime
+// source of truth; the `subagent.json` catalog is a snapshot. After
+// per-file hash verification passes, this check confirms they agree on:
+//   1. The set of subagent ids present in each.
 //   2. The `run_in_background_default` boolean for each shared id.
 //
 // If either direction is broken, the catalog is either stale (re-run
 // `gen:catalog`) or hand-edited (revert the catalog). Both are reported
-// as failures. The check reads both files fresh and is independent of
-// the cache layer — it always reflects the on-disk truth.
+// as failures. The check reads pi-subagents' current `KNOWN_SUBAGENT_IDS`
+// fresh and is independent of the cache layer — it always reflects the
+// in-memory truth.
 
 interface CrossConsistencyResult {
 	ok: boolean;
@@ -150,53 +155,28 @@ interface CrossConsistencyResult {
 }
 
 function verifySubagentCrossConsistency(): CrossConsistencyResult {
-	const registryRelPath = "subagents/registry.yaml";
 	const catalogRelPath = "catalogs/subagent.json";
-	const registryAbs = join(PI_ROOT, registryRelPath);
 	const catalogAbs = join(PI_ROOT, catalogRelPath);
 
-	if (!existsSync(registryAbs)) {
-		return { ok: false, error: `registry file missing: ${registryRelPath}` };
-	}
 	if (!existsSync(catalogAbs)) {
 		return { ok: false, error: `catalog file missing: ${catalogRelPath}` };
 	}
 
-	let registryParsed: unknown;
 	let catalogParsed: unknown;
-	try {
-		registryParsed = yaml.load(readFileSync(registryAbs, "utf-8"));
-	} catch (e) {
-		return { ok: false, error: `registry.yaml is not valid YAML: ${(e as Error).message}` };
-	}
 	try {
 		catalogParsed = JSON.parse(readFileSync(catalogAbs, "utf-8"));
 	} catch (e) {
 		return { ok: false, error: `subagent.json is not valid JSON: ${(e as Error).message}` };
 	}
 
-	const registrySubs = (registryParsed as { subagents?: unknown } | null)?.subagents;
 	const catalogEntries = (catalogParsed as { entries?: unknown } | null)?.entries;
-	if (!Array.isArray(registrySubs)) {
-		return { ok: false, error: "registry.yaml: 'subagents' is not an array" };
-	}
 	if (!Array.isArray(catalogEntries)) {
 		return { ok: false, error: "subagent.json: 'entries' is not an array" };
 	}
 
 	const registryMap = new Map<string, boolean>();
-	for (const [index, candidate] of registrySubs.entries()) {
-		if (typeof candidate !== "object" || candidate === null) {
-			return { ok: false, error: `registry.yaml entry ${index} is not an object` };
-		}
-		const entry = candidate as { id?: unknown; run_in_background?: unknown };
-		if (typeof entry.id !== "string" || entry.id.length === 0) {
-			return { ok: false, error: `registry.yaml entry ${index} has missing 'id'` };
-		}
-		if (typeof entry.run_in_background !== "boolean") {
-			return { ok: false, error: `registry.yaml entry '${entry.id}' has missing 'run_in_background'` };
-		}
-		registryMap.set(entry.id, entry.run_in_background);
+	for (const id of KNOWN_SUBAGENT_IDS) {
+		registryMap.set(id, defaultRunInBackground(id));
 	}
 
 	const catalogMap = new Map<string, boolean>();
@@ -346,30 +326,14 @@ export interface ProfileCrossConsistencyResult {
 
 export function verifyProfileCrossConsistency(
 	profilesDir = join(PI_ROOT, "profiles"),
-	registryPath = join(PI_ROOT, "subagents", "registry.yaml"),
 ): ProfileCrossConsistencyResult {
 	if (!existsSync(profilesDir)) {
 		return { ok: false, error: `profiles directory missing: ${relative(PI_ROOT, profilesDir)}` };
 	}
-	if (!existsSync(registryPath)) {
-		return { ok: false, error: `registry file missing: ${relative(PI_ROOT, registryPath)}` };
-	}
 
-	let registryIds: Set<string>;
-	try {
-		const parsed = yaml.load(readFileSync(registryPath, "utf-8")) as { subagents?: unknown } | null;
-		if (!parsed || !Array.isArray(parsed.subagents)) {
-			return { ok: false, error: "registry.yaml: 'subagents' is not an array" };
-		}
-		registryIds = new Set<string>();
-		for (const candidate of parsed.subagents) {
-			if (typeof candidate !== "object" || candidate === null) continue;
-			const id = (candidate as { id?: unknown }).id;
-			if (typeof id === "string" && id.length > 0) registryIds.add(id);
-		}
-	} catch (e) {
-		return { ok: false, error: `registry.yaml is not valid YAML: ${(e as Error).message}` };
-	}
+	// pi-subagents owns the canonical subagent id list. Profiles are
+	// whitelists that must be subsets of that set.
+	const registryIds = new Set(KNOWN_SUBAGENT_IDS);
 
 	const yamlFiles = readdirSync(profilesDir)
 		.filter((name) => name.endsWith(".yaml") || name.endsWith(".yml"))
