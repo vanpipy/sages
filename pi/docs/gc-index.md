@@ -57,10 +57,10 @@
 | GC-2026-060 | sages_todo persistence + TodoWrite mirror module (GC-2026-067 T3) | [.pi/orchestrator/goal-GC-2026-060.yaml](../../.pi/orchestrator/goal-GC-2026-060.yaml) |
 | GC-2026-061 | merge todo-as-DAG compile bridge | [.pi/orchestrator/goal-GC-2026-061.yaml](../../.pi/orchestrator/goal-GC-2026-061.yaml) |
 | GC-2026-062 | T4 template-loader module-relative | [.pi/orchestrator/goal-GC-2026-062.yaml](../../.pi/orchestrator/goal-GC-2026-062.yaml) |
-| GC-2026-063 | pi-evaluator agentic metrics layer (7 metrics, 0.2.0→0.3.0) | [.pi/orchestrator/goal-GC-2026-063.yaml](../../.pi/orchestrator/goal-GC-2026-063.yaml) |
-| GC-2026-064 | cap-and-poc | [.pi/orchestrator/goal-GC-2026-064.yaml](../../.pi/orchestrator/goal-GC-2026-064.yaml) |
-| GC-2026-065 | poc-phase-2 | [.pi/orchestrator/goal-GC-2026-065.yaml](../../.pi/orchestrator/goal-GC-2026-065.yaml) |
-| GC-2026-066 | reminders | [.pi/orchestrator/goal-GC-2026-066.yaml](../../.pi/orchestrator/goal-GC-2026-066.yaml) |
+| GC-2026-063 | postmortem for pi-evaluator agentic metrics layer | [.pi/orchestrator/goal-GC-2026-063.yaml](../../.pi/orchestrator/goal-GC-2026-063.yaml) |
+| GC-2026-064 | postmortem for pi-evaluator agentic metrics layer | [.pi/orchestrator/goal-GC-2026-064.yaml](../../.pi/orchestrator/goal-GC-2026-064.yaml) |
+| GC-2026-065 | T1b extension tool_call listener | [.pi/orchestrator/goal-GC-2026-065.yaml](../../.pi/orchestrator/goal-GC-2026-065.yaml) |
+| GC-2026-066 | Tool Correctness metric + task-brief expected_tools schema | [.pi/orchestrator/goal-GC-2026-066.yaml](../../.pi/orchestrator/goal-GC-2026-066.yaml) |
 | GC-2026-067 | reminders | [.pi/orchestrator/goal-GC-2026-067.yaml](../../.pi/orchestrator/goal-GC-2026-067.yaml) |
 | GC-2026-068 | reminder chain closure + 3 follow-ups | [.pi/orchestrator/goal-GC-2026-068.yaml](../../.pi/orchestrator/goal-GC-2026-068.yaml) |
 | GC-2026-069 | reminder chain closure + 3 follow-ups | [.pi/orchestrator/goal-GC-2026-069.yaml](../../.pi/orchestrator/goal-GC-2026-069.yaml) |
