@@ -7,17 +7,14 @@
  *
  * Why this tool exists:
  *
- *   pi's routine subsystem (pi-routines) fires routine prompts as user
- *   messages via `pi.sendUserMessage`. Each fire is a normal LLM turn.
- *   The LLM can call any LLM-registered tool — which includes the four
- *   existing orchestrator tools plus any third-party tools — but NOT
- *   extension API methods. `pi.appendEntry` is an extension API method,
- *   not an LLM tool, so routines (and any LLM context) had no way to
- *   inject system reminders.
+ *   pi's extension API exposes `pi.appendEntry("system", ...)` for
+ *   system reminders, but that is NOT an LLM-callable tool. Any LLM
+ *   context (a routine, a subagent, a third-party tool's callback) had
+ *   no way to surface a system-level reminder to the user.
  *
  *   This tool solves that by exposing a single LLM-callable tool that
- *   wraps `pi.appendEntry("system", reminderPayload)`. Routines (and any
- *   LLM that wants to surface a system-level reminder to the user) call
+ *   wraps `pi.appendEntry("system", reminderPayload)`. Any LLM that
+ *   wants to surface a system-level reminder calls
  *   `sages_reminder({ type, dag_id, message })` and the tool does the
  *   rest. The reminder appears in the conversation as a `[sages reminder:
  *   {TYPE}] {message}` block with structured metadata.

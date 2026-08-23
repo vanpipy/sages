@@ -1,21 +1,16 @@
 /**
- * observability — public surface for the three event domains.
+ * observability — public surface for the run/* event domain.
  *
- * Re-exports the enums + emitters so consumers can depend on a single
- * entry point. Callers should import from
+ * Re-exports the run enum + emitter so consumers can depend on a
+ * single entry point. Callers should import from
  * `"@/observability/index.js"` (or the relative equivalent), not from
  * individual files in this directory.
  *
- * The split across events.ts / runner.ts / step.ts / seam.ts is
- * intentional:
+ * The split across events.ts / runner.ts is intentional:
  *   - events.ts is pure data (no runtime side effects beyond the
  *     domainOf helper).
  *   - runner.ts handles durable storage and depends on node:fs +
  *     js-yaml.
- *   - step.ts handles ephemeral logging and depends only on the
- *     logger.
- *   - seam.ts handles callback dispatch and depends only on the
- *     process registry.
  *
  * Splitting the surfaces keeps each emitter's dependency graph
  * minimal — typecheck-only consumers (e.g. an enum-side
@@ -25,8 +20,6 @@
 
 export {
   RunEvent,
-  StepEvent,
-  SeamEvent,
   domainOf,
   type EventDomain,
 } from "./events.js";
@@ -35,24 +28,3 @@ export {
   emitRunEvent,
   type AuditEvent,
 } from "./runner.js";
-
-export {
-  emitStepEvent,
-} from "./step.js";
-
-export {
-  emitSeamEvent,
-  onSeam,
-  clearSeamCallbacks,
-} from "./seam.js";
-
-export {
-  buildSessionDigest,
-  formatSessionDigest,
-  attachSessionDigest,
-  type SessionDigest,
-  type InflightGoal,
-  type PendingAuditVerdict,
-  type UnmergedBranch,
-  type TodoStateSummary,
-} from "./digest.js";

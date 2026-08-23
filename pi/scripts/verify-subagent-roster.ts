@@ -2,82 +2,39 @@
 /**
  * verify-subagent-roster.ts — GC-2026-052 T6.1
  *
- * Verifies three-way consistency across the three subagent-roster
- * sources of truth:
+ * Verifies two-way consistency between the two subagent-roster
+ * surfaces:
  *
- *   1. `pi/subagents/registry.yaml` — runtime registry loaded by
- *      `pi/src/tools/orchestrator/subagent-registry.ts`. The
- *      canonical list of subagent ids.
- *   2. `pi/templates/SUBAGENTS.md` — the orchestrator-facing
- *      deployment reference table. The roster has to be visible
- *      to the human / LLM reading the orchestrator docs.
- *   3. The set of `subagent_type` ids actually accepted by
- *      `pi/src/tools/orchestrator/dag-synthesizer.ts` — derived
- *      from the registry at runtime, so the synthesizer is
- *      automatically in sync as long as the registry is.
+ *   1. `KNOWN_SUBAGENT_IDS` exported by `@sages/pi-subagents` — the
+ *      canonical list of subagent ids. The runtime registry loader
+ *      `sages/pi/src/tools/orchestrator/dag-synthesizer.ts` consults
+ *      this list at synthesize time.
+ *   2. `pi/templates/SUBAGENTS.md` — the orchestrator-facing deployment
+ *      reference table. The roster has to be visible to the human /
+ *      LLM reading the orchestrator docs.
  *
- * The verifier enforces two-way equivalence between the registry
- * and the SUBAGENTS.md table. (The synthesizer is a runtime
- * derivative of the registry; its set always equals the registry's
- * `ids` set.) On mismatch: print the offending id and exit 1. On
- * match: print `OK: subagent roster — registry = SUBAGENTS.md`
- * and exit 0.
+ * The verifier enforces equivalence between these two surfaces.
+ * On mismatch: print the offending id and exit 1. On match: print
+ * `OK: subagent roster — KNOWN_SUBAGENT_IDS = SUBAGENTS.md` and
+ * exit 0.
  *
- * No external dependencies beyond `js-yaml` (already a runtime
- * dep of pi). Self-test: running this script against the current
- * `pi/` tree MUST exit 0.
+ * Self-test: running this script against the current `pi/` tree
+ * MUST exit 0.
  *
  * Entry-point guard matches the pattern in `verify-catalog.ts` —
- * the helper functions are also importable by tests (e.g.
- * `test/verify-subagent-roster.test.ts`) without triggering
- * `process.exit(0)` on import.
+ * the helper functions are also importable by tests without
+ * triggering `process.exit(0)` on import.
  */
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as yaml from "js-yaml";
+import { KNOWN_SUBAGENT_IDS } from "@sages/pi-subagents";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PI_ROOT = join(__dirname, "..");
-
-const REGISTRY_PATH = join(PI_ROOT, "subagents", "registry.yaml");
 const SUBAGENTS_MD = join(PI_ROOT, "templates", "SUBAGENTS.md");
-
-interface RegistryEntry {
-	id: string;
-	kind?: string;
-	isolation?: string[];
-	run_in_background?: boolean;
-	gather?: boolean;
-	artifact_schema?: string[];
-}
-
-interface Registry {
-	subagents: RegistryEntry[];
-}
-
-function loadRegistry(): Registry {
-	const raw = readFileSync(REGISTRY_PATH, "utf-8");
-	const parsed = yaml.load(raw) as Registry;
-	if (!parsed || !Array.isArray(parsed.subagents)) {
-		throw new Error(
-			`registry: required 'subagents' array is missing in ${REGISTRY_PATH}`,
-		);
-	}
-	const seen = new Set<string>();
-	for (const [i, e] of parsed.subagents.entries()) {
-		if (!e || typeof e.id !== "string" || e.id.length === 0) {
-			throw new Error(`registry: entry ${i} missing 'id' field`);
-		}
-		if (seen.has(e.id)) {
-			throw new Error(`registry: duplicate id '${e.id}'`);
-		}
-		seen.add(e.id);
-	}
-	return parsed;
-}
 
 /**
  * Extract subagent ids from the SUBAGENTS.md roster table.
@@ -113,8 +70,7 @@ export interface RosterResult {
 }
 
 export function checkSubagentRoster(): RosterResult {
-	const registry = loadRegistry();
-	const registryIds = new Set(registry.subagents.map((s) => s.id));
+	const registryIds = new Set(KNOWN_SUBAGENT_IDS);
 
 	const md = readFileSync(SUBAGENTS_MD, "utf-8");
 	const tableIds = extractTableIds(md);
@@ -128,12 +84,12 @@ export function checkSubagentRoster(): RosterResult {
 	const parts: string[] = [];
 	if (registryOnly.length > 0) {
 		parts.push(
-			`in registry but missing from SUBAGENTS.md table: ${registryOnly.join(", ")}`,
+			`in KNOWN_SUBAGENT_IDS but missing from SUBAGENTS.md table: ${registryOnly.join(", ")}`,
 		);
 	}
 	if (tableOnly.length > 0) {
 		parts.push(
-			`in SUBAGENTS.md table but missing from registry: ${tableOnly.join(", ")}`,
+			`in SUBAGENTS.md table but missing from KNOWN_SUBAGENT_IDS: ${tableOnly.join(", ")}`,
 		);
 	}
 	return { ok: false, error: parts.join("; "), registryOnly, tableOnly };
@@ -144,16 +100,17 @@ function main(): void {
 	if (!result.ok) {
 		console.error(`verify-subagent-roster: FAIL`);
 		console.error(`  ✗ ${result.error}`);
-		console.error(`      fix: edit ${REGISTRY_PATH} (the runtime source of truth) AND`);
-		console.error(`           the roster table in ${SUBAGENTS_MD} to agree on the same id set`);
+		console.error(
+			`      fix: edit SUBAGENTS.md (the orchestrator-facing doc) to agree with KNOWN_SUBAGENT_IDS (defined in pi-subagents)`,
+		);
 		process.exit(1);
 	}
-	const registry = loadRegistry();
+	const ids = KNOWN_SUBAGENT_IDS;
 	console.log(
-		`OK: subagent roster — registry (${registry.subagents.length}) = SUBAGENTS.md table (${registry.subagents.length})`,
+		`OK: subagent roster — KNOWN_SUBAGENT_IDS (${ids.length}) = SUBAGENTS.md table`,
 	);
-	for (const e of registry.subagents) {
-		console.log(`  ✓ ${e.id}`);
+	for (const id of ids) {
+		console.log(`  ✓ ${id}`);
 	}
 	process.exit(0);
 }

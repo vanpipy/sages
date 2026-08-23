@@ -30,7 +30,7 @@ import type { OrchestrationPlan, TaskNode } from "./types.js";
 import { ORCHESTRATOR_DIR, dagPath } from "./types.js";
 import { loadPlan } from "./dag-synthesizer.js";
 import { atomicWriteOrchestratorFile, isOrchestrationPlanState } from "./state-persistence.js";
-import { lookupSubagent } from "./subagent-registry.js";
+import { defaultRunInBackground } from "@sages/pi-subagents";
 import { RunEvent } from "../../observability/events.js";
 import { emitRunEvent } from "../../observability/runner.js";
 
@@ -178,14 +178,11 @@ export function summarizeDispatch(dispatch: DispatchPlan): DispatchPlanSummary {
   };
 }
 
-/** Default dispatch policy comes from pi/subagents/registry.yaml. */
-export function defaultRunInBackground(subagentType: string): boolean {
-  const entry = lookupSubagent(subagentType);
-  if (entry) return entry.run_in_background;
-  // Unknown subagent: default to background to avoid surprises;
-  // the LLM can always set run_in_background:false on the task.
-  return true;
-}
+// Re-export pi-subagents' defaultRunInBackground so existing import sites
+// (`import { defaultRunInBackground } from "./task-dispatcher.js"`) keep
+// working without a sweeping consumer update. Behavior is identical —
+// the implementation now lives in pi-subagents (single source of truth).
+export { defaultRunInBackground } from "@sages/pi-subagents";
 
 /** Build the dispatch plan from a loaded DAG. Injects upstream task outputs into each task's prompt. */
 export function buildDispatchPlan(

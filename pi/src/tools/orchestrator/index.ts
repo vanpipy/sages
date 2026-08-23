@@ -69,11 +69,6 @@ export {
 } from "./template-loader.js";
 
 export {
-  canMainAgentWrite,
-  policyMessage,
-} from "../file-gate.js";
-
-export {
   type GoalContract,
   type SuccessCriterion,
   type TaskNode,

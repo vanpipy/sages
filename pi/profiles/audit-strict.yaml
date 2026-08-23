@@ -13,15 +13,3 @@ soft_mode_reminder: |
   > (typecheck + test + verify:catalog + verify:profile) before landing.
   > Recommend the DAG workflow even for ≤2-item tasks because the gate
   > discipline matters.
-soft_mode_system_prompt_suffix: |
-  ## Audit-strict profile active
-
-  You have full tool access, but production-code edits to the main branch are
-  blocked by convention. Subagent dispatch via the 4-stage DAG workflow is
-  **REQUIRED** for any change to `src/`, `test/`, `lib/`, `pi/`, or any peer
-  package. Use `isolation: { dag_id, task_id, mode: "create" }` for
-  workspace-using roles.
-
-  The full gate suite (`typecheck` + `test` + `verify:catalog` +
-  `verify:profile`) must pass at integration time. Audit failures are
-  blockers; do not bypass.
