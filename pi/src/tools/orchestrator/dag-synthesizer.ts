@@ -49,6 +49,35 @@ export const TaskNodeSchema = Type.Object({
   depends_on: Type.Array(Type.String(), { description: "Task ids this depends on" }),
   files: Type.Array(Type.String(), { description: "Files this task touches" }),
   subagent_type: Type.String({ description: "Subagent role to dispatch to" }),
+  /**
+   * GC-2026-066: optional list of tool names the task is expected to
+   * invoke. Used by pi-evaluator's ToolCorrectness metric (precision /
+   * recall / F1 over actual tool invocations). The list is advisory,
+   * not enforced: a subagent that calls a tool not on this list is
+   * still allowed to proceed (ToolCorrectness penalizes the gap, it
+   * doesn't reject the task).
+   *
+   * Tool names match the CustomToolCallEvent.toolName values used in
+   * the LLM tool registry: the 8 file/network tools (bash, read, edit,
+   * write, grep, find, ls, webfetch) plus the 4 Sages orchestrator
+   * tools (goal_contract_create, dag_synthesize, task_dispatch,
+   * orchestrator_audit). Unknown names emit a NON-FATAL warning at
+   * validation time — never an error — so older DAGs that reference
+   * legacy or renamed tools continue to validate.
+   *
+   * Additive: omitted = unchanged behavior.
+   */
+  expected_tools: Type.Optional(Type.Array(
+    Type.String({ minLength: 1 }),
+    {
+      description:
+        "Optional list of tool names the task is expected to invoke. " +
+        "Used by pi-evaluator's ToolCorrectness metric (GC-2026-066). " +
+        "Unknown tool names trigger a warning (not an error) at DAG " +
+        "construction time.",
+      maxItems: 32,
+    },
+  )),
   batch: Type.Number({ description: "Concurrency group (1-based, contiguous)", minimum: 1 }),
   isolation: Type.Optional(Type.Union([
     Type.Literal("none"),
@@ -119,6 +148,22 @@ export const TaskNodeSchema = Type.Object({
     self_check_cmd: Type.Optional(Type.String()),
     auditor_check_cmd: Type.Optional(Type.String()),
   }),
+  /**
+   * GC-2026-066: per-task non-fatal validation warnings. Currently
+   * populated by validateExpectedTools when a task references tool
+   * names not in the known registry. Always Optional + additive —
+   * older plans written before GC-2026-066 simply omit the field.
+   *
+   * Downstream consumers (subagents reading the plan, evaluators
+   * scoring it) can read this list to surface informational notes
+   * without grep'ing the global DAGValidation.warnings array.
+   */
+  acceptance_warnings: Type.Optional(Type.Array(Type.String(), {
+    description:
+      "Non-fatal validation warnings attached to this task. Populated " +
+      "by validateExpectedTools for unknown tool names. Omitted when " +
+      "no warnings apply.",
+  })),
 });
 
 export const DAGParams = Type.Object({
@@ -274,7 +319,72 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
     warnings.push(`${totalBatches} batches may slow orchestration; consider merging trivial tasks`);
   }
 
+  // 10. GC-2026-066: expected_tools — warn-only validation. Unknown
+  //     tool names emit a warning (per-task) but never an error. The
+  //     per-task warnings are also aggregated into the global warnings
+  //     list so the tool response surfaces them next to subagent_type
+  //     and batch-count warnings.
+  const expectedToolsTaskWarnings = validateExpectedTools(input);
+  for (const [taskId, taskWs] of Object.entries(expectedToolsTaskWarnings)) {
+    for (const w of taskWs) {
+      warnings.push(`task '${taskId}': ${w}`);
+    }
+  }
+
   return { valid: errors.length === 0, errors, warnings };
+}
+
+/**
+ * GC-2026-066: registry of tool names that pi-evaluator's
+ * ToolCorrectness metric recognizes. Tool names match the
+ * CustomToolCallEvent.toolName values used in the LLM tool registry:
+ * the 8 file/network tools (bash, read, edit, write, grep, find, ls,
+ * webfetch) plus the 4 Sages orchestrator tools (goal_contract_create,
+ * dag_synthesize, task_dispatch, orchestrator_audit).
+ *
+ * Exported so other modules (e.g. pi-evaluator's tool-correctness
+ * metric) can reuse the same set instead of duplicating the list.
+ */
+export const KNOWN_TOOL_NAMES = new Set([
+  // File / network tools (in pi-coding-agent's CustomToolCallEvent)
+  "bash",
+  "read",
+  "edit",
+  "write",
+  "grep",
+  "find",
+  "ls",
+  "webfetch",
+  // Sages orchestrator tools (GC-2026-066 ships with the 4-tool set)
+  "goal_contract_create",
+  "dag_synthesize",
+  "task_dispatch",
+  "orchestrator_audit",
+]);
+
+/**
+ * GC-2026-066: per-task warnings for `expected_tools` references that
+ * don't match the known tool registry. Returns a map from task_id to
+ * a list of warning strings — empty map when every entry is known.
+ *
+ * The function is pure (no mutation, no side effects) so it can be
+ * tested in isolation and called from both validateDAG (to surface
+ * warnings in the tool response) and buildPlan (to attach warnings
+ * to the persisted plan via the `acceptance_warnings` field).
+ */
+export function validateExpectedTools(input: DAGInput): Record<string, string[]> {
+  const taskWarnings: Record<string, string[]> = {};
+  for (const t of input.tasks as any[]) {
+    if (!Array.isArray(t.expected_tools)) continue;
+    const unknown = t.expected_tools.filter(
+      (name: unknown) => typeof name !== "string" || !KNOWN_TOOL_NAMES.has(name),
+    );
+    if (unknown.length === 0) continue;
+    taskWarnings[t.id] = [
+      `expected_tools contains unknown tool name(s): ${unknown.join(", ")} (known: ${[...KNOWN_TOOL_NAMES].sort().join(", ")})`,
+    ];
+  }
+  return taskWarnings;
 }
 
 function hasCycle(adj: Map<string, string[]>): boolean {
@@ -302,7 +412,17 @@ function hasCycle(adj: Map<string, string[]>): boolean {
 }
 
 /** Build OrchestrationPlan from input + contract. Renders task_template prompts when set. */
-export function buildPlan(input: DAGInput, contract: GoalContract): OrchestrationPlan {
+export function buildPlan(
+  input: DAGInput,
+  contract: GoalContract,
+  /**
+   * GC-2026-066: per-task validation warnings to attach as
+   * `acceptance_warnings` on each persisted task. Optional — when
+   * omitted (older callers, tests not exercising the field), no
+   * warnings are written.
+   */
+  taskWarnings?: Record<string, string[]>,
+): OrchestrationPlan {
   const now = new Date().toISOString();
   const tasks: TaskNode[] = (input.tasks as any[]).map((t: any) => {
     // If task_template is set, render the prompt from template + params.
@@ -316,12 +436,16 @@ export function buildPlan(input: DAGInput, contract: GoalContract): Orchestratio
       // If template not found, fall back to LLM-written prompt with a warning
       // logged at validation time (see dag_synthesizer tool handler).
     }
+    const perTaskWarnings = taskWarnings?.[t.id];
     return {
       ...t,
       prompt,
       status: "pending",
       retry_count: 0,
       max_retries: 2,
+      ...(perTaskWarnings && perTaskWarnings.length > 0
+        ? { acceptance_warnings: perTaskWarnings }
+        : {}),
     };
   });
   const prompts: Record<string, string> = {};
@@ -437,8 +561,14 @@ export async function executeDAGSynthesize(
     };
   }
 
+  // GC-2026-066: compute per-task expected_tools warnings so they can be
+  // attached to each persisted task as `acceptance_warnings`. The same
+  // warnings are already aggregated into result.warnings by validateDAG
+  // (step 10) so the tool response stays in sync.
+  const expectedToolsTaskWarnings = validateExpectedTools(params);
+
   // Build plan and write
-  const plan = buildPlan(params, contract);
+  const plan = buildPlan(params, contract, expectedToolsTaskWarnings);
   const path = atomicWriteOrchestratorFile(cwd, `dag-${plan.id}.yaml`, planToYaml(plan), {
     owner: "l3",
     validate: isOrchestrationPlanState,
