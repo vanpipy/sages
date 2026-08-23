@@ -75,10 +75,14 @@ function emptyDimensions(): Record<Dimension, DimensionScore> {
 /**
  * Pure compute: given the current `EvalState`, produce the locked EvalScoreOutput.
  *
+ * Async because the lazy self-cooking path (when `active_workflow === null` but
+ * `active_workflow_path` is set) needs to call `scoreWorkflow` which awaits the
+ * metric layer. The cost on the no-lazy path is one extra microtask.
+ *
  * This function is exported so tests can exercise the shape contract directly,
  * and so future tooling (e.g. a debug `eval-score --print`) can reuse it.
  */
-export function computeEvalScore(state: EvalState): EvalScoreOutput {
+export async function computeEvalScore(state: EvalState): Promise<EvalScoreOutput> {
 	if (state.mode === "off") {
 		return {
 			status: "blocked",
@@ -90,7 +94,41 @@ export function computeEvalScore(state: EvalState): EvalScoreOutput {
 		};
 	}
 
-	const wf = state.active_workflow;
+	let wf = state.active_workflow;
+
+	// Lazy path: no cached workflow, but extension.ts has set the path. Self-cook.
+	if (wf === null && state.active_workflow_path) {
+		try {
+			const { scoreWorkflow, globalScore } = await import(
+				"../engine/scoring-engine.ts"
+			);
+			const scores = await scoreWorkflow(
+				state.active_workflow_path,
+				state.coefficients,
+				process.cwd(),
+			);
+			wf = {
+				workflow_id: state.active_workflow_id ?? "unknown",
+				started_at: new Date().toISOString(),
+				total_score: globalScore(scores, state.coefficients),
+				dimensions: scores,
+				signature: { sc_count: 0, task_count: 0, scope_dirs: [], planes: [] },
+			};
+			// Cache so subsequent calls don't re-cook.
+			state.active_workflow = wf;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return {
+				status: "ok",
+				intent: `scoring failed: ${message}`,
+				workflow_id: null,
+				total_score: 0,
+				dimensions: emptyDimensions(),
+				coefficients_warning: state.coefficients_warning,
+			};
+		}
+	}
+
 	if (wf === null) {
 		return {
 			status: "ok",
@@ -152,7 +190,7 @@ export function makeEvalScoreTool(state: EvalState): ToolDefinition<typeof EvalS
 		description,
 		parameters: EvalScoreParams,
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
-			const data = computeEvalScore(stateRef);
+			const data = await computeEvalScore(stateRef);
 			return {
 				content: [{ type: "text", text: JSON.stringify(data) }],
 				details: data,

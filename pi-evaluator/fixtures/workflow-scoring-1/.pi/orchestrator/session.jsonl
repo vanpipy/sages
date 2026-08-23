@@ -1,0 +1,26 @@
+{"type":"session","timestamp":"2026-08-22T10:00:00.000Z","id":"sess-scoring-1"}
+{"type":"message","timestamp":"2026-08-22T10:00:05.000Z","message":{"role":"user","content":[{"type":"text","text":"score this workflow"}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:10.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"dag_synthesize","arguments":{"goal_id":"GC-scoring-1"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:11.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"read","arguments":{"file_path":"src/metrics/registry.ts"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:12.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"read","content":"file contents","isError":false}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:13.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"grep","arguments":{"pattern":"Metric"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:14.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"grep","content":"results","isError":false}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:15.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"bash","arguments":{"command":"bun test"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:16.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"bash","content":"152 pass","isError":false}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:17.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"read","arguments":{"file_path":"src/engine/scoring-engine.ts"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:18.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"read","content":"scoring engine source","isError":false}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:19.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"read","arguments":{"file_path":"src/signals/metric-runner.ts"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:20.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"read","content":"runner source","isError":false}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:21.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"write","arguments":{"path":"test/engine/scoring-engine.test.ts"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:22.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"write","content":"test file created","isError":true}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:23.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"edit","arguments":{"path":"test/engine/scoring-engine.test.ts"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:24.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"edit","content":"test file edited","isError":false}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:25.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"bash","arguments":{"command":"bun test test/engine"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:26.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"bash","content":"3 pass","isError":false}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:27.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"task_dispatch","arguments":{"task_id":"T3","subagent_type":"auditor"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:28.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"task_dispatch","content":"task T3 dispatched","isError":false}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:29.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"orchestrator_audit","arguments":{"workflow_path":"/scoring-1"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:30.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"orchestrator_audit","content":"workflow audit complete","isError":false}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:31.000Z","message":{"role":"assistant","content":[{"type":"toolCall","name":"read","arguments":{"file_path":"audit-final.md"}}]}}
+{"type":"message","timestamp":"2026-08-22T10:00:32.000Z","message":{"role":"assistant","content":[{"type":"toolResult","name":"read","content":"audit contents","isError":false}]}}
+{"type":"session_end","timestamp":"2026-08-22T10:00:35.000Z","id":"sess-scoring-1"}

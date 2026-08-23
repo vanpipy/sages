@@ -1,7 +1,7 @@
 {
 	"$schema_comment": "Copy this file to ~/.pi/agent/evaluator-log/coefficients.json and tune the weights. The schema is enforced by pi-evaluator's TypeBox checker; an invalid file (bad shape, Σ weights ≠ 1.0, etc.) throws on load and pi-evaluator falls back to the built-in defaults. Comments are stripped before validation, so you can keep this file annotated.",
 
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"_version_comment": "MUST mirror pi-evaluator/package.json#version. Mismatch triggers a warning surfaced in eval_score output, but the loader still loads the file (strict equality is intentional — drift means your coefficients describe a different release's algorithm). Bump alongside pi-evaluator.",
 
 	"global": {
@@ -159,6 +159,29 @@
 					"norm": "ratio_0_1",
 					"direction": "higher_better"
 				}
+			}
+		}
+	},
+
+	"_v030_opt_in_examples": "v0.3.0+ ships 7 metrics behind weight=0 placeholders. The examples below show how to opt-in to specific metrics by setting their weight > 0 and (for LLM-judged hybrid metrics) providing a `with: { from: 'llm', criteria: '...' }` block. To use, copy the comment line, uncomment it, and adjust the existing weights in the dim so Σ still equals 1.0.",
+	"_v030_disabled_metrics": {
+		"_comment": "Set weight > 0 in the dim signal block above to enable. Defaults are all weight=0 (no contribution).",
+		"implement": ["argument_correctness", "task_completion", "tool_use"],
+		"audit": ["goal_accuracy"],
+		"coordination": ["step_efficiency"],
+		"dag": ["plan_adherence", "plan_quality"]
+	},
+	"_v030_llm_opt_in_example_task_completion": {
+		"_comment": "Example: opt into task_completion with LLM judge. Drop this into the implement.signals block. Adjusts the other implement weights so Σ still equals 1.0.",
+		"task_completion": {
+			"weight": 0.20,
+			"norm": "ratio_0_1",
+			"direction": "higher_better",
+			"with": {
+				"from": "llm",
+				"criteria": "Does the task report indicate the SC criterion is met?",
+				"provider": "anthropic",
+				"modelId": "claude-haiku-4-5"
 			}
 		}
 	}
