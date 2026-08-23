@@ -1,0 +1,41 @@
+id: GC-scoring-1
+title: 'Workflow scoring fixture — known-good pipeline verification'
+rationale: >-
+  Fixture for the pi-evaluator end-to-end scoring integration test. The values
+  here are chosen so each heuristic metric produces a known, deterministic score
+  that the test asserts (within tolerance).
+success_criteria:
+  - id: SC1
+    criterion: artifact-reader parses this goal YAML and returns 3 SCs
+    verification_cmd: "echo SC1 && exit 0"
+    expected_output: 'SC1'
+    severity: blocker
+  - id: SC2
+    criterion: >-
+      jsonl-reader parses the scoring-1 session.jsonl with both task windows
+    verification_cmd: "echo SC2 && exit 0"
+    expected_output: 'SC2'
+    severity: blocker
+  - id: SC3
+    criterion: >-
+      scoring-engine reads the audit + task reports and produces per-dim scores
+    verification_cmd: "echo SC3 && exit 0"
+    expected_output: 'SC3'
+    severity: blocker
+anti_goals:
+  - Do not introduce any new npm dependency
+  - Do not couple scoring to a specific LLM provider
+  - Do not regress existing pi-evaluator tests
+scope:
+  include:
+    - pi-evaluator/src/engine/
+    - pi-evaluator/src/metrics/
+  exclude:
+    - pi-evaluator/src/extension.ts
+  # NOTE: scope is intentionally tiny (2 dirs) — produces high scope_breadth norm.
+constraints:
+  max_dependency_additions: 0
+  test_coverage_min: 80
+done_definition: >-
+  Scoring pipeline integration test passes against this fixture.
+created_at: '2026-08-22T00:00:00.000Z'
