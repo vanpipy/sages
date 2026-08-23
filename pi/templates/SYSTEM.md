@@ -392,14 +392,14 @@ system.
   session is also acceptable.
 - **Auto-steer on drift.** When the bash-guard classifier detects
   a write-intent bash command and the LLM has not yet received a
-  reminder this session, the extension appends a once-per-session
-  system reminder via `pi.appendEntry("system", SOFT_MODE_REMINDER)`.
+  reminder this process, the extension appends a once-per-process
+  system reminder via `pi.appendEntry("system", softModeReminder(profile))`.
   The reminder is goal-orientation — it nudges you back toward
   staying aligned with your goal — it does **not** flag specific
   write actions as "production code". Drift is never blocked.
-- **Policy surfaced in every turn.** The `before_agent_start`
-  listener prepends `SOFT_MODE_SYSTEM_PROMPT_SUFFIX` to the system
-  prompt so the policy is visible from turn 0.
+- **Policy surfaced in every turn.** The soft-mode reminder is
+  loaded once at module load from the active profile and fired once
+  on the first write-intent bash call.
 
 ### Recommended subagents (when complexity warrants)
 
@@ -416,17 +416,19 @@ system.
 
 ### How soft mode is implemented
 
-- `pi/src/soft-mode.ts` — the two reminder strings used by the
-  extension (`SOFT_MODE_REMINDER`, `SOFT_MODE_SYSTEM_PROMPT_SUFFIX`).
-- `pi/src/extension.ts` — wires the `session_start` reset,
-  `tool_call` classifier (fires the once-per-session reminder),
-  and `before_agent_start` system-prompt suffix.
-- `pi/src/tools/bash-guard.ts` — `shouldBlockBashCommand` returns
-  `{ block: false, … }` under soft mode; classifier functions
-  still classify for the auto-steer trigger.
-- `pi/src/tools/file-gate.ts` — `canMainAgentWrite` is preserved
-  for classifier-side intent reporting but is no longer a
-  blocking path policy.
+- `pi/src/profile.ts` — `DEFAULT_SOFT_MODE_REMINDER` (in-code default
+  for `standard`) + the `Profile.soft_mode_reminder` field that user
+  YAML overrides. The four built-in profiles (`standard`, `light`,
+  `audit-strict`, `ci-only`) live alongside.
+- `pi/src/soft-mode.ts` — `softModeReminder(profile)` returns the
+  profile's reminder string. The bash handler reads it via
+  `softModeReminder(PROFILE)` after the once-per-process throttle
+  fires on the first write-intent bash call.
+- `pi/src/extension.ts` — wires the `tool_call` classifier (fires
+  the once-per-process reminder on the first write-intent bash call).
+  The `session_start` and `before_agent_start` handlers were dropped
+  in earlier cleanup passes; the L1 advisory handler
+  (`orchestratorAdvisoryFor`) remains active.
 
 ### Why soft mode
 

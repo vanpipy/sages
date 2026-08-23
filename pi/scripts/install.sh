@@ -19,7 +19,6 @@
 #   pinned for reproducibility — see "Pinned npm-peer versions" below:
 #     pi-mcp-adapter@2.25.0              → npm:pi-mcp-adapter@2.25.0
 #     @cortexkit/pi-magic-context@0.36.1 → CortexKit's cross-session memory layer
-#     @davecodes/pi-routines@0.5.1       → scheduled + event-driven routines
 #
 #   Manual-only carve-out (intentionally NOT auto-installed):
 #     AFT (npm:@cortexkit/aft-pi) — binary provisioning is owned by the
@@ -29,8 +28,8 @@
 #     user can copy to ~/.config/cortexkit/aft.jsonc after installation.
 #
 # Selective install options:
-#   --sages-only   only install sages source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)
+#   --sages-only   only install sages source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
+#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -66,35 +65,24 @@ fi
 # SYSTEM.md template (single source of truth for all three install scripts: .sh / .ps1 / .bat)
 SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 
-# Subagent template install info.
-# Phase A (DAG-2026-011) + Phase B (DAG-2026-011) — done: every default
-# subagent (Explore, Plan, developer, auditor) is a
-# canonical built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
-# No user-level template is shipped; SUBAGENT_NAMES is empty and the
-# install path is a no-op for subagent templates. Pre-existing user-
-# level `developer.md` and `auditor.md` (if installed
-# by older install.sh / install.ps1 / install.bat versions) are LEFT IN
-# PLACE for the user to remove manually — auto-backup-and-remove was
-# removed because the user-level file is theirs to manage. New user
-# customizations go in `~/.pi/agent/agents/` (global) or `.pi/agents/`
-# (project) and override the built-in via direct registry-hit
-# precedence in `registerAgents` (see agent-types.ts).
+# Subagent template install info (GC-2026-066 reversal).
 #
-# Each template body carries an HTML-comment sentinel (SAGES_TEMPLATE_V1) so
-# uninstall_subagent_templates can distinguish "we installed this" from
-# "user wrote their own agent or hand-edited ours".
+# Every default subagent (Explore, Plan, developer, auditor) is a
+# canonical built-in in pi-subagents — see
+# `pi-subagents/src/default-agents.ts`. No user-level template is
+# shipped, and there is no install / uninstall path for subagent
+# templates anymore. Pre-existing user-level developer.md /
+# auditor.md (if installed by older install.sh / install.ps1 /
+# install.bat versions) are LEFT IN PLACE for the user to remove
+# manually. New user customizations go in `~/.pi/agent/agents/`
+# (global) or `.pi/agents/` (project) and override the built-in via
+# direct registry-hit precedence in `registerAgents` (see
+# agent-types.ts).
 #
-# ── 4-agent subagent pipeline ─────────────────────────────────────
-# The full pipeline the orchestrator dispatches (see SUBAGENTS.md):
-#
-#   Stage 1  Explore              ← pi-subagents built-in (no install)
-#   Stage 2  Plan                 ← pi-subagents built-in (no install)
-#   Stage 3  developer            ← pi-subagents built-in (no install)
-#   Stage 4  auditor              ← pi-subagents built-in (no install)
-#   (cross-workspace)  merger     ← pi-subagents built-in (no install)
-SUBAGENT_TEMPLATE_DIR="$SCRIPT_DIR/../templates/agents"
-SUBAGENT_TARGET_DIR="$AGENT_DIR/agents"
-SUBAGENT_NAMES=()
+# The `SUBAGENT_SENTINEL_TEXT` constant below stays — it's stamped into
+# `templates/agent-tool-description.md` (one of the files this
+# installer still writes) so the uninstall path can tell which copy
+# is ours.
 
 # Subagent pipeline doc — installed to $AGENT_DIR/SUBAGENTS.md alongside
 # the agent .md files. Plain markdown, NOT parsed by pi-subagents (it only
@@ -153,8 +141,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install sages source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)"
+  echo "  --sages-only       Only install sages source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
@@ -388,27 +376,12 @@ install_system_prompt() {
   echo "  Installed SYSTEM.md"
 }
 
-# ────────────────────────────────────────────────────────────
-# Subagent templates (pi-subagents' global agent definitions)
-# Phase A + Phase B: every default is built-in to pi-subagents; no
-# canonical template is installed. Pre-existing user-level files
-# (developer.md / auditor.md) are
-# left in place for the user to remove manually. See DEVELOPER_AGENT
-# and AUDITOR_AGENT in `pi-subagents/src/default-agents.ts`.
-# ────────────────────────────────────────────────────────────
-
-# Sentinel marker stamped into every template body (see templates/agents/*.md).
-# HTML comment: invisible in markdown render, unknown to pi-subagents' YAML-only
-# frontmatter parser, but grep-detectable so uninstall can distinguish
-# template-installed files from user-written/edited ones.
+# Sentinel marker for `templates/agent-tool-description.md`. The file
+# uses this in-body so the uninstall path can tell which copy is ours.
+# (Subagent templates no longer ship — every default subagent is a
+# built-in in pi-subagents; see `pi-subagents/src/default-agents.ts`.)
 SUBAGENT_SENTINEL_TEXT='SAGES_TEMPLATE_V1'
 
-# True if $1 exists and carries the SAGES_TEMPLATE_V1 sentinel — i.e. we
-# installed it. Mirrors is_*-config_installed patterns.
-is_subagent_template_installed() {
-  local file="$1"
-  [[ -f "$file" ]] && grep -q "$SUBAGENT_SENTINEL_TEXT" "$file" 2>/dev/null
-}
 
 # Phase A + Phase B (DAG-2026-011) — done. The canonical `developer`
 # and `auditor` agents are both built-in to pi-subagents. Pre-existing
@@ -424,7 +397,7 @@ is_subagent_template_installed() {
 # Linux/POSIX, `mv` within the same filesystem is an atomic rename, so
 # concurrent readers (e.g., pi-subagents scanning $AGENT_DIR/agents/)
 # never see a half-written file. Cleans up the tmp file on failure.
-# Used by both install_subagent_templates and install_subagents_doc to
+# Used by install_subagents_doc + install_agent_tool_description to
 # safely refresh user-visible files where partial writes would be
 # user-visible.
 _atomic_copy() {
@@ -438,103 +411,6 @@ _atomic_copy() {
   fi
 }
 
-# Copy every $SUBAGENT_NAMES template from $SUBAGENT_TEMPLATE_DIR to
-# $SUBAGENT_TARGET_DIR. Idempotent rules (match *_config):
-#   - missing → install from template
-#   - file exists with sentinel → skip (we installed it; --force to overwrite)
-#   - file exists without sentinel → user-customized; skip unless --force
-# Shell-quoted: array iteration is POSIX-portable bash.
-install_subagent_templates() {
-  if [[ ! -d "$SUBAGENT_TEMPLATE_DIR" ]]; then
-    echo "  Warning: subagent template dir not found at $SUBAGENT_TEMPLATE_DIR"
-    echo "  (Re-download the sages repo or restore templates/agents/)"
-    return 0
-  fi
-
-  mkdir -p "$SUBAGENT_TARGET_DIR"
-
-  local name template target
-  for name in "${SUBAGENT_NAMES[@]}"; do
-    template="$SUBAGENT_TEMPLATE_DIR/$name.md"
-    target="$SUBAGENT_TARGET_DIR/$name.md"
-
-    if [[ ! -f "$template" ]]; then
-      echo "  Warning: template not found: $template (skipping $name)"
-      continue
-    fi
-
-    if [[ -f "$target" ]] && is_subagent_template_installed "$target" && [[ "${FORCE:-false}" != true ]]; then
-      echo "  $name.md already installed (use --force to reinstall)"
-      continue
-    fi
-
-    if [[ -f "$target" ]] && ! is_subagent_template_installed "$target" && [[ "${FORCE:-false}" != true ]]; then
-      # Phase A P3 (DAG-2026-011): back up and classify user-customized
-      # subagent templates BEFORE skipping. The backup directory
-      # `$SUBAGENT_TARGET_DIR/.phase-a-migration/` carries:
-      #   - the original file (`<name>.md`)
-      #   - a metadata sidecar (`<name>.md.meta`) recording the install
-      #     time + the classification ("user-customized") so a rollback
-      #     is always possible without consulting git.
-      # Phase B (auditor migration) reuses this directory.
-      local backup_root="$SUBAGENT_TARGET_DIR/.phase-a-migration"
-      mkdir -p "$backup_root"
-      local ts
-      ts=$(date +%Y%m%dT%H%M%S)
-      cp "$target" "$backup_root/${name}.${ts}.md" 2>/dev/null || true
-      cat > "$backup_root/${name}.${ts}.md.meta" <<META_EOF
-classification: user-customized
-install_time: ${ts}
-subagent_name: ${name}
-phase: A
-reason: existing file lacks SAGES_TEMPLATE_V1 sentinel; skipped install to preserve customization
-META_EOF
-      echo "  $name.md exists with user customization — backed up to .phase-a-migration/${name}.${ts}.md (use --force to overwrite)"
-      continue
-    fi
-
-    rm -f "$target"
-    _atomic_copy "$template" "$target"
-    echo "  Installed $name.md (subagent template)"
-  done
-}
-
-# Remove files in $SUBAGENT_TARGET_DIR ONLY if they carry our sentinel.
-# Globs $SUBAGENT_TARGET_DIR/*.md directly (not iterating $SUBAGENT_NAMES)
-# so user-added agent .md files in $AGENT_DIR/agents/ also get evaluated
-# against the NEVER-TOUCH policy. `shopt -s nullglob` makes an empty dir
-# produce a length-0 array, so the early-return skips cleanly. User-
-# written or hand-edited agent files (no sentinel) are left alone,
-# matching the uninstall_*_config + uninstall_magic_context policy.
-#
-# Residual race: if a file's sentinel membership changes between the
-# is_subagent_template_installed check and the rm call below, the file's
-# state at moment-of-rm determines behaviour. Acceptable for this
-# installer (not designed to be reentrant).
-uninstall_subagent_templates() {
-  shopt -s nullglob 2>/dev/null || true
-  local candidates=("$SUBAGENT_TARGET_DIR"/*.md)
-  [[ ${#candidates[@]} -eq 0 ]] && return 0
-
-  local to_remove=()
-  local f name
-  for f in "${candidates[@]}"; do
-    name=$(basename "$f")
-    if is_subagent_template_installed "$f"; then
-      to_remove+=("$f")
-      echo "  Removed $name (was our template)"
-    else
-      echo "  $name is user-customized, leaving alone"
-    fi
-  done
-
-  # Use if (not && short-circuit): under `set -e`, `[[ ... ]] && cmd` would
-  # abort the script when the test is false but the && chain returns 1.
-  # if/fi constructors are exempt from set -e on the test itself.
-  if [[ ${#to_remove[@]} -gt 0 ]]; then
-    rm -f "${to_remove[@]}"
-  fi
-}
 
 # ────────────────────────────────────────────────────────────
 # SUBAGENTS.md — 4-agent pipeline doc
@@ -589,7 +465,7 @@ uninstall_subagents_doc() {
 # ~line 791). The file is read once at tool registration; re-installing
 # refreshes the file for the next pi session.
 #
-# Idempotency rules (match install_subagent_templates):
+# Idempotency rules (match install_subagents_config / agent_tool_description):
 #   - missing → install from template
 #   - file exists with sentinel → skip (we installed it; --force to overwrite)
 #   - file exists without sentinel → user-customized; skip unless --force
@@ -1125,7 +1001,6 @@ except Exception as e:
 #
 #   pi-mcp-adapter                → 2.25.0
 #   @cortexkit/pi-magic-context   → 0.36.1
-#   @davecodes/pi-routines        → 0.5.1
 #
 # Local-peer (file-copy) packages — sages, pi-codebase-memory,
 # pi-subagents, pi-evaluator — are NOT pinned via npm and have NO
@@ -1442,119 +1317,10 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
-# pi-routines (@davecodes) — scheduled + event-driven routines
-# PINNED: @davecodes/pi-routines@0.5.1  (see "Pinned npm-peer versions" block above)
-#
-# Mirrors the install_pi_magic_context npm-install pattern. Pure JS
-# (no native deps — just nanoid + typebox), so --ignore-scripts is
-# purely a network-safety / parity choice rather than a workaround
-# for a failing postinstall. The cli-style install matches the rest
-# of the npm-peer stack.
-# ────────────────────────────────────────────────────────────
-
-PI_ROUTINES_PKG="npm:@davecodes/pi-routines@0.5.1"
-PI_ROUTINES_NODE_MODULES_DIR="$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines"
-
-is_pi_routines_installed() {
-  # Auto-recovery invariant (mirrors is_pi_codebase_memory_installed):
-  # require BOTH settings.json registration AND node_modules dir on disk.
-  # PKG_PATTERN matches four forms so any legacy form does not silently
-  # no-op the install:
-  #   1. npm:@davecodes/pi-routines                  (legacy version-less)
-  #   2. npm:@davecodes/pi-routines@X.Y.Z            (pinned form — see block above)
-  #   3. /path/to/pi-routines                         (unscoped local-fork path)
-  #   4. /path/to/@davecodes/pi-routines             (scoped local-fork path)
-  local settings="$PI_DIR/agent/settings.json"
-  [[ ! -f "$settings" ]] && return 1
-  python3 -c "
-import json, os, re, sys
-try:
-    d = json.load(open('$settings'))
-    PKG_PATTERN = re.compile(r'^(npm:@davecodes/pi-routines(@.+)?|.*/pi-routines|.*/@davecodes/pi-routines)\$')
-    registered = any(PKG_PATTERN.match(p) for p in d.get('packages', []))
-    if registered and os.path.isdir('$PI_ROUTINES_NODE_MODULES_DIR'):
-        sys.exit(0)
-    sys.exit(1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null
-}
-
-install_pi_routines() {
-  echo "==> Installing @davecodes/pi-routines..."
-
-  if is_pi_routines_installed && [[ "${FORCE:-false}" != true ]]; then
-    echo "  @davecodes/pi-routines already installed (use --force to reinstall)"
-    return 0
-  fi
-
-  if [[ "${FORCE:-false}" == true ]] && is_pi_routines_installed; then
-    echo "  Force-reinstall: removing previous @davecodes/pi-routines first"
-    uninstall_pi_routines
-  fi
-
-  if command -v pi &>/dev/null; then
-    echo "  Installing @davecodes/pi-routines via npm..."
-    (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
-      npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_ROUTINES_PKG" 2>&1 | tail -3) || {
-      echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_ROUTINES_PKG' manually"
-    }
-
-    local settings="$PI_DIR/agent/settings.json"
-    mkdir -p "$(dirname "$settings")"
-    [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
-    python3 -c "
-import json, re
-f, pkg = '$settings', '$PI_ROUTINES_PKG'
-PKG_PATTERN = re.compile(r'^(npm:@davecodes/pi-routines(@.+)?|.*/pi-routines|.*/@davecodes/pi-routines)\$')
-try: d = json.load(open(f))
-except: d = {'packages': []}
-pkgs = [p for p in d.get('packages', []) if not PKG_PATTERN.match(p)]
-if pkg not in pkgs:
-    pkgs.append(pkg)
-d['packages'] = pkgs
-json.dump(d, open(f, 'w'), indent=2)
-print('  Registered', pkg)
-"
-  else
-    echo "  'pi' command not found; user must install manually"
-  fi
-
-  echo "  @davecodes/pi-routines installed"
-}
-
-uninstall_pi_routines() {
-  echo "==> Uninstalling @davecodes/pi-routines..."
-
-  local settings="$PI_DIR/agent/settings.json"
-  [[ -f "$settings" ]] && python3 -c "
-import json, re, sys
-try:
-    d = json.load(open('$settings'))
-    pkgs = d.get('packages', [])
-    PKG_PATTERN = re.compile(r'^(npm:@davecodes/pi-routines(@.+)?|.*/pi-routines|.*/@davecodes/pi-routines)\$')
-    new_pkgs = [p for p in pkgs if not PKG_PATTERN.match(p)]
-    if len(new_pkgs) != len(pkgs):
-        d['packages'] = new_pkgs
-        json.dump(d, open('$settings', 'w'), indent=2)
-        print('  Removed @davecodes/pi-routines from settings.json')
-except Exception as e:
-    sys.exit(1)
-" 2>/dev/null || true
-
-  if [[ -d "$PI_ROUTINES_NODE_MODULES_DIR" ]]; then
-    rm -rf "$PI_ROUTINES_NODE_MODULES_DIR"
-    echo "  Removed $PI_ROUTINES_NODE_MODULES_DIR"
-  fi
-
-  echo "  @davecodes/pi-routines uninstalled"
-}
-
-# ────────────────────────────────────────────────────────────
 # Mode 1: full install (default)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
+  echo "==> Installing sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1575,9 +1341,6 @@ install() {
 
   # Install pi-mcp-adapter (MCP server adapter)
   install_pi_mcp_adapter || true
-
-  # Install @davecodes/pi-routines (scheduled + event-driven routines)
-  install_pi_routines || true
 
   # Install pi-codebase-memory sage peer (file copy from $LOCAL_REPO_ROOT/pi-codebase-memory + settings.json register).
   # Old design had two steps (install_pi_codebase_memory + install_pi_codebase_memory_files); merged into one
@@ -1607,12 +1370,10 @@ install() {
   # Install system prompt
   install_system_prompt
 
-  # Install subagent templates (Agent tool requires software-{auditor,developer}
-  # to exist in $AGENT_DIR/agents/ for orchestrator to dispatch by name).
-  # Combine with the SUBAGENTS.md doc to ship the complete 4-agent pipeline:
-  # Stages 1-2 (Explore, Plan) are pi-subagents built-ins; Stages 3-4
-  # (software-{developer,auditor}) are the templates we ship.
-  install_subagent_templates
+  # Install the SUBAGENTS.md doc (4-agent pipeline doc) — combined
+  # with the agent-tool-description.md override below to ship the
+  # complete 4-agent pipeline. Subagent templates themselves are
+  # pi-subagents built-ins and need no installer step.
   install_subagents_doc
 
   # Install agent-tool-description.md override + subagents.json setting
@@ -1629,7 +1390,7 @@ install() {
 # Mode 2: update sages only (skip pi-codebase-memory and SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_sages_only() {
-  echo "==> Installing sages only (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, skip SYSTEM.md)..."
+  echo "==> Installing sages only (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, skip SYSTEM.md)..."
 
   # Pre-flight: pi is still required (sages is a pi extension)
   install_pi_if_needed
@@ -1642,8 +1403,8 @@ install_sages_only() {
   echo "==> Installing sages..."
   install_sages_files || exit 1
 
-  # Explicitly do NOT call install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_routines / install_pi_subagents / install_pi_evaluator / install_system_prompt
-  echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
+  # Explicitly do NOT call install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_subagents / install_pi_evaluator / install_system_prompt
+  echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1653,10 +1414,10 @@ install_sages_only() {
 # Mode 3: update SYSTEM.md only (skip sages and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)..."
+  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)..."
   # No git / pi needed — SYSTEM.md is standalone markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-routines, pi-subagents, pi-evaluator, subagent templates)"
+  echo "  (skipped: sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1666,7 +1427,7 @@ install_system_only() {
 # Uninstall (removes both sages and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-routines + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
+  echo "==> Uninstalling sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
 
   # Remove sages
   if [[ -d "$PKG_DIR" ]]; then
@@ -1690,8 +1451,7 @@ uninstall() {
   # Uninstall pi-mcp-adapter (MCP server adapter)
   uninstall_pi_mcp_adapter
 
-  # Uninstall @davecodes/pi-routines (scheduled + event-driven routines)
-  uninstall_pi_routines
+  
 
   # Uninstall pi-subagents (subagent extension)
   uninstall_pi_subagents
@@ -1699,9 +1459,9 @@ uninstall() {
   # Uninstall pi-evaluator (reward-mode extension)
   uninstall_pi_evaluator
 
-  # Uninstall subagent templates we installed (leaves user-customized alone),
-  # plus the SUBAGENTS.md doc (only if byte-identical to our template)
-  uninstall_subagent_templates
+  # Uninstall the SUBAGENTS.md doc (only if byte-identical to our template).
+  # Subagent templates themselves are pi-subagents built-ins — no uninstall
+  # path for them.
   uninstall_subagents_doc
 
   # Uninstall agent-tool-description.md override + subagents.json setting.

@@ -29,7 +29,7 @@ import {
   loadYamlOrchestratorFile,
 } from "./state-persistence.js";
 import { renderTaskPrompt, validateTemplateParams } from "./template-loader.js";
-import { knownSubagentIds } from "./subagent-registry.js";
+import { KNOWN_SUBAGENT_IDS } from "@sages/pi-subagents";
 import { RunEvent } from "../../observability/events.js";
 import { emitRunEvent } from "../../observability/runner.js";
 
@@ -305,10 +305,13 @@ export function validateDAG(input: DAGInput, contract: GoalContract): DAGValidat
     }
   }
 
-  // 8. Known subagent types come from pi/subagents/registry.yaml.
-  const knownSubagents = knownSubagentIds();
+  // 8. Known subagent types come from pi-subagents (canonical owner of
+  //    subagent registration). Sages warns when a task references a
+  //    subagent_type that pi-subagents hasn't shipped — but the warning
+  //    is soft, since user .md files at ~/.pi/agent/agents/{name}.md
+  //    can add custom subagents not in pi-subagents' defaults.
   for (const t of input.tasks as any[]) {
-    if (!knownSubagents.has(t.subagent_type)) {
+    if (!KNOWN_SUBAGENT_IDS.includes(t.subagent_type)) {
       warnings.push(`task '${t.id}': subagent_type '${t.subagent_type}' is not a known role — verify ~/.pi/agent/agents/${t.subagent_type}.md exists`);
     }
   }

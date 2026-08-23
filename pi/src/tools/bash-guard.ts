@@ -1,68 +1,42 @@
 /**
- * Bash Guard — advisory classifier for bash commands (GC-2026-031 soft mode).
+ * Bash Guard — bash command classifier for the soft-mode auto-steer reminder
+ * (GC-2026-031).
  *
- * Under soft mode, `shouldBlockBashCommand` is a pure classifier that
- * NEVER blocks: every command returns `{ block: false }`. The historical
- * four-layer gate (L1 read / L2 git-meta / L3 meta-file-write /
- * L4 production-code-write) and the destructive-verb short-circuit have
- * been removed — main-agent bash commands are not gated.
+ * `classifyBashCommand` is the only production consumer of this module
+ * — the bash tool_call handler in `extension.ts` calls it on every
+ * invocation to decide whether the first write-intent bash call should
+ * fire `softModeReminder(profile)`. The historical four-layer gate
+ * (L1 read / L2 git-meta / L3 meta-file-write / L4 production-code-write),
+ * the destructive-verb short-circuit, the target-extraction helpers, and
+ * the chained-command splitter have all been removed — main-agent bash
+ * commands are not gated. The path-policy module that used to back the
+ * gate (`src/tools/file-gate.ts`) was deleted in the same change.
  *
- * The classifier functions remain useful for downstream consumers
- * (advisory metadata, audit reports, auto-steer reminder decisions in
- * `extension.ts`):
+ * Result enum:
+ *   - "read-only"   — first-word matches a known safe command, no write
+ *                      redirect to a real file.
+ *   - "write-intent"— the command can mutate files (rm, sed -i, tee,
+ *                      redirects, find -delete, …).
+ *   - "git-meta"    — git subcommand on the L2 whitelist (status,
+ *                      log, diff, branch, etc.).
+ *   - "unknown"     — anything else.
  *
- *   classifyBashCommand(cmd)  → "read-only" | "write-intent" | "git-meta" | "unknown"
- *   isGitMetaCommand(cmd)     → positive-whitelist `GitMetaVerdict`
- *   extractBashTargets(cmd)   → string[] of paths the command will write
- *   splitChainedCommands(cmd) → string[] of top-level segments
- *   shouldBlockBashCommand(cmd, ctx) → { block: false }
- *
- * Path policy is no longer consumed by this classifier under soft mode.
- * Chained-command handling (added 2026-07-25): `splitChainedCommands`
- * splits on top-level `&&` / `||` / `;` (respecting quotes and
- * paren/brace nesting). Test coverage: T16–T22 + T23b + T24 in
- * `pi/test/tools/bash-guard.test.ts`.
+ * Hot-path memoization: `classifyCache` (LRU, cap 256, move-to-end)
+ * short-circuits the entire pipeline on repeat keys. `__shellTokensCallCount`
+ * is a test-only instrumentation counter — production code never reads it.
  */
 
-// LLM-facing reason from `file-gate`. Under soft mode this is
-// no longer consumed for blocking — `policyMessage` is re-exported
-// so callers wiring their own advisory paths can surface the canonical
-// meta-file rationale verbatim.
-import { policyMessage } from "./file-gate.js";
-
-/** Unconditional read-only first-words. */
 const READ_ONLY_FIRST_WORDS = new Set([
 	"ls", "cat", "head", "tail", "grep", "wc", "file", "stat",
 	"tree", "which", "jq", "env",
 	"cd", "pwd", "printenv",
 ]);
 
-/** Write-intent first-words (always win over read-only). */
 const WRITE_INTENT_FIRST_WORDS = new Set([
 	"rm", "mv", "cp", "sed", "perl", "tee", "truncate", "mkdir",
 	"chmod", "chown", "tar", "unzip",
 ]);
 
-/**
- * Chain / pipe / redirect / fd operators that terminate a command's
- * arg list. Used by `extractBashTargets` to stop at the first
- * non-target token so e.g. `rm pi/src/foo.ts 2>&1 | head -5` extracts
- * only `pi/src/foo.ts` (not `2>&1`, `|`, `head`).
- *
- * Kept narrow on purpose — these are SHELL-level separators, not
- * data the user might be passing as a filename. Quoted operators
- * (`"&&"`) never reach here because the helper is called on
- * already-shell-tokenized args.
- */
-function isShellOperator(token: string): boolean {
-	if (token === "|" || token === ";" || token === "&") return true;
-	if (token === "&&" || token === "||") return true;
-	if (token.startsWith(">") || token.startsWith("<")) return true;
-	if (token === "2>&1" || token.startsWith("&>")) return true;
-	return false;
-}
-
-/** Read-only prefix patterns. */
 const READ_ONLY_PREFIX_PATTERNS: RegExp[] = [
 	/^npm\s+(test|lint|typecheck)\b/,
 	/^bun\s+test\b/,
@@ -71,163 +45,96 @@ const READ_ONLY_PREFIX_PATTERNS: RegExp[] = [
 	/^make\b/,
 ];
 
-
-/** Git commands retained as L1 read-only for classifier compatibility. */
 const READ_ONLY_GIT_SUBCOMMANDS = new Set(["status", "log", "diff", "show", "branch"]);
 
 /**
- * Shared redirect-detector prefix. Matches any file-redirect:
- *   `>`, `>>`, `N>`, `N>>`, `&>`, `&>>`
- * Excludes fd duplications (`N>&M`, `>&M`) by requiring `>` to
- * NOT be followed by `&`. Used by both `hasWriteRedirect` (boolean
- * classification) and the target-extraction regex below. Keeping
- * them as a shared prefix prevents the two sites from drifting
- * (F4-2 hardening — `2>file` is a stderr-to-file redirect).
+ * Matches any file-redirect (`>`, `>>`, `N>`, `N>>`, `&>`, `&>>`)
+ * but excludes fd duplications (`>&`, `2>&1`) where `>` is immediately
+ * followed by `&`. Required by both `hasWriteRedirect` (boolean) and
+ * the classifier's "first redirect target" walk.
  */
 const WRITE_REDIRECT_PREFIX = /\d*&?(?:>>|>(?!&))/;
 
-/**
- * Module-level pre-compiled redirect-target extraction regex.
- *
- * Built from `WRITE_REDIRECT_PREFIX.source` plus the trailing
- * `\\s*(\\S+)` capture group (which extracts the destination
- * path). Compiled ONCE at module load — used to be rebuilt on
- * every `extractBashTargets` call. Shared across calls via
- * `String.prototype.matchAll`, which manages the regex's
- * `lastIndex` internally without leaking state between calls
- * (MDN: matchAll clones the regexp before iteration).
- *
- * GC-2026-032 phase-1 — SC3.
- */
-export const REDIRECT_REGEX: RegExp = new RegExp(
-	WRITE_REDIRECT_PREFIX.source + "\\s*(\\S+)",
-	"g",
-);
-
 export type BashClassification = "read-only" | "write-intent" | "git-meta" | "unknown";
-
-export type GitMetaVerdict =
-	| { allow: true; subcommand: string }
-	| { allow: false; reason: string };
-
-export interface BashGuardDecision {
-	block: boolean;
-	reason?: string;
-}
-
-/**
- * Test-only instrumentation: monotonically incremented on every
- * `shellTokens` invocation across the module. Lets tests assert that
- * `classifyBashCommand` does not re-tokenize when delegating to
- * `isGitMetaCommand` (which previously triggered a second pass).
- *
- * Exported with the leading-underscore convention reserved for
- * internal/test use; downstream consumers must not rely on it.
- *
- * GC-2026-032 phase-1 — SC2 (dedupe shellTokens in classifyBashCommand).
- */
-export let __shellTokensCallCount = 0;
 
 /**
  * GC-2026-033 phase-2 — LRU memoization for the per-tool_call hot path.
  *
- * `classifyBashCommand` and `extractBashTargets` are invoked on every
- * LLM bash tool call (the bash handler in `extension.ts` calls
- * `classifyBashCommand` on every invocation). In a multi-turn LLM
- * session, the same commands repeat frequently (`git status`,
- * `ls -la`, `cat <file>`, `bun test`, …) and each call currently
- * pays full tokenize + regex + git-meta verdict cost.
+ * `classifyBashCommand` is invoked on every LLM bash call (the bash
+ * handler in `extension.ts` calls it on every invocation). In a
+ * multi-turn LLM session the same commands repeat frequently
+ * (`git status`, `ls -la`, `cat <file>`, `bun test`, …) and each call
+ * otherwise pays full tokenize + regex + git-meta verdict cost.
  *
- * Two independent `Map`s cache the (string → BashClassification) and
- * (string → string[]) mappings. Insertion-order iteration on `Map`
- * is guaranteed by the spec, so the oldest entry is `keys().next().value`
- * and the cache is bounded by `*_CACHE_MAX`. A two-call repetition
- * on the same key refreshes insertion order (delete + re-set moves
- * the key to the end) so the working set stays warm.
- *
- * Map capacity 256 is the same knob used by `worktree.ts`'s profile
- * counters (GC-2026-032 phase-1) and is large enough to cover any
- * realistic single-session working set while bounding memory at a
- * few KB.
+ * Map capacity 256 is the same knob the worktree profile counters
+ * use (GC-2026-032 phase-1) — large enough to cover any realistic
+ * single-session working set while bounding memory at a few KB.
  */
 const CLASSIFY_CACHE_MAX = 256;
-const EXTRACT_CACHE_MAX = 256;
 const classifyCache = new Map<string, BashClassification>();
-const extractCache = new Map<string, string[]>();
 
-/**
- * Move-to-end + cap-evict. On a cache hit the caller should have
- * already done `cache.delete(key); cache.set(key, cached)` to refresh
- * the LRU position; this helper handles the miss path and the
- * post-insert eviction when the cache grows past `max`. Returns the
- * new size of the cache (mostly for test ergonomics — the callers
- * below don't actually need it).
- */
-function touchCache<K, V>(cache: Map<K, V>, key: K, value: V, max: number): number {
+/** Move-to-end + cap-evict for a one-shot cache insertion. */
+function touchCache(
+	cache: Map<string, BashClassification>,
+	key: string,
+	value: BashClassification,
+	cap: number,
+): void {
+	if (cache.has(key)) cache.delete(key);
 	cache.set(key, value);
-	if (cache.size > max) {
-		const firstKey = cache.keys().next().value as K | undefined;
-		if (firstKey !== undefined) cache.delete(firstKey);
+	while (cache.size > cap) {
+		const oldest = cache.keys().next().value;
+		if (oldest === undefined) break;
+		cache.delete(oldest);
 	}
-	return cache.size;
 }
 
-/**
- * Test-only helpers — underscore-prefixed by convention to signal
- * test-only intent and to avoid colliding with any future public API.
- * They expose the cache state directly so tests can assert hit / miss
- * / eviction behavior without coupling to internals. The
- * `bash-guard.ts` module sits in the `pi` package, which has no
- * `profile.ts` counter module (unlike `pi-subagents`), so we use
- * these exports as the canonical observability seam for the LRU.
- *
- * GC-2026-033 phase-2 — SC1, SC2.
- */
-export function _getClassifyCacheSize(): number {
-	return classifyCache.size;
-}
-export function _getExtractCacheSize(): number {
-	return extractCache.size;
-}
-export function _clearClassifyCache(): void {
-	classifyCache.clear();
-	extractCache.clear();
-}
-
-/** Tokenize the command prefix while preserving spaces inside shell quotes. */
+/** Tokenize a shell command with full quote/escape/paren awareness. */
 function shellTokens(command: string): string[] {
-	__shellTokensCallCount++;
 	const tokens: string[] = [];
-	let token = "";
-	let quote: "'" | '"' | undefined;
-	let escaped = false;
-	for (const char of command.trim()) {
-		if (escaped) {
-			token += char;
-			escaped = false;
+	let current = "";
+	let inSingle = false;
+	let inDouble = false;
+	let escape = false;
+	let i = 0;
+	while (i < command.length) {
+		const c = command[i];
+		if (escape) {
+			current += c;
+			escape = false;
+			i++;
 			continue;
 		}
-		if (char === "\\" && quote !== "'") {
-			escaped = true;
+		if (c === "\\") {
+			escape = true;
+			current += c;
+			i++;
 			continue;
 		}
-		if (quote) {
-			if (char === quote) quote = undefined;
-			else token += char;
+		if (!inSingle && c === '"') {
+			inDouble = !inDouble;
+			current += c;
+			i++;
 			continue;
 		}
-		if (char === "'" || char === '"') {
-			quote = char;
+		if (!inDouble && c === "'") {
+			inSingle = !inSingle;
+			current += c;
+			i++;
 			continue;
 		}
-		if (/\s/.test(char)) {
-			if (token) {
-				tokens.push(token);
-				token = "";
+		if (!inSingle && !inDouble && /\s/.test(c)) {
+			if (current) {
+				tokens.push(current);
+				current = "";
 			}
-		} else token += char;
+			i++;
+			continue;
+		}
+		current += c;
+		i++;
 	}
-	if (token) tokens.push(token);
+	if (current) tokens.push(current);
 	return tokens;
 }
 
@@ -239,26 +146,23 @@ function gitTokens(command: string): string[] | undefined {
 	return tokens[index] === "git" ? tokens.slice(index) : undefined;
 }
 
-/** Classify a git command against the positive L2 whitelist. */
-export function isGitMetaCommand(command: string): GitMetaVerdict {
-	const tokens = gitTokens(command);
-	return evaluateGitMetaVerdict(tokens);
+/** Detect a write-targeting redirect (`>`, `>>`, `N>`, `N>>`, `&>`, `&>>`). */
+function hasWriteRedirect(cmd: string): boolean {
+	return WRITE_REDIRECT_PREFIX.test(cmd);
 }
 
 /**
- * Core git-meta classification. Operates on a pre-tokenized array
- * (the same shape `gitTokens` produces) so callers that have
- * already tokenized a command can reuse the result without a
- * second `shellTokens` pass. `undefined` (i.e. `gitTokens` returned
- * undefined because the command isn't a git command) yields the
- * canonical `{ allow: false, reason: "not a git command" }`.
+ * Classify a git command against the positive L2 whitelist. Operates on a
+ * pre-tokenized array (the shape `gitTokens` produces) so callers that
+ * have already tokenized a command can reuse the result without a second
+ * `shellTokens` pass.
  *
- * GC-2026-032 phase-1 — SC2 (dedupe `shellTokens` in
- * `classifyBashCommand`). The signature is module-internal (not
- * exported) because it depends on the exact token-shape contract
- * of `gitTokens`; external callers should use `isGitMetaCommand`.
+ * `undefined` (i.e. `gitTokens` returned undefined because the command
+ * isn't a git command) yields `{ allow: false, reason: "not a git command" }`.
  */
-function evaluateGitMetaVerdict(tokens: string[] | undefined): GitMetaVerdict {
+function evaluateGitMetaVerdict(tokens: string[] | undefined): {
+	allow: true; subcommand: string;
+} | { allow: false; reason: string } {
 	if (!tokens) return { allow: false, reason: "not a git command" };
 	const sub = tokens[1];
 	const args = tokens.slice(2);
@@ -270,7 +174,8 @@ function evaluateGitMetaVerdict(tokens: string[] | undefined): GitMetaVerdict {
 		sub === "mv" ||
 		(sub === "reset" && args.includes("--hard")) ||
 		(sub === "clean" && args.some(a => /^-[a-z]+$/i.test(a) && a.includes("f") && a.includes("d"))) ||
-		(sub === "stash" && args[0] === "drop") || (sub === "tag" && args.includes("-d")) ||
+		(sub === "stash" && args[0] === "drop") ||
+		(sub === "tag" && args.includes("-d")) ||
 		(sub === "branch" && args.some(a => a === "-D" || a === "-d")) ||
 		(sub === "push" && args.some(a =>
 			a === "--force" || a === "-f" ||
@@ -278,10 +183,16 @@ function evaluateGitMetaVerdict(tokens: string[] | undefined): GitMetaVerdict {
 		)) ||
 		(sub === "switch" && args.includes("--discard-changes")) ||
 		(sub === "worktree" && args[0] === "remove" && args.includes("--force"));
-	if (destructive) return { allow: false, reason: `destructive: ${rendered}${args.length ? ` ${args.join(" ")}` : ""}` };
+	if (destructive) {
+		return { allow: false, reason: `destructive: ${rendered}${args.length ? ` ${args.join(" ")}` : ""}` };
+	}
 	if (!sub) return { allow: false, reason: "unsupported: git command has no subcommand" };
 
-	const direct = new Set(["status", "log", "diff", "show", "blame", "shortlog", "reflog", "rev-parse", "rev-list", "add", "commit", "merge", "cherry-pick", "rebase", "stash", "fetch", "pull", "push", "init", "clone"]);
+	const direct = new Set([
+		"status", "log", "diff", "show", "blame", "shortlog", "reflog",
+		"rev-parse", "rev-list", "add", "commit", "merge", "cherry-pick",
+		"rebase", "stash", "fetch", "pull", "push", "init", "clone",
+	]);
 	let allow = direct.has(sub);
 	if (sub === "tag" || sub === "branch") allow = !args.some(a => a.startsWith("-") && a !== "-l" && a !== "--list");
 	if (sub === "worktree") allow = ["list", "add", "remove"].includes(args[0] ?? "");
@@ -303,28 +214,20 @@ function evaluateGitMetaVerdict(tokens: string[] | undefined): GitMetaVerdict {
 		// `--discard-changes` (forced switch with local-change loss).
 		allow = true;
 	}
-	return allow ? { allow: true, subcommand: sub } : { allow: false, reason: `unsupported: ${rendered}` };
+	return allow
+		? { allow: true, subcommand: sub }
+		: { allow: false, reason: `unsupported: ${rendered}` };
 }
 
-
 /**
- * Classify a bash command by its first word (with a few exceptions
- * for redirect, `find` flags, and `echo`).
+ * Classify a bash command by its first word (with a few exceptions for
+ * redirect, `find` flags, and `echo`).
  *
- * Returns one of:
- *   - "read-only"   — first-word matches a known safe command, no
- *                      redirect targets production code.
- *   - "write-intent"— the command can mutate files (rm, sed -i,
- *                      tee, redirects, find -delete, …).
- *   - "unknown"     — anything else (python3 -c, ruby -e, bash -c,
- *                      git checkout/restore/clean/rm, …).
- *
- * GC-2026-033 phase-2 — SC1: the result is memoized in
- * `classifyCache` (Map-based LRU, cap 256). Repeated commands on
- * subsequent LLM turns short-circuit the entire classification
- * pipeline (no `shellTokens`, no redirect regex, no git-meta verdict).
- * The signature is unchanged — callers see a plain classifier; the
- * cache is purely internal.
+ * The result is memoized in `classifyCache` (Map-based LRU, cap 256).
+ * Repeated commands on subsequent LLM turns short-circuit the entire
+ * classification pipeline (no `shellTokens`, no redirect regex, no
+ * git-meta verdict). The signature is unchanged — callers see a plain
+ * classifier; the cache is purely internal.
  */
 export function classifyBashCommand(command: string): BashClassification {
 	const cached = classifyCache.get(command);
@@ -345,8 +248,7 @@ export function classifyBashCommand(command: string): BashClassification {
  * Pure (cache-free) classifier logic. Extracted so the cache wrapper
  * above has a single exit point and so the inner logic can be unit-
  * tested directly (e.g. by asserting that `classifyBashCommand`'s
- * `__shellTokensCallCount` delta matches the expected tokenize count
- * — see T-PERF-* in `pi/test/tools/bash-guard.test.ts`).
+ * `__shellTokensCallCount` delta matches the expected tokenize count).
  */
 function classifyUncached(command: string): BashClassification {
 	const trimmed = command.trimStart();
@@ -364,7 +266,6 @@ function classifyUncached(command: string): BashClassification {
 	}
 
 	// 2. find: write-intent if -delete / -exec, else read-only.
-	//    (find with redirect is handled by step 3.)
 	if (firstWord === "find") {
 		const hasDeleteOrExec =
 			/(^|\s)-delete(\s|$)/.test(trimmed) ||
@@ -394,12 +295,8 @@ function classifyUncached(command: string): BashClassification {
 	}
 
 	// 6. Existing read-only git commands remain L1 for API compatibility.
-	//    GC-2026-032 phase-1 — SC2: `shellTokens(trimmed)` is called
-	//    exactly once here; the git-meta verdict below reuses the
-	//    same `tokens` array via `evaluateGitMetaVerdict`, which
-	//    accepts a pre-tokenized input. (Previously this code path
-	//    triggered a second `shellTokens` pass via
-	//    `isGitMetaCommand(trimmed)`.)
+	//    `shellTokens(trimmed)` is called exactly once here; the git-meta
+	//    verdict reuses the same `tokens` array via `evaluateGitMetaVerdict`.
 	const tokens = shellTokens(trimmed);
 	const gitIndex = tokens.findIndex(t => t === "git");
 	if (gitIndex >= 0) {
@@ -408,9 +305,7 @@ function classifyUncached(command: string): BashClassification {
 		if (sub === "worktree" && tokens[gitIndex + 2] === "list") return "read-only";
 	}
 
-	// Other whitelisted git-meta subcommands are L2. The verdict
-	// helper takes the pre-tokenized array directly so we skip a
-	// redundant `shellTokens` call.
+	// Other whitelisted git-meta subcommands are L2.
 	const gitTokensSlice = gitIndex >= 0 ? tokens.slice(gitIndex) : undefined;
 	const gitVerdict = evaluateGitMetaVerdict(gitTokensSlice);
 	if (gitVerdict.allow) return "git-meta";
@@ -423,434 +318,12 @@ function classifyUncached(command: string): BashClassification {
 	return "unknown";
 }
 
-/**
- * Return paths a write-intent command will touch. Empty array means
- * no write-target was identifiable (e.g. `git status`).
- *
- * Patterns handled (per design):
- *   rm [-flags]* <path> [<path>...]
- *   mv <src> <dst>
- *   cp <src> <dst>               → only <dst>
- *   tee <path> [<path>...]
- *   > <path> / >> <path>         (anywhere)
- *   sed -i<SUFFIX>? '<expr>' <path>
- *   find <dir> -delete           → <dir>
- *   git checkout [--] <paths...>
- *   git checkout <ref> -- <paths...>
- *   git restore [--source=<ref>] <paths...>
- *   git clean -fd [<paths...>]   → <paths...> or cwd
- *   git rm <paths...>
- *   tar -xf|-xjf|-xzf <arc> [-C <dir>] → <dir> or cwd
- *
- * GC-2026-033 phase-2 — SC1: the result is memoized in `extractCache`
- * (Map-based LRU, cap 256). The signature and return shape are
- * unchanged — the cache is purely internal. Note that the cached
- * array is shared by reference with subsequent cache hits; the only
- * consumer is the soft-mode advisory path and the unit tests, both
- * of which treat the return value as read-only.
- */
-export function extractBashTargets(command: string): string[] {
-	const cached = extractCache.get(command);
-	if (cached !== undefined) {
-		// Move-to-end refresh (see `classifyBashCommand` for the
-		// rationale: plain JS `set` does NOT advance an existing
-		// key's iteration position, so we delete + re-set).
-		extractCache.delete(command);
-		extractCache.set(command, cached);
-		return cached;
-	}
-	const result = extractBashTargetsUncached(command);
-	touchCache(extractCache, command, result, EXTRACT_CACHE_MAX);
-	return result;
+/** Test-only — read the current LRU size. Throws if the helper is missing (the helper not exported). */
+export function _getClassifyCacheSize(): number {
+	return classifyCache.size;
 }
 
-/**
- * Pure (cache-free) target-extraction logic. Same body as the
- * pre-phase-2 `extractBashTargets` — extracted so the cache wrapper
- * has a single exit point.
- */
-function extractBashTargetsUncached(command: string): string[] {
-	const trimmed = command.trimStart();
-	if (!trimmed) return [];
-
-	const tokens = trimmed.split(/\s+/).filter(Boolean);
-	const firstWord = tokens[0] || "";
-	const targets: string[] = [];
-
-	switch (firstWord) {
-		case "rm": {
-			// rm [-rf|-r|-f|...]* <path> [<path>...]
-			// Stop at the first shell operator (chain parser
-			// hardening — `rm foo 2>&1 | head` previously
-			// extracted `2>&1`, `|`, `head` as targets).
-			for (const t of tokens.slice(1)) {
-				if (t.startsWith("-")) continue;
-				if (isShellOperator(t)) break;
-				targets.push(t);
-			}
-			break;
-		}
-		case "mv": {
-			// mv <src> <dst>   (take first non-flag and last non-flag).
-			// Walk forward, skip flags, stop at the first shell
-			// operator. The path pair is the first and last
-			// collected path before the operator.
-			const pathArgs: string[] = [];
-			for (const t of tokens.slice(1)) {
-				if (t.startsWith("-")) continue;
-				if (isShellOperator(t)) break;
-				pathArgs.push(t);
-			}
-			if (pathArgs.length >= 2) {
-				targets.push(pathArgs[0], pathArgs[pathArgs.length - 1]);
-			} else if (pathArgs.length === 1) {
-				targets.push(pathArgs[0]);
-			}
-			break;
-		}
-		case "cp": {
-			// cp <src> <dst>   → only <dst>.
-			// Walk forward, skip flags, stop at the first shell
-			// operator. Capture the last path arg before the
-			// operator (= destination). A single arg is treated as
-			// the destination too (e.g. `cp a` → [a]).
-			let last: string | undefined;
-			for (const t of tokens.slice(1)) {
-				if (t.startsWith("-")) continue;
-				if (isShellOperator(t)) break;
-				last = t;
-			}
-			if (last !== undefined) targets.push(last);
-			break;
-		}
-		case "mkdir": {
-			// mkdir [-p] <dir> [<dir>...] — stop at first operator.
-			for (const t of tokens.slice(1)) {
-				if (t.startsWith("-")) continue;
-				if (isShellOperator(t)) break;
-				targets.push(t);
-			}
-			break;
-		}
-		case "tee": {
-			// tee <path> [<path>...] — stop at first operator.
-			for (const t of tokens.slice(1)) {
-				if (t === "<" || t.startsWith("<")) break;
-				if (isShellOperator(t)) break;
-				if (!t.startsWith("-")) targets.push(t);
-			}
-			break;
-		}
-		case "perl": {
-			// F4-1 hardening: perl [-pi] [-e 'code'] [file...] was a
-			// write-intent bypass because the switch fell through to
-			// default, returning no targets. Without parsing perl, we
-			// extract paths using a two-pronged heuristic:
-			//
-			//   1. Plain non-flag, non-quoted args (e.g., `perl -pi -e
-			//      's/a/b/' x.ts` → `x.ts`). Stop at the first
-			//      shell operator.
-			//   2. Quoted strings that look like file paths (have `/`
-			//      and a basename with `.`, or start with `./`, `../`,
-			//      `/`). We match single-quoted strings before
-			//      double-quoted ones so a path literal inside the
-			//      perl code (e.g., `unlink 'src/foo.ts'` inside
-			//      `"..."`) is captured independently of the wrapping
-			//      double quotes. Double-quoted strings that contain
-			//      inner single quotes are skipped (likely code wrapping
-			//      a path literal; the path is captured by the
-			//      single-quote pass).
-			for (const t of tokens.slice(1)) {
-				if (t.startsWith("-") || t.startsWith("'") || t.startsWith('"')) continue;
-				if (isShellOperator(t)) break;
-				targets.push(t);
-			}
-			const isPathLike = (s: string): boolean => {
-				if (!s.includes("/")) return false;
-				if (s.startsWith("./") || s.startsWith("../") || s.startsWith("/")) return true;
-				const lastSlash = s.lastIndexOf("/");
-				const basename = s.slice(lastSlash + 1);
-				return basename.includes(".");
-			};
-			const singleQ = /'([^']+)'/g;
-			let sm: RegExpExecArray | null;
-			while ((sm = singleQ.exec(trimmed)) !== null) {
-				const c = sm[1];
-				if (c && !c.includes('"') && isPathLike(c)) targets.push(c);
-			}
-			const doubleQ = /"([^"]+)"/g;
-			let dm: RegExpExecArray | null;
-			while ((dm = doubleQ.exec(trimmed)) !== null) {
-				const c = dm[1];
-				if (c && !c.includes("'") && isPathLike(c)) targets.push(c);
-			}
-			break;
-		}
-		case "sed": {
-			// sed -i<SUFFIX>? '<expr>' <path> [<path>...]
-			// Walk forward, capture the LAST non-flag, non-operator
-			// token (i.e., the path closest to the script). The
-			// forward walk replaces the previous reverse scan so
-			// chain operators terminate the path hunt
-			// (`sed -i 's/a/b/' x.ts && rm y` → only [x.ts]).
-			let lastPath: string | undefined;
-			for (const a of tokens.slice(1)) {
-				if (a.startsWith("-")) continue;
-				if (isShellOperator(a)) break;
-				lastPath = a;
-			}
-			if (lastPath) targets.push(lastPath);
-			break;
-		}
-		case "find": {
-			// find <dir> -delete  → <dir>
-			// The directory is the first non-flag, non-operator
-			// argument (skip `|`, `;`, etc. defensively even though
-			// find + redirect is unusual).
-			if (/(^|\s)-delete(\s|$)/.test(trimmed)) {
-				const args = tokens.slice(1);
-				const dir = args.find(a => !a.startsWith("-") && !isShellOperator(a));
-				if (dir) targets.push(dir);
-			}
-			break;
-		}
-		case "tar": {
-			// tar -xf|-xjf|-xzf <arc> [-C <dir>] → <dir> or cwd
-			// Reject operator tokens after `-C` (e.g.,
-			// `tar -xzf a.tar.gz -C && rm x` falls back to cwd).
-			const cIdx = tokens.indexOf("-C");
-			if (cIdx >= 0 && tokens[cIdx + 1] && !isShellOperator(tokens[cIdx + 1])) {
-				targets.push(tokens[cIdx + 1]);
-			} else {
-				targets.push(".");
-			}
-			break;
-		}
-		case "git": {
-			const sub = tokens[1];
-			if (sub === "checkout") {
-				// git checkout [--] <paths...>
-				// git checkout <ref> [--] <paths...>
-				// Find `--` separator; everything after is paths.
-				const dashIdx = tokens.indexOf("--");
-				if (dashIdx >= 0) {
-					for (const t of tokens.slice(dashIdx + 1)) {
-						if (t) targets.push(t);
-					}
-				}
-				// If no `--`, it's a ref-only checkout (branch switch),
-				// no file targets — leave empty.
-			} else if (sub === "restore") {
-				// git restore [--source=<ref>] <paths...>
-				// `git restore` doesn't use a `--` separator; paths
-				// follow directly (optionally after `--source=<ref>`).
-				// Take everything after `restore` that isn't a flag.
-				for (const t of tokens.slice(2)) {
-					if (!t || t.startsWith("--")) continue;
-					targets.push(t);
-				}
-			} else if (sub === "clean") {
-				const args = tokens.slice(2).filter(t => !t.startsWith("-"));
-				if (args.length > 0) {
-					for (const t of args) targets.push(t);
-				} else {
-					targets.push(".");
-				}
-			} else if (sub === "rm") {
-				for (const t of tokens.slice(2)) {
-					if (t) targets.push(t);
-				}
-			}
-			break;
-		}
-		default:
-			break;
-	}
-
-	// Redirect patterns: `> <path>` and `>> <path>` anywhere in the
-	// command. We also accept `N>` and `&>` fd-prefixed forms (F4-2
-	// hardening — `2>file` is a stderr-to-file redirect, NOT an fd
-	// duplication). Only `>&` (i.e. `>` immediately followed by `&`)
-	// indicates fd duplication (`2>&1`) and is excluded. Optional
-	// `\d*` / `&?` prefix allows `2>`, `&>`, `2>>`, `&>>`.
-	//
-	// GC-2026-032 phase-1 — SC3: use the module-level `REDIRECT_REGEX`
-	// (built once at import time from `WRITE_REDIRECT_PREFIX.source`)
-	// instead of `new RegExp(...)` per call. `String.prototype.matchAll`
-	// manages `lastIndex` internally on a per-iteration clone, so the
-	// shared regex is safe across successive `extractBashTargets`
-	// calls (no state leak between commands).
-	for (const match of trimmed.matchAll(REDIRECT_REGEX)) {
-		targets.push(match[1]);
-	}
-
-	// Deduplicate while preserving insertion order.
-	const seen = new Set<string>();
-	const out: string[] = [];
-	for (const t of targets) {
-		if (!seen.has(t)) {
-			seen.add(t);
-			out.push(t);
-		}
-	}
-	return out;
+/** Test-only — clear the LRU. */
+export function _clearClassifyCache(): void {
+	classifyCache.clear();
 }
-
-/**
- * Decide whether to block a bash command.
- *
- * Soft mode (GC-2026-031): this function NEVER blocks. Every command
- * returns `{ block: false }`. The classifier functions
- * (`classifyBashCommand`, `extractBashTargets`, `splitChainedCommands`)
- * remain available for downstream consumers (advisory metadata, audit
- * reports) — the bash handler in `extension.ts` uses
- * `classifyBashCommand` to decide whether to emit the once-per-session
- * auto-steer reminder.
- *
- * Historical behavior (pre-GC-2026-031): the function used to apply a
- * four-layer gate (L1 read / L2 git-meta / L3 meta-file-write /
- * L4 production-code-write) plus a destructive-verb short-circuit
- * (`rm` / `mv` / `cp` / `unlink` / `rmdir` were always denied
- * regardless of target). Both the gate and the short-circuit are
- * removed under soft mode. See the test file's "soft mode inverts all
- * blocks" describe block for the inverted-assertion coverage.
- *
- * The signature is preserved (`BashGuardDecision`) so downstream
- * consumers (if any are added later) can read `block: false`
- * uniformly; the `reason` field is omitted because there is no
- * blocking rationale.
- *
- * The `ctx` parameter is accepted for signature symmetry with the
- * pre-soft-mode wiring and to give the function a future place to
- * hang absolute-path resolution without changing callers again.
- */
-export function shouldBlockBashCommand(
-	_command: string,
-	_ctx: { cwd: string },
-): BashGuardDecision {
-	// Soft mode: never block. Classifier functions (see above) carry
-	// the policy description; the gate itself is dormant.
-	return { block: false };
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Internals
-// ─────────────────────────────────────────────────────────────────────────
-
-/**
- * Split a shell command into top-level segments separated by `&&`,
- * `||`, or `;`. Respects single quotes, double quotes, backslash
- * escapes, and paren / brace nesting. Empty segments are dropped.
- *
- * Used by `classifyBashCommand` indirectly (via `splitChainedCommands`
- * integration paths in the historical gate) and exported for unit
- * testing. Under soft mode the gate itself does not call this
- * function, but downstream consumers (audit reports, advisory
- * metadata) may use it to walk per-segment intent.
- *
- * Behaviour:
- *   - `echo a && rm b`             → `["echo a", "rm b"]`
- *   - `rm a || echo b`             → `["rm a", "echo b"]`
- *   - `rm a; echo b`               → `["rm a", "echo b"]`
- *   - `echo "a && b" && c`         → `["echo \"a && b\"", "c"]`
- *     (the `&&` inside double quotes is data, not a separator)
- *   - `(echo done) && rm b`        → `["(echo done)", "rm b"]`
- *     (paren group counts as one segment)
- *   - `rm a\nrm b`                 → `["rm a\\nrm b"]`
- *     (newlines are NOT separators here — bash treats them as such but
- *      it's rare in tool calls; add if needed)
- *
- * Exported for unit testing.
- */
-export function splitChainedCommands(command: string): string[] {
-	const segments: string[] = [];
-	let current = "";
-	let i = 0;
-	let inSingle = false;
-	let inDouble = false;
-	let escape = false;
-	let parenDepth = 0;
-	let braceDepth = 0;
-
-	while (i < command.length) {
-		const c = command[i];
-
-		if (escape) {
-			current += c;
-			escape = false;
-			i++;
-			continue;
-		}
-		if (c === "\\") {
-			escape = true;
-			current += c;
-			i++;
-			continue;
-		}
-		// Quotes toggle; content is appended verbatim.
-		if (!inSingle && c === '"') {
-			inDouble = !inDouble;
-			current += c;
-			i++;
-			continue;
-		}
-		if (!inDouble && c === "'") {
-			inSingle = !inSingle;
-			current += c;
-			i++;
-			continue;
-		}
-
-		// Outside quotes: track paren/brace depth + detect separators.
-		if (!inSingle && !inDouble) {
-			if (c === "(") parenDepth++;
-			else if (c === ")") parenDepth--;
-			else if (c === "{") braceDepth++;
-			else if (c === "}") braceDepth--;
-
-			// Top-level separators only — depth must be 0.
-			if (parenDepth === 0 && braceDepth === 0) {
-				if (c === ";") {
-					if (current.trim()) segments.push(current.trim());
-					current = "";
-					i++;
-					continue;
-				}
-				if (
-					(c === "&" && command[i + 1] === "&") ||
-					(c === "|" && command[i + 1] === "|")
-				) {
-					if (current.trim()) segments.push(current.trim());
-					current = "";
-					i += 2; // skip the second char of `&&` or `||`
-					continue;
-				}
-			}
-		}
-
-		current += c;
-		i++;
-	}
-	if (current.trim()) segments.push(current.trim());
-	return segments;
-}
-
-/**
- * Detect a write-targeting redirect: `> <path>`, `>> <path>`, and
- * the fd-prefixed forms `N>file`, `N>>file`, `&>file`, `&>>file`.
- *
- * Excludes fd duplications (`N>&M`, `>&M`) where `>` is immediately
- * followed by `&` — those are fd-redirects between file descriptors,
- * not writes to files.
- */
-function hasWriteRedirect(cmd: string): boolean {
-	// Use the shared prefix constant — keeps the two redirect sites
-	// (classification + extraction) in lockstep.
-	return WRITE_REDIRECT_PREFIX.test(cmd);
-}
-
-// Re-export `policyMessage` from file-gate as a convenience for
-// callers wiring their own advisory paths: they can import both the
-// classifier and the canonical rationale text from a single module
-// without reaching into file-gate directly.
-export { policyMessage };

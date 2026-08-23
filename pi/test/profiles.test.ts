@@ -17,7 +17,7 @@ import {
 	clearProfileCache,
 	type Profile,
 } from "@/profile.js";
-import { softModeReminder, softModeSystemPromptSuffix } from "@/soft-mode.js";
+import { softModeReminder } from "@/soft-mode.js";
 
 const BUILTIN_IDS = ["light", "standard", "audit-strict", "ci-only"] as const;
 
@@ -78,7 +78,6 @@ describe("profile schema — built-in validation", () => {
 			expect(p.dag_threshold).toBeGreaterThanOrEqual(0);
 			expect(Array.isArray(p.gate_suite)).toBe(true);
 			expect(typeof p.soft_mode_reminder).toBe("string");
-			expect(typeof p.soft_mode_system_prompt_suffix).toBe("string");
 		});
 	}
 });
@@ -126,12 +125,6 @@ describe("soft-mode helpers — Profile-driven", () => {
 		expect(softModeReminder(p)).toBe(p.soft_mode_reminder);
 	});
 
-	it("softModeSystemPromptSuffix returns the profile's suffix string", () => {
-		const p = loadProfile("pi/profiles/light.yaml");
-		expect(softModeSystemPromptSuffix(p)).toBe(p.soft_mode_system_prompt_suffix);
-		expect(softModeSystemPromptSuffix(p)).toContain("light profile");
-	});
-
 	it("ci-only softModeReminder is empty (no interactive nudge in CI)", () => {
 		const p = loadProfile("pi/profiles/ci-only.yaml");
 		expect(softModeReminder(p)).toBe("");
@@ -161,21 +154,21 @@ describe("profile.ts — validation (malformed input)", () => {
 
 	it("rejects an empty subagents array", () => {
 		const path = tmpProfile(
-			"id: broken\ndescription: empty roster\nsubagents: []\nisolation_default: none\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: \"\"\nsoft_mode_system_prompt_suffix: \"\"\n",
+			"id: broken\ndescription: empty roster\nsubagents: []\nisolation_default: none\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: \"\"\n",
 		);
 		expect(() => loadProfile(path)).toThrow(/non-empty array/);
 	});
 
 	it("rejects an invalid isolation_default value", () => {
 		const path = tmpProfile(
-			"id: broken\ndescription: bad isolation\nsubagents: [Explore]\nisolation_default: totes-broken\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: \"\"\nsoft_mode_system_prompt_suffix: \"\"\n",
+			"id: broken\ndescription: bad isolation\nsubagents: [Explore]\nisolation_default: totes-broken\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: \"\"\n",
 		);
 		expect(() => loadProfile(path)).toThrow(/isolation_default invalid/);
 	});
 
 	it("rejects a non-integer dag_threshold", () => {
 		const path = tmpProfile(
-			"id: broken\ndescription: float threshold\nsubagents: [Explore]\nisolation_default: none\ndag_threshold: 1.5\ngate_suite: []\nsoft_mode_reminder: \"\"\nsoft_mode_system_prompt_suffix: \"\"\n",
+			"id: broken\ndescription: float threshold\nsubagents: [Explore]\nisolation_default: none\ndag_threshold: 1.5\ngate_suite: []\nsoft_mode_reminder: \"\"\n",
 		);
 		expect(() => loadProfile(path)).toThrow(/dag_threshold/);
 	});
@@ -212,7 +205,6 @@ const __dirname = dirname(__filename);
 const PI_ROOT = pathResolve(__dirname, "..");
 const SCRATCH_BASE = process.env.JCODE_SCRATCH_DIR ?? join(tmpdir(), "sages-profiles-test");
 const PROFILES_DIR = join(PI_ROOT, "profiles");
-const REGISTRY_PATH = join(PI_ROOT, "subagents", "registry.yaml");
 
 function tmpProfilePath(name: string): string {
 	// Ensure the scratch dir exists before writing into it (idempotent).
@@ -221,11 +213,11 @@ function tmpProfilePath(name: string): string {
 }
 
 const minimalValidProfile = (subagents: string[]) =>
-	`id: tmp\ndescription: temp profile for cross-consistency test\nsubagents: [${subagents.join(", ")}]\nisolation_default: none\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: ""\nsoft_mode_system_prompt_suffix: ""\n`;
+	`id: tmp\ndescription: temp profile for cross-consistency test\nsubagents: [${subagents.join(", ")}]\nisolation_default: none\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: ""\n`;
 
 describe("profile ↔ registry cross-consistency (GC-2026-049 T3.2)", () => {
 	it("every built-in profile's subagents list is a subset of registry.yaml ids", () => {
-		const result = verifyProfileCrossConsistency(PROFILES_DIR, REGISTRY_PATH);
+		const result = verifyProfileCrossConsistency(PROFILES_DIR);
 		expect(result.ok).toBe(true);
 		expect(result.unknown ?? []).toEqual([]);
 	});
@@ -240,7 +232,7 @@ describe("profile ↔ registry cross-consistency (GC-2026-049 T3.2)", () => {
 			// job. We mirror the check by writing a temp profile to a
 			// scratch directory and pointing the verifier at it.
 			const scratchDir = pathResolve(path, "..");
-			const result = verifyProfileCrossConsistency(scratchDir, REGISTRY_PATH);
+			const result = verifyProfileCrossConsistency(scratchDir);
 			expect(result.ok).toBe(false);
 			expect(result.error).toBeUndefined();
 			expect(result.unknown).toEqual([
@@ -260,11 +252,11 @@ describe("profile ↔ registry cross-consistency (GC-2026-049 T3.2)", () => {
 		try {
 			writeFileSync(
 				path,
-				'id: tmp\ndescription: bad shape\nsubagents: "Explore"\nisolation_default: none\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: ""\nsoft_mode_system_prompt_suffix: ""\n',
+				'id: tmp\ndescription: bad shape\nsubagents: "Explore"\nisolation_default: none\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: ""\n',
 				"utf-8",
 			);
 			const scratchDir = pathResolve(path, "..");
-			const result = verifyProfileCrossConsistency(scratchDir, REGISTRY_PATH);
+			const result = verifyProfileCrossConsistency(scratchDir);
 			expect(result.ok).toBe(false);
 			expect(result.error).toMatch(/subagents.*not an array/);
 		} finally {
@@ -357,8 +349,5 @@ describe("builtin profile dir + STANDARD_PROFILE fallback (GC-2026-062)", () => 
 		expect(STANDARD_PROFILE.dag_threshold).toBe(fromDisk.dag_threshold);
 		expect(STANDARD_PROFILE.gate_suite).toEqual(fromDisk.gate_suite);
 		expect(STANDARD_PROFILE.soft_mode_reminder).toBe(fromDisk.soft_mode_reminder);
-		expect(STANDARD_PROFILE.soft_mode_system_prompt_suffix).toBe(
-			fromDisk.soft_mode_system_prompt_suffix,
-		);
 	});
 });

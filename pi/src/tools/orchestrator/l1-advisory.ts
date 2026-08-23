@@ -50,7 +50,6 @@ export type L1Severity = "minor" | "major" | "critical";
 import {
 	chainKey,
 	tallyChainCounts,
-	findMaxChain,
 	chainCountAtLeast,
 	type ChainToolCall,
 } from "./chain-key.js";
@@ -73,12 +72,26 @@ export interface L1Finding {
 
 /** A single orchestrator tool-call entry. Mirrors the shape pi's
  *  `tool_call` event delivers (toolName + input), plus a wall-clock
- *  timestamp for cadence analysis. */
+ *  timestamp for cadence analysis and an optional `callId` for
+ *  correlating with `tool_result` events (used by error-aware detectors). */
 export interface OrchestratorToolCall {
 	toolName: string;
 	input: Record<string, unknown>;
 	/** Unix ms timestamp. */
 	timestamp: number;
+	/** Optional pi toolCallId for tool_result correlation. Detectors
+	 *  that don't need error tracking can leave this undefined. */
+	callId?: string;
+}
+
+/** A single orchestrator tool-result record, sourced from pi's
+ *  `tool_result` event. Maps `toolCallId` (from the matching tool_call)
+ *  to the outcome. */
+export interface OrchestratorToolResult {
+	toolCallId: string;
+	/** True if the tool returned an error (e.g. validation failure,
+	 *  execution exception). False on success. */
+	isError: boolean;
 }
 
 /** Snapshot of the active goal contract used by goal_drift_detected. */
@@ -98,10 +111,14 @@ export interface DagPlanSnapshot {
 }
 
 export interface OrchestratorAdvisoryContext {
-	/** Rules already advised in this dispatch. Used to suppress duplicates. */
+	/** Rules already advised in this process. Used to fire-once dedup
+	 *  per rule ID — the same mistake must not nag the LLM repeatedly. */
 	alreadyAdvisedRules: Set<string>;
-	/** Number of advisories already sent in this dispatch. */
-	advisoriesSent: number;
+	/** Per-severity counters — compared against
+	 *  DEFAULT_ADVISORY_BUDGET_BY_SEVERITY (or the override passed via
+	 *  options.maxAdvisoriesBySeverity). The extension process owns
+	 *  this map; orchestratorAdvisoryFor reads it but never mutates it. */
+	advisoriesBySeverity: Record<L1Severity, number>;
 }
 
 export interface OrchestratorAdvisoryOptions {
@@ -113,21 +130,76 @@ export interface OrchestratorAdvisoryOptions {
 	orchestratorAuditToolName?: string;
 	/** Threshold for dag_resynth_loop (default: 2 — fires after 3+ calls). */
 	resynthThreshold?: number;
+	/** Threshold for repeat_call_chain (default: 3). */
+	repeatThreshold?: number;
 	/** Threshold for no_progress_no_audit (default: 10). */
 	progressThreshold?: number;
+	/** Stuck-interval ceiling for chain-loop detection (ms). A chain
+	 *  is only considered "stuck" if every interval between consecutive
+	 *  calls is below this threshold. Defaults to 2000ms — LLM thinking
+	 *  time between retries typically exceeds this; genuine stuck loops
+	 *  fire sub-second. Use this to suppress false positives where the
+	 *  LLM is intentionally retrying with reasoning in between. */
+	stuckIntervalMs?: number;
+	/** Recent tool-result outcomes keyed by toolCallId. When provided,
+	 *  detectors that fire on stuck patterns (dag_resynth_loop,
+	 *  repeat_call_chain) require every call in the chain to have
+	 *  errored. A successful call in the chain means the LLM is
+	 *  intentionally re-running for a reason other than failure —
+	 *  typical of retries-with-fix-not-yet-deployed, or refresh after
+	 *  state changes. Use this to suppress false positives. */
+	errorHistory?: OrchestratorToolResult[];
+	/** Text of the last assistant message. When provided, detectors
+	 *  scan for retry-intent markers (e.g. "retrying", "amending the
+	 *  goal") and suppress stuck-loop advisories if the LLM has
+	 *  clearly signalled intent to retry with reasoning. Use this to
+	 *  suppress false positives on thoughtful retries. */
+	lastAssistantMessage?: string;
 	/** Loader for the active goal contract (used by goal_drift_detected). */
 	loadGoalScope?: (goalId: string) => GoalScopeSnapshot | null;
 	/** Loader for the active DAG plan (used by transition_skip_failed). */
 	loadDagPlan?: (dagId: string) => DagPlanSnapshot | null;
+	/** Per-severity cap override. Merged on top of
+	 *  DEFAULT_ADVISORY_BUDGET_BY_SEVERITY. Set a severity to
+	 *  `Number.POSITIVE_INFINITY` to disable its cap entirely. */
+	maxAdvisoriesBySeverity?: Partial<Record<L1Severity, number>>;
 }
 
 // =============================================================================
-// Caps — mirror L2 exactly so the orchestrator's self-feedback budget is
-// pinned to the same constants as the subagent feedback budget.
+// Caps — per-severity, dynamic.
 // =============================================================================
 
+/** Per-advisory token cap. Mirrors L2's
+ *  ADVISORY_MAX_TOKENS so the two layers are formatted identically. */
 export const ADVISORY_MAX_TOKENS = 200;
-export const ADVISORY_MAX_PER_DISPATCH = 2;
+
+/**
+ * Default advisory budget per severity, per process.
+ *
+ * - **critical** = ∞ — critical mistakes must always surface. The
+ *   dedup set (`alreadyAdvisedRules`) prevents the same rule from
+ *   firing twice, but distinct critical rules fire freely.
+ *   Rationale: a real governance violation (e.g. dispatching without
+ *   audit, transitioning past a failed dep) is the advisory's main
+ *   value. Silencing it after a fixed budget defeats the design.
+ *
+ * - **major** = 4 — bounded to avoid LLM noise. Major findings
+ *   (dag_resynth_loop, goal_drift, no_progress, repeat_call_chain)
+ *   are common enough that an unbounded budget would spam the LLM.
+ *
+ * - **minor** = 0 — hard-filtered regardless of override. The
+ *   current detector set has no minor rules; this field exists so
+ *   a future minor rule doesn't silently flood the LLM.
+ *
+ * Overridable via `options.maxAdvisoriesBySeverity`. Set to
+ * `Number.POSITIVE_INFINITY` to disable a severity's cap.
+ */
+export const DEFAULT_ADVISORY_BUDGET_BY_SEVERITY: Record<L1Severity, number> = {
+	critical: Number.POSITIVE_INFINITY,
+	major: 4,
+	minor: 0,
+};
+
 export const ADVISORY_MIN_SEVERITY: L1Severity = "major";
 
 /** Per-rule actionable fix text. Mirrors L2's `RULE_FIX_DIRECTIVES`
@@ -159,23 +231,18 @@ interface Counters {
 	lastAuditIndex: number;
 }
 
-function initCounters(): Counters {
-	return {
+function tallyCounters(
+	history: OrchestratorToolCall[],
+	opts: Required<Pick<OrchestratorAdvisoryOptions, "dagSynthesizeToolName" | "taskDispatchToolName" | "orchestratorAuditToolName">>,
+): Counters {
+	const c: Counters = {
 		dagSynthesizeCalls: 0,
 		taskDispatchCalls: 0,
 		orchestratorAuditCalls: 0,
 		totalToolCallsSinceLastAudit: 0,
 		lastAuditIndex: -1,
 	};
-}
-
-function tallyCounters(
-	history: OrchestratorToolCall[],
-	opts: Required<Pick<OrchestratorAdvisoryOptions, "dagSynthesizeToolName" | "taskDispatchToolName" | "orchestratorAuditToolName">>,
-): Counters {
-	const c = initCounters();
-	for (let i = 0; i < history.length; i++) {
-		const call = history[i]!;
+	for (const call of history) {
 		if (call.toolName === opts.dagSynthesizeToolName) {
 			c.dagSynthesizeCalls += 1;
 			c.totalToolCallsSinceLastAudit += 1;
@@ -184,7 +251,7 @@ function tallyCounters(
 			c.totalToolCallsSinceLastAudit += 1;
 		} else if (call.toolName === opts.orchestratorAuditToolName) {
 			c.orchestratorAuditCalls += 1;
-			c.lastAuditIndex = i;
+			c.lastAuditIndex = history.indexOf(call);
 			c.totalToolCallsSinceLastAudit = 0;
 		} else {
 			c.totalToolCallsSinceLastAudit += 1;
@@ -193,65 +260,158 @@ function tallyCounters(
 	return c;
 }
 
+/** Default stuck-interval ceiling (ms). LLM thinking time between
+ *  intentional retries typically exceeds this; genuine stuck loops
+ *  fire sub-second. Tunable via `OrchestratorAdvisoryOptions.stuckIntervalMs`. */
+export const DEFAULT_STUCK_INTERVAL_MS = 2000;
+
+/** Group timed calls by chain-key, preserving call order. Used by
+ *  detectors that need per-chain interval analysis (not just count). */
+function groupCallsByChainKey(
+	calls: OrchestratorToolCall[],
+): Map<string, OrchestratorToolCall[]> {
+	const byChain = new Map<string, OrchestratorToolCall[]>();
+	for (const call of calls) {
+		const key = chainKey(call.toolName, call.input);
+		const bucket = byChain.get(key);
+		if (bucket) bucket.push(call);
+		else byChain.set(key, [call]);
+	}
+	return byChain;
+}
+
+/** True if every call in `chain` has a matching tool_result with
+ *  `isError=true`. Used to gate "stuck on retries" detectors — a
+ *  successful call in the chain means the LLM is intentionally
+ *  re-running, not stuck. Returns true (eligible) when no
+ *  errorHistory is provided (back-compat) or when no matching results
+ *  exist for the chain. */
+function chainAllErrored(
+	chain: OrchestratorToolCall[],
+	errorHistory: OrchestratorToolResult[] | undefined,
+): boolean {
+	if (!errorHistory) return true;
+	const errorByCallId = new Map<string, boolean>();
+	for (const r of errorHistory) errorByCallId.set(r.toolCallId, r.isError);
+	for (const c of chain) {
+		if (!c.callId) continue; // no correlation possible → don't gate
+		const outcome = errorByCallId.get(c.callId);
+		if (outcome === undefined) continue; // no result yet → don't gate
+		if (!outcome) return false; // at least one call succeeded → not stuck
+	}
+	return true;
+}
+
+/** Patterns indicating the LLM has explicitly signalled retry intent in
+ *  its last assistant message. Matched against the last assistant
+ *  message text provided via `options.lastAssistantMessage`. When any
+ *  pattern matches, stuck-loop detectors are suppressed — the LLM is
+ *  intentionally retrying with reasoning, not stuck.
+ *
+ *  Patterns are deliberately narrow to avoid false positives on
+ *  casual use of "retry" / "amend" in non-stuck contexts (e.g. "I'll
+ *  retry that later" with no follow-up). */
+const RETRY_INTENT_PATTERNS: RegExp[] = [
+	/\bretrying\b/i,
+	/\bre-?attempt/i,
+	/\bamending (?:the )?(?:goal|contract|dag)/i,
+	/\bfixing (?:the )?(?:issue|problem|error)/i,
+	/\btrying again\b/i,
+	/\blet me (?:try|retry|amend|fix)/i,
+];
+
+function showsRetryIntent(text: string | undefined): boolean {
+	if (!text) return false;
+	return RETRY_INTENT_PATTERNS.some((p) => p.test(text));
+}
+
+/** Compute the maximum interval (ms) between consecutive calls in a chain.
+ *  Returns 0 for chains of length ≤ 1 (no intervals to measure). */
+function maxIntervalInChain(chain: OrchestratorToolCall[]): number {
+	if (chain.length <= 1) return 0;
+	let max = 0;
+	for (let i = 1; i < chain.length; i++) {
+		const prev = chain[i - 1];
+		const curr = chain[i];
+		if (!prev || !curr) continue;
+		const interval = curr.timestamp - prev.timestamp;
+		if (interval > max) max = interval;
+	}
+	return max;
+}
+
 /** Detect `dag_resynth_loop`: same (tool, args) chain-key for dag_synthesize
- *  seen more than the threshold. GC-2026-059 changed this from
- *  `per-goal_id` to full chain-key — different args means progress,
- *  same args means stuck. */
+ *  seen more than the threshold AND all intervals below `stuckIntervalMs`.
+ *  The interval gate distinguishes true stuck loops (sub-second retries)
+ *  from intentional retry-with-reasoning patterns (8-12s between attempts). */
 function detectDagResynthLoop(
 	history: OrchestratorToolCall[],
 	dagToolName: string,
 	threshold: number,
+	stuckIntervalMs: number,
+	errorHistory: OrchestratorToolResult[] | undefined,
+	lastAssistantMessage: string | undefined,
 ): L1Finding | null {
-	const calls: ChainToolCall[] = [];
-	for (const call of history) {
-		if (call.toolName !== dagToolName) continue;
-		calls.push({ toolName: call.toolName, input: call.input });
+	const dagCalls = history.filter((c) => c.toolName === dagToolName);
+	const byChain = groupCallsByChainKey(dagCalls);
+
+	let top: { chain: OrchestratorToolCall[]; count: number } | null = null;
+	for (const chain of byChain.values()) {
+		if (chain.length <= threshold) continue;
+		if (maxIntervalInChain(chain) >= stuckIntervalMs) continue;
+		if (!chainAllErrored(chain, errorHistory)) continue;
+		if (top === null || chain.length > top.count) {
+			top = { chain, count: chain.length };
+		}
 	}
-	if (calls.length <= threshold) return null;
-	const counts = tallyChainCounts(calls);
-	const top = findMaxChain(counts);
 	if (!top) return null;
-	// Need strictly more than threshold (e.g. threshold=2 → fire on 3+).
-	if (top.count <= threshold) return null;
+	// Last gate: if the LLM has explicitly signalled retry intent in its
+	// last assistant message, suppress — the retries are deliberate.
+	if (showsRetryIntent(lastAssistantMessage)) return null;
+	const sample = top.chain[0]!;
 	return {
 		rule: "dag_resynth_loop",
 		severity: "major",
-		issue: `dag_synthesize called ${top.count} times with identical args (>${threshold})`,
-		evidence: `chain ${top.sample.toolName}(${JSON.stringify(top.sample.input).slice(0, 80)}) × ${top.count}`,
+		issue: `dag_synthesize called ${top.count} times with identical args (>${threshold}) within <${stuckIntervalMs}ms intervals, all errored`,
+		evidence: `chain ${sample.toolName}(${JSON.stringify(sample.input).slice(0, 80)}) × ${top.count}`,
 		recommendation:
-			"orchestrator is re-synthesizing the same DAG with identical arguments; stop and revise either the goal contract or the existing DAG",
+			"orchestrator is re-synthesizing the same DAG with identical arguments in rapid succession; stop and revise either the goal contract or the existing DAG",
 	};
 }
 
-/** Detect `repeat_call_chain`: same (tool, args) called ≥ threshold times.
- *  General stuck-on-same-call detector. Mirrors dsh's
- *  `repeat-tool-reminder` chain-key semantics without porting the
- *  full configuration system. */
+/** Detect `repeat_call_chain`: same (tool, args) called ≥ threshold times
+ *  AND all intervals below `stuckIntervalMs`. General stuck-on-same-call
+ *  detector — interval gate prevents false positives on retries-with-thinking. */
 function detectRepeatCallChain(
 	history: OrchestratorToolCall[],
 	threshold: number,
+	stuckIntervalMs: number,
+	errorHistory: OrchestratorToolResult[] | undefined,
+	lastAssistantMessage: string | undefined,
 ): L1Finding | null {
-	const calls: ChainToolCall[] = history.map((c) => ({
-		toolName: c.toolName,
-		input: c.input,
-	}));
-	const counts = tallyChainCounts(calls);
-	if (!chainCountAtLeast(counts, threshold)) return null;
-	const top = findMaxChain(counts);
-	if (!top) return null;
-	// Suppress if the worst chain is dag_synthesize with the same args —
-	// that's already covered by dag_resynth_loop, which has a more
-	// specific fix-directive. Avoid double-firing.
-	if (top.sample.toolName === "dag_synthesize") {
-		return null;
+	const byChain = groupCallsByChainKey(history);
+
+	let top: { chain: OrchestratorToolCall[]; count: number; sample: ChainToolCall } | null = null;
+	for (const chain of byChain.values()) {
+		if (chain.length < threshold) continue;
+		// Suppress dag_synthesize chains — covered by dag_resynth_loop.
+		if (chain[0]?.toolName === "dag_synthesize") continue;
+		if (maxIntervalInChain(chain) >= stuckIntervalMs) continue;
+		if (!chainAllErrored(chain, errorHistory)) continue;
+		if (top === null || chain.length > top.count) {
+			top = { chain, count: chain.length, sample: { toolName: chain[0]!.toolName, input: chain[0]!.input } };
+		}
 	}
+	if (!top) return null;
+	// Same retry-intent gate as dag_resynth_loop.
+	if (showsRetryIntent(lastAssistantMessage)) return null;
 	return {
 		rule: "repeat_call_chain",
 		severity: "major",
-		issue: `${top.count} identical calls to ${top.sample.toolName} with the same args (>=${threshold})`,
+		issue: `${top.count} identical calls to ${top.sample.toolName} with the same args (>=${threshold}) within <${stuckIntervalMs}ms intervals, all errored`,
 		evidence: `chain ${top.sample.toolName}(${JSON.stringify(top.sample.input).slice(0, 80)}) × ${top.count}`,
 		recommendation:
-			"orchestrator is calling the same tool with identical arguments repeatedly; this suggests it is stuck. Re-read the last result, change approach, or conclude",
+			"orchestrator is calling the same tool with identical arguments in rapid succession; this suggests it is stuck. Re-read the last result, change approach, or conclude",
 	};
 }
 
@@ -389,11 +549,9 @@ function detectNoProgressNoAudit(
 	// pattern (e.g. re-reading the same file 3+ times) AND has gone
 	// many calls without an audit. Without the chain-key, the rule
 	// would fire on any 10+ calls regardless of repetition.
-	const calls: ChainToolCall[] = history.map((c) => ({
-		toolName: c.toolName,
-		input: c.input,
-	}));
-	const counts = tallyChainCounts(calls);
+	const counts = tallyChainCounts(
+		history.map((c) => ({ toolName: c.toolName, input: c.input })),
+	);
 	if (!chainCountAtLeast(counts, chainKeyThreshold)) return null;
 	return {
 		rule: "no_progress_no_audit",
@@ -409,6 +567,20 @@ function detectNoProgressNoAudit(
 // Public API
 // =============================================================================
 
+/**
+ * One advisory entry — the wire string for `pi.appendEntry("system", ...)`
+ * plus the structured fields the caller needs to update its dedup /
+ * per-severity budget counters without re-parsing the text.
+ */
+export interface L1AdvisoryEntry {
+	/** Formatted string with the same shape L2 emits, prefixed with severity. */
+	text: string;
+	/** Rule ID — caller adds this to `alreadyAdvisedRules`. */
+	rule: L1RuleId;
+	/** Severity — caller increments `advisoriesBySeverity[severity]`. */
+	severity: L1Severity;
+}
+
 /** Extract L1 findings from the orchestrator's tool-call history. */
 export function extractOrchestratorFindings(
 	history: OrchestratorToolCall[],
@@ -419,7 +591,9 @@ export function extractOrchestratorFindings(
 		taskDispatchToolName: options.taskDispatchToolName ?? "task_dispatch",
 		orchestratorAuditToolName: options.orchestratorAuditToolName ?? "orchestrator_audit",
 		resynthThreshold: options.resynthThreshold ?? 2,
+		repeatThreshold: options.repeatThreshold ?? 3,
 		progressThreshold: options.progressThreshold ?? 10,
+		stuckIntervalMs: options.stuckIntervalMs ?? DEFAULT_STUCK_INTERVAL_MS,
 		loadGoalScope: options.loadGoalScope,
 		loadDagPlan: options.loadDagPlan,
 	};
@@ -429,7 +603,14 @@ export function extractOrchestratorFindings(
 	const counters = tallyCounters(history, opts);
 	const sevRank: Record<L1Severity, number> = { minor: 0, major: 1, critical: 2 };
 
-	const f1 = detectDagResynthLoop(history, opts.dagSynthesizeToolName, opts.resynthThreshold);
+	const f1 = detectDagResynthLoop(
+		history,
+		opts.dagSynthesizeToolName,
+		opts.resynthThreshold,
+		opts.stuckIntervalMs,
+		options.errorHistory,
+		options.lastAssistantMessage,
+	);
 	if (f1) findings.push(f1);
 
 	const f2 = detectDispatchNoAudit(counters);
@@ -448,8 +629,9 @@ export function extractOrchestratorFindings(
 	// (tool, args) chain-key is at length ≥ repeatThreshold. Mirror of
 	// dsh's `repeat-tool-reminder`. Threshold defaults to 3 (matching
 	// dsh's first-level nudge). Can be lower than the dag_resynth_loop
-	// threshold because this is the more general rule.
-	const f6 = detectRepeatCallChain(history, 3);
+	// threshold because this is the more general rule. The interval gate
+	// (stuckIntervalMs) prevents false positives on retries-with-thinking.
+	const f6 = detectRepeatCallChain(history, opts.repeatThreshold, opts.stuckIntervalMs, options.errorHistory, options.lastAssistantMessage);
 	if (f6) findings.push(f6);
 
 	// Sort by severity (critical > major > minor).
@@ -457,47 +639,93 @@ export function extractOrchestratorFindings(
 	return findings;
 }
 
-/** Truncate a string to fit within the token cap. Adds "..." when truncated. */
+/** Truncate a string to fit within the token cap. Adds "..." when truncated.
+ *  Approximate 4 chars/token heuristic — exact counts are not needed for
+ *  advisory text. */
 function truncateToTokens(text: string, maxTokens: number): string {
 	const maxChars = maxTokens * 4;
-	if (text.length <= maxChars) return text;
-	return text.slice(0, Math.max(0, maxChars - 3)) + "...";
+	return text.length <= maxChars ? text : text.slice(0, Math.max(0, maxChars - 3)) + "...";
 }
 
-/** Format advisory strings for the orchestrator. Mirrors L2's
- *  `advisoryFor`: severity filter + dedup + per-dispatch cap + per-token
+/**
+ * Format advisory entries for the orchestrator. Mirrors L2's
+ *  `advisoryFor`: severity filter + dedup + per-severity budget + per-token
  *  cap, but operating on tool-call history instead of message text.
  *
- *  Returns 0..ADVISORY_MAX_PER_DISPATCH advisory strings. Each is capped
- *  at ADVISORY_MAX_TOKENS tokens. The format is identical to L2 so the
- *  two layers can be reasoned about together. */
+ *  Returns 0..N structured entries (text + rule + severity). Each is capped
+ *  at ADVISORY_MAX_TOKENS tokens. The format includes the severity and a
+ *  per-severity N/M counter so the LLM knows which budget slot this is.
+ *
+ *  The function does NOT mutate `ctx` — the caller increments
+ *  `ctx.alreadyAdvisedRules` and `ctx.advisoriesBySeverity[severity]` for
+ *  each returned entry. This keeps the function pure and lets tests
+ *  assert on the returned entries without state surprises.
+ */
+/**
+ * Pre-tool hook decision. Projects `upcoming` onto `history` and runs
+ * the detector pipeline. If a CRITICAL finding would fire as a result of
+ * the upcoming call, return `{ block: true, reason: ... }` so the
+ * extension's tool_call handler can prevent execution. Major findings
+ * are NOT pre-blocked — they emit advisory text after the call, not
+ * before. The block is the strongest possible gate: critical mistakes
+ * must not happen at all.
+ */
+export function preToolBlockDecision(
+	upcoming: OrchestratorToolCall,
+	history: OrchestratorToolCall[],
+	options: OrchestratorAdvisoryOptions = {},
+): { block: true; reason: string } | undefined {
+	const projected = [...history, upcoming];
+	const findings = extractOrchestratorFindings(projected, options);
+	const critical = findings.find((f) => f.severity === "critical");
+	if (!critical) return undefined;
+	const fixText = RULE_FIX_DIRECTIVES[critical.rule];
+	const reason = `[orchestrator pre-tool block] ${critical.rule}: ${critical.issue}. Fix: ${fixText}. Evidence: ${critical.evidence}`;
+	return { block: true, reason };
+}
+
 export function orchestratorAdvisoryFor(
 	history: OrchestratorToolCall[],
 	ctx: OrchestratorAdvisoryContext = {
 		alreadyAdvisedRules: new Set<string>(),
-		advisoriesSent: 0,
+		advisoriesBySeverity: { critical: 0, major: 0, minor: 0 },
 	},
 	options: OrchestratorAdvisoryOptions = {},
-): string[] {
-	if (ctx.advisoriesSent >= ADVISORY_MAX_PER_DISPATCH) return [];
+): L1AdvisoryEntry[] {
+	const budget = {
+		...DEFAULT_ADVISORY_BUDGET_BY_SEVERITY,
+		...options.maxAdvisoriesBySeverity,
+	};
 
 	const findings = extractOrchestratorFindings(history, options);
-	const eligible = findings.filter(
-		(f) =>
-			(f.severity === "major" || f.severity === "critical") &&
-			!ctx.alreadyAdvisedRules.has(f.rule) &&
-			ctx.advisoriesSent < ADVISORY_MAX_PER_DISPATCH,
-	);
 
-	const out: string[] = [];
+	// Project the per-severity counts as we add to `eligible`. This way we
+	// stop accepting findings of a severity once the budget is consumed,
+	// even when several findings of the same severity fire in one call.
+	const projected: Record<L1Severity, number> = {
+		critical: ctx.advisoriesBySeverity.critical ?? 0,
+		major: ctx.advisoriesBySeverity.major ?? 0,
+		minor: ctx.advisoriesBySeverity.minor ?? 0,
+	};
+	const eligible: L1Finding[] = [];
+	for (const f of findings) {
+		if (ctx.alreadyAdvisedRules.has(f.rule)) continue;
+		const cap = budget[f.severity];
+		if ((projected[f.severity] ?? 0) >= cap) continue;
+		eligible.push(f);
+		projected[f.severity] = (projected[f.severity] ?? 0) + 1;
+	}
+
+	const out: L1AdvisoryEntry[] = [];
 	for (const f of eligible) {
-		if (ctx.advisoriesSent + out.length >= ADVISORY_MAX_PER_DISPATCH) break;
-		const n = ctx.advisoriesSent + out.length + 1;
-		const total = Math.min(eligible.length, ADVISORY_MAX_PER_DISPATCH);
+		const sevCount = ctx.advisoriesBySeverity[f.severity] ?? 0;
+		const sevPosition = sevCount + out.filter((e) => e.severity === f.severity).length + 1;
+		const cap = budget[f.severity];
+		const capLabel = cap === Number.POSITIVE_INFINITY ? "∞" : String(cap);
 		const fixText = RULE_FIX_DIRECTIVES[f.rule];
-		const advisory = `[orchestrator audit advisory — ${n}/${total}] ${f.rule}: ${f.issue}. Fix: ${fixText}. Evidence: ${f.evidence}`;
-		const capped = truncateToTokens(advisory, ADVISORY_MAX_TOKENS);
-		out.push(capped);
+		const text = `[orchestrator audit advisory — ${f.severity} ${sevPosition}/${capLabel}] ${f.rule}: ${f.issue}. Fix: ${fixText}. Evidence: ${f.evidence}`;
+		const capped = truncateToTokens(text, ADVISORY_MAX_TOKENS);
+		out.push({ text: capped, rule: f.rule, severity: f.severity });
 	}
 
 	return out;

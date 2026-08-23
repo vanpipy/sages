@@ -7,13 +7,16 @@
  * Subagent dispatch is a RECOMMENDATION (driven by the agent's own
  * todowrite count), surfaced via auto-steer reminders, never blocks.
  *
- * RED phase — these tests fail until `pi/src/extension.ts` is updated
- * to remove Layer 1, emit soft-mode reminders via `pi.appendEntry`,
- * and inject the soft-mode system-prompt suffix via `before_agent_start`.
+ * The session_start + before_agent_start handlers were dropped after
+ * this suite was originally written; their assertions were removed in
+ * the same change. The remaining tests cover the bash tool_call handler
+ * (the only soft-mode reminder surface still wired) and tool
+ * registration correctness.
  */
 import { describe, it, expect, beforeEach } from "bun:test";
 import registerSagesExtension from "@/extension.js";
-import { SOFT_MODE_REMINDER, SOFT_MODE_SYSTEM_PROMPT_SUFFIX } from "@/soft-mode.js";
+import { softModeReminder } from "@/soft-mode.js";
+import { STANDARD_PROFILE } from "@/profile.js";
 
 /**
  * Minimal mock of the ExtensionAPI surface actually used by registerSagesExtension.
@@ -21,7 +24,7 @@ import { SOFT_MODE_REMINDER, SOFT_MODE_SYSTEM_PROMPT_SUFFIX } from "@/soft-mode.
  *   orchestrator tools. We record the calls so we can confirm registration ran.
  * - `on(event, handler)` captures every event handler.
  * - `getActiveTools` / `setActiveTools` record / restore the toolset (soft mode
- *   does NOT touch these — main agent has full toolset on session_start).
+ *   does NOT touch these — main agent has full toolset on registration).
  * - `appendEntry(channel, text)` records the soft-mode reminders that the bash
  *   handler emits once per session.
  */
@@ -54,58 +57,9 @@ class MockPi {
     registerFlag(_name: string, _opts: any): void {}
 }
 
-describe("registerSagesExtension — soft mode (no Layer 1 strip)", () => {
-    let mock: MockPi;
-
-    beforeEach(() => {
-        mock = new MockPi();
-    });
-
-    it("T-A (inverted): preserves `edit` and `write` after session_start", () => {
-        mock.getActiveToolsResult = ["read", "edit", "write", "grep", "bash"];
-        registerSagesExtension(mock as any);
-        const sessionStart = mock.handlers.session_start?.[0];
-        expect(sessionStart).toBeDefined();
-        sessionStart!();
-        // Soft mode does not touch the active toolset.
-        expect(mock.setActiveToolsCalls).toHaveLength(0);
-    });
-
-    it("T-B (updated): preserves the FULL toolset (including edit/write/aft_edit/apply_patch) after session_start", () => {
-        const fullToolset = [
-            "read", "edit", "write", "aft_edit", "apply_patch",
-            "grep", "find", "ls", "bash",
-            "aft_read", "aft_search", "aft_zoom", "aft_outline",
-            "codebase_search", "codebase_refs", "codebase_memory_list_projects",
-            "ctx_search", "todowrite",
-            "goal_contract_create", "dag_synthesize", "task_dispatch", "orchestrator_audit",
-            "Agent", "get_subagent_result", "steer_subagent",
-        ];
-        mock.getActiveToolsResult = fullToolset;
-        registerSagesExtension(mock as any);
-        const sessionStart = mock.handlers.session_start?.[0];
-        sessionStart!();
-        // Soft mode does not strip anything — the toolset stays as-is.
-        expect(mock.setActiveToolsCalls).toHaveLength(0);
-    });
-
-    it("session_start resets the auto-steer throttle (once-per-session)", () => {
-        registerSagesExtension(mock as any);
-        const sessionStart = mock.handlers.session_start?.[0];
-        expect(sessionStart).toBeDefined();
-        // First session_start — flag is fresh, no prior reminder.
-        sessionStart!();
-        // session_start may inject the GC-2026-067 session digest (a
-        // `system` channel entry) — we don't assert the absolute count
-        // because future digest changes would break the test. The
-        // auto-steer reminder (SOFT_MODE_REMINDER) is what we care
-        // about here, and it should NOT have fired yet.
-        const steerEntries = mock.appendedEntries.filter(
-            (e) => e.text === SOFT_MODE_REMINDER,
-        );
-        expect(steerEntries).toHaveLength(0);
-    });
-});
+// (Tests for session_start + before_agent_start handlers were removed when
+// the handlers themselves were dropped — the assertions verified the
+// handlers were registered, which they no longer are.)
 
 describe("registerSagesExtension — soft mode bash handler (no Layer 2 block)", () => {
     let mock: MockPi;
@@ -141,7 +95,7 @@ describe("registerSagesExtension — soft mode bash handler (no Layer 2 block)",
         );
         expect(mock.appendedEntries).toHaveLength(1);
         expect(mock.appendedEntries[0].channel).toBe("system");
-        expect(mock.appendedEntries[0].text).toBe(SOFT_MODE_REMINDER);
+        expect(mock.appendedEntries[0].text).toBe(softModeReminder(STANDARD_PROFILE));
         // Second write-intent command — throttled, NO new reminder.
         await handler(
             { toolName: "bash", input: { command: "sed -i 's/a/b/' src/bar.ts" } },
@@ -163,37 +117,6 @@ describe("registerSagesExtension — soft mode bash handler (no Layer 2 block)",
         expect(mock.appendedEntries).toHaveLength(0);
     });
 
-    it("reminder throttle resets on session_start (next session can be reminded again)", async () => {
-        const handler = await getBashHandler();
-        const sessionStart = mock.handlers.session_start?.[0];
-        expect(sessionStart).toBeDefined();
-
-        // First session — emit and consume the reminder slot.
-        await handler(
-            { toolName: "bash", input: { command: "echo x > src/foo.ts" } },
-            { cwd: "/home/leroy/sages-worktrees/main" },
-        );
-        expect(mock.appendedEntries).toHaveLength(1);
-        await handler(
-            { toolName: "bash", input: { command: "echo y > src/bar.ts" } },
-            { cwd: "/home/leroy/sages-worktrees/main" },
-        );
-        expect(mock.appendedEntries).toHaveLength(1);
-
-        // session_start — throttle resets. (Also appends the GC-2026-067
-        // session digest; we filter to the auto-steer reminder below so
-        // digest changes don't break this assertion.)
-        sessionStart!();
-        await handler(
-            { toolName: "bash", input: { command: "echo z > src/baz.ts" } },
-            { cwd: "/home/leroy/sages-worktrees/main" },
-        );
-        const steerEntries = mock.appendedEntries.filter(
-            (e) => e.text === SOFT_MODE_REMINDER,
-        );
-        expect(steerEntries).toHaveLength(2);
-    });
-
     it("T-D (preserved): passes through non-bash events (returns undefined)", async () => {
         const handler = await getBashHandler();
         const result = await handler(
@@ -212,27 +135,6 @@ describe("registerSagesExtension — soft mode bash handler (no Layer 2 block)",
             );
             expect(result).toBeUndefined();
         }
-    });
-});
-
-describe("registerSagesExtension — before_agent_start appends soft-mode suffix", () => {
-    let mock: MockPi;
-
-    beforeEach(() => {
-        mock = new MockPi();
-    });
-
-    it("T-SOFT-MODE-SUFFIX: before_agent_start injects SOFT_MODE_SYSTEM_PROMPT_SUFFIX into the system prompt", async () => {
-        registerSagesExtension(mock as any);
-        const handler = mock.handlers.before_agent_start?.[0];
-        expect(handler).toBeDefined();
-        const result = await handler(
-            { systemPrompt: "BASE_SYSTEM_PROMPT" },
-            {} as any,
-        );
-        expect(result).toBeDefined();
-        expect(result.systemPrompt).toContain("BASE_SYSTEM_PROMPT");
-        expect(result.systemPrompt).toContain(SOFT_MODE_SYSTEM_PROMPT_SUFFIX.trim());
     });
 });
 

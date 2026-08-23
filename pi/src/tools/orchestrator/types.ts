@@ -243,12 +243,12 @@ export interface OrchestrationPlan {
 	/** Map from task_id to subagent prompt (assembled by dag_synthesize) */
 	prompts: Record<string, string>;
 	/**
-	 * GC-2026-061: set on plans compiled from structured todos (see
-	 * pi/src/tools/todo/dag-compile.ts). dag_synthesize output never
-	 * carries it, so the extension can tell "todo-compiled" dags apart
-	 * from authoritative dag_synthesize plans and refuse to overwrite
-	 * the latter. Extra top-level fields are transparent to the
-	 * persistence validators (structural checks only).
+	 * Reserved for historical todo-compile marker (GC-2026-061). The
+	 * auto-todowrite module that produced this flag was removed in the
+	 * GC-2026-068 reversal; the field is kept so older dag yaml files
+	 * still round-trip through `loadPlan` without losing their original
+	 * provenance. New plans should never set it. Extra top-level fields
+	 * are transparent to the persistence validators (structural checks only).
 	 */
 	compiled_from_todos?: boolean;
 }
