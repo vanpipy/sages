@@ -86,7 +86,7 @@ import {
 	type TodoDiff,
 	type TodoItem,
 } from "./tools/todo/todo-state.js";
-import { deriveDagTodos, notifyOverlay, registerSagesTodoTool } from "./tools/todo/sages-todo-tool.js";
+import { deriveDagTodos } from "./tools/todo/derive-dag-todos.js";
 import { maybeCompileDagFromTodos } from "./tools/todo/dag-compile.js";
 import { buildSessionDigest, formatSessionDigest } from "./observability/digest.js";
 
@@ -100,10 +100,9 @@ const PROFILE = loadProfile();
  */
 export default function registerSagesExtension(pi: ExtensionAPI): void {
 	registerOrchestratorTools(pi);
-	// GC-2026-060: the root-agent todo tool (sync/get/auto-plan).
-	// Registered on the root extension only — subagent toolsets never
-	// include it, and the store rejects any non-root owner.
-	registerSagesTodoTool(pi);
+	// GC-2026-060: the `sages_todo` tool was removed (GC-2026-068 reversal).
+	// The LLM-facing todo tool is now Magic Context's `todowrite`, mirrored
+	// into the Sages store by the tool_call listener below.
 
 	// ── Seam event registration (GC-2026-050) ────────────────────────────
 	// Register a no-op seam callback for the Preflight hook so downstream
@@ -315,7 +314,8 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 	// classifier + L1 advisory stay first and keep their exact
 	// behavior). Mirrors the built-in `todowrite` calls into the root
 	// todo store and triggers an auto-plan sync when the orchestrator
-	// synthesizes a DAG or runs an audit. sages_todo is NOT mirrored —
+	// synthesizes a DAG or runs an audit. (The legacy `sages_todo` mirror
+	// branch was removed in the GC-2026-068 reversal.)
 	// it writes the store directly.
 	pi.on("tool_call", (event: any, ctx: any) => {
 		const toolName: string = event?.toolName;
@@ -330,20 +330,9 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		const cwd: string = typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd();
 		const repoRoot = resolveRepoRoot(cwd);
 		const stateDir = todoStateDir(repoRoot);
-		const sessionId: string | undefined =
-			typeof ctx?.sessionManager?.getSessionId === "function"
-				? ctx.sessionManager.getSessionId()
-				: undefined;
 
 		try {
-			// Only `sages_todo sync` writes the root todo store here.
-			// `todowrite` (Magic Context's built-in) is disabled in Sages
-			// profiles (see `magic-context.jsonc`); Sages owns the todo
-			// lifecycle through the `sages_todo` tool, which already
-			// notifies the Magic Context overlay via `notifyOverlay`.
-			// The mirror-via-`todowrite` path (GC-2026-067) is dead
-			// code under this architecture.
-			if (toolName === "sages_todo" && input.action === "sync") {
+			if (toolName === "todowrite") {
 				const items = todoItemsFromRaw(input.todos);
 				if (items.length === 0) return undefined; // empty / all entries malformed
 				lastTodoChange = todoState.apply(items);
@@ -353,7 +342,6 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 				// authoritative and is never overwritten — see the policy in
 				// maybeCompileDagFromTodos.
 				maybeCompileDagFromTodos(items, repoRoot, { sessionDagId, sessionGoalId });
-				notifyOverlay(sessionId, items);
 				return undefined;
 			}
 
@@ -378,11 +366,10 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 				if (derived.length === 0) return undefined; // no DAG → never wipe the list
 				lastTodoChange = todoState.apply(derived);
 				saveTodoState(stateDir, todoState);
-				notifyOverlay(sessionId, derived);
 				return undefined;
 			}
 		} catch {
-			// Best-effort observability: a malformed event must never
+			// Best-effort observability: a malformed mirror must never
 			// break the agent's tool execution.
 		}
 		return undefined;
@@ -441,7 +428,7 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 // ── GC-2026-060 helpers ────────────────────────────────────────────────────
 
 /**
- * Normalize raw todowrite / sages_todo sync entries into TodoItems.
+ * Normalize raw todowrite entries into TodoItems.
  * Validates content + status, preserves id / priority and the
  * GC-2026-061 structured fields (kind / depends_on / batch / dag_id /
  * goal_id / prompt / files) so the compile trigger can see them.

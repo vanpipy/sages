@@ -3,13 +3,13 @@
  *
  * Covers the extension wiring that turns structured todos (kind 'task',
  * depends_on, batch) into a compiled DAG yaml:
- *  - sages_todo sync with task-level todos → compiles + writes
+ *  - todowrite mirror with task-level todos → compiles + writes
  *    <repo>/.pi/orchestrator/dag-<dagId>.yaml;
  *  - recompiling the same todos is idempotent (identical file, no rewrite);
  *  - plan-level todos only → no dag yaml is ever written or wiped;
  *  - an existing dag from dag_synthesize (no compiled marker) is
  *    authoritative and is NOT overwritten;
- *  - sages_todo sync with task-level todos triggers the same compile;
+ *  - todowrite mirror with task-level todos triggers the same compile;
  *  - dag_id / goal_id derivation: todo items' dag_id field → session
  *    default (most recent orchestrator call) → 'DAG-todos';
  *  - direct maybeCompileDagFromTodos policy tests (overwrite rules,
@@ -38,7 +38,7 @@ import {
 	todoStateDir,
 	type TodoItem,
 } from "@/tools/todo/todo-state.js";
-import { SagesTodoParams, executeSagesTodo } from "@/tools/todo/sages-todo-tool.js";
+
 
 /** Minimal mock of the ExtensionAPI surface used by registerSagesExtension. */
 class MockPi {
@@ -79,7 +79,7 @@ const TASK_TODOS: TodoItem[] = [
 	},
 	{
 		id: "P2",
-		content: "Implement the sages_todo tool",
+		content: "Implement the todo state manager",
 		status: "pending",
 		kind: "task",
 		depends_on: ["P1"],
@@ -94,7 +94,7 @@ const TASK_TODOS_NO_DAG_ID: TodoItem[] = [
 	{ id: "P1", content: "Implement the todo state manager", status: "pending", kind: "task" },
 	{
 		id: "P2",
-		content: "Implement the sages_todo tool",
+		content: "Implement the todo state manager",
 		status: "pending",
 		kind: "task",
 		depends_on: ["P1"],
@@ -133,12 +133,12 @@ function dagFiles(): string[] {
 	return readdirSync(dir).filter((f) => f.startsWith("dag-") && f.endsWith(".yaml"));
 }
 
-// ─── sages_todo sync → compile trigger ─────────────────────────────────────
+// ─── todowrite mirror → compile trigger ─────────────────────────────────────
 
-describe("todo-dag extension — sages_todo sync compiles structured todos", () => {
+describe("todo-dag extension — todowrite mirror compiles structured todos", () => {
 	it("writes a compiled dag yaml (dag_id from the todo items' dag_id field)", async () => {
 		registerSagesExtension(mock as any);
-		await fireToolCall({ toolName: "sages_todo", input: { action: "sync", todos: TASK_TODOS } });
+		await fireToolCall({ toolName: "todowrite", input: { todos: TASK_TODOS } });
 
 		// dag-GC-2026-061.yaml (the todos' dag_id) must exist and load as a plan.
 		const path = join(tmp, ".pi", "orchestrator", "dag-GC-2026-061.yaml");
@@ -156,13 +156,13 @@ describe("todo-dag extension — sages_todo sync compiles structured todos", () 
 
 	it("recompiling the same todos is idempotent (identical bytes, no rewrite)", async () => {
 		registerSagesExtension(mock as any);
-		await fireToolCall({ toolName: "sages_todo", input: { action: "sync", todos: TASK_TODOS } });
+		await fireToolCall({ toolName: "todowrite", input: { todos: TASK_TODOS } });
 		const path = join(tmp, ".pi", "orchestrator", "dag-GC-2026-061.yaml");
 		const firstBytes = readFileSync(path, "utf8");
 		const firstMtime = statSync(path).mtimeMs;
 
 		// Same list again (e.g. the agent flips a status): no structural change.
-		await fireToolCall({ toolName: "sages_todo", input: { action: "sync", todos: TASK_TODOS } });
+		await fireToolCall({ toolName: "todowrite", input: { todos: TASK_TODOS } });
 		const secondBytes = readFileSync(path, "utf8");
 		expect(secondBytes).toBe(firstBytes);
 		// The skip-rewrite path leaves the mtime untouched.
@@ -171,7 +171,7 @@ describe("todo-dag extension — sages_todo sync compiles structured todos", () 
 
 	it("plan-level todos only → no dag yaml is written (and none is wiped)", async () => {
 		registerSagesExtension(mock as any);
-		await fireToolCall({ toolName: "sages_todo", input: { action: "sync", todos: PLAN_TODOS } });
+		await fireToolCall({ toolName: "todowrite", input: { todos: PLAN_TODOS } });
 		expect(dagFiles()).toEqual([]);
 	});
 
@@ -202,7 +202,7 @@ describe("todo-dag extension — sages_todo sync compiles structured todos", () 
 		);
 
 		registerSagesExtension(mock as any);
-		await fireToolCall({ toolName: "sages_todo", input: { action: "sync", todos: TASK_TODOS } });
+		await fireToolCall({ toolName: "todowrite", input: { todos: TASK_TODOS } });
 
 		// dag_synthesize's plan is authoritative — the todo compile must not
 		// overwrite it even though the todos carry the same dag_id.
@@ -213,55 +213,7 @@ describe("todo-dag extension — sages_todo sync compiles structured todos", () 
 	});
 });
 
-// ─── sages_todo sync → same trigger ─────────────────────────────────────────
 
-describe("todo-dag extension — sages_todo sync triggers the same compile", () => {
-	it("sync with task-level todos compiles + persists the structured fields", async () => {
-		registerSagesExtension(mock as any);
-		await fireToolCall({
-			toolName: "sages_todo",
-			input: { action: "sync", todos: TASK_TODOS },
-		});
-
-		expect(dagFiles()).toContain("dag-GC-2026-061.yaml");
-		const plan = loadPlan(tmp, "GC-2026-061");
-		expect(plan?.tasks.map((t) => t.id)).toEqual(["P1", "P2"]);
-
-		// The mirrored store keeps the structured fields (persist round-trip).
-		const state = loadTodoState(todoStateDir(tmp));
-		expect(state?.getTodos()[1].kind).toBe("task");
-		expect(state?.getTodos()[1].depends_on).toEqual(["P1"]);
-	});
-
-	it("sages_todo sync without task-level todos writes no dag yaml", async () => {
-		registerSagesExtension(mock as any);
-		await fireToolCall({
-			toolName: "sages_todo",
-			input: { action: "sync", todos: PLAN_TODOS },
-		});
-		expect(dagFiles()).toEqual([]);
-	});
-
-	it("executeSagesTodo accepts structured todos and the TypeBox schema declares the structured fields", async () => {
-		// The tool's own sync path preserves structured fields end-to-end.
-		const result = await executeSagesTodo({ action: "sync", todos: TASK_TODOS }, { cwd: tmp });
-		expect(result.details.status).toBe("ok");
-		const state = loadTodoState(todoStateDir(tmp));
-		expect(state?.getTodos()[0].dag_id).toBe("GC-2026-061");
-		expect(state?.getTodos()[0].kind).toBe("task");
-
-		// The registered tool schema must not strip the structured fields at
-		// the pi validation boundary.
-		const itemProps = (SagesTodoParams as unknown as {
-			properties: { todos: { items: { properties: Record<string, unknown> } } };
-		}).properties.todos.items.properties;
-		expect(itemProps.kind).toBeDefined();
-		expect(itemProps.depends_on).toBeDefined();
-		expect(itemProps.batch).toBeDefined();
-		expect(itemProps.dag_id).toBeDefined();
-		expect(itemProps.goal_id).toBeDefined();
-	});
-});
 
 // ─── dag_id / goal_id derivation ────────────────────────────────────────────
 
@@ -272,7 +224,7 @@ describe("todo-dag extension — dag_id / goal_id derivation", () => {
 		// no-ops, but the session default dag_id is recorded.
 		await fireToolCall({ toolName: "dag_synthesize", input: { goal_id: "GC-9999" } });
 
-		await fireToolCall({ toolName: "sages_todo", input: { action: "sync", todos: TASK_TODOS_NO_DAG_ID } });
+		await fireToolCall({ toolName: "todowrite", input: { todos: TASK_TODOS_NO_DAG_ID } });
 		expect(dagFiles()).toContain("dag-GC-9999.yaml");
 		const plan = loadPlan(tmp, "GC-9999");
 		expect(plan?.goal_id).toBe("GC-9999");
@@ -281,7 +233,7 @@ describe("todo-dag extension — dag_id / goal_id derivation", () => {
 
 	it("falls back to 'DAG-todos' when no dag_id is available", async () => {
 		registerSagesExtension(mock as any);
-		await fireToolCall({ toolName: "sages_todo", input: { action: "sync", todos: TASK_TODOS_NO_DAG_ID } });
+		await fireToolCall({ toolName: "todowrite", input: { todos: TASK_TODOS_NO_DAG_ID } });
 		expect(dagFiles()).toContain("dag-DAG-todos.yaml");
 	});
 
@@ -290,7 +242,7 @@ describe("todo-dag extension — dag_id / goal_id derivation", () => {
 		// Record a session default first...
 		await fireToolCall({ toolName: "dag_synthesize", input: { goal_id: "GC-9999" } });
 		// ...then todos that carry their own dag_id.
-		await fireToolCall({ toolName: "sages_todo", input: { action: "sync", todos: TASK_TODOS } });
+		await fireToolCall({ toolName: "todowrite", input: { todos: TASK_TODOS } });
 		expect(dagFiles()).toContain("dag-GC-2026-061.yaml");
 		expect(dagFiles()).not.toContain("dag-GC-9999.yaml");
 		const plan = loadPlan(tmp, "GC-2026-061");

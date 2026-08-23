@@ -237,7 +237,7 @@ describe("registerSagesExtension — before_agent_start appends soft-mode suffix
 });
 
 describe("registerSagesExtension — registration correctness", () => {
-    it("registers the 4 orchestrator tools + sages_reminder + sages_todo", () => {
+    it("registers the 4 orchestrator tools + sages_reminder", () => {
         const mock = new MockPi();
         registerSagesExtension(mock as any);
         const toolNames = mock.registeredTools.map((t) => t.name).sort();
@@ -246,7 +246,6 @@ describe("registerSagesExtension — registration correctness", () => {
             "goal_contract_create",
             "orchestrator_audit",
             "sages_reminder",
-            "sages_todo",
             "task_dispatch",
         ]);
     });
