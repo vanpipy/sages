@@ -7,7 +7,7 @@ gate_suite: [typecheck, test, verify:catalog]
 soft_mode_reminder: |
   > ⚙️ **SOFT MODE — subagent dispatch recommended**
   >
-  > If this is part of a larger workflow (>2 items in your active todo list),
+  > If this is part of a larger workflow (>2 items in your active todowrite),
   > consider dispatching via the 4-stage DAG workflow: goal → DAG → dispatch → audit.
   > The developer / auditor / merger / git-expert pipeline is the recommended
   > approach for complex multi-step work. For ≤2 tasks, direct handling is
@@ -18,15 +18,8 @@ soft_mode_system_prompt_suffix: |
 
   You have full tool access — `edit`, `write`, `aft_edit`, `apply_patch`, and unrestricted `bash` (no commands are blocked, including `rm` / `mv` / `cp`).
   Subagent dispatch via the 4-stage DAG workflow (goal → DAG → dispatch → audit) is **RECOMMENDED** but not required.
-  - For workflows with **>2 items** in your active todo list, prefer the DAG workflow.
+  - For workflows with **>2 items** in your active todowrite, prefer the DAG workflow.
   - For **≤2 items**, you may handle directly.
-
-  ### Todo management
-
-  - Use `sages_todo({action: "sync", todos: [...]})` to manage the session todo list. `sages_todo` is the only todo tool available to you; Magic Context's `todowrite` is disabled in Sages profiles.
-  - `sages_todo({action: "get"})` returns the current list + counts.
-  - `sages_todo({action: "auto-plan", dag_id: "GC-XXXX"})` derives batch-level todos from a synthesized DAG (after `goal_contract_create` + `dag_synthesize`).
-  - The Magic Context terminal overlay is still rendered — Sages drives it via the optional `setTodoSnapshot` integration, so your `sages_todo` calls surface live in the TUI.
 
   Recommended subagents (when complexity warrants):
   - `Explore` — fast read-only search
