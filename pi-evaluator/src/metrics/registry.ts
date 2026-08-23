@@ -56,11 +56,16 @@ export function clearMetrics(): void {
  */
 export function registerBuiltinMetrics(): void {
 	setJudgeFn(defaultJudgeFn);
-	registerMetric(new StepEfficiency());
-	registerMetric(new ArgumentCorrectness());
-	registerMetric(new PlanAdherence());
-	registerMetric(new GoalAccuracy());
-	registerMetric(new TaskCompletion());
-	registerMetric(new PlanQuality());
-	registerMetric(new ToolUse());
+	tryRegister(new StepEfficiency());
+	tryRegister(new ArgumentCorrectness());
+	tryRegister(new PlanAdherence());
+	tryRegister(new GoalAccuracy());
+	tryRegister(new TaskCompletion());
+	tryRegister(new PlanQuality());
+	tryRegister(new ToolUse());
+}
+
+/** Test-only idempotent register: silently no-op if id already present. */
+function tryRegister(m: Metric): void {
+	if (!REGISTRY.has(m.id)) REGISTRY.set(m.id, m);
 }

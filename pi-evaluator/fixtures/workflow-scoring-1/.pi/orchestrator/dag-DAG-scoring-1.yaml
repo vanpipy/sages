@@ -1,0 +1,62 @@
+id: DAG-scoring-1
+goal_id: GC-scoring-1
+title: 'Workflow scoring fixture — DAG with 2 parallel tasks + 1 dependent task'
+tasks:
+  - id: T1
+    description: First parallel task — explores codebase patterns
+    plane: Discovery
+    priority: medium
+    depends_on: []
+    files:
+      - pi-evaluator/src/metrics/registry.ts
+    subagent_type: Explore
+    batch: 1
+    isolation: none
+    tdd: none
+    run_in_background: false
+    acceptance:
+      covers:
+        - SC1
+    # No self_check_cmd intentionally — exercises the missing verification_cmd
+    # branch in the artifact reader (does NOT affect scoring metrics; informational).
+  - id: T2
+    description: Second parallel task — implements scoring-engine
+    plane: Foundation
+    priority: high
+    depends_on: []
+    files:
+      - pi-evaluator/src/engine/scoring-engine.ts
+    subagent_type: developer
+    batch: 1
+    isolation:
+      dag_id: DAG-scoring-1
+      task_id: T2
+      mode: create
+    tdd: strict
+    run_in_background: true
+    acceptance:
+      covers:
+        - SC2
+        - SC3
+  - id: T3
+    description: Final task — verifies all SCs end-to-end
+    plane: Audit
+    priority: high
+    depends_on:
+      - T1
+      - T2
+    files:
+      - pi-evaluator/test/integration/scoring-pipeline.test.ts
+    subagent_type: auditor
+    batch: 2
+    isolation: none
+    tdd: none
+    run_in_background: true
+    acceptance:
+      covers:
+        - SC1
+        - SC2
+        - SC3
+created_at: '2026-08-22T00:00:00.000Z'
+state: executing
+isolation_default: worktree
