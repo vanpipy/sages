@@ -62,7 +62,7 @@
 | GC-2026-065 | T1b extension tool_call listener | [.pi/orchestrator/goal-GC-2026-065.yaml](../../.pi/orchestrator/goal-GC-2026-065.yaml) |
 | GC-2026-066 | Tool Correctness metric + task-brief expected_tools schema | [.pi/orchestrator/goal-GC-2026-066.yaml](../../.pi/orchestrator/goal-GC-2026-066.yaml) |
 | GC-2026-067 | reminders | [.pi/orchestrator/goal-GC-2026-067.yaml](../../.pi/orchestrator/goal-GC-2026-067.yaml) |
-| GC-2026-068 | reminder chain closure + 3 follow-ups | [.pi/orchestrator/goal-GC-2026-068.yaml](../../.pi/orchestrator/goal-GC-2026-068.yaml) |
+| GC-2026-068 | sages_todo owns todo lifecycle, MC overlay driven by Sages | [.pi/orchestrator/goal-GC-2026-068.yaml](../../.pi/orchestrator/goal-GC-2026-068.yaml) |
 | GC-2026-069 | reminder chain closure + 3 follow-ups | [.pi/orchestrator/goal-GC-2026-069.yaml](../../.pi/orchestrator/goal-GC-2026-069.yaml) |
 
 _Total: 58 GCs_
