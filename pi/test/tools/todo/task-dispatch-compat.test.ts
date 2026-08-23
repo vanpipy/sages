@@ -54,7 +54,7 @@ const STRUCTURED_TODOS: TodoItem[] = [
 	{ id: "P1", content: "Implement the todo state manager", status: "pending", kind: "task" },
 	{
 		id: "P2",
-		content: "Implement the sages_todo tool",
+		content: "Implement the todo reminder",
 		status: "pending",
 		kind: "task",
 		depends_on: ["P1"],
@@ -91,7 +91,7 @@ describe("task_dispatch compat — loadPlan round-trip", () => {
 			expect(plan!.tasks.map((t) => t.batch)).toEqual([1, 2, 3]);
 			expect(plan!.tasks.map((t) => t.description)).toEqual([
 				"Implement the todo state manager",
-				"Implement the sages_todo tool",
+				"Implement the todo reminder",
 				"Wire the todo reminder into the extension",
 			]);
 			// The plan-level todo must not leak into the compiled DAG.
@@ -189,7 +189,7 @@ describe("task_dispatch compat — dag yaml and todo-state.json coexist", () => 
 					{ id: "P1", content: "Implement the todo state manager", status: "in_progress", kind: "task" },
 					{
 						id: "P2",
-						content: "Implement the sages_todo tool",
+						content: "Implement the todo reminder",
 						status: "pending",
 						kind: "task",
 						depends_on: ["P1"],
