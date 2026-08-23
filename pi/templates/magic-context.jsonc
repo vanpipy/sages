@@ -12,6 +12,16 @@
 
 	"enabled": true,
 
+	// todowrite — Sages owns the LLM-facing `sages_todo` tool. Magic
+	// Context's built-in `todowrite` is DISABLED so it does not appear
+	// in the tool list and cannot be called by the model; the terminal
+	// overlay (rendered by Sages via `setTodoSnapshot`) remains enabled
+	// so the user still sees a live todo pane.
+	"todowrite": {
+		"enabled": false,
+		"overlay": true,
+	},
+
 	// Historian — background subagent compresses old conversation into
 	// compartments + facts at threshold pressure or commit boundaries.
 	"historian": {

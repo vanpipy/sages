@@ -86,7 +86,7 @@ import {
 	type TodoDiff,
 	type TodoItem,
 } from "./tools/todo/todo-state.js";
-import { deriveDagTodos, registerSagesTodoTool } from "./tools/todo/sages-todo-tool.js";
+import { deriveDagTodos, notifyOverlay, registerSagesTodoTool } from "./tools/todo/sages-todo-tool.js";
 import { maybeCompileDagFromTodos } from "./tools/todo/dag-compile.js";
 import { buildSessionDigest, formatSessionDigest } from "./observability/digest.js";
 
@@ -330,9 +330,20 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 		const cwd: string = typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd();
 		const repoRoot = resolveRepoRoot(cwd);
 		const stateDir = todoStateDir(repoRoot);
+		const sessionId: string | undefined =
+			typeof ctx?.sessionManager?.getSessionId === "function"
+				? ctx.sessionManager.getSessionId()
+				: undefined;
 
 		try {
-			if (toolName === "todowrite" || (toolName === "sages_todo" && input.action === "sync")) {
+			// Only `sages_todo sync` writes the root todo store here.
+			// `todowrite` (Magic Context's built-in) is disabled in Sages
+			// profiles (see `magic-context.jsonc`); Sages owns the todo
+			// lifecycle through the `sages_todo` tool, which already
+			// notifies the Magic Context overlay via `notifyOverlay`.
+			// The mirror-via-`todowrite` path (GC-2026-067) is dead
+			// code under this architecture.
+			if (toolName === "sages_todo" && input.action === "sync") {
 				const items = todoItemsFromRaw(input.todos);
 				if (items.length === 0) return undefined; // empty / all entries malformed
 				lastTodoChange = todoState.apply(items);
@@ -342,6 +353,7 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 				// authoritative and is never overwritten — see the policy in
 				// maybeCompileDagFromTodos.
 				maybeCompileDagFromTodos(items, repoRoot, { sessionDagId, sessionGoalId });
+				notifyOverlay(sessionId, items);
 				return undefined;
 			}
 
@@ -366,10 +378,11 @@ export default function registerSagesExtension(pi: ExtensionAPI): void {
 				if (derived.length === 0) return undefined; // no DAG → never wipe the list
 				lastTodoChange = todoState.apply(derived);
 				saveTodoState(stateDir, todoState);
+				notifyOverlay(sessionId, derived);
 				return undefined;
 			}
 		} catch {
-			// Best-effort observability: a malformed mirror must never
+			// Best-effort observability: a malformed event must never
 			// break the agent's tool execution.
 		}
 		return undefined;

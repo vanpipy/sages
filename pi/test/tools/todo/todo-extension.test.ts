@@ -1,8 +1,8 @@
 /**
- * todo-extension tests — GC-2026-060 auto-todowrite extension wiring.
+ * todo-extension tests — GC-2026-060 + GC-2026-068 sages-todo extension wiring.
  *
  * Covers the `registerSagesExtension` wiring block:
- *  - `todowrite` tool_call mirror → TodoStateManager + persist
+ *  - `sages_todo` sync tool_call → TodoStateManager + persist
  *  - before_agent_start injects the per-turn todo block (only when the
  *    list is non-empty OR a change diff is pending); diff is one-shot
  *  - session_start restores the persisted list (cross-session resume)
@@ -75,7 +75,7 @@ class MockPi {
 const FIXTURE_DAG = {
   id: "DAG-2026-060",
   goal_id: "GC-2026-060",
-  title: "Auto-todowrite fixture",
+  title: "Auto-todo fixture",
   state: "approved",
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -173,14 +173,15 @@ function todoReminders(): Array<{ channel: string; text: string }> {
   return mock.appendedEntries.filter((e) => e.text.startsWith("[sages todo reminder]"));
 }
 
-// ─── todowrite mirror ───────────────────────────────────────────────────────
+// ─── sages_todo sync mirror ──────────────────────────────────────────────────
 
-describe("todo extension — todowrite tool_call mirror", () => {
-  it("mirrors a todowrite call into the root todo state (get returns the list)", async () => {
+describe("todo extension — sages_todo sync mirror", () => {
+  it("mirrors a sages_todo sync call into the root todo state (get returns the list)", async () => {
     registerSagesExtension(mock as any);
     await fireToolCall({
-      toolName: "todowrite",
+      toolName: "sages_todo",
       input: {
+        action: "sync",
         todos: [
           { content: "Build the state manager", status: "pending" },
           { content: "Wire the extension", status: "in_progress" },
@@ -204,24 +205,25 @@ describe("todo extension — todowrite tool_call mirror", () => {
     expect(get.details.todos).toEqual(loaded?.getTodos());
   });
 
-  it("ignores empty/malformed todowrite inputs (no state change, no crash)", async () => {
+  it("ignores empty/malformed sages_todo inputs (no state change, no crash)", async () => {
     registerSagesExtension(mock as any);
-    await fireToolCall({ toolName: "todowrite", input: { todos: [] } });
-    await fireToolCall({ toolName: "todowrite", input: {} });
+    await fireToolCall({ toolName: "sages_todo", input: { action: "sync", todos: [] } });
+    await fireToolCall({ toolName: "sages_todo", input: { action: "sync" } });
     await fireToolCall({
-      toolName: "todowrite",
-      input: { todos: [{ content: "", status: "pending" }, { status: "pending" }, "junk"] },
+      toolName: "sages_todo",
+      input: { action: "sync", todos: [{ content: "", status: "pending" }, { status: "pending" }, "junk"] },
     });
     expect(loadTodoState(todoStateDir(tmp))).toBeNull();
     expect(await beforeAgentStart()).not.toContain("[sages todos:");
   });
 
-  it("root-only: todowrite with an explicit owner marker 'subagent' is rejected", async () => {
+  it("root-only: sages_todo with an explicit owner marker 'subagent' is rejected", async () => {
     registerSagesExtension(mock as any);
     await fireToolCall({
-      toolName: "todowrite",
+      toolName: "sages_todo",
       input: {
         owner: "subagent",
+        action: "sync",
         todos: [{ content: "subagent sneaky todo", status: "in_progress" }],
       },
     });
@@ -244,10 +246,10 @@ describe("todo extension — before_agent_start todo block", () => {
     expect(emptyPrompt).toContain("BASE");
     expect(emptyPrompt).not.toContain("[sages todos:");
 
-    // Mirror a todowrite call: list + change diff.
+    // Mirror a sages_todo sync: list + change diff.
     await fireToolCall({
-      toolName: "todowrite",
-      input: { todos: [{ content: "Build X", status: "pending" }] },
+      toolName: "sages_todo",
+      input: { action: "sync", todos: [{ content: "Build X", status: "pending" }] },
     });
 
     // Next turn: block + change highlight.
@@ -267,12 +269,12 @@ describe("todo extension — before_agent_start todo block", () => {
     // Seed two todos, then mirror a whole-list replacement that drops
     // both and adds one new item — the diff is added + removed.
     await fireToolCall({
-      toolName: "todowrite",
-      input: { todos: [{ content: "A", status: "pending" }, { content: "B", status: "completed" }] },
+      toolName: "sages_todo",
+      input: { action: "sync", todos: [{ content: "A", status: "pending" }, { content: "B", status: "completed" }] },
     });
     await fireToolCall({
-      toolName: "todowrite",
-      input: { todos: [{ content: "Keep this", status: "in_progress" }] },
+      toolName: "sages_todo",
+      input: { action: "sync", todos: [{ content: "Keep this", status: "in_progress" }] },
     });
     const prompt = await beforeAgentStart();
     expect(prompt).toContain("⚠ changed: +1 added · 2 removed");
@@ -317,8 +319,8 @@ describe("todo extension — turn_end stale reminder (rate-limited)", () => {
   it("fires exactly one appendEntry reminder for a stale in_progress todo, then never repeats", async () => {
     registerSagesExtension(mock as any);
     await fireToolCall({
-      toolName: "todowrite",
-      input: { todos: [{ id: "P1", content: "long running", status: "in_progress" }] },
+      toolName: "sages_todo",
+      input: { action: "sync", todos: [{ id: "P1", content: "long running", status: "in_progress" }] },
     });
 
     // 8 consecutive turns with P1 still in_progress.
@@ -333,8 +335,8 @@ describe("todo extension — turn_end stale reminder (rate-limited)", () => {
   it("does not remind while the todo is below the gentle threshold", async () => {
     registerSagesExtension(mock as any);
     await fireToolCall({
-      toolName: "todowrite",
-      input: { todos: [{ id: "P1", content: "quick task", status: "in_progress" }] },
+      toolName: "sages_todo",
+      input: { action: "sync", todos: [{ id: "P1", content: "quick task", status: "in_progress" }] },
     });
     for (let i = 0; i < 3; i++) fireTurnEnd(); // P1 reaches 2
     expect(todoReminders()).toHaveLength(0);
@@ -343,8 +345,8 @@ describe("todo extension — turn_end stale reminder (rate-limited)", () => {
   it("input event resets stale counters (staleness clock restarts)", async () => {
     registerSagesExtension(mock as any);
     await fireToolCall({
-      toolName: "todowrite",
-      input: { todos: [{ id: "P1", content: "long running", status: "in_progress" }] },
+      toolName: "sages_todo",
+      input: { action: "sync", todos: [{ id: "P1", content: "long running", status: "in_progress" }] },
     });
 
     // 3 turns: P1 = 2 → no reminder.
@@ -368,8 +370,8 @@ describe("todo extension — turn_end stale reminder (rate-limited)", () => {
   it("input event also clears a pending change diff", async () => {
     registerSagesExtension(mock as any);
     await fireToolCall({
-      toolName: "todowrite",
-      input: { todos: [{ content: "Build X", status: "pending" }] },
+      toolName: "sages_todo",
+      input: { action: "sync", todos: [{ content: "Build X", status: "pending" }] },
     });
     fireInput();
     const prompt = await beforeAgentStart();
@@ -410,8 +412,8 @@ describe("todo extension — orchestrator tool_call auto-plan", () => {
     registerSagesExtension(mock as any);
     // Seed the list with a manual todo.
     await fireToolCall({
-      toolName: "todowrite",
-      input: { todos: [{ content: "manual ad-hoc todo", status: "pending" }] },
+      toolName: "sages_todo",
+      input: { action: "sync", todos: [{ content: "manual ad-hoc todo", status: "pending" }] },
     });
     // Unknown dag_id → deriveDagTodos returns [] → list untouched.
     await fireToolCall({ toolName: "dag_synthesize", input: { goal_id: "GC-9999" } });
