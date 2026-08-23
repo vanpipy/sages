@@ -1,6 +1,6 @@
 {
 	"name": "@sages/pi-evaluator",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "Sages reward mode extension: per-workflow running score (`eval_score`) and cross-workflow trend (`eval_trend`) for the Sages agent. Default OFF, opt-in via `sages.rewardMode` in `~/.pi/agent/settings.json`.",
 	"type": "module",
 	"main": "src/extension.ts",
