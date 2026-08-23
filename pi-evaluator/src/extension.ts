@@ -9,21 +9,61 @@
  *   - `session_start` event: read `~/.pi/agent/settings.json` and set mode
  *   - `before_agent_start` event: when mode is on, append the reward mode
  *     system-prompt augmentation to the original system prompt
+ *   - `tool_call` event: when any of the 4 Sages orchestrator tools
+ *     (goal_contract_create, dag_synthesize, task_dispatch, orchestrator_audit)
+ *     is invoked, set state.active_workflow_path + state.active_workflow_id so
+ *     the lazy eval-score self-cook path has a target (T1b).
  *
  * Mode is read ONCE per session (`session_start`) and is constant for the
  * session's lifetime. Hot-switch via `/reward` etc. is OUT OF SCOPE for T2
  * (explicit GC-2026-019 anti-goal).
  *
- * T3 will add event subscriptions (tool_call, agent_end, session_end) for
- * the signal engine. T2's job is the 2-tool skeleton + mode toggle.
+ * The `tool_call` listener is intentionally narrow — it only fires for the
+ * 4 orchestrator tools and only writes to `state.active_workflow_*` fields.
+ * It does not read session.jsonl, does not write to `.pi/orchestrator/`, and
+ * does not trigger evaluation on its own (lazy path fires on the next
+ * `eval_score` invocation).
  */
 
+import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import { readSagesRewardMode } from "./settings.ts";
 import { REWARD_MODE_SYSTEM_PROMPT } from "./prompts.ts";
 import { createEvalState, reloadCoefficients } from "./state.ts";
 import { registerEvalTools, type HistoricalReport } from "./tools/index.ts";
+
+/** Set of Sages orchestrator tool names whose invocations update eval state. */
+const ORCHESTRATOR_TOOL_NAMES = new Set([
+	"goal_contract_create",
+	"dag_synthesize",
+	"task_dispatch",
+	"orchestrator_audit",
+]);
+
+interface OrchestratorToolCallEventLike {
+	type?: string;
+	toolName?: string;
+	input?: Record<string, unknown>;
+}
+
+/**
+ * Pull the workflow id out of a tool_call's input. Each of the 4 orchestrator
+ * tools uses a different field name (goal_contract_create.id,
+ * dag_synthesize.goal_id, task_dispatch.dag_id, orchestrator_audit.dag_id),
+ * so we probe all four candidates and return the first match.
+ */
+function extractWorkflowId(toolName: string, input: Record<string, unknown>): string | undefined {
+	if (toolName === "goal_contract_create") {
+		return typeof input.id === "string" ? input.id : undefined;
+	}
+	if (toolName === "dag_synthesize") {
+		return typeof input.goal_id === "string" ? input.goal_id : undefined;
+	}
+	// task_dispatch + orchestrator_audit both use dag_id.
+	if (typeof input.dag_id === "string") return input.dag_id;
+	return undefined;
+}
 
 /**
  * Default pi extension entrypoint.
@@ -67,5 +107,22 @@ export default function registerEvaluatorExtension(pi: ExtensionAPI): void {
 		return {
 			systemPrompt: `${original}\n\n${REWARD_MODE_SYSTEM_PROMPT}`,
 		};
+	});
+
+	// ── tool_call: track active workflow for lazy eval-score self-cook ──────
+	// Only fires for the 4 Sages orchestrator tools. Updates state.active_workflow_path
+	// (always `<cwd>/.pi/orchestrator`) and state.active_workflow_id (per-tool field).
+	// No-ops when mode is off or when the input doesn't contain a recognizable id.
+	pi.on("tool_call", (event: OrchestratorToolCallEventLike, ctx?: { cwd?: string }) => {
+		if (state.mode !== "on") return;
+		if (event?.type !== "tool_call") return;
+		const toolName = typeof event.toolName === "string" ? event.toolName : "";
+		if (!ORCHESTRATOR_TOOL_NAMES.has(toolName)) return;
+		const input = event.input && typeof event.input === "object" ? event.input : {};
+		const workflowId = extractWorkflowId(toolName, input);
+		if (!workflowId) return;
+		const cwd = typeof ctx?.cwd === "string" ? ctx.cwd : process.cwd();
+		state.active_workflow_path = join(cwd, ".pi", "orchestrator");
+		state.active_workflow_id = workflowId;
 	});
 }
