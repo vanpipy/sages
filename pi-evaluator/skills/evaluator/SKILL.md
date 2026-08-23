@@ -101,6 +101,7 @@ by overriding the signal's `weight` in your coefficients file.
 | `task_completion` | implement | hybrid | **Heuristic** (default): per-task ratio of `SC<N> PASS` matches in audit findings over `acceptance.covers[]`. **LLM branch**: judge reads each task report and scores per-SC. | 0 / ~$0.003 per task |
 | `plan_quality` | dag | llm_judge | DAG structural quality — judge reads `dag-{id}.yaml` + summaries (planes, batches, isolation, coverage). | ~$0.001 per call |
 | `tool_use` | coordination | llm_judge | Tool usage quality — judge reads `session.jsonl` per-tool summaries (calls / errors / sequences). | ~$0.001 per call |
+| `tool_correctness` | implement | heuristic | Per-task F1 between `expected_tools[]` (DAG) and actual tool invocations (session.jsonl). **Opt-in** — the metric is data_missing when no DAG task declares `expected_tools[]`. Task IDs map to orchestrator tool names (current mapping model). | 0 LLM tokens |
 
 ### Cost gate
 
@@ -178,6 +179,43 @@ config (e.g. `with: { from: 'llm', provider: 'anthropic', modelId: '...' }`).
 v0.2.0 coefficients files (no `with`) continue to parse without modification
 (additive compatibility).
 
+### Expected tools (GC-2026-066)
+
+The `tool_correctness` metric is opt-in: declare `expected_tools: string[]` on
+a DAG task and pi-evaluator scores precision (|actual ∩ expected| / |actual|),
+recall (|actual ∩ expected| / |expected|), and F1 for that task.
+
+```yaml
+# dag-{id}.yaml
+tasks:
+  - id: goal_contract_create
+    expected_tools: [read, grep]   # this task is expected to use only read + grep
+  - id: dag_synthesize
+    expected_tools: [edit, bash]
+```
+
+The metric currently maps session.jsonl windows by orchestrator tool name
+(goal_contract_create, dag_synthesize, task_dispatch, orchestrator_audit),
+so task IDs in the DAG must use one of those four names for the metric to
+match the window. Per-task F1 is averaged into the implement dim score.
+
+To enable scoring, override the default weight:0 in your coefficients:
+
+```jsonc
+{
+  "dimensions": {
+    "implement": {
+      "signals": {
+        "tool_correctness": { "weight": 0.3, "norm": "ratio_0_1", "direction": "higher_better" }
+      }
+    }
+  }
+}
+```
+
+Future GC may extend the mapping model to per-DAG-task-id windows (not
+gated by orchestrator tool names).
+
 Weight invariants (enforced on load):
 
 - Σ signal weights = 1.0 per dimension (per enabled dimension; data_missing signals are excluded from the weighted sum at runtime, not from this invariant)
@@ -189,4 +227,4 @@ Weight invariants (enforced on load):
 - It does not replace `goal_contract_create` / `dag_synthesize` / `task_dispatch` / `orchestrator_audit`. Those are Stage 1–4 of the Sages workflow; this extension is a passive observer on top.
 - It does not run any shell commands. It reads `.pi/orchestrator/` files and surfaces scores; it never writes to orchestrator state.
 - It does not provide a CLI (`pi-evaluator run`, etc.). The reward mode is invoked by pi at runtime, not from a shell.
-- **Tool Correctness** (`expected_tools[]`-based scoring) is deferred to a future GC that extends the task-brief schema — currently the metric is not implemented.
+- **Tool Correctness** (`expected_tools[]`-based scoring) is shipped as `tool_correctness` in v0.4.0 (GC-2026-066). Opt-in only. The metric currently maps windows by orchestrator tool name; per-DAG-task-id windowing is a future GC.

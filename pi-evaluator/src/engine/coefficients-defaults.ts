@@ -167,6 +167,15 @@ export const DEFAULT_COEFFICIENTS: CoefficientsConfig = {
 					norm: "ratio_0_1",
 					direction: "higher_better",
 				},
+				// DISABLED placeholder (GC-2026-066 ships the metric; opt-in via override).
+				// Heuristic: per-task F1 between expected_tools[] (DAG) and actual
+				// tool invocations (session.jsonl). Opt-in — only scores if a task
+				// declares expected_tools[].
+				tool_correctness: {
+					weight: 0,
+					norm: "ratio_0_1",
+					direction: "higher_better",
+				},
 			},
 		},
 
