@@ -1,0 +1,59 @@
+id: DAG-tool-correctness-fixture
+goal_id: GC-tool-correctness-fixture
+title: 'DAG with 3 orchestrator-tool-named tasks for ToolCorrectness scoring'
+tasks:
+  - id: goal_contract_create
+    description: First window — goal creation phase; expected to use read+grep
+    plane: Foundation
+    priority: medium
+    depends_on: []
+    files: []
+    subagent_type: developer
+    batch: 1
+    isolation: none
+    tdd: strict
+    run_in_background: false
+    expected_tools:
+      - read
+      - grep
+    acceptance:
+      covers:
+        - SC1
+  - id: dag_synthesize
+    description: Second window — DAG synthesis; expected to use edit+bash but actually used edit+read
+    plane: Foundation
+    priority: medium
+    depends_on:
+      - goal_contract_create
+    files: []
+    subagent_type: developer
+    batch: 2
+    isolation: none
+    tdd: strict
+    run_in_background: false
+    expected_tools:
+      - edit
+      - bash
+    acceptance:
+      covers:
+        - SC1
+  - id: task_dispatch
+    description: Third window — task dispatch; expected read but agent used nothing
+    plane: Observation
+    priority: medium
+    depends_on:
+      - dag_synthesize
+    files: []
+    subagent_type: developer
+    batch: 3
+    isolation: none
+    tdd: strict
+    run_in_background: false
+    expected_tools:
+      - read
+    acceptance:
+      covers:
+        - SC1
+created_at: '2026-08-23T00:00:00.000Z'
+state: executing
+isolation_default: none
