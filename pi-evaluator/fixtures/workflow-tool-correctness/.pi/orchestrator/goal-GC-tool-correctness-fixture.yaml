@@ -1,0 +1,26 @@
+id: GC-tool-correctness-fixture
+title: 'Workflow tool-correctness fixture — known F1 outcomes per task'
+rationale: >-
+  Fixture for the pi-evaluator ToolCorrectness metric integration test.
+  Three DAG tasks correspond to three orchestrator-tool boundaries in
+  session.jsonl. Each task declares an `expected_tools` array. The actual
+  tool invocations per window are deterministic; the integration test
+  asserts the average F1 score matches the predicted value.
+success_criteria:
+  - id: SC1
+    criterion: ToolCorrectness metric returns 0.5 average F1 across the 3 tasks
+    verification_cmd: "echo SC1 && exit 0"
+    expected_output: 'SC1'
+    severity: blocker
+anti_goals:
+  - Do not change the metric implementation
+  - Do not introduce new npm dependencies
+scope:
+  include:
+    - pi-evaluator/test/integration/tool-correctness-pipeline.test.ts
+    - pi-evaluator/fixtures/workflow-tool-correctness/
+  exclude:
+    - pi/src/tools/orchestrator/dag-synthesizer.ts
+done_definition: >-
+  Tool-correctness integration test passes against this fixture.
+created_at: '2026-08-23T00:00:00.000Z'
