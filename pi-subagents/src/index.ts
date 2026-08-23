@@ -3177,3 +3177,14 @@ ${systemPrompt}
 		},
 	});
 }
+
+// ───────────────────────────────────────────────────────────────────────
+// Public surface for other pi extensions (sages/pi orchestrator) to learn
+// which subagents are registered. Single source of truth: see
+//// `subagent-info.ts` for the canonical list + default-runInBackground.
+// ───────────────────────────────────────────────────────────────────────
+
+export {
+	KNOWN_SUBAGENT_IDS,
+	defaultRunInBackground,
+} from "./subagent-info.js";
