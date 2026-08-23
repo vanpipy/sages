@@ -4,6 +4,90 @@ All notable changes to `@sages/pi-evaluator` are documented here. Versions
 follow semver; the `coefficients.json` `version` field MUST mirror
 `package.json#version`.
 
+## 0.4.0 — 2026-08-23 (GC-2026-066)
+
+**Tool Correctness metric + task-brief schema extension.** Adds an
+optional `expected_tools?: string[]` field on TaskNode and the 8th metric
+in pi-evaluator's registry.
+
+### Added
+
+- **Schema extension** (in pi/src/tools/orchestrator/dag-synthesizer.ts,
+  cross-package GC-2026-066 T1):
+  - TaskNodeSchema gains optional `expected_tools?: string[]` field
+    (GC-2026-066). Additive — existing DAGs without the field still parse.
+  - TaskNodeSchema gains optional `acceptance_warnings?: string[]` field
+    for per-task warning surface.
+  - `validateExpectedTools(tasks)` helper: warns (does NOT fail) on
+    unknown tool names. Known names: {bash, read, edit, write, grep,
+    find, ls, webfetch, goal_contract_create, dag_synthesize,
+    task_dispatch, orchestrator_audit}.
+- **Metric** (src/metrics/tool-correctness.ts):
+  - `id: 'tool_correctness'`, `dim: 'implement'`, `kind: 'heuristic'`.
+  - Reads `dag-{id}.yaml` for `expected_tools[]` per task + `session.jsonl`
+    for actual tool invocations, bucketed by orchestrator-tool windows.
+  - Per-task precision = |actual ∩ expected| / |actual| (0 when
+    |actual|=0); recall = |actual ∩ expected| / |expected| (0 when
+    |expected|=0); F1 = 2*P*R / (P+R) (0 when both 0).
+  - Metric score = average F1 across tasks with `expected_tools[]`.
+  - `data_missing: true` when no DAG task declares `expected_tools[]`
+    (opt-in semantic).
+- **Pure helpers** (src/metrics/tool-correctness-internals.ts):
+  `computePerTask`, `uniqueTools`, `bucketToolsByTask` — exported
+  separately so unit tests can drive them without I/O.
+- **Defaults** (src/engine/coefficients-defaults.ts): added
+  `tool_correctness: { weight: 0, norm: 'ratio_0_1', direction: 'higher_better' }`
+  placeholder to `implement.signals`.
+- **Examples** (examples/evaluator-log/coefficients.json):
+  - `version` bumped to `"0.4.0"`.
+  - Added `_v040_tool_correctness_opt_in` block showing how to enable
+    the metric.
+- **Tests**:
+  - `test/metrics/tool-correctness.test.ts` — 8 unit tests
+    (F1 edge cases + bucketToolsByTask boundary detection).
+  - `test/integration/tool-correctness-pipeline.test.ts` — 4 end-to-end
+    tests against `fixtures/workflow-tool-correctness/`.
+  - `test/metrics/registry.test.ts` — updated to expect 8 built-ins.
+- **Fixtures** (fixtures/workflow-tool-correctness/.pi/orchestrator/):
+  - `goal-GC-tool-correctness-fixture.yaml`
+  - `dag-DAG-tool-correctness-fixture.yaml` (3 tasks with expected_tools)
+  - `session.jsonl` (3 orchestrator-tool windows with deterministic
+    actual invocations)
+
+### Mapping limitation (current)
+
+The metric's session.jsonl window detector uses orchestrator tool call
+names (goal_contract_create, dag_synthesize, task_dispatch,
+orchestrator_audit) as window boundaries. Therefore, to score a task,
+its DAG `id` must match one of those 4 names. A future GC may extend
+the window detection to per-DAG-task-id tracking via the `task_dispatch`
+event payload (currently not exposed).
+
+### Backward compat
+
+- 0.3.0 coefficient files (no `expected_tools` related fields) still parse
+  cleanly via `coefficients-backward-compat.test.ts`. The
+  `expected_tools` field is on the DAG task schema, not the coefficient
+  schema — it's an author-side concern, not an evaluator-side one.
+- The `with?` field remains on SignalConfig unchanged from 0.3.0.
+
+### Defaults
+
+`tool_correctness` ships at `weight: 0` by default — zero overhead when
+unused. To enable, override the signal weight in your coefficients file.
+
+### Performance
+
+End-to-end heuristic path on the tool-correctness fixture: ~3ms (5x under
+the 500ms heuristic benchmark).
+
+### Anti-scope (deferred)
+
+- Per-DAG-task-id window detection (current metric maps only by
+  orchestrator tool name).
+- Tool *argument* validation per known tool (would require per-tool JSON
+  Schema imports — separate GC).
+
 ## 0.3.0 — 2026-08-22 (GC-2026-063)
 
 **Major: scoring engine + 7 agentic metrics land.** `eval_score()` now returns
@@ -24,7 +108,7 @@ real scores instead of all-zero. `computeEvalScore` lazy-cooks via
   - `registry.ts` — module-scoped registry + `registerBuiltinMetrics()`
     (idempotent; safe to call from multiple test files).
   - 3 pure heuristic: `step_efficiency`, `argument_correctness`, `plan_adherence`.
-  - 2 hybrid heuristic + LLM-stub: `goal_accuracy`, `task_completion`.
+  - 2 hybrid heuristic+LLM-stub: `goal_accuracy`, `task_completion`.
   - 2 pure LLM-only: `plan_quality`, `tool_use`.
 - **LLM-judge seam** (`src/metrics/llm-judge/`):
   - `seam.ts` — `setJudgeFn`/`getJudgeFn` + `judge()` entry. Missing judge
@@ -64,7 +148,7 @@ real scores instead of all-zero. `computeEvalScore` lazy-cooks via
   - `integration/scoring-pipeline.test.ts` — 8 end-to-end tests against
     `fixtures/workflow-scoring-1`.
   - `integration/heuristic-benchmark.test.ts` — heuristic path <500ms
-    (actually averages 2.3ms, max 3.9ms over 20 runs).
+    (actually averages 2.3ms, max 3.9ms).
 - **Fixtures** (`fixtures/workflow-scoring-1/`):
   - 6 artifact files + `session.jsonl` with 3 task windows (9/0/1 tool
     calls) so each metric produces a deterministic expected score.
