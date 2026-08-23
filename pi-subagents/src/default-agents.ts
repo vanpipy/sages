@@ -306,6 +306,9 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			// out for breadth coverage. 4 concurrent is the supported DAG fan-out
 			// (combined with Plan's 2 cap to stay under the global 6 cap).
 			maxConcurrent: 4,
+			// Read-only search: foreground. The orchestrator needs the
+			// result before proceeding (Explore answers "where is X").
+			runInBackground: false,
 		},
 	],
 	[
