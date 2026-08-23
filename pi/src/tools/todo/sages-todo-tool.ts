@@ -40,6 +40,53 @@ import {
 
 const TODO_STATUSES = ["pending", "in_progress", "completed"] as const;
 
+// ─── Optional Magic Context overlay integration ──────────────────────────
+// `@cortexkit/pi-magic-context` (when installed) renders a terminal todo
+// overlay and exposes `setTodoSnapshot(sessionId, todos)` to drive it.
+// Sages is the source of truth for the todo list; calling
+// `setTodoSnapshot` after every store mutation keeps the overlay in lock
+// step with the Sages store so the LLM-facing surface feels equivalent
+// to Magic Context's own `todowrite` tool. Magic Context is an OPTIONAL
+// peer dependency — when absent the helpers no-op and the Sages store
+// is unaffected.
+
+type SetTodoSnapshotFn = (sessionId: string, todos: unknown[]) => void;
+
+let mcSetTodoSnapshot: SetTodoSnapshotFn | null | undefined = undefined;
+
+async function resolveMcSetTodoSnapshot(): Promise<SetTodoSnapshotFn | null> {
+  if (mcSetTodoSnapshot !== undefined) return mcSetTodoSnapshot;
+  try {
+    // @ts-expect-error — pi-magic-context ships no .d.ts; shape verified at runtime
+    const mod = await import("@cortexkit/pi-magic-context");
+    const fn = mod?.setTodoSnapshot;
+    if (typeof fn === "function") {
+      mcSetTodoSnapshot = fn as SetTodoSnapshotFn;
+    } else {
+      mcSetTodoSnapshot = null;
+    }
+  } catch {
+    mcSetTodoSnapshot = null;
+  }
+  return mcSetTodoSnapshot;
+}
+
+export function notifyOverlay(sessionId: string | undefined, todos: TodoItem[]): void {
+  if (!sessionId) return;
+  void resolveMcSetTodoSnapshot()
+    .then((fn) => {
+      if (!fn) return;
+      try {
+        fn(sessionId, todos);
+      } catch {
+        // overlay failure is non-fatal
+      }
+    })
+    .catch(() => {
+      // probe failure is non-fatal
+    });
+}
+
 /** One todo as submitted by the LLM (mirrors TodoItem; TypeBox-constrained). */
 const TodoItemParams = Type.Object({
   id: Type.Optional(Type.String({ description: "Optional stable identity (e.g. a DAG task id)" })),
@@ -256,7 +303,7 @@ function countsText(counts: { pending: number; inProgress: number; completed: nu
   return `${counts.pending + counts.inProgress + counts.completed} todos (${counts.pending} pending | ${counts.inProgress} in_progress | ${counts.completed} completed)`;
 }
 
-function syncAction(params: SagesTodoInput, stateDir: string): SagesTodoResult {
+function syncAction(params: SagesTodoInput, stateDir: string, ctx: { sessionId?: string } = {}): SagesTodoResult {
   const validated = validateSyncTodos(params.todos);
   if (!validated.ok) {
     return {
@@ -285,7 +332,7 @@ function getAction(stateDir: string): SagesTodoResult {
   };
 }
 
-function autoPlanAction(params: SagesTodoInput, stateDir: string, repoRoot: string): SagesTodoResult {
+function autoPlanAction(params: SagesTodoInput, stateDir: string, repoRoot: string, ctx: { sessionId?: string } = {}): SagesTodoResult {
   const manager = loadTodoState(stateDir) ?? new TodoStateManager();
   const dagId = params.dag_id;
 
@@ -331,6 +378,7 @@ function autoPlanAction(params: SagesTodoInput, stateDir: string, repoRoot: stri
   const text =
     `sages_todo auto-plan: derived ${derived.length} todos from ${dagId}` +
     (highlight ? `; changes: ${highlight}` : "");
+  notifyOverlay(ctx.sessionId, derived);
   return {
     content: [{ type: "text", text }],
     details: {
@@ -353,15 +401,15 @@ function autoPlanAction(params: SagesTodoInput, stateDir: string, repoRoot: stri
  * <repo>/.pi/orchestrator. Extracted from the registered tool so tests
  * can drive it directly with a temp cwd.
  */
-export async function executeSagesTodo(params: SagesTodoInput, ctx: { cwd?: string }): Promise<SagesTodoResult> {
+export async function executeSagesTodo(params: SagesTodoInput, ctx: { cwd?: string; sessionId?: string }): Promise<SagesTodoResult> {
   const repoRoot = resolveRepoRoot(ctx.cwd ?? process.cwd());
   const stateDir = todoStateDir(repoRoot);
 
   switch (params.action) {
     case "sync":
-      return syncAction(params, stateDir);
+      return syncAction(params, stateDir, ctx);
     case "auto-plan":
-      return autoPlanAction(params, stateDir, repoRoot);
+      return autoPlanAction(params, stateDir, repoRoot, ctx);
     case "get":
       return getAction(stateDir);
   }
@@ -388,7 +436,10 @@ export function registerSagesTodoTool(pi: any): void {
     parameters: SagesTodoParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      return await executeSagesTodo(params as SagesTodoInput, { cwd: ctx?.cwd });
+      return await executeSagesTodo(params as SagesTodoInput, {
+        cwd: ctx?.cwd,
+        sessionId: typeof ctx?.sessionId === "string" ? ctx.sessionId : undefined,
+      });
     },
   });
 }
