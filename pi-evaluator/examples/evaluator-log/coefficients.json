@@ -1,7 +1,7 @@
 {
 	"$schema_comment": "Copy this file to ~/.pi/agent/evaluator-log/coefficients.json and tune the weights. The schema is enforced by pi-evaluator's TypeBox checker; an invalid file (bad shape, Σ weights ≠ 1.0, etc.) throws on load and pi-evaluator falls back to the built-in defaults. Comments are stripped before validation, so you can keep this file annotated.",
 
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"_version_comment": "MUST mirror pi-evaluator/package.json#version. Mismatch triggers a warning surfaced in eval_score output, but the loader still loads the file (strict equality is intentional — drift means your coefficients describe a different release's algorithm). Bump alongside pi-evaluator.",
 
 	"global": {
@@ -183,6 +183,14 @@
 				"provider": "anthropic",
 				"modelId": "claude-haiku-4-5"
 			}
+		}
+	},
+	"_v040_tool_correctness_opt_in": {
+		"_comment": "GC-2026-066: tool_correctness opt-in. Declare expected_tools[] per task in the DAG, then enable the metric here. Each task contributes precision + recall + F1; the score is the average F1 across tasks that declare expected_tools. Task IDs in session.jsonl windows must match the orchestrator tool name (goal_contract_create, dag_synthesize, task_dispatch, orchestrator_audit) — see the metric's current mapping model.",
+		"tool_correctness": {
+			"weight": 0.30,
+			"norm": "ratio_0_1",
+			"direction": "higher_better"
 		}
 	}
 }
