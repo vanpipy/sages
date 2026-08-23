@@ -80,6 +80,21 @@ export interface TaskNode {
 	files: string[];
 	/** Subagent role to dispatch to (e.g. "developer", "auditor") */
 	subagent_type: string;
+	/**
+	 * GC-2026-066: optional list of tool names the task is expected to
+	 * invoke. Consumed by pi-evaluator's ToolCorrectness metric (GC-2026-066
+	 * T2) to compute precision / recall / F1 of actual tool invocations
+	 * versus the declared intent. Additive — omitted = unchanged behavior.
+	 *
+	 * Tool names match CustomToolCallEvent.toolName values used in the
+	 * LLM tool registry: 8 file/network tools (bash, read, edit, write,
+	 * grep, find, ls, webfetch) plus the 4 Sages orchestrator tools
+	 * (goal_contract_create, dag_synthesize, task_dispatch,
+	 * orchestrator_audit). Unknown names emit a non-fatal warning at
+	 * DAG construction time (see validateExpectedTools in
+	 * dag-synthesizer.ts).
+	 */
+	expected_tools?: string[];
 	/** Concurrency grouping — same batch runs in parallel */
 	batch: number;
 	/**
@@ -181,6 +196,18 @@ export interface TaskNode {
 		/** Optional automated verification command (run by auditor) */
 		auditor_check_cmd?: string;
 	};
+	/**
+	 * GC-2026-066: per-task non-fatal validation warnings. Currently
+	 * populated by validateExpectedTools when a task references tool
+	 * names not in the known registry (see KNOWN_TOOL_NAMES in
+	 * dag-synthesizer.ts). Older plans written before GC-2026-066 omit
+	 * the field; new plans attach one entry per task that has at least
+	 * one unknown tool name. Downstream consumers (subagents reading
+	 * the plan, evaluators scoring it) can use this list to surface
+	 * informational notes without grep'ing the global
+	 * DAGValidation.warnings array.
+	 */
+	acceptance_warnings?: string[];
 	/** Runtime state (filled during execution) */
 	status: "pending" | "in_progress" | "completed" | "failed" | "skipped";
 	retry_count: number;
