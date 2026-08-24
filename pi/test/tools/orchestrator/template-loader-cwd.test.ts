@@ -27,7 +27,7 @@ import {
  * Module-relative package root, computed the same way the source module does:
  * test file lives at pi/test/tools/orchestrator/ → up 3 = pi/ (the sages
  * package root). Mirrors `join(dirname(fileURLToPath(import.meta.url)),
- * "..", "..", "..")` in template-loader.ts / sages-routines-install.ts.
+ * "..", "..", "..")` inside template-loader.ts.
  */
 const EXPECTED_PACKAGE_ROOT = join(
   dirname(fileURLToPath(import.meta.url)),
