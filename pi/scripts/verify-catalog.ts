@@ -248,6 +248,10 @@ function verifySubagentCrossConsistency(): CrossConsistencyResult {
 export interface CookbookPostmortemResult {
 	ok: boolean;
 	error?: string;
+	/** True when gc-index.md was present and a real consistency check ran.
+	 *  False when institutional coverage is suspended (no gc-index AND
+	 *  no orphan postmortems on disk) and the gate trivially passed. */
+	checked?: boolean;
 	orphanPostmortems?: string[];
 	missingCookbookLinks?: string[];
 }
@@ -257,7 +261,24 @@ export function verifyCookbookPostmortemConsistency(
 	postmortemDir: string = join(PI_ROOT, "docs", "postmortem"),
 ): CookbookPostmortemResult {
 	if (!existsSync(gcIndexPath)) {
-		return { ok: false, error: `gc-index.md missing: ${relative(PI_ROOT, gcIndexPath)}` };
+		// gc-index.md is absent. Institutional coverage is suspended only
+		// when there are no orphan postmortems to surface — i.e. either
+		// the postmortem dir is missing entirely, or it exists but holds
+		// no .md files (the only thing that dir contributes to this check
+		// is per-file id extraction, so an empty dir is also a no-op).
+		// If postmortems DO exist on disk without an index, they're
+		// unreachable from the entry point — that's a real orphan bug
+		// worth surfacing even with the index itself missing.
+		const orphanPostmortemsPresent =
+			existsSync(postmortemDir) &&
+			readdirSync(postmortemDir).some((f) => /^(GC-\d{4}-\d{3,})\.md$/.test(f));
+		if (orphanPostmortemsPresent) {
+			return {
+				ok: false,
+				error: `gc-index.md missing: ${relative(PI_ROOT, gcIndexPath)} (postmortem files exist without index)`,
+			};
+		}
+		return { ok: true, checked: false };
 	}
 	if (!existsSync(postmortemDir)) {
 		// No postmortems yet — invariant trivially satisfied.
@@ -292,7 +313,7 @@ export function verifyCookbookPostmortemConsistency(
 	}
 
 	if (orphanPostmortems.length === 0 && missingCookbookLinks.length === 0) {
-		return { ok: true };
+		return { ok: true, checked: true };
 	}
 	return { ok: false, orphanPostmortems, missingCookbookLinks };
 }
@@ -469,9 +490,12 @@ function main(): void {
 		process.exit(1);
 	}
 
-	console.log(`OK: ${passing.length} catalogues current (registry.yaml ↔ subagent.json consistent; profiles ↔ registry consistent; gc-index.md institutional coverage OK)`);
+	const cookbookNote = cookbookCross.checked
+		? "gc-index.md institutional coverage OK"
+		: "gc-index.md + postmortem dir both absent \u2014 institutional coverage suspended (no orphan postmortems)";
+	console.log(`OK: ${passing.length} catalogues current (registry.yaml \u2194 subagent.json consistent; profiles \u2194 registry consistent; ${cookbookNote})`);
 	for (const p of passing) {
-		console.log(`  ✓ ${p.name}.json (hash=${p.stored!.slice(0, 12)}…)`);
+		console.log(`  \u2713 ${p.name}.json (hash=${p.stored!.slice(0, 12)}\u2026)`);
 	}
 	process.exit(0);
 }

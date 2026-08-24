@@ -8,9 +8,28 @@ declare module "bun:test" {
     timeout?: number;
     retry?: number;
   }
-  
-  export function it(name: string, fn: () => void | Promise<void>, options?: TestOptions): void;
-  export function test(name: string, fn: () => void | Promise<void>, options?: TestOptions): void;
+
+  /**
+   * Runtime-only stub augmented to also expose the chainable
+   * helpers (`skipIf`, `if`, `skip`, etc.) that the real Bun runtime
+   * ships on `it` / `test`. The local `bun-types.d.ts` shim is kept
+   * narrow so `tsc` understands bun:test imports without dragging
+   * in the full bun-types package; this interface narrows the gap
+   * just enough for conditional skipping patterns like
+   * `it.skipIf(!existsSync(...))(...)`.
+   */
+  export interface TestFn {
+    (name: string, fn: () => void | Promise<void>, options?: TestOptions): void;
+    skipIf(condition: boolean): TestFn;
+    if(condition: boolean): TestFn;
+    skip: TestFn;
+    only: TestFn;
+    todo: TestFn;
+    failing: TestFn;
+  }
+
+  export const it: TestFn;
+  export const test: TestFn;
   export function beforeEach(fn: () => void | Promise<void>): void;
   export function afterEach(fn: () => void | Promise<void>): void;
   export function beforeAll(fn: () => void | Promise<void>): void;

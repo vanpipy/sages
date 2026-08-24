@@ -18,7 +18,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
@@ -276,7 +276,14 @@ describe("verify:gcdb gate (GC-2026-051 T5.2)", () => {
   });
 
   describe("gc-index.md round-trip", () => {
-    it("every goal currently in .pi/orchestrator/ is listed in gc-index.md", () => {
+    // The round-trip invariants below only hold when gc-index.md is the
+    // canonical entry point for institutional knowledge. When the file
+    // is removed (alongside docs/postmortem/ + docs/cookbook/), the
+    // discipline is intentionally suspended — the gate verifies-catalog
+    // and verify-gcdb agree there is nothing to round-trip. In that
+    // state the tests skip rather than pass-vacuously so the suite
+    // doesn't claim coverage it can't actually demonstrate.
+    it.skipIf(!existsSync(GC_INDEX))("every goal currently in .pi/orchestrator/ is listed in gc-index.md", () => {
       // If no goal files exist (current state), this is trivially true.
       // The invariant is "the index never lists fewer GCs than the
       // goal directory holds" — verified by enumerating real goals and
@@ -292,7 +299,7 @@ describe("verify:gcdb gate (GC-2026-051 T5.2)", () => {
       }
     });
 
-    it("every postmortemed GC referenced in gc-index.md resolves on disk", () => {
+    it.skipIf(!existsSync(GC_INDEX))("every postmortemed GC referenced in gc-index.md resolves on disk", () => {
       // Inverse: every id mentioned in the index body must either
       // have a matching postmortem file OR be in the carve-out
       // section. Catches hand-edited index drift.
