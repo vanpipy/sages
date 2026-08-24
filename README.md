@@ -76,8 +76,6 @@ contracts live in `pi/skills/orchestrator/templates/goals/` and are installed to
 | `pi-subagents/` | Agent runtime: subagent lifecycle and managed worktrees |
 | `pi-codebase-memory/` | Code knowledge graph MCP server |
 | `pi-evaluator/` | Evaluation metrics for cost, security, and text quality |
-| `pi-minimax/` | MiniMax AI integration |
-| `pi-yunxiao/` | Alibaba Cloud DevOps integration |
 
 ## Where to learn more
 
