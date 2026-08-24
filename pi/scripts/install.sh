@@ -747,6 +747,61 @@ setup_peer_node_modules_symlinks() {
   done
 
 }
+
+# Reverse-direction symlink: expose each installed sage peer under
+# sages/node_modules/@sages/<peer> so that an import statement like
+# `import { KNOWN_SUBAGENT_IDS } from '@sages/pi-subagents'` inside
+# pi/src/**/*.ts resolves during Node module resolution.
+#
+# Walks-up resolution from an importing file under pi/src/ lands on
+# sages/node_modules first, so without this link Node cannot find any
+# `@sages/*` peer. The forward link above (peer/node_modules → sages/node_modules)
+# solves the opposite direction (peer reading sages' deps); this function
+# solves sages reading peers-as-packages.
+#
+# Why this exists: f6eaf8f consolidated the subagent registry into
+# `@sages/pi-subagents` as the single source of truth and switched
+# pi/src/tools/orchestrator/dag-synthesizer.ts to import
+# KNOWN_SUBAGENT_IDS + defaultRunInBackground directly from there. The
+# previous in-tree subagent-registry.ts + pi/subagents/registry.yaml
+# pair had no scope, so this reverse link was unnecessary. The cleanup
+# author did not add this link, leaving every f6eaf8f+ install unable
+# to resolve `@sages/pi-subagents` (observed failure mode:
+# `Error: Cannot find module '@sages/pi-subagents'` from
+# ~/.pi/packages/sages/src/tools/orchestrator/dag-synthesizer.ts).
+#
+# Idempotent: skip when the symlink already points at the expected
+# relative target; rebuild when it's wrong or dangling. Never clobber a
+# real directory or file at the path — warn and skip. Runs after
+# setup_peer_node_modules_symlinks in install() so a fresh `bun install`
+# inside install_sages_files cannot wipe the symlink.
+setup_sages_peer_symlinks() {
+  for peer in pi-subagents pi-codebase-memory pi-evaluator; do
+    local peer_dir="$PI_DIR/packages/$peer"
+    [[ ! -d "$peer_dir" ]] && continue  # user opted out (--sages-only)
+
+    local link_dir="$PKG_DIR/node_modules/@sages"
+    local link_path="$link_dir/$peer"
+
+    mkdir -p "$link_dir"
+
+    if [[ -L "$link_path" ]]; then
+      local current
+      current="$(readlink "$link_path")"
+      if [[ "$current" == "../../../$peer" ]]; then
+        continue  # already correct
+      fi
+      rm "$link_path"
+    elif [[ -e "$link_path" ]]; then
+      # Real dir or file — don't clobber; warn so the user can intervene.
+      echo "  Warning: $link_path is a real entry (not a symlink), leaving alone"
+      continue
+    fi
+
+    ln -s "../../../$peer" "$link_path"
+    echo "  Linked sages/node_modules/@sages/$peer → ../../../$peer"
+  done
+}
 # ──────────────────────────────────────────────────────────────────
 # pi-subagents — subagent extension for pi
 #
@@ -1366,6 +1421,13 @@ install() {
   # After ALL peer file copies are done, set up node_modules symlinks pointing
   # at sages' shared deps (idempotent — skipped if peers already have node_modules).
   setup_peer_node_modules_symlinks
+
+  # Reverse-direction symlinks: expose each installed sage peer under
+  # sages/node_modules/@sages/<peer> so that pi/src/**/*.ts can `import
+  # '@sages/<peer>'` and Node walks up to find it. Missing this link
+  # caused every f6eaf8f+ install to fail at extension load with
+  # `Cannot find module '@sages/pi-subagents'`.
+  setup_sages_peer_symlinks
 
   # Install system prompt
   install_system_prompt
