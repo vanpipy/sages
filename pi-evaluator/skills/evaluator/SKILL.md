@@ -1,3 +1,8 @@
+---
+name: evaluator
+description: "Self-evaluate active Sages workflows via `eval_score()` (current score + 5-dimension breakdown) and `eval_trend()` (current run vs historical similar workflows). Use when `sages.rewardMode: true` is on — after designing the DAG, after writing key task reports, before finalizing, or whenever a dimension score is low and its `evidence` array points at the artifact to fix."
+---
+
 # Sages Reward Mode
 
 ## When reward mode is on (`sages.rewardMode: true` in `~/.pi/agent/settings.json`)
