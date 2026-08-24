@@ -39,7 +39,6 @@ mistakes:
 | Verifier lint | `pi/src/tools/orchestrator/verification-cmd-linter.ts` | **NEW** — rejects placeholder `verification_cmd` (heuristics + execution probe) |
 | Goal lock | `pi/src/tools/orchestrator/goal-lock.ts` | **NEW** — SHA-256 anti-cheat; detects silent SC modification |
 | Verdict gate | `pi/src/tools/orchestrator/verdict-enforcement.ts` | **NEW** — machine-enforced gate: REVISE/REJECT blocks `task_dispatch` until acknowledged |
-| Routines | `pi/src/tools/routines/sages-routines-install.ts` | **NEW** — auto-installs 3 Sages routines (session-wrap / resume / watchdog) on `session_start` |
 
 ### Soft mode policy (GC-2026-031)
 
@@ -128,7 +127,7 @@ Five GCs in one session, in order:
    fix (drift detection, 5 previously-missed GCs now appear)
 3. **GC-2026-055** — Routine auto-install on `session_start` +
    per-type `SAGES_REMINDER_FIXDIRECTIVES` + cleanup of 2 pre-existing
-   `task-count threshold` WARNs in `AGENTS.md` / `SUBAGENTS.md`
+   `dag_threshold` mental-model WARNs in `AGENTS.md` / `SUBAGENTS.md`
 4. **GC-2026-056** — `verification_cmd` linter (heuristics + execution
    probe; rejects placeholders like `echo yes`, `pwd`, `true`)
 5. **GC-2026-057** — Goal lock (SHA-256 anti-cheat; detects silent

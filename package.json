@@ -4,7 +4,8 @@
   "description": "Four Sages Agents - Multi-agent workflow for pi",
   "private": true,
   "workspaces": [
-    "pi"
+    "pi",
+    "pi-subagents"
   ],
   "scripts": {
     "pi:typecheck": "cd pi && bun run typecheck",

@@ -181,9 +181,10 @@ export function loadBuiltInProfile(id: string): Profile {
 
 /**
  * Read and validate a profile YAML at `path`. The path is resolved
- * against cwd AND the repository root, mirroring the
- * `subagent-registry.ts` fallback pattern, so tests and scripts can
- * run from either location without surprise failures.
+ * against cwd AND the repository root via `resolveProfilePath`,
+ * so tests and scripts can run from either location without
+ * surprise failures (e.g. `bun test ./test` from `pi/`, or
+ * `bun run verify:catalog` from the repo root).
  */
 function loadFromPath(path: string): Profile {
   const resolved = resolveProfilePath(path);
