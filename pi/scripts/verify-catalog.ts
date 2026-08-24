@@ -298,25 +298,25 @@ export function verifyCookbookPostmortemConsistency(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GC-2026-049 T3.2 — profile ↔ registry cross-consistency check
+// GC-2026-049 T3.2 — profile ↔ subagent-roster cross-consistency check
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // A profile is a named bundle (see `pi/src/profile.ts`) that whitelists
-// subagents. The profile's `subagents` list MUST be a subset of the
-// registry id set — otherwise the profile would dispatch a role the
-// runtime has never heard of, and `validateDAG` would emit "not a known
-// role" warnings on every task.
+// subagents. The profile's `subagents` list MUST be a subset of
+// `@sages/pi-subagents.KNOWN_SUBAGENT_IDS` — otherwise the profile
+// would dispatch a role the runtime has never heard of, and `validateDAG`
+// would emit "not a known role" warnings on every task.
 //
 // The check reads every `pi/profiles/*.yaml`, parses it, and confirms
-// each `profile.subagents` id appears in `pi/subagents/registry.yaml`.
-// Profiles with no `subagents` array (or any other schema failure) are
-// reported as a failure with a precise file path and reason.
+// each `profile.subagents` id appears in `KNOWN_SUBAGENT_IDS`. Profiles
+// with no `subagents` array (or any other schema failure) are reported
+// as a failure with a precise file path and reason.
 //
 // Direction: this check is one-directional (profile → registry). A
 // registered subagent that no profile references is *not* an error
 // (profiles intentionally whittle down the full roster). Orphan
-// detection is a separate, informational concern — see the test in
-// `pi/test/subagent-registry.test.ts` for the inverse perspective.
+// detection is a separate, informational concern — covered by the
+// built-in profile smoke tests in `pi/test/profiles.test.ts`.
 
 export interface ProfileCrossConsistencyResult {
 	ok: boolean;

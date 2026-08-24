@@ -179,8 +179,8 @@ describe("profile.ts — validation (malformed input)", () => {
  *
  * These tests pin:
  *   1. Every built-in profile's `subagents` list is a subset of
- *      `pi/subagents/registry.yaml`'s id set (the same invariant the
- *      `verify:catalog` script enforces at the repo level).
+ *      `@sages/pi-subagents.KNOWN_SUBAGENT_IDS` (the same invariant
+ *      the `verify:catalog` script enforces at the repo level).
  *   2. `loadProfile(overridePath)` reads the override path directly
  *      (and re-reads on every call — the cache is bypassed).
  *   3. `clearProfileCache()` actually clears the cache (a profile
@@ -216,7 +216,7 @@ const minimalValidProfile = (subagents: string[]) =>
 	`id: tmp\ndescription: temp profile for cross-consistency test\nsubagents: [${subagents.join(", ")}]\nisolation_default: none\ndag_threshold: 1\ngate_suite: []\nsoft_mode_reminder: ""\n`;
 
 describe("profile ↔ registry cross-consistency (GC-2026-049 T3.2)", () => {
-	it("every built-in profile's subagents list is a subset of registry.yaml ids", () => {
+	it("every built-in profile's subagents list is a subset of @sages/pi-subagents.KNOWN_SUBAGENT_IDS", () => {
 		const result = verifyProfileCrossConsistency(PROFILES_DIR);
 		expect(result.ok).toBe(true);
 		expect(result.unknown ?? []).toEqual([]);
@@ -225,7 +225,7 @@ describe("profile ↔ registry cross-consistency (GC-2026-049 T3.2)", () => {
 	it("rejects a profile that references an unregistered subagent", () => {
 		const path = tmpProfilePath("unknown-subagent");
 		try {
-			// 'definitely-not-registered' is not in registry.yaml
+			// 'definitely-not-registered' is not in @sages/pi-subagents.KNOWN_SUBAGENT_IDS
 			writeFileSync(path, minimalValidProfile(["Explore", "definitely-not-registered"]), "utf-8");
 			// loadProfile validates the schema but does NOT check
 			// against the registry — that is verifyProfileCrossConsistency's

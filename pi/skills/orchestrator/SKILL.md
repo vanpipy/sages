@@ -63,7 +63,8 @@ implementation dispatch.
 ## When each stage is recommended
 
 Under soft mode no stage is required. The table below is the
-recommended routing, anchored to the task-count threshold:
+recommended routing, anchored to the profile's `dag_threshold`
+(default `2` — DAG recommended when todowrite exceeds it):
 
 | Task shape                                  | Recommended stages (for >2 todowrite items) |
 |----------------------------------------------|------------------------------|

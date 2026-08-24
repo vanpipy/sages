@@ -26,7 +26,6 @@ pi/
 │       │   ├── task-dispatcher.ts # Stage 3
 │       │   ├── orchestrator-audit.ts # Stage 4 (A3 split)
 │       │   └── template-loader.ts  # {{var}} / {{#if}} / {{#each}}
-│       ├── file-gate.ts          # canMainAgentWrite() — L1/L2 path policy single source of truth
 │       └── brainstorming/        # pre-design intent clarification (slash command)
 ├── test/                         # Bun test suite (see test count: bun test ./test)
 ├── skills/                        # orchestrator + brainstorming SKILL.md

@@ -93,14 +93,13 @@ Key rules:
 
 ## Meta-File vs Production Code — Concrete Classification
 
-The dispatch contract (and `file-gate.ts`'s `canMainAgentWrite`)
-distinguish two classes of files. **Use this test to classify any
-path before picking a subagent**:
+The dispatch contract distinguishes two classes of files.
+**Use this test to classify any path before picking a subagent**:
 
 ### Meta-files (use `developer` with `tdd: "none"`)
 
-Allowed paths (also enforced by `canMainAgentWrite` via
-`META_WRITE_PATTERNS` — GC-2026-029 contracted to **root-only**):
+Allowed paths (per the meta-file allowlist — GC-2026-029 contracted
+to **root-only**):
 
 | Pattern | Examples |
 |---|---|
@@ -116,9 +115,9 @@ below).
 
 ### Production code (recommended: `developer` + worktree for >2-item workflows)
 
-Recommended paths (the historical `PRODUCTION_DENY_PATTERNS` is
-still defined in `file-gate.ts` for classifier-side intent
-reporting, but no longer enforced under soft mode):
+Recommended paths (the historical `PRODUCTION_DENY_PATTERNS` was
+dropped during the file-gate.ts cleanup; nothing enforces a
+production deny-list under soft mode):
 
 | Pattern | Examples |
 |---|---|
@@ -337,11 +336,10 @@ recommended pattern remains: dispatch `developer` with managed
 worktree isolation for any production-code edit on workflows with
 >2 items in the active todowrite.
 
-The `canMainAgentWrite(path)` function in
-`pi/src/tools/file-gate.ts` is still defined (and used by the
-bash-guard classifier) but is no longer a blocking path policy;
-it classifies commands and surfaces intent to the bash-guard,
-which under soft mode never blocks.
+The `file-gate.ts` module was removed in the cleanup that dropped the
+hard-gate policy (GC-2026-031 + f6eaf8f). Under soft mode, the
+bash-guard is a pure intent classifier — it surfaces advisory
+context but never blocks.
 
 For a detailed classification of which paths are meta-file vs
 production-code (with concrete examples), see
