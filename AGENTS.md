@@ -171,17 +171,8 @@ it forces the writer to articulate the negative space (what the
 recipe is NOT for), which is the part new contributors get wrong
 most often.
 
-Current entries:
-
-- `pi/docs/cookbook/dispatch-developer-TDD.md` — Spawning an
-  `implementer` worker (`subagent_type: developer`) with full TDD
-  discipline inside a managed worktree.
-- `pi/docs/cookbook/reviewer-as-regression-auditor.md` — Promoting a
-  `reviewer` worker to regression-auditor mode for projects whose
-  full test suite exceeds the 2-minute Layer-2 gate budget.
-- `pi/docs/cookbook/partial-status-handling.md` — Root-session
-  protocol when a worker reports `status: partial` (scope-creep
-  discoveries, deferred slices, re-spawn vs accept-partial decisions).
+*Currently empty after the 2026-08-24 reset — entries will populate
+as new GCs ship.*
 
 ### Postmortem
 
@@ -191,14 +182,8 @@ what broke, why, and how the fix sticks. Each entry follows:
 tagged in the frontmatter (`major`, `blocker`, `minor`) so future
 readers can triage at a glance.
 
-Current entries:
-
-- `pi/docs/postmortem/GC-2026-029.md` — Every Sages package
-  subtree is production code (meta-allowlist contraction).
-- `pi/docs/postmortem/GC-2026-031.md` — Lift the main-agent hard
-  gate to soft mode (full tool access by default).
-- `pi/docs/postmortem/GC-2026-044.md` — Tier-1 mechanisms 1.3 +
-  1.4: catalog generator/verifier chain + diagnostic wire.
+*Currently empty after the 2026-08-24 reset — entries will populate
+as new GCs ship.*
 
 ### GC index
 

@@ -117,21 +117,5 @@ runtime replaced that design on 2026-07-24; migration notes live in
 
 ### Recent: orchestrator self-feedback (GC-2026-053 → 058, 2026-08-20)
 
-Five GCs in one session, in order:
-
-1. **GC-2026-053** — L1 advisory mirror + `sages_reminder` tool + 3
-   routine templates + smoke test (4 commits, +906 tests)
-2. **GC-2026-054** — Postmortem for GC-2026-053 + `gen-gcdb` body-scan
-   fix (drift detection, 5 previously-missed GCs now appear)
-3. **GC-2026-055** — Routine auto-install on `session_start` +
-   per-type `SAGES_REMINDER_FIXDIRECTIVES` + cleanup of 2 pre-existing
-   `dag_threshold` mental-model WARNs in `AGENTS.md` / `SUBAGENTS.md`
-4. **GC-2026-056** — `verification_cmd` linter (heuristics + execution
-   probe; rejects placeholders like `echo yes`, `pwd`, `true`)
-5. **GC-2026-057** — Goal lock (SHA-256 anti-cheat; detects silent
-   SC modification after the goal is created)
-6. **GC-2026-058** — Verdict enforcement (machine-enforced gate;
-   REVISE/REJECT blocks `task_dispatch` until acknowledged)
-
-Together: 6 new modules, 236 new tests (790 → 1026), 5 new
-postmortems, 6 new feature branches all merged to main.
+*[Removed 2026-08-24 reset — those GCs are no longer in the
+postmortem index. See `git log` for the historical context.]*

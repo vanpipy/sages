@@ -2,7 +2,7 @@
 
 > **Maintained by:** `bun run gen:gcdb` (run from `pi/`).
 > **Source:** `git log --all --grep='GC-'`
-> **Last generated:** 2026-08-23
+> **Last generated:** 2026-08-24
 
 | ID | Title | Goal contract |
 | --- | --- | --- |
@@ -23,14 +23,13 @@
 | GC-2026-021 | Merge perf/pi-subagents-busy-wait-yield-tui-idle into main | [.pi/orchestrator/goal-GC-2026-021.yaml](../../.pi/orchestrator/goal-GC-2026-021.yaml) |
 | GC-2026-022 | Merge feat/pi-subagents-budget-handoff into main | [.pi/orchestrator/goal-GC-2026-022.yaml](../../.pi/orchestrator/goal-GC-2026-022.yaml) |
 | GC-2026-028 | audit remediation (F1/F2/F4/F5/F6/F7/F9 + lockfile) | [.pi/orchestrator/goal-GC-2026-028.yaml](../../.pi/orchestrator/goal-GC-2026-028.yaml) |
-| GC-2026-029 | merge meta-allowlist contraction | [.pi/orchestrator/goal-GC-2026-029.yaml](../../.pi/orchestrator/goal-GC-2026-029.yaml) |
+| GC-2026-029 | 8 cleanup rounds + drop subagent-registry | [.pi/orchestrator/goal-GC-2026-029.yaml](../../.pi/orchestrator/goal-GC-2026-029.yaml) |
 | GC-2026-030 | git-expert default subagent + main-agent awareness | [.pi/orchestrator/goal-GC-2026-030.yaml](../../.pi/orchestrator/goal-GC-2026-030.yaml) |
 | GC-2026-031 | lift main-agent hard gate → soft mode | [.pi/orchestrator/goal-GC-2026-031.yaml](../../.pi/orchestrator/goal-GC-2026-031.yaml) |
 | GC-2026-032 | phase-1 P1 — profile worktree.ts hot paths | [.pi/orchestrator/goal-GC-2026-032.yaml](../../.pi/orchestrator/goal-GC-2026-032.yaml) |
 | GC-2026-033 | phase-2 P1 — LRU memoize classifyBashCommand + extractBashTargets | [.pi/orchestrator/goal-GC-2026-033.yaml](../../.pi/orchestrator/goal-GC-2026-033.yaml) |
 | GC-2026-034 | phase-3 P2 — TTL cache skill-loader | [.pi/orchestrator/goal-GC-2026-034.yaml](../../.pi/orchestrator/goal-GC-2026-034.yaml) |
 | GC-2026-035 | add worktree-async baseline scripts — phase-4 capture | [.pi/orchestrator/goal-GC-2026-035.yaml](../../.pi/orchestrator/goal-GC-2026-035.yaml) |
-| GC-2026-036 | SpawnCapable.spawn returns Promise<string> — closes T3 typecheck gap | [.pi/orchestrator/goal-GC-2026-036.yaml](../../.pi/orchestrator/goal-GC-2026-036.yaml) |
 | GC-2026-037 | BudgetTracker + resolveDeadlineMs accept RunController | [.pi/orchestrator/goal-GC-2026-037.yaml](../../.pi/orchestrator/goal-GC-2026-037.yaml) |
 | GC-2026-038 | phase-4c prompt-layer governance | [.pi/orchestrator/goal-GC-2026-038.yaml](../../.pi/orchestrator/goal-GC-2026-038.yaml) |
 | GC-2026-039 | integrate T5 — merger Phase Gate tables + byte-identical HANDOFF | [.pi/orchestrator/goal-GC-2026-039.yaml](../../.pi/orchestrator/goal-GC-2026-039.yaml) |
@@ -47,22 +46,22 @@
 | GC-2026-050 | G4 event three-domain split — observability/ module + audit-state | [.pi/orchestrator/goal-GC-2026-050.yaml](../../.pi/orchestrator/goal-GC-2026-050.yaml) |
 | GC-2026-051 | G5 cookbook + postmortem + gc-index + verify:gcdb | [.pi/orchestrator/goal-GC-2026-051.yaml](../../.pi/orchestrator/goal-GC-2026-051.yaml) |
 | GC-2026-052 | G6 verify matrix hardening — 4 new verifiers + check:all aggregator | [.pi/orchestrator/goal-GC-2026-052.yaml](../../.pi/orchestrator/goal-GC-2026-052.yaml) |
-| GC-2026-053 | chain-key detection — kill false positives from legit refinement | [.pi/orchestrator/goal-GC-2026-053.yaml](../../.pi/orchestrator/goal-GC-2026-053.yaml) |
+| GC-2026-053 | 8 cleanup rounds + drop subagent-registry | [.pi/orchestrator/goal-GC-2026-053.yaml](../../.pi/orchestrator/goal-GC-2026-053.yaml) |
 | GC-2026-054 | postmortem for GC-2026-053 + gen-gcdb improvements | [.pi/orchestrator/goal-GC-2026-054.yaml](../../.pi/orchestrator/goal-GC-2026-054.yaml) |
 | GC-2026-055 | SAGES_REMINDER_FIXDIRECTIVES + auto-install routines on session_start | [.pi/orchestrator/goal-GC-2026-055.yaml](../../.pi/orchestrator/goal-GC-2026-055.yaml) |
 | GC-2026-056 | verification_cmd linter | [.pi/orchestrator/goal-GC-2026-056.yaml](../../.pi/orchestrator/goal-GC-2026-056.yaml) |
 | GC-2026-057 | goal lock — anti-cheat SHA-256 hash detects silent SC modification | [.pi/orchestrator/goal-GC-2026-057.yaml](../../.pi/orchestrator/goal-GC-2026-057.yaml) |
 | GC-2026-058 | verdict enforcement — machine-enforced gate against silent REVISE/REJECT bypass | [.pi/orchestrator/goal-GC-2026-058.yaml](../../.pi/orchestrator/goal-GC-2026-058.yaml) |
 | GC-2026-059 | L1 advisory chain-key detection | [.pi/orchestrator/goal-GC-2026-059.yaml](../../.pi/orchestrator/goal-GC-2026-059.yaml) |
-| GC-2026-060 | sages_todo persistence + TodoWrite mirror module (GC-2026-067 T3) | [.pi/orchestrator/goal-GC-2026-060.yaml](../../.pi/orchestrator/goal-GC-2026-060.yaml) |
+| GC-2026-060 | 8 cleanup rounds + drop subagent-registry | [.pi/orchestrator/goal-GC-2026-060.yaml](../../.pi/orchestrator/goal-GC-2026-060.yaml) |
 | GC-2026-061 | merge todo-as-DAG compile bridge | [.pi/orchestrator/goal-GC-2026-061.yaml](../../.pi/orchestrator/goal-GC-2026-061.yaml) |
 | GC-2026-062 | T4 template-loader module-relative | [.pi/orchestrator/goal-GC-2026-062.yaml](../../.pi/orchestrator/goal-GC-2026-062.yaml) |
 | GC-2026-063 | postmortem for pi-evaluator agentic metrics layer | [.pi/orchestrator/goal-GC-2026-063.yaml](../../.pi/orchestrator/goal-GC-2026-063.yaml) |
 | GC-2026-064 | postmortem for pi-evaluator agentic metrics layer | [.pi/orchestrator/goal-GC-2026-064.yaml](../../.pi/orchestrator/goal-GC-2026-064.yaml) |
 | GC-2026-065 | T1b extension tool_call listener | [.pi/orchestrator/goal-GC-2026-065.yaml](../../.pi/orchestrator/goal-GC-2026-065.yaml) |
-| GC-2026-066 | Tool Correctness metric + task-brief expected_tools schema | [.pi/orchestrator/goal-GC-2026-066.yaml](../../.pi/orchestrator/goal-GC-2026-066.yaml) |
-| GC-2026-067 | reminders | [.pi/orchestrator/goal-GC-2026-067.yaml](../../.pi/orchestrator/goal-GC-2026-067.yaml) |
-| GC-2026-068 | reminder chain closure + 3 follow-ups | [.pi/orchestrator/goal-GC-2026-068.yaml](../../.pi/orchestrator/goal-GC-2026-068.yaml) |
+| GC-2026-066 | fix package.json#version to 0.4.0 | [.pi/orchestrator/goal-GC-2026-066.yaml](../../.pi/orchestrator/goal-GC-2026-066.yaml) |
+| GC-2026-067 | sages_todo owns todo lifecycle, MC overlay driven by Sages | [.pi/orchestrator/goal-GC-2026-067.yaml](../../.pi/orchestrator/goal-GC-2026-067.yaml) |
+| GC-2026-068 | 8 cleanup rounds + drop subagent-registry | [.pi/orchestrator/goal-GC-2026-068.yaml](../../.pi/orchestrator/goal-GC-2026-068.yaml) |
 | GC-2026-069 | reminder chain closure + 3 follow-ups | [.pi/orchestrator/goal-GC-2026-069.yaml](../../.pi/orchestrator/goal-GC-2026-069.yaml) |
 
-_Total: 58 GCs_
+_Total: 57 GCs_
