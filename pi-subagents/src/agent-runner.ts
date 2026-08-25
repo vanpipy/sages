@@ -35,7 +35,7 @@ import {
 } from "./budget.js";
 import { buildParentContext, extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
-import { diagnosticForRunResult, writeDiagnostic } from "./diagnostic.js";
+import { diagnosticForRunResult, retryBudgetLeftFor, writeDiagnostic } from "./diagnostic.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
@@ -1295,6 +1295,13 @@ function emitRunDiagnostic(
 	try {
 		const classified = diagnosticForRunResult(result, cwd);
 		if (!classified) return;
+		// GC-2026-070: compute and persist retryBudgetLeft. The catalog declares
+		// handler.retryBudget for retry-subagent modes; we record the budget
+		// REMAINING after this attempt so the orchestrator's retry helper can
+		// decide whether one more dispatch is allowed without re-loading the
+		// catalog. Returns undefined (and writeDiagnostic then omits the field)
+		// when the cause has no actionable retry handler.
+		const retryBudgetLeft = retryBudgetLeftFor(classified.cause, cwd);
 		writeDiagnostic({
 			dispatchId: options.agentId ?? `${type}-${Date.now()}`,
 			context: { taskId: options.agentId },
@@ -1303,6 +1310,7 @@ function emitRunDiagnostic(
 			cause: classified.cause,
 			detail: classified.detail,
 			evidence: result.failure ? { stderrDigest: result.failure } : undefined,
+			...(retryBudgetLeft !== undefined ? { retryBudgetLeft } : {}),
 			cwd,
 			catalogCwd: cwd,
 		});
