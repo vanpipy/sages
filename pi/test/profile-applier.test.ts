@@ -186,8 +186,8 @@ describe("applyProfile integration", () => {
 		// Trigger each hook path
 		pi.fire("tool_call", { toolName: "bash" });
 		pi.fire("before_agent_start", { systemPrompt: "" });
-		const result = pi.fire("tool_call", { toolName: "agent" });
-		expect(result?.block).toBeFalsy(); // agent is in STANDARD_PROFILE.tools
+		const result = pi.fire("tool_call", { toolName: "Agent" });
+		expect(result?.block).toBeFalsy(); // Agent is in STANDARD_PROFILE.tools
 		expect(pi.entries().length).toBeGreaterThan(0);
 	});
 });

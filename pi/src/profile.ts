@@ -41,12 +41,13 @@ import * as yaml from "js-yaml";
  */
 export const DEFAULT_SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — subagent dispatch recommended**
 >
-> If this is part of a larger workflow (>2 items in your active todowrite),
-> consider dispatching via the 4-stage DAG workflow: goal → DAG → dispatch → audit.
-> The developer / auditor / merger / git-expert pipeline is the recommended
-> approach for complex multi-step work. For ≤2 tasks, direct handling is
-> acceptable. This is a recommendation — the agent decides. No commands are
-> blocked.
+> If this is part of a larger workflow (>2 items in your active todowrite,
+> i.e. above the **task-count threshold**), consider dispatching via the
+> 4-stage DAG workflow: goal → DAG → dispatch → audit. The developer /
+> auditor / merger / git-expert pipeline is the recommended approach for
+> complex multi-step work. For ≤2 tasks (below the task-count threshold),
+> direct handling is acceptable. This is a recommendation — the agent decides.
+> No commands are blocked.
 `;
 
 export type IsolationDefault = "none" | "current-workspace" | "worktree";
