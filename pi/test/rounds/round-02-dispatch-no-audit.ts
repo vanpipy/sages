@@ -1,5 +1,5 @@
 /**
- * Round 2: L1 advisory — dispatch_no_audit
+ * Round 2: Orchestrator advisory — dispatch_no_audit
  *
  * task_dispatch called but orchestrator_audit never observed.
  * Expected: critical advisory — "audit not run, must call orchestrator_audit".
@@ -9,9 +9,9 @@ import { describe, it, expect } from "bun:test";
 import {
   extractOrchestratorFindings,
   RULE_FIX_DIRECTIVES,
-} from "@/l1-advisory.js";
+} from "@/orchestrator-advisory.js";
 
-describe("Round 2: L1 advisory — dispatch_no_audit", () => {
+describe("Round 2: Orchestrator advisory — dispatch_no_audit", () => {
   it("fires with critical severity when task_dispatch is called without audit", () => {
     const history = [
       { toolName: "task_dispatch", input: { dag_id: "DAG-2026-X" }, timestamp: 1 },

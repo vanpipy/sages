@@ -136,7 +136,7 @@ describe("auditor-prompt: invariants", () => {
 describe("auditor-prompt: tool preference order (GC-2026-012 symmetry)", () => {
 	// The auditor prompt must publish the same tool preference order as
 	// the developer prompt — AFT → MCP → Magic Context → todowrite → read
-	// → bash. This pins the L2 dispatch discipline into the auditor's
+	// → bash. This pins the subagent dispatch discipline into the auditor's
 	// prompt and gives a "is the auditor reaching for AFT before bash?"
 	// signal visible in the prose itself.
 

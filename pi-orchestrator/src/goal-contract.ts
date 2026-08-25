@@ -320,7 +320,7 @@ export async function executeGoalContractCreate(
     cwd,
     `goal-${contract.id}.yaml`,
     yaml.dump(contract, { indent: 2, lineWidth: 120, noRefs: true }),
-    { owner: "l3", validate: isGoalContractState },
+    { owner: "orchestrator", validate: isGoalContractState },
   );
 
   // GC-2026-067 T1: emit run/goal_created so the orchestrator-state

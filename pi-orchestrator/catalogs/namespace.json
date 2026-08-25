@@ -1,12 +1,12 @@
 {
-  "_source_hash": "0a177ebe13524105f8b97e38e963ac95cb0c097a6bcb33e961d3cdaf058e3cb2",
-  "_generated_at": "2026-08-25T12:36:25.621Z",
+  "_source_hash": "33021917b8d0ea21f1bf8c06b9e0acd38f4bed158df542c2a2bff9180d37cdf7",
+  "_generated_at": "2026-08-25T14:32:08.119Z",
   "_source_files": [
     "src/namespace-ownership.ts"
   ],
   "entries": [
     {
-      "id": "l3",
+      "id": "orchestrator",
       "patterns": [
         "^goal-${SAFE_SEGMENT}\\\\.yaml$",
         "^dag-${SAFE_SEGMENT}\\\\.yaml$",

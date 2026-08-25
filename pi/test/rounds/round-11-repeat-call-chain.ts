@@ -1,5 +1,5 @@
 /**
- * Round 11: L1 advisory — repeat_call_chain (chain-key detection)
+ * Round 11: Orchestrator advisory — repeat_call_chain (chain-key detection)
  *
  * New rule in GC-2026-059. Fires when same (tool, args) called
  * 3+ times. General "stuck on same call" detector that mirrors
@@ -14,9 +14,9 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { extractOrchestratorFindings } from "@/l1-advisory.js";
+import { extractOrchestratorFindings } from "@/orchestrator-advisory.js";
 
-describe("Round 11: L1 advisory — repeat_call_chain", () => {
+describe("Round 11: Orchestrator advisory — repeat_call_chain", () => {
   it("R11-01: fires on 3+ identical reads of the same path", () => {
     const history = Array.from({ length: 4 }, (_, i) => ({
       toolName: "read",

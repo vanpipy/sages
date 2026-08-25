@@ -1,7 +1,7 @@
-export type OrchestratorNamespaceOwner = "l3" | "developer" | "auditor";
+export type OrchestratorNamespaceOwner = "orchestrator" | "developer" | "auditor";
 
 const SAFE_SEGMENT = "[A-Za-z0-9][A-Za-z0-9._-]*";
-const L3_PATTERNS = [
+const ORCHESTRATOR_PATTERNS = [
   new RegExp(`^goal-${SAFE_SEGMENT}\\.yaml$`),
   new RegExp(`^dag-${SAFE_SEGMENT}\\.yaml$`),
   new RegExp(`^audit-state-${SAFE_SEGMENT}\\.yaml$`),
@@ -28,7 +28,7 @@ function normalizeOwnedPath(path: string): string {
 /** Return the sole role allowed to create or replace an orchestrator artifact. */
 export function classifyOrchestratorNamespace(path: string): OrchestratorNamespaceOwner | null {
   const normalized = normalizeOwnedPath(path);
-  if (L3_PATTERNS.some((pattern) => pattern.test(normalized))) return "l3";
+  if (ORCHESTRATOR_PATTERNS.some((pattern) => pattern.test(normalized))) return "orchestrator";
   if (DEVELOPER_PATTERNS.some((pattern) => pattern.test(normalized))) return "developer";
   if (AUDITOR_PATTERNS.some((pattern) => pattern.test(normalized))) return "auditor";
   return null;

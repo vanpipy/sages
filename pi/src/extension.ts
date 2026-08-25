@@ -3,7 +3,7 @@
  * resolves the @sages/pi package.
  *
  * The conductor (`@sages/pi`) is a thin profile-driven layer. The actual
- * orchestrator machinery (4-stage DAG workflow, L1 advisory, bash
+ * orchestrator machinery (4-stage DAG workflow, Orchestrator advisory, bash
  * classification, file-gate, observability, project analyzer) lives in
  * the sibling `@sages/pi-orchestrator` package.
  *
@@ -14,7 +14,7 @@
  *      - `installPromptComposer`   — prepend profile-driven system prompt
  *      - `installReminderInjector` — fire soft-mode reminder once on first bash
  *   3. Delegate to the orchestrator package: `registerOrchestratorTools(pi, runtimeDeps)`
- *      registers the 5 orchestrator tools + installs the L1 advisory
+ *      registers the 5 orchestrator tools + installs the Orchestrator advisory
  *      pipeline. The runtime deps pass through the cwd-aware goal/dag
  *      loaders the orchestrator needs for its detectors.
  *
@@ -38,7 +38,7 @@ import {
 	registerOrchestratorTools,
 	loadGoalContract,
 	loadPlan,
-	type L1AdvisoryRuntimeDeps,
+	type OrchestratorAdvisoryRuntimeDeps,
 } from "../../pi-orchestrator/src/index.js";
 import { loadProfile } from "./profile/loader.js";
 import { applyProfile } from "./profile/applier.js";
@@ -112,12 +112,12 @@ export function registerConductorOnly(pi: ExtensionAPI): void {
 }
 
 /**
- * Build the runtime deps the orchestrator's L1 advisory handler needs
+ * Build the runtime deps the orchestrator's Orchestrator advisory handler needs
  * to enrich its decisions. The orchestrator's no-op defaults return
  * `null` for goal/dag lookups; the conductor wires the real loaders
  * (which know how to read goal / plan YAML from disk).
  */
-function buildL1RuntimeDeps(): L1AdvisoryRuntimeDeps {
+function buildOrchestratorAdvisoryRuntimeDeps(): OrchestratorAdvisoryRuntimeDeps {
 	return {
 		loadGoalScope: (goalId: string, cwd: string) => {
 			const goal = loadGoalContract(cwd, goalId);
@@ -147,7 +147,7 @@ function buildL1RuntimeDeps(): L1AdvisoryRuntimeDeps {
  */
 export default function registerSagesExtension(pi: ExtensionAPI): void {
 	registerConductorOnly(pi);
-	registerOrchestratorTools(pi, buildL1RuntimeDeps());
+	registerOrchestratorTools(pi, buildOrchestratorAdvisoryRuntimeDeps());
 }
 
 // Exported for tests that want to assert which profile the extension

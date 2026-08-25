@@ -86,7 +86,7 @@ describe("developer-prompt: invariants", () => {
 describe("developer-prompt: tool preference order (GC-2026-012)", () => {
 	// The developer prompt must publish an explicit tool preference order so
 	// the subagent reaches for indexed semantic tools (AFT, MCP, Magic Context)
-	// and `todowrite` before falling back to bash / read. This pins the L2
+	// and `todowrite` before falling back to bash / read. This pins the subagent
 	// dispatch discipline into the prompt itself.
 
 	function sectionIndex(name: string): number {

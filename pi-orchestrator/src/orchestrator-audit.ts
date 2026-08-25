@@ -184,7 +184,7 @@ function loadAuditState(cwd: string, dagId: string): AuditState | null {
 function saveAuditState(cwd: string, state: AuditState): void {
   const path = auditStatePath(cwd, state.dag_id);
   const serialized = yaml.dump(state, { indent: 2, lineWidth: 120, noRefs: true });
-  const saved = atomicWriteOrchestratorText(cwd, `audit-state-${state.dag_id}.yaml`, serialized, "l3");
+  const saved = atomicWriteOrchestratorText(cwd, `audit-state-${state.dag_id}.yaml`, serialized, "orchestrator");
   if (saved !== path) throw new Error(`audit state path mismatch: ${saved} vs ${path}`);
 }
 
@@ -324,11 +324,11 @@ async function initAudit(
   // YAML block, and stuck-checkpoint patterns that the per-task audit
   // may have missed. The findings are surfaced as audit-gate warnings;
   // they do NOT block the audit (workflowReady stays as the auditor's
-  // verdict) but they trigger the L3 to record additional findings.
+  // verdict) but they trigger the orchestrator to record additional findings.
   const taskReports = readTaskReports(cwd, tasks);
   // GC-2026-041: Use the full 5-rule extractAuditFindings from pi-subagents.
   // The inline 3-rule subset is gone. Each task's report is parsed and any
-  // findings are surfaced as inline_findings for the L3 to record.
+  // findings are surfaced as inline_findings for the orchestrator to record.
   const inlineFindings: Array<{ task_id: string; finding: AuditFinding }> = [];
   for (const t of tasks) {
     const report = taskReports.get(t.id);
@@ -343,7 +343,7 @@ async function initAudit(
     content: [{ type: "text", text: JSON.stringify({
       status: "in_progress",
       phase: "audit-init",
-      intent: `Audit initialized for ${tasks.length} task(s). workflowReady=${workflowSummary.workflowReady}. ${workflowSummary.blockingTasks.length > 0 ? `Blocking: ${workflowSummary.blockingTasks.join(", ")}. Run any remaining tasks + audits, then record findings (≥${findingsRequiredMin(depth)} required) and complete.` : "All tasks certified — record findings (≥" + findingsRequiredMin(depth) + " required for fast depth) and complete."}` + (inlineFindings.length > 0 ? ` GC-2026-039 runtime enforcement surfaced ${inlineFindings.length} finding(s); the L3 should record them via the observation.findings array.` : ""),
+      intent: `Audit initialized for ${tasks.length} task(s). workflowReady=${workflowSummary.workflowReady}. ${workflowSummary.blockingTasks.length > 0 ? `Blocking: ${workflowSummary.blockingTasks.join(", ")}. Run any remaining tasks + audits, then record findings (≥${findingsRequiredMin(depth)} required) and complete.` : "All tasks certified — record findings (≥" + findingsRequiredMin(depth) + " required for fast depth) and complete."}` + (inlineFindings.length > 0 ? ` GC-2026-039 runtime enforcement surfaced ${inlineFindings.length} finding(s); the orchestrator should record them via the observation.findings array.` : ""),
       validation: {
         errors: workflowSummary.workflowReady ? [] : [`tasks not yet certified: ${workflowSummary.blockingTasks.join(", ")}`],
         warnings: inlineFindings.length > 0 ? [`GC-2026-039: ${inlineFindings.length} runtime enforcement finding(s) surfaced — see inline_findings`]: [],
@@ -522,20 +522,20 @@ async function completeAudit(
 
   // GC-2026-041: Auto-inject inline findings into state.findings.
   // Re-run extractAuditFindings on each task's report. For any finding
-  // NOT already in state.findings (i.e. the L3 didn't record it via
+  // NOT already in state.findings (i.e. the orchestrator didn't record it via
   // observation.findings), auto-record it as a synthetic finding with
   // category=castration (the cross-cutting governance concern) and
   // severity matching the inline finding's severity. This ensures
-  // computeScore penalizes governance violations even if the L3
+  // computeScore penalizes governance violations even if the orchestrator
   // forgets to record them. The synthetic findings are visible in the
-  // audit report; the L3 still has the option to add its own findings.
+  // audit report; the orchestrator still has the option to add its own findings.
   const taskReportsAuto = readTaskReports(cwd, state.tasks);
   for (const t of state.tasks) {
     const report = taskReportsAuto.get(t.id);
     if (report == null) continue;
     const inlineResults = extractAuditFindings(report, "");
     for (const inf of inlineResults) {
-      // Has the L3 already recorded an equivalent finding? (Match by
+      // Has the orchestrator already recorded an equivalent finding? (Match by
       // rule + task_id.) If yes, skip. If no, auto-inject.
       const already = state.findings.some(
         (f) =>
@@ -571,12 +571,12 @@ async function completeAudit(
   const computedScore = computeScore(state.findings);
   const finalScore = Math.min(score, computedScore);
 
-  // Namespace ownership check — auditor owns audit-{id}.md, L3 owns the
+  // Namespace ownership check — auditor owns audit-{id}.md, Orchestrator owns the
   // workflow rollup. The path the tool returns MUST match the path the
   // tool actually writes to (C1 regression guard). Ownership classification
   // also rejects cross-namespace writes before they reach the file system.
   // Per-scope report path:
-  //   - workflow → audit-workflow.md (L3-owned rollup)
+  //   - workflow → audit-workflow.md (orchestrator-owned rollup)
   //   - task     → audit-<task_id>.md      (auditor-owned per-task report)
   //   - batch    → audit-<batch>.md        (auditor-owned per-batch report)
   // Both task and batch use the AUDITOR namespace — taskAuditPath gives
@@ -860,9 +860,9 @@ function readAuditReports(cwd: string, tasks: TaskNode[]): Map<string, string | 
  * runtime enforcement checks. Returns a map keyed by task id; missing
  * or unreadable files map to null.
  *
- * The task report is what the sub-agent developer (or L3 fallback)
+ * The task report is what the sub-agent developer (or orchestrator fallback)
  * writes at the end of a task. It contains the agent's last message
- * embedded in markdown + a structured summary by the L3.
+ * embedded in markdown + a structured summary by the orchestrator.
  */
 function readTaskReports(cwd: string, tasks: TaskNode[]): Map<string, string | null> {
 	const reports = new Map<string, string | null>();
@@ -939,12 +939,12 @@ export function writeAuditReport(
   }
 
   // Namespace ownership check — only auditor-owned audit-{task|batch|scope}.md
-  // and L3-owned audit-workflow.md / audit-rollup-*.md may be written from
+  // and orchestrator-owned audit-workflow.md / audit-rollup-*.md may be written from
   // this tool. Without this guard, a state-prefixed report path could
   // accidentally cross a namespace boundary.
   const relative = path.replace(`${cwd}/${ORCHESTRATOR_DIR}/`, "").replaceAll("\\", "/");
-  const owner: "auditor" | "l3" = relative === WORKFLOW_AUDIT || relative.startsWith("audit-rollup-")
-    ? "l3"
+  const owner: "auditor" | "orchestrator" = relative === WORKFLOW_AUDIT || relative.startsWith("audit-rollup-")
+    ? "orchestrator"
     : "auditor";
   atomicWriteOrchestratorText(cwd, relative, lines.join("\n"), owner);
   return path;

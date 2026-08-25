@@ -58,7 +58,7 @@ Author is `git config user.{name,email}`. Never `--author`, never `GIT_AUTHOR_*`
 |---|---|
 | Developer | `task-{task_id}-report.md`, `handoff/{workspace_id}/{task_id}-handoff.md` |
 | Auditor | `audit-{task_id}.md` |
-| L3 | `goal-{id}.yaml`, DAG, audit-state, workflow rollup |
+| Orchestrator | `goal-{id}.yaml`, DAG, audit-state, workflow rollup |
 
 Cross-namespace overwrites prohibited. Explore and Plan are read-only.
 

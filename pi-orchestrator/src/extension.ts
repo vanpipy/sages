@@ -29,9 +29,9 @@ import { registerTaskDispatcherTool } from "./task-dispatcher.js";
 import { registerOrchestratorAuditTool } from "./orchestrator-audit.js";
 import { registerSagesReminderTool } from "./sages-reminder.js";
 import {
-	installL1AdvisoryHandlers,
-	type L1AdvisoryRuntimeDeps,
-} from "./l1-advisory.js";
+	installOrchestratorAdvisoryHandlers,
+	type OrchestratorAdvisoryRuntimeDeps,
+} from "./orchestrator-advisory.js";
 
 /**
  * Register all orchestrator tools on the pi extension. Idempotent.
@@ -42,7 +42,7 @@ import {
  */
 export function registerOrchestratorTools(
 	pi: ExtensionAPI,
-	runtime?: L1AdvisoryRuntimeDeps,
+	runtime?: OrchestratorAdvisoryRuntimeDeps,
 ): void {
 	registerGoalContractTool(pi);
 	registerDAGSynthesizerTool(pi);
@@ -54,7 +54,7 @@ export function registerOrchestratorTools(
 	// message_end assistant-text tracker). Pre-PR-2 these handlers lived
 	// in the conductor; the smoke test in `test/smoke/gc-2026-053.test.ts`
 	// expects them registered alongside the orchestrator tools.
-	installL1AdvisoryHandlers(pi, runtime);
+	installOrchestratorAdvisoryHandlers(pi, runtime);
 }
 
 /**

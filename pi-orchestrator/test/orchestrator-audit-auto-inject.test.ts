@@ -1,7 +1,7 @@
 /**
  * orchestrator-audit-auto-inject.test.ts — GC-2026-041
  *
- * Tests the auto-inject logic: when the L3 doesn't record inline findings
+ * Tests the auto-inject logic: when the orchestrator doesn'''t record inline findings
  * via observation.findings, the orchestrator_audit tool should
  * auto-record them as castration findings so computeScore penalizes
  * governance violations.
@@ -112,7 +112,7 @@ handoff_for_next_task: []
 
 	it("T-AUTOINJECT-04: existing finding detected by issue text -> no duplicate", () => {
 		// The auto-inject compares by issue text to avoid duplicate
-		// findings if the L3 already recorded the same issue.
+		// findings if the orchestrator already recorded the same issue.
 		const auditFinding = extractAuditFindings(`\`\`\`yaml
 status: completed
 deliverables:
@@ -125,7 +125,7 @@ open_questions: []
 \`\`\``, "")[0];
 		expect(auditFinding).toBeDefined();
 
-		// Simulate: L3 already recorded this finding
+		// Simulate: orchestrator already recorded this finding
 		const existingIssue = auditFinding!.issue;
 		let state = makeInitialState() as any;
 		state = appendFindings(state, [

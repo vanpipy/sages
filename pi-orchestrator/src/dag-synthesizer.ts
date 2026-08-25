@@ -481,7 +481,7 @@ export function planToYaml(plan: OrchestrationPlan): string {
 /** Load a goal contract from disk. */
 export function loadGoalContract(cwd: string, goalId: string): GoalContract | null {
   return loadYamlOrchestratorFile(cwd, `goal-${goalId}.yaml`, {
-    owner: "l3",
+    owner: "orchestrator",
     validate: isGoalContractState as unknown as (value: unknown) => value is GoalContract,
   });
 }
@@ -502,7 +502,7 @@ export function parseGoalContractYaml(raw: string): GoalContract {
 /** Load a plan from disk. Returns null if file is missing or malformed. */
 export function loadPlan(cwd: string, dagId: string): OrchestrationPlan | null {
   return loadYamlOrchestratorFile(cwd, `dag-${dagId}.yaml`, {
-    owner: "l3",
+    owner: "orchestrator",
     validate: isOrchestrationPlanState as unknown as (value: unknown) => value is OrchestrationPlan,
   });
 }
@@ -573,7 +573,7 @@ export async function executeDAGSynthesize(
   // Build plan and write
   const plan = buildPlan(params, contract, expectedToolsTaskWarnings);
   const path = atomicWriteOrchestratorFile(cwd, `dag-${plan.id}.yaml`, planToYaml(plan), {
-    owner: "l3",
+    owner: "orchestrator",
     validate: isOrchestrationPlanState,
   });
 

@@ -138,7 +138,7 @@ export interface TraceDecisionsValidation {
 // ---------------------------------------------------------------------------
 
 /**
- * Input to `check_workflow`. L1 + L2 merged into a single structural check.
+ * Input to `check_workflow`. Orchestrator advisory + subagent advisory merged into a single structural check.
  *
  * - `run_verification_cmds`: default true. Set false for a fast dry-run
  *   that skips re-execution.

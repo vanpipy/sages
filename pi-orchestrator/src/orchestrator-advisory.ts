@@ -1,5 +1,5 @@
 /**
- * l1-advisory.ts — GC-2026-053 + GC-2026-059
+ * orchestrator-advisory.ts — GC-2026-053 + GC-2026-059
  *
  * Orchestrator advisory mirror. This mirrors the subagent advisory
  * pattern from `pi-subagents/src/agent-runner.ts:advisoryFor`, applied to
@@ -46,7 +46,7 @@
  * Same args = stuck. Different args = progress.
  */
 
-export type L1Severity = "minor" | "major" | "critical";
+export type OrchestratorAdvisorySeverity = "minor" | "major" | "critical";
 
 import {
 	chainKey,
@@ -57,7 +57,7 @@ import {
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-export type L1RuleId =
+export type OrchestratorAdvisoryRuleId =
 	| "dag_resynth_loop"
 	| "dispatch_no_audit"
 	| "transition_skip_failed"
@@ -65,9 +65,9 @@ export type L1RuleId =
 	| "no_progress_no_audit"
 	| "repeat_call_chain";
 
-export interface L1Finding {
-	rule: L1RuleId;
-	severity: L1Severity;
+export interface OrchestratorAdvisoryFinding {
+	rule: OrchestratorAdvisoryRuleId;
+	severity: OrchestratorAdvisorySeverity;
 	issue: string;
 	evidence: string;
 	recommendation: string;
@@ -121,7 +121,7 @@ export interface OrchestratorAdvisoryContext {
 	 *  DEFAULT_ADVISORY_BUDGET_BY_SEVERITY (or the override passed via
 	 *  options.maxAdvisoriesBySeverity). The extension process owns
 	 *  this map; orchestratorAdvisoryFor reads it but never mutates it. */
-	advisoriesBySeverity: Record<L1Severity, number>;
+	advisoriesBySeverity: Record<OrchestratorAdvisorySeverity, number>;
 }
 
 export interface OrchestratorAdvisoryOptions {
@@ -165,7 +165,7 @@ export interface OrchestratorAdvisoryOptions {
 	/** Per-severity cap override. Merged on top of
 	 *  DEFAULT_ADVISORY_BUDGET_BY_SEVERITY. Set a severity to
 	 *  `Number.POSITIVE_INFINITY` to disable its cap entirely. */
-	maxAdvisoriesBySeverity?: Partial<Record<L1Severity, number>>;
+	maxAdvisoriesBySeverity?: Partial<Record<OrchestratorAdvisorySeverity, number>>;
 }
 
 // =============================================================================
@@ -197,17 +197,17 @@ export const ADVISORY_MAX_TOKENS = 200;
  * Overridable via `options.maxAdvisoriesBySeverity`. Set to
  * `Number.POSITIVE_INFINITY` to disable a severity's cap.
  */
-export const DEFAULT_ADVISORY_BUDGET_BY_SEVERITY: Record<L1Severity, number> = {
+export const DEFAULT_ADVISORY_BUDGET_BY_SEVERITY: Record<OrchestratorAdvisorySeverity, number> = {
 	critical: Number.POSITIVE_INFINITY,
 	major: 4,
 	minor: 0,
 };
 
-export const ADVISORY_MIN_SEVERITY: L1Severity = "major";
+export const ADVISORY_MIN_SEVERITY: OrchestratorAdvisorySeverity = "major";
 
 /** Per-rule actionable fix text. Mirrors subagent advisory's `RULE_FIX_DIRECTIVES`
  *  shape so both layers are introspectable in the same way. */
-export const RULE_FIX_DIRECTIVES: Record<L1RuleId, string> = {
+export const RULE_FIX_DIRECTIVES: Record<OrchestratorAdvisoryRuleId, string> = {
 	dag_resynth_loop:
 		"The previous DAG synthesis failed due to X; either amend goal({scope, criteria}), or explicitly revise the current DAG instead of calling dag_synthesize again (if args are identical each time)",
 	dispatch_no_audit:
@@ -354,7 +354,7 @@ function detectDagResynthLoop(
 	stuckIntervalMs: number,
 	errorHistory: OrchestratorToolResult[] | undefined,
 	lastAssistantMessage: string | undefined,
-): L1Finding | null {
+): OrchestratorAdvisoryFinding | null {
 	const dagCalls = history.filter((c) => c.toolName === dagToolName);
 	const byChain = groupCallsByChainKey(dagCalls);
 
@@ -391,7 +391,7 @@ function detectRepeatCallChain(
 	stuckIntervalMs: number,
 	errorHistory: OrchestratorToolResult[] | undefined,
 	lastAssistantMessage: string | undefined,
-): L1Finding | null {
+): OrchestratorAdvisoryFinding | null {
 	const byChain = groupCallsByChainKey(history);
 
 	let top: { chain: OrchestratorToolCall[]; count: number; sample: ChainToolCall } | null = null;
@@ -420,7 +420,7 @@ function detectRepeatCallChain(
 
 /** Detect `dispatch_no_audit`: task_dispatch called but no orchestrator_audit observed
  *  in the entire history (or no audit observed AFTER the last dispatch). */
-function detectDispatchNoAudit(counters: Counters): L1Finding | null {
+function detectDispatchNoAudit(counters: Counters): OrchestratorAdvisoryFinding | null {
 	if (counters.taskDispatchCalls === 0) return null;
 	// The simplest correct rule: there has been at least one dispatch,
 	// and no audit has been observed. This covers the most common
@@ -446,7 +446,7 @@ function detectTransitionSkipFailed(
 	history: OrchestratorToolCall[],
 	taskDispatchToolName: string,
 	loadDagPlan: ((dagId: string) => DagPlanSnapshot | null) | undefined,
-): L1Finding | null {
+): OrchestratorAdvisoryFinding | null {
 	if (!loadDagPlan) return null;
 	// Walk history in reverse to find the most recent task_dispatch that
 	// includes a transition block. If its task has any failed dep, fire.
@@ -489,7 +489,7 @@ function detectTransitionSkipFailed(
 function detectGoalDrift(
 	history: OrchestratorToolCall[],
 	loadGoalScope: ((goalId: string) => GoalScopeSnapshot | null) | undefined,
-): L1Finding | null {
+): OrchestratorAdvisoryFinding | null {
 	if (!loadGoalScope) return null;
 	// Gather (goalId, paths) pairs from the history. We only consider
 	// tools that explicitly carry file references (dag_synthesize with
@@ -545,7 +545,7 @@ function detectNoProgressNoAudit(
 	history: OrchestratorToolCall[],
 	threshold: number,
 	chainKeyThreshold: number = 3,
-): L1Finding | null {
+): OrchestratorAdvisoryFinding | null {
 	if (counters.totalToolCallsSinceLastAudit <= threshold) return null;
 	// Tighten: also require at least one chain at length ≥ chainKeyThreshold.
 	// This means the rule fires when the LLM is genuinely stuck on a
@@ -575,20 +575,20 @@ function detectNoProgressNoAudit(
  * plus the structured fields the caller needs to update its dedup /
  * per-severity budget counters without re-parsing the text.
  */
-export interface L1AdvisoryEntry {
+export interface OrchestratorAdvisoryEntry {
 	/** Formatted string with the same shape the subagent advisory emits, prefixed with severity. */
 	text: string;
 	/** Rule ID — caller adds this to `alreadyAdvisedRules`. */
-	rule: L1RuleId;
+	rule: OrchestratorAdvisoryRuleId;
 	/** Severity — caller increments `advisoriesBySeverity[severity]`. */
-	severity: L1Severity;
+	severity: OrchestratorAdvisorySeverity;
 }
 
-/** Extract L1 findings from the orchestrator's tool-call history. */
+/** Extract Orchestrator advisory findings from the orchestrator's tool-call history. */
 export function extractOrchestratorFindings(
 	history: OrchestratorToolCall[],
 	options: OrchestratorAdvisoryOptions = {},
-): L1Finding[] {
+): OrchestratorAdvisoryFinding[] {
 	const opts = {
 		dagSynthesizeToolName: options.dagSynthesizeToolName ?? "dag_synthesize",
 		taskDispatchToolName: options.taskDispatchToolName ?? "task_dispatch",
@@ -601,10 +601,10 @@ export function extractOrchestratorFindings(
 		loadDagPlan: options.loadDagPlan,
 	};
 
-	const findings: L1Finding[] = [];
+	const findings: OrchestratorAdvisoryFinding[] = [];
 
 	const counters = tallyCounters(history, opts);
-	const sevRank: Record<L1Severity, number> = { minor: 0, major: 1, critical: 2 };
+	const sevRank: Record<OrchestratorAdvisorySeverity, number> = { minor: 0, major: 1, critical: 2 };
 
 	const f1 = detectDagResynthLoop(
 		history,
@@ -694,7 +694,7 @@ export function orchestratorAdvisoryFor(
 		advisoriesBySeverity: { critical: 0, major: 0, minor: 0 },
 	},
 	options: OrchestratorAdvisoryOptions = {},
-): L1AdvisoryEntry[] {
+): OrchestratorAdvisoryEntry[] {
 	const budget = {
 		...DEFAULT_ADVISORY_BUDGET_BY_SEVERITY,
 		...options.maxAdvisoriesBySeverity,
@@ -705,12 +705,12 @@ export function orchestratorAdvisoryFor(
 	// Project the per-severity counts as we add to `eligible`. This way we
 	// stop accepting findings of a severity once the budget is consumed,
 	// even when several findings of the same severity fire in one call.
-	const projected: Record<L1Severity, number> = {
+	const projected: Record<OrchestratorAdvisorySeverity, number> = {
 		critical: ctx.advisoriesBySeverity.critical ?? 0,
 		major: ctx.advisoriesBySeverity.major ?? 0,
 		minor: ctx.advisoriesBySeverity.minor ?? 0,
 	};
-	const eligible: L1Finding[] = [];
+	const eligible: OrchestratorAdvisoryFinding[] = [];
 	for (const f of findings) {
 		if (ctx.alreadyAdvisedRules.has(f.rule)) continue;
 		const cap = budget[f.severity];
@@ -719,7 +719,7 @@ export function orchestratorAdvisoryFor(
 		projected[f.severity] = (projected[f.severity] ?? 0) + 1;
 	}
 
-	const out: L1AdvisoryEntry[] = [];
+	const out: OrchestratorAdvisoryEntry[] = [];
 	for (const f of eligible) {
 		const sevCount = ctx.advisoriesBySeverity[f.severity] ?? 0;
 		const sevPosition = sevCount + out.filter((e) => e.severity === f.severity).length + 1;
@@ -734,27 +734,27 @@ export function orchestratorAdvisoryFor(
 	return out;
 }
 // =============================================================================
-// L1 Advisory wiring (post-tool, pre-tool, tool_result, message_end)
+// Orchestrator advisory wiring (post-tool, pre-tool, tool_result, message_end)
 // =============================================================================
 
 /**
- * External loaders the L1 detector consults to enrich its advisory context
+ * External loaders the Orchestrator advisory detector consults to enrich its advisory context
  * (goal scope, dag plan status). The conductor in `@sages/pi` supplies the
  * real ones; tests can stub them.
  */
-export interface L1AdvisoryRuntimeDeps {
+export interface OrchestratorAdvisoryRuntimeDeps {
 	loadGoalScope?: (goalId: string, cwd: string) => { goal_id: string; scope_include: string[]; scope_exclude: string[] } | null;
 	loadDagPlan?: (dagId: string, cwd: string) => DagPlanSnapshot | null;
 }
 
 /** No-op loaders used when no runtime deps are provided (e.g. isolated unit tests). */
-const NOOP_DEPS: Required<L1AdvisoryRuntimeDeps> = {
+const NOOP_DEPS: Required<OrchestratorAdvisoryRuntimeDeps> = {
 	loadGoalScope: () => null,
 	loadDagPlan: () => null,
 };
 
 /**
- * Install the four event listeners that drive the L1 orchestrator advisory
+ * Install the four event listeners that drive the orchestrator advisory orchestrator advisory
  * pipeline (GC-2026-053). Returns a handle the caller can use to inspect
  * advisory state (alreadyAdvisedRules, per-severity budget counters,
  * rolling history length) for assertions.
@@ -763,7 +763,7 @@ const NOOP_DEPS: Required<L1AdvisoryRuntimeDeps> = {
  * pre-tool short-circuit applies handlers left-to-right):
  *   1. tool_call  pre-tool blocker  — `preToolBlockDecision` returns
  *                                    `{ block, reason }` on critical findings
- *   2. tool_call  post-call history  — pushes to `l1History`, calls
+ *   2. tool_call  post-call history  — pushes to `orchestratorHistory`, calls
  *                                    `orchestratorAdvisoryFor`, fires
  *                                    `pi.appendEntry("system", ...)` for each
  *   3. tool_result error tracker     — populates `errorHistory` keyed by
@@ -771,22 +771,22 @@ const NOOP_DEPS: Required<L1AdvisoryRuntimeDeps> = {
  *   4. message_end assistant-text    — captures `lastAssistantMessage` for
  *                                    retry-intent detection
  *
- * L1_HISTORY_CAP = 50 (≈5× the longest chain-detection threshold). LRU
+ * ORCHESTRATOR_ADVISORY_HISTORY_CAP = 50 (≈5× the longest chain-detection threshold). LRU
  * eviction; only the most recent calls matter for repeat / resynth-loop
  * detection.
  */
-export function installL1AdvisoryHandlers(
+export function installOrchestratorAdvisoryHandlers(
 	pi: ExtensionAPI,
-	runtime?: L1AdvisoryRuntimeDeps,
+	runtime?: OrchestratorAdvisoryRuntimeDeps,
 ): {
 	alreadyAdvisedRules: ReadonlySet<string>;
-	advisoriesBySeverity: Readonly<Record<L1Severity, number>>;
+	advisoriesBySeverity: Readonly<Record<OrchestratorAdvisorySeverity, number>>;
 	historyLength: () => number;
 } {
-	const deps: Required<L1AdvisoryRuntimeDeps> = { ...NOOP_DEPS, ...(runtime ?? {}) };
-	const L1_HISTORY_CAP = 50;
+	const deps: Required<OrchestratorAdvisoryRuntimeDeps> = { ...NOOP_DEPS, ...(runtime ?? {}) };
+	const ORCHESTRATOR_ADVISORY_HISTORY_CAP = 50;
 
-	const l1History: OrchestratorToolCall[] = [];
+	const orchestratorHistory: OrchestratorToolCall[] = [];
 	const errorHistory: OrchestratorToolResult[] = [];
 	let lastAssistantMessage: string | null = null;
 	const l1Ctx: OrchestratorAdvisoryContext = {
@@ -822,7 +822,7 @@ export function installL1AdvisoryHandlers(
 			callId: toolCallId,
 		};
 
-		const decision = preToolBlockDecision(upcoming, l1History, {
+		const decision = preToolBlockDecision(upcoming, orchestratorHistory, {
 			...advisoryOptions,
 			errorHistory,
 			lastAssistantMessage: lastAssistantMessage ?? undefined,
@@ -848,12 +848,12 @@ export function installL1AdvisoryHandlers(
 		if (typeof toolName !== "string" || toolName.length === 0) return;
 		const input =
 			event?.input && typeof event.input === "object" ? event.input : {};
-		l1History.push({ toolName, input, timestamp: Date.now() });
-		if (l1History.length > L1_HISTORY_CAP) {
-			l1History.splice(0, l1History.length - L1_HISTORY_CAP);
+		orchestratorHistory.push({ toolName, input, timestamp: Date.now() });
+		if (orchestratorHistory.length > ORCHESTRATOR_ADVISORY_HISTORY_CAP) {
+			orchestratorHistory.splice(0, orchestratorHistory.length - ORCHESTRATOR_ADVISORY_HISTORY_CAP);
 		}
 
-		const advisories = orchestratorAdvisoryFor(l1History, l1Ctx, {
+		const advisories = orchestratorAdvisoryFor(orchestratorHistory, l1Ctx, {
 			...advisoryOptions,
 			errorHistory,
 			lastAssistantMessage: lastAssistantMessage ?? undefined,
@@ -874,7 +874,7 @@ export function installL1AdvisoryHandlers(
 		const isError: boolean = event?.isError === true;
 		if (!toolCallId) return;
 		errorHistory.push({ toolCallId, isError });
-		if (errorHistory.length > L1_HISTORY_CAP) errorHistory.shift();
+		if (errorHistory.length > ORCHESTRATOR_ADVISORY_HISTORY_CAP) errorHistory.shift();
 	});
 
 	// 4. message_end assistant-text capture.
@@ -892,6 +892,6 @@ export function installL1AdvisoryHandlers(
 	return {
 		alreadyAdvisedRules: l1Ctx.alreadyAdvisedRules,
 		advisoriesBySeverity: l1Ctx.advisoriesBySeverity,
-		historyLength: () => l1History.length,
+		historyLength: () => orchestratorHistory.length,
 	};
 }

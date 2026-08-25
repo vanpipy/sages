@@ -56,7 +56,7 @@ export {
 } from "./dag-synthesizer.js";
 
 export * as Observability from "./observability/index.js";
-export * from "./l1-advisory.js";
+export * from "./orchestrator-advisory.js";
 export * from "./observability/index.js";
 export * as ProjectAnalyzer from "./utils/analyzer/index.js";
 export * as FileService from "./services/index.js";
