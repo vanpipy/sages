@@ -59,7 +59,7 @@ parallelism_notes: |
   # Refactor flows have multiple implementer tasks (often worktree-
   # parallel). All of them plus the final audit MUST run in
   # background so the orchestrator can steer mid-run if scope
-  # shifts. See pi/templates/SUBAGENTS.md.
+  # shifts. See pi-orchestrator/skills/orchestrator/SKILL.md.
   phases:
     - id: explore
       run_in_background: false

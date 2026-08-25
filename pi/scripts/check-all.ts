@@ -6,28 +6,36 @@
  *   1. typecheck
  *   2. bun test ./src ./test
  *   3. verify:catalog
- *   4. verify:subagent-roster
- *   5. verify:isolation-modes
- *   6. verify:namespace-ownership
- *   7. verify:soft-mode-mental-model
+ *   4. verify:isolation-modes
+ *   5. verify:namespace-ownership
+ *   6. verify:soft-mode-mental-model
  *
  * Exits non-zero on first failure. Designed to be the single gate CI
  * can wire up.
+ *
+ * History: GC-2026-069 dropped `verify:subagent-roster` — it parsed a
+ * roster table in `pi/templates/SUBAGENTS.md` and cross-checked it
+ * against `@sages/pi-subagents.KNOWN_SUBAGENT_IDS`. After the PR-3
+ * surface gut, that file is no longer installed to user machines and
+ * no runtime code reads it; the LLM-facing roster comes from
+ * `pi/templates/agent-tool-description.md`'s `{{typeList}}` template
+ * rendering, sourced directly from pi-subagents. The verifier's drift
+ * target became dead documentation, so it was retired alongside the
+ * file.
  */
 
 interface Step {
-  name: string;
-  cmd: string[];
+	name: string;
+	cmd: string[];
 }
 
 const STEPS: Step[] = [
-  { name: "typecheck", cmd: ["bun", "run", "typecheck"] },
-  { name: "test:unit", cmd: ["bun", "test", "./src", "./test"] },
-  { name: "verify:catalog", cmd: ["bun", "run", "verify:catalog"] },
-  { name: "verify:subagent-roster", cmd: ["bun", "run", "verify:subagent-roster"] },
-  { name: "verify:isolation-modes", cmd: ["bun", "run", "verify:isolation-modes"] },
-  { name: "verify:namespace-ownership", cmd: ["bun", "run", "verify:namespace-ownership"] },
-  { name: "verify:soft-mode-mental-model", cmd: ["bun", "run", "verify:soft-mode-mental-model"] },
+	{ name: "typecheck", cmd: ["bun", "run", "typecheck"] },
+	{ name: "test:unit", cmd: ["bun", "test", "./src", "./test"] },
+	{ name: "verify:catalog", cmd: ["bun", "run", "verify:catalog"] },
+	{ name: "verify:isolation-modes", cmd: ["bun", "run", "verify:isolation-modes"] },
+	{ name: "verify:namespace-ownership", cmd: ["bun", "run", "verify:namespace-ownership"] },
+	{ name: "verify:soft-mode-mental-model", cmd: ["bun", "run", "verify:soft-mode-mental-model"] },
 ];
 
 async function runStep(step: Step): Promise<number> {

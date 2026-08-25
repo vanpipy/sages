@@ -41,7 +41,6 @@ pi/
 │   └── check-all.ts         # aggregate verifier (typecheck + test + verify:*)
 ├── templates/               # installed by install.sh to ~/.pi/agent/
 │   ├── SYSTEM.md            #   → Main Agent system prompt
-│   ├── SUBAGENTS.md         #   → subagent pipeline guide
 │   ├── agent-tool-description.md  # → Agent tool override
 │   ├── subagents.json       #   → {toolDescriptionMode: custom}
 │   ├── aft.jsonc            #   → AFT bridge config
@@ -72,8 +71,8 @@ curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/insta
 
 The installer:
 
-1. Registers `~/.pi/agent/SYSTEM.md`, `SUBAGENTS.md`,
-   `agent-tool-description.md`, `subagents.json` (sentinel-protected;
+1. Registers `~/.pi/agent/SYSTEM.md`, `agent-tool-description.md`,
+   `subagents.json` (sentinel-protected;
    preserves user customizations).
 2. Installs the conductor + the orchestrator package (file-copy to
    `~/.pi/packages/pi-orchestrator`) and configures the reverse peer

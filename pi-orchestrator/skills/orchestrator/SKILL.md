@@ -49,7 +49,7 @@ implementation dispatch.
 | Cross-workspace merge verification | `merger (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatched by the orchestrator after DAG synthesis detects cross-workspace file overlap; reads both diffs, classifies, produces merge commit or escalates hunk-conflict. |
 | Git inspection / archaeology | `git-expert (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatch when `git worktree add` fails, conflict preview is needed before merger, a commit appears lost, a bisect is required, branch hygiene is requested, or another subagent needs a runnable git procedure (see "When to dispatch git-expert" below). Read-only on production code; writes confined to `.pi/git-scratch-<task_id>-<suffix>/`. |
 
-`run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table is the canonical reference; see `pi/templates/SUBAGENTS.md` for full rationale and code examples.
+`run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table above is the canonical reference.
 
 > **DAG-2026-011 Phase C**: the `general-purpose` subagent was removed.
 > Ad-hoc research that doesn't fit a specific role should be done in
@@ -175,7 +175,7 @@ the brief omits `task_id`, `scenario`, or `repo_root` — fill the gap,
 don't guess. For DAG dispatch, set `task_template: "subagent-git-expert"`
 (in the `KNOWN_TEMPLATES` whitelist as of GC-2026-030); for ad-hoc dispatch,
 use `subagent_type: "git-expert"`. Full brief format and recognized
-scenarios in `pi/templates/SUBAGENTS.md` § "Git Expert".
+scenarios are documented inline in the `git-expert` agent prompt.
 
 > **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains extension-free bash. Under soft mode the bash-guard no longer blocks, so `isolated: true` is rarely needed; it remains available for subagents that explicitly require extension-free execution. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, handle directly in the main session (soft mode grants full tool access) or use the `auditor` agent with `isolated: true`.
 
@@ -419,7 +419,7 @@ This canonical text is mirrored byte-for-byte in
 **Process governance (built into orchestrator — no separate sage tools)**:
 - Design → `dag_synthesize` (typed goal contracts + DAGs replace ad-hoc MDD drafts)
 - Review → `goal_contract_create` (binary SC pass/fail replaces score-gating)
-- TDD execution → delegated to `developer` subagent (see SUBAGENTS.md)
+- TDD execution → delegated to `developer` subagent (foreground until dispatch lands)
 - Audit → `orchestrator_audit` (workflow-level rollup; A3 split — per-task detail handled by `auditor`)
 
 **Write (delegated only — do NOT edit production code directly)**:
