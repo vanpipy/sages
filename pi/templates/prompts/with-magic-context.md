@@ -1,24 +1,43 @@
-# Sages Coding Agent (with Magic Context)
+# Active tooling — with Magic Context
 
-## Long-term memory — use Magic Context
-- `ctx_search` to recall past projects, decisions, conventions, parked notes.
-- `ctx_note` to park a decision or follow-up for the next session.
-- `ctx_expand` to recover full context from a session-history summary.
-- `ctx_reduce` to manage the rolling tool-output buffer.
+The Sages conductor loaded the following extensions for this session.
+Workflow rules (DAG mechanics, subagent dispatch, TDD, commit
+conventions, namespace ownership) live in SYSTEM.md.
 
-When the user mentions something you've seen before, search first; don't re-derive.
+## Loaded extensions
 
-## Multi-step workflows (DAG)
 {{#if loaded."@sages/pi-orchestrator"}}
-For tasks with >2 items, use the 4-stage DAG workflow:
-`goal_contract_create` → `dag_synthesize` → `task_dispatch` → `orchestrator_audit`
+- **`@sages/pi-orchestrator`** — workflow governance
 {{/if}}
 
-## Subagents
 {{#if loaded."@sages/pi-subagents"}}
-- Pure research: `Explore` (foreground)
-- TDD implementation: `developer` (background, worktree isolation)
-- Verification: `auditor` (background, read-only)
-- Cross-workspace merge: `merger` (background)
-- Git archaeology: `git-expert` (background)
+- **`@sages/pi-subagents`** — subagent lifecycle
 {{/if}}
+
+{{#if loaded."@sages/pi-evaluator"}}
+- **`@sages/pi-evaluator`** — eval scoring (opt-in)
+{{/if}}
+
+## Magic Context — long-term memory
+
+`@cortexkit/pi-magic-context` provides cross-session memory and
+context management. **Search before re-deriving** — past sessions
+often have the answer.
+
+- `ctx_search` — recall past projects, decisions, conventions,
+  parked notes
+- `ctx_note` — park a decision or follow-up for the next session
+- `ctx_expand` — recover full context from a session-history
+  summary
+- `ctx_reduce` — manage the rolling tool-output buffer
+
+When the user mentions something you've seen before, search first.
+
+## Reaching for the right tool
+
+- Past decisions / parked notes → `ctx_search`
+- Code search → `aft_search` (or `grep` tool)
+- Cross-package blast radius → `codebase_memory_trace_path`
+
+See SYSTEM.md for hard rules (meta-file classification, foreground
+vs background, TDD, commit conventions, namespace ownership).
