@@ -12,8 +12,12 @@ describe("verify matrix — script presence", () => {
   // GC-2026-069: orchestrator-related scripts moved to pi-orchestrator/;
   // conductor owns only check-all.ts (orchestrator verify scripts are
   // the orchestrator package's responsibility now).
+  //
+  // GC-2026-069 (later): verify:subagent-roster retired alongside
+  // pi/templates/SUBAGENTS.md — the roster table it parsed is no longer
+  // installed to user machines and the LLM-facing roster comes from
+  // agent-tool-description.md's {{typeList}} template rendering.
   const expected = [
-    "../pi-orchestrator/scripts/verify-subagent-roster.ts",
     "../pi-orchestrator/scripts/verify-isolation-modes.ts",
     "../pi-orchestrator/scripts/verify-namespace-ownership.ts",
     "../pi-orchestrator/scripts/verify-soft-mode-mental-model.ts",
@@ -28,10 +32,6 @@ describe("verify matrix — script presence", () => {
 });
 
 describe("verify matrix — script run", () => {
-  it("verify:subagent-roster exits 0", () => {
-    const r = spawnSync("bun", ["run", "../pi-orchestrator/scripts/verify-subagent-roster.ts"], { cwd: PI_DIR });
-    expect(r.status).toBe(0);
-  });
   it("verify:isolation-modes exits 0", () => {
     const r = spawnSync("bun", ["run", "../pi-orchestrator/scripts/verify-isolation-modes.ts"], { cwd: PI_DIR });
     expect(r.status).toBe(0);

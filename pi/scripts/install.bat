@@ -181,27 +181,6 @@ if not exist "%AGENT_DIR%\agents" mkdir "%AGENT_DIR%\agents" >nul 2>&1
 
 
 
-REM ─── SUBAGENTS.md (4-agent pipeline doc) ───
-echo ==^> Installing subagents doc...
-set "SUBAGENTS_DOC_TEMPLATE=%~dp0..\templates\SUBAGENTS.md"
-set "SUBAGENTS_DOC_TARGET=%AGENT_DIR%\SUBAGENTS.md"
-if exist "%SUBAGENTS_DOC_TEMPLATE%" (
-    if exist "%SUBAGENTS_DOC_TARGET%" (
-        if "%FORCE%"=="true" (
-            copy /Y "%SUBAGENTS_DOC_TEMPLATE%" "%SUBAGENTS_DOC_TARGET%" >nul
-            echo   Installed SUBAGENTS.md (--force)
-        ) else (
-            echo   SUBAGENTS.md already exists (use --force to overwrite)
-        )
-    ) else (
-        if not exist "%AGENT_DIR%" mkdir "%AGENT_DIR%" >nul 2>&1
-        copy /Y "%SUBAGENTS_DOC_TEMPLATE%" "%SUBAGENTS_DOC_TARGET%" >nul
-        echo   Installed SUBAGENTS.md (4-agent pipeline doc)
-    )
-) else (
-    echo   Warning: SUBAGENTS.md template not found
-)
-
 REM ─── SYSTEM.md ───
 set "SYSTEM_MD=%AGENT_DIR%\SYSTEM.md"
 if not exist "%SYSTEM_MD%" (
@@ -237,7 +216,7 @@ REM ──────────── --sages-only ────────�
 
 :sages_only
 
-echo ==^> Installing sages only (skip subagent templates, SUBAGENTS.md, SYSTEM.md)...
+echo ==^> Installing sages only (skip subagent templates, SYSTEM.md)...
 
 where git >nul 2>&1
 if errorlevel 1 (
@@ -308,7 +287,7 @@ echo   Registered sages
 
 rmdir /s /q "%TMP_DIR%" 2>nul
 
-echo   ^^(skipped: subagent templates, SUBAGENTS.md, SYSTEM.md^^)
+echo   ^^(skipped: subagent templates, SYSTEM.md^^)
 echo.
 echo Done! Restart pi: exit ^&^& pi
 exit /b 0
@@ -317,7 +296,7 @@ REM ──────────── --system-only ────────�
 
 :system_only
 
-echo ==^> Installing SYSTEM.md only (skip sages, subagent templates, SUBAGENTS.md)...
+echo ==^> Installing SYSTEM.md only (skip sages, subagent templates)...
 if not exist "%AGENT_DIR%" mkdir "%AGENT_DIR%" >nul 2>&1
 set "SYSTEM_MD=%AGENT_DIR%\SYSTEM.md"
 set "SYSTEM_TEMPLATE=%~dp0..\templates\SYSTEM.md"
@@ -339,7 +318,7 @@ if exist "%SYSTEM_MD%" (
     )
 )
 
-echo   ^^(skipped: sages, subagent templates, SUBAGENTS.md^^)
+echo   ^^(skipped: sages, subagent templates^^)
 echo.
 echo Done! Restart pi: exit ^&^& pi
 exit /b 0
@@ -362,7 +341,7 @@ REM ──────────── UNINSTALL ─────────�
 
 :uninstall
 
-echo ==^> Uninstalling sages + subagent templates + SUBAGENTS.md...
+echo ==^> Uninstalling sages + subagent templates...
 
 REM Remove sages package
 if exist "%PKG_DIR%" (
@@ -390,24 +369,6 @@ for %%N in (auditor developer developer) do (
         ) else (
             echo   %%N.md user-customized, leaving alone
         )
-    )
-)
-
-REM Remove SUBAGENTS.md (only if content matches template byte-for-byte)
-set "SUBAGENTS_DOC_TEMPLATE=%~dp0..\templates\SUBAGENTS.md"
-set "SUBAGENTS_DOC_TARGET=%AGENT_DIR%\SUBAGENTS.md"
-if exist "%SUBAGENTS_DOC_TARGET%" (
-    if exist "%SUBAGENTS_DOC_TEMPLATE%" (
-        REM fc /B returns 0 on identical files; >0 otherwise
-        fc /B "%SUBAGENTS_DOC_TARGET%" "%SUBAGENTS_DOC_TEMPLATE%" >nul 2>&1
-        if not errorlevel 1 (
-            del /Q "%SUBAGENTS_DOC_TARGET%"
-            echo   Removed SUBAGENTS.md (was our template)
-        ) else (
-            echo   SUBAGENTS.md user-customized, leaving alone
-        )
-    ) else (
-        echo   SUBAGENTS.md comparison template missing, leaving alone
     )
 )
 

@@ -54,12 +54,6 @@ $AGENT_DIR = "$PI_DIR\agent"
 
 $SUBAGENT_SENTINEL = "SAGES_TEMPLATE_V1"
 
-# Subagent pipeline doc — installed alongside agent .md files. Plain markdown,
-# NOT parsed by pi-subagents (lives outside agents/, so it's not loaded as an
-# agent def even though YAML frontmatter is absent).
-$SUBAGENTS_DOC_TEMPLATE = Join-Path (Split-Path -Parent $PSCommandPath) "..\templates\SUBAGENTS.md"
-$SUBAGENTS_DOC_TARGET = "$AGENT_DIR\SUBAGENTS.md"
-
 # Temp directory for cloning (unique per run)
 $script:TMP_DIR = ""
 
@@ -113,43 +107,6 @@ function IsAgentToolDescriptionInstalled {
     $content = Get-Content $File -Raw -ErrorAction SilentlyContinue
     if (-not $content) { return $false }
     return $content.Contains($SUBAGENT_SENTINEL)
-}
-
-# Install the 4-agent pipeline doc (SUBAGENTS.md). Idempotent:
-#   - missing → install from template
-#   - file exists → skip unless -Force (user-customized)
-# Plain markdown, no sentinel — diff'd against template at uninstall time.
-function Install-SubagentsDoc {
-    if (-not (Test-Path $SUBAGENTS_DOC_TEMPLATE)) {
-        Write-Host "  Warning: SUBAGENTS.md template not found at $SUBAGENTS_DOC_TEMPLATE"
-        return
-    }
-
-    if ((Test-Path $SUBAGENTS_DOC_TARGET) -and -not $Force) {
-        Write-Host "  SUBAGENTS.md already exists (use -Force to overwrite)"
-        return
-    }
-
-    $null = New-Item -ItemType Directory -Path (Split-Path $SUBAGENTS_DOC_TARGET) -Force -ErrorAction SilentlyContinue
-    Copy-Item $SUBAGENTS_DOC_TEMPLATE $SUBAGENTS_DOC_TARGET -Force
-    Write-Host "  Installed SUBAGENTS.md (4-agent pipeline doc)"
-}
-
-function Uninstall-SubagentsDoc {
-    if (-not (Test-Path $SUBAGENTS_DOC_TARGET)) { return }
-    if (-not (Test-Path $SUBAGENTS_DOC_TEMPLATE)) {
-        Write-Host "  SUBAGENTS.md comparison template missing, leaving alone"
-        return
-    }
-    # Compare via canonical paths to handle the ..\templates\SUBAGENTS.md relative form
-    $a = (Resolve-Path $SUBAGENTS_DOC_TARGET).Path
-    $b = (Resolve-Path $SUBAGENTS_DOC_TEMPLATE).Path
-    if ((Get-FileHash $a).Hash -eq (Get-FileHash $b).Hash) {
-        Remove-Item -Force $SUBAGENTS_DOC_TARGET
-        Write-Host "  Removed SUBAGENTS.md (was our template)"
-    } else {
-        Write-Host "  SUBAGENTS.md is user-customized, leaving alone"
-    }
 }
 
 function install_system_prompt {
@@ -279,11 +236,6 @@ function install {
     # Register in settings
     register_settings
 
-    # Install SUBAGENTS.md (4-agent pipeline doc). Subagent templates
-    # themselves are pi-subagents built-ins — no installer step.
-    Write-Host "==> Installing subagents doc..."
-    Install-SubagentsDoc
-
     # Install SYSTEM.md
     $systemMdPath = Join-Path $AGENT_DIR "SYSTEM.md"
     if ((-not (Test-Path $systemMdPath)) -or $Force) {
@@ -301,7 +253,7 @@ function install {
 function install_sages_only {
     # Mirrors install.sh's --sages-only: clones repo + installs sages source +
     # registers in settings.json, but skips all peers + templates + SYSTEM.md.
-    Write-Host "==> Installing sages only (skip subagent templates, SUBAGENTS.md, SYSTEM.md)..."
+    Write-Host "==> Installing sages only (skip subagent templates, SYSTEM.md)..."
 
     check_git
     install_pi_if_needed
@@ -355,14 +307,14 @@ function install_sages_only {
     register_settings
     cleanup
 
-    Write-Host "  (skipped: subagent templates, SUBAGENTS.md, SYSTEM.md)"
+    Write-Host "  (skipped: subagent templates, SYSTEM.md)"
     Write-Host ""
     Write-Host "Done! Restart pi: exit && pi" -ForegroundColor Green
 }
 
 function install_system_only {
     # Mirrors install.sh's --system-only: only install/update SYSTEM.md.
-    Write-Host "==> Installing SYSTEM.md only (skip sages, subagent templates, SUBAGENTS.md)..."
+    Write-Host "==> Installing SYSTEM.md only (skip sages, subagent templates)..."
 
     $systemMdPath = Join-Path $AGENT_DIR "SYSTEM.md"
     if ((-not (Test-Path $systemMdPath)) -or $Force) {
@@ -371,13 +323,13 @@ function install_system_only {
         Write-Host "  SYSTEM.md already exists (use -Force to overwrite)"
     }
 
-    Write-Host "  (skipped: sages, subagent templates, SUBAGENTS.md)"
+    Write-Host "  (skipped: sages, subagent templates)"
     Write-Host ""
     Write-Host "Done! Restart pi: exit && pi" -ForegroundColor Green
 }
 
 function uninstall {
-    Write-Host "==> Uninstalling sages + subagent templates + SUBAGENTS.md + SYSTEM.md..."
+    Write-Host "==> Uninstalling sages + subagent templates + SYSTEM.md..."
 
     # Remove sages
     if (Test-Path $PKG_DIR) {
@@ -387,10 +339,6 @@ function uninstall {
 
     # Unregister sages
     unregister_settings
-
-    # Remove SUBAGENTS.md (only if matches template). Subagent templates
-    # are pi-subagents built-ins — no uninstall path for them.
-    Uninstall-SubagentsDoc
 
     # SYSTEM.md is plain markdown with no sentinel — leave it alone unless no sage
     # source is left (this matches install.sh's behavior — uninstall doesn't

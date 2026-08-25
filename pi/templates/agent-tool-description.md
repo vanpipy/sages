@@ -72,7 +72,7 @@ The upstream default frames background as "parallelism". **Sages inverts this fo
 | `developer`          | **`true` (background)** | TDD RED→GREEN→REFACTOR is 1–10 min, can be steered |
 | `auditor` | **`true` (background)** | Re-runs every verification_cmd, 30s–3 min, can be steered |
 
-Use `get_subagent_result(agent_id)` to collect when needed, or `steer_subagent(agent_id, "...")` to redirect mid-run. Don't wait synchronously for developer/auditor even if "the next step depends on it" — the notification arrives when the agent completes; the parent context stays free in the meantime. See {{agentDir}}/SUBAGENTS.md for the full rationale and code examples.
+Use `get_subagent_result(agent_id)` to collect when needed, or `steer_subagent(agent_id, "...")` to redirect mid-run. Don't wait synchronously for developer/auditor even if "the next step depends on it" — the notification arrives when the agent completes; the parent context stays free in the meantime. See `pi-orchestrator/skills/orchestrator/SKILL.md` for the full rationale and dispatch examples.
 
 ### Orchestration dashboard — use `todowrite`
 

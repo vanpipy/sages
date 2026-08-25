@@ -701,8 +701,8 @@ read-only.
 
 ## Workflow References (on-demand)
 
-- **Multi-task orchestrator**: `pi/skills/orchestrator/SKILL.md`
-- **Subagent pipeline**: `pi/templates/SUBAGENTS.md`
+- **Multi-task orchestrator**: `pi-orchestrator/skills/orchestrator/SKILL.md`
+- **Subagent dispatch + Agent tool description**: `pi/templates/agent-tool-description.md`
 - **Brainstorming**: `/brainstorm` command or `brainstorming` skill
 
 Agent reads the reference, returns to action. References are not

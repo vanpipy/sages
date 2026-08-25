@@ -81,8 +81,8 @@ installed to `~/.pi/agent/goals/`.
 ## Where to learn more
 
 - **Agent operational guide:** [AGENTS.md](AGENTS.md)
-- **Subagent dispatch reference:** [`pi/templates/SUBAGENTS.md`](pi/templates/SUBAGENTS.md)
-  (installed to `~/.pi/agent/SUBAGENTS.md`)
+- **Agent tool description (LLM-visible):** [`pi/templates/agent-tool-description.md`](pi/templates/agent-tool-description.md)
+  (installed to `~/.pi/agent/agent-tool-description.md`)
 - **Workflow skill:** [`pi-orchestrator/skills/orchestrator/SKILL.md`](pi-orchestrator/skills/orchestrator/SKILL.md)
 
 ## `.pi/orchestrator/` namespace ownership

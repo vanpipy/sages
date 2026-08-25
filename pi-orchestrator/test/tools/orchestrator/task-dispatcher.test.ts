@@ -2,7 +2,7 @@
  * Tests for task-dispatcher's buildDispatchPlan.
  *
  * Pins the per-stage `run_in_background` policy documented in
- * `pi/templates/SUBAGENTS.md`:
+ * `pi-orchestrator/skills/orchestrator/SKILL.md`:
  *   - Explore, Plan       → foreground
  *   - developer           → background
  *   - auditor             → background

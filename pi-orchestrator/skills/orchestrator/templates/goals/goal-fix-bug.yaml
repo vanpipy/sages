@@ -52,8 +52,7 @@ parallelism_notes: |
   #
   # Even in a small bug-fix flow (3 batches), the implement step
   # (RED reproduction + GREEN fix) and the audit step are long enough
-  # to be worth backgrounding. See pi/templates/SUBAGENTS.md for the
-  # full rule and rationale.
+  # to be worth backgrounding — see pi-orchestrator/skills/orchestrator/SKILL.md.
   phases:
     - id: explore
       run_in_background: false
