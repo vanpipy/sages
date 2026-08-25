@@ -11,7 +11,7 @@
  *     GC-2026-049). The default reminder string lives in
  *     `pi/src/profile.ts` as `DEFAULT_SOFT_MODE_REMINDER`.
  *   - The documentation (mirrors): `AGENTS.md`, `README.md`,
- *     and `templates/SUBAGENTS.md`.
+ *     and `templates/SYSTEM.md`.
  *
  * What this verifier checks:
  *
@@ -51,7 +51,7 @@ const PROFILE_APPLIER_PATH = join(PI_ROOT, "src", "profile", "applier.ts");
 const DOC_PATHS = [
 	join(PI_ROOT, "..", "AGENTS.md"),
 	join(PI_ROOT, "..", "README.md"),
-	join(PI_ROOT, "templates", "SUBAGENTS.md"),
+	join(PI_ROOT, "templates", "SYSTEM.md"),
 ];
 
 export interface SoftModeExports {

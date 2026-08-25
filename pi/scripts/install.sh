@@ -84,13 +84,6 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # installer still writes) so the uninstall path can tell which copy
 # is ours.
 
-# Subagent pipeline doc — installed to $AGENT_DIR/SUBAGENTS.md alongside
-# the agent .md files. Plain markdown, NOT parsed by pi-subagents (it only
-# scans $AGENT_DIR/agents/*.md for agent frontmatter), so the install target
-# is $AGENT_DIR/ (not $AGENT_DIR/agents/).
-SUBAGENTS_DOC_TEMPLATE="$SCRIPT_DIR/../templates/SUBAGENTS.md"
-SUBAGENTS_DOC_TARGET="$AGENT_DIR/SUBAGENTS.md"
-
 # pi-subagents config (toolDescriptionMode: "custom") + agent-tool-description.md
 # override. pi-subagents reads toolDescriptionMode from $AGENT_DIR/subagents.json
 # and the description template from $AGENT_DIR/agent-tool-description.md (see
@@ -405,9 +398,13 @@ SUBAGENT_SENTINEL_TEXT='SAGES_TEMPLATE_V1'
 # Linux/POSIX, `mv` within the same filesystem is an atomic rename, so
 # concurrent readers (e.g., pi-subagents scanning $AGENT_DIR/agents/)
 # never see a half-written file. Cleans up the tmp file on failure.
-# Used by install_subagents_doc + install_agent_tool_description to
-# safely refresh user-visible files where partial writes would be
-# user-visible.
+# Used by install_agent_tool_description to safely refresh user-visible
+# files where partial writes would be user-visible.
+#
+# History: previously also used by `install_subagents_doc` for the
+# `pi/templates/SUBAGENTS.md` doc; that doc was retired in GC-2026-069
+# because no runtime code path read it (the LLM-facing roster comes
+# from `pi/templates/agent-tool-description.md` via {{typeList}}).
 _atomic_copy() {
   local src="$1" target="$2"
   local tmp="${target}.tmp.$$"
@@ -416,52 +413,6 @@ _atomic_copy() {
   else
     rm -f "$tmp"
     return 1
-  fi
-}
-
-
-# ────────────────────────────────────────────────────────────
-# SUBAGENTS.md — 4-agent pipeline doc
-# Lives at $AGENT_DIR/SUBAGENTS.md (next to agent .md files but NOT inside
-# agents/ — it's documentation, not an agent definition). pi-subagents only
-# loads *.md from agents/ as agent specs, so SUBAGENTS.md is safely ignored
-# as an agent even though YAML frontmatter is absent.
-# ────────────────────────────────────────────────────────────
-
-install_subagents_doc() {
-  if [[ ! -f "$SUBAGENTS_DOC_TEMPLATE" ]]; then
-    echo "  Warning: SUBAGENTS.md template not found at $SUBAGENTS_DOC_TEMPLATE"
-    echo "  (Re-download the sages repo or restore templates/SUBAGENTS.md)"
-    return 0
-  fi
-
-  if [[ -f "$SUBAGENTS_DOC_TARGET" ]] && [[ "${FORCE:-false}" != true ]]; then
-    echo "  SUBAGENTS.md already exists (use --force to overwrite)"
-    return 0
-  fi
-
-  mkdir -p "$(dirname "$SUBAGENTS_DOC_TARGET")"
-  _atomic_copy "$SUBAGENTS_DOC_TEMPLATE" "$SUBAGENTS_DOC_TARGET"
-  echo "  Installed SUBAGENTS.md (4-agent pipeline doc)"
-}
-
-# Uninstall SUBAGENTS.md only if it matches our template (byte-identical).
-# Unlike the agent .md files (which use a sentinel in-body), plain docs have
-# no hidden marker; diff is the trust signal. NEVER-TOUCH for any user-edited
-# doc, just like the *_config "user-customized → skip" policy.
-uninstall_subagents_doc() {
-  if [[ ! -f "$SUBAGENTS_DOC_TARGET" ]]; then
-    return 0
-  fi
-  if [[ ! -f "$SUBAGENTS_DOC_TEMPLATE" ]]; then
-    echo "  SUBAGENTS.md comparison template missing, leaving alone"
-    return 0
-  fi
-  if diff -q "$SUBAGENTS_DOC_TEMPLATE" "$SUBAGENTS_DOC_TARGET" > /dev/null 2>&1; then
-    rm -f "$SUBAGENTS_DOC_TARGET"
-    echo "  Removed SUBAGENTS.md (was our template)"
-  else
-    echo "  SUBAGENTS.md is user-customized, leaving alone"
   fi
 }
 
@@ -1513,12 +1464,6 @@ install() {
   # Install system prompt
   install_system_prompt
 
-  # Install the SUBAGENTS.md doc (4-agent pipeline doc) — combined
-  # with the agent-tool-description.md override below to ship the
-  # complete 4-agent pipeline. Subagent templates themselves are
-  # pi-subagents built-ins and need no installer step.
-  install_subagents_doc
-
   # Install agent-tool-description.md override + subagents.json setting
   # (toolDescriptionMode=custom). pi-subagents reads these at next session
   # start — see pi-subagents/dist/index.js#loadCustomToolDescription.
@@ -1604,11 +1549,6 @@ uninstall() {
 
   # Uninstall pi-evaluator (reward-mode extension)
   uninstall_pi_evaluator
-
-  # Uninstall the SUBAGENTS.md doc (only if byte-identical to our template).
-  # Subagent templates themselves are pi-subagents built-ins — no uninstall
-  # path for them.
-  uninstall_subagents_doc
 
   # Uninstall agent-tool-description.md override + subagents.json setting.
   uninstall_agent_tool_description

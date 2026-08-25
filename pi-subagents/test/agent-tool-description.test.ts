@@ -109,7 +109,7 @@ describe("index.ts (full mode description + model parameter schema)", () => {
 	});
 });
 
-describe("prompt templates: SYSTEM.md + SUBAGENTS.md", () => {
+describe("prompt templates: SYSTEM.md", () => {
 	it("SYSTEM.md Explore row does not mention the legacy 'haiku model' phrasing", () => {
 		// Original line:  | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast haiku model |
 		// New line:      | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast cheap model from the parent registry (settings.json default) |
@@ -130,39 +130,9 @@ describe("prompt templates: SYSTEM.md + SUBAGENTS.md", () => {
 		).not.toContain("haiku");
 	});
 
-	it("SUBAGENTS.md Explore roster row does not mention 'Haiku' as the model's identity", () => {
-		// Original: | 1     | `Explore` ... | Fast codebase search. Haiku — cheap, fast, **read-only**.        |
-		// New:      | 1     | `Explore` ... | cheap, fast, read-only — inherits the parent registry's cheapest available model when dispatched without model=.
-		const text = readFileSync(
-			join(repoRoot(), "pi", "templates", "SUBAGENTS.md"),
-			"utf-8",
-		);
-		// Locate the roster table by its anchor and slice the table block so
-		// earlier `Explore` mentions (e.g. dispatch examples) don't blow up the
-		// fixture's window.
-		const agentRosterStart = text.indexOf("## Agent Roster");
-		expect(
-			agentRosterStart,
-			"Agent Roster section not found in SUBAGENTS.md",
-		).toBeGreaterThanOrEqual(0);
-		const rosterBlock = text.slice(agentRosterStart, agentRosterStart + 2000);
-		// Locate the Explore roster row. The roster table puts `Haiku —` in
-		// the LAST cell (Purpose), so a naive non-greedy `*?` match would stop
-		// at the next `|`, miss it, and false-negative the test. Match the
-		// full row through end-of-line with `[\s\S]*?(?=\n|$)` so we capture
-		// every column cell.
-		const exploreRowMatch = rosterBlock.match(
-			/^\|\s*1\s*\|\s*`Explore`[\s\S]*?(?=\n|$)/m,
-		);
-		expect(
-			exploreRowMatch,
-			"Explore roster row not found in SUBAGENTS.md Agent Roster table",
-		).not.toBeNull();
-		const exploreRowText = exploreRowMatch![0];
-		expect(
-			exploreRowText,
-			"SUBAGENTS.md Explore roster row still references 'Haiku' or 'Sonnet'",
-		).not.toMatch(/\bHaiku\b/);
-		expect(exploreRowText).not.toMatch(/\bSonnet\b/);
-	});
+	// GC-2026-069: SUBAGENTS.md was retired alongside the verifier. The
+	// roster table it parsed is no longer installed to user machines and
+	// the LLM-facing roster comes from agent-tool-description.md's
+	// `{{typeList}}` template rendering (sourced from pi-subagents
+	// default-agents.ts). No second guard test needed.
 });

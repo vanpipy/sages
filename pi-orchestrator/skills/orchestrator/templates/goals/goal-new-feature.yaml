@@ -60,7 +60,7 @@ parallelism_notes: |
   #
   # Frontend phases (Explore / Plan) remain foreground — they are
   # short, dependency-ordered, and their result feeds directly into
-  # the next batch's prompt. See pi/templates/SUBAGENTS.md for the
+  # the next batch's prompt. See pi-orchestrator/skills/orchestrator/SKILL.md for the
   # full rule and rationale.
   phases:
     - id: explore

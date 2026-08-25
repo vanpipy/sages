@@ -12,7 +12,6 @@ const requiredDocs = [
   "README.md",
   "pi/README.md",
   "pi/templates/SYSTEM.md",
-  "pi/templates/SUBAGENTS.md",
   "pi-orchestrator/skills/orchestrator/SKILL.md",
   "pi-orchestrator/skills/orchestrator/templates/prompts/subagent-developer.md",
   "pi-orchestrator/skills/orchestrator/templates/prompts/subagent-auditor.md",
@@ -28,7 +27,7 @@ describe("orchestrator namespace documentation consistency", () => {
   });
 
   it("documents role-owned paths in operational docs", () => {
-    for (const relative of ["AGENTS.md", "README.md", "pi/README.md", "pi/templates/SYSTEM.md", "pi/templates/SUBAGENTS.md", "pi-orchestrator/skills/orchestrator/SKILL.md"]) {
+    for (const relative of ["AGENTS.md", "README.md", "pi/README.md", "pi/templates/SYSTEM.md", "pi-orchestrator/skills/orchestrator/SKILL.md"]) {
       const content = readFileSync(join(root, relative), "utf8");
       expect(content).toContain("task-{task_id}-report.md");
       expect(content).toContain("audit-{task_id}.md");

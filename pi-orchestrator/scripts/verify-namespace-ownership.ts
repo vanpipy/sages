@@ -7,8 +7,8 @@
  * equivalent) path lists.
  *
  * Background: per the `.pi/orchestrator/` namespace ownership
- * contract (see `AGENTS.md` and `SUBAGENTS.md`), subagent
- * dispatch is partitioned into:
+ * contract (see `AGENTS.md` and the orchestrator SKILL.md),
+ * subagent dispatch is partitioned into:
  *
  *   - **L3 orchestrator** owns `goal-*.yaml`, `dag-*.yaml`,
  *     `audit-state-*.yaml`, and the orchestrator workflow

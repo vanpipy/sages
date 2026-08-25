@@ -52,7 +52,7 @@ parallelism_notes: |
   #
   # The "implement" phase here writes the new tests; "audit" verifies
   # coverage and runs them. Both are backgrounded for the same
-  # reason as goal-new-feature. See pi/templates/SUBAGENTS.md.
+  # reason as goal-new-feature. See pi-orchestrator/skills/orchestrator/SKILL.md.
   phases:
     - id: explore
       run_in_background: false

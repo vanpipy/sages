@@ -677,7 +677,7 @@ export function appendFindings(
 // A3 — workflow-level audit aggregation (read auditor's reports)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Verdict strings emitted by the auditor subagent (per SUBAGENTS.md). */
+/** Verdict strings emitted by the auditor subagent (defined in pi-subagents). */
 export type SubagentVerdict = "CERTIFIED" | "NEEDS WORK" | "BLOCKED" | "UNKNOWN";
 
 /** Per-task summary extracted from an auditor audit report. */
