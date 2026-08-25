@@ -45,24 +45,26 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { registerOrchestratorTools } from "./tools/orchestrator/index.js";
-import { classifyBashCommand } from "./tools/bash-guard.js";
-import { softModeReminder } from "./soft-mode.js";
-import { loadProfile } from "./profile/loader.js";
-import { applyProfile } from "./profile/applier.js";
+// Post-PR-2: orchestrator tools + bash-guard + l1-advisory + observability
+// all live in the @sages/pi-orchestrator sibling package. The conductor
+// (this file) still wires them up so existing behavior is preserved.
 import {
+	registerOrchestratorTools,
+	classifyBashCommand,
 	orchestratorAdvisoryFor,
 	preToolBlockDecision,
+	loadGoalContract,
+	loadPlan,
+	ORCHESTRATOR_DIR,
+	RunEvent,
+	emitRunEvent,
 	type OrchestratorToolCall,
 	type OrchestratorToolResult,
 	type OrchestratorAdvisoryContext,
-} from "./tools/orchestrator/l1-advisory.js";
-import { loadGoalContract, loadPlan } from "./tools/orchestrator/dag-synthesizer.js";
-import { ORCHESTRATOR_DIR } from "./tools/orchestrator/types.js";
-import {
-	RunEvent,
-	emitRunEvent,
-} from "./observability/index.js";
+} from "../../pi-orchestrator/src/index.js";
+import { softModeReminder } from "./soft-mode.js";
+import { loadProfile } from "./profile/loader.js";
+import { applyProfile } from "./profile/applier.js";
 
 // Load the active profile once at module load. Resolution order is
 // documented in `profile.ts`; falls back to the `standard` built-in
@@ -171,7 +173,7 @@ const L1_HISTORY_CAP = 50;
 
 		const cwd: string = ctx?.cwd ?? process.cwd();
 		const advisories = orchestratorAdvisoryFor(l1History, l1Ctx, {
-			loadGoalScope: (goalId) => {
+			loadGoalScope: (goalId: string) => {
 				const goal = loadGoalContract(cwd, goalId);
 				if (!goal) return null;
 				return {
@@ -180,11 +182,11 @@ const L1_HISTORY_CAP = 50;
 					scope_exclude: goal.scope?.exclude ?? [],
 				};
 			},
-			loadDagPlan: (dagId) => {
+			loadDagPlan: (dagId: string) => {
 				const plan = loadPlan(cwd, dagId);
 				if (!plan) return null;
 				return {
-					tasks: plan.tasks.map((t) => ({
+					tasks: plan.tasks.map((t: any) => ({
 						id: t.id,
 						status: t.status,
 						depends_on: t.depends_on ?? [],
@@ -230,7 +232,7 @@ const L1_HISTORY_CAP = 50;
 		const decision = preToolBlockDecision(upcoming, l1History, {
 			errorHistory,
 			lastAssistantMessage: lastAssistantMessage ?? undefined,
-			loadGoalScope: (goalId) => {
+			loadGoalScope: (goalId: string) => {
 				const goal = loadGoalContract(cwd, goalId);
 				if (!goal) return null;
 				return {
@@ -239,11 +241,11 @@ const L1_HISTORY_CAP = 50;
 					scope_exclude: goal.scope?.exclude ?? [],
 				};
 			},
-			loadDagPlan: (dagId) => {
+			loadDagPlan: (dagId: string) => {
 				const plan = loadPlan(cwd, dagId);
 				if (!plan) return null;
 				return {
-					tasks: plan.tasks.map((t) => ({
+					tasks: plan.tasks.map((t: any) => ({
 						id: t.id,
 						status: t.status,
 						depends_on: t.depends_on ?? [],

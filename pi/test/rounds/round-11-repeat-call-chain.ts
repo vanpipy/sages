@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { extractOrchestratorFindings } from "@/tools/orchestrator/l1-advisory.js";
+import { extractOrchestratorFindings } from "@/l1-advisory.js";
 
 describe("Round 11: L1 advisory — repeat_call_chain", () => {
   it("R11-01: fires on 3+ identical reads of the same path", () => {

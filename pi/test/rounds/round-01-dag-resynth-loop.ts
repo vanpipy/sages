@@ -11,7 +11,7 @@ import {
   extractOrchestratorFindings,
   orchestratorAdvisoryFor,
   RULE_FIX_DIRECTIVES,
-} from "@/tools/orchestrator/l1-advisory.js";
+} from "@/l1-advisory.js";
 
 describe("Round 1: L1 advisory — dag_resynth_loop", () => {
   it("fires when same goal is resynthesized > 2 times", () => {
