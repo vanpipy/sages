@@ -30,7 +30,8 @@ Thumbs.db
 .env.local
 
 # Runtime state and host-managed worktrees
-.pi/orchestrator/
+.pi/
+**/.pi/orchestrator/
 .pi/worktree/
 .pi/worktree-state/
 # GC-2026-044: sub-agent-owned runtime state. These sit OUTSIDE
