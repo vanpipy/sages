@@ -40,11 +40,14 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-// GC-2026-069: conductor files (soft-mode.ts, profile.ts) live in the
-// conductor package at ../pi/, not in this orchestrator package.
+// GC-2026-069: conductor files (profile.ts, profile/applier.ts) live in
+// the conductor package at ../pi/, not in this orchestrator package.
+// Post-PR-3: pi/src/soft-mode.ts is gone — the soft-mode reminder is
+// now applied directly via profile.policies.soft_mode_reminder in
+// profile/applier.ts. This script's gate has been updated to match.
 const PI_ROOT = join(__dirname, "..", "..", "pi");
-const SOFT_MODE_PATH = join(PI_ROOT, "src", "soft-mode.ts");
 const PROFILE_PATH = join(PI_ROOT, "src", "profile.ts");
+const PROFILE_APPLIER_PATH = join(PI_ROOT, "src", "profile", "applier.ts");
 const DOC_PATHS = [
 	join(PI_ROOT, "..", "AGENTS.md"),
 	join(PI_ROOT, "..", "README.md"),
@@ -68,11 +71,19 @@ function extractStringLiterals(body: string): string[] {
 }
 
 export function inspectSoftMode(): SoftModeExports {
-	const softModeSrc = readFileSync(SOFT_MODE_PATH, "utf-8");
 	const profileSrc = readFileSync(PROFILE_PATH, "utf-8");
+	const applierSrc = readFileSync(PROFILE_APPLIER_PATH, "utf-8");
 
-	// Profile-driven function — the only runtime export of soft-mode.ts.
-	const hasReminderFn = /export\s+function\s+softModeReminder\s*\(/.test(softModeSrc);
+	// GC-2026-069 PR 3: the soft-mode reminder is no longer a standalone
+	// `softModeReminder(profile)` function. The conductor's
+	// `profile/applier.ts` reads `profile.policies.soft_mode_reminder`
+	// directly and pipes it through `installReminderInjector(pi, ...)`.
+	// The hard gate now checks that the applier wires the reminder into
+	// `pi.on("tool_call", ...)` — the same effect, declared in a
+	// different shape.
+	const hasReminderFn =
+		/installReminderInjector\s*\(/.test(applierSrc) &&
+		/pi\.on\(\s*["']tool_call["']/.test(applierSrc);
 
 	// Default reminder string — lives in profile.ts as
 	// DEFAULT_SOFT_MODE_REMINDER. Surface its literal contents for the
@@ -98,9 +109,16 @@ export function checkSoftModeMentalModel(): SoftModeScanResult {
 	const sm = inspectSoftMode();
 	const warnings: string[] = [];
 
-	// Gate: the Profile-driven function MUST exist.
+	// Gate: the applier must wire `installReminderInjector(pi, ...)` to a
+	// `pi.on("tool_call", ...)` handler. This is the post-PR-3 contract —
+	// the reminder string itself lives on `profile.policies.soft_mode_reminder`.
 	if (!sm.hasReminderFn) {
-		return { ok: false, exportError: "missing export: softModeReminder(profile)", warnings };
+		return {
+			ok: false,
+			exportError:
+				"profile/applier.ts must call installReminderInjector(pi, profile.policies.soft_mode_reminder) from a pi.on('tool_call') handler",
+			warnings,
+		};
 	}
 
 	// Drift warnings — informational only.
@@ -126,7 +144,7 @@ function main(): void {
 	const result = checkSoftModeMentalModel();
 	if (!result.ok) {
 		console.error(`verify-soft-mode-mental-model: FAIL — ${result.exportError}`);
-		console.error(`      fix: restore the missing export in src/soft-mode.ts`);
+		console.error(`      fix: wire installReminderInjector(pi, profile.policies.soft_mode_reminder) in profile/applier.ts`);
 		process.exit(1);
 	}
 	for (const w of result.warnings) {

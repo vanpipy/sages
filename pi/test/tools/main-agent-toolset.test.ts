@@ -15,7 +15,6 @@
  */
 import { describe, it, expect, beforeEach } from "bun:test";
 import registerSagesExtension from "@/extension.js";
-import { softModeReminder } from "@/soft-mode.js";
 import { STANDARD_PROFILE } from "@/profile/types.js";
 
 /**
@@ -105,7 +104,7 @@ describe("registerSagesExtension — soft mode bash handler (no Layer 2 block)",
         );
         expect(mock.appendedEntries).toHaveLength(1);
         expect(mock.appendedEntries[0].channel).toBe("system");
-        expect(mock.appendedEntries[0].text).toBe(softModeReminder(STANDARD_PROFILE));
+        expect(mock.appendedEntries[0].text).toBe(STANDARD_PROFILE.policies!.soft_mode_reminder);
         // Second write-intent command — throttled, NO new reminder.
         await handler(
             { toolName: "bash", input: { command: "sed -i 's/a/b/' src/bar.ts" } },
