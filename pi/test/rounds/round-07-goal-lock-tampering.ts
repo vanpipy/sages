@@ -10,7 +10,7 @@ import {
   computeGoalHash,
   checkGoalLock,
   lockGoal,
-} from "@/tools/orchestrator/goal-lock.js";
+} from "@/goal-lock.js";
 
 const BASE_GOAL = {
   id: "GC-2026-LOCK-TEST",

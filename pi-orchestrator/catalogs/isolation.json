@@ -1,0 +1,40 @@
+{
+  "_source_hash": "f9d20d554e3c64122e16aa56ec912bca23e4becdcf547cc3b9da1acb4aa60e86",
+  "_generated_at": "2026-08-25T07:59:24.487Z",
+  "_source_files": [
+    "src/types.ts"
+  ],
+  "entries": [
+    {
+      "id": "worktree-create",
+      "kind": "object",
+      "valid_for_subagent": [
+        "developer",
+        "test-writer",
+        "doc-writer",
+        "migrator"
+      ]
+    },
+    {
+      "id": "current-workspace",
+      "kind": "literal",
+      "valid_for_subagent": [
+        "developer",
+        "test-writer",
+        "doc-writer",
+        "migrator"
+      ]
+    },
+    {
+      "id": "none",
+      "kind": "literal",
+      "valid_for_subagent": [
+        "Explore",
+        "Plan",
+        "auditor",
+        "merger",
+        "git-expert"
+      ]
+    }
+  ]
+}

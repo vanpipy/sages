@@ -8,7 +8,7 @@ import { describe, it, expect } from "bun:test";
 import {
   extractOrchestratorFindings,
   RULE_FIX_DIRECTIVES,
-} from "@/tools/orchestrator/l1-advisory.js";
+} from "@/l1-advisory.js";
 
 describe("Round 4: L1 advisory — no_progress_no_audit", () => {
   it("fires after 12 tool calls AND a chain at length >= 3 (GC-2026-059 tightened rule)", () => {

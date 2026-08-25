@@ -1,0 +1,31 @@
+{
+  "_source_hash": "0a177ebe13524105f8b97e38e963ac95cb0c097a6bcb33e961d3cdaf058e3cb2",
+  "_generated_at": "2026-08-25T07:59:24.489Z",
+  "_source_files": [
+    "src/namespace-ownership.ts"
+  ],
+  "entries": [
+    {
+      "id": "l3",
+      "patterns": [
+        "^goal-${SAFE_SEGMENT}\\\\.yaml$",
+        "^dag-${SAFE_SEGMENT}\\\\.yaml$",
+        "^audit-state-${SAFE_SEGMENT}\\\\.yaml$",
+        "^audit-rollup-(?:task|batch)-${SAFE_SEGMENT}\\\\.md$"
+      ]
+    },
+    {
+      "id": "developer",
+      "patterns": [
+        "^task-${SAFE_SEGMENT}-report\\\\.md$",
+        "^handoff/${SAFE_SEGMENT}/${SAFE_SEGMENT}-handoff\\\\.md$"
+      ]
+    },
+    {
+      "id": "auditor",
+      "patterns": [
+        "^audit-${SAFE_SEGMENT}\\\\.md$"
+      ]
+    }
+  ]
+}

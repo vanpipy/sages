@@ -14,7 +14,7 @@ import {
   recordVerdict,
   acknowledgeVerdict,
   checkVerdictGate,
-} from "@/tools/orchestrator/verdict-enforcement.js";
+} from "@/verdict-enforcement.js";
 
 let tmpDir: string;
 const DAG_ID = "GC-2026-VERDICT-TEST";
