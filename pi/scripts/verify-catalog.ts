@@ -378,6 +378,13 @@ export function verifyProfileCrossConsistency(
 			return { ok: false, error: `${relPath}: top-level value is not a mapping` };
 		}
 		const subagents = (profile as { subagents?: unknown }).subagents;
+		// GC-2026-069 PR 1: the new 4-segment profile schema doesn't have a
+		// `subagents` whitelist (subagent dispatch is now per-DAG, not per-profile).
+		// Old 7-field profiles kept `subagents`; new ones don't. Skip silently
+		// when the field is absent.
+		if (subagents === undefined) {
+			continue;
+		}
 		if (!Array.isArray(subagents)) {
 			return { ok: false, error: `${relPath}: 'subagents' is not an array` };
 		}

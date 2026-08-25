@@ -14,9 +14,9 @@
  * Use `softModeReminder(profile)` to read it.
  */
 
-import type { Profile } from "./profile.js";
+import type { Profile } from "./profile/types.js";
 
 /** Goal-orientation reminder, fired once per process on first write-intent bash. */
 export function softModeReminder(profile: Profile): string {
-	return profile.soft_mode_reminder;
+	return profile.policies?.soft_mode_reminder ?? "";
 }
