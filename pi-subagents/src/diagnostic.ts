@@ -405,3 +405,36 @@ export function diagnosticForRunResult(
 
 	return null;
 }
+
+/**
+ * GC-2026-070 mechanism: compute `retryBudgetLeft` for a diagnostic write.
+ *
+ * The catalog declares `handler.retryBudget: N` for `retry-subagent` handlers —
+ * the maximum number of retries the orchestrator should attempt for the same
+ * cause on the same task. We persist the budget REMAINING (not the budget
+ * itself) so the orchestrator's retry helper can read it back without needing
+ * to re-load the catalog.
+ *
+ * `priorAttemptCount` lets the caller pass the count of attempts that
+ * PRECEDED this one (the diagnostic write that calls this helper IS this
+ * attempt, so it's not counted here). Defaults to 0 — the most common case
+ * where `emitRunDiagnostic` runs after a fresh spawn with no prior chain.
+ *
+ * Returns `undefined` when the cause has no actionable retry handler
+ * (escalate-to-l3 / mark-stalled / noop / unknown) — `writeDiagnostic` then
+ * omits the `retryBudgetLeft` field entirely.
+ */
+export function retryBudgetLeftFor(
+	cause: string,
+	catalogCwd?: string,
+	priorAttemptCount: number = 0,
+): number | undefined {
+	const mode = getFailureCatalog(catalogCwd).lookup(cause);
+	if (!mode) return undefined;
+	if (mode.handler.kind !== "retry-subagent") return undefined;
+	const budget = mode.handler.retryBudget;
+	if (!Number.isFinite(budget) || budget < 0) return undefined;
+	// budget - (priorAttemptCount + 1)  ← this attempt + any earlier attempts in the chain
+	const remaining = budget - (priorAttemptCount + 1);
+	return Math.max(0, remaining);
+}
