@@ -76,38 +76,33 @@ single YAML file. Every profile declares:
   workspace-using subagents (`none`, `current-workspace`, or
   `worktree`).
 - `dag_threshold` — todo-item count at which the 4-stage DAG
-  workflow is recommended (>2 in `standard`; 1 in `light` /
-  `audit-strict`; ≥99 in `ci-only`).
+  workflow is recommended (default 2; lower for stricter
+  governance, ≥99 to effectively disable).
 - `gate_suite` — which verifications the profile requires (e.g.
-  `typecheck`, `test`, `verify:catalog`, `verify:profile`).
+  `typecheck`, `test`, `verify:catalog`).
 - `soft_mode_reminder` — string fired once per session on the
-  first write-intent bash call (empty in CI).
+  first write-intent bash call.
 - `soft_mode_system_prompt_suffix` — string appended to every
   system prompt.
 
 The main-agent extension loads the active profile once at session
 start via `loadProfile()` (in `pi/src/profile.ts`) and threads its
-fields through `soft-mode.ts`. The dispatcher + DAG synthesizer
+fields through `profile/applier.ts`. The dispatcher + DAG synthesizer
 treat the whitelist as authoritative.
 
-### The 4 built-in profiles
+### The 1 built-in profile
 
-- **`light`** — read-only, in-process tool families only.
-  `subagents=[Explore]`, `isolation_default: none`, empty
-  `gate_suite`, `dag_threshold: 1`. CI-friendly; recommend DAG
-  for >2-item workflows but never force it.
-- **`standard`** — full subagent roster (all six) with
+GC-2026-069 collapsed the historical `light` / `audit-strict` /
+`ci-only` variants — the conductor now uses `extensions.tools` to
+filter capabilities, not separate profiles. The only built-in is:
+
+- **`standard`** — full subagent roster
+  (`[Explore, Plan, developer, auditor, merger, git-expert]`) with
   `current-workspace` isolation, `dag_threshold: 2`, and the
-  `typecheck + test + verify:catalog` gate suite. The default
-  when no override is present.
-- **`audit-strict`** — full roster with `worktree`-only isolation,
-  `dag_threshold: 1` (recommend DAG even for ≤2-item tasks),
-  stricter reminder + suffix, and a gate suite that adds
-  `verify:profile`. Use when merge discipline matters more than
-  dispatch speed.
-- **`ci-only`** — `subagents=[auditor]`, `isolation_default: none`,
-  `dag_threshold: 99` (effectively never), empty reminder. For
-  CI environments: run gates, no spawning, no interactive nudges.
+  `typecheck + test + verify:catalog` gate suite. The default when
+  no override is present. Definition lives in
+  `pi/profiles/standard.yaml`; the in-code `STANDARD_PROFILE`
+  constant in `pi/src/profile.ts` is a fallback for partial installs.
 
 ### How to override
 
@@ -115,42 +110,18 @@ Write `~/.pi/profile.yaml` with the same schema as a built-in
 profile, e.g.:
 
 ```yaml
-id: audit-strict
+id: my-override
 description: Personal override; full audit gates
 subagents: [Explore, Plan, developer, auditor, merger, git-expert]
 isolation_default: worktree
 dag_threshold: 1
-gate_suite: [typecheck, test, verify:catalog, verify:profile]
+gate_suite: [typecheck, test, verify:catalog]
 soft_mode_reminder: ""
 soft_mode_system_prompt_suffix: ""
 ```
 
 `loadProfile()` reads it on startup; the built-in `standard`
 profile is the fallback when no home-level override is present.
-
-### How to add a new profile
-
-1. Copy `pi/profiles/standard.yaml` to `pi/profiles/myprofile.yaml`.
-2. Edit the fields. Keep `subagents` ⊆ `@sages/pi-subagents.KNOWN_SUBAGENT_IDS`.
-3. From `pi/`, run `bun run verify:catalog` to confirm the new
-   profile does not break the profile ↔ registry cross-consistency
-   check. If you reference an unregistered subagent, the verifier
-   prints a clear error:
-   ```
-   profile 'myprofile' references unknown subagent 'foo'; add it to @sages/pi-subagents' DEFAULT_AGENTS or remove from profile
-   ```
-4. Add a smoke test in `pi/test/profiles.test.ts` (one
-   `describe` block per profile is the conventional shape) so the
-   schema and intent are pinned.
-
-### Reference table
-
-| Profile | subagents | isolation_default | dag_threshold | gate_suite |
-|---|---|---:|---:|---|
-| `light` | `[Explore]` | `none` | 1 | `[]` |
-| `standard` | `[Explore, Plan, developer, auditor, merger, git-expert]` | `current-workspace` | 2 | `[typecheck, test, verify:catalog]` |
-| `audit-strict` | `[Explore, Plan, developer, auditor, merger, git-expert]` | `worktree` | 1 | `[typecheck, test, verify:catalog, verify:profile]` |
-| `ci-only` | `[auditor]` | `none` | 99 | `[typecheck, test, verify:catalog]` |
 
 ## Institutional knowledge
 
