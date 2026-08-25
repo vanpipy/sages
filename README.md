@@ -65,14 +65,15 @@ curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/insta
 ```
 
 The agent guides the work through goal → DAG → dispatch → audit. Example goal
-contracts live in `pi/skills/orchestrator/templates/goals/` and are installed to
-`~/.pi/agent/goals/`.
+contracts live in `pi-orchestrator/skills/orchestrator/templates/goals/` and are
+installed to `~/.pi/agent/goals/`.
 
 ## Repository layout
 
 | Package | Purpose |
 |---|---|
-| `pi/` | Main orchestrator: four-tool workflow plus the soft-mode policy (`pi/src/soft-mode.ts`, `pi/src/extension.ts`) |
+| `pi/` | Conductor: profile loader + 4-segment schema + 3-hook applier (`pi/src/extension.ts` → `registerConductorOnly` + delegate to `pi-orchestrator`) |
+| `pi-orchestrator/` | Orchestrator: 5-tool DAG workflow + L1 advisory + observability + project analyzer + template loader |
 | `pi-subagents/` | Agent runtime: subagent lifecycle and managed worktrees |
 | `pi-codebase-memory/` | Code knowledge graph MCP server |
 | `pi-evaluator/` | Evaluation metrics for cost, security, and text quality |
@@ -82,7 +83,7 @@ contracts live in `pi/skills/orchestrator/templates/goals/` and are installed to
 - **Agent operational guide:** [AGENTS.md](AGENTS.md)
 - **Subagent dispatch reference:** [`pi/templates/SUBAGENTS.md`](pi/templates/SUBAGENTS.md)
   (installed to `~/.pi/agent/SUBAGENTS.md`)
-- **Workflow skill:** [`pi/skills/orchestrator/SKILL.md`](pi/skills/orchestrator/SKILL.md)
+- **Workflow skill:** [`pi-orchestrator/skills/orchestrator/SKILL.md`](pi-orchestrator/skills/orchestrator/SKILL.md)
 
 ## `.pi/orchestrator/` namespace ownership
 
@@ -111,9 +112,10 @@ remaining operational constraints.
 ## History
 
 Earlier versions used four role-named tools inspired by the four sages of
-Chinese mythology, plus an FSM-style orchestrator. The current four-tool DAG
-runtime replaced that design on 2026-07-24; migration notes live in
-`pi/skills/audit-notes/`.
+Chinese mythology, plus an FSM-style orchestrator. The current 5-tool DAG
+runtime (4 orchestrator tools + `sages_reminder`) replaced that design on
+2026-07-24, and the 2026-08-24 GC-2026-031 reset removed the historical
+audit-notes directory. See `git log` for the historical context.
 
 ### Recent: orchestrator self-feedback (GC-2026-053 → 058, 2026-08-20)
 
