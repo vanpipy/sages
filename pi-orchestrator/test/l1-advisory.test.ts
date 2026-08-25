@@ -1,7 +1,7 @@
 /**
  * l1-advisory.test.ts — GC-2026-053
  *
- * Tests the L1 (orchestrator self-audit) advisory mirror. The L1 layer
+ * Tests the orchestrator advisory mirror. This layer
  * observes the orchestrator's own tool-call history (NOT agent message
  * text — that's L2) and emits advisory entries via `pi.appendEntry("system", ...)`.
  *

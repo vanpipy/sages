@@ -452,7 +452,7 @@ export function resolveDeadlineMs(
 // allowed network access at registration time.
 //
 // The agent tool executor reads these via `getNetworkAllowedDefault(type)`
-// and applies them in `pi.exec()` gate logic. The L3 orchestrator can
+// and applies them in `pi.exec()` gate logic. The orchestrator can
 // override per-dispatch via `params.network_allowed` (future Agent tool
 // parameter).
 // =============================================================================

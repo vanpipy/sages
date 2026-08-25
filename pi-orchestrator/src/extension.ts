@@ -36,8 +36,8 @@ import {
 /**
  * Register all orchestrator tools on the pi extension. Idempotent.
  *
- * Pass `runtime` to provide the goal/dag loaders the L1 advisory handler
- * needs. The conductor in `@sages/pi` supplies these loaders; tests can
+ * Pass `runtime` to provide the goal/dag loaders the orchestrator advisory
+ * handler needs. The conductor in `@sages/pi` supplies these loaders; tests can
  * stub them.
  */
 export function registerOrchestratorTools(
@@ -49,7 +49,7 @@ export function registerOrchestratorTools(
 	registerTaskDispatcherTool(pi);
 	registerOrchestratorAuditTool(pi);
 	registerSagesReminderTool(pi);
-	// GC-2026-053: L1 orchestrator tool_call audit wiring (the post-tool
+	// GC-2026-053: orchestrator tool_call audit wiring (the post-tool
 	// history-tracker, pre-tool blocker, tool_result error tracker, and
 	// message_end assistant-text tracker). Pre-PR-2 these handlers lived
 	// in the conductor; the smoke test in `test/smoke/gc-2026-053.test.ts`

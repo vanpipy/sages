@@ -479,7 +479,7 @@ const FINAL_VERDICT_ADDENDUM = `
 ## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
 
 Your final message MUST contain a single YAML fenced block at the end.
-This is your "verdict" - the L3 orchestrator parses it mechanically; a
+This is your "verdict" - the orchestrator parses it mechanically; a
 missing or malformed block fails the audit gate.
 
 The block MUST include these fields:
@@ -517,7 +517,7 @@ Field semantics:
 - commits: SHAs of commits you made on the worktree branch.
 - tests_added: each test in path::test_name form.
 - fail_details: one entry per failing test (omit if fail: 0).
-- open_questions: a question only if the L3 should answer it.
+- open_questions: a question only if the orchestrator should answer it.
 - handoff_for_next_task: list the file the next developer should read first.
 
 Anti-patterns (will fail the audit gate):
@@ -525,7 +525,7 @@ Anti-patterns (will fail the audit gate):
 - YAML block missing status, deliverables, or test_results.
 - YAML block status is completed but tests are failing.
 
-This block is what the L3 uses to verify you did the work. Be specific.
+This block is what the orchestrator uses to verify you did the work. Be specific.
 If you cannot fill a field, leave it out (the schema tolerates that) or
 move the item to open_questions.
 `;
@@ -541,20 +541,20 @@ void FINAL_VERDICT_ADDENDUM;
 // GC-2026-038 T1: Commit Discipline (commit-as-checkpoint)
 //
 // The agent-runner + audit gate can read git history. If you write tests
-// or implementation but never commit, the L3 orchestrator cannot tell
+// or implementation but never commit, the orchestrator cannot tell
 // what you have done — only the LLM's context window knows. Run out of
 // turns before committing, and your work is lost.
 //
 // Commit every RED test and every GREEN test. Commit before exploring
-// further. Think of commits as “progress markers” the L3 can read.
+// further. Think of commits as “progress markers” the orchestrator can read.
 // =============================================================================
 const COMMIT_DISCIPLINE_SECTION = `
 ## Commit Discipline (commit-as-checkpoint)
 
-Your work is on a git branch. The L3 orchestrator reads git history to
+Your work is on a git branch. The orchestrator reads git history to
 verify your progress. **Every RED test and every GREEN test MUST end with
 a git commit.** A commit is your durable progress signal — without it,
-the L3 cannot distinguish “work done” from “work in progress”.
+the orchestrator cannot distinguish “work done” from “work in progress”.
 
 ### When to commit
 
@@ -572,7 +572,7 @@ the L3 cannot distinguish “work done” from “work in progress”.
 
 - **Do NOT write multiple tests before committing the first one.** If
   you write 7 tests and run out of turns before committing any, the
-  L3 sees 0 commits and abandons your work.
+  The orchestrator sees 0 commits and abandons your work.
 - **Do NOT explore further without committing what you have.** If 5
   turns have passed without a commit, stop exploring. Commit what
   you have (even if RED) and emit \`BLOCKED\` in your final message.
@@ -584,7 +584,7 @@ the L3 cannot distinguish “work done” from “work in progress”.
 
 If you realize mid-task that you have been exploring for too long
 without a commit, **commit what you have immediately and declare
-BLOCKED**. Do not try to “finish the exploration first”. The L3 will
+BLOCKED**. Do not try to “finish the exploration first”. The orchestrator will
 re-dispatch a follow-up task with your partial work as the starting
 point.
 `;
@@ -598,7 +598,7 @@ void COMMIT_DISCIPLINE_SECTION;
 const EXPLORATION_BUDGET_SECTION = `
 ## Exploration Budget (hard caps on read tools)
 
-Reading tools burn turns quickly. The L3 orchestrator monitors your
+Reading tools burn turns quickly. The orchestrator monitors your
 tool-call count via the prompts. If you exceed a budget, you are
 SLOWER than if you commit and stop. **You do NOT get extra turns
 for exploration — you get less.**
@@ -626,7 +626,7 @@ for exploration — you get less.**
 ### Escape hatch
 
 If you hit a budget cap and have not yet produced a commit, **commit
-what you have immediately and declare BLOCKED**. The L3 will
+what you have immediately and declare BLOCKED**. The orchestrator will
 re-dispatch with a narrower scope. Do not finish reading.
 `;
 
@@ -651,16 +651,16 @@ Examples:
 ### When to BLOCKED
 
 If 2 consecutive checkpoints show no new commits, **declare BLOCKED**
-in your final message. The L3 orchestrator reads these checkpoints and
+in your final message. The orchestrator reads these checkpoints and
 will detect the no-progress pattern and re-dispatch.
 
 The rule: 2 consecutive checkpoints with the same commit count = BLOCKED.
 
 ### Why this matters
 
-The L3 orchestrator runs a checkpoint parser on your last message.
-Without checkpoints, the L3 cannot tell "I am working" from "I am stuck".
-With checkpoints, the L3 can:
+The orchestrator runs a checkpoint parser on your last message.
+Without checkpoints, the orchestrator cannot tell "I am working" from "I am stuck".
+With checkpoints, the orchestrator can:
 - Detect when you have not yet committed (commit count = 0)
 - Detect when you are stuck (no commits in 2 consecutive checkpoints)
 - Surface blockers to the user
@@ -683,7 +683,7 @@ in your final message using the ASK markup:
 
 <ASK>What API signature should the deadline hook use: AbortSignal.timeout(deadlineMs) or a manual setTimeout? Look at the existing runAgent signature and the mergedSignal pattern to decide.</ASK>
 
-The L3 orchestrator parses <ASK>...</ASK> blocks. A clean question
+The orchestrator parses <ASK>...</ASK> blocks. A clean question
 saves the next dispatch from re-deriving the same context.
 
 ### When to use <ASK>
@@ -703,13 +703,13 @@ saves the next dispatch from re-deriving the same context.
   what you can read.
 - **For a question you can answer with one more read** — read first,
   ask only if the read is inconclusive.
-- **For a question the L3 already answered** in the task prompt —
+- **For a question the orchestrator already answered** in the task prompt —
   re-reading the brief is faster than asking.
 
 ### Format
 
 The <ASK>...</ASK> markup can appear anywhere in your final message
-(multiple instances OK). The L3 orchestrator extracts all questions
+(multiple instances OK). The orchestrator extracts all questions
 and surfaces them to the user. Be specific — the more context you
 include in the question, the better the answer.
 `;
@@ -738,7 +738,7 @@ const BASH_TIMEOUT_SECTION = `${renderBashTimeoutSection()}
   Default is OFF. The audit gate flags network calls as suspicious
   unless the parent overrode the per-dispatch setting.
 
-The L3 orchestrator's overhead per "wait for backgrounded command" is ~5s.
+The orchestrator's overhead per "wait for backgrounded command" is ~5s.
 Plan your command budget accordingly.
 `;
 

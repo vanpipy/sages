@@ -220,7 +220,7 @@ export async function claimWorktreeLease(
 	if (args.bypass) warnBypassOnce(canonical);
 	if (gateEnabled && cap > 0 && !args.bypass && repoLeases.length >= cap) {
 		// Emit a mechanism-1.4 diagnostic BEFORE the throw propagates so the
-		// L3 audit roll-up can bucket the refusal from the filesystem rather
+		// orchestrator audit roll-up can bucket the refusal from the filesystem rather
 		// than having to re-run the dispatch. writeDiagnostic is sync-and-swallow
 		// for I/O; if it does throw (e.g. catalog drift drops the cause id), warn
 		// to stderr and proceed with the throw — the gate's behavior must not

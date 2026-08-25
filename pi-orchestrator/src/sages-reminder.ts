@@ -108,7 +108,7 @@ const DEFAULT_REMINDER_TEMPLATES: Record<SagesReminderType, string> = {
 };
 
 /**
- * Per-type actionable fix directives (GC-2026-055). Mirrors L2's
+ * Per-type actionable fix directives (GC-2026-055). Mirrors subagent advisory's
  * `RULE_FIX_DIRECTIVES` (pi-subagents/src/agent-runner.ts:2225). When the
  * reminder is injected without a `message` override, the call site can
  * prefer the fixdirective over the generic default template — the
@@ -116,7 +116,7 @@ const DEFAULT_REMINDER_TEMPLATES: Record<SagesReminderType, string> = {
  * "we found a problem" message.
  *
  * Keep these to single-line shell invocations where possible. Tokens
- * are capped by the same 200-token limit as L2's advisories.
+ * are capped by the same 200-token limit as subagent advisory's advisories.
  */
 export const SAGES_REMINDER_FIXDIRECTIVES: Record<SagesReminderType, string> = {
   STALE_DAG:
@@ -136,7 +136,7 @@ export const SAGES_REMINDER_FIXDIRECTIVES: Record<SagesReminderType, string> = {
     "run `ls -la .pi/orchestrator/audit-state-*.yaml` to see active DAGs; " +
     "then `cat` the most recent one to inspect in-progress tasks before resuming.",
   GENERIC:
-    "no specific fixdirective — re-read the surrounding context (L1 advisory, recent audit) " +
+    "no specific fixdirective — re-read the surrounding context (orchestrator advisory, recent audit) " +
     "for actionable next steps.",
 };
 
