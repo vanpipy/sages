@@ -407,6 +407,39 @@ export function diagnosticForRunResult(
 }
 
 /**
+ * GC-2026-070 mechanism: push-notify the orchestrator session that a
+ * diagnostic was written. Without this, the orchestrator only learns of a
+ * sub-agent failure on the next `orchestrator_audit` poll — potentially
+ * many turns later, and after the failure context has rolled out of
+ * the LLM's context window.
+ *
+ * Pushes a single line via `pi.appendEntry("system", ...)` so the
+ * orchestrator's next decision can see the cause + budget without
+ * needing to re-read `.pi/diagnostics/`.
+ *
+ * Silent on success outcomes (a clean run doesn't need to bother the
+ * orchestrator). Silent on read errors — this is best-effort notification,
+ * not a primary signal.
+ */
+export function notifyOrchestrator(
+	pi: { appendEntry: (channel: string, data: unknown) => void },
+	diagnostic: DiagnosticJsonV1,
+): void {
+	// Only notify on actionable outcomes. Success → silent.
+	if (diagnostic.outcome === "success") return;
+	try {
+		const budget =
+			diagnostic.retryBudgetLeft !== undefined
+				? `${diagnostic.retryBudgetLeft} retry(s) left`
+				: "no retry budget";
+		const line = `[subagent-failure] ${diagnostic.subagentType} ${diagnostic.dispatchId}: cause=${diagnostic.cause}, outcome=${diagnostic.outcome}, ${budget}. Detail: ${diagnostic.detail.slice(0, 200)}`;
+		pi.appendEntry("system", line);
+	} catch {
+		/* never let notification failure mask the diagnostic write */
+	}
+}
+
+/**
  * GC-2026-070 mechanism: compute `retryBudgetLeft` for a diagnostic write.
  *
  * The catalog declares `handler.retryBudget: N` for `retry-subagent` handlers —
