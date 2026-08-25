@@ -319,6 +319,17 @@ async function initAudit(
   const reports = readAuditReports(cwd, tasks);
   const workflowSummary = aggregateTaskAudits(tasks, reports);
 
+  // GC-2026-070: surface the retryable-failure rollup so the orchestrator
+  // sees the hint even at the compact (non-verbose) audit-init summary.
+  // When `retryable.length > 0`, the orchestrator has at least one
+  // spec-classified failure mode with budget remaining — a re-dispatch with
+  // mode: "reuse" + the catalog's feedback template is the right move.
+  const failureModeStats = gatherFailureModeStats(cwd, plan.id);
+  const retryableHint =
+    failureModeStats.retryable.length > 0
+      ? ` GC-2026-070: ${failureModeStats.retryable.length} retryable failure mode(s) detected (${failureModeStats.retryable.map((r) => `${r.id}(${r.count})`).join(", ")}); consider buildReDispatchSuggestion(prior_diagnostic) for mode: "reuse" re-dispatch.`
+      : "";
+
   // GC-2026-039: Runtime enforcement. Read each task's report and run
   // the inline governance check. This catches BLOCKED-no-reason, missing
   // YAML block, and stuck-checkpoint patterns that the per-task audit
@@ -343,7 +354,7 @@ async function initAudit(
     content: [{ type: "text", text: JSON.stringify({
       status: "in_progress",
       phase: "audit-init",
-      intent: `Audit initialized for ${tasks.length} task(s). workflowReady=${workflowSummary.workflowReady}. ${workflowSummary.blockingTasks.length > 0 ? `Blocking: ${workflowSummary.blockingTasks.join(", ")}. Run any remaining tasks + audits, then record findings (≥${findingsRequiredMin(depth)} required) and complete.` : "All tasks certified — record findings (≥" + findingsRequiredMin(depth) + " required for fast depth) and complete."}` + (inlineFindings.length > 0 ? ` GC-2026-039 runtime enforcement surfaced ${inlineFindings.length} finding(s); the orchestrator should record them via the observation.findings array.` : ""),
+      intent: `Audit initialized for ${tasks.length} task(s). workflowReady=${workflowSummary.workflowReady}. ${workflowSummary.blockingTasks.length > 0 ? `Blocking: ${workflowSummary.blockingTasks.join(", ")}. Run any remaining tasks + audits, then record findings (≥${findingsRequiredMin(depth)} required) and complete.` : "All tasks certified — record findings (≥" + findingsRequiredMin(depth) + " required for fast depth) and complete."}` + (inlineFindings.length > 0 ? ` GC-2026-039 runtime enforcement surfaced ${inlineFindings.length} finding(s); the orchestrator should record them via the observation.findings array.` : "") + retryableHint,
       validation: {
         errors: workflowSummary.workflowReady ? [] : [`tasks not yet certified: ${workflowSummary.blockingTasks.join(", ")}`],
         warnings: inlineFindings.length > 0 ? [`GC-2026-039: ${inlineFindings.length} runtime enforcement finding(s) surfaced — see inline_findings`]: [],
@@ -703,6 +714,16 @@ export interface FailureModeStat {
   count: number;
   /** ISO8601 `emittedAt` of the most recent diagnostic in this bucket. */
   latest: string;
+  /**
+   * GC-2026-070: catalog-derived metadata. `handlerKind` is `"spec"` for
+   * LLM-side misses (retryable) and `"error"` for infrastructure failures.
+   * `minRetryBudgetLeft` is the minimum retryBudgetLeft observed across the
+   * bucket — 0 means at least one diagnostic showed the budget as exhausted.
+   * `undefined` when the cause is not in the catalog (unknown id).
+   */
+  handlerKind?: "spec" | "error";
+  /** Per-bucket minimum of `retryBudgetLeft`; undefined when no diagnostic carried it. */
+  minRetryBudgetLeft?: number;
 }
 
 /** GC-2026-044 design §5.6 — failure-mode rollup for a workflow. */
@@ -711,6 +732,12 @@ export interface FailureModeStats {
   /** Buckets sorted by count desc, then id, so the report is stable. */
   byCause: FailureModeStat[];
   byOutcome: Record<string, number>;
+  /**
+   * GC-2026-070: subset of `byCause` whose handler.kind === "retry-subagent".
+   * Surfaced separately so the orchestrator's intent text can name the
+   * retryable failure count without re-filtering client-side.
+   */
+  retryable: Array<{ id: string; count: number; minRetryBudgetLeft?: number }>;
 }
 
 /**
@@ -796,25 +823,68 @@ export function gatherFailureModeStats(
 			? all
 			: all.filter((d: any) => d.context?.dagId === dagId);
 
-	const buckets = new Map<string, { count: number; latest: string }>();
+	// GC-2026-070: bucket also tracks the per-bucket minimum retryBudgetLeft
+	// and the handler kind from the catalog (so the orchestrator can see at a
+	// glance which failures are retryable vs. escalation-required).
+	const buckets = new Map<
+		string,
+		{ count: number; latest: string; minBudget: number | undefined }
+	>();
 	const byOutcome: Record<string, number> = {};
+
+	// Lazy-load the catalog so unknown causes don't throw — we already handle
+	// unknown via `?? undefined` on the lookup result below.
+	const catalog = (() => {
+		try {
+			// @ts-ignore -- tsc rejects cross-package imports under rootDir.
+			return require("../../pi-subagents/src/failure-catalog.js").getFailureCatalog(cwd);
+		} catch {
+			return null;
+		}
+	})();
 
 	for (const d of scoped) {
 		const prior = buckets.get(d.cause);
 		if (prior === undefined) {
-			buckets.set(d.cause, { count: 1, latest: d.emittedAt });
+			buckets.set(d.cause, {
+				count: 1,
+				latest: d.emittedAt,
+				minBudget:
+					typeof d.retryBudgetLeft === "number" ? d.retryBudgetLeft : undefined,
+			});
 		} else {
 			prior.count++;
 			if (d.emittedAt > prior.latest) prior.latest = d.emittedAt;
+			if (typeof d.retryBudgetLeft === "number") {
+				prior.minBudget =
+					prior.minBudget === undefined
+						? d.retryBudgetLeft
+						: Math.min(prior.minBudget, d.retryBudgetLeft);
+			}
 		}
 		byOutcome[d.outcome] = (byOutcome[d.outcome] ?? 0) + 1;
 	}
 
 	const byCause = [...buckets.entries()]
-		.map(([id, v]) => ({ id, count: v.count, latest: v.latest }))
+		.map(([id, v]) => {
+			const mode = catalog?.lookup?.(id);
+			return {
+				id,
+				count: v.count,
+				latest: v.latest,
+				handlerKind: mode?.kind,
+				minRetryBudgetLeft: v.minBudget,
+			};
+		})
 		.sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
 
-	return { total: scoped.length, byCause, byOutcome };
+	// GC-2026-070: a separate view of retryable buckets so the orchestrator
+	// doesn't have to filter client-side.
+	const retryable = byCause
+		.filter((s) => s.handlerKind === "spec" && s.minRetryBudgetLeft !== 0)
+		.map((s) => ({ id: s.id, count: s.count, minRetryBudgetLeft: s.minRetryBudgetLeft }));
+
+	return { total: scoped.length, byCause, byOutcome, retryable };
 }
 
 /**
