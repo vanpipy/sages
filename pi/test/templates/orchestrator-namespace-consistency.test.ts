@@ -4,16 +4,19 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+// Post-PR-2: orchestrator skill files live in the sibling pi-orchestrator
+// package, not under pi/. Paths here use the conductor repo root (../../..)
+// + the relative path within the new layout.
 const requiredDocs = [
   "AGENTS.md",
   "README.md",
   "pi/README.md",
   "pi/templates/SYSTEM.md",
   "pi/templates/SUBAGENTS.md",
-  "pi/skills/orchestrator/SKILL.md",
-  "pi/skills/orchestrator/templates/prompts/subagent-developer.md",
-  "pi/skills/orchestrator/templates/prompts/subagent-auditor.md",
-  "pi/skills/orchestrator/templates/prompts/subagent-explore.md",
+  "pi-orchestrator/skills/orchestrator/SKILL.md",
+  "pi-orchestrator/skills/orchestrator/templates/prompts/subagent-developer.md",
+  "pi-orchestrator/skills/orchestrator/templates/prompts/subagent-auditor.md",
+  "pi-orchestrator/skills/orchestrator/templates/prompts/subagent-explore.md",
 ];
 
 describe("orchestrator namespace documentation consistency", () => {
@@ -25,7 +28,7 @@ describe("orchestrator namespace documentation consistency", () => {
   });
 
   it("documents role-owned paths in operational docs", () => {
-    for (const relative of ["AGENTS.md", "README.md", "pi/README.md", "pi/templates/SYSTEM.md", "pi/templates/SUBAGENTS.md", "pi/skills/orchestrator/SKILL.md"]) {
+    for (const relative of ["AGENTS.md", "README.md", "pi/README.md", "pi/templates/SYSTEM.md", "pi/templates/SUBAGENTS.md", "pi-orchestrator/skills/orchestrator/SKILL.md"]) {
       const content = readFileSync(join(root, relative), "utf8");
       expect(content).toContain("task-{task_id}-report.md");
       expect(content).toContain("audit-{task_id}.md");
@@ -36,9 +39,9 @@ describe("orchestrator namespace documentation consistency", () => {
   });
 
   it("keeps Explore and Plan read-only while developer and auditor prompts use only their namespaces", () => {
-    const developer = readFileSync(join(root, "pi/skills/orchestrator/templates/prompts/subagent-developer.md"), "utf8");
-    const auditor = readFileSync(join(root, "pi/skills/orchestrator/templates/prompts/subagent-auditor.md"), "utf8");
-    const explore = readFileSync(join(root, "pi/skills/orchestrator/templates/prompts/subagent-explore.md"), "utf8");
+    const developer = readFileSync(join(root, "pi-orchestrator/skills/orchestrator/templates/prompts/subagent-developer.md"), "utf8");
+    const auditor = readFileSync(join(root, "pi-orchestrator/skills/orchestrator/templates/prompts/subagent-auditor.md"), "utf8");
+    const explore = readFileSync(join(root, "pi-orchestrator/skills/orchestrator/templates/prompts/subagent-explore.md"), "utf8");
     expect(developer).toContain(".pi/orchestrator/task-{{task_id}}-report.md");
     expect(developer).toContain(".pi/orchestrator/handoff/{{workspace_id}}/{{task_id}}-handoff.md");
     expect(auditor).toContain(".pi/orchestrator/audit-{{task_id}}.md");

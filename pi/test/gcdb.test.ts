@@ -102,7 +102,8 @@ afterEach(() => {
 describe("verify:gcdb gate (GC-2026-051 T5.2)", () => {
   describe("verify:gcdb subprocess", () => {
     it("exits 0 in the current state (no goal files, trivially covered)", async () => {
-      const result = await runSubprocess(["run", "verify:gcdb"]);
+      // Post-PR-2: verify-gcdb lives in the orchestrator package.
+      const result = await runSubprocess(["run", "../pi-orchestrator/scripts/verify-gcdb.ts"]);
       if (result.code !== 0) {
         console.error("verify:gcdb stdout:", result.stdout);
         console.error("verify:gcdb stderr:", result.stderr);

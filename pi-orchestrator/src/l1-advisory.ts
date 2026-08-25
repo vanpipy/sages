@@ -54,6 +54,8 @@ import {
 	type ChainToolCall,
 } from "./chain-key.js";
 
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+
 export type L1RuleId =
 	| "dag_resynth_loop"
 	| "dispatch_no_audit"
@@ -680,7 +682,7 @@ export function preToolBlockDecision(
 	const critical = findings.find((f) => f.severity === "critical");
 	if (!critical) return undefined;
 	const fixText = RULE_FIX_DIRECTIVES[critical.rule];
-	const reason = `[orchestrator pre-tool block] ${critical.rule}: ${critical.issue}. Fix: ${fixText}. Evidence: ${critical.evidence}`;
+	const reason = `[orchestrator audit advisory — critical] [pre-tool block] ${critical.rule}: ${critical.issue}. Fix: ${fixText}. Evidence: ${critical.evidence}`;
 	return { block: true, reason };
 }
 
@@ -729,4 +731,166 @@ export function orchestratorAdvisoryFor(
 	}
 
 	return out;
+}
+// =============================================================================
+// L1 Advisory wiring (post-tool, pre-tool, tool_result, message_end)
+// =============================================================================
+
+/**
+ * External loaders the L1 detector consults to enrich its advisory context
+ * (goal scope, dag plan status). The conductor in `@sages/pi` supplies the
+ * real ones; tests can stub them.
+ */
+export interface L1AdvisoryRuntimeDeps {
+	loadGoalScope?: (goalId: string, cwd: string) => { goal_id: string; scope_include: string[]; scope_exclude: string[] } | null;
+	loadDagPlan?: (dagId: string, cwd: string) => DagPlanSnapshot | null;
+}
+
+/** No-op loaders used when no runtime deps are provided (e.g. isolated unit tests). */
+const NOOP_DEPS: Required<L1AdvisoryRuntimeDeps> = {
+	loadGoalScope: () => null,
+	loadDagPlan: () => null,
+};
+
+/**
+ * Install the four event listeners that drive the L1 orchestrator advisory
+ * pipeline (GC-2026-053). Returns a handle the caller can use to inspect
+ * advisory state (alreadyAdvisedRules, per-severity budget counters,
+ * rolling history length) for assertions.
+ *
+ * Listeners registered (in order, registration order matters because pi's
+ * pre-tool short-circuit applies handlers left-to-right):
+ *   1. tool_call  pre-tool blocker  — `preToolBlockDecision` returns
+ *                                    `{ block, reason }` on critical findings
+ *   2. tool_call  post-call history  — pushes to `l1History`, calls
+ *                                    `orchestratorAdvisoryFor`, fires
+ *                                    `pi.appendEntry("system", ...)` for each
+ *   3. tool_result error tracker     — populates `errorHistory` keyed by
+ *                                    toolCallId
+ *   4. message_end assistant-text    — captures `lastAssistantMessage` for
+ *                                    retry-intent detection
+ *
+ * L1_HISTORY_CAP = 50 (≈5× the longest chain-detection threshold). LRU
+ * eviction; only the most recent calls matter for repeat / resynth-loop
+ * detection.
+ */
+export function installL1AdvisoryHandlers(
+	pi: ExtensionAPI,
+	runtime?: L1AdvisoryRuntimeDeps,
+): {
+	alreadyAdvisedRules: ReadonlySet<string>;
+	advisoriesBySeverity: Readonly<Record<L1Severity, number>>;
+	historyLength: () => number;
+} {
+	const deps: Required<L1AdvisoryRuntimeDeps> = { ...NOOP_DEPS, ...(runtime ?? {}) };
+	const L1_HISTORY_CAP = 50;
+
+	const l1History: OrchestratorToolCall[] = [];
+	const errorHistory: OrchestratorToolResult[] = [];
+	let lastAssistantMessage: string | null = null;
+	const l1Ctx: OrchestratorAdvisoryContext = {
+		alreadyAdvisedRules: new Set<string>(),
+		advisoriesBySeverity: { critical: 0, major: 0, minor: 0 },
+	};
+
+	const advisoryOptions: OrchestratorAdvisoryOptions = {
+		loadGoalScope: (goalId: string) => {
+			const cwd = process.cwd();
+			return deps.loadGoalScope(goalId, cwd);
+		},
+		loadDagPlan: (dagId: string) => {
+			const cwd = process.cwd();
+			return deps.loadDagPlan(dagId, cwd);
+		},
+	};
+
+	// 1. Pre-tool blocker (must run before the post-tool history-tracker
+	//    so a critical block short-circuits pi's tool_call loop without
+	//    polluting the history with a call that never executed).
+	pi.on("tool_call", (event: any, ctx: any) => {
+		const toolName: string = event?.toolName;
+		if (typeof toolName !== "string" || toolName.length === 0) return;
+		const toolCallId: string | undefined =
+			typeof event?.toolCallId === "string" ? event.toolCallId : undefined;
+		const input =
+			event?.input && typeof event.input === "object" ? event.input : {};
+		const upcoming: OrchestratorToolCall = {
+			toolName,
+			input,
+			timestamp: Date.now(),
+			callId: toolCallId,
+		};
+
+		const decision = preToolBlockDecision(upcoming, l1History, {
+			...advisoryOptions,
+			errorHistory,
+			lastAssistantMessage: lastAssistantMessage ?? undefined,
+		});
+		if (decision) {
+			const ruleMatch = decision.reason.match(/pre-tool block\] (\w+)/);
+			const ruleId = ruleMatch?.[1];
+			if (ruleId && !l1Ctx.alreadyAdvisedRules.has(ruleId)) {
+				pi.appendEntry("system", decision.reason);
+				l1Ctx.alreadyAdvisedRules.add(ruleId);
+				l1Ctx.advisoriesBySeverity.critical =
+					(l1Ctx.advisoriesBySeverity.critical ?? 0) + 1;
+			} else if (ruleId) {
+				l1Ctx.alreadyAdvisedRules.add(ruleId);
+			}
+		}
+		return decision;
+	});
+
+	// 2. Post-tool history-tracker + advisory emitter.
+	pi.on("tool_call", (event: any, _ctx: any) => {
+		const toolName: string = event?.toolName;
+		if (typeof toolName !== "string" || toolName.length === 0) return;
+		const input =
+			event?.input && typeof event.input === "object" ? event.input : {};
+		l1History.push({ toolName, input, timestamp: Date.now() });
+		if (l1History.length > L1_HISTORY_CAP) {
+			l1History.splice(0, l1History.length - L1_HISTORY_CAP);
+		}
+
+		const advisories = orchestratorAdvisoryFor(l1History, l1Ctx, {
+			...advisoryOptions,
+			errorHistory,
+			lastAssistantMessage: lastAssistantMessage ?? undefined,
+		});
+		for (const advisory of advisories) {
+			pi.appendEntry("system", advisory.text);
+			l1Ctx.alreadyAdvisedRules.add(advisory.rule);
+			l1Ctx.advisoriesBySeverity[advisory.severity] =
+				(l1Ctx.advisoriesBySeverity[advisory.severity] ?? 0) + 1;
+		}
+		return undefined;
+	});
+
+	// 3. tool_result error tracker.
+	pi.on("tool_result", (event: any) => {
+		const toolCallId: string | undefined =
+			typeof event?.toolCallId === "string" ? event.toolCallId : undefined;
+		const isError: boolean = event?.isError === true;
+		if (!toolCallId) return;
+		errorHistory.push({ toolCallId, isError });
+		if (errorHistory.length > L1_HISTORY_CAP) errorHistory.shift();
+	});
+
+	// 4. message_end assistant-text capture.
+	pi.on("message_end", (event: any) => {
+		const msg = event?.message;
+		if (!msg || msg.role !== "assistant") return;
+		const content = Array.isArray(msg.content) ? msg.content : [];
+		const text = content
+			.filter((c: any) => c && c.type === "text" && typeof c.text === "string")
+			.map((c: any) => c.text)
+			.join(" ");
+		if (text.length > 0) lastAssistantMessage = text;
+	});
+
+	return {
+		alreadyAdvisedRules: l1Ctx.alreadyAdvisedRules,
+		advisoriesBySeverity: l1Ctx.advisoriesBySeverity,
+		historyLength: () => l1History.length,
+	};
 }

@@ -64,10 +64,10 @@ class MockPi {
 // ─── 1. Extension registration ──────────────────────────────────────────────
 
 describe("GC-2026-053 smoke: extension registration (Step 1)", () => {
-  it("SMOKE-1.1: registerSagesExtension registers 5 tools (4 orchestrator + sages_reminder)", async () => {
-    const registerSagesExtension = (await import("../../src/extension.js")).default;
+  it("SMOKE-1.1: registerOrchestratorTools registers 5 tools (4 orchestrator + sages_reminder)", async () => {
+    const registerOrchestratorTools = (await import("../../src/extension.js")).registerOrchestratorTools;
     const pi = new MockPi();
-    registerSagesExtension(pi as any);
+    registerOrchestratorTools(pi as any);
     const names = [...pi.tools.keys()].sort();
     expect(names).toEqual([
       "dag_synthesize",
@@ -79,9 +79,9 @@ describe("GC-2026-053 smoke: extension registration (Step 1)", () => {
   });
 
   it("SMOKE-1.2: each tool has label, description, parameters, execute", async () => {
-    const registerSagesExtension = (await import("../../src/extension.js")).default;
+    const registerOrchestratorTools = (await import("../../src/extension.js")).registerOrchestratorTools;
     const pi = new MockPi();
-    registerSagesExtension(pi as any);
+    registerOrchestratorTools(pi as any);
     for (const tool of pi.tools.values()) {
       expect(typeof tool.name).toBe("string");
       expect(typeof tool.label).toBe("string");
@@ -92,9 +92,9 @@ describe("GC-2026-053 smoke: extension registration (Step 1)", () => {
   });
 
   it("SMOKE-1.3: sages_reminder tool description mentions all 6 types", async () => {
-    const registerSagesExtension = (await import("../../src/extension.js")).default;
+    const registerOrchestratorTools = (await import("../../src/extension.js")).registerOrchestratorTools;
     const pi = new MockPi();
-    registerSagesExtension(pi as any);
+    registerOrchestratorTools(pi as any);
     const t = pi.tools.get("sages_reminder")!;
     for (const ty of ["STALE_DAG", "MERGE_GATE", "COMPLETION_GATE", "GOAL_DRIFT", "RESUME_REQUIRED", "GENERIC"]) {
       expect(t.description).toContain(ty);
@@ -109,8 +109,8 @@ describe("GC-2026-053 smoke: L1 advisory detector triggers (Step 2)", () => {
   beforeEach(async () => {
     pi = new MockPi();
     const ext = await import("../../src/extension.js");
-    const registerSagesExtension = ext.default;
-    registerSagesExtension(pi as any);
+    const registerOrchestratorTools = ext.registerOrchestratorTools;
+    registerOrchestratorTools(pi as any);
   });
 
   function fireSequence(history: Array<{ toolName: string; input: any }>) {
@@ -229,8 +229,8 @@ describe("GC-2026-053 smoke: sages_reminder integration (Step 3)", () => {
   beforeEach(async () => {
     pi = new MockPi();
     const ext = await import("../../src/extension.js");
-    const registerSagesExtension = ext.default;
-    registerSagesExtension(pi as any);
+    const registerOrchestratorTools = ext.registerOrchestratorTools;
+    registerOrchestratorTools(pi as any);
   });
 
   it("SMOKE-3.1: sages_reminder(SALE_DAG) injects a system entry", async () => {
@@ -279,8 +279,8 @@ describe("GC-2026-053 smoke: sages_reminder integration (Step 3)", () => {
 
   it("SMOKE-3.4: appendEntry failure surfaces as structured error", async () => {
     const failingPi = new MockPi();
-    const registerSagesExtension = (await import("../../src/extension.js")).default;
-    registerSagesExtension(failingPi as any);
+    const registerOrchestratorTools = (await import("../../src/extension.js")).registerOrchestratorTools;
+    registerOrchestratorTools(failingPi as any);
     // Replace appendEntry with throwing impl
     failingPi.appendEntry = () => {
       throw new Error("session closed");
@@ -316,9 +316,9 @@ describe("GC-2026-053 smoke: sages_reminder integration (Step 3)", () => {
 
 describe("GC-2026-053 smoke: end-to-end (Step 5)", () => {
   it("SMOKE-5.1: all 3 reminder channels are reachable via the registered tool", async () => {
-    const registerSagesExtension = (await import("../../src/extension.js")).default;
+    const registerOrchestratorTools = (await import("../../src/extension.js")).registerOrchestratorTools;
     const pi = new MockPi();
-    registerSagesExtension(pi as any);
+    registerOrchestratorTools(pi as any);
     const t = pi.tools.get("sages_reminder")!;
 
     // Reach each of the 6 reminder types via the registered tool
@@ -340,9 +340,9 @@ describe("GC-2026-053 smoke: end-to-end (Step 5)", () => {
 
   it("SMOKE-5.2: L1 advisory and sages_reminder are independent channels", async () => {
     const ext = await import("../../src/extension.js");
-    const registerSagesExtension = ext.default;
+    const registerOrchestratorTools = ext.registerOrchestratorTools;
     const pi = new MockPi();
-    registerSagesExtension(pi as any);
+    registerOrchestratorTools(pi as any);
 
     // Channel A: L1 advisory (auto-fires on tool_call)
     pi.fireToolCall({ toolName: "task_dispatch", input: {}, timestamp: 1 });

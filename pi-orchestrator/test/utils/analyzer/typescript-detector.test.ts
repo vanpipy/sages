@@ -62,8 +62,11 @@ describe('TypeScriptDetector', () => {
     });
     
     it('should detect existing components', async () => {
-      const info = await detector.analyze('/home/leroy/Project/sages/pi');
-      
+      // Post-PR-2: components live in pi-orchestrator/ (utils/services/etc.).
+      // Analyze the orchestrator package directly so the detector sees the
+      // subdirs it cares about.
+      const info = await detector.analyze('/home/leroy/Project/sages/pi-orchestrator');
+
       expect(Array.isArray(info.components)).toBe(true);
       expect(info.components.length).toBeGreaterThan(0);
     });
