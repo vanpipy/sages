@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import registerSagesExtension from "@/extension.js";
 import { softModeReminder } from "@/soft-mode.js";
-import { STANDARD_PROFILE } from "@/profile.js";
+import { STANDARD_PROFILE } from "@/profile/types.js";
 
 /**
  * Minimal mock of the ExtensionAPI surface actually used by registerSagesExtension.
@@ -70,9 +70,19 @@ describe("registerSagesExtension — soft mode bash handler (no Layer 2 block)",
 
     async function getBashHandler(): Promise<(event: any, ctx: any) => Promise<any> | any> {
         registerSagesExtension(mock as any);
-        const handler = mock.handlers.tool_call?.[0];
-        expect(handler).toBeDefined();
-        return handler!;
+        const handlers = mock.handlers.tool_call ?? [];
+        expect(handlers.length).toBeGreaterThan(0);
+        // Return a composite handler that invokes ALL registered tool_call
+        // handlers in order. Mirrors how pi actually runs event handlers
+        // (they all fire, first non-undefined result wins).
+        return (event: any, ctx: any) => {
+            let result: any = undefined;
+            for (const h of handlers) {
+                const r = h(event, ctx);
+                if (r !== undefined && result === undefined) result = r;
+            }
+            return result;
+        };
     }
 
     it("T-C (inverted): `rm src/foo.ts` is NOT blocked in soft mode", async () => {
@@ -104,17 +114,18 @@ describe("registerSagesExtension — soft mode bash handler (no Layer 2 block)",
         expect(mock.appendedEntries).toHaveLength(1);
     });
 
-    it("does NOT emit reminder for read-only bash commands", async () => {
+    it("emits reminder on FIRST bash (read-only or write-intent) — PR 1 conductor", async () => {
+        // GC-2026-069 PR 1: the new conductor's reminder injector fires on the
+        // first bash call regardless of classification (more eager than the
+        // historical write-intent-only behavior — the soft-mode nudge is
+        // useful even for read-only commands because it tells the LLM that
+        // subagent dispatch is recommended for non-trivial work).
         const handler = await getBashHandler();
         await handler(
             { toolName: "bash", input: { command: "ls -la" } },
             { cwd: "/home/leroy/sages-worktrees/main" },
         );
-        await handler(
-            { toolName: "bash", input: { command: "cat src/foo.ts" } },
-            { cwd: "/home/leroy/sages-worktrees/main" },
-        );
-        expect(mock.appendedEntries).toHaveLength(0);
+        expect(mock.appendedEntries).toHaveLength(1);
     });
 
     it("T-D (preserved): passes through non-bash events (returns undefined)", async () => {

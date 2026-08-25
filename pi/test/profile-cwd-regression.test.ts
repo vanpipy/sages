@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearProfileCache, loadBuiltInProfile, loadProfile } from "@/profile.js";
+import { clearProfileCache, loadProfile } from "@/profile/loader.js";
 
 describe("profile loading from a non-repo cwd (GC-2026-062 regression)", () => {
   const originalCwd = process.cwd();
@@ -44,7 +44,12 @@ describe("profile loading from a non-repo cwd (GC-2026-062 regression)", () => {
     expect(p.id).toBe("standard");
   });
 
-  it("loadBuiltInProfile('light') resolves from any cwd", () => {
-    expect(loadBuiltInProfile("light").id).toBe("light");
+  it("loadProfile() resolves the built-in 'standard' from any cwd", () => {
+    // GC-2026-069 PR 1: only `standard` is a built-in profile (light / audit-strict
+    // / ci-only were removed — conductor uses extensions.tools to filter capabilities,
+    // not separate profiles). The cwd-relative module-resolution contract still
+    // applies: loadProfile() from a non-repo cwd must find the built-in.
+    const p = loadProfile();
+    expect(p.id).toBe("standard");
   });
 });

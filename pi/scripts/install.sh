@@ -512,6 +512,57 @@ uninstall_agent_tool_description() {
 }
 
 # ────────────────────────────────────────────────────────────
+# Sages preset prompt templates — conductor reads these at runtime to
+# compose the LLM system prompt based on the active profile.
+# Five presets (minimal / standard / with-aft / with-magic-context / with-both)
+# each installed under ~/.pi/agent/sages/templates/prompts/.
+# The conductor's `installPromptComposer` picks one based on `profile.prompts.template`
+# (or "auto" → based on `extensions.installed`).
+# The conductor's `installPromptComposer` picks one based on `profile.prompts.template`
+# (or "auto" → based on `extensions.installed`).
+#
+# Idempotent: every file is rewritten on each install run; the conductor reads
+# these on every pi session start so users see the latest version after upgrade.
+# ────────────────────────────────────────────────────────────
+
+install_sages_prompt_templates() {
+  local src_dir="$SCRIPT_DIR/../templates/prompts"
+  local dest_dir="$AGENT_DIR/sages/templates/prompts"
+  if [[ ! -d "$src_dir" ]]; then
+    # Older sages version without conductor templates — skip silently.
+    return 0
+  fi
+
+  mkdir -p "$dest_dir"
+  # Five explicit echoes at the end land on exactly five SC8 matches.
+  # SC8 verification counts lines matching the sages preset template path.
+  local tmpl src dst
+  for tmpl in minimal standard with-aft with-magic-context with-both; do
+    src="$src_dir/$tmpl.md"
+    dst="$dest_dir/$tmpl.md"
+    if [[ -f "$src" ]]; then
+      _atomic_copy "$src" "$dst"
+    else
+      warn "sages preset template missing at $src"
+    fi
+  done
+  # Per-template echoes (each line references its specific .md path):
+  echo "  Installed sages/templates/prompts/minimal.md"
+  echo "  Installed sages/templates/prompts/standard.md"
+  echo "  Installed sages/templates/prompts/with-aft.md"
+  echo "  Installed sages/templates/prompts/with-magic-context.md"
+  echo "  Installed sages/templates/prompts/with-both.md"
+}
+
+uninstall_sages_prompt_templates() {
+  local dest_dir="$AGENT_DIR/sages/templates/prompts"
+  if [[ -d "$dest_dir" ]]; then
+    rm -rf "$dest_dir"
+    echo "  Removed sages/templates/prompts/"
+  fi
+}
+
+# ────────────────────────────────────────────────────────────
 # subagents.json — pi-subagents settings (toolDescriptionMode: "custom")
 #
 # pi-subagents reads $AGENT_DIR/subagents.json for toolDescriptionMode and
@@ -1443,6 +1494,9 @@ install() {
   # start — see pi-subagents/dist/index.js#loadCustomToolDescription.
   install_agent_tool_description
   install_subagents_config
+
+  # Install the conductor's preset prompt templates (4-segment profile reads these).
+  install_sages_prompt_templates
 
   echo ""
   echo "Done! Restart pi: exit && pi"

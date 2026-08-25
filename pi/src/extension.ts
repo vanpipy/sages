@@ -47,8 +47,9 @@ import { join } from "node:path";
 
 import { registerOrchestratorTools } from "./tools/orchestrator/index.js";
 import { classifyBashCommand } from "./tools/bash-guard.js";
-import { loadProfile } from "./profile.js";
 import { softModeReminder } from "./soft-mode.js";
+import { loadProfile } from "./profile/loader.js";
+import { applyProfile } from "./profile/applier.js";
 import {
 	orchestratorAdvisoryFor,
 	preToolBlockDecision,
@@ -69,9 +70,28 @@ import {
 const PROFILE = loadProfile();
 
 /**
+ * Apply the 4-segment profile via the conductor's three pi hooks.
+ *
+ *   1. installCapabilityFilter — block tools not in profile.tools
+ *   2. installPromptComposer  — prepend profile-driven system prompt
+ *   3. installReminderInjector — fire soft-mode reminder once on first bash
+ *
+ * The conductor does NOT register tools, write state, or install files.
+ * It only configures how the LLM interacts with the existing tool surface
+ * + system prompt. PR 1 (GC-2026-069) — additive alongside the existing
+ * orchestrator / bash-guard / l1-advisory wiring; the old behaviour stays
+ * intact until PR 3 guts it.
+ */
+export function registerConductorOnly(pi: ExtensionAPI): void {
+	const profile = loadProfile();
+	applyProfile(pi, profile);
+}
+
+/**
  * Default pi extension entrypoint. pi calls this once on package load.
  */
 export default function registerSagesExtension(pi: ExtensionAPI): void {
+	registerConductorOnly(pi);
 	registerOrchestratorTools(pi);
 	// GC-2026-060: the `sages_todo` tool was removed (GC-2026-068 reversal).
 	// The LLM-facing todo tool is now Magic Context's `todowrite`, mirrored
@@ -124,25 +144,12 @@ const L1_HISTORY_CAP = 50;
 	// This is the strongest gate — critical mistakes must not happen at
 	// all. Major findings still post-call advise but don't pre-block.
 
-	// ── Bash tool_call handler — soft mode ────────────────────────────
-	// Soft mode: NEVER block. The handler still classifies each command
-	// so it can fire the once-per-process auto-steer reminder on the
-	// first write-intent bash call. The reminder is goal-orientation,
-	// not "you wrote production code" feedback — it nudges the LLM back
-	// toward DAG workflow when its todowrite has grown past the
-	// profile's `dag_threshold`.
-	pi.on("tool_call", (event: any, ctx: any) => {
-		if (event.toolName !== "bash") return;
-		const command: string = event?.input?.command;
-		if (typeof command !== "string" || command.length === 0) return;
-
-		const classification = classifyBashCommand(command);
-		if (classification === "write-intent" && !remindedThisSession) {
-			remindedThisSession = true;
-			pi.appendEntry("system", softModeReminder(PROFILE));
-		}
-		return undefined;
-	});
+	// ── Bash reminder is now handled by the conductor ────────────────
+	// GC-2026-069 PR 1: the historical write-intent-bash reminder
+	// (removed) is replaced by `installReminderInjector` in
+	// `profile/applier.ts`, called from `registerConductorOnly` above.
+	// The new injector fires on the first bash call regardless of
+	// classification — simpler, faster feedback to the LLM.
 
 	// ── L1 orchestrator tool_call handler (GC-2026-053) ─────────────────
 	// Separate handler so L1 logic stays isolated from the soft-mode
