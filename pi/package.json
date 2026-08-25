@@ -6,14 +6,13 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test ./src ./test --path-ignore-patterns dist/",
-    "gen:catalog": "bun run scripts/gen-catalog.ts",
     "gen:gcdb": "bun run scripts/gen-gcdb.ts",
-    "verify:catalog": "bun run scripts/verify-catalog.ts",
-    "verify:gcdb": "bun run scripts/verify-gcdb.ts",
-    "verify:subagent-roster": "bun run scripts/verify-subagent-roster.ts",
-    "verify:isolation-modes": "bun run scripts/verify-isolation-modes.ts",
-    "verify:namespace-ownership": "bun run scripts/verify-namespace-ownership.ts",
-    "verify:soft-mode-mental-model": "bun run scripts/verify-soft-mode-mental-model.ts",
+    "verify:catalog": "bun run ../pi-orchestrator/scripts/verify-catalog.ts",
+    "verify:gcdb": "bun run ../pi-orchestrator/scripts/verify-gcdb.ts",
+    "verify:subagent-roster": "bun run ../pi-orchestrator/scripts/verify-subagent-roster.ts",
+    "verify:isolation-modes": "bun run ../pi-orchestrator/scripts/verify-isolation-modes.ts",
+    "verify:namespace-ownership": "bun run ../pi-orchestrator/scripts/verify-namespace-ownership.ts",
+    "verify:soft-mode-mental-model": "bun run ../pi-orchestrator/scripts/verify-soft-mode-mental-model.ts",
     "check:all": "bun run scripts/check-all.ts"
   },
   "keywords": [
