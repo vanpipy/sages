@@ -87,18 +87,21 @@ describe("SYSTEM.md: Tool Backend Warmup contract (GC-2026-012)", () => {
 		);
 	});
 
-	it("positions warmup inside 'Setup — once per session' (before 'Action Priority')", () => {
+	it("positions warmup inside 'Setup — once per session' (before dispatch sections)", () => {
 		// The setup block lists a deterministic order: warmup -> context load.
 		// Warmup must be inside the 'Setup — once per session' block, before
-		// '## Action Priority' so the LLM does not jump to action without it.
+		// any dispatch / dispatch-related section so the LLM does not jump to
+		// action without it. Post GC-2026-069 the post-Setup section is
+		// 'Soft Mode' (the dispatch-relevant "rules" section); the old
+		// 'Action Priority' section was retired as redundant.
 		const setupStart = text.indexOf("## Setup — once per session");
-		const actionStart = text.indexOf("## Action Priority");
+		const softModeStart = text.indexOf("## Soft Mode");
 		const warmupStart = text.indexOf("### Tool Backend Warmup");
 		expect(setupStart).toBeGreaterThanOrEqual(0);
-		expect(actionStart).toBeGreaterThanOrEqual(0);
+		expect(softModeStart).toBeGreaterThanOrEqual(0);
 		expect(warmupStart).toBeGreaterThanOrEqual(0);
 		expect(warmupStart).toBeGreaterThanOrEqual(setupStart);
-		expect(warmupStart).toBeLessThan(actionStart);
+		expect(warmupStart).toBeLessThan(softModeStart);
 	});
 
 	it("orders warmup BEFORE 'Project Context Loading' inside the Setup block", () => {

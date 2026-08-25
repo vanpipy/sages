@@ -1,24 +1,40 @@
-# Sages Coding Agent (with AFT)
+# Active tooling — with AFT code-intel
 
-## Code search — use AFT, not bash+grep
-- `aft_search` for any code/concept query. Sub-second, indexed, ranked.
-- `aft_outline` to explore file/directory structure.
-- `aft_zoom` to read a specific symbol (function / class / method).
-- `aft_inspect` for code health, TODOs, diagnostics, dead code.
+The Sages conductor loaded the following extensions for this session.
+Workflow rules (DAG mechanics, subagent dispatch, TDD, commit
+conventions, namespace ownership) live in SYSTEM.md.
 
-DO NOT use `bash grep` for code search. AFT is strictly faster and ranked.
+## Loaded extensions
 
-## Multi-step workflows (DAG)
 {{#if loaded."@sages/pi-orchestrator"}}
-For tasks with >2 items, use the 4-stage DAG workflow:
-`goal_contract_create` → `dag_synthesize` → `task_dispatch` → `orchestrator_audit`
+- **`@sages/pi-orchestrator`** — workflow governance
 {{/if}}
 
-## Subagents
 {{#if loaded."@sages/pi-subagents"}}
-- Pure research: `Explore` (foreground)
-- TDD implementation: `developer` (background, worktree isolation)
-- Verification: `auditor` (background, read-only)
-- Cross-workspace merge: `merger` (background)
-- Git archaeology: `git-expert` (background)
+- **`@sages/pi-subagents`** — subagent lifecycle
 {{/if}}
+
+{{#if loaded."@sages/pi-evaluator"}}
+- **`@sages/pi-evaluator`** — eval scoring (opt-in)
+{{/if}}
+
+## AFT — code-intel tools
+
+`@cortexkit/aft-pi` provides ranked, indexed code search. **Prefer
+AFT over `bash grep` / `rg`** — AFT is sub-second, respects
+`.gitignore`, and ranks results.
+
+- `aft_search` — semantic + literal code/concept query
+- `aft_outline` — file/directory structure (symbols, headings)
+- `aft_zoom` — single symbol inspection (with call-graph)
+- `aft_inspect` — code health (TODOs, diagnostics, dead code)
+
+## Reaching for the right tool
+
+- Code search → `aft_search`
+- Symbol lookup → `aft_zoom` (specific) / `aft_search` (broad)
+- Cross-package blast radius → `codebase_memory_trace_path`
+- Past decisions / parked notes → `ctx_search`
+
+See SYSTEM.md for hard rules (meta-file classification, foreground
+vs background, TDD, commit conventions, namespace ownership).

@@ -1,22 +1,41 @@
-# Sages Coding Agent
+# Active tooling — standard
 
-## Multi-step workflows (DAG)
+The Sages conductor loaded the following extensions for this session.
+Each contributes tools to your active toolset. This file is the
+dynamic-context companion to `SYSTEM.md` (the static constitution);
+it only lists which extensions are loaded and what each contributes
+— workflow rules (DAG mechanics, subagent dispatch, TDD, commit
+conventions, namespace ownership) live in SYSTEM.md, not here.
+
+## Loaded extensions
+
 {{#if loaded."@sages/pi-orchestrator"}}
-For tasks with >2 items in your plan, use the 4-stage DAG workflow:
-1. `goal_contract_create({ id, title, success_criteria })` — turn intent into a verifiable contract
-2. `dag_synthesize({ goal_id, tasks })` — decompose into a task DAG with batch / depends_on / isolation
-3. `task_dispatch({ dag_id, strategy: "auto" })` — spawn subagents per batch
-4. `orchestrator_audit({ dag_id, depth: "fast" })` — workflow-level audit rollup
-
-For ≤2 items, handle directly.
+- **`@sages/pi-orchestrator`** — workflow governance
+  - `goal_contract_create` — turn intent into a verifiable contract
+  - `dag_synthesize` — decompose into a task DAG
+  - `task_dispatch` — spawn subagents per batch
+  - `orchestrator_audit` — workflow-level audit rollup
+  - `sages_reminder` — soft-mode reminder injector
 {{/if}}
 
-## Subagents
 {{#if loaded."@sages/pi-subagents"}}
-- Pure research / codebase search: dispatch `Explore` (foreground, fast).
-- Planning Brief compilation: dispatch `Plan` (foreground, read-only).
-- TDD implementation in a managed worktree: dispatch `developer` (background).
-- Evidence-based verification: dispatch `auditor` (background, read-only).
-- Cross-workspace merge verification: dispatch `merger` (background).
-- Git inspection / archaeology: dispatch `git-expert` (background, read-only).
+- **`@sages/pi-subagents`** — subagent lifecycle (managed worktrees)
+  - `Agent` — dispatch subagents
+  - `get_subagent_result` — fetch results
+  - `steer_subagent` — redirect mid-run
 {{/if}}
+
+{{#if loaded."@sages/pi-evaluator"}}
+- **`@sages/pi-evaluator`** — eval scoring (off by default; opt in via `sages.rewardMode`)
+{{/if}}
+
+## Reaching for the right tool
+
+- Code search across the repo → use `aft_search` (or `grep` tool);
+  avoid `bash grep`.
+- Symbol lookup / cross-file → `codebase_search` / `codebase_refs`.
+- Cross-package blast radius → `codebase_memory_trace_path`.
+- Find past decisions / parked notes → `ctx_search`.
+
+See SYSTEM.md for hard rules (meta-file classification, foreground
+vs background, TDD, commit conventions, namespace ownership).
