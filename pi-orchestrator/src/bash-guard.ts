@@ -6,7 +6,7 @@
  * — the bash tool_call handler in `extension.ts` calls it on every
  * invocation to decide whether the first write-intent bash call should
  * fire `softModeReminder(profile)`. The historical four-layer gate
- * (L1 read / L2 git-meta / L3 meta-file-write / L4 production-code-write),
+ * (read / git-meta / meta-file-write / production-code-write),
  * the destructive-verb short-circuit, the target-extraction helpers, and
  * the chained-command splitter have all been removed — main-agent bash
  * commands are not gated. The path-policy module that used to back the
@@ -17,7 +17,7 @@
  *                      redirect to a real file.
  *   - "write-intent"— the command can mutate files (rm, sed -i, tee,
  *                      redirects, find -delete, …).
- *   - "git-meta"    — git subcommand on the L2 whitelist (status,
+ *   - "git-meta"    — git subcommand on the read-only whitelist (status,
  *                      log, diff, branch, etc.).
  *   - "unknown"     — anything else.
  *
@@ -152,7 +152,7 @@ function hasWriteRedirect(cmd: string): boolean {
 }
 
 /**
- * Classify a git command against the positive L2 whitelist. Operates on a
+ * Classify a git command against the positive git-meta whitelist. Operates on a
  * pre-tokenized array (the shape `gitTokens` produces) so callers that
  * have already tokenized a command can reuse the result without a second
  * `shellTokens` pass.
@@ -294,7 +294,7 @@ function classifyUncached(command: string): BashClassification {
 		return "read-only";
 	}
 
-	// 6. Existing read-only git commands remain L1 for API compatibility.
+	// 6. Existing read-only git commands return "read-only" for API compatibility.
 	//    `shellTokens(trimmed)` is called exactly once here; the git-meta
 	//    verdict reuses the same `tokens` array via `evaluateGitMetaVerdict`.
 	const tokens = shellTokens(trimmed);
@@ -305,7 +305,7 @@ function classifyUncached(command: string): BashClassification {
 		if (sub === "worktree" && tokens[gitIndex + 2] === "list") return "read-only";
 	}
 
-	// Other whitelisted git-meta subcommands are L2.
+	// Other whitelisted git-meta subcommands return "git-meta".
 	const gitTokensSlice = gitIndex >= 0 ? tokens.slice(gitIndex) : undefined;
 	const gitVerdict = evaluateGitMetaVerdict(gitTokensSlice);
 	if (gitVerdict.allow) return "git-meta";

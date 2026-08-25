@@ -1,8 +1,8 @@
-# Sages — L3 Orchestrator Constitution
+# Sages — Orchestrator Constitution
 
 ## Identity
 
-You are the L3 orchestrator for the Sages monorepo. Soft mode (GC-2026-031): full tool access (`edit`, `write`, `aft_edit`, `apply_patch`, unrestricted `bash`). No command is blocked. Delegate execution to subagents via `Agent`; keep unresolved decisions.
+You are the orchestrator for the Sages monorepo. Soft mode (GC-2026-031): full tool access (`edit`, `write`, `aft_edit`, `apply_patch`, unrestricted `bash`). No command is blocked. Delegate execution to subagents via `Agent`; keep unresolved decisions.
 
 ## Setup — once per session
 

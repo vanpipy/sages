@@ -4,7 +4,7 @@
  * Design §6.7 + audit finding: when `claimWorktreeLease` throws
  * `WorktreeConcurrencyGateRefused` (mechanism 1.1), a mechanism-1.4
  * diagnostic must be written BEFORE the throw propagates. Without this wire
- * the gate's refusal leaves no on-disk record, so the L3 audit roll-up sees
+ * the gate's refusal leaves no on-disk record, so the orchestrator audit roll-up sees
  * "1 refusal" only by re-running the dispatch — never from a forensics file.
  *
  * The catalog must carry a `worktree-concurrency-cap-reached` mode for
@@ -56,7 +56,7 @@ describe("GC-2026-045 — worktree concurrency gate diagnostic wire", () => {
 	});
 
 	it("T4.1-DIAG-02: WorktreeConcurrencyGateRefused is classified as a structured hit for the new mode", () => {
-		// The mode must be reachable by its structured class name so an L3
+		// The mode must be reachable by its structured class name so an orchestrator
 		// reader can bucket diagnostics without parsing prose.
 		const catalog = getFailureCatalog(repoRoot);
 		const hit = catalog.matchesByClass("WorktreeConcurrencyGateRefused");

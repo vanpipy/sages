@@ -70,7 +70,7 @@ test_results:
 open_questions:
   - question: "What API contract for the deadline hook?"
     why_blocking: true
-    suggestion: "ask the L3 orchestrator"
+    suggestion: "ask the orchestrator"
 handoff_for_next_task: []
 \`\`\``;
 		const findings = extractAuditFindings(report, "");

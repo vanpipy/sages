@@ -137,7 +137,7 @@ test_results:
 open_questions: []
 handoff_for_next_task: []
 \`\`\``;
-		// The L3 should have surfaced the question in the task report. If not,
+		// The orchestrator should have surfaced the question in the task report. If not,
 		// the inline check fires ask_unanswered. The audit auto-injects.
 		const findings = extractAuditFindings(message, "");
 		expect(findings.some((f) => f.rule === "ask_unanswered")).toBe(true);
@@ -162,7 +162,7 @@ open_questions:
     why_blocking: true
 handoff_for_next_task: []
 \`\`\``;
-		// When the L3 includes the question in the task report's
+		// When the orchestrator includes the question in the task report's
 		// open_questions AND the agent message's open_questions, the
 		// audit gate sees it as surfaced. We pass the task report as
 		// the second arg (which is what orchestrator_audit does).

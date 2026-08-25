@@ -3,7 +3,7 @@
  *
  * Adapted from ai-sdlc RFC-0015 §5.1 + §Q9. The point of the mechanism is that
  * failure classes stop being free text ("NEEDS WORK: something broke") and
- * become a versioned, enumerable vocabulary that both the sub-agent and the L3
+ * become a versioned, enumerable vocabulary that both the sub-agent and the orchestrator
  * audit roll-up can reason about. `DiagnosticJsonV1.cause` (mechanism 1.4)
  * draws from exactly these ids — that shared vocabulary is what makes
  * `gatherFailureModeStats()` possible.

@@ -1,14 +1,15 @@
 /**
  * l1-advisory.ts — GC-2026-053 + GC-2026-059
  *
- * L1 (orchestrator self-audit) advisory mirror. This is the L2 advisory
+ * Orchestrator advisory mirror. This mirrors the subagent advisory
  * pattern from `pi-subagents/src/agent-runner.ts:advisoryFor`, applied to
  * the orchestrator's own tool-call history instead of subagent messages.
  *
- * The L2 layer audits subagent message text for governance compliance
- * (YAML block, checkpoint cadence, ASK propagation, BLOCKED reason). The
- * L1 layer audits the orchestrator's tool-call stream for the same
- * class of problems at the orchestrator's own layer:
+ * The subagent advisory audits subagent message text for governance
+ * compliance (YAML block, checkpoint cadence, ASK propagation, BLOCKED
+ * reason). This orchestrator advisory audits the orchestrator's
+ * tool-call stream for the same class of problems at the orchestrator's
+ * own layer:
  *
  *   - dag_resynth_loop        — same (tool, args) re-synthesized > N times
  *   - dispatch_no_audit       — task dispatched but never audited
@@ -19,7 +20,7 @@
  *                                stuck-on-same-call detector, mirrors dsh
  *                                repeat-tool-reminder chain-key semantics)
  *
- * Output contract mirrors L2 exactly:
+ * Output contract mirrors the subagent advisory exactly:
  *
  *   [orchestrator audit advisory — N/M] <rule>: <issue>. Fix: <directive>.
  *
@@ -171,7 +172,7 @@ export interface OrchestratorAdvisoryOptions {
 // Caps — per-severity, dynamic.
 // =============================================================================
 
-/** Per-advisory token cap. Mirrors L2's
+/** Per-advisory token cap. Mirrors subagent advisory's
  *  ADVISORY_MAX_TOKENS so the two layers are formatted identically. */
 export const ADVISORY_MAX_TOKENS = 200;
 
@@ -204,7 +205,7 @@ export const DEFAULT_ADVISORY_BUDGET_BY_SEVERITY: Record<L1Severity, number> = {
 
 export const ADVISORY_MIN_SEVERITY: L1Severity = "major";
 
-/** Per-rule actionable fix text. Mirrors L2's `RULE_FIX_DIRECTIVES`
+/** Per-rule actionable fix text. Mirrors subagent advisory's `RULE_FIX_DIRECTIVES`
  *  shape so both layers are introspectable in the same way. */
 export const RULE_FIX_DIRECTIVES: Record<L1RuleId, string> = {
 	dag_resynth_loop:
@@ -575,7 +576,7 @@ function detectNoProgressNoAudit(
  * per-severity budget counters without re-parsing the text.
  */
 export interface L1AdvisoryEntry {
-	/** Formatted string with the same shape L2 emits, prefixed with severity. */
+	/** Formatted string with the same shape the subagent advisory emits, prefixed with severity. */
 	text: string;
 	/** Rule ID — caller adds this to `alreadyAdvisedRules`. */
 	rule: L1RuleId;
@@ -650,7 +651,7 @@ function truncateToTokens(text: string, maxTokens: number): string {
 }
 
 /**
- * Format advisory entries for the orchestrator. Mirrors L2's
+ * Format advisory entries for the orchestrator. Mirrors subagent advisory's
  *  `advisoryFor`: severity filter + dedup + per-severity budget + per-token
  *  cap, but operating on tool-call history instead of message text.
  *
