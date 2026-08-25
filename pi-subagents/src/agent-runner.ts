@@ -35,7 +35,7 @@ import {
 } from "./budget.js";
 import { buildParentContext, extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
-import { diagnosticForRunResult, retryBudgetLeftFor, writeDiagnostic } from "./diagnostic.js";
+import { diagnosticForRunResult, notifyOrchestrator, retryBudgetLeftFor, writeDiagnostic } from "./diagnostic.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { inc as profileInc, observe as profileObserve } from "./profile.js";
@@ -1271,6 +1271,7 @@ export async function runAgent(
 		type,
 		options,
 		effectiveCwd,
+		options.pi,
 	);
 
 	return { responseText, session, aborted, steered: softLimitReached, failure };
@@ -1290,6 +1291,7 @@ function emitRunDiagnostic(
 	type: SubagentType,
 	options: RunOptions,
 	cwd: string,
+	pi: { appendEntry: (channel: string, data: unknown) => void },
 ): void {
 	if (process.env.SAGES_DIAGNOSTIC_WRITE === "off") return;
 	try {
@@ -1302,7 +1304,7 @@ function emitRunDiagnostic(
 		// catalog. Returns undefined (and writeDiagnostic then omits the field)
 		// when the cause has no actionable retry handler.
 		const retryBudgetLeft = retryBudgetLeftFor(classified.cause, cwd);
-		writeDiagnostic({
+		const written = writeDiagnostic({
 			dispatchId: options.agentId ?? `${type}-${Date.now()}`,
 			context: { taskId: options.agentId },
 			subagentType: type,
@@ -1314,6 +1316,25 @@ function emitRunDiagnostic(
 			cwd,
 			catalogCwd: cwd,
 		});
+		// GC-2026-070: push-notify the orchestrator session. The diagnostic is
+		// on disk (writeDiagnostic returned a path or null on I/O failure), and
+		// a single `system` line into the main session is enough for the
+		// orchestrator's next decision to see the cause + remaining budget
+		// without needing to re-poll `.pi/diagnostics/`.
+		if (written !== null) {
+			notifyOrchestrator(pi, {
+				schemaVersion: "v1",
+				emittedAt: new Date().toISOString(),
+				dispatchId: options.agentId ?? `${type}-${Date.now()}`,
+				context: { taskId: options.agentId },
+				subagentType: type,
+				outcome: classified.outcome,
+				cause: classified.cause,
+				detail: classified.detail,
+				evidence: result.failure ? { stderrDigest: result.failure } : undefined,
+				...(retryBudgetLeft !== undefined ? { retryBudgetLeft } : {}),
+			});
+		}
 	} catch {
 		/* never let post-mortem bookkeeping fail the run */
 	}
