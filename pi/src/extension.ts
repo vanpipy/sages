@@ -28,6 +28,10 @@
  * `pi.appendEntry("system", ...)` reminder — never blocked.
  */
 
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import {
@@ -38,6 +42,57 @@ import {
 } from "../../pi-orchestrator/src/index.js";
 import { loadProfile } from "./profile/loader.js";
 import { applyProfile } from "./profile/applier.js";
+
+/**
+ * `@sages/pi-orchestrator` is a peer dep of `@sages/pi`
+ * (see `pi/package.json#peerDependencies`). The relative-path import
+ * above assumes the orchestrator package sits as a sibling under the
+ * same parent directory — `pi/` and `pi-orchestrator/` in dev,
+ * `~/.pi/packages/<conductor>/` and `~/.pi/packages/pi-orchestrator/`
+ * in production installs done by
+ * `pi/scripts/install.sh:install_pi_orchestrator_files`.
+ *
+ * When the sibling layout is broken (user installed the conductor
+ * without the orchestrator, or moved one to a different parent), the
+ * relative-path import throws a generic `Cannot find module`. This
+ * pre-load check walks parents up to 5 levels looking for a sibling
+ * `pi-orchestrator/src/` so the user gets an actionable error pointing
+ * at the actual contract instead of an ESM-resolution dead-end.
+ *
+ * Bun loads TS directly (.ts) but a built install serves .js — accept
+ * either.
+ */
+function assertOrchestratorSiblingPresent(): void {
+	const here = dirname(fileURLToPath(import.meta.url));
+	let dir = here;
+	for (let depth = 0; depth < 5; depth++) {
+		const srcDir = join(dir, "pi-orchestrator", "src");
+		if (
+			existsSync(join(srcDir, "index.ts")) ||
+			existsSync(join(srcDir, "index.js"))
+		) {
+			return;
+		}
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	// Note: this fires only when the relative-path import above has
+	// already resolved via a non-standard layout — e.g., node_modules
+	// resolution or a workspace symlink. In the canonical dev/install
+	// case the ESM import either succeeded (this check passes) or
+	// failed at the import site above with the standard ESM error.
+	throw new Error(
+		"[sages] @sages/pi-orchestrator not found as a sibling of @sages/pi.\n" +
+			"  The conductor (this package) requires @sages/pi-orchestrator as a\n" +
+			"  peer dep — both packages must share a parent directory:\n" +
+			"    - dev:           <repo>/pi/  +  <repo>/pi-orchestrator/\n" +
+			"    - production:    ~/.pi/packages/<conductor>/  +  ~/.pi/packages/pi-orchestrator/\n" +
+			"  Re-run `pi/scripts/install.sh` to deploy them together.",
+	);
+}
+
+assertOrchestratorSiblingPresent();
 
 // Load the active profile once at module load. Resolution order is
 // documented in `profile.ts`; falls back to the `standard` built-in
