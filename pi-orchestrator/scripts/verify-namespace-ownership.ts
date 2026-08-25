@@ -3,14 +3,14 @@
  * verify-namespace-ownership.ts — GC-2026-052 T6.1
  *
  * Verifies that subagent + profile YAML templates do not declare
- * L3 paths (`.pi/orchestrator/...`) in their `files:` (or
+ * orchestrator paths (`.pi/orchestrator/...`) in their `files:` (or
  * equivalent) path lists.
  *
  * Background: per the `.pi/orchestrator/` namespace ownership
  * contract (see `AGENTS.md` and the orchestrator SKILL.md),
  * subagent dispatch is partitioned into:
  *
- *   - **L3 orchestrator** owns `goal-*.yaml`, `dag-*.yaml`,
+ *   - **Orchestrator** owns `goal-*.yaml`, `dag-*.yaml`,
  *     `audit-state-*.yaml`, and the orchestrator workflow
  *     rollups.
  *   - **Subagents** own their own reports (`task-{id}-report.md`)
@@ -18,8 +18,8 @@
  *
  * If a subagent template lists `.pi/orchestrator/goal-*.yaml`
  * in its `files:`, that template is declaring ownership over an
- * L3 path — a namespace violation. Subagents MUST NOT modify
- * orchestrator state; only the L3 orchestrator (main agent) owns
+ * orchestrator path — a namespace violation. Subagents MUST NOT modify
+ * orchestrator state; only the orchestrator owns
  * those paths.
  *
  * Scan scope: every YAML file under `subagents/` and `profiles/`.
@@ -28,7 +28,7 @@
  * key it appears under.
  *
  * On any hit: print the offending file + matched path and exit 1.
- * On no hits: print `OK: no L3 path references in subagent /
+ * On no hits: print `OK: no orchestrator path references in subagent /
  * profile templates` and exit 0.
  *
  * No external dependencies beyond `js-yaml`. Self-test: running
@@ -45,8 +45,8 @@ const __dirname = dirname(__filename);
 const PI_ROOT = join(__dirname, "..");
 
 const TEMPLATE_DIRS = ["subagents", "profiles"];
-const L3_PREFIX = ".pi/orchestrator/";
-const L3_PATTERN = /"\.pi\/orchestrator\/[^"]+"/g;
+const ORCHESTRATOR_PREFIX = ".pi/orchestrator/";
+const ORCHESTRATOR_PATTERN = /"\.pi\/orchestrator\/[^"]+"/g;
 
 export interface NamespaceScanResult {
 	ok: boolean;
@@ -72,7 +72,7 @@ function scanFile(path: string): string[] {
 	} catch {
 		// fall through to raw scan
 	}
-	for (const m of text.matchAll(L3_PATTERN)) {
+	for (const m of text.matchAll(ORCHESTRATOR_PATTERN)) {
 		matches.add(m[0]);
 	}
 	return [...matches].sort();
@@ -81,7 +81,7 @@ function scanFile(path: string): string[] {
 function walkValue(value: unknown, out: Set<string>): void {
 	if (value === null || value === undefined) return;
 	if (typeof value === "string") {
-		if (value.startsWith(L3_PREFIX)) out.add(`"${value}"`);
+		if (value.startsWith(ORCHESTRATOR_PREFIX)) out.add(`"${value}"`);
 		return;
 	}
 	if (Array.isArray(value)) {
@@ -116,18 +116,18 @@ function main(): void {
 	const result = scanNamespaceOwnership();
 	if (!result.ok) {
 		console.error(
-			`verify-namespace-ownership: FAIL — ${result.offenders.length} L3 path reference(s) in templates:`,
+			`verify-namespace-ownership: FAIL — ${result.offenders.length} orchestrator path reference(s) in templates:`,
 		);
 		for (const o of result.offenders) {
 			console.error(`  ✗ ${o.file}: ${o.path}`);
 		}
 		console.error(
-			`      fix: remove the \`${L3_PREFIX}*\` path from the template — L3 orchestrator paths are owned by the main agent, not subagents.`,
+			`      fix: remove the \`${ORCHESTRATOR_PREFIX}*\` path from the template — orchestrator paths are owned by the main agent, not subagents.`,
 		);
 		process.exit(1);
 	}
 	console.log(
-		`OK: no L3 path references in subagent templates (scanned ${TEMPLATE_DIRS.join(", ")})`,
+		`OK: no orchestrator path references in subagent templates (scanned ${TEMPLATE_DIRS.join(", ")})`,
 	);
 	process.exit(0);
 }

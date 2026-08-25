@@ -15,7 +15,7 @@
  *   - event.json      ← pi/src/observability/events.ts
  *                        (RunEvent enum, GC-2026-050 taxonomy)
  *   - namespace.json  ← pi/src/namespace-ownership.ts
- *                        (L3 / developer / auditor patterns)
+ *                        (orchestrator / developer / auditor patterns)
  *
  * Each catalog file has top-level `_source_hash` (SHA-256 chain) and
  * `_generated_at` (ISO 8601). The hash chain is computed from the bytes of
@@ -382,14 +382,14 @@ function extractEvent(): {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface NamespaceEntry {
-	id: "l3" | "developer" | "auditor";
+	id: "orchestrator" | "developer" | "auditor";
 	patterns: string[];
 }
 
 function extractNamespace(): { entries: NamespaceEntry[]; sources: SourceFile[] } {
 	const ns = loadSource("src/namespace-ownership.ts");
 
-	// Parse the three pattern constants: L3_PATTERNS, DEVELOPER_PATTERNS, AUDITOR_PATTERNS.
+	// Parse the three pattern constants: ORCHESTRATOR_PATTERNS, DEVELOPER_PATTERNS, AUDITOR_PATTERNS.
 	function parsePatterns(constName: string): string[] {
 		// Match the array body between `[` and the first `]`. We capture
 		// everything between them (non-greedy). The trailing `;` is required
@@ -416,12 +416,12 @@ function extractNamespace(): { entries: NamespaceEntry[]; sources: SourceFile[] 
 		return patterns;
 	}
 
-	const l3 = parsePatterns("L3_PATTERNS");
+	const orchestrator = parsePatterns("ORCHESTRATOR_PATTERNS");
 	const dev = parsePatterns("DEVELOPER_PATTERNS");
 	const aud = parsePatterns("AUDITOR_PATTERNS");
 
 	const entries: NamespaceEntry[] = [
-		{ id: "l3", patterns: l3 },
+		{ id: "orchestrator", patterns: orchestrator },
 		{ id: "developer", patterns: dev },
 		{ id: "auditor", patterns: aud },
 	];

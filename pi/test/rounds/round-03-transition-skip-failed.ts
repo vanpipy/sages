@@ -1,5 +1,5 @@
 /**
- * Round 3: L1 advisory — transition_skip_failed
+ * Round 3: Orchestrator advisory — transition_skip_failed
  *
  * DAG state shows T1 in `failed` status; LLM calls task_dispatch for
  * T2 whose dep is T1. Expected: critical advisory.
@@ -9,9 +9,9 @@ import { describe, it, expect } from "bun:test";
 import {
   extractOrchestratorFindings,
   RULE_FIX_DIRECTIVES,
-} from "@/l1-advisory.js";
+} from "@/orchestrator-advisory.js";
 
-describe("Round 3: L1 advisory — transition_skip_failed", () => {
+describe("Round 3: Orchestrator advisory — transition_skip_failed", () => {
   it("fires when dispatching T2 while T1 (dep) is failed", () => {
     // The detector scans for task_dispatch with a transition block.
     const history = [

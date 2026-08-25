@@ -36,7 +36,7 @@ Thumbs.db
 .pi/worktree-state/
 # GC-2026-044: sub-agent-owned runtime state. These sit OUTSIDE
 # `.pi/orchestrator/` on purpose (memory rule #23 keeps that namespace
-# L3-only), so they need their own entries here — a diagnostic is a
+# orchestrator-only), so they need their own entries here — a diagnostic is a
 # post-mortem about one machine's run and must never reach a commit.
 # `**/` matters: a sub-agent's cwd is often a package dir, not the repo
 # root, and the root-anchored form above would miss `pi-subagents/.pi/`.

@@ -4,10 +4,10 @@
  * Tests the inline_findings translation: orchestrator-audit reads each
  * task's report, calls extractAuditFindings (the full 5-rule parser
  * from pi-subagents), and translates the AuditFinding[] into
- * inline_findings surfaced in the audit response. L3 records them.
+ * inline_findings surfaced in the audit response. orchestrator records them.
  *
  * After GC-2026-041: orchestrator_audit auto-injects the inline findings
- * into state.findings if the L3 doesn't record them, so computeScore
+ * into state.findings if the orchestrator doesn'''t record them, so computeScore
  * is penalized.
  */
 
