@@ -37,8 +37,9 @@ export interface ChainToolCall {
  * variations. Two args objects that are semantically equivalent
  * produce the same canonical string regardless of key order.
  *
- * Mirrors the canonicalization in `pi/src/tools/orchestrator/goal-lock.ts:computeGoalHash`
- * — same algorithm, different scope.
+ * Mirrors the canonicalization in
+ * `pi-orchestrator/src/goal-lock.ts:computeGoalHash` — same algorithm,
+ * different scope.
  */
 export function canonicalJSON(value: unknown): string {
   if (value === null || typeof value !== "object") {
