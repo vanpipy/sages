@@ -18,7 +18,8 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import type { Profile } from "./types.js";
 
-/** Templates are bundled with the sages package — installed by `install.sh` to `~/.pi/agent/sages/templates/prompts/`. */
+/** Templates are bundled with the sages package — installed by `install.sh` to `~/.pi/agent/sages/templates/prompts/`.
+ *  Resolved via two `..` hops: from `dist/profile/` (or `src/profile/` in dev) up to the package root, then into `templates/prompts/`. */
 const TEMPLATES_DIR = join(
 	dirname(fileURLToPath(import.meta.url)),
 	"..",
