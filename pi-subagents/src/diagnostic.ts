@@ -3,7 +3,7 @@
  *
  * Adapted from ai-sdlc RFC-0041 §4.4 + §5.2. When a sub-agent exits
  * non-cleanly today, the only record is a string in a tool result — which is
- * gone the moment the L3 orchestrator's context is compacted. This module
+ * gone the moment the orchestrator's context is compacted. This module
  * makes that record a typed artefact on disk: self-contained, versioned, and
  * readable hours later by an orchestrator that has forgotten everything.
  *

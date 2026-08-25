@@ -300,7 +300,7 @@ const FINAL_VERDICT_ADDENDUM = `
 ## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
 
 Your final message MUST contain a single YAML fenced block at the end.
-The L3 orchestrator parses it mechanically; a missing or malformed
+The orchestrator parses it mechanically; a missing or malformed
 block fails the audit gate.
 
 \`\`\`yaml
@@ -328,9 +328,9 @@ Status values (choose the most honest):
 Field semantics:
 - files_changed: paths relative to the audited branch's repo root.
 - fail_details: one entry per unverified SC or failing test.
-- open_questions: blocking questions for the L3.
+- open_questions: blocking questions for the orchestrator.
 
-The L3 verifies the YAML against the actual bun test and bun run
+verifies the YAML against the actual bun test and bun run
 typecheck output. If your YAML says pass: 5 but the test output shows
 4 passing, the audit gate REJECTS the dispatch.
 `;
@@ -341,7 +341,7 @@ void FINAL_VERDICT_ADDENDUM;
 const EXPLORATION_BUDGET_SECTION = `
 ## Exploration Budget (hard caps on read tools)
 
-Reading tools burn turns quickly. The L3 orchestrator monitors your
+Reading tools burn turns quickly. The orchestrator monitors your
 tool-call count via the prompts. If you exceed a budget, you are
 SLOWER than if you commit and stop. **You do NOT get extra turns
 for exploration — you get less.**
@@ -369,7 +369,7 @@ for exploration — you get less.**
 ### Escape hatch
 
 If you hit a budget cap and have not yet produced a commit, **commit
-what you have immediately and declare BLOCKED**. The L3 will
+what you have immediately and declare BLOCKED**. the orchestrator will
 re-dispatch with a narrower scope. Do not finish reading.
 `;
 
@@ -387,7 +387,7 @@ Every 5 turns, emit a one-line progress report:
 [checkpoint N/200 turns, Xm] <work summary>. <commit count> commits. blocker: <state>.
 
 If 2 consecutive checkpoints show no new commits, declare BLOCKED.
-The L3 orchestrator can detect this pattern and re-dispatch.
+The orchestrator can detect this pattern and re-dispatch.
 `;
 
 // See developer.ts for the void pattern.
@@ -405,7 +405,7 @@ message using the ASK markup:
 
 <ASK>What is the contract for X? The task brief is ambiguous.</ASK>
 
-The L3 orchestrator parses <ASK>...</ASK> blocks. A clean question
+The orchestrator parses <ASK>...</ASK> blocks. A clean question
 saves the next dispatch from re-deriving the same context.
 `;
 

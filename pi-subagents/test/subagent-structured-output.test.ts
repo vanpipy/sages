@@ -8,7 +8,7 @@
  * This file pins the SCHEMA and the extractStructuredOutput() helper. The
  * helper lives in agent-runner.ts (or a new file) and is the source of
  * truth for parsing agent final messages into a structured shape the
- * L3 orchestrator can read mechanically.
+ * orchestrator can read mechanically.
  *
  * T2 must satisfy SC3 (YAML schema in agent-prompts) + SC4 (parsing
  * helper exists + test passes).
@@ -121,7 +121,7 @@ handoff_for_next_task: []
 status: completed
 \`\`\``;
 		const out = extractStructuredOutput(text);
-		// Either null (validation fails) or throws — but for the L3 to gate on
+		// Either null (validation fails) or throws — but for the orchestrator to gate on
 		// this, we need a clean null. The helper should validate required fields.
 		expect(out).toBeNull();
 	});

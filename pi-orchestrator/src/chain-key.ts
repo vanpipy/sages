@@ -10,7 +10,7 @@
  * full guard config.
  *
  * The chain-key solves a precision problem with the old per-tool
- * counters in L1 advisory: "dag_synthesize called 3 times" fires
+ * counters in orchestrator advisory: "dag_synthesize called 3 times" fires
  * even when the LLM is legitimately refining the goal (different
  * args each call). Chain-key fires only when args are identical,
  * which matches the actual "stuck" semantics we want to detect.

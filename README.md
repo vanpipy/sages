@@ -17,8 +17,8 @@ developer / auditor  → /tmp/pi-subagents-.../tasks/<id>.output
         ↓
 orchestrator_audit   → .pi/orchestrator/audit-workflow.md
         ↓
-L1 advisory          → "[orchestrator audit advisory — N/M] <rule>: ..."
-        ↓                 (mirrors L2 advisory; 5 rules, auto-injected
+orchestrator advisory → "[orchestrator audit advisory — N/M] <rule>: ..."
+        ↓                 (mirrors subagent advisory; 5 rules, auto-injected
 sages_reminder         on tool_call, dedup + cap + token-cap)
         ↓                 (LLM-callable tool that wraps pi.appendEntry
                           for system reminders; 6 types, per-type
@@ -33,8 +33,8 @@ mistakes:
 
 | Layer | Module | Purpose |
 |---|---|---|
-| L2 advisory | `pi-subagents/src/agent-runner.ts:advisoryFor` | Subagent message-text validator (5 rules, dedup + cap + token-cap) |
-| L1 advisory | `pi/src/tools/orchestrator/l1-advisory.ts` | **NEW** — orchestrator tool-call history validator (5 rules, mirrors L2) |
+| Subagent advisory | `pi-subagents/src/agent-runner.ts:advisoryFor` | Subagent message-text validator (5 rules, dedup + cap + token-cap) |
+| Orchestrator advisory | `pi/src/tools/orchestrator/l1-advisory.ts` | **NEW** — orchestrator tool-call history validator (5 rules, mirrors subagent advisory) |
 | Reminder | `pi/src/tools/orchestrator/sages-reminder.ts` | **NEW** — LLM-callable bridge to `pi.appendEntry` (6 reminder types) |
 | Verifier lint | `pi/src/tools/orchestrator/verification-cmd-linter.ts` | **NEW** — rejects placeholder `verification_cmd` (heuristics + execution probe) |
 | Goal lock | `pi/src/tools/orchestrator/goal-lock.ts` | **NEW** — SHA-256 anti-cheat; detects silent SC modification |
@@ -73,7 +73,7 @@ installed to `~/.pi/agent/goals/`.
 | Package | Purpose |
 |---|---|
 | `pi/` | Conductor: profile loader + 4-segment schema + 3-hook applier (`pi/src/extension.ts` → `registerConductorOnly` + delegate to `pi-orchestrator`) |
-| `pi-orchestrator/` | Orchestrator: 5-tool DAG workflow + L1 advisory + observability + project analyzer + template loader |
+| `pi-orchestrator/` | Orchestrator: 5-tool DAG workflow + orchestrator advisory + observability + project analyzer + template loader |
 | `pi-subagents/` | Agent runtime: subagent lifecycle and managed worktrees |
 | `pi-codebase-memory/` | Code knowledge graph MCP server |
 | `pi-evaluator/` | Evaluation metrics for cost, security, and text quality |
@@ -89,7 +89,7 @@ installed to `~/.pi/agent/goals/`.
 
 Developers may write `task-{task_id}-report.md` and
 `handoff/{workspace_id}/{task_id}-handoff.md`; auditors may write
-`audit-{task_id}.md`. L3 alone owns `goal-{id}.yaml` (with
+`audit-{task_id}.md`. The orchestrator alone owns `goal-{id}.yaml` (with
 `_lock_hash`), `dag-{id}.yaml`, `audit-state-{dag_id}.yaml`,
 `verdict-state-{dag_id}.yaml` (GC-2026-058), and workflow rollup
 files. Cross-namespace overwrites are prohibited; Explore and

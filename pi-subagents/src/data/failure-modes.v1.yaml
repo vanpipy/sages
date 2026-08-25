@@ -76,7 +76,7 @@ modes:
 
   - id: "pi-orchestrator-leak"
     name: "Sub-agent wrote into .pi/orchestrator/"
-    description: "A commit added or modified files under .pi/orchestrator/, which is the L3 orchestrator's namespace. Sub-agents own .pi/diagnostics/ and .pi/worktree-leases/ only."
+    description: "A commit added or modified files under .pi/orchestrator/, which is the orchestrator's namespace. Sub-agents own .pi/diagnostics/ and .pi/worktree-leases/ only."
     kind: "spec"
     appliesTo: ["commit"]
     detection:

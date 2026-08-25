@@ -50,7 +50,7 @@ function makeMockPi(): MockPi {
       entries.push({ customType, data });
     },
     on(_event: string, _handler: (...args: any[]) => any) {
-      // L1 advisory handler registration — no-op in unit tests that
+      // orchestrator advisory handler registration — no-op in unit tests that
       // don't exercise the tool_call stream.
     },
   };

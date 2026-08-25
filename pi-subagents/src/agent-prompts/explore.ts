@@ -116,7 +116,7 @@ Explore is read-heavy by design. Respect the budget or commit early.
 - **commits**: UNLIMITED
 
 If you hit a cap, commit your findings (even partial) and declare
-BLOCKED. The L3 will re-dispatch with a narrower scope.
+BLOCKED. the orchestrator will re-dispatch with a narrower scope.
 `;
 
 // See developer.ts for the void pattern.
@@ -133,7 +133,7 @@ Every 5 turns, emit a one-line progress report:
 [checkpoint N/200 turns, Xm] <work summary>. <commit count> commits. blocker: <state>.
 
 If 2 consecutive checkpoints show no new commits, declare BLOCKED.
-The L3 orchestrator can detect this pattern and re-dispatch.
+The orchestrator can detect this pattern and re-dispatch.
 `;
 
 // See developer.ts for the void pattern.
@@ -150,7 +150,7 @@ When you are unsure about a design decision AND cannot resolve it in
 
 <ASK>What is the contract for X?</ASK>
 
-The L3 orchestrator parses <ASK>...</ASK> blocks. A clean question
+The orchestrator parses <ASK>...</ASK> blocks. A clean question
 saves the next dispatch from re-deriving the same context.
 `;
 

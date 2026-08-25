@@ -1440,10 +1440,11 @@ export function getAgentConversation(session: AgentSession): string {
 //
 // Every subagent dispatch (developer / auditor / Explore / Plan) MUST
 // produce a final message containing a YAML block in the schema below.
-// `extractStructuredOutput` parses that block into a typed object the L3
+// `extractStructuredOutput` parses that block into a typed object the
 // orchestrator (and the audit gate) can consume mechanically. Missing or
-// malformed blocks return `null` — the L3 then treats the dispatch as
-// "structured output missing" (a separate fail-closed check, future phase).
+// malformed blocks return `null` — the orchestrator then treats the
+// dispatch as "structured output missing" (a separate fail-closed check,
+// future phase).
 // =============================================================================
 
 export type SubagentOutputStatus = "completed" | "blocked" | "partial";
@@ -1883,7 +1884,7 @@ function asHandoffs(v: unknown): SubagentOutputHandoff[] {
 //
 // `NetworkNotAllowedError` is thrown by the network gate when an agent
 // dispatches a network-bearing command (git fetch, curl, etc.) while
-// `network_allowed` is false. The L3 audit gate distinguishes this
+// `network_allowed` is false. The orchestrator audit gate distinguishes this
 // failure mode (governance violation) from a generic execution error
 // and reports it separately in the task report.
 //
@@ -2040,7 +2041,7 @@ export function wrapPiForNetworkGate<T extends object>(
 //
 // `parseCheckpoint(text)` extracts the most recent checkpoint line, returning
 // { turnNumber, timeMinutes, workSummary, commitCount, blocker } | null.
-// The orchestrator (L3) can read this to track progress; future phases may
+// The orchestrator can read this to track progress; future phases may
 // use it to enforce "2 consecutive no-progress checkpoints -> BLOCKED".
 // =============================================================================
 
@@ -2101,7 +2102,7 @@ export function parseCheckpoint(text: string): SubagentCheckpoint | null {
 //
 // Agent prompts instruct the LLM to emit <ASK>question</ASK> when stuck.
 // `extractAsk(text)` parses all <ASK>...</ASK> blocks and returns the
-// trimmed questions. The L3 orchestrator (or a future dashboard) reads
+// trimmed questions. The orchestrator (or a future dashboard) reads
 // these to surface blockers to the user.
 // =============================================================================
 
@@ -2217,7 +2218,7 @@ export function extractAuditFindings(
 			severity: "major",
 			category: "ink",
 			issue:
-				"agent message has no parseable YAML block; L3 cannot verify deliverables mechanically",
+				"agent message has no parseable YAML block; orchestrator cannot verify deliverables mechanically",
 			evidence: "extractStructuredOutput returned null",
 			recommendation:
 				"agent must emit ```yaml ... ``` block with status / deliverables / test_results / open_questions / handoff_for_next_task",
@@ -2261,14 +2262,14 @@ export function extractAuditFindings(
 					issue: `2 consecutive checkpoints with same commit count (${lastTwo[0].commitCount}); agent is stuck on exploration`,
 					evidence: `checkpoints: turn ${lastTwo[0].turnNumber} (${lastTwo[0].commitCount} commits) and turn ${lastTwo[1].turnNumber} (${lastTwo[1].commitCount} commits)`,
 					recommendation:
-						"agent should declare BLOCKED with open_questions; L3 will re-dispatch with narrower scope",
+						"agent should declare BLOCKED with open_questions; the orchestrator will re-dispatch with narrower scope",
 				});
 			}
 		}
 
 		// Rule 4: ask_unanswered
 		if (askQuestions.length > 0) {
-			// The L3 should have surfaced these in task report's open_questions
+			// The orchestrator should have surfaced these in task report's open_questions
 			// or in a separate questions list. Detect if the task report does
 			// NOT mention the asks.
 			const asksNotInReport = askQuestions.filter(
@@ -2283,7 +2284,7 @@ export function extractAuditFindings(
 					issue: `${asksNotInReport.length} <ASK> question(s) not surfaced in task report`,
 					evidence: asksNotInReport.map((q) => q.slice(0, 60)).join(" | "),
 					recommendation:
-						"L3 should surface <ASK> questions to the user; the task report must include them in open_questions",
+						"the orchestrator should surface <ASK> questions to the user; the task report must include them in open_questions",
 				});
 			}
 		}
@@ -2299,7 +2300,7 @@ export function extractAuditFindings(
 				severity: "minor",
 				category: "ink",
 				issue:
-					"status=blocked but open_questions is empty; the L3 cannot unblock without a reason",
+					"status=blocked but open_questions is empty; the orchestrator cannot unblock without a reason",
 				evidence:
 					"deliverables.commits may be empty AND open_questions is empty",
 				recommendation:
