@@ -1,5 +1,5 @@
 /**
- * Round 1: L1 advisory — dag_resynth_loop
+ * Round 1: Orchestrator advisory — dag_resynth_loop
  *
  * Synthetic tool-call history: 3× dag_synthesize for the same goal.
  * Expected: orchestratorAdvisoryFor emits a `dag_resynth_loop` advisory
@@ -11,9 +11,9 @@ import {
   extractOrchestratorFindings,
   orchestratorAdvisoryFor,
   RULE_FIX_DIRECTIVES,
-} from "@/l1-advisory.js";
+} from "@/orchestrator-advisory.js";
 
-describe("Round 1: L1 advisory — dag_resynth_loop", () => {
+describe("Round 1: Orchestrator advisory — dag_resynth_loop", () => {
   it("fires when same goal is resynthesized > 2 times", () => {
     const history = [
       { toolName: "dag_synthesize", input: { goal_id: "GC-2026-TEST" }, timestamp: 1 },

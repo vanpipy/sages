@@ -559,7 +559,7 @@ After Stage 4 completes with PASS, deliver:
 
 Developers may write only `task-{task_id}-report.md` and
 `handoff/{workspace_id}/{task_id}-handoff.md`; auditors may write only
-`audit-{task_id}.md`. L3 owns `goal-{id}.yaml`, DAG, audit-state, and workflow
+`audit-{task_id}.md`. The orchestrator owns `goal-{id}.yaml`, DAG, audit-state, and workflow
 rollup files. Cross-namespace overwrites are prohibited; Explore and Plan stay
 read-only.
 

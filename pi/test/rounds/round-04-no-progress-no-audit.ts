@@ -1,5 +1,5 @@
 /**
- * Round 4: L1 advisory — no_progress_no_audit
+ * Round 4: Orchestrator advisory — no_progress_no_audit
  *
  * 12+ tool calls without orchestrator_audit. Expected: major advisory.
  */
@@ -8,9 +8,9 @@ import { describe, it, expect } from "bun:test";
 import {
   extractOrchestratorFindings,
   RULE_FIX_DIRECTIVES,
-} from "@/l1-advisory.js";
+} from "@/orchestrator-advisory.js";
 
-describe("Round 4: L1 advisory — no_progress_no_audit", () => {
+describe("Round 4: Orchestrator advisory — no_progress_no_audit", () => {
   it("fires after 12 tool calls AND a chain at length >= 3 (GC-2026-059 tightened rule)", () => {
     // GC-2026-059: tighten rule to require a chain at length >= 3.
     // 9 distinct reads + 3 reads of the same path (chain length 3).

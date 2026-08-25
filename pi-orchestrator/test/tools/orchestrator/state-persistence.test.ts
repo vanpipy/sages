@@ -16,12 +16,12 @@ describe("shared orchestrator state persistence", () => {
     const cwd = mkdtempSync(join(tmpdir(), "sages-state-"));
     try {
       atomicWriteOrchestratorFile(cwd, "goal-GC-test.yaml", "id: GC-test\ntitle: test\n", {
-        owner: "l3",
+        owner: "orchestrator",
         validate: (value): value is { id: string; title: string } =>
           typeof value === "object" && value !== null && (value as any).id === "GC-test" && typeof (value as any).title === "string",
       });
       const loaded = loadYamlOrchestratorFile(cwd, "goal-GC-test.yaml", {
-        owner: "l3",
+        owner: "orchestrator",
         validate: (value): value is { id: string; title: string } =>
           typeof value === "object" && value !== null && (value as any).id === "GC-test" && typeof (value as any).title === "string",
       });
@@ -38,7 +38,7 @@ describe("shared orchestrator state persistence", () => {
       mkdirSync(join(cwd, ".pi/orchestrator"), { recursive: true });
       writeFileSync(join(cwd, ".pi/orchestrator/dag-DAG-test.yaml"), "tasks: nope\n");
       expect(() => loadYamlOrchestratorFile(cwd, "dag-DAG-test.yaml", {
-        owner: "l3",
+        owner: "orchestrator",
         validate: (value): value is { tasks: unknown[] } =>
           typeof value === "object" && value !== null && Array.isArray((value as any).tasks),
       })).toThrow(/malformed/i);
@@ -54,11 +54,11 @@ describe("shared orchestrator state persistence", () => {
       mkdirSync(join(cwd, ".pi"), { recursive: true });
       symlinkSync(outside, join(cwd, ".pi/orchestrator"));
       expect(() => atomicWriteOrchestratorFile(cwd, "goal-GC-test.yaml", "id: GC-test\n", {
-        owner: "l3",
+        owner: "orchestrator",
         validate: (_value: unknown): _value is unknown => true,
       })).toThrow(/symlink/i);
       expect(() => atomicWriteOrchestratorFile(cwd, "../escape.yaml", "x: 1\n", {
-        owner: "l3",
+        owner: "orchestrator",
         validate: (_value: unknown): _value is unknown => true,
       })).toThrow(/contained|path/i);
     } finally {
@@ -69,20 +69,20 @@ describe("shared orchestrator state persistence", () => {
 });
 
 describe(".pi/orchestrator namespace ownership", () => {
-  it("classifies L3, developer, and auditor namespaces", () => {
-    expect(classifyOrchestratorNamespace("goal-GC-test.yaml")).toBe("l3");
-    expect(classifyOrchestratorNamespace("dag-DAG-test.yaml")).toBe("l3");
-    expect(classifyOrchestratorNamespace("audit-state-DAG-test.yaml")).toBe("l3");
-    expect(classifyOrchestratorNamespace("audit-workflow.md")).toBe("l3");
+  it("classifies orchestrator, developer, and auditor namespaces", () => {
+    expect(classifyOrchestratorNamespace("goal-GC-test.yaml")).toBe("orchestrator");
+    expect(classifyOrchestratorNamespace("dag-DAG-test.yaml")).toBe("orchestrator");
+    expect(classifyOrchestratorNamespace("audit-state-DAG-test.yaml")).toBe("orchestrator");
+    expect(classifyOrchestratorNamespace("audit-workflow.md")).toBe("orchestrator");
     expect(classifyOrchestratorNamespace("task-P1-report.md")).toBe("developer");
     expect(classifyOrchestratorNamespace("handoff/W1/P1-handoff.md")).toBe("developer");
     expect(classifyOrchestratorNamespace("audit-P1.md")).toBe("auditor");
   });
 
   it("rejects cross-namespace overwrite attempts and unowned names", () => {
-    expect(() => assertOrchestratorNamespaceOwner("task-P1-report.md", "l3")).toThrow(/owned by developer/i);
+    expect(() => assertOrchestratorNamespaceOwner("task-P1-report.md", "orchestrator")).toThrow(/owned by developer/i);
     expect(() => assertOrchestratorNamespaceOwner("audit-P1.md", "developer")).toThrow(/owned by auditor/i);
-    expect(() => assertOrchestratorNamespaceOwner("goal-GC-test.yaml", "auditor")).toThrow(/owned by l3/i);
+    expect(() => assertOrchestratorNamespaceOwner("goal-GC-test.yaml", "auditor")).toThrow(/owned by orchestrator/i);
     expect(() => assertOrchestratorNamespaceOwner("misc.txt", "developer")).toThrow(/unowned/i);
   });
 });

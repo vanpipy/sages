@@ -6,7 +6,7 @@
  *
  *   1. Register Sages extension on a mock pi runtime
  *   2. Verify all 5 orchestrator tools (4 existing + sages_reminder) are present
- *   3. Drive the L1 advisory injector with synthetic tool-call history that
+ *   3. Drive the Orchestrator advisory injector with synthetic tool-call history that
  *      triggers each of the 5 rules
  *   4. Invoke sages_reminder through the registered tool, observe appendEntry
  *
@@ -104,7 +104,7 @@ describe("GC-2026-053 smoke: extension registration (Step 1)", () => {
 
 // ─── 2. orchestrator advisory: detector triggers ──────────────────────────────────────
 
-describe("GC-2026-053 smoke: L1 advisory detector triggers (Step 2)", () => {
+describe("GC-2026-053 smoke: Orchestrator advisory detector triggers (Step 2)", () => {
   let pi: MockPi;
   beforeEach(async () => {
     pi = new MockPi();
@@ -344,7 +344,7 @@ describe("GC-2026-053 smoke: end-to-end (Step 5)", () => {
     const pi = new MockPi();
     registerOrchestratorTools(pi as any);
 
-    // Channel A: L1 advisory (auto-fires on tool_call)
+    // Channel A: Orchestrator advisory (auto-fires on tool_call)
     pi.fireToolCall({ toolName: "task_dispatch", input: {}, timestamp: 1 });
     const l1Entries = pi.systemEntries.filter((e) => {
       if (e.customType !== "system") return false;

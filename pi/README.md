@@ -8,7 +8,7 @@ The `pi/` subpackage of the [Sages monorepo](../). This is the
    prompt composer, reminder injector) in `registerConductorOnly`.
 3. Delegates to the orchestrator package: `registerOrchestratorTools(pi, runtimeDeps)`
    from `@sages/pi-orchestrator` (a sibling monorepo package) registers
-   the 5 orchestrator tools + installs the L1 advisory pipeline.
+   the 5 orchestrator tools + installs the orchestrator advisory pipeline.
 
 `standard` is the only built-in profile; user overrides at
 `~/.pi/profile.yaml` take precedence.
@@ -51,7 +51,7 @@ pi/
 
 Peer packages in the same monorepo:
 
-- `pi-orchestrator/` — orchestrator tools, L1 advisory, observability,
+- `pi-orchestrator/` — orchestrator tools, orchestrator advisory, observability,
   bash-guard, file-gate, project analyzer, template loader. The
   conductor delegates tool registration here.
 - `pi-subagents/` — Agent tool (subagent lifecycle, worktrees).
@@ -101,7 +101,7 @@ relative paths in `pi/src/`.
 
 Developers own `task-{task_id}-report.md` and
 `handoff/{workspace_id}/{task_id}-handoff.md`; auditors own
-`audit-{task_id}.md`; L3 owns `goal-{id}.yaml`, DAG, audit-state, and
+`audit-{task_id}.md`; The orchestrator owns `goal-{id}.yaml`, DAG, audit-state, and
 workflow rollup files. Cross-namespace overwrites are rejected, and
 Explore/Plan remain read-only.
 
