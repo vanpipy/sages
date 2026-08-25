@@ -152,6 +152,96 @@ describe("validateProfile — 4-segment schema", () => {
 	});
 });
 
+describe("validateProfile — tools ↔ extensions.installed cross-check (GC-2026-069 PR-3 follow-up)", () => {
+	it("warns when an enabled tool has no owner in extensions.installed", () => {
+		// orchestrator_audit is owned by @sages/pi-orchestrator, but we
+		// declare @sages/pi-evaluator only. installCapabilityFilter would
+		// pass the call (tool is in allowSet) but pi has no such tool
+		// registered → runtime error. The warning moves this to load-time.
+		const profile: Profile = {
+			id: "missing-owner",
+			extensions: { installed: ["@sages/pi-evaluator"] },
+			tools: { orchestrator_audit: { enabled: true } },
+			prompts: { template: "auto" },
+			policies: {},
+		};
+		const result = validateProfile(profile);
+		expect(result.valid).toBe(true);
+		expect(
+			result.warnings.some(
+				(w) =>
+					w.includes("no installed extension provides") &&
+					w.includes("orchestrator_audit"),
+			),
+		).toBe(true);
+	});
+
+	it("warns when an installed extension has no enabled tools in this profile", () => {
+		// pi-subagents is installed but no Agent tool is enabled — the LLM
+		// will see Agent in pi's tool list but every call gets blocked by
+		// installCapabilityFilter. This is the silent failure mode that
+		// motivates the cross-check.
+		const profile: Profile = {
+			id: "unused-extension",
+			extensions: { installed: ["@sages/pi-orchestrator", "@sages/pi-subagents"] },
+			tools: { goal_contract_create: { enabled: true } },
+			prompts: { template: "auto" },
+			policies: {},
+		};
+		const result = validateProfile(profile);
+		expect(result.valid).toBe(true);
+		expect(
+			result.warnings.some(
+				(w) =>
+					w.includes("installed but no tools from them are enabled") &&
+					w.includes("@sages/pi-subagents"),
+			),
+		).toBe(true);
+	});
+
+	it("emits no warnings when tools and extensions agree", () => {
+		// Build a profile that uses one tool per extension and matches.
+		const profile: Profile = {
+			id: "matched",
+			extensions: {
+				installed: [
+					"@sages/pi-orchestrator",
+					"@sages/pi-subagents",
+					"@sages/pi-evaluator",
+				],
+			},
+			tools: {
+				goal_contract_create: { enabled: true },
+				Agent: { enabled: true },
+				eval_score: { enabled: true },
+			},
+			prompts: { template: "auto" },
+			policies: {},
+		};
+		const result = validateProfile(profile);
+		expect(result.valid).toBe(true);
+		expect(result.warnings.some((w) => w.includes("no installed extension provides"))).toBe(
+			false,
+		);
+		expect(
+			result.warnings.some((w) => w.includes("installed but no tools from them are enabled")),
+		).toBe(false);
+	});
+
+	it("STANDARD_PROFILE emits no cross-validation warnings (it is internally consistent)", () => {
+		// STANDARD_PROFILE was authored against the current extension set;
+		// the cross-check should pass it without complaint.
+		const result = validateProfile(STANDARD_PROFILE);
+		expect(result.valid).toBe(true);
+		expect(result.warnings.some((w) => w.includes("no installed extension provides"))).toBe(
+			false,
+		);
+		expect(
+			result.warnings.some((w) => w.includes("installed but no tools from them are enabled")),
+		).toBe(false);
+	});
+});
+
 describe("STANDARD_PROFILE — fallback invariant", () => {
 	it("STANDARD_PROFILE has all 4 segments populated", () => {
 		expect(STANDARD_PROFILE.extensions.installed.length).toBeGreaterThan(0);

@@ -79,11 +79,16 @@ echo '{"packages": []}' > "$PI_DIR/agent/settings.json"
 source "$TMPDIR/pi-codebase-memory-fns.sh"
 
 # ──────────────────────────────────────────────────────────────────
-# T4: Subagent templates (pi/templates/agents/)
-# Validates: install.sh copies software-{auditor,developer}.md from
-# pi/templates/agents/ to $AGENT_DIR/agents/, with sentinel-based
-# idempotency matching the AFT config flow.
-# ──────────────────────────────────────────────────────────────────
+# T4: Subagent template directory (pi/templates/agents/)
+# As of Phase B migration (commit 1d9cbc1), all canonical subagent
+# templates (developer / auditor) moved into pi-subagents built-ins.
+# install.sh no longer copies anything from pi/templates/agents/ to
+# $AGENT_DIR/agents/. Only T4.1 (assert no canonical template ships)
+# and T4.21-T4.23 (assert built-in defaults in pi-subagents) remain.
+# The historical T4.3-T4.20a block (constants + behavioral install /
+# uninstall tests for the removed installer path) was retired in
+# GC-2026-069 because it tested a defunct code path that no longer
+# exists in install.sh.
 
 SUBAGENT_TEMPLATES_DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)/templates/agents"
 
@@ -98,204 +103,6 @@ if [[ -f "$SUBAGENT_TEMPLATES_DIR/software-auditor.md" ]]; then
 fi
 echo "✅ PASS: templates/agents/software-auditor.md is NOT shipped (Phase B migrated canonical to pi-subagents)"
 
-# Test T4.3: SUBAGENT_* constants defined
-for c in SUBAGENT_TEMPLATE_DIR SUBAGENT_TARGET_DIR SUBAGENT_NAMES SUBAGENT_SENTINEL_TEXT; do
-  grep -qE "^${c}=" "$SCRIPT" \
-    || { echo "❌ FAIL: constant $c not defined"; exit 1; }
-done
-echo "✅ PASS: 4 SUBAGENT_* constants defined"
-
-# Test T4.4: 3 subagent template functions defined
-for fn in is_subagent_template_installed install_subagent_templates uninstall_subagent_templates; do
-  grep -qE "^${fn}\(\) \{$" "$SCRIPT" \
-    || { echo "❌ FAIL: function $fn not defined"; exit 1; }
-done
-echo "✅ PASS: 3 subagent template functions defined"
-
-# Test T4.5: install() flow calls install_subagent_templates
-sed -n '/^install() {/,/^}$/p' "$SCRIPT" | grep -q "install_subagent_templates" \
-  || { echo "❌ FAIL: install() does not call install_subagent_templates"; exit 1; }
-echo "✅ PASS: install() invokes install_subagent_templates"
-
-# Test T4.6: uninstall() flow calls uninstall_subagent_templates
-sed -n '/^uninstall() {/,/^}$/p' "$SCRIPT" | grep -q "uninstall_subagent_templates" \
-  || { echo "❌ FAIL: uninstall() does not call uninstall_subagent_templates"; exit 1; }
-echo "✅ PASS: uninstall() invokes uninstall_subagent_templates"
-
-# Test T4.7: --sages-only does NOT call install_subagent_templates
-# (orchestrator agents are user-level global definitions, separate from
-# the sages source files --sages-only is scoped to)
-sed -n '/^install_sages_only() {/,/^}$/p' "$SCRIPT" | grep -q "install_subagent_templates" \
-  && { echo "❌ FAIL: install_sages_only() should NOT call install_subagent_templates"; exit 1; }
-echo "✅ PASS: --sages-only mode correctly skips install_subagent_templates"
-
-# Test T4.8: install.sh references "subagent templates" so users see what
-# they're skipping in --sages-only / --system-only output
-grep -q "subagent templates" "$SCRIPT" \
-  || { echo "❌ FAIL: 'subagent templates' not mentioned in install.sh"; exit 1; }
-echo "✅ PASS: 'subagent templates' referenced in install.sh"
-
-# ─────────────────────────────────────────────────────────────────
-# Behavioral tests for subagent template install/uninstall.
-# Use SCRIPT_DIR + extracted constants/functions, point at fake
-# $SUBAGENT_TARGET_DIR so we never touch the real ~/.pi/agent/agents/.
-# ─────────────────────────────────────────────────────────────────
-
-TMPDIR4="$(mktemp -d)"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
-
-# The extracted SUBAGENT_TARGET_DIR constant expands to $AGENT_DIR/agents.
-# Set AGENT_DIR + PI_DIR so the expansion resolves to a temp dir, not
-# the real ~/.pi/agent/agents (which would clobber live agent files).
-PI_DIR="$TMPDIR4"
-AGENT_DIR="$PI_DIR/agent"
-
-# Extract constants + functions for behavioral test
-{
-  awk '/^SUBAGENT_TEMPLATE_DIR=/' "$SCRIPT"
-  awk '/^SUBAGENT_TARGET_DIR=/' "$SCRIPT"
-  awk '/^SUBAGENT_NAMES=/' "$SCRIPT"
-  awk '/^SUBAGENT_SENTINEL_TEXT=/' "$SCRIPT"
-  for fn in is_subagent_template_installed _atomic_copy install_subagent_templates uninstall_subagent_templates; do
-    extract_fn "$fn"
-  done
-} > "$TMPDIR4/subagent-fns.sh"
-# shellcheck disable=SC1090
-source "$TMPDIR4/subagent-fns.sh"
-
-# Test T4.9: SUBAGENT_TEMPLATE_DIR does NOT exist (Phase B migration)
-# As of commit 1d9cbc1 (DAG-2026-011 Phase B), the canonical developer /
-# auditor templates moved to pi-subagents/src/default-agents.ts as
-# built-ins. The pi/templates/agents/ directory was deleted; install.sh
-# now emits a graceful warning when the variable is dereferenced, and
-# install_subagent_templates() is a no-op. This test pins the new state.
-test ! -d "$SUBAGENT_TEMPLATE_DIR" \
-  || { echo "❌ FAIL: SUBAGENT_TEMPLATE_DIR unexpectedly exists at $SUBAGENT_TEMPLATE_DIR (Phase B migration should have removed it)"; exit 1; }
-echo "✅ PASS: SUBAGENT_TEMPLATE_DIR is correctly absent (canonical templates moved to pi-subagents built-ins)"
-
-# Test T4.10: SUBAGENT_NAMES is EMPTY (Phase A + Phase B complete: both
-# developer and auditor are built-in to pi-subagents, not shipped here)
-[[ "${#SUBAGENT_NAMES[@]}" -eq 0 ]] \
-  || { echo "❌ FAIL: SUBAGENT_NAMES has ${#SUBAGENT_NAMES[@]} entries, expected 0 (all built-ins migrated)"; exit 1; }
-echo "✅ PASS: SUBAGENT_NAMES is empty (all built-ins migrated to pi-subagents)"
-
-# Test T4.11: behavioral — install_subagent_templates is a no-op when no
-# legacy files exist (no canonical install, no legacy to back up)
-mkdir -p "$SUBAGENT_TARGET_DIR"
-test ! -e "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: pre-test: target already has software-auditor.md"; exit 1; }
-test ! -e "$SUBAGENT_TARGET_DIR/software-developer.md" \
-  || { echo "❌ FAIL: pre-test: target already has software-developer.md"; exit 1; }
-
-install_subagent_templates
-
-# Both legacy files remain absent (no canonical install, no legacy to back up).
-test ! -e "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: install should NOT create software-auditor.md (canonical auditor is built-in to pi-subagents)"; exit 1; }
-test ! -e "$SUBAGENT_TARGET_DIR/software-developer.md" \
-  || { echo "❌ FAIL: install should NOT create software-developer.md (canonical developer is built-in to pi-subagents)"; exit 1; }
-test ! -e "$SUBAGENT_TARGET_DIR/developer.md" \
-  || { echo "❌ FAIL: install should NOT create developer.md (built-in to pi-subagents)"; exit 1; }
-echo "✅ PASS: install_subagent_templates does not create any agent file (built-ins are pi-subagents-internal)"
-
-# Test T4.12: Phase B policy — a pre-existing user-level software-auditor.md
-# is LEFT IN PLACE (no auto-backup, no auto-remove). The user cleans it up
-# manually if they want the built-in alias to take over. This is a deliberate
-# simplification vs Phase A: the user-level file is theirs to manage.
-mkdir -p "$SUBAGENT_TARGET_DIR"
-cat > "$SUBAGENT_TARGET_DIR/software-auditor.md" <<'LEGACY_EOF'
----
-name: User-customized auditor
-description: legacy
----
-# User-customized software-auditor.md (Phase B does not touch this)
-LEGACY_EOF
-
-install_subagent_templates
-
-# File is unchanged after install.
-test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: Phase B install should NOT remove user-level software-auditor.md (user cleans up manually)"; exit 1; }
-grep -q "User-customized auditor" "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: user content was modified by install"; exit 1; }
-# No backup directory created.
-test ! -d "$SUBAGENT_TARGET_DIR/.phase-a-migration" \
-  || { echo "❌ FAIL: Phase B should NOT create .phase-a-migration/ for the auditor (user-cleans-up policy)"; ls "$SUBAGENT_TARGET_DIR/.phase-a-migration"; exit 1; }
-echo "✅ PASS: Phase B install leaves user-level software-auditor.md untouched (user cleans up manually)"
-
-# Test T4.13: idempotent — re-running install_subagent_templates is still
-# a no-op (Phase A backup_legacy_developer may have created the directory
-# but Phase B must not). We don't assert the directory state here (T4.20a
-# covers Phase A's developer backup separately); only the agent files.
-test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: re-install removed user-level software-auditor.md"; exit 1; }
-echo "✅ PASS: install_subagent_templates is idempotent (Phase B leaves user files alone)"
-
-# Test T4.15: user-customized legacy auditor is preserved on re-install.
-# Symmetric with T4.20a below for the developer migration: user
-# customizations always win, only sages-managed files are removed.
-cat > "$SUBAGENT_TARGET_DIR/software-auditor.md" <<'CUSTOM_EOF'
----
-name: My Custom Auditor
-description: User-customized — must be preserved across no-FORCE re-installs.
----
-# My Custom Auditor
-(custom body content; deliberately lacks the install-template marker)
-CUSTOM_EOF
-
-install_subagent_templates  # no-op now (Phase B policy: no auto-backup, no auto-remove)
-
-# Phase B policy: the user cleans up their software-auditor.md manually.
-# Re-install must not clobber, modify, or back up the file.
-grep -q "My Custom Auditor" "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: user-customized software-auditor.md was modified by re-install"; cat "$SUBAGENT_TARGET_DIR/software-auditor.md"; exit 1; }
-is_subagent_template_installed "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  && { echo "❌ FAIL: user-customized file got sentinel from re-install"; exit 1; \
-} || echo "✅ PASS: re-install leaves user-level software-auditor.md untouched (Phase B user-cleans-up policy)"
-
-# Test T4.16: uninstall_subagent_templates is a no-op when no canonical
-# template is present (the only files in $SUBAGENT_TARGET_DIR are
-# user-customized; they lack the sentinel and must NOT be touched).
-# Note: even though we kept the historical-name list in the uninstall
-# for safety, the user file above has no SAGES_TEMPLATE_V1 sentinel so
-# it must NOT be deleted.
-uninstall_subagent_templates
-test -f "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: uninstall removed user-customized software-auditor.md"; exit 1; }
-grep -q "My Custom Auditor" "$SUBAGENT_TARGET_DIR/software-auditor.md" \
-  || { echo "❌ FAIL: user-written content lost during uninstall"; exit 1; }
-echo "✅ PASS: uninstall_subagent_templates is a no-op when no canonical files exist"
-
-# Test T4.20a: Phase A + Phase B user-cleans-up policy. A pre-existing
-# user-level `software-developer.md` is LEFT IN PLACE (no auto-backup,
-# no auto-remove) — the user removes it manually if they want the
-# built-in `developer` to take over.
-rm -f "$SUBAGENT_TARGET_DIR/developer.md"
-cat > "$SUBAGENT_TARGET_DIR/software-developer.md" <<'CUSTOM_EOF'
----
-name: Legacy Custom Developer
-description: User cleans up manually.
----
-# Legacy Custom Developer
-CUSTOM_EOF
-
-install_subagent_templates
-
-# User-customized legacy is preserved (no auto-backup, no auto-remove).
-test -f "$SUBAGENT_TARGET_DIR/software-developer.md" \
-  || { echo "❌ FAIL: install removed user-customized software-developer.md"; exit 1; }
-grep -q "Legacy Custom Developer" "$SUBAGENT_TARGET_DIR/software-developer.md" \
-  || { echo "❌ FAIL: user content was modified by install"; exit 1; }
-# NO canonical developer.md is installed (built-in to pi-subagents).
-test ! -f "$SUBAGENT_TARGET_DIR/developer.md" \
-  || { echo "❌ FAIL: install should NOT create canonical developer.md (built-in to pi-subagents)"; exit 1; }
-# No backup directory created (Phase A backup logic removed).
-test ! -d "$SUBAGENT_TARGET_DIR/.phase-a-migration" \
-  || { echo "❌ FAIL: install should NOT create .phase-a-migration/ (user-cleans-up policy)"; ls "$SUBAGENT_TARGET_DIR/.phase-a-migration"; exit 1; }
-echo "✅ PASS: install leaves user-level software-developer.md untouched (Phase A user-cleans-up policy)"
-unset PI_DIR AGENT_DIR
-
-# ─────────────────────────────────────────────────────────────────
 # T4.21 (continued): subagent frontmatter must NOT hard-limit
 # (T4.* behavioral tests above mutate TMPDIR4 PI_DIR/AGENT_DIR; this
 # block re-reads the on-disk templates, so it lives outside the
@@ -354,7 +161,7 @@ echo "✅ PASS: pi-subagents auditor declares maxTurns=200 (matches developer's 
 # the contractual phrase or annotation.
 # ──────────────────────────────────────────────────────────────────
 
-ORCH_SKILL_DIR="$(cd "$(dirname "$SCRIPT")/.." && pwd)/skills/orchestrator"
+ORCH_SKILL_DIR="$(cd "$(dirname "$SCRIPT")/../.." && pwd)/pi-orchestrator/skills/orchestrator"
 GOALS_DIR="$ORCH_SKILL_DIR/templates/goals"
 DAGS_DIR="$ORCH_SKILL_DIR/templates/dag"
 PROMPTS_DIR="$ORCH_SKILL_DIR/templates/prompts"
