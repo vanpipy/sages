@@ -25,14 +25,12 @@ import {
 
 /**
  * Module-relative package root, computed the same way the source module does:
- * test file lives at pi-orchestrator/test/tools/orchestrator/ → up 3 = pi-orchestrator/
- * (the orchestrator package root). Mirrors `join(dirname(fileURLToPath(import.meta.url)),
- * "..", "..", "..")` inside template-loader.ts.
+ * test file lives at pi-orchestrator/test/ → up 1 = pi-orchestrator/ (the
+ * orchestrator package root). Mirrors `join(dirname(fileURLToPath(import.meta.url)),
+ * "..")` inside template-loader.ts.
  */
 const EXPECTED_PACKAGE_ROOT = join(
   dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
   "..",
 );
 

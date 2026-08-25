@@ -51,9 +51,9 @@ import { loadPlan } from "./dag-synthesizer.js";
 // (which would otherwise reject with TS6059). Runtime resolution
 // uses Node ESM (relative path is correct in the monorepo).
 // @ts-ignore -- tsc rejects cross-package imports under rootDir.
-import { extractAuditFindings, type AuditFinding } from "../../../../pi-subagents/src/agent-runner.js";
+import { extractAuditFindings, type AuditFinding } from "../../pi-subagents/src/agent-runner.js";
 // @ts-ignore -- tsc rejects cross-package imports under rootDir.
-import { readAllDiagnostics, DIAGNOSTICS_RELDIR } from "../../../../pi-subagents/src/diagnostic.js";
+import { readAllDiagnostics, DIAGNOSTICS_RELDIR } from "../../pi-subagents/src/diagnostic.js";
 
 const COMPLETE_OBSERVATION = Type.Object({
   verdict: Type.Union([Type.Literal("PASS"), Type.Literal("REVISE"), Type.Literal("REJECT")]),

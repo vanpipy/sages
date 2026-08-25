@@ -28,16 +28,33 @@ import { registerDAGSynthesizerTool } from "./dag-synthesizer.js";
 import { registerTaskDispatcherTool } from "./task-dispatcher.js";
 import { registerOrchestratorAuditTool } from "./orchestrator-audit.js";
 import { registerSagesReminderTool } from "./sages-reminder.js";
+import {
+	installL1AdvisoryHandlers,
+	type L1AdvisoryRuntimeDeps,
+} from "./l1-advisory.js";
 
 /**
  * Register all orchestrator tools on the pi extension. Idempotent.
+ *
+ * Pass `runtime` to provide the goal/dag loaders the L1 advisory handler
+ * needs. The conductor in `@sages/pi` supplies these loaders; tests can
+ * stub them.
  */
-export function registerOrchestratorTools(pi: ExtensionAPI): void {
+export function registerOrchestratorTools(
+	pi: ExtensionAPI,
+	runtime?: L1AdvisoryRuntimeDeps,
+): void {
 	registerGoalContractTool(pi);
 	registerDAGSynthesizerTool(pi);
 	registerTaskDispatcherTool(pi);
 	registerOrchestratorAuditTool(pi);
 	registerSagesReminderTool(pi);
+	// GC-2026-053: L1 orchestrator tool_call audit wiring (the post-tool
+	// history-tracker, pre-tool blocker, tool_result error tracker, and
+	// message_end assistant-text tracker). Pre-PR-2 these handlers lived
+	// in the conductor; the smoke test in `test/smoke/gc-2026-053.test.ts`
+	// expects them registered alongside the orchestrator tools.
+	installL1AdvisoryHandlers(pi, runtime);
 }
 
 /**
