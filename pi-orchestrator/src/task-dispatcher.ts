@@ -390,7 +390,7 @@ function resetTask(task: TaskNode): void {
   delete task.failed_at;
 }
 
-function transitionTask(plan: OrchestrationPlan, transition: any): { task?: TaskNode; error?: string } {
+function transitionTask(plan: OrchestrationPlan, transition: any): { task?: TaskNode; error?: string; retryBudgetExhausted?: { retryCount: number; maxRetries: number } } {
   const task = plan.tasks.find((candidate) => candidate.id === transition.task_id);
   if (!task) return { error: `task '${transition.task_id}' not found` };
   const next = transition.status as TaskNode["status"];
@@ -427,6 +427,17 @@ function transitionTask(plan: OrchestrationPlan, transition: any): { task?: Task
     return { error: `unsupported task status '${next}'` };
   }
 
+  // GC-2026-070: surface a retry-budget warning when the task has just
+  // exhausted its max_retries. We don't BLOCK the transition — the caller
+  // (orchestrator LLM) still decides whether to re-dispatch with a
+  // narrower brief, a fresh DAG, or escalate — but the response carries
+  // an explicit signal so the orchestrator sees the budget hit without
+  // having to inspect task.retry_count vs task.max_retries by hand.
+  let retryBudgetExhausted: { retryCount: number; maxRetries: number } | undefined;
+  if (next === "failed" && task.retry_count >= task.max_retries) {
+    retryBudgetExhausted = { retryCount: task.retry_count, maxRetries: task.max_retries };
+  }
+
   if (plan.tasks.every((candidate) => candidate.status === "completed" || candidate.status === "skipped")) {
     plan.state = "completed";
   } else if (plan.tasks.some((candidate) => candidate.status === "failed")) {
@@ -435,7 +446,7 @@ function transitionTask(plan: OrchestrationPlan, transition: any): { task?: Task
     plan.state = "executing";
   }
   plan.updated_at = now;
-  return { task };
+  return { task, retryBudgetExhausted };
 }
 
 /**
@@ -458,13 +469,24 @@ export async function executeTaskDispatch(params: TaskDispatchInput, ctx: { cwd:
     const transitioned = transitionTask(plan, params.transition);
     if (transitioned.error) return errorResponse("Task lifecycle transition rejected.", [transitioned.error]);
     const planPath = savePlan(cwd, plan);
+    // GC-2026-070: surface the retry-budget warning to the orchestrator. We
+    // don't add it to `errors` (the transition is valid; the budget is the
+    // task's, not the transition's) — it goes to `warnings` so it lights
+    // up alongside other advisory text.
+    const warnings: string[] = [];
+    if (transitioned.retryBudgetExhausted) {
+      warnings.push(
+        `task '${transitioned.task!.id}' retry budget exhausted (${transitioned.retryBudgetExhausted.retryCount}/${transitioned.retryBudgetExhausted.maxRetries} attempts). Re-dispatching will not recover; consider amending the goal, splitting the task, or escalating.`,
+      );
+    }
     return {
       content: [{ type: "text", text: JSON.stringify({
         status: plan.state === "failed" ? "failed" : plan.state === "completed" ? "complete" : "in_progress",
         intent: `Recorded task ${transitioned.task!.id} transition to ${transitioned.task!.status}.`,
-        validation: { errors: [], files_required: [planPath] },
+        validation: { errors: [], warnings, files_required: [planPath] },
         task: transitioned.task,
         plan_state: plan.state,
+        ...(transitioned.retryBudgetExhausted ? { retry_budget_exhausted: transitioned.retryBudgetExhausted } : {}),
       }) }],
       details: { task: transitioned.task, plan_path: planPath },
     };
