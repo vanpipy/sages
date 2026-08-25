@@ -36,7 +36,7 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
-    "@sages/pi-subagents": "*"
+    "@sages/pi-orchestrator": "*"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "^0.70.5",
