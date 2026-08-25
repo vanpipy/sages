@@ -1,7 +1,0 @@
-id: light
-description: In-process tool families only; ≤2-item workflows stay in main session.
-subagents: [Explore]
-isolation_default: none
-dag_threshold: 1
-gate_suite: []
-soft_mode_reminder: ""

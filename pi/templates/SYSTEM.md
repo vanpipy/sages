@@ -415,18 +415,20 @@ system.
 ### How soft mode is implemented
 
 - `pi/src/profile.ts` — `DEFAULT_SOFT_MODE_REMINDER` (in-code default
-  for `standard`) + the `Profile.soft_mode_reminder` field that user
-  YAML overrides. The four built-in profiles (`standard`, `light`,
-  `audit-strict`, `ci-only`) live alongside.
-- `pi/src/soft-mode.ts` — `softModeReminder(profile)` returns the
-  profile's reminder string. The bash handler reads it via
-  `softModeReminder(PROFILE)` after the once-per-process throttle
-  fires on the first write-intent bash call.
-- `pi/src/extension.ts` — wires the `tool_call` classifier (fires
-  the once-per-process reminder on the first write-intent bash call).
-  The `session_start` and `before_agent_start` handlers were dropped
-  in earlier cleanup passes; the L1 advisory handler
-  (`orchestratorAdvisoryFor`) remains active.
+  for the only built-in `standard` profile) + the
+  `Profile.soft_mode_reminder` field that user YAML overrides. The
+  `standard` definition lives in `pi/profiles/standard.yaml` (the
+  in-code `STANDARD_PROFILE` constant is the fallback for partial
+  installs). `pi/src/profile/applier.ts` reads the field directly and
+  pipes it through `installReminderInjector(pi, ...)` on
+  `pi.on("tool_call", ...)`.
+- `pi/src/extension.ts` — slim 100-line conductor that applies the
+  profile (via `registerConductorOnly`) and delegates to
+  `registerOrchestratorTools(pi, runtimeDeps)` from the orchestrator
+  package. The orchestrator installs the L1 advisory handler
+  (`installL1AdvisoryHandlers`) which is the only `pi.on(...)`
+  wiring in the system. The `session_start` and `before_agent_start`
+  handlers were dropped in earlier cleanup passes.
 
 ### Why soft mode
 

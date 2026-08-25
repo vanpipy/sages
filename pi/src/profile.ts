@@ -4,11 +4,15 @@
  * A profile is a named bundle that captures the Sages soft-mode policy
  * (GC-2026-031) plus its dispatch + gate posture in a single YAML file.
  *
- * Built-in profiles live in `<pkg>/profiles/<id>.yaml` (module-relative
- * to this file, so resolution works from any cwd). A user override at
- * `~/.pi/profile.yaml` takes precedence. If neither is present, the
- * `standard` profile is loaded — from YAML when available, otherwise
- * from the in-code `STANDARD_PROFILE` constant.
+ * `standard` is the only built-in profile (GC-2026-069 PR 3 collapsed
+ * the historical `light` / `audit-strict` / `ci-only` variants — the
+ * conductor now uses `extensions.tools` to filter capabilities, not
+ * separate profiles). Its definition lives in
+ * `<pkg>/profiles/standard.yaml` (module-relative) with the in-code
+ * `STANDARD_PROFILE` constant as a fallback for partial installs.
+ *
+ * A user override at `~/.pi/profile.yaml` takes precedence over the
+ * built-in.
  *
  * The main-agent extension reads the profile once at module load via
  * `loadProfile()` and uses its fields:
@@ -29,13 +33,11 @@ import * as yaml from "js-yaml";
  * Default `standard` profile's soft-mode reminder string. Lives here
  * (instead of `soft-mode.ts`) so it has zero module-load coupling —
  * `STANDARD_PROFILE.soft_mode_reminder` resolves this constant
- * directly, and `softModeReminder(profile)` just returns whatever the
- * profile carries (this default for built-in standard, an override
- * from user YAML, or a per-profile custom string).
+ * directly.
  *
  * The `profiles/standard.yaml` field must stay byte-identical to this
- * literal (the `STANDARD_PROFILE matches loadBuiltInProfile('standard')
- * field-for-field` test pins it).
+ * literal (the `STANDARD_PROFILE byte-matches the on-disk
+ * standard.yaml` test in `test/profiles.test.ts` pins it).
  */
 export const DEFAULT_SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — subagent dispatch recommended**
 >
@@ -170,14 +172,7 @@ export function loadProfile(overridePath?: string): Profile {
   return cached;
 }
 
-/**
- * Look up a specific built-in profile by id (e.g. `"light"`,
- * `"audit-strict"`). Bypasses the cache. Used by tests and by
- * downstream consumers that want to enumerate the bundled profiles.
- */
-export function loadBuiltInProfile(id: string): Profile {
-  return loadFromPath(join(builtinProfileDir(), `${id}.yaml`));
-}
+
 
 /**
  * Read and validate a profile YAML at `path`. The path is resolved
