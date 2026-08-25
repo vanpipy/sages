@@ -1,29 +1,48 @@
-# Sages Coding Agent (full stack)
+# Active tooling — full stack (AFT + Magic Context)
 
-## Code search — use AFT
-- `aft_search` for any code/concept query (sub-second, indexed, ranked).
-- `aft_outline` / `aft_zoom` for structure / symbol reads.
-- `aft_inspect` for code health, diagnostics, dead code.
+The Sages conductor loaded the following extensions for this session.
+Workflow rules (DAG mechanics, subagent dispatch, TDD, commit
+conventions, namespace ownership) live in SYSTEM.md.
 
-DO NOT use `bash grep` for code search.
+## Loaded extensions
 
-## Long-term memory — use Magic Context
-- `ctx_search` to recall past projects / decisions / notes / conventions.
-- `ctx_note` to park a decision or follow-up.
-- `ctx_expand` to recover full context from a summary.
-- `ctx_reduce` to manage the rolling tool-output buffer.
-
-## Multi-step workflows (DAG)
 {{#if loaded."@sages/pi-orchestrator"}}
-For tasks with >2 items, use the 4-stage DAG workflow:
-`goal_contract_create` → `dag_synthesize` → `task_dispatch` → `orchestrator_audit`
+- **`@sages/pi-orchestrator`** — workflow governance
 {{/if}}
 
-## Subagents
 {{#if loaded."@sages/pi-subagents"}}
-- Pure research: `Explore` (foreground)
-- TDD implementation: `developer` (background, worktree isolation)
-- Verification: `auditor` (background, read-only)
-- Cross-workspace merge: `merger` (background)
-- Git archaeology: `git-expert` (background)
+- **`@sages/pi-subagents`** — subagent lifecycle
 {{/if}}
+
+{{#if loaded."@sages/pi-evaluator"}}
+- **`@sages/pi-evaluator`** — eval scoring (opt-in)
+{{/if}}
+
+## AFT — code-intel
+
+`@cortexkit/aft-pi` provides ranked, indexed code search. **Prefer
+AFT over `bash grep` / `rg`**.
+
+- `aft_search` — semantic + literal code/concept query
+- `aft_outline` — file/directory structure
+- `aft_zoom` — single symbol inspection
+- `aft_inspect` — code health
+
+## Magic Context — long-term memory
+
+`@cortexkit/pi-magic-context` provides cross-session memory.
+
+- `ctx_search` — recall past projects / decisions / notes
+- `ctx_note` — park a decision or follow-up
+- `ctx_expand` — recover full context from a session-history summary
+- `ctx_reduce` — manage the rolling tool-output buffer
+
+## Reaching for the right tool
+
+- Code search → `aft_search`
+- Past decisions / parked notes → `ctx_search`
+- Cross-package blast radius → `codebase_memory_trace_path`
+- Symbol lookup → `aft_zoom` (specific) / `codebase_refs` (symbol)
+
+See SYSTEM.md for hard rules (meta-file classification, foreground
+vs background, TDD, commit conventions, namespace ownership).

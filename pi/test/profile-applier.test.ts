@@ -103,7 +103,11 @@ describe("installPromptComposer (via applyProfile)", () => {
 		};
 		applyProfile(pi as any, profile);
 		const result = pi.fire("before_agent_start", { systemPrompt: "" });
-		expect(result.systemPrompt).toContain("Subagents");
+		// standard.md renders the @sages/pi-subagents block — the section
+		// header is "Loaded extensions" (post GC-2026-069 partition) instead
+		// of the old "Subagents" header.
+		expect(result.systemPrompt).toContain("Loaded extensions");
+		expect(result.systemPrompt).toContain("@sages/pi-subagents");
 	});
 
 	it("renders with-aft when only aft is installed", () => {
@@ -122,8 +126,12 @@ describe("installPromptComposer (via applyProfile)", () => {
 		const pi = makeMockPi();
 		applyProfile(pi as any, STANDARD_PROFILE);
 		const result = pi.fire("before_agent_start", { systemPrompt: "" });
-		expect(result.systemPrompt).toContain("DAG workflow");
-		// {{#if}} markers should be stripped (not remain in output)
+		// Post-partition (GC-2026-069): the DAG workflow description moved
+		// out of presets and into SYSTEM.md. The preset now just lists which
+		// extensions are loaded. Verify @sages/pi-orchestrator's block
+		// expanded (its presence is the canonical "standard extension set"
+		// signal) and the {{#if}} markers were stripped.
+		expect(result.systemPrompt).toContain("@sages/pi-orchestrator");
 		expect(result.systemPrompt).not.toContain("{{#if");
 	});
 
