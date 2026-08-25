@@ -2,7 +2,8 @@
  * Profile validator — enforces 4-segment schema + cross-field semantic checks.
  *
  * Uses typebox/value for shape validation (the same TypeBox runtime the
- * orchestrator tools use — see `pi/src/tools/orchestrator/goal-contract.ts`).
+ * orchestrator tools use — see
+ * `pi-orchestrator/src/goal-contract.ts`).
  */
 
 import { Value } from "typebox/value";
