@@ -123,6 +123,14 @@ PI_SUBAGENTS_SRC_REL="pi-subagents"
 PI_SUBAGENTS_DEST_DIR="$PI_DIR/packages/pi-subagents"
 PI_SUBAGENTS_PKG="$PI_SUBAGENTS_DEST_DIR"
 
+# pi-orchestrator package info (sage peer, deployed by file-copy)
+# Contains the 4-stage DAG orchestrator tools + brainstorming + observability +
+# project analyzer. The conductor (in `pi/`) reads `profile.tools` to gate
+# which of these are exposed to the LLM.
+PI_ORCHESTRATOR_SRC_REL="pi-orchestrator"
+PI_ORCHESTRATOR_DEST_DIR="$PI_DIR/packages/pi-orchestrator"
+PI_ORCHESTRATOR_PKG="$PI_ORCHESTRATOR_DEST_DIR"
+
 # pi-evaluator package info (sage peer, deployed by file-copy)
 # pi-evaluator is the reward-mode extension (eval_score + eval_trend tools).
 # Default OFF, opt-in via `sages.rewardMode: true` in ~/.pi/agent/settings.json.
@@ -916,6 +924,25 @@ install_pi_subagents_files() {
   fi
 }
 
+install_pi_orchestrator_files() {
+  local src_root="$LOCAL_REPO_ROOT/$PI_ORCHESTRATOR_SRC_REL"
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in local sages repo, skipping pi-orchestrator files"
+    return 0
+  }
+  if [[ -d "$PI_ORCHESTRATOR_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-orchestrator files (exists, use --force)"
+  else
+    rm -rf "$PI_ORCHESTRATOR_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_ORCHESTRATOR_DEST_DIR"
+    echo "  Installed pi-orchestrator files to $PI_ORCHESTRATOR_DEST_DIR"
+  fi
+  if [[ -f "$PI_ORCHESTRATOR_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    (cd "$PI_ORCHESTRATOR_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
+  fi
+}
+
 install_pi_subagents() {
   echo "==> Installing pi-subagents..."
   if is_pi_subagents_installed && [[ "${FORCE:-false}" != true ]]; then
@@ -1463,6 +1490,9 @@ install() {
 
   # Install pi-subagents (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-subagents).
   install_pi_subagents || true
+
+  # Install pi-orchestrator (4-stage DAG workflow + brainstorming + observability + analyzer)
+  install_pi_orchestrator || true
 
   # Install pi-evaluator (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-evaluator).
   # Reward mode (eval_score / eval_trend) is OFF by default — opt in via

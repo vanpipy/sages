@@ -1,0 +1,72 @@
+{
+  "_source_hash": "854be7777a914874e0f56da36dc106e251879c9fd5e74e51d901da92271eecf5",
+  "_generated_at": "2026-08-25T07:59:24.488Z",
+  "_source_files": [
+    "src/orchestrator-audit.ts",
+    "src/goal-contract.ts"
+  ],
+  "categories": [
+    {
+      "id": "ink",
+      "severity": [
+        "critical",
+        "major",
+        "minor"
+      ],
+      "validates": "task-level audit report presence (has_report + verdict=CERTIFIED)"
+    },
+    {
+      "id": "nose",
+      "severity": [
+        "critical",
+        "major",
+        "minor"
+      ],
+      "validates": "cross-task SC coverage against goal contract"
+    },
+    {
+      "id": "foot",
+      "severity": [
+        "critical",
+        "major",
+        "minor"
+      ],
+      "validates": "cross-cutting verification_cmd re-runs"
+    },
+    {
+      "id": "castration",
+      "severity": [
+        "critical",
+        "major",
+        "minor"
+      ],
+      "validates": "workflow-level security (orphaned worktrees, shared secrets)"
+    },
+    {
+      "id": "death",
+      "severity": [
+        "critical",
+        "major",
+        "minor"
+      ],
+      "validates": "long-term viability (orphaned branches, drive-by refactor)"
+    }
+  ],
+  "severities": [
+    {
+      "id": "critical",
+      "severity": [],
+      "validates": "defect finding → audit verdict downgraded to REJECT"
+    },
+    {
+      "id": "major",
+      "severity": [],
+      "validates": "defect finding → audit verdict downgraded to REVISE"
+    },
+    {
+      "id": "minor",
+      "severity": [],
+      "validates": "defect finding → score deduction, no verdict change"
+    }
+  ]
+}

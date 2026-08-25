@@ -1,39 +1,31 @@
 /**
- * Sages - pi Package (orchestrator + subagents)
+ * Sages - pi Package (conductor)
  *
- * Provides the orchestrator workflow (goal → decompose → dispatch → audit)
- * that drives multi-task agent pipelines. Subagent execution itself
- * (`developer`, `auditor`) is delegated to the Agent
- * tool — those agents are built-in to `pi-subagents`, see
- * `pi/templates/SUBAGENTS.md`.
+ * Post-PR-2: the orchestrator tools, brainstorming, observability, and
+ * project analyzer have moved to `@sages/pi-orchestrator` (a sibling
+ * monorepo package). This package retains only the conductor layer:
  *
- *   - Orchestrator: `goal_contract_create`, `dag_synthesize`,
- *     `task_dispatch`, `orchestrator_audit`
- *   - Subagents (delegated to Agent tool): `Explore`, `Plan` (Planning Brief
- *     compiler), `developer`, `auditor`. The main agent owns decisions.
- *     `general-purpose` helper was removed; meta-file work now uses
- *     `developer` with `tdd: none`)
+ *   - Profile loading + 4-segment schema (extensions / tools / prompts / policies)
+ *   - Conductor runtime that translates the profile into three pi standard hooks
+ *     (tool filter, prompt composer, reminder injector)
+ *   - The 4 sage-flavored subagent templates in `templates/agents/`
  *
- * File operations (read/write/edit/grep/bash) are not provided here —
- * they come from pi's built-ins (optionally AFT-backed via
- * `@cortexkit/aft-pi`, installed separately by install.sh).
+ * The conductor gates orchestrator tools at runtime via `profile.tools`;
+ * the orchestrator package itself unconditionally registers all of them
+ * and the conductor decides what the LLM may invoke.
  *
- * Workflow outputs are persisted to `.pi/orchestrator/`
- * (goal-{id}.yaml, dag-{id}.yaml, audit-{task_id}.md) and consumed by
- * the user-level subagent sessions.
+ * For more details, see `templates/SYSTEM.md` (sages-style agent system
+ * prompt) and the `templates/prompts/*.md` presets.
  */
 
-// Re-export the package extension entrypoint so other pi packages can
-// compose it (e.g. for tests, or for downstream packages that want to
-// mount the orchestrator surface).
 export { default as default, default as registerSagesExtension } from "./extension.js";
+export { registerConductorOnly } from "./extension.js";
 
-// Orchestrator tool registrar — the only public API for in-process tools.
-// Subagent personas (Explore / Plan / developer / auditor)
-// are reached via the Agent tool, not through this index.
-export { registerOrchestratorTools } from "./tools/orchestrator/index.js";
-
-// Per-orchestrator runtime support — file I/O with security validation.
-// FileService is the only cross-tool utility.
-export { FileService } from "./services/file-service.js";
-export { createFileService } from "./services/file-service.js";
+// Profile subsystem (conductor input)
+export {
+	loadProfile,
+	clearProfileCache,
+	type Profile,
+	STANDARD_PROFILE,
+	ProfileSchema,
+} from "./profile/index.js";

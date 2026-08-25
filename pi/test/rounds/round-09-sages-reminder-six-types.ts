@@ -12,7 +12,7 @@ import {
   registerSagesReminderTool,
   SAGES_REMINDER_TYPES,
   SAGES_REMINDER_FIXDIRECTIVES,
-} from "@/tools/orchestrator/sages-reminder.js";
+} from "@/sages-reminder.js";
 
 interface MockEntry { customType: string; data: any }
 

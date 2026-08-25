@@ -9,7 +9,7 @@ import { describe, it, expect } from "bun:test";
 import {
   extractOrchestratorFindings,
   RULE_FIX_DIRECTIVES,
-} from "@/tools/orchestrator/l1-advisory.js";
+} from "@/l1-advisory.js";
 
 describe("Round 2: L1 advisory — dispatch_no_audit", () => {
   it("fires with critical severity when task_dispatch is called without audit", () => {

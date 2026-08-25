@@ -1,0 +1,39 @@
+{
+  "_source_hash": "20b7f88ec0c96e06590ab111de6c82eadf1f1087a6aa88695fd60598ed1eef57",
+  "_generated_at": "2026-08-25T07:59:24.486Z",
+  "_source_files": [
+    "../pi-subagents/src/default-agents.ts"
+  ],
+  "entries": [
+    {
+      "id": "auditor",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
+      "id": "developer",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
+      "id": "Explore",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": false
+    },
+    {
+      "id": "git-expert",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
+      "id": "merger",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
+      "id": "Plan",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": false
+    }
+  ]
+}

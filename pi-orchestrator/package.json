@@ -1,0 +1,42 @@
+{
+  "name": "@sages/pi-orchestrator",
+  "version": "0.1.0",
+  "description": "Sages 4-stage DAG orchestrator + brainstorming + observability + project analyzer. Domain capability package, loaded by pi via standard pi.extensions.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./test --path-ignore-patterns dist/",
+    "verify:catalog": "bun run scripts/verify-catalog.ts",
+    "gen:catalog": "bun run scripts/gen-catalog.ts"
+  },
+  "keywords": [
+    "pi-extension",
+    "sages",
+    "orchestrator",
+    "dag",
+    "brainstorming"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./src/extension.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.70.5"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.70.5",
+    "@sages/pi-subagents": "file:../pi-subagents",
+    "js-yaml": "^5.2.0",
+    "typebox": "^1.1.34"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "bun-types": "^1.3.14",
+    "typescript": "^6.0.3"
+  }
+}
