@@ -106,3 +106,14 @@ Provide clear, detailed prompts so the agent can work autonomously. Brief it lik
 Terse command-style prompts produce shallow, generic work.
 
 **Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research, implement it." Those phrases push synthesis onto the agent instead of doing it yourself. Write prompts that prove you understood: include file paths, line numbers, what specifically to change.
+
+## Subagent control (GC-2026-073)
+
+Four additional tools let you actively manage agents you've already dispatched, instead of abandoning them when they go off-track. All four reach the **same** `AgentManager` singleton that powers the `Agent` tool — state is shared end-to-end.
+
+- `subagent_status` — list running / queued / recently-completed subagents. Filters: `status`, `type`, `limit`. `verbose: true` adds `lifetimeUsage`, `toolUses`, `compactionCount`. Returns plain-object summaries (never the live `AgentRecord`).
+- `subagent_steer` — push a message into a running or queued agent's session. If the session isn't ready the message queues in `pendingSteers[]` and flushes when ready.
+- `subagent_abort` — hard-stop. Idempotent on terminal agents (returns `stopped: false` with the existing status). Emits a `warning` field when aborting a foreground agent.
+- `subagent_resume` — re-enter a TERMINAL agent's existing session with a new prompt. Refuses if the agent is currently running or queued.
+
+Use these when you can name the dispatch by id. For background, scoped work, prefer them over `Agent`-and-abandon — they let you course-correct in flight.
