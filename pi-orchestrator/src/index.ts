@@ -18,6 +18,7 @@ export { registerTaskDispatcherTool } from "./task-dispatcher.js";
 export { registerOrchestratorAuditTool } from "./orchestrator-audit.js";
 export { registerSagesReminderTool } from "./sages-reminder.js";
 export { registerSubagentControlTools } from "./subagent-control.js";
+export { registerTodowriteTools } from "./todowrite.js";
 
 // Brainstorming slash command
 export {

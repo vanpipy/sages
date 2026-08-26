@@ -44,6 +44,7 @@ import { registerTaskDispatcherTool } from "./task-dispatcher.js";
 import { registerOrchestratorAuditTool } from "./orchestrator-audit.js";
 import { registerSagesReminderTool } from "./sages-reminder.js";
 import { registerSubagentControlTools } from "./subagent-control.js";
+import { registerTodowriteTools } from "./todowrite.js";
 import {
 	installOrchestratorAdvisoryHandlers,
 	type OrchestratorAdvisoryRuntimeDeps,
@@ -146,6 +147,9 @@ export function registerOrchestratorTools(
 	// GC-2026-073: programmatic LLM-facing tools for inspecting and
 	// controlling subagents — subagent_status / steer / abort / resume.
 	registerSubagentControlTools(pi);
+	// GC-2026-074: todowrite view + DAG linkage (todowrite_compile /
+	// todowrite_progress). DAG↔todo auto-sync is wired inside task_dispatch.
+	registerTodowriteTools(pi);
 	// GC-2026-053: orchestrator tool_call audit wiring (the post-tool
 	// history-tracker, pre-tool blocker, tool_result error tracker, and
 	// message_end assistant-text tracker).
