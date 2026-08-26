@@ -585,7 +585,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 		expect(typeof handoff.leaseToken).toBe("string");
 		expect(handoff.leaseToken.length).toBeGreaterThan(0);
 		// Worktree handoff carries no merge instruction string (Sages pins
-		// that to pi/templates/SYSTEM.md).
+		// that to pi-orchestrator/templates/SYSTEM.md).
 		expect(JSON.stringify(handoff)).not.toMatch(/git merge/);
 		manager.dispose();
 	});

@@ -22,10 +22,10 @@ The `mcp` proxy tool comes from [pi-mcp-adapter](https://github.com/nicobailon/p
 
 ## Install
 
-`pi-codebase-memory` is shipped alongside `sages` and installed by `pi/scripts/install.sh`:
+`pi-codebase-memory` is shipped alongside the Sages orchestrator and installed by `pi-orchestrator/scripts/install.sh`:
 
 ```bash
-./pi/scripts/install.sh   # installs sages + pi-memory + pi-codebase-memory + pi-mcp-adapter + pi-serena + pi-codebase-memory-mcp-binary
+./pi-orchestrator/scripts/install.sh   # installs orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + codebase-memory-mcp binary
 ```
 
 The install will:
@@ -131,7 +131,7 @@ mcp_trace_path({ name: "main", direction: "callers" })   # try a trace
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `mcp_*` tool not in tool list | `pi-mcp-adapter` not installed | `pi install npm:pi-mcp-adapter` |
-| `codebase-memory-mcp: command not found` | Binary not installed | `./pi/scripts/install.sh --force` |
+| `codebase-memory-mcp: command not found` | Binary not installed | `./pi-orchestrator/scripts/install.sh --force` |
 | `command not found` but binary exists | `~/.local/bin` not in PATH | `export PATH="$HOME/.local/bin:$PATH"` |
 | `mcp_index_repository` times out | Large repo first scan | Wait; check `mcp_index_status` |
 | `mcp_*` returns empty | Project not indexed | `mcp_index_repository({project: "."})` |

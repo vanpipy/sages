@@ -3,7 +3,7 @@
  *
  * Built-in to pi-subagents as of DAG-2026-011 (Phase A) — the legacy
  * Sages `software-developer` role (formerly shipped via
- * `pi/templates/agents/software-developer.md`) is no longer accepted.
+ * `pi-orchestrator/templates/agents/software-developer.md`) is no longer accepted.
  * Removed in GC-2026-014; see DAG-2026-011 Phase A for the migration
  * history.
  *

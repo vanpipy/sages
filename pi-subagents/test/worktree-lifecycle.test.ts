@@ -15,7 +15,7 @@
  *     then removes anyway and the result records that fact.
  *
  * Importantly, the merge step lives OUTSIDE this module: Sages pins the
- * merge command in `pi/templates/SYSTEM.md` §Phase 4. These helpers do
+ * merge command in `pi-orchestrator/templates/SYSTEM.md` §Phase 4. These helpers do
  * NOT emit merge instructions.
  */
 

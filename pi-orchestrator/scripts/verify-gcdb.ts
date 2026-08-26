@@ -15,7 +15,7 @@
  * Exit 1 with the list of uncovered IDs otherwise.
  *
  * The script resolves its root relative to its own location, so it
- * works from any cwd as long as it lives at `pi/scripts/verify-gcdb.ts`.
+ * works from any cwd as long as it lives at `pi-orchestrator/scripts/verify-gcdb.ts`.
  * Tests import the `uncovered()`, `goalIds()`, and `carveOutIds()`
  * helpers to drive the same logic against a temp directory.
  */

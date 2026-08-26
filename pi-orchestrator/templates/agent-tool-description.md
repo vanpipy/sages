@@ -1,5 +1,5 @@
 <!--
-SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Installed to
+SAGES_TEMPLATE_V1: managed by pi-orchestrator/scripts/install.sh. Installed to
 $AGENT_DIR/agent-tool-description.md and activated by
 $AGENT_DIR/subagents.json (toolDescriptionMode: "custom").
 Modifying this file re-syncs on next install.sh run.

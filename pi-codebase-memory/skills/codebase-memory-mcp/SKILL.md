@@ -112,7 +112,7 @@ When entering a new workspace:
 | Symptom | Cause | Fix |
 |------|------|------|
 | `mcp_*` tool not found | `pi-mcp-adapter` not installed | `pi install npm:pi-mcp-adapter` |
-| `codebase-memory-mcp: command not found` | binary not installed | `./pi/scripts/install.sh --force` |
+| `codebase-memory-mcp: command not found` | binary not installed | `./pi-orchestrator/scripts/install.sh --force` |
 | `mcp_index_repository` times out (>2 min) | first scan of a large project | wait; check status with `mcp_index_status` |
 | `mcp_*` returns empty results | project not indexed | `mcp_index_repository({project: "."})` |
 | `command not found` with binary in PATH | binary installed to `~/.local/bin/` but PATH doesn't include it | `export PATH="$HOME/.local/bin:$PATH"` |

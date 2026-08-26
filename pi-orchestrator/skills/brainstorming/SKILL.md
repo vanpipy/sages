@@ -149,7 +149,7 @@ If any answer is no, the boundaries need work. Smaller, well-bounded units are e
 
 ## Design Document Template
 
-Write the design doc to `.pi/orchestrator/designs/YYYY-MM-DD-<topic>.md` (see `pi/src/tools/brainstorming/index.ts:writeDesignDoc`):
+Write the design doc to `.pi/orchestrator/designs/YYYY-MM-DD-<topic>.md` (see `pi-orchestrator/src/brainstorming/index.ts:writeDesignDoc`):
 
 ```markdown
 # Design: <Topic>

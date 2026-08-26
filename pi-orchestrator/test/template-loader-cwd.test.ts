@@ -1,15 +1,16 @@
 /**
  * cwd / env independence tests for the orchestrator template loader.
  *
- * GC-2026-062 regression pin: sages is a GLOBAL pi extension installed at
- * ~/.pi/packages/sages — every resource lookup must work from any cwd on
- * any machine. template-loader.ts previously baked in a machine-specific
- * absolute path (/home/leroy/...) and made resolution depend on
- * process.cwd(); this suite pins the module-relative fix.
+ * GC-2026-062 regression pin: pi-orchestrator is a GLOBAL pi extension
+ * installed at ~/.pi/packages/pi-orchestrator — every resource lookup
+ * must work from any cwd on any machine. template-loader.ts previously
+ * baked in a machine-specific absolute path (/home/leroy/...) and made
+ * resolution depend on process.cwd(); this suite pins the module-relative
+ * fix.
  *
- * The test file lives at pi/test/tools/orchestrator/ — up 3 = pi/ = the
- * sages package root, which is exactly what the source module resolves
- * from pi/src/tools/orchestrator/.
+ * GC-2026-073: the conductor (./pi/) was retired; this test now lives
+ * at pi-orchestrator/test/template-loader-cwd.test.ts and pins the
+ * module-relative contract from pi-orchestrator/src/.
  */
 
 import { afterAll, describe, expect, it } from "bun:test";

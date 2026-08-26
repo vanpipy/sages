@@ -1,37 +1,40 @@
 #!/usr/bin/env bun
 /**
- * verify-soft-mode-mental-model.ts — GC-2026-052 T6.1
+ * verify-soft-mode-mental-model.ts — GC-2026-052 T6.1 (GC-2026-073 updated)
  *
  * Verifies that the documentation describing "soft mode" does not
- * contradict the actual exports of `pi/src/soft-mode.ts`. The
- * goal is to keep the mental model consistent across:
+ * contradict the actual soft-mode wiring in the orchestrator's
+ * `src/extension.ts`. The goal is to keep the mental model
+ * consistent across:
  *
- *   - The runtime (canonical): `pi/src/soft-mode.ts` exports
- *     `softModeReminder(profile)` (Profile-driven since
- *     GC-2026-049). The default reminder string lives in
- *     `pi/src/profile.ts` as `DEFAULT_SOFT_MODE_REMINDER`.
- *   - The documentation (mirrors): `AGENTS.md`, `README.md`,
- *     and `templates/SYSTEM.md`.
+ *   - The runtime (canonical): `src/extension.ts` exposes the
+ *     `SOFT_MODE_REMINDER` constant, and the `installSessionHooks`
+ *     function wires it into a `pi.on("tool_call", ...)` handler
+ *     that fires once per session on the first `bash` call.
+ *   - The documentation (mirrors): `AGENTS.md`, `README.md`, and
+ *     `templates/SYSTEM.md`.
  *
- * What this verifier checks:
+ * What this verifier checks (post-GC-2026-073):
  *
- *   1. **Export exists.** `soft-mode.ts` exports the Profile-driven
- *      function. Missing exports are flagged (the runtime could not
- *      satisfy the docs).
- *   2. **Docs mention soft mode.** For each doc that mentions
- *      "soft mode" (or "Soft mode"), the verifier confirms the
- *      docs do not invent a contradicting mental model.
+ *   1. **Runtime wiring exists.** `src/extension.ts` exports
+ *      `installSessionHooks` (or wires it inline) AND that function
+ *      contains a `pi.on("tool_call", ...)` handler that calls
+ *      `pi.appendEntry("system", SOFT_MODE_REMINDER)`.
+ *   2. **Default reminder string exists.** The `SOFT_MODE_REMINDER`
+ *      constant is declared and contains the canonical reminder
+ *      text (verified by a regex match on the expected keywords —
+ *      no need to pin byte-for-byte equality).
  *   3. **Concept drift warning.** If a doc mentions
  *      "task-count threshold" but the default reminder string never
- *      mentions it, the verifier emits a `WARN:` to stderr
- *      (does not fail the gate). This is informational — drift
- *      may be intentional — but surfaces a hint for human review.
+ *      mentions it, the verifier emits a `WARN:` to stderr (does
+ *      not fail the gate). This is informational — drift may be
+ *      intentional — but surfaces a hint for human review.
  *
- * On any export missing: print FAIL and exit 1. Otherwise:
- * print `OK: soft-mode mental model` and exit 0.
+ * On any runtime wiring missing: print FAIL and exit 1.
+ * Otherwise: print `OK: soft-mode mental model` and exit 0.
  *
- * No external dependencies. Self-test: running this script
- * against the current `pi/` tree MUST exit 0.
+ * No external dependencies. Self-test: running this script against
+ * the current `pi-orchestrator/` tree MUST exit 0.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -40,22 +43,22 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-// GC-2026-069: conductor files (profile.ts, profile/applier.ts) live in
-// the conductor package at ../pi/, not in this orchestrator package.
-// Post-PR-3: pi/src/soft-mode.ts is gone — the soft-mode reminder is
-// now applied directly via profile.policies.soft_mode_reminder in
-// profile/applier.ts. This script's gate has been updated to match.
-const PI_ROOT = join(__dirname, "..", "..", "pi");
-const PROFILE_PATH = join(PI_ROOT, "src", "profile.ts");
-const PROFILE_APPLIER_PATH = join(PI_ROOT, "src", "profile", "applier.ts");
+
+// GC-2026-073: the conductor (./pi/) is gone. The soft-mode reminder
+// now lives in `pi-orchestrator/src/extension.ts` as
+// `SOFT_MODE_REMINDER`, fired by `installSessionHooks`. The verifier
+// points at the orchestrator's own extension and templates.
+const PI_ORCH_ROOT = join(__dirname, "..");
+const EXTENSION_PATH = join(PI_ORCH_ROOT, "src", "extension.ts");
 const DOC_PATHS = [
-	join(PI_ROOT, "..", "AGENTS.md"),
-	join(PI_ROOT, "..", "README.md"),
-	join(PI_ROOT, "templates", "SYSTEM.md"),
+	join(PI_ORCH_ROOT, "..", "AGENTS.md"),
+	join(PI_ORCH_ROOT, "..", "README.md"),
+	join(PI_ORCH_ROOT, "templates", "SYSTEM.md"),
 ];
 
 export interface SoftModeExports {
-	hasReminderFn: boolean;
+	hasReminderConstant: boolean;
+	hasAppendEntryCall: boolean;
 	reminderMentions: string[];
 }
 
@@ -71,30 +74,32 @@ function extractStringLiterals(body: string): string[] {
 }
 
 export function inspectSoftMode(): SoftModeExports {
-	const profileSrc = readFileSync(PROFILE_PATH, "utf-8");
-	const applierSrc = readFileSync(PROFILE_APPLIER_PATH, "utf-8");
+	const extSrc = readFileSync(EXTENSION_PATH, "utf-8");
 
-	// GC-2026-069 PR 3: the soft-mode reminder is no longer a standalone
-	// `softModeReminder(profile)` function. The conductor's
-	// `profile/applier.ts` reads `profile.policies.soft_mode_reminder`
-	// directly and pipes it through `installReminderInjector(pi, ...)`.
-	// The hard gate now checks that the applier wires the reminder into
-	// `pi.on("tool_call", ...)` — the same effect, declared in a
-	// different shape.
-	const hasReminderFn =
-		/installReminderInjector\s*\(/.test(applierSrc) &&
-		/pi\.on\(\s*["']tool_call["']/.test(applierSrc);
+	// Gate 1: the orchestrator's extension.ts declares
+	// `SOFT_MODE_REMINDER` (the once-per-session reminder text).
+	const hasReminderConstant = /const\s+SOFT_MODE_REMINDER\s*=/.test(extSrc);
 
-	// Default reminder string — lives in profile.ts as
-	// DEFAULT_SOFT_MODE_REMINDER. Surface its literal contents for the
-	// drift check below.
-	const defaultReminderMatch = profileSrc.match(
-		/export\s+const\s+DEFAULT_SOFT_MODE_REMINDER\s*[:=]\s*([\s\S]+?);\s*(?:\n|$)/,
+	// Gate 2: the orchestrator's extension.ts wires
+	// `pi.appendEntry("system", SOFT_MODE_REMINDER)` inside a
+	// `pi.on("tool_call", ...)` handler. The historical
+	// `installReminderInjector` helper is gone — the reminder now
+	// fires directly from `installSessionHooks`.
+	const hasAppendEntryCall =
+		/pi\.on\(\s*["']tool_call["']/.test(extSrc) &&
+		/pi\.appendEntry\(\s*["']system["']\s*,\s*SOFT_MODE_REMINDER/.test(extSrc);
+
+	// Default reminder string — lives in extension.ts as
+	// SOFT_MODE_REMINDER. Surface its literal contents for the drift
+	// check below.
+	const reminderMatch = extSrc.match(
+		/const\s+SOFT_MODE_REMINDER\s*=\s*([\s\S]+?);\s*(?:\n|$)/,
 	);
-	const reminderMentions = defaultReminderMatch ? extractStringLiterals(defaultReminderMatch[1]) : [];
+	const reminderMentions = reminderMatch ? extractStringLiterals(reminderMatch[1]) : [];
 
 	return {
-		hasReminderFn,
+		hasReminderConstant,
+		hasAppendEntryCall,
 		reminderMentions,
 	};
 }
@@ -109,14 +114,19 @@ export function checkSoftModeMentalModel(): SoftModeScanResult {
 	const sm = inspectSoftMode();
 	const warnings: string[] = [];
 
-	// Gate: the applier must wire `installReminderInjector(pi, ...)` to a
-	// `pi.on("tool_call", ...)` handler. This is the post-PR-3 contract —
-	// the reminder string itself lives on `profile.policies.soft_mode_reminder`.
-	if (!sm.hasReminderFn) {
+	// Gate: the extension must declare SOFT_MODE_REMINDER AND wire it
+	// into a pi.on("tool_call") handler that calls pi.appendEntry("system",
+	// SOFT_MODE_REMINDER). Both are required for soft mode to function.
+	if (!sm.hasReminderConstant || !sm.hasAppendEntryCall) {
+		const missing: string[] = [];
+		if (!sm.hasReminderConstant) missing.push("SOFT_MODE_REMINDER constant");
+		if (!sm.hasAppendEntryCall)
+			missing.push(
+				"pi.on('tool_call') handler with pi.appendEntry('system', SOFT_MODE_REMINDER)",
+			);
 		return {
 			ok: false,
-			exportError:
-				"profile/applier.ts must call installReminderInjector(pi, profile.policies.soft_mode_reminder) from a pi.on('tool_call') handler",
+			exportError: `src/extension.ts must declare and wire ${missing.join(" + ")}`,
 			warnings,
 		};
 	}
@@ -132,7 +142,7 @@ export function checkSoftModeMentalModel(): SoftModeScanResult {
 
 		if (/task[- ]count\s+threshold/i.test(text) && !mentionsTaskCount) {
 			warnings.push(
-				`${relative(PI_ROOT, docPath)}: mentions "task-count threshold" but soft-mode reminder does not`,
+				`${relative(PI_ORCH_ROOT, docPath)}: mentions "task-count threshold" but soft-mode reminder does not`,
 			);
 		}
 	}
@@ -144,7 +154,9 @@ function main(): void {
 	const result = checkSoftModeMentalModel();
 	if (!result.ok) {
 		console.error(`verify-soft-mode-mental-model: FAIL — ${result.exportError}`);
-		console.error(`      fix: wire installReminderInjector(pi, profile.policies.soft_mode_reminder) in profile/applier.ts`);
+		console.error(
+			`      fix: declare SOFT_MODE_REMINDER and wire it into a pi.on('tool_call') handler in src/extension.ts`,
+		);
 		process.exit(1);
 	}
 	for (const w of result.warnings) {
@@ -152,7 +164,7 @@ function main(): void {
 	}
 	const sm = inspectSoftMode();
 	console.log(
-		`OK: soft-mode mental model — profile-driven export present (${sm.reminderMentions.length} string literal(s) in default reminder)`,
+		`OK: soft-mode mental model — runtime wiring present (${sm.reminderMentions.length} string literal(s) in default reminder)`,
 	);
 	process.exit(0);
 }

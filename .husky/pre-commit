@@ -3,7 +3,12 @@
 # in any worktree (the previous hard-coded `cd ~/Project/sages` only
 # covered the original checkout and silently re-ran typecheck + tests
 # against the wrong tree in any managed worktree).
+#
+# GC-2026-073: the conductor (`./pi/`) was retired; pi:typecheck /
+# pi:test scripts (which ran in the deleted `./pi/` workspace) were
+# replaced with `pi-orchestrator:typecheck` / `pi-orchestrator:test`
+# pointing at the surviving `./pi-orchestrator/` workspace.
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT" || exit 1
-bun run pi:typecheck || exit 1
-bun run pi:test || exit 1
+bun run orchestrator:typecheck || exit 1
+bun run orchestrator:test || exit 1

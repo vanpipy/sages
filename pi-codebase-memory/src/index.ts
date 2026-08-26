@@ -11,7 +11,7 @@
  * Non-responsibilities (delegated to other extensions):
  * - The `mcp` proxy tool itself comes from pi-mcp-adapter
  * - The codebase-memory-mcp binary itself is installed by sage's install.sh
- *   (see pi/scripts/install.sh → install_codebase_memory_mcp)
+ *   (see pi-orchestrator/scripts/install.sh → install_codebase_memory_mcp)
  *
  * @see https://github.com/DeusData/codebase-memory-mcp
  * @see https://github.com/nicobailon/pi-mcp-adapter
@@ -75,7 +75,7 @@ export default function piCodebaseMemory(pi: ExtensionAPI): void {
 		if (!installed) {
 			ctx.ui?.notify?.(
 				`[pi-codebase-memory] WARNING: codebase-memory-mcp binary NOT installed. ` +
-					`Run ./pi/scripts/install.sh --force to install. ` +
+					`Run ./pi-orchestrator/scripts/install.sh --force to install. ` +
 					`Graph tools (trace_path, detect_changes, etc.) will NOT work until installed.`,
 				"warning",
 			);

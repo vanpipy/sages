@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 #
-# Four Sages Installation Script for pi
-# Installs to ~/.pi/packages/sages
+# Sages Installation Script for pi (orchestrator-owned, GC-2026-073)
 #
-# This script owns the full Sages extension stack on Linux/macOS:
+# This script owns the full Sages extension stack on Linux/macOS,
+# including all peer packages. As of GC-2026-073 the conductor
+# package (`./pi/`) was retired — its capabilities (profile-driven
+# tool filter, prompt composer, soft-mode reminder) were absorbed
+# directly into the orchestrator's `src/extension.ts` (session_start,
+# before_agent_start, tool_call hooks). The orchestrator is now the
+# sole entrypoint package; this script installs it plus all peers.
 #
 #   Local-peer (file-copy) extensions — all four are sourced from the
-#   local sages repo (the parent directory of pi/scripts/install.sh).
-#   No `git clone`, no remote ref pin: install.sh reads the source
-#   files from its own containing repo (LOCAL_REPO_ROOT, derived from
-#   ${BASH_SOURCE[0]}). Bump versions in the local repo and re-run.
-#     sages                → ~/.pi/packages/sages
+#   local sages repo (the parent directory of
+#   pi-orchestrator/scripts/install.sh). No `git clone`, no remote
+#   ref pin: install.sh reads the source files from its own containing
+#   repo (LOCAL_REPO_ROOT, derived from ${BASH_SOURCE[0]}). Bump
+#   versions in the local repo and re-run.
+#     pi-orchestrator      → ~/.pi/packages/pi-orchestrator  (the Sages orchestrator)
 #     pi-codebase-memory   → ~/.pi/packages/pi-codebase-memory
 #     pi-subagents         → ~/.pi/packages/pi-subagents
 #     pi-evaluator         → ~/.pi/packages/pi-evaluator
@@ -24,12 +30,13 @@
 #     AFT (npm:@cortexkit/aft-pi) — binary provisioning is owned by the
 #     AFT team; users run
 #         npx @cortexkit/aft@latest setup --harness pi
-#     manually. pi/templates/aft.jsonc ships as a reference template the
-#     user can copy to ~/.config/cortexkit/aft.jsonc after installation.
+#     manually. pi-orchestrator/templates/aft.jsonc ships as a reference
+#     template the user can copy to ~/.config/cortexkit/aft.jsonc
+#     after installation.
 #
 # Selective install options:
-#   --sages-only   only install sages source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
-#   --system-only  only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)
+#   --orchestrator-only only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
+#   --system-only       only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -38,27 +45,27 @@ set -euo pipefail
 
 # Core paths
 PI_DIR="${PI_DIR:-$HOME/.pi}"
-PKG_NAME="sages"
+PKG_NAME="pi-orchestrator"
 PKG_DIR="$PI_DIR/packages/$PKG_NAME"
 AGENT_DIR="$PI_DIR/agent"
 
 # Resolve this script's directory (works whether invoked by absolute path, symlink, or relative)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
-# Local sages repo root — parent directory of pi/. install.sh no longer
-# clones; it sources all four peer packages from this directory. The
-# sanity check below fails loud if install.sh was misplaced (e.g.,
-# copied to /tmp without the surrounding repo tree) so the install
-# never silently skips a missing peer.
+# Local sages repo root — parent directory of pi-orchestrator/.
+# install.sh no longer clones; it sources all four peer packages from
+# this directory. The sanity check below fails loud if install.sh
+# was misplaced (e.g., copied to /tmp without the surrounding repo
+# tree) so the install never silently skips a missing peer.
 LOCAL_REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-if [[ ! -d "$LOCAL_REPO_ROOT/pi" \
+if [[ ! -d "$LOCAL_REPO_ROOT/pi-orchestrator" \
    || ! -d "$LOCAL_REPO_ROOT/pi-codebase-memory" \
    || ! -d "$LOCAL_REPO_ROOT/pi-subagents" \
    || ! -d "$LOCAL_REPO_ROOT/pi-evaluator" ]]; then
   echo "Error: LOCAL_REPO_ROOT sanity check failed" >&2
-  echo "  Expected: <repo>/{pi,pi-codebase-memory,pi-subagents,pi-evaluator}/" >&2
+  echo "  Expected: <repo>/{pi-orchestrator,pi-codebase-memory,pi-subagents,pi-evaluator}/" >&2
   echo "  Got: $LOCAL_REPO_ROOT" >&2
-  echo "  install.sh must live at <repo>/pi/scripts/install.sh" >&2
+  echo "  install.sh must live at <repo>/pi-orchestrator/scripts/install.sh" >&2
   exit 1
 fi
 
@@ -116,10 +123,11 @@ PI_SUBAGENTS_SRC_REL="pi-subagents"
 PI_SUBAGENTS_DEST_DIR="$PI_DIR/packages/pi-subagents"
 PI_SUBAGENTS_PKG="$PI_SUBAGENTS_DEST_DIR"
 
-# pi-orchestrator package info (sage peer, deployed by file-copy)
-# Contains the 4-stage DAG orchestrator tools + brainstorming + observability +
-# project analyzer. The conductor (in `pi/`) reads `profile.tools` to gate
-# which of these are exposed to the LLM.
+# pi-orchestrator package info (sage peer, deployed by file-copy).
+# GC-2026-073: the orchestrator is now the entrypoint package — it
+# absorbs the conductor's session_start / before_agent_start /
+# tool_call hooks. There is no separate "sages" or "conductor"
+# install target.
 PI_ORCHESTRATOR_SRC_REL="pi-orchestrator"
 PI_ORCHESTRATOR_DEST_DIR="$PI_DIR/packages/pi-orchestrator"
 PI_ORCHESTRATOR_PKG="$PI_ORCHESTRATOR_DEST_DIR"
@@ -142,11 +150,11 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --sages-only       Only install sages source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)"
+  echo "  --orchestrator-only Only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)"
   echo "  --help, -h         Show this help message"
   echo ""
-  echo "Modes are mutually exclusive: pick one of (default | --uninstall | --sages-only | --system-only)."
+  echo "Modes are mutually exclusive: pick one of (default | --uninstall | --orchestrator-only | --system-only)."
 }
 
 
@@ -364,7 +372,7 @@ install_system_prompt() {
     return 0
   fi
 
-  # SYSTEM.md is sourced from a single template (pi/templates/SYSTEM.md) to avoid
+  # SYSTEM.md is sourced from a single template (pi-orchestrator/templates/SYSTEM.md) to avoid
   # drift across install.sh / install.ps1 / install.bat.
   if [[ ! -f "$SYSTEM_TEMPLATE" ]]; then
     echo "  Error: SYSTEM.md template not found at $SYSTEM_TEMPLATE"
@@ -402,9 +410,9 @@ SUBAGENT_SENTINEL_TEXT='SAGES_TEMPLATE_V1'
 # files where partial writes would be user-visible.
 #
 # History: previously also used by `install_subagents_doc` for the
-# `pi/templates/SUBAGENTS.md` doc; that doc was retired in GC-2026-069
+# `pi-orchestrator/templates/SUBAGENTS.md` doc; that doc was retired in GC-2026-069
 # because no runtime code path read it (the LLM-facing roster comes
-# from `pi/templates/agent-tool-description.md` via {{typeList}}).
+# from `pi-orchestrator/templates/agent-tool-description.md` via {{typeList}}).
 _atomic_copy() {
   local src="$1" target="$2"
   local tmp="${target}.tmp.$$"
@@ -467,57 +475,6 @@ uninstall_agent_tool_description() {
     echo "  Removed agent-tool-description.md (was our template)"
   else
     echo "  agent-tool-description.md is user-customized, leaving alone"
-  fi
-}
-
-# ────────────────────────────────────────────────────────────
-# Sages preset prompt templates — conductor reads these at runtime to
-# compose the LLM system prompt based on the active profile.
-# Five presets (minimal / standard / with-aft / with-magic-context / with-both)
-# each installed under ~/.pi/agent/sages/templates/prompts/.
-# The conductor's `installPromptComposer` picks one based on `profile.prompts.template`
-# (or "auto" → based on `extensions.installed`).
-# The conductor's `installPromptComposer` picks one based on `profile.prompts.template`
-# (or "auto" → based on `extensions.installed`).
-#
-# Idempotent: every file is rewritten on each install run; the conductor reads
-# these on every pi session start so users see the latest version after upgrade.
-# ────────────────────────────────────────────────────────────
-
-install_sages_prompt_templates() {
-  local src_dir="$SCRIPT_DIR/../templates/prompts"
-  local dest_dir="$AGENT_DIR/sages/templates/prompts"
-  if [[ ! -d "$src_dir" ]]; then
-    # Older sages version without conductor templates — skip silently.
-    return 0
-  fi
-
-  mkdir -p "$dest_dir"
-  # Five explicit echoes at the end land on exactly five SC8 matches.
-  # SC8 verification counts lines matching the sages preset template path.
-  local tmpl src dst
-  for tmpl in minimal standard with-aft with-magic-context with-both; do
-    src="$src_dir/$tmpl.md"
-    dst="$dest_dir/$tmpl.md"
-    if [[ -f "$src" ]]; then
-      _atomic_copy "$src" "$dst"
-    else
-      warn "sages preset template missing at $src"
-    fi
-  done
-  # Per-template echoes (each line references its specific .md path):
-  echo "  Installed sages/templates/prompts/minimal.md"
-  echo "  Installed sages/templates/prompts/standard.md"
-  echo "  Installed sages/templates/prompts/with-aft.md"
-  echo "  Installed sages/templates/prompts/with-magic-context.md"
-  echo "  Installed sages/templates/prompts/with-both.md"
-}
-
-uninstall_sages_prompt_templates() {
-  local dest_dir="$AGENT_DIR/sages/templates/prompts"
-  if [[ -d "$dest_dir" ]]; then
-    rm -rf "$dest_dir"
-    echo "  Removed sages/templates/prompts/"
   fi
 }
 
@@ -654,12 +611,12 @@ try:
     d = json.load(open(f))
 except (json.JSONDecodeError, FileNotFoundError):
     d = {'packages': []}
-# Remove existing sages entry, then add
+# Remove existing orchestrator entry, then add
 d['packages'] = [x for x in d.get('packages', []) if x != pkg and '$PKG_NAME' not in x]
 if pkg not in d['packages']:
     d['packages'].append(pkg)
 json.dump(d, open(f, 'w'), indent=2)
-print('Registered sages')
+print('Registered pi-orchestrator')
 "
 }
 
@@ -674,30 +631,31 @@ try:
     d = json.load(open(f))
     d['packages'] = [x for x in d.get('packages', []) if x != pkg and '$PKG_NAME' not in x]
     json.dump(d, open(f, 'w'), indent=2)
-    print('Unregistered sages')
+    print('Unregistered pi-orchestrator')
 except Exception as e:
     print('Warning:', e, file=sys.stderr)
 "
 }
 
 # ────────────────────────────────────────────────────────────
-# Shared: copy sages files from the local sages repo
+# Shared: copy pi-orchestrator files from the local sages repo
 # ────────────────────────────────────────────────────────────
-install_sages_files() {
+install_orchestrator_files() {
   # No clone: source files come from LOCAL_REPO_ROOT (the parent
-  # directory of pi/, derived at script entry + sanity-checked). The
-  # user controls which commit is installed by where their local repo
-  # is checked out — `git checkout` in the sages repo, then re-run
-  # install.sh. Pin policy is gone (no SAGES_REPO_SHA, no remote ref).
-  local src_root="$LOCAL_REPO_ROOT/pi"
+  # directory of pi-orchestrator/, derived at script entry +
+  # sanity-checked). The user controls which commit is installed by
+  # where their local repo is checked out — `git checkout` in the
+  # sages repo, then re-run install.sh. Pin policy is gone (no
+  # SAGES_REPO_SHA, no remote ref).
+  local src_root="$LOCAL_REPO_ROOT/pi-orchestrator"
   if [[ ! -d "$src_root" ]]; then
-    echo "Error: sages source tree not found at $src_root"
+    echo "Error: pi-orchestrator source tree not found at $src_root"
     echo "  LOCAL_REPO_ROOT sanity check passed earlier — this is unexpected."
     return 1
   fi
 
   mkdir -p "$PKG_DIR"
-  for dir in skills src profiles subagents templates; do
+  for dir in skills src templates; do
     local src_dir="$src_root/$dir"
     local dest_dir="$PKG_DIR/$dir"
 
@@ -736,15 +694,16 @@ install_sages_files() {
   # copies complete — not here, where peer dirs don't exist yet.
 }
 
-# Link each installed peer package's node_modules → ../sages/node_modules so that
-# tsc/test imports from peer source trees (which may not carry their own node_modules)
-# resolve shared deps via sages' installed deps. Idempotent: skipped if peer already
-# has its own node_modules (e.g., populated by `bun install` in install_*_files).
+# Link each installed peer package's node_modules → ../pi-orchestrator/node_modules
+# so that tsc/test imports from peer source trees (which may not carry their
+# own node_modules) resolve shared deps via the orchestrator's installed
+# deps. Idempotent: skipped if peer already has its own node_modules (e.g.,
+# populated by `bun install` in install_*_files).
 #
 # IMPORTANT: this must run AFTER all peer file copies (in install()) — not in
-# install_sages_files(). Peer source dirs are read straight from $LOCAL_REPO_ROOT
-# (no clone staging dir involved), so there is no longer a risk of copying stale
-# relative-path symlinks into $PI_DIR/packages/.
+# install_orchestrator_files(). Peer source dirs are read straight from
+# $LOCAL_REPO_ROOT (no clone staging dir involved), so there is no longer a
+# risk of copying stale relative-path symlinks into $PI_DIR/packages/.
 setup_peer_node_modules_symlinks() {
   for peer in pi-codebase-memory pi-subagents pi-evaluator; do
     local peer_dir="$PI_DIR/packages/$peer"
@@ -752,43 +711,33 @@ setup_peer_node_modules_symlinks() {
     if [[ -L "$peer_dir/node_modules" || -e "$peer_dir/node_modules" ]]; then
       continue
     fi
-    ln -s ../sages/node_modules "$peer_dir/node_modules"
-    echo "  Linked $peer/node_modules → ../sages/node_modules"
+    ln -s ../pi-orchestrator/node_modules "$peer_dir/node_modules"
+    echo "  Linked $peer/node_modules → ../pi-orchestrator/node_modules"
   done
 
 }
 
 # Reverse-direction symlink: expose each installed sage peer under
-# sages/node_modules/@sages/<peer> so that an import statement like
-# `import { KNOWN_SUBAGENT_IDS } from '@sages/pi-subagents'` inside
-# pi/src/**/*.ts resolves during Node module resolution.
+# pi-orchestrator/node_modules/@sages/<peer> so that an import statement
+# like `import { KNOWN_SUBAGENT_IDS } from '@sages/pi-subagents'` inside
+# pi-orchestrator/src/**/*.ts resolves during Node module resolution.
 #
-# Walks-up resolution from an importing file under pi/src/ lands on
-# sages/node_modules first, so without this link Node cannot find any
-# `@sages/*` peer. The forward link above (peer/node_modules → sages/node_modules)
-# solves the opposite direction (peer reading sages' deps); this function
-# solves sages reading peers-as-packages.
-#
-# Why this exists: f6eaf8f consolidated the subagent registry into
-# `@sages/pi-subagents` as the single source of truth and switched
-# pi/src/tools/orchestrator/dag-synthesizer.ts to import
-# KNOWN_SUBAGENT_IDS + defaultRunInBackground directly from there. The
-# previous in-tree subagent-registry.ts + pi/subagents/registry.yaml
-# pair had no scope, so this reverse link was unnecessary. The cleanup
-# author did not add this link, leaving every f6eaf8f+ install unable
-# to resolve `@sages/pi-subagents` (observed failure mode:
-# `Error: Cannot find module '@sages/pi-subagents'` from
-# ~/.pi/packages/sages/src/tools/orchestrator/dag-synthesizer.ts).
+# Walks-up resolution from an importing file under
+# pi-orchestrator/src/ lands on pi-orchestrator/node_modules first, so
+# without this link Node cannot find any `@sages/*` peer. The forward
+# link above (peer/node_modules → pi-orchestrator/node_modules) solves
+# the opposite direction (peer reading orchestrator's deps); this
+# function solves the orchestrator reading peers-as-packages.
 #
 # Idempotent: skip when the symlink already points at the expected
 # relative target; rebuild when it's wrong or dangling. Never clobber a
 # real directory or file at the path — warn and skip. Runs after
 # setup_peer_node_modules_symlinks in install() so a fresh `bun install`
-# inside install_sages_files cannot wipe the symlink.
-setup_sages_peer_symlinks() {
+# inside install_orchestrator_files cannot wipe the symlink.
+setup_orchestrator_peer_symlinks() {
   for peer in pi-subagents pi-codebase-memory pi-evaluator; do
     local peer_dir="$PI_DIR/packages/$peer"
-    [[ ! -d "$peer_dir" ]] && continue  # user opted out (--sages-only)
+    [[ ! -d "$peer_dir" ]] && continue  # user opted out (--orchestrator-only)
 
     local link_dir="$PKG_DIR/node_modules/@sages"
     local link_path="$link_dir/$peer"
@@ -809,7 +758,7 @@ setup_sages_peer_symlinks() {
     fi
 
     ln -s "../../../$peer" "$link_path"
-    echo "  Linked sages/node_modules/@sages/$peer → ../../../$peer"
+    echo "  Linked pi-orchestrator/node_modules/@sages/$peer → ../../../$peer"
   done
 }
 # ──────────────────────────────────────────────────────────────────
@@ -819,9 +768,10 @@ setup_sages_peer_symlinks() {
 # actually spawn subagents for the 4-stage workflow.
 #
 # Source of truth: the local fork at ./pi-subagents/ (a sibling of
-# ./pi/ in this sages monorepo). At runtime pi loads it from
-# $PI_DIR/packages/pi-subagents, which install.sh deploys by file-copy
-# during the default install path (mirror of the local-peer flow).
+# ./pi-orchestrator/ in this sages monorepo). At runtime pi loads it
+# from $PI_DIR/packages/pi-subagents, which install.sh deploys by
+# file-copy during the default install path (mirror of the local-peer
+# flow).
 #
 # The npm upstream (npm:@tintinweb/pi-subagents) is intentionally NOT
 # installed because it would conflict with the local fork by
@@ -1086,15 +1036,15 @@ except Exception as e:
 #   pi-mcp-adapter                → 2.25.0
 #   @cortexkit/pi-magic-context   → 0.36.1
 #
-# Local-peer (file-copy) packages — sages, pi-codebase-memory,
+# Local-peer (file-copy) packages — pi-orchestrator, pi-codebase-memory,
 # pi-subagents, pi-evaluator — are NOT pinned via npm and have NO
 # remote ref pin. They are sourced directly from the local sages repo
-# (the parent directory of pi/scripts/install.sh, derived as
+# (the parent directory of pi-orchestrator/scripts/install.sh, derived as
 # LOCAL_REPO_ROOT at script entry). "Versioning" is whatever commit
 # the local repo is checked out to — `git checkout <sha>` in the
 # sages repo, then re-run install.sh to roll the deployed peers.
 #
-#   sages / pi-codebase-memory / pi-subagents / pi-evaluator → local HEAD
+#   pi-orchestrator / pi-codebase-memory / pi-subagents / pi-evaluator → local HEAD
 #
 # AFT (@cortexkit/aft-pi) is NOT pinned here; it is intentionally
 # not auto-installed (memory #25) — users run
@@ -1404,7 +1354,7 @@ except Exception as e:
 # Mode 1: full install (default)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
+  echo "==> Installing pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1416,9 +1366,12 @@ install() {
   fi
 
 
-  # Install sages first (sources files from $LOCAL_REPO_ROOT/pi/).
-  echo "==> Installing sages..."
-  install_sages_files || exit 1
+  # Install pi-orchestrator first (sources files from $LOCAL_REPO_ROOT/pi-orchestrator/).
+  # GC-2026-073: this replaces the historical `install_sages_files()` —
+  # the conductor (./pi/) is gone, and the orchestrator is now the
+  # entrypoint package.
+  echo "==> Installing pi-orchestrator..."
+  install_orchestrator_files || exit 1
 
   # Install pi-magic-context (cross-session memory + context layer)
   install_pi_magic_context || true
@@ -1442,24 +1395,23 @@ install() {
   # Install pi-subagents (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-subagents).
   install_pi_subagents || true
 
-  # Install pi-orchestrator (4-stage DAG workflow + brainstorming + observability + analyzer)
-  install_pi_orchestrator || true
-
   # Install pi-evaluator (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-evaluator).
   # Reward mode (eval_score / eval_trend) is OFF by default — opt in via
   # `sages.rewardMode: true` in ~/.pi/agent/settings.json after install.
   install_pi_evaluator || true
 
   # After ALL peer file copies are done, set up node_modules symlinks pointing
-  # at sages' shared deps (idempotent — skipped if peers already have node_modules).
+  # at the orchestrator's shared deps (idempotent — skipped if peers already
+  # have node_modules).
   setup_peer_node_modules_symlinks
 
   # Reverse-direction symlinks: expose each installed sage peer under
-  # sages/node_modules/@sages/<peer> so that pi/src/**/*.ts can `import
-  # '@sages/<peer>'` and Node walks up to find it. Missing this link
-  # caused every f6eaf8f+ install to fail at extension load with
-  # `Cannot find module '@sages/pi-subagents'`.
-  setup_sages_peer_symlinks
+  # pi-orchestrator/node_modules/@sages/<peer> so that
+  # pi-orchestrator/src/**/*.ts can `import '@sages/<peer>'` and Node
+  # walks up to find it. Missing this link caused every pre-GC-2026-073
+  # install to fail at extension load with `Cannot find module
+  # '@sages/pi-subagents'`.
+  setup_orchestrator_peer_symlinks
 
   # Install system prompt
   install_system_prompt
@@ -1470,29 +1422,26 @@ install() {
   install_agent_tool_description
   install_subagents_config
 
-  # Install the conductor's preset prompt templates (4-segment profile reads these).
-  install_sages_prompt_templates
-
   echo ""
   echo "Done! Restart pi: exit && pi"
 }
 
 # ────────────────────────────────────────────────────────────
-# Mode 2: update sages only (skip pi-codebase-memory and SYSTEM.md)
+# Mode 2: update orchestrator only (skip pi-codebase-memory and SYSTEM.md)
 # ────────────────────────────────────────────────────────────
-install_sages_only() {
-  echo "==> Installing sages only (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, skip SYSTEM.md)..."
+install_orchestrator_only() {
+  echo "==> Installing orchestrator only (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, skip SYSTEM.md)..."
 
-  # Pre-flight: pi is still required (sages is a pi extension)
+  # Pre-flight: pi is still required (orchestrator is a pi extension)
   install_pi_if_needed
   if ! command -v pi &>/dev/null; then
     echo "Error: pi not found after installation"
     exit 1
   fi
 
-  # Install only the sages files
-  echo "==> Installing sages..."
-  install_sages_files || exit 1
+  # Install only the orchestrator files
+  echo "==> Installing pi-orchestrator..."
+  install_orchestrator_files || exit 1
 
   # Explicitly do NOT call install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_subagents / install_pi_evaluator / install_system_prompt
   echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
@@ -1502,31 +1451,31 @@ install_sages_only() {
 }
 
 # ────────────────────────────────────────────────────────────
-# Mode 3: update SYSTEM.md only (skip sages and pi-codebase-memory)
+# Mode 3: update SYSTEM.md only (skip orchestrator and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)..."
+  echo "==> Installing SYSTEM.md only (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)..."
   # No git / pi needed — SYSTEM.md is standalone markdown
   install_system_prompt
-  echo "  (skipped: sages, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)"
+  echo "  (skipped: orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
 }
 
 # ────────────────────────────────────────────────────────────
-# Uninstall (removes both sages and pi-codebase-memory)
+# Uninstall (removes both orchestrator and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling sages + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
+  echo "==> Uninstalling pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
 
-  # Remove sages
+  # Remove orchestrator
   if [[ -d "$PKG_DIR" ]]; then
     rm -rf "$PKG_DIR"
-    echo "  Removed sages"
+    echo "  Removed pi-orchestrator"
   fi
 
-  # Unregister sages
+  # Unregister orchestrator
   unregister_settings
 
   # Uninstall pi-codebase-memory (sage peer)
@@ -1542,7 +1491,7 @@ uninstall() {
   # Uninstall pi-mcp-adapter (MCP server adapter)
   uninstall_pi_mcp_adapter
 
-  
+
 
   # Uninstall pi-subagents (subagent extension)
   uninstall_pi_subagents
@@ -1559,7 +1508,7 @@ uninstall() {
 }
 
 main() {
-  local FORCE=false UNINSTALL=false SAGES_ONLY=false SYSTEM_ONLY=false
+  local FORCE=false UNINSTALL=false ORCHESTRATOR_ONLY=false SYSTEM_ONLY=false
   local MODE_COUNT=0
 
   while [[ $# -gt 0 ]]; do
@@ -1571,7 +1520,7 @@ main() {
         ;;
       --force) FORCE=true; shift ;;
       --uninstall) UNINSTALL=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
-      --sages-only) SAGES_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
+      --orchestrator-only) ORCHESTRATOR_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --system-only) SYSTEM_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --help|-h) usage; exit 0 ;;
       *) echo "Error: Unknown option: $1"; usage; exit 1 ;;
@@ -1580,7 +1529,7 @@ main() {
 
   # Mutual-exclusion check: only one mode may be selected at a time
   if [[ "$MODE_COUNT" -gt 1 ]]; then
-    echo "Error: --uninstall, --sages-only, --system-only are mutually exclusive"
+    echo "Error: --uninstall, --orchestrator-only, --system-only are mutually exclusive"
     echo "Pick at most one of them (or none for full install)."
     usage
     exit 1
@@ -1588,13 +1537,14 @@ main() {
 
   if $UNINSTALL; then
     uninstall
-  elif $SAGES_ONLY; then
-    install_sages_only
+  elif $ORCHESTRATOR_ONLY; then
+    install_orchestrator_only
   elif $SYSTEM_ONLY; then
     install_system_only
   else
     install
   fi
 }
+
 
 main "$@"
