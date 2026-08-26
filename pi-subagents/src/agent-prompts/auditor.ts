@@ -3,7 +3,7 @@
  *
  * Built-in to pi-subagents as of DAG-2026-011 (Phase B) — the legacy
  * Sages `software-auditor` role (formerly shipped via
- * `pi/templates/agents/software-auditor.md` and installed to
+ * `pi-orchestrator/templates/agents/software-auditor.md` and installed to
  * `~/.pi/agent/agents/` by `pi/scripts/install.sh`) is no longer
  * accepted. Removed in GC-2026-014; see DAG-2026-011 Phase B for the
  * migration history.

@@ -4,12 +4,14 @@
   "description": "Four Sages Agents - Multi-agent workflow for pi",
   "private": true,
   "workspaces": [
-    "pi",
-    "pi-subagents"
+    "pi-orchestrator",
+    "pi-subagents",
+    "pi-codebase-memory",
+    "pi-evaluator"
   ],
   "scripts": {
-    "pi:typecheck": "cd pi && bun run typecheck",
-    "pi:test": "cd pi && bun test ./src ./test --path-ignore-patterns dist/",
+    "orchestrator:typecheck": "cd pi-orchestrator && bun run typecheck",
+    "orchestrator:test": "cd pi-orchestrator && bun test ./test --path-ignore-patterns dist/",
     "prepare": "husky install"
   },
   "keywords": [

@@ -1745,7 +1745,7 @@ function formatGitErr(err: unknown): string {
 //   2. An explicit delete path that's "host-owned": removes the on-disk
 //      worktree, deletes the marker, optionally deletes the branch, and
 //      refuses to escape `.pi/worktree`. The merge step lives elsewhere
-//      (Sages pins it in `pi/templates/SYSTEM.md`) so this helper emits no
+//      (Sages pins it in `pi-orchestrator/templates/SYSTEM.md`) so this helper emits no
 //      `git merge` instruction.
 //
 // `releaseManagedWorktree` (above) is the agent-cleanup path; `deleteManagedWorktree`
@@ -1873,7 +1873,7 @@ export interface DeleteManagedWorktreeResult {
  *
  * No changes-preserved guard: the host owns the decision. The merge step is
  * the orchestrator's responsibility — this helper never emits a merge
- * instruction (Sages pins that to `pi/templates/SYSTEM.md`).
+ * instruction (Sages pins that to `pi-orchestrator/templates/SYSTEM.md`).
  *
  * Refuses to do anything for an unknown repo (ENOENT) or a missing marker
  * (path-leakage guard: refuses to operate on a path that was not provisioned

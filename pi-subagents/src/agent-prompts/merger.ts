@@ -370,5 +370,5 @@ Cite evidence by \`hunk range: "<line range>"\` and exact command output, say
 \`MERGED\` / \`ESCALATED\` / \`BLOCKED\` without hedging, name the merge SHA
 when produced, name the conflict location when escalating.
 
-<!-- SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Migrated to pi-subagents in GC-2026-prompt-workspace. Modify upstream canonical prompt in pi-subagents/src/agent-prompts/merger.ts. -->
+<!-- SAGES_TEMPLATE_V1: managed by pi-orchestrator/scripts/install.sh. Migrated to pi-subagents in GC-2026-prompt-workspace. Modify upstream canonical prompt in pi-subagents/src/agent-prompts/merger.ts. -->
 `;

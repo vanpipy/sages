@@ -340,7 +340,7 @@ function buildDetails(
 		// GC-2026-008 P2: surface the managed-worktree handoff so the UI / a
 		// future `sages_release_worktree` tool can read path / branch / base /
 		// lease without re-inspecting the worktree. NO `git merge` instruction
-		// is appended — the merge step lives in pi/templates/SYSTEM.md §Phase 4.
+		// is appended — the merge step lives in pi-orchestrator/templates/SYSTEM.md §Phase 4.
 		worktree: record.managedWorktree,
 		...overrides,
 	};

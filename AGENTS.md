@@ -17,8 +17,9 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
     a classifier under soft mode, not a gate. See "Soft mode and dag_threshold"
     below for the recommendation mechanism.
 2. **Production code uses managed-worktree dispatch.** RECOMMENDED for
-   `src/`, `test/`, `lib/`, the entire `pi/` tree, every sibling `pi-*/`
-   subpackage, or any root source file: dispatch `developer` with
+   `src/`, `test/`, `lib/`, every `pi-*/` subpackage
+   (pi-orchestrator, pi-subagents, pi-codebase-memory, pi-evaluator),
+   or any root source file: dispatch `developer` with
    `isolation: { dag_id, task_id, mode: "create" }` and use TDD. For ≤2-item
    workflows direct editing is also acceptable.
 3. **Root meta-files use current-workspace dispatch (lightweight).** For
@@ -27,7 +28,7 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
    `tsconfig*.json`, `.gitignore`, `.aft.jsonc`), dispatch `developer` with
    `isolation: "current-workspace"` and `tdd: "none"`; review the diff before
    committing. Direct editing in the main session is also acceptable for
-   ≤2-item workflows. **Every Sages package subtree (`pi/`, every `pi-*/`)
+   ≤2-item workflows. **Every Sages package subtree (every `pi-*/`)
    is production code** — no carve-outs (GC-2026-029).
 
 ## The 4 orchestrator tools
@@ -66,63 +67,16 @@ of truth.
 
 ## Profiles
 
-A **profile** is a named bundle that captures one coherent Sages
-soft-mode policy (GC-2026-031) plus its dispatch + gate posture in a
-single YAML file. Every profile declares:
-
-- `subagents` — whitelist of subagent ids (must be a subset of
-  `@sages/pi-subagents.KNOWN_SUBAGENT_IDS`; verified by
-  `verifyProfileCrossConsistency`).
-- `isolation_default` — the default isolation mode for
-  workspace-using subagents (`none`, `current-workspace`, or
-  `worktree`).
-- `dag_threshold` — todo-item count at which the 4-stage DAG
-  workflow is recommended (default 2; lower for stricter
-  governance, ≥99 to effectively disable).
-- `gate_suite` — which verifications the profile requires (e.g.
-  `typecheck`, `test`, `verify:catalog`).
-- `soft_mode_reminder` — string fired once per session on the
-  first write-intent bash call.
-- `soft_mode_system_prompt_suffix` — string appended to every
-  system prompt.
-
-The main-agent extension loads the active profile once at session
-start via `loadProfile()` (in `pi/src/profile.ts`) and threads its
-fields through `profile/applier.ts`. The dispatcher + DAG synthesizer
-treat the whitelist as authoritative.
-
-### The 1 built-in profile
-
-GC-2026-069 collapsed the historical `light` / `audit-strict` /
-`ci-only` variants — the conductor now uses `extensions.tools` to
-filter capabilities, not separate profiles. The only built-in is:
-
-- **`standard`** — full subagent roster
-  (`[Explore, Plan, developer, auditor, merger, git-expert]`) with
-  `current-workspace` isolation, `dag_threshold: 2`, and the
-  `typecheck + test + verify:catalog` gate suite. The default when
-  no override is present. Definition lives in
-  `pi/profiles/standard.yaml`; the in-code `STANDARD_PROFILE`
-  constant in `pi/src/profile.ts` is a fallback for partial installs.
-
-### How to override
-
-Write `~/.pi/profile.yaml` with the same schema as a built-in
-profile, e.g.:
-
-```yaml
-id: my-override
-description: Personal override; full audit gates
-subagents: [Explore, Plan, developer, auditor, merger, git-expert]
-isolation_default: worktree
-dag_threshold: 1
-gate_suite: [typecheck, test, verify:catalog]
-soft_mode_reminder: ""
-soft_mode_system_prompt_suffix: ""
-```
-
-`loadProfile()` reads it on startup; the built-in `standard`
-profile is the fallback when no home-level override is present.
+> **GC-2026-073:** the conductor (`./pi/`) and its profile mechanism
+> (yaml + 4-segment schema + applier.ts) are gone. The orchestrator's
+> `extension.ts` absorbs the conductor's three hooks directly
+> (`session_start` calls `setActiveTools([...])`, `before_agent_start`
+> reads `templates/SYSTEM.md`, `tool_call` fires the once-per-session
+> soft-mode reminder). User customizations move to pi-native primitives:
+> `~/.pi/agent/SYSTEM.md` (main-agent prompt),
+> `~/.pi/agent/agents/*.md` (per-subagent overrides via `AgentConfig`),
+> `/model` and `/thinking` runtime commands, and
+> `~/.pi/agent/settings.json#packages` for extension inclusion.
 
 ## Institutional knowledge
 
@@ -198,17 +152,21 @@ resume after context compaction.
 ## Key paths
 
 - `.pi/orchestrator/goal-*.yaml`, `dag-*.yaml`, `audit-*.md` — workflow state
-- `pi/src/extension.ts` — soft-mode wiring (`session_start`,
-  `tool_call` classifier, `before_agent_start` system-prompt suffix)
-- `pi/src/soft-mode.ts` — `SOFT_MODE_REMINDER` and
-  `SOFT_MODE_SYSTEM_PROMPT_SUFFIX`
-- `pi/src/tools/bash-guard.ts` — shell command classifier
+- `pi-orchestrator/src/extension.ts` — orchestrator entrypoint
+  (default export wires `registerOrchestratorTools` + the three
+  session hooks: `session_start` `setActiveTools`, `before_agent_start`
+  prompt overlay, `tool_call` once-per-session soft-mode reminder)
+- `pi-orchestrator/src/orchestrator-advisory.ts` — orchestrator advisory
+  pipeline (pre-tool blocker + history tracker + error tracker +
+  assistant-text tracker)
+- `pi-orchestrator/src/goal-contract.ts`, `dag-synthesizer.ts`,
+  `task-dispatcher.ts`, `orchestrator-audit.ts`, `sages-reminder.ts`
+  — the 5 LLM-callable tools
+- `pi-orchestrator/src/bash-guard.ts` — shell command classifier
   (`shouldBlockBashCommand` is advisory under soft mode; never blocks)
-- `pi/src/tools/orchestrator/task-dispatcher.ts` — dispatch defaults
-- `pi/src/tools/orchestrator/dag-synthesizer.ts` — task-template whitelist
-- `pi/skills/orchestrator/SKILL.md` — full workflow reference
-- `pi/templates/agent-tool-description.md` — Agent tool description
-  template (LLM-visible after install)
+- `pi-orchestrator/skills/orchestrator/SKILL.md` — full workflow reference
+- `pi-orchestrator/templates/agent-tool-description.md` — Agent tool
+  description template (LLM-visible after install)
 
 The package map belongs in [README.md § Repository layout](README.md#repository-layout).
 
@@ -228,26 +186,25 @@ A `check:all` aggregator wires them into one entry point for CI.
 | Gate | Command | Catches |
 |---|---|---|
 | Type check | `bun run typecheck` | Type errors anywhere |
-| Unit suite | `bun test ./src ./test` | Behavior regression |
+| Unit suite | `bun test ./test` | Behavior regression |
 | Catalog | `bun run verify:catalog` | Drift between source + `.pi/orchestrator/catalogs/*.json` |
 | Isolation modes | `bun run verify:isolation-modes` | Literal `isolation: "worktree"` (forbidden) |
 | Namespace ownership | `bun run verify:namespace-ownership` | Subagent templates declaring `.pi/orchestrator/...` in files[] |
-| Soft-mode mental model | `bun run verify:soft-mode-mental-model` | Docs "soft mode" mentions vs `pi/src/soft-mode.ts` exports |
+| Soft-mode mental model | `bun run verify:soft-mode-mental-model` | Docs "soft mode" mentions vs `src/extension.ts` reminder wiring |
 | **All** | `bun run check:all` | Runs every gate above; CI single entry point |
 
 GC-2026-069 retired `verify:subagent-roster` alongside `pi/templates/SUBAGENTS.md` — the roster table it parsed is no longer installed to user machines and the LLM-facing roster comes from `pi/templates/agent-tool-description.md`'s `{{typeList}}` template rendering (sourced from `pi-subagents/src/default-agents.ts`).
 
-The pre-commit hook (`pi/typecheck` + `pi/test`) still runs automatically and must pass before commit. Run the rest locally:
+The pre-commit hook (`orchestrator:typecheck` + `orchestrator:test`) still runs automatically and must pass before commit. Run the rest locally from `pi-orchestrator/`:
 
-- `bun run typecheck` — pi typecheck
-- `bun test ./src ./test` — pi unit + integration tests
-- `bun run verify:catalog` — fails when any of the 5 catalogues under `pi/catalogs/` drift from their source files. Run after editing `pi/src/tools/orchestrator/*.ts` or `pi/templates/agent-tool-description.md`.
+- `bun run typecheck` — orchestrator typecheck
+- `bun test ./test` — orchestrator unit + integration tests
+- `bun run verify:catalog` — fails when any of the 5 catalogues under `pi-orchestrator/catalogs/` drift from their source files. Run after editing `pi-orchestrator/src/*.ts` or `pi-orchestrator/templates/agent-tool-description.md`.
 - `bun run verify:isolation-modes` — fails when any subagent template or worker dispatch uses the literal `isolation: "worktree"` token. Use the explicit managed-worktree object or `"current-workspace"`.
 - `bun run verify:namespace-ownership` — fails when a subagent template declares a `.pi/orchestrator/...` path inside its `files[]` allow-list (cross-namespace overwrites).
-- `bun run verify:soft-mode-mental-model` — fails when docs references to "soft mode" drift from the exports / reminder / suffix strings in `pi/src/soft-mode.ts`.
-- `bun run check:all` — runs every gate above in sequence; exits non-zero on first failure. Use this as the single entry point in CI.
+- `bun run verify:soft-mode-mental-model` — fails when docs references to "soft mode" drift from the `SOFT_MODE_REMINDER` constant + `pi.on("tool_call")` wiring in `pi-orchestrator/src/extension.ts`.
 
-If you change any source file listed in a catalog's `_source_files`, re-run `bun run gen:catalog` and commit the regenerated `pi/catalogs/*.json` along with the source change.
+If you change any source file listed in a catalog's `_source_files`, re-run `bun run gen:catalog` and commit the regenerated `pi-orchestrator/catalogs/*.json` along with the source change.
 
 ## Soft mode and dag_threshold
 
@@ -316,7 +273,7 @@ read-only.
 
 ## Deep references
 
-- **Subagent dispatch + Agent tool description:** `pi/templates/agent-tool-description.md`
+- **Subagent dispatch + Agent tool description:** `pi-orchestrator/templates/agent-tool-description.md`
 - **Workflow:** `pi-orchestrator/skills/orchestrator/SKILL.md`
-- **Brainstorming:** `pi/skills/brainstorming/SKILL.md`
-- **Installed system prompt:** `pi/templates/SYSTEM.md`
+- **Brainstorming:** `pi-orchestrator/skills/brainstorming/SKILL.md`
+- **Installed system prompt:** `pi-orchestrator/templates/SYSTEM.md`

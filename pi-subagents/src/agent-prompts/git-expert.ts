@@ -20,7 +20,7 @@
  * Leftovers) OR a cross-subagent recipe block (Pre-conditions /
  * Steps / Failure modes / Verify / Forbidden).
  *
- * SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Modify
+ * SAGES_TEMPLATE_V1: managed by pi-orchestrator/scripts/install.sh. Modify
  * upstream canonical prompt in
  * pi-subagents/src/agent-prompts/git-expert.ts. (Kept out of the
  * prompt literal so the LLM never sees the template-marker
@@ -312,5 +312,5 @@ You are NOT responsible for:
 
 Cite evidence by \`sha:\` + \`reflog entry:\` + \`conflict-marker count:\` + exact command output, say \`DONE\` / \`BLOCKED\` / \`NEEDS MORE INFO\` without hedging, name the recovered SHA when produced, name the conflict location when escalating.
 
-<!-- SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Migrated to pi-subagents in GC-2026-030. Modify upstream canonical prompt in pi-subagents/src/agent-prompts/git-expert.ts. -->
+<!-- SAGES_TEMPLATE_V1: managed by pi-orchestrator/scripts/install.sh. Migrated to pi-subagents in GC-2026-030. Modify upstream canonical prompt in pi-subagents/src/agent-prompts/git-expert.ts. -->
 `;
