@@ -22,7 +22,7 @@ describe("classifyBashCommand — read-only fast paths", () => {
 	it("classifies read-only first-word commands", () => {
 		expect(classifyBashCommand("ls -la")).toBe("read-only");
 		expect(classifyBashCommand("cat foo.ts")).toBe("read-only");
-		expect(classifyBashCommand("grep -r pattern src/")).toBe("read-only");
+		expect(classifyBashCommand("grep -r pattern src/")).toBe("code-search");
 		expect(classifyBashCommand("echo hello")).toBe("read-only");
 	});
 
@@ -126,5 +126,76 @@ describe("classifyBashCommand — LRU memoization", () => {
 		expect(_getClassifyCacheSize()).toBe(2);
 		_clearClassifyCache();
 		expect(_getClassifyCacheSize()).toBe(0);
+	});
+});
+
+describe("classifyBashCommand — code-search branch (GC-2026-075)", () => {
+	beforeEach(() => _clearClassifyCache());
+
+	it("classifies plain grep against src/ as code-search", () => {
+		expect(classifyBashCommand("grep -r handleAuth src/")).toBe("code-search");
+	});
+
+	it("classifies rg against source paths as code-search", () => {
+		expect(classifyBashCommand("rg -n 'TODO' packages/foo/")).toBe("code-search");
+	});
+
+	it("classifies naked grep as code-search (no path argument)", () => {
+		expect(classifyBashCommand("grep -r handler")).toBe("code-search");
+	});
+
+	it("classifies find with source-root hint as code-search", () => {
+		expect(classifyBashCommand("find src -name '*.ts'")).toBe("code-search");
+	});
+
+	it("classifies find with lib root as code-search", () => {
+		expect(classifyBashCommand("find lib -type f -name '*.js'")).toBe("code-search");
+	});
+
+	it("returns read-only for grep against non-source paths", () => {
+		expect(classifyBashCommand("grep -r pattern node_modules/")).toBe("read-only");
+		expect(classifyBashCommand("grep -r pattern dist/")).toBe("read-only");
+		expect(classifyBashCommand("grep -r pattern .git/")).toBe("read-only");
+		expect(classifyBashCommand("grep -r pattern build/")).toBe("read-only");
+		expect(classifyBashCommand("grep -r pattern .cache/")).toBe("read-only");
+		expect(classifyBashCommand("grep -r pattern vendor/")).toBe("read-only");
+	});
+
+	it("returns read-only for grep with no path and no source hint", () => {
+		// `grep foo` without path argument — naked grep; per design this
+		// still counts as code-search (LLM most likely exploring).
+		expect(classifyBashCommand("grep foo")).toBe("code-search");
+	});
+
+	it("returns write-intent for grep with redirect (redirect overrides)", () => {
+		expect(classifyBashCommand("grep -r handleAuth src/ > out.txt")).toBe("write-intent");
+	});
+
+	it("returns write-intent for find -delete (destructive overrides)", () => {
+		expect(classifyBashCommand("find src -name '*.bak' -delete")).toBe("write-intent");
+	});
+
+	it("returns write-intent for find -exec (exec overrides)", () => {
+		expect(classifyBashCommand("find src -name '*.ts' -exec rm {} +")).toBe("write-intent");
+	});
+
+	it("does not classify git grep as code-search (git-meta verdict wins)", () => {
+		// `git grep` falls through the new code-search branch (firstWord is
+		// "git", not "grep") and into the existing git-meta verdict. The
+		// git-meta whitelist does not include `git grep` so it ends up
+		// "unknown" — same as before GC-2026-075. We document this so a
+		// future change to the git-meta whitelist knows to consider
+		// promoting `git grep` (or letting it fall through to code-search).
+		expect(classifyBashCommand("git grep -n foo")).toBe("unknown");
+	});
+
+	it("is case-insensitive on path hints", () => {
+		expect(classifyBashCommand("grep -r pattern SRC/")).toBe("code-search");
+		expect(classifyBashCommand("grep -r pattern LIB/")).toBe("code-search");
+	});
+
+	it("treats .git/ as a non-source prefix even with a source hint elsewhere", () => {
+		// `.git/` is checked first — non-source wins over source hint
+		expect(classifyBashCommand("grep -r pattern src/ .git/")).toBe("read-only");
 	});
 });
