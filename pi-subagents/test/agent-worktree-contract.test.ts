@@ -126,6 +126,7 @@ vi.mock("../src/agent-runner.js", () => ({
 
 import { AgentManager } from "../src/agent-manager.js";
 import * as runnerModule from "../src/agent-runner.js";
+import { registerAgents, setDefaultsDisabled } from "../src/agent-types.js";
 import {
 	acquireManagedWorktreeLease,
 	readManagedWorktreeLease,
@@ -147,6 +148,13 @@ const stubRunAgent = runnerModule.runAgent as unknown as ReturnType<
 >;
 
 beforeEach(() => {
+	// Ensure the agent registry has DEFAULT_AGENTS so "Explore" / "Plan" /
+	// "developer" / "auditor" resolve when AgentManager.spawn() is called.
+	// 12 other test files in test/ use the same canonical pattern; this
+	// commit brings agent-worktree-contract.test.ts in line with them.
+	// (GC-2026-071)
+	setDefaultsDisabled(false);
+	registerAgents(new Map());
 	stubRunAgent.mockClear();
 	RUN_AGENT_STATE.reset();
 });
