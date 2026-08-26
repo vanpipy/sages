@@ -872,31 +872,21 @@ export function installOrchestratorAdvisoryHandlers(
 		// runs grep / rg / find in bash to explore source code, classify
 		// the command via bash-guard and emit a one-line reminder pointing
 		// at `aft_search`. The bash call still runs — soft mode (GC-2026-031)
-		// never blocks. We rate-limit by skipping the reminder when the
-		// same `aft-search-nudge` advisory was already emitted within
-		// `ORCHESTRATOR_ADVISORY_HISTORY_CAP` recent tool calls, to avoid
-		// a single bash-heavy session spamming the context.
-		if (toolName === "bash") {
+		// never blocks. Rate-limited via l1Ctx.alreadyAdvisedRules so a
+		// single bash-heavy session does not spam the context. The rule
+		// persists for the session's lifetime (matches the existing
+		// orchestrator-advisory dedup convention).
+		if (toolName === "bash" && !l1Ctx.alreadyAdvisedRules.has("aft-search-nudge")) {
 			const command = (input as { command?: unknown }).command;
 			if (typeof command === "string" && command.length > 0) {
 				const classification = classifyBashCommand(command);
 				if (classification === "code-search") {
-					const recentlyNudged = orchestratorHistory.some(
-						(c) =>
-							c.toolName === "bash" &&
-							typeof (c.input as { command?: unknown }).command === "string" &&
-							classifyBashCommand(
-								(c.input as { command: string }).command,
-							) === "code-search",
+					pi.appendEntry(
+						"system",
+						"💡 Read-only code search detected. Consider `aft_search({ query: " +
+							'"' + "<your query>" + '"' + " })` for an indexed, ranked single-call replacement.",
 					);
-					if (!recentlyNudged) {
-						pi.appendEntry(
-							"system",
-							"💡 Read-only code search detected. Consider `aft_search({ query: " +
-								'"' + "<your query>" + '"' + " })` for an indexed, ranked single-call replacement.",
-						);
-						l1Ctx.alreadyAdvisedRules.add("aft-search-nudge");
-					}
+					l1Ctx.alreadyAdvisedRules.add("aft-search-nudge");
 				}
 			}
 		}
