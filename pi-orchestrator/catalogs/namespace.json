@@ -1,6 +1,6 @@
 {
-  "_source_hash": "33021917b8d0ea21f1bf8c06b9e0acd38f4bed158df542c2a2bff9180d37cdf7",
-  "_generated_at": "2026-08-26T16:37:57.592Z",
+  "_source_hash": "80d98f204d6d776921621108cc533df68eaf0c20b4fa4ac2d7ef2b925e0ce498",
+  "_generated_at": "2026-08-26T16:50:03.451Z",
   "_source_files": [
     "src/namespace-ownership.ts"
   ],
@@ -10,6 +10,7 @@
       "patterns": [
         "^goal-${SAFE_SEGMENT}\\\\.yaml$",
         "^dag-${SAFE_SEGMENT}\\\\.yaml$",
+        "^todo-${SAFE_SEGMENT}\\\\.yaml$",
         "^audit-state-${SAFE_SEGMENT}\\\\.yaml$",
         "^audit-rollup-(?:task|batch)-${SAFE_SEGMENT}\\\\.md$"
       ]
