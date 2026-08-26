@@ -43,17 +43,27 @@ const observedReadFilePaths: string[] = [];
 // `vi.mock` factories run before `vi` is bound at module scope, so we use
 // dynamic `import()` (always available in module factory context) instead of
 // `vi.importActual` (which is undefined during hoisting).
+// GC-2026-072: hoist `await import(...)` OUTSIDE the vi.mock factory closures.
+// Bun's vitest runtime deadlocks when a vi.mock factory does `await import()`
+// of the very module it's mocking (factory's import never resolves because
+// the mock is already active). Capturing the real module + the real function
+// reference at module scope, then referencing them from the factory via
+// closure, sidesteps the deadlock. Verified: 5 pass / 0 fail in 2.4s
+// (previously hung indefinitely at module load).
+const __actualEa = await import("@earendil-works/pi-coding-agent");
 vi.mock("@earendil-works/pi-coding-agent", async () => {
-	const actual = await import("@earendil-works/pi-coding-agent");
+	const actual = __actualEa;
 	return {
 		...actual,
 		getAgentDir: () => MOCK_GLOBAL_DIR,
 	};
 });
 
+const __actualFs = await import("node:fs");
+const __originalReadFileSync = __actualFs.readFileSync;
 vi.mock("node:fs", async () => {
-	const actual = await import("node:fs");
-	const originalReadFileSync = actual.readFileSync;
+	const actual = __actualFs;
+	const originalReadFileSync = __originalReadFileSync;
 	return {
 		...actual,
 		readFileSync: ((
