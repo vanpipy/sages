@@ -64,7 +64,7 @@ class MockPi {
 // ─── 1. Extension registration ──────────────────────────────────────────────
 
 describe("GC-2026-053 smoke: extension registration (Step 1)", () => {
-  it("SMOKE-1.1: registerOrchestratorTools registers 9 tools (5 prior + 4 subagent control from GC-2026-073)", async () => {
+  it("SMOKE-1.1: registerOrchestratorTools registers 11 tools (9 from GC-2026-073 + 2 todowrite from GC-2026-074)", async () => {
     const registerOrchestratorTools = (await import("../../src/extension.js")).registerOrchestratorTools;
     const pi = new MockPi();
     registerOrchestratorTools(pi as any);
@@ -79,6 +79,8 @@ describe("GC-2026-053 smoke: extension registration (Step 1)", () => {
       "subagent_status",
       "subagent_steer",
       "task_dispatch",
+      "todowrite_compile",
+      "todowrite_progress",
     ]);
   });
 

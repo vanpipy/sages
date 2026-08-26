@@ -43,6 +43,7 @@ import {
   atomicWriteOrchestratorText,
 } from "./state-persistence.js";
 import { loadPlan } from "./dag-synthesizer.js";
+import { loadTodoFile, computeTodoDrift } from "./todo-sync.js";
 // GC-2026-041: Cross-package import. The full extractAuditFindings
 // parser lives in pi-subagents/src/agent-runner.ts (5 rules). The
 // ambient declaration in pi/types/pi-subagents-audit.d.ts declares
@@ -883,6 +884,29 @@ export function gatherFailureModeStats(
 	const retryable = byCause
 		.filter((s) => s.handlerKind === "spec" && s.minRetryBudgetLeft !== 0)
 		.map((s) => ({ id: s.id, count: s.count, minRetryBudgetLeft: s.minRetryBudgetLeft }));
+
+	// GC-2026-074: surface todowrite drift as a special cause bucket so
+	// the audit rollup catches LLM-side divergence from the DAG. Drift
+	// counts reflect the number of todo items / DAG tasks whose status
+	// disagrees with the other view.
+	if (dagId !== undefined) {
+		try {
+			const plan = loadPlan(cwd, dagId);
+			const todo = loadTodoFile(cwd, dagId);
+			const drift = plan ? computeTodoDrift(plan, todo) : [];
+			if (drift.length > 0) {
+				byCause.push({
+					id: "todowrite-drift",
+					count: drift.length,
+					latest: new Date().toISOString(),
+					handlerKind: "spec",
+					minRetryBudgetLeft: undefined,
+				});
+			}
+		} catch {
+			/* never fail the audit because of a drift lookup */
+		}
+	}
 
 	return { total: scoped.length, byCause, byOutcome, retryable };
 }

@@ -93,7 +93,7 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
     pi = new MockPi();
   });
 
-  it("SMOKE-073-1: default export registers 9 orchestrator tools (5 prior + 4 subagent control)", async () => {
+  it("SMOKE-073-1: default export registers 11 orchestrator tools (9 from GC-2026-073 + 2 todowrite from GC-2026-074)", async () => {
     const ext = await import("../../src/extension.js");
     expect(typeof ext.default).toBe("function");
     ext.default(pi as any);
@@ -108,6 +108,8 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
       "subagent_status",
       "subagent_steer",
       "task_dispatch",
+      "todowrite_compile",
+      "todowrite_progress",
     ]);
   });
 
