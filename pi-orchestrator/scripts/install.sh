@@ -225,7 +225,16 @@ install_pi_codebase_memory() {
   fi
 
   if [[ -f "$PI_CODEBASE_MEMORY_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
-    (cd "$PI_CODEBASE_MEMORY_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
+    # Drop --silent so install failures surface (matches the orchestrator
+    # fix at commit e2e0101). pi-codebase-memory has no critical runtime
+    # deps to verify (only the pi-coding-agent peer that pi provides),
+    # so the per-step verify is a no-op — but at least surface bun
+    # install errors instead of silently swallowing them with `|| true`.
+    if ! (cd "$PI_CODEBASE_MEMORY_DEST_DIR" && bun install 2>&1 | tail -10); then
+      echo "  ERROR: pi-codebase-memory bun install failed"
+      echo "  Run 'cd $PI_CODEBASE_MEMORY_DEST_DIR && bun install' manually to diagnose"
+      return 1
+    fi
   fi
 
   # Register local-peer package in settings.json (matches the local-peer pattern).
@@ -671,6 +680,126 @@ verify_critical_orchestrator_deps() {
   return 0
 }
 
+# Per-peer critical-deps verification functions — mirrors
+# verify_critical_orchestrator_deps for the other sage peers.
+#
+# Each function lists the modules that the peer's extension entry
+# imports at module-load time. The set is derived by grepping
+# `^import .* from ['"]<name>['"]` across `peer/src/*.ts` against
+# non-relative, non-node: imports, then filtering to anything in
+# the peer's package.json dependencies (or transitively resolved).
+# Anything not declared in deps but imported at load time is a
+# latent bug — flag it.
+#
+# Critical sets (as of this commit):
+#   pi-subagents:   @sinclair/typebox, croner, nanoid
+#     (used by src/index.ts at extension load — without these the
+#      Agent tool registration throws "Cannot find module" at
+#      pi session start, mirroring the original js-yaml failure)
+#   pi-evaluator:   typebox (the npm package is published as
+#     @sinclair/typebox but its package.json declares name="typebox",
+#     so bun resolves it to node_modules/typebox/ not
+#     node_modules/@sinclair/typebox/. Both names accepted.)
+#   pi-codebase-memory: no critical runtime deps — only peer
+#     `@mariozechner/pi-coding-agent` which pi provides.
+
+verify_critical_subagents_deps() {
+  local pkg_dir="$1"
+  local missing=()
+  for dep in @sinclair/typebox croner nanoid; do
+    if [[ ! -d "$pkg_dir/node_modules/$dep" ]]; then
+      missing+=("$dep")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "  ERROR: pi-subagents critical deps missing after bun install:"
+    for dep in "${missing[@]}"; do
+      echo "    - $pkg_dir/node_modules/$dep"
+    done
+    echo "  Run 'cd $pkg_dir && bun install' manually to recover"
+    return 1
+  fi
+  return 0
+}
+
+verify_critical_evaluator_deps() {
+  local pkg_dir="$1"
+  local missing=()
+  # @sinclair/typebox resolves to either node_modules/@sinclair/typebox/
+  # or node_modules/typebox/ depending on the package manager's hoisting
+  # strategy (bun resolves via the package's own name field, which is
+  # "typebox"). Accept either.
+  if [[ ! -d "$pkg_dir/node_modules/typebox" \
+     && ! -d "$pkg_dir/node_modules/@sinclair/typebox" ]]; then
+    missing+=("typebox")
+  fi
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "  ERROR: pi-evaluator critical deps missing after bun install:"
+    for dep in "${missing[@]}"; do
+      echo "    - $pkg_dir/node_modules/$dep"
+    done
+    echo "  Run 'cd $pkg_dir && bun install' manually to recover"
+    return 1
+  fi
+  return 0
+}
+
+# verify_critical_codebase_memory_deps: no critical runtime deps to
+# check (only the @mariozechner/pi-coding-agent peer, which pi itself
+# provides). Kept as a function so the final verify-all gate has a
+# uniform call surface.
+verify_critical_codebase_memory_deps() {
+  local pkg_dir="$1"
+  # Intentional no-op. Left as a placeholder so adding a new critical
+  # dep later is a one-line change.
+  return 0
+}
+
+# Final gate: run all per-peer critical-deps verifies and exit 1 if
+# any peer is missing required modules. Called at the END of install()
+# so it catches:
+#   - per-peer install steps that silently failed (peer installs use
+#     `bun install --silent || true`, swallowing errors)
+#   - state where a peer dir was deleted out-of-band but settings.json
+#     still registers it (the is_*_installed guards would skip reinstall)
+#   - post-install race conditions (something wiped a peer/node_modules
+#     between install_pi_*_files and the next session start)
+#
+# The function prints a clear recovery command per missing peer and
+# returns non-zero so the caller exits non-zero.
+verify_all_critical_install_deps() {
+  local missing_total=0
+  echo "==> Verifying critical deps for all installed packages..."
+
+  if ! verify_critical_orchestrator_deps "$PI_ORCHESTRATOR_DEST_DIR"; then
+    missing_total=$((missing_total + 1))
+  fi
+  if [[ -d "$PI_SUBAGENTS_DEST_DIR" ]]; then
+    if ! verify_critical_subagents_deps "$PI_SUBAGENTS_DEST_DIR"; then
+      missing_total=$((missing_total + 1))
+    fi
+  fi
+  if [[ -d "$PI_EVALUATOR_DEST_DIR" ]]; then
+    if ! verify_critical_evaluator_deps "$PI_EVALUATOR_DEST_DIR"; then
+      missing_total=$((missing_total + 1))
+    fi
+  fi
+  if [[ -d "$PI_CODEBASE_MEMORY_DEST_DIR" ]]; then
+    if ! verify_critical_codebase_memory_deps "$PI_CODEBASE_MEMORY_DEST_DIR"; then
+      missing_total=$((missing_total + 1))
+    fi
+  fi
+
+  if [[ $missing_total -gt 0 ]]; then
+    echo ""
+    echo "ERROR: $missing_total package(s) have missing critical deps."
+    echo "Run 'bash $0 --force' to repair (re-copies files + reinstalls deps)."
+    return 1
+  fi
+  echo "  All critical deps present."
+  return 0
+}
+
 install_orchestrator_files() {
   # No clone: source files come from LOCAL_REPO_ROOT (the parent
   # directory of pi-orchestrator/, derived at script entry +
@@ -720,19 +849,29 @@ install_orchestrator_files() {
   # continued, the user started a pi session, and pi failed with
   # `Cannot find module 'js-yaml'` (js-yaml is required at
   # extension load by src/goal-contract.ts). The verification step
-  # below catches that case and prints a clear recovery path.
+  # below catches that case, prints a clear recovery path, AND
+  # propagates the failure (return 1) so the caller's
+  # `|| exit 1` actually exits the install.
+  #
+  # Propagation invariant: any failure of verify_critical_orchestrator_deps
+  # returns 1 from this function. Without it, the verify print was a no-op
+  # (the install reported success) and the user only learned about the
+  # missing dep when pi failed to load the extension at next session start.
   if [[ -f "$PKG_DIR/package.json" ]] && command -v bun &>/dev/null; then
     echo "  Installing dependencies (bun install)..."
     if ! (cd "$PKG_DIR" && bun install 2>&1 | tail -10); then
       echo "  ERROR: bun install failed; deps may be missing"
       echo "  Run 'cd $PKG_DIR && bun install' manually to diagnose"
+      return 1
     elif ! verify_critical_orchestrator_deps "$PKG_DIR"; then
       echo "  Run 'cd $PKG_DIR && bun install' manually to recover"
+      return 1
     fi
   elif [[ -f "$PKG_DIR/package.json" ]] && ! command -v bun &>/dev/null; then
     echo "  Warning: bun not found on PATH; $PKG_DIR/node_modules not populated"
     echo "  Install bun (https://bun.sh) and re-run install.sh, or run"
     echo "  'cd $PKG_DIR && npm install' manually before starting pi."
+    return 1
   fi
 
   register_settings
@@ -868,7 +1007,18 @@ install_pi_subagents_files() {
     echo "  Installed pi-subagents files to $PI_SUBAGENTS_DEST_DIR"
   fi
   if [[ -f "$PI_SUBAGENTS_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
-    (cd "$PI_SUBAGENTS_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
+    # Drop --silent + add verify_critical_subagents_deps — mirror of
+    # the orchestrator fix at commit e2e0101. pi-subagents imports
+    # @sinclair/typebox, croner, and nanoid at extension-load time
+    # (see src/index.ts), so a silent install failure means the Agent
+    # tool can't register and pi fails at session start.
+    if ! (cd "$PI_SUBAGENTS_DEST_DIR" && bun install 2>&1 | tail -10); then
+      echo "  ERROR: pi-subagents bun install failed"
+      echo "  Run 'cd $PI_SUBAGENTS_DEST_DIR && bun install' manually to diagnose"
+      return 1
+    elif ! verify_critical_subagents_deps "$PI_SUBAGENTS_DEST_DIR"; then
+      return 1
+    fi
   fi
 }
 
@@ -992,7 +1142,17 @@ install_pi_evaluator_files() {
     echo "  Installed pi-evaluator files to $PI_EVALUATOR_DEST_DIR"
   fi
   if [[ -f "$PI_EVALUATOR_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
-    (cd "$PI_EVALUATOR_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
+    # Drop --silent + add verify_critical_evaluator_deps — mirror of
+    # the orchestrator fix at commit e2e0101. pi-evaluator's src imports
+    # `from "typebox"` at module load (see src/tools/eval-*.ts); a silent
+    # install failure leaves the dir missing and pi fails at session start.
+    if ! (cd "$PI_EVALUATOR_DEST_DIR" && bun install 2>&1 | tail -10); then
+      echo "  ERROR: pi-evaluator bun install failed"
+      echo "  Run 'cd $PI_EVALUATOR_DEST_DIR && bun install' manually to diagnose"
+      return 1
+    elif ! verify_critical_evaluator_deps "$PI_EVALUATOR_DEST_DIR"; then
+      return 1
+    fi
   fi
 }
 
@@ -1460,6 +1620,22 @@ install() {
   install_agent_tool_description
   install_subagents_config
 
+  # Final gate: verify every installed package has its critical runtime
+  # deps in node_modules. Per-peer install steps can silently succeed
+  # (their `bun install --silent || true` swallows errors), and a peer
+  # dir deleted out-of-band but still in settings.json would be skipped
+  # by the is_*_installed guards. This catch-all re-verifies everything
+  # at end of install and exits 1 with a clear recovery path if any
+  # package is missing its critical modules. Without this gate, the
+  # user only learns about missing deps when pi fails to load the
+  # extension at next session start.
+  verify_all_critical_install_deps || {
+    echo ""
+    echo "Install completed but critical deps verification failed."
+    echo "Re-run with --force to repair: bash $0 --force"
+    exit 1
+  }
+
   echo ""
   echo "Done! Restart pi: exit && pi"
 }
@@ -1480,6 +1656,20 @@ install_orchestrator_only() {
   # Install only the orchestrator files
   echo "==> Installing pi-orchestrator..."
   install_orchestrator_files || exit 1
+
+  # Verify orchestrator critical deps + verify the peer packages
+  # already on disk (installed by an earlier full install run) so a
+  # partial --orchestrator-only re-run can't leave the peer chain
+  # silently broken. The full-mode install_orchestrator_files call
+  # above already verified the orchestrator's own deps; this
+  # catch-all catches any peer whose node_modules got wiped since
+  # the last install.
+  verify_all_critical_install_deps || {
+    echo ""
+    echo "Install completed but critical deps verification failed."
+    echo "Re-run the full install to repair: bash $0 --force"
+    exit 1
+  }
 
   # Explicitly do NOT call install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_subagents / install_pi_evaluator / install_system_prompt
   echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
