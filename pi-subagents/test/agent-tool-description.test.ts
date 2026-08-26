@@ -10,8 +10,9 @@
  *
  * Two surfaces need to drop the haiku/sonnet examples:
  *
- *   - `pi/templates/agent-tool-description.md:73` — the `toolDescriptionMode:
- *     "custom"` copy (file is installed to ~/.pi/agent/ by install.sh).
+ *   - `pi-orchestrator/templates/agent-tool-description.md:73` — the `toolDescriptionMode:
+ *     "custom"` copy (file is installed to ~/.pi/agent/ by install.sh from
+ *     `pi-orchestrator/scripts/install.sh`).
  *   - `pi-subagents/src/index.ts:1046 + 1141-1144` — the default "full"
  *     description rendered when `toolDescriptionMode` is not custom.
  *
@@ -32,13 +33,16 @@ import { describe, expect, it } from "vitest";
  * Vitest is invoked from `pi-subagents/` or the project root.
  */
 function repoRoot(): string {
+	// GC-2026-073: the conductor (`./pi/`) was retired; templates now sit in
+	// `./pi-orchestrator/templates/`. Test paths still resolve via the repo root
+	// — only the leaf segment changed.
 	return join(import.meta.dirname, "..", "..");
 }
 
 describe("agent-tool-description.md (custom mode template)", () => {
 	const templatePath = join(
 		repoRoot(),
-		"pi",
+		"pi-orchestrator",
 		"templates",
 		"agent-tool-description.md",
 	);
@@ -110,24 +114,23 @@ describe("index.ts (full mode description + model parameter schema)", () => {
 });
 
 describe("prompt templates: SYSTEM.md", () => {
-	it("SYSTEM.md Explore row does not mention the legacy 'haiku model' phrasing", () => {
-		// Original line:  | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast haiku model |
-		// New line:      | `Agent({ subagent_type: "Explore" })` | pi-subagents built-in; fast cheap model from the parent registry (settings.json default) |
+	it("SYSTEM.md does NOT advertise 'haiku' / 'sonnet' as fuzzy model examples", () => {
+		// GC-2026-073: the conductor's templates/ directory was retired; SYSTEM.md
+		// moved to pi-orchestrator/templates/. The GC-2026-014 follow-up's
+		// "Explore row" landmark is gone after the partition pass, but the
+		// broader invariant still holds: SYSTEM.md must not prime the LLM to
+		// emit "haiku" / "sonnet" fuzzy model strings.
 		const text = readFileSync(
-			join(repoRoot(), "pi", "templates", "SYSTEM.md"),
+			join(repoRoot(), "pi-orchestrator", "templates", "SYSTEM.md"),
 			"utf-8",
 		);
-		// We look for the Explore row, then a small window around it.
-		const idx = text.indexOf('subagent_type: "Explore"');
+		// Surgical check: only flag the *advertising* form — not unrelated prose
+		// that mentions the names in passing. The historical bad line was
+		// "fast haiku model" / "fuzzy e.g. haiku, sonnet".
 		expect(
-			idx,
-			"Explore row landmark not found in SYSTEM.md",
-		).toBeGreaterThanOrEqual(0);
-		const chunk = text.slice(idx, idx + 400);
-		expect(
-			chunk.toLowerCase(),
-			"SYSTEM.md Explore row still mentions 'haiku'",
-		).not.toContain("haiku");
+			text.toLowerCase(),
+			"SYSTEM.md still mentions 'haiku' or 'sonnet' as fuzzy model examples",
+		).not.toMatch(/haiku|sonnet/);
 	});
 
 	// GC-2026-069: SUBAGENTS.md was retired alongside the verifier. The

@@ -6,15 +6,15 @@
  *   - subagent.json   ← @sages/pi-subagents (DEFAULT_AGENTS, single
  *                        source of truth for subagent registration;
  *                        replaces GC-2026-048 subagents/registry.yaml)
- *   - isolation.json  ← pi/src/types.ts
+ *   - isolation.json  ← pi-orchestrator/src/types.ts
  *                        (TaskNode.isolation union)
- *   - gate.json       ← pi/src/orchestrator-audit.ts
+ *   - gate.json       ← pi-orchestrator/src/orchestrator-audit.ts
  *                        (g.* category vocabulary) +
- *                        pi/src/goal-contract.ts
+ *                        pi-orchestrator/src/goal-contract.ts
  *                        (severity vocabulary)
- *   - event.json      ← pi/src/observability/events.ts
+ *   - event.json      ← pi-orchestrator/src/observability/events.ts
  *                        (RunEvent enum, GC-2026-050 taxonomy)
- *   - namespace.json  ← pi/src/namespace-ownership.ts
+ *   - namespace.json  ← pi-orchestrator/src/namespace-ownership.ts
  *                        (orchestrator / developer / auditor patterns)
  *
  * Each catalog file has top-level `_source_hash` (SHA-256 chain) and
@@ -40,7 +40,7 @@ import * as yaml from "js-yaml";
 import { KNOWN_SUBAGENT_IDS, defaultRunInBackground } from "@sages/pi-subagents";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// `pi/scripts/gen-catalog.ts` → `pi/` is the parent
+// `pi-orchestrator/scripts/gen-catalog.ts` → `pi-orchestrator/` is the parent
 const PI_ROOT = join(__dirname, "..");
 const CATALOGS_DIR = join(PI_ROOT, "catalogs");
 
@@ -319,7 +319,7 @@ function extractGate(): {
 // Extractor 4 — event vocabulary
 //
 // GC-2026-050 T4.2: the event taxonomy now lives in
-// `pi/src/observability/events.ts`. Three enums (RunEvent / StepEvent /
+// `pi-orchestrator/src/observability/events.ts`. Three enums (RunEvent / StepEvent /
 // SeamEvent) cover 5 + 7 + 3 = 15 events, each prefixed with its domain
 // (`run/` / `step/` / `seam/`). This extractor parses the enum-member
 // shape `<Name> = "<domain>/<slug>"` and emits one entry per member.

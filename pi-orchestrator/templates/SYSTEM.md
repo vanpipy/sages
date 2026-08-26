@@ -65,7 +65,7 @@ Cross-namespace overwrites prohibited. Explore and Plan are read-only.
 ## Workflow References
 
 - `pi-orchestrator/skills/orchestrator/SKILL.md`
-- `pi/templates/agent-tool-description.md`
+- `pi-orchestrator/templates/agent-tool-description.md`
 - `/brainstorm` command or `brainstorming` skill
 
 Agent reads the reference, returns to action.

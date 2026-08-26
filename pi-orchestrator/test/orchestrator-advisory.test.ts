@@ -58,7 +58,7 @@ const DEFAULT_OPTS: OrchestratorAdvisoryOptions = {
 /** Goal scope fixture — keeps the "in scope" test files narrow. */
 const SCOPE_IN: GoalScopeSnapshot = {
 	goal_id: "GC-2026-053",
-	scope_include: ["pi/src/tools/orchestrator/", "pi/test/tools/orchestrator/"],
+	scope_include: ["pi-orchestrator/src/tools/orchestrator/", "pi-orchestrator/test/tools/orchestrator/"],
 	scope_exclude: ["node_modules/", "dist/"],
 };
 
@@ -304,7 +304,7 @@ describe("orchestrator advisory: 5 rules (GC-2026-053)", () => {
 	});
 
 	it("T-ORCH-ADV-R4: goal_drift_detected fires when a tool call references files outside scope", () => {
-		// scope.include = ["pi/src/tools/orchestrator/"] — out-of-scope file is "lib/extra.ts".
+		// scope.include = ["pi-orchestrator/src/tools/orchestrator/"] — out-of-scope file is "lib/extra.ts".
 		const history: OrchestratorToolCall[] = [
 			makeCall(
 				"dag_synthesize",
@@ -328,7 +328,7 @@ describe("orchestrator advisory: 5 rules (GC-2026-053)", () => {
 				"dag_synthesize",
 				{
 					goal_id: "GC-2026-053",
-					tasks: [{ id: "T1", files: ["pi/src/tools/orchestrator/foo.ts"] }],
+					tasks: [{ id: "T1", files: ["pi-orchestrator/src/tools/orchestrator/foo.ts"] }],
 				},
 				1000,
 			),

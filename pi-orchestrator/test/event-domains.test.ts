@@ -2,7 +2,7 @@
  * event-domains.test.ts — GC-2026-050 T4.2
  *
  * Tests the run/* event-domain isolation contract defined in
- * `pi/src/observability/events.ts` + the matching `emitRunEvent`
+ * `pi-orchestrator/src/observability/events.ts` + the matching `emitRunEvent`
  * emitter:
  *
  *   - run/* events are durable (written to audit-state-{dag}.yaml).

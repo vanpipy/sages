@@ -34,11 +34,11 @@ mistakes:
 | Layer | Module | Purpose |
 |---|---|---|
 | Subagent advisory | `pi-subagents/src/agent-runner.ts:advisoryFor` | Subagent message-text validator (5 rules, dedup + cap + token-cap) |
-| Orchestrator advisory | `pi/src/tools/orchestrator/l1-advisory.ts` | **NEW** — orchestrator tool-call history validator (5 rules, mirrors subagent advisory) |
-| Reminder | `pi/src/tools/orchestrator/sages-reminder.ts` | **NEW** — LLM-callable bridge to `pi.appendEntry` (6 reminder types) |
-| Verifier lint | `pi/src/tools/orchestrator/verification-cmd-linter.ts` | **NEW** — rejects placeholder `verification_cmd` (heuristics + execution probe) |
-| Goal lock | `pi/src/tools/orchestrator/goal-lock.ts` | **NEW** — SHA-256 anti-cheat; detects silent SC modification |
-| Verdict gate | `pi/src/tools/orchestrator/verdict-enforcement.ts` | **NEW** — machine-enforced gate: REVISE/REJECT blocks `task_dispatch` until acknowledged |
+| Orchestrator advisory | `pi-orchestrator/src/orchestrator-advisory.ts` | Orchestrator tool-call history validator (5 rules, mirrors subagent advisory) |
+| Reminder | `pi-orchestrator/src/sages-reminder.ts` | LLM-callable bridge to `pi.appendEntry` (6 reminder types) |
+| Verifier lint | `pi-orchestrator/src/verification-cmd-linter.ts` | Rejects placeholder `verification_cmd` (heuristics + execution probe) |
+| Goal lock | `pi-orchestrator/src/goal-lock.ts` | SHA-256 anti-cheat; detects silent SC modification |
+| Verdict gate | `pi-orchestrator/src/verdict-enforcement.ts` | Machine-enforced gate: REVISE/REJECT blocks `task_dispatch` until acknowledged |
 
 ### Soft mode policy (GC-2026-031)
 
@@ -58,7 +58,7 @@ background execution, and result collection.
 
 ```bash
 # Install the orchestrator and subagent runtime
-curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi-orchestrator/scripts/install.sh | bash
 
 # Open a pi session, then give the agent a goal, for example:
 # "Add rate limiting to the login endpoint."
@@ -72,16 +72,15 @@ installed to `~/.pi/agent/goals/`.
 
 | Package | Purpose |
 |---|---|
-| `pi/` | Conductor: profile loader + 4-segment schema + 3-hook applier (`pi/src/extension.ts` → `registerConductorOnly` + delegate to `pi-orchestrator`) |
-| `pi-orchestrator/` | Orchestrator: 5-tool DAG workflow + orchestrator advisory + observability + project analyzer + template loader |
-| `pi-subagents/` | Agent runtime: subagent lifecycle and managed worktrees |
+| `pi-orchestrator/` | Orchestrator (sole entrypoint): 5-tool DAG workflow + orchestrator advisory + session hooks (`session_start` `setActiveTools`, `before_agent_start` prompt overlay, `tool_call` soft-mode reminder) + observability + project analyzer + template loader |
+| `pi-subagents/` | Agent runtime: subagent lifecycle and managed worktrees (per-subagent precise control via `AgentConfig` markdown frontmatter) |
 | `pi-codebase-memory/` | Code knowledge graph MCP server |
 | `pi-evaluator/` | Evaluation metrics for cost, security, and text quality |
 
 ## Where to learn more
 
 - **Agent operational guide:** [AGENTS.md](AGENTS.md)
-- **Agent tool description (LLM-visible):** [`pi/templates/agent-tool-description.md`](pi/templates/agent-tool-description.md)
+- **Agent tool description (LLM-visible):** [`pi-orchestrator/templates/agent-tool-description.md`](pi-orchestrator/templates/agent-tool-description.md)
   (installed to `~/.pi/agent/agent-tool-description.md`)
 - **Workflow skill:** [`pi-orchestrator/skills/orchestrator/SKILL.md`](pi-orchestrator/skills/orchestrator/SKILL.md)
 

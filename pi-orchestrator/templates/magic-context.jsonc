@@ -1,7 +1,7 @@
 {
 	// ════════════════════════════════════════════════════════════════════════
 	// Magic Context configuration template — installed by
-	// `pi/scripts/install.sh` to ~/.config/cortexkit/magic-context.jsonc so
+	// `pi-orchestrator/scripts/install.sh` to ~/.config/cortexkit/magic-context.jsonc so
 	// the extension boots with sensible defaults instead of schema fallbacks.
 	//
 	// Per-session fields (harness, project_root) are NOT pinned here; the

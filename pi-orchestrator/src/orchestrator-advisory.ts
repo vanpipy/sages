@@ -739,8 +739,10 @@ export function orchestratorAdvisoryFor(
 
 /**
  * External loaders the Orchestrator advisory detector consults to enrich its advisory context
- * (goal scope, dag plan status). The conductor in `@sages/pi` supplies the
- * real ones; tests can stub them.
+ * (goal scope, dag plan status). The conductor in `@sages/pi` (now
+ * retired as of GC-2026-073 — its capability was absorbed into this
+ * orchestrator's `extension.ts`) used to supply the real ones; tests
+ * can still stub them via the `runtime` parameter for back-compat.
  */
 export interface OrchestratorAdvisoryRuntimeDeps {
 	loadGoalScope?: (goalId: string, cwd: string) => { goal_id: string; scope_include: string[]; scope_exclude: string[] } | null;

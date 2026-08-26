@@ -49,7 +49,7 @@ implementation dispatch.
 | Cross-workspace merge verification | `merger (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatched by the orchestrator after DAG synthesis detects cross-workspace file overlap; reads both diffs, classifies, produces merge commit or escalates hunk-conflict. |
 | Git inspection / archaeology | `git-expert (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatch when `git worktree add` fails, conflict preview is needed before merger, a commit appears lost, a bisect is required, branch hygiene is requested, or another subagent needs a runnable git procedure (see "When to dispatch git-expert" below). Read-only on production code; writes confined to `.pi/git-scratch-<task_id>-<suffix>/`. |
 
-`run_in_background` defaults are derived from `subagent_type` by `pi/src/tools/orchestrator/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table above is the canonical reference.
+`run_in_background` defaults are derived from `subagent_type` by `pi-orchestrator/src/task-dispatcher.ts:defaultRunInBackground()` (single source of truth). The table above is the canonical reference.
 
 > **DAG-2026-011 Phase C**: the `general-purpose` subagent was removed.
 > Ad-hoc research that doesn't fit a specific role should be done in

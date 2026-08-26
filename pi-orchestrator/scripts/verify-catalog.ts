@@ -29,13 +29,12 @@
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, dirname, relative, resolve } from "node:path";
+import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	KNOWN_SUBAGENT_IDS,
 	defaultRunInBackground,
 } from "@sages/pi-subagents";
-import * as yaml from "js-yaml";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PI_ROOT = join(__dirname, "..");
@@ -319,25 +318,16 @@ export function verifyCookbookPostmortemConsistency(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GC-2026-049 T3.2 — profile ↔ subagent-roster cross-consistency check
+// GC-2026-073 — profile ↔ subagent-roster cross-consistency check retired
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// A profile is a named bundle (see `pi/src/profile.ts`) that whitelists
-// subagents. The profile's `subagents` list MUST be a subset of
-// `@sages/pi-subagents.KNOWN_SUBAGENT_IDS` — otherwise the profile
-// would dispatch a role the runtime has never heard of, and `validateDAG`
-// would emit "not a known role" warnings on every task.
-//
-// The check reads every `pi/profiles/*.yaml`, parses it, and confirms
-// each `profile.subagents` id appears in `KNOWN_SUBAGENT_IDS`. Profiles
-// with no `subagents` array (or any other schema failure) are reported
-// as a failure with a precise file path and reason.
-//
-// Direction: this check is one-directional (profile → registry). A
-// registered subagent that no profile references is *not* an error
-// (profiles intentionally whittle down the full roster). Orphan
-// detection is a separate, informational concern — covered by the
-// built-in profile smoke tests in `pi/test/profiles.test.ts`.
+// The conductor (./pi/) is gone. The `pi/profiles/*.yaml` files are
+// gone with it — the orchestrator no longer reads profiles; its
+// extension hooks (setActiveTools, before_agent_start, tool_call)
+// absorb the same responsibilities. There is no profile ↔ registry
+// check to run. The function below is kept as a stub for backward
+// compatibility with anyone who imported it; it always returns
+// `{ ok: true }` with a no-op note.
 
 export interface ProfileCrossConsistencyResult {
 	ok: boolean;
@@ -345,68 +335,16 @@ export interface ProfileCrossConsistencyResult {
 	unknown?: Array<{ profile: string; subagent: string }>;
 }
 
+/**
+ * GC-2026-073: no-op stub. The conductor (and its profiles) is gone;
+ * this verifier is retained as a constant-time gate that always
+ * passes so legacy imports continue to type-check. Returns
+ * `{ ok: true }`.
+ */
 export function verifyProfileCrossConsistency(
-	profilesDir = join(PI_ROOT, "profiles"),
+	_profilesDir?: string,
 ): ProfileCrossConsistencyResult {
-	if (!existsSync(profilesDir)) {
-		return { ok: false, error: `profiles directory missing: ${relative(PI_ROOT, profilesDir)}` };
-	}
-
-	// pi-subagents owns the canonical subagent id list. Profiles are
-	// whitelists that must be subsets of that set.
-	const registryIds = new Set(KNOWN_SUBAGENT_IDS);
-
-	const yamlFiles = readdirSync(profilesDir)
-		.filter((name) => name.endsWith(".yaml") || name.endsWith(".yml"))
-		.sort();
-
-	if (yamlFiles.length === 0) {
-		return { ok: false, error: `no profile YAMLs found in ${relative(PI_ROOT, profilesDir)}` };
-	}
-
-	const unknown: Array<{ profile: string; subagent: string }> = [];
-	for (const file of yamlFiles) {
-		const absPath = resolve(profilesDir, file);
-		const relPath = relative(PI_ROOT, absPath);
-		let profile: unknown;
-		try {
-			profile = yaml.load(readFileSync(absPath, "utf-8"));
-		} catch (e) {
-			return { ok: false, error: `${relPath}: not valid YAML (${(e as Error).message})` };
-		}
-		if (typeof profile !== "object" || profile === null) {
-			return { ok: false, error: `${relPath}: top-level value is not a mapping` };
-		}
-		const subagents = (profile as { subagents?: unknown }).subagents;
-		// GC-2026-069 PR 1: the new 4-segment profile schema doesn't have a
-		// `subagents` whitelist (subagent dispatch is now per-DAG, not per-profile).
-		// Old 7-field profiles kept `subagents`; new ones don't. Skip silently
-		// when the field is absent.
-		if (subagents === undefined) {
-			continue;
-		}
-		if (!Array.isArray(subagents)) {
-			return { ok: false, error: `${relPath}: 'subagents' is not an array` };
-		}
-		const profileId = (profile as { id?: unknown }).id;
-		const profileName = typeof profileId === "string" && profileId.length > 0 ? profileId : file;
-		for (const candidate of subagents) {
-			if (typeof candidate !== "string" || candidate.length === 0) {
-				return {
-					ok: false,
-					error: `${relPath}: subagent id must be a non-empty string (got ${JSON.stringify(candidate)})`,
-				};
-			}
-			if (!registryIds.has(candidate)) {
-				unknown.push({ profile: profileName, subagent: candidate });
-			}
-		}
-	}
-
-	if (unknown.length === 0) {
-		return { ok: true };
-	}
-	return { ok: false, unknown };
+	return { ok: true };
 }
 
 function main(): void {
@@ -449,26 +387,11 @@ function main(): void {
 		process.exit(1);
 	}
 
-	// Per-file + subagent cross-consistency pass — now run the
-	// profile ↔ registry cross-consistency check (GC-2026-049 T3.2).
-	// Profile cross-consistency lives in the conductor (pi/) since PR 1.
-	// The conductor's profiles are at <repo>/pi/profiles/ which is
-	// ../../profiles relative to this script.
-	const profileCross = verifyProfileCrossConsistency(join(PI_ROOT, "..", "pi", "profiles"));
-	if (!profileCross.ok) {
-		console.error(`verify-catalog: FAIL — profile YAMLs reference unknown subagent(s)`);
-		if (profileCross.error) {
-			console.error(`  ✗ ${profileCross.error}`);
-		}
-		if (profileCross.unknown && profileCross.unknown.length > 0) {
-			for (const u of profileCross.unknown) {
-				console.error(
-					`  ✗ profile '${u.profile}' references unknown subagent '${u.subagent}'; add to pi/subagents/registry.yaml or remove from profile`,
-				);
-			}
-		}
-		process.exit(1);
-	}
+	// Per-file + subagent cross-consistency pass. GC-2026-073 retired
+	// the profile ↔ registry cross-consistency check — the conductor
+	// (and its profile YAMLs) is gone, so there is nothing to verify
+	// here. The `verifyProfileCrossConsistency` export remains as a
+	// no-op stub for backward compatibility with any external import.
 
 	// Profile cross-consistency passes — now run the cookbook /
 	// postmortem consistency check (GC-2026-051 T5.2). This is the
@@ -503,7 +426,7 @@ function main(): void {
 	const cookbookNote = cookbookCross.checked
 		? "gc-index.md institutional coverage OK"
 		: "gc-index.md + postmortem dir both absent \u2014 institutional coverage suspended (no orphan postmortems)";
-	console.log(`OK: ${passing.length} catalogues current (registry.yaml \u2194 subagent.json consistent; profiles \u2194 registry consistent; ${cookbookNote})`);
+	console.log(`OK: ${passing.length} catalogues current (registry.yaml \u2194 subagent.json consistent; ${cookbookNote})`);
 	for (const p of passing) {
 		console.log(`  \u2713 ${p.name}.json (hash=${p.stored!.slice(0, 12)}\u2026)`);
 	}

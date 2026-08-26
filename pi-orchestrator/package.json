@@ -7,6 +7,10 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test ./test --path-ignore-patterns dist/",
     "verify:catalog": "bun run scripts/verify-catalog.ts",
+    "verify:isolation-modes": "bun run scripts/verify-isolation-modes.ts",
+    "verify:namespace-ownership": "bun run scripts/verify-namespace-ownership.ts",
+    "verify:soft-mode-mental-model": "bun run scripts/verify-soft-mode-mental-model.ts",
+    "verify:gcdb": "bun run scripts/verify-gcdb.ts",
     "gen:catalog": "bun run scripts/gen-catalog.ts"
   },
   "keywords": [
@@ -23,7 +27,11 @@
     ],
     "skills": [
       "./skills"
-    ]
+    ],
+    "prompts": [
+      "./templates/prompts"
+    ],
+    "themes": []
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "^0.70.5"
