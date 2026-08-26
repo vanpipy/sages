@@ -39,7 +39,7 @@ describe('ProjectAnalyzer', () => {
     });
     
     it('should analyze TypeScript project correctly', async () => {
-      const context = await analyzer.analyze('/home/leroy/Project/sages/pi');
+      const context = await analyzer.analyze('/home/leroy/Project/sages/pi-orchestrator');
 
       expect(context.language).toBe('typescript');
       expect(typeof context.projectName).toBe('string');
@@ -80,8 +80,8 @@ describe('ProjectAnalyzer', () => {
     });
     
     it('should detect TypeScript from package.json', async () => {
-      const info = await analyzer.detectLanguage('/home/leroy/Project/sages/pi');
-      
+      const info = await analyzer.detectLanguage('/home/leroy/Project/sages/pi-orchestrator');
+
       expect(info).not.toBeNull();
       expect(info!.language).toBe('typescript');
     });
