@@ -640,6 +640,37 @@ except Exception as e:
 # ────────────────────────────────────────────────────────────
 # Shared: copy pi-orchestrator files from the local sages repo
 # ────────────────────────────────────────────────────────────
+
+# Critical-deps verification: confirm node_modules/<dep> exists for every
+# module that pi loads at extension-startup time (i.e. the require stack
+# pi-core hits before user code runs). If any are missing, pi will fail
+# with `Cannot find module '<dep>'` at session start, leaving the user
+# with a broken extension and no obvious recovery path. Caller prints
+# recovery instructions; this function only reports.
+#
+# Critical deps are sourced from runtime imports of src/extension.ts →
+# src/goal-contract.ts (the file in the original failure's require
+# stack). Bump this list when a new top-level src/*.ts file adds a
+# `dependencies` import that runs at module load (not a type-only or
+# dynamic import).
+verify_critical_orchestrator_deps() {
+  local pkg_dir="$1"
+  local missing=()
+  for dep in js-yaml typebox; do
+    if [[ ! -d "$pkg_dir/node_modules/$dep" ]]; then
+      missing+=("$dep")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "  ERROR: critical deps missing after bun install:"
+    for dep in "${missing[@]}"; do
+      echo "    - node_modules/$dep"
+    done
+    return 1
+  fi
+  return 0
+}
+
 install_orchestrator_files() {
   # No clone: source files come from LOCAL_REPO_ROOT (the parent
   # directory of pi-orchestrator/, derived at script entry +
@@ -680,12 +711,28 @@ install_orchestrator_files() {
     echo "  Installed package.json"
   fi
 
-  # Install dependencies into $PKG_DIR/node_modules
+  # Install dependencies into $PKG_DIR/node_modules.
+  #
+  # Drop --silent and add a critical-deps verification step. The
+  # pre-fix form (`bun install --silent 2>&1 | tail -3 || echo
+  # warning`) swallowed install failures — when bun hit a network
+  # error or the silent mode hid a real non-zero exit, the script
+  # continued, the user started a pi session, and pi failed with
+  # `Cannot find module 'js-yaml'` (js-yaml is required at
+  # extension load by src/goal-contract.ts). The verification step
+  # below catches that case and prints a clear recovery path.
   if [[ -f "$PKG_DIR/package.json" ]] && command -v bun &>/dev/null; then
     echo "  Installing dependencies (bun install)..."
-    (cd "$PKG_DIR" && bun install --silent 2>&1 | tail -3) || {
-      echo "  Warning: bun install failed, deps may be missing"
-    }
+    if ! (cd "$PKG_DIR" && bun install 2>&1 | tail -10); then
+      echo "  ERROR: bun install failed; deps may be missing"
+      echo "  Run 'cd $PKG_DIR && bun install' manually to diagnose"
+    elif ! verify_critical_orchestrator_deps "$PKG_DIR"; then
+      echo "  Run 'cd $PKG_DIR && bun install' manually to recover"
+    fi
+  elif [[ -f "$PKG_DIR/package.json" ]] && ! command -v bun &>/dev/null; then
+    echo "  Warning: bun not found on PATH; $PKG_DIR/node_modules not populated"
+    echo "  Install bun (https://bun.sh) and re-run install.sh, or run"
+    echo "  'cd $PKG_DIR && npm install' manually before starting pi."
   fi
 
   register_settings
