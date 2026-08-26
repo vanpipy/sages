@@ -117,3 +117,14 @@ Four additional tools let you actively manage agents you've already dispatched, 
 - `subagent_resume` — re-enter a TERMINAL agent's existing session with a new prompt. Refuses if the agent is currently running or queued.
 
 Use these when you can name the dispatch by id. For background, scoped work, prefer them over `Agent`-and-abandon — they let you course-correct in flight.
+
+## Todowrite + DAG linkage (GC-2026-074)
+
+Two tools link your todowrite to the DAG, so the LLM's private task tracker stays in sync with the orchestrator's ground-truth plan. **The DAG is the source of truth; the todo file is a view.** Drift between the two is surfaced via `orchestrator_audit`, not silently corrected.
+
+- `todowrite_compile` — generate a todowrite view from a DAG plan. Each TaskNode becomes one item with `[serial]` / `[parallel]` marker + task_id, persisted to `.pi/orchestrator/todo-{dag_id}.yaml`. Mirrors `todo_id` onto TaskNodes for cross-reference. Refuses to overwrite an existing todo file unless `force: true`.
+- `todowrite_progress` — read the persisted todo + DAG state, return a reconciliation view. Reports per-item `synced` flag and `drift[]` (todo_ahead / dag_ahead / todo_orphaned / task_orphaned). `verbose: true` echoes the raw YAMLs for debugging.
+
+Auto-sync direction is one-way (DAG → todo). When `task_dispatch` successfully transitions a task, the matching todo item's status is updated atomically. No-op if no todo file exists. Drift surfaces through the `todowrite-drift` bucket in `orchestrator_audit.failure_mode_stats`.
+
+Call `todowrite_compile` once after `dag_synthesize`, before the first dispatch. After that, transitionTask auto-syncs. Use `todowrite_progress` to verify sync health.

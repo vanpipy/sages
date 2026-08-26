@@ -538,6 +538,8 @@ session is also acceptable. Nothing is blocked.
 
 GC-2026-073 added four programmatic tools (`subagent_status` / `subagent_steer` / `subagent_abort` / `subagent_resume`) so the orchestrator can directly intervene in running subagents without abandoning the dispatch. `subagent_status` is read-only; the other three mutate state — use with intent.
 
+GC-2026-074 added `todowrite_compile` / `todowrite_progress` to link the LLM-facing todowrite with the DAG. The DAG is the source of truth; the todo file (`.pi/orchestrator/todo-{dag_id}.yaml`) is a view. After every `task_dispatch.transitionTask` the todo file is auto-updated. Drift (todo_ahead / dag_ahead / *_orphaned) surfaces through `orchestrator_audit` — never silently corrected. Run `todowrite_compile` once after `dag_synthesize`, then let the auto-sync handle the rest.
+
 ## Output: Final Summary to User
 
 After Stage 4 completes with PASS, deliver:
