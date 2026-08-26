@@ -690,6 +690,17 @@ export default function (pi: ExtensionAPI) {
 		spawn: (piRef: any, ctx: any, type: string, prompt: string, options: any) =>
 			manager.spawn(piRef, ctx, type, prompt, options),
 		getRecord: (id: string) => manager.getRecord(id),
+		// GC-2026-073: expose the LLM-facing control surface so the
+		// orchestrator's subagent_status / steer / abort / resume tools
+		// reach the same singleton that powers the Agent tool. The
+		// registry already mediates identity across multiple pi
+		// activations; adding methods here is purely additive — older
+		// callers (e.g. cross-extension RPC, ui widgets) only use the
+		// four-method surface above.
+		steer: (id: string, message: string) => manager.steer(id, message),
+		abort: (id: string, reason?: unknown) => manager.abort(id, reason),
+		resume: (id: string, prompt: string) => manager.resume(id, prompt),
+		listAgents: () => manager.listAgents(),
 	};
 	const ownsManagerRegistry = (globalThis as any)[MANAGER_KEY] === undefined;
 	if (ownsManagerRegistry) {
