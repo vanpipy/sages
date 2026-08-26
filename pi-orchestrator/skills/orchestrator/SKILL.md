@@ -530,10 +530,13 @@ session is also acceptable. Nothing is blocked.
 |-------|---------|----------|
 | Stage 1 | Tool rejects contract | Fix validation errors, re-call |
 | Stage 2 | Coverage gap detected | Add missing task or split existing task |
-| Stage 3 | Subagent fails | retry_subagent (max 2 retries); if still fails, replan (add new task or restructure) |
-| Stage 3 | Subagent drifts off-task | steer_subagent with correction message |
+| Stage 3 | Subagent fails | retry_subagent (max 2 retries); if still fails, replan (add new task or restructure). For active intervention use `subagent_abort` + re-dispatch. |
+| Stage 3 | Subagent drifts off-task | `subagent_steer` with correction message; `subagent_status` to see current state |
+| Stage 3 | Terminal agent needs another turn | `subagent_resume` with new prompt (terminal only — refuses running/queued) |
 | Stage 4 | audit verdict REVISE | List must-fix items; loop back to Stage 3 with corrections |
 | Stage 4 | audit verdict REJECT | Loop back to Stage 2 with new tasks |
+
+GC-2026-073 added four programmatic tools (`subagent_status` / `subagent_steer` / `subagent_abort` / `subagent_resume`) so the orchestrator can directly intervene in running subagents without abandoning the dispatch. `subagent_status` is read-only; the other three mutate state — use with intent.
 
 ## Output: Final Summary to User
 
