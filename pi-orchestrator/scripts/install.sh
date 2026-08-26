@@ -1563,24 +1563,48 @@ install() {
     exit 1
   fi
 
+  # ── Install sage-peer file-copy packages FIRST. ────────────────────────
+  #
+  # pi-orchestrator/package.json declares
+  #   "@sages/pi-subagents": "file:../pi-subagents"
+  # and bun resolves `file:` paths relative to the cwd at install time.
+  # install_orchestrator_files() runs `bun install` from
+  # $PI_DIR/packages/pi-orchestrator/ — so $PI_DIR/packages/pi-subagents/
+  # MUST exist (and carry its own package.json) before that bun install
+  # runs. Same logic for pi-evaluator and pi-codebase-memory, which
+  # setup_orchestrator_peer_symlinks later exposes under
+  # pi-orchestrator/node_modules/@sages/<peer>/.
+  #
+  # Bug this guards against (pre-fix form): install.sh ran
+  # install_orchestrator_files first, then install_pi_subagents later.
+  # bun walked up from file:../pi-subagents, found no package.json, and
+  # aborted with:
+  #   "Could not find package.json for file:../pi-subagents"
+  # Commit d9e1785 made the failure propagate instead of being silently
+  # swallowed — which surfaced this ordering bug loudly. The fix is to
+  # land peer packages on disk first; install_orchestrator_files can
+  # then resolve the file: dep, run `bun install` to completion, and
+  # the reverse-direction symlinks (setup_orchestrator_peer_symlinks)
+  # install on top of an already-correct node_modules/.
+  #
+  # Peer file-copy installs are independent of pi (the CLI), so we run
+  # them before install_orchestrator_files and before the npm: peers
+  # below. The is_*_installed guards keep each step idempotent —
+  # already-installed peers short-circuit the file copy + bun install
+  # and only the settings.json registration is no-op'd.
 
-  # Install pi-orchestrator first (sources files from $LOCAL_REPO_ROOT/pi-orchestrator/).
-  # GC-2026-073: this replaces the historical `install_sages_files()` —
-  # the conductor (./pi/) is gone, and the orchestrator is now the
-  # entrypoint package.
-  echo "==> Installing pi-orchestrator..."
-  install_orchestrator_files || exit 1
+  # Install pi-subagents (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-subagents).
+  install_pi_subagents || exit 1
 
-  # Install pi-magic-context (cross-session memory + context layer)
-  install_pi_magic_context || true
-
-  # Install pi-mcp-adapter (MCP server adapter)
-  install_pi_mcp_adapter || true
+  # Install pi-evaluator (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-evaluator).
+  # Reward mode (eval_score / eval_trend) is OFF by default — opt in via
+  # `sages.rewardMode: true` in ~/.pi/agent/settings.json after install.
+  install_pi_evaluator || exit 1
 
   # Install pi-codebase-memory sage peer (file copy from $LOCAL_REPO_ROOT/pi-codebase-memory + settings.json register).
   # Old design had two steps (install_pi_codebase_memory + install_pi_codebase_memory_files); merged into one
   # after we dropped the npm:pi-codebase-memory (R-Dson) variant in favor of the local peer only.
-  install_pi_codebase_memory || true
+  install_pi_codebase_memory || exit 1
   write_codebase_memory_mcp_config
 
   # Install codebase-memory-mcp binary (~50MB download from GitHub releases)
@@ -1590,13 +1614,19 @@ install() {
     echo "  To retry: bash <(curl -fsSL https://raw.githubusercontent.com/${CBM_REPO}/main/install.sh)"
   }
 
-  # Install pi-subagents (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-subagents).
-  install_pi_subagents || true
+  # Install pi-orchestrator (sources files from $LOCAL_REPO_ROOT/pi-orchestrator/).
+  # GC-2026-073: this replaces the historical `install_sages_files()` —
+  # the conductor (./pi/) is gone, and the orchestrator is now the
+  # entrypoint package. Runs AFTER the sage peers above so its
+  # `file:../pi-subagents` dep can resolve during bun install.
+  echo "==> Installing pi-orchestrator..."
+  install_orchestrator_files || exit 1
 
-  # Install pi-evaluator (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-evaluator).
-  # Reward mode (eval_score / eval_trend) is OFF by default — opt in via
-  # `sages.rewardMode: true` in ~/.pi/agent/settings.json after install.
-  install_pi_evaluator || true
+  # Install pi-magic-context (cross-session memory + context layer)
+  install_pi_magic_context || true
+
+  # Install pi-mcp-adapter (MCP server adapter)
+  install_pi_mcp_adapter || true
 
   # After ALL peer file copies are done, set up node_modules symlinks pointing
   # at the orchestrator's shared deps (idempotent — skipped if peers already
