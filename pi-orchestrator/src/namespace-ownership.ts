@@ -2,11 +2,15 @@ export type OrchestratorNamespaceOwner = "orchestrator" | "developer" | "auditor
 
 const SAFE_SEGMENT = "[A-Za-z0-9][A-Za-z0-9._-]*";
 const ORCHESTRATOR_PATTERNS = [
-  new RegExp(`^goal-${SAFE_SEGMENT}\\.yaml$`),
-  new RegExp(`^dag-${SAFE_SEGMENT}\\.yaml$`),
-  new RegExp(`^audit-state-${SAFE_SEGMENT}\\.yaml$`),
-  /^audit-workflow\.md$/,
-  new RegExp(`^audit-rollup-(?:task|batch)-${SAFE_SEGMENT}\\.md$`),
+	new RegExp(`^goal-${SAFE_SEGMENT}\\.yaml$`),
+	new RegExp(`^dag-${SAFE_SEGMENT}\\.yaml$`),
+	// GC-2026-074: todowrite view files live alongside the DAG YAML
+	// they shadow. Orchestrator-owned (auto-sync writes from
+	// task_dispatch; LLM reads via todowrite_progress).
+	new RegExp(`^todo-${SAFE_SEGMENT}\\.yaml$`),
+	new RegExp(`^audit-state-${SAFE_SEGMENT}\\.yaml$`),
+	/^audit-workflow\.md$/,
+	new RegExp(`^audit-rollup-(?:task|batch)-${SAFE_SEGMENT}\\.md$`),
 ];
 const DEVELOPER_PATTERNS = [
   new RegExp(`^task-${SAFE_SEGMENT}-report\\.md$`),
