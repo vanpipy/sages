@@ -872,24 +872,15 @@ install_pi_subagents_files() {
   fi
 }
 
-install_pi_orchestrator_files() {
-  local src_root="$LOCAL_REPO_ROOT/$PI_ORCHESTRATOR_SRC_REL"
-  [[ ! -d "$src_root" ]] && {
-    echo "  Warning: $src_root not found in local sages repo, skipping pi-orchestrator files"
-    return 0
-  }
-  if [[ -d "$PI_ORCHESTRATOR_DEST_DIR" && "${FORCE:-false}" != true ]]; then
-    echo "  Skipping pi-orchestrator files (exists, use --force)"
-  else
-    rm -rf "$PI_ORCHESTRATOR_DEST_DIR"
-    mkdir -p "$PI_DIR/packages"
-    cp -r "$src_root" "$PI_ORCHESTRATOR_DEST_DIR"
-    echo "  Installed pi-orchestrator files to $PI_ORCHESTRATOR_DEST_DIR"
-  fi
-  if [[ -f "$PI_ORCHESTRATOR_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
-    (cd "$PI_ORCHESTRATOR_DEST_DIR" && bun install --silent 2>&1 | tail -1) || true
-  fi
-}
+# NOTE: install_pi_orchestrator_files was removed — it duplicated the
+# canonical install_orchestrator_files() above and still used the pre-fix
+# `bun install --silent 2>&1 | tail -1 || true` pattern that originally
+# caused the "Cannot find module 'js-yaml'" failure (the --silent flag
+# swallowed bun install errors so js-yaml was missing from
+# ~/.pi/packages/pi-orchestrator/node_modules/). The active path now
+# drops --silent and runs verify_critical_orchestrator_deps after the
+# install, which fails loud with a recovery command if js-yaml or
+# typebox are absent. See commit e2e0101 for the original fix.
 
 install_pi_subagents() {
   echo "==> Installing pi-subagents..."
