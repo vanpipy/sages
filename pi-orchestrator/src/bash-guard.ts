@@ -55,7 +55,65 @@ const READ_ONLY_GIT_SUBCOMMANDS = new Set(["status", "log", "diff", "show", "bra
  */
 const WRITE_REDIRECT_PREFIX = /\d*&?(?:>>|>(?!&))/;
 
-export type BashClassification = "read-only" | "write-intent" | "git-meta" | "unknown";
+
+// GC-2026-075: paths that signal "this isn't source code" so we don't
+// spam the AFT reminder on routine housekeeping. Conservative — substring
+// match on leading components, case-insensitive.
+const NON_SOURCE_PATH_PREFIXES: ReadonlySet<string> = new Set([
+	".git/",
+	"node_modules/",
+	"dist/",
+	"build/",
+	".cache/",
+	".next/",
+	"target/",
+	"out/",
+	"vendor/",
+	".venv/",
+	"__pycache__/",
+]);
+
+// GC-2026-075: common source roots. Presence of any of these in the
+// command means the search targets real source code and the AFT
+// reminder is on-target.
+const SOURCE_PATH_HINTS: readonly string[] = [
+	"src/",
+	"lib/",
+	"tests/",
+	"test/",
+	"packages/",
+	"app/",
+	"scripts/",
+];
+
+// GC-2026-075: returns true when the commands search target overlaps a
+// source path. Conservative — prefers false-negatives over false-positives.
+//   - if the command mentions a non-source prefix, return false
+//   - if it mentions a source hint, return true
+//   - otherwise (no path argument at all) return true
+function isCodeSearchPath(command: string): boolean {
+	const lowered = command.toLowerCase();
+	for (const prefix of NON_SOURCE_PATH_PREFIXES) {
+		if (lowered.includes(prefix)) return false;
+	}
+	for (const hint of SOURCE_PATH_HINTS) {
+		if (lowered.includes(hint)) return true;
+	}
+	return true;
+}
+export type BashClassification =
+	| "read-only"
+	| "write-intent"
+	| "git-meta"
+	| "unknown"
+	/**
+	 * GC-2026-075: A read-only bash call that looks like a code-search query
+	 * (grep / rg / find with no write flag and no redirect). The orchestrator
+	 * advisory handler emits a soft reminder to use `aft_search` instead;
+	 * the bash call still runs. Returning this verdict is purely advisory
+	 * — soft mode (GC-2026-031) never blocks commands.
+	 */
+	| "code-search";
 
 /**
  * GC-2026-033 phase-2 — LRU memoization for the per-tool_call hot path.
@@ -265,12 +323,14 @@ function classifyUncached(command: string): BashClassification {
 		return "write-intent";
 	}
 
-	// 2. find: write-intent if -delete / -exec, else read-only.
+	// 2. find: write-intent if -delete / -exec, else code-search when
+	//    the target is source code, else read-only.
 	if (firstWord === "find") {
 		const hasDeleteOrExec =
 			/(^|\s)-delete(\s|$)/.test(trimmed) ||
 			/(^|\s)-exec(\s|$)/.test(trimmed);
-		return hasDeleteOrExec ? "write-intent" : "read-only";
+		if (hasDeleteOrExec) return "write-intent";
+		return isCodeSearchPath(trimmed) ? "code-search" : "read-only";
 	}
 
 	// 3. Write-targeting redirect (`>`, `>>`) → write-intent
@@ -283,7 +343,17 @@ function classifyUncached(command: string): BashClassification {
 		return "write-intent";
 	}
 
-	// 4. Read-only first-words (cat, ls, head, grep, …).
+	// 3a. GC-2026-075: code-search verbs (grep / rg / find) reach `code-search`
+	//     BEFORE the read-only bucket so the soft reminder can fire. We
+	//     skip paths that are not source code (build artifacts, .git,
+	//     node_modules) so the reminder doesn't get spammy on routine
+	//     housekeeping calls. `git grep` is excluded — it's handled by
+	//     the git-meta branch further down and stays "git-meta" for
+	//     compatibility with downstream consumers.
+	if (firstWord === "grep" || firstWord === "rg") {
+		return isCodeSearchPath(trimmed) ? "code-search" : "read-only";
+	}
+		// 4. Read-only first-words (cat, ls, head, wc, …).
 	if (READ_ONLY_FIRST_WORDS.has(firstWord)) {
 		return "read-only";
 	}
