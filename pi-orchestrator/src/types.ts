@@ -293,6 +293,31 @@ export interface TaskTemplate {
 	params: Record<string, unknown>;
 }
 
+/**
+ * GC-2026-073: LLM-facing summary of a subagent's current state. Returned
+ * by the `subagent_status` tool. Plain object — never the live AgentRecord
+ * reference — so the LLM cannot mutate internal manager state.
+ */
+export interface SubagentStatusSummary {
+	id: string;
+	type: string;
+	description: string;
+	status:
+		| "queued"
+		| "running"
+		| "completed"
+		| "steered"
+		| "aborted"
+		| "stopped"
+		| "error";
+	startedAt: number;
+	completedAt?: number;
+	isBackground?: boolean;
+	lifetimeUsage?: { input: number; output: number; cacheWrite: number };
+	toolUses?: number;
+	compactionCount?: number;
+}
+
 /** Path conventions — single source of truth for the orchestrator directory layout. */
 export const ORCHESTRATOR_DIR = ".pi/orchestrator";
 export const GOAL_CONTRACT_PREFIX = "goal-";
