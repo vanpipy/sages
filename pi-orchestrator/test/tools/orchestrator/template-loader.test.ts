@@ -4,6 +4,8 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   findSagesRoot,
   findTemplatesRoot,
@@ -21,7 +23,18 @@ describe("template-loader", () => {
     it("returns a path to the installed sages package", () => {
       const root = findSagesRoot();
       expect(root).not.toBeNull();
-      expect(root).toContain("sages");
+      // GC-2026-072: the previous `expect(root).toContain("sages")` was
+      // path-fragile — any install layout whose path does not literally
+      // contain the substring "sages" (e.g. /tmp/merge-<gc>/...) would
+      // fail. Verify the actual invariant instead: the path is the
+      // directory of a `@sages/*` package (the orchestrator package itself
+      // counts when tests run inside it). PACKAGE_ROOT = `dirname(...)` of
+      // template-loader.js, so when the orchestrator tests run the returned
+      // root is the pi-orchestrator package, whose name starts with `@sages/`.
+      const pkg = JSON.parse(
+        readFileSync(join(root as string, "package.json"), "utf-8"),
+      );
+      expect(pkg.name).toMatch(/^@sages\//);
     });
 
     it("the returned path contains a package.json", () => {
