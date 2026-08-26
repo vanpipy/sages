@@ -20,7 +20,7 @@ After the warmup, read in priority order: `README.md`, `AGENTS.md`, then `CLAUDE
 
 No hard-mode toggle, no escape hatch, no path gate. The agent decides routing based on task count.
 
-Task-count threshold: active `todowrite` has **>2 items** → dispatch `developer` with managed worktree for production code, or run the 4-stage DAG workflow. **≤2 items** → direct handling with `edit`/`write`/`bash` is also acceptable.
+Task-count threshold: active `todowrite` has **>2 items** → dispatch `developer` with managed worktree for production code, or run the 4-stage DAG workflow. **≤2 items** → direct handling with `edit`/`write`/`bash` is also acceptable. After `dag_synthesize` and before dispatch, run `todowrite_compile` once so the LLM's todowrite mirrors the DAG; transitionTask auto-syncs after that.
 
 ## Meta-File vs Production Code
 
