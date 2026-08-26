@@ -128,3 +128,17 @@ Two tools link your todowrite to the DAG, so the LLM's private task tracker stay
 Auto-sync direction is one-way (DAG → todo). When `task_dispatch` successfully transitions a task, the matching todo item's status is updated atomically. No-op if no todo file exists. Drift surfaces through the `todowrite-drift` bucket in `orchestrator_audit.failure_mode_stats`.
 
 Call `todowrite_compile` once after `dag_synthesize`, before the first dispatch. After that, transitionTask auto-syncs. Use `todowrite_progress` to verify sync health.
+## Tool priority for code exploration (GC-2026-075)
+
+When you need to find or read code, ALWAYS reach for the indexed tools first. Bash code-search is a **last resort** — the orchestrator's bash-guard emits a soft reminder whenever you run `grep` / `rg` / `find` against source paths.
+
+Priority:
+
+1. **`aft_search`** — concepts, identifiers, regex, literals. Single indexed call replaces N bash grep invocations.
+2. **`aft_outline`** — file / module structure before reading.
+3. **`aft_zoom`** — one symbol's body, with cross-references.
+4. **`aft_inspect`** — diagnostics / TS errors / dead code.
+5. **`read`** — direct file read when the path is already known precisely.
+6. **`bash grep` / `rg` / `find`** — **last resort**. Slow, unindexed, prone to false hits. If you find yourself running these, STOP and call `aft_search` first.
+
+The rule applies to **both the root agent and subagents**. Subagents already have AFT exposed; the bash-guard nudge in this session only fires when a subagent's bash call is classified as `code-search`. The same priority applies regardless of who runs the search.
