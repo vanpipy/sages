@@ -16,7 +16,7 @@ import { describe, expect, it } from "bun:test";
 
 import {
 	extractAuditFindings,
-} from "../../pi-subagents/src/agent-runner.js";
+} from "@sages/pi-subagents/agent-runner";
 import { appendFindings, computeScore } from "@/orchestrator-audit.js";
 import type { OrchestratorFinding } from "@/types.js";
 

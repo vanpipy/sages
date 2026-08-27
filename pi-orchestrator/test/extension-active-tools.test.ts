@@ -22,8 +22,20 @@
  *      to `setActiveTools(tools)` follows. Drift guard against
  *      silent removal of the spread itself.
  *
- * Total active toolset: 5 (ORCHESTRATOR) + 3 (SUBAGENT) + 7
- * (BASELINE) + 3 (TODOWRITE) + 11 (AFT) + 5 (CTX) = 34.
+ * Total active toolset: 5 (ORCHESTRATOR) + 7 (SUBAGENT) + 7
+ * (BASELINE) + 3 (TODOWRITE) + 11 (AFT) + 5 (CTX) = 38.
+ *
+ * SUBAGENT_TOOLS expanded from 3 to 7 during the orchestrator↔subagents
+ * seam audit — added the four `subagent_*` control tools
+ * (status / steer / abort / resume) so the LLM has schema-level access
+ * to incident-response on its own background dispatches.
+ *
+ * SUBAGENT_TOOLS is the concatenation of `PI_SUBAGENT_TOOLS` (3 tools,
+ * registered by `@sages/pi-subagents`) + `SUBAGENT_CONTROL_TOOLS` (4
+ * tools, registered by the orchestrator's `registerSubagentControlTools`).
+ * Splitting them at the type level makes the ownership boundary
+ * self-documenting — adding a new subagent tool forces the contributor
+ * to declare which side owns it.
  *
  * Run: cd pi-orchestrator && bun test ./test/extension-active-tools.test.ts
  */
@@ -35,6 +47,8 @@ import { fileURLToPath } from "node:url";
 
 import {
 	ORCHESTRATOR_TOOLS,
+	PI_SUBAGENT_TOOLS,
+	SUBAGENT_CONTROL_TOOLS,
 	SUBAGENT_TOOLS,
 	BASELINE_TOOLS,
 	TODOWRITE_TOOLS,
@@ -130,11 +144,50 @@ describe("existing tool allowlist constants — regression (GC-2026-081)", () =>
 		expect(ORCHESTRATOR_TOOLS.length).toBe(5);
 	});
 
-	it("SUBAGENT_TOOLS still contains the 3 subagent tools", () => {
+	it("PI_SUBAGENT_TOOLS contains exactly the 3 tools registered by pi-subagents", () => {
+		// `Agent`, `get_subagent_result`, `steer_subagent` are owned by
+		// `@sages/pi-subagents` (see pi-subagents/src/index.ts lines
+		// 1154, 2040, 2138). Use deep equality (toEqual) on the tuple —
+		// arrayContaining would silently accept extra entries.
+		expect(PI_SUBAGENT_TOOLS).toEqual([
+			"Agent",
+			"get_subagent_result",
+			"steer_subagent",
+		]);
+	});
+
+	it("SUBAGENT_CONTROL_TOOLS contains exactly the 4 tools registered by the orchestrator", () => {
+		// `subagent_status` / `subagent_steer` / `subagent_abort` /
+		// `subagent_resume` are registered by the orchestrator's own
+		// `registerSubagentControlTools` (GC-2026-073). Deep equality
+		// pins both presence AND exact ordering — silent additions
+		// require updating this assertion, which is the point.
+		expect(SUBAGENT_CONTROL_TOOLS).toEqual([
+			"subagent_status",
+			"subagent_steer",
+			"subagent_abort",
+			"subagent_resume",
+		]);
+	});
+
+	it("SUBAGENT_TOOLS contains all 7 subagent tools", () => {
 		expect(SUBAGENT_TOOLS).toEqual(
-			expect.arrayContaining(["Agent", "get_subagent_result", "steer_subagent"]),
+			expect.arrayContaining([
+				...PI_SUBAGENT_TOOLS,
+				...SUBAGENT_CONTROL_TOOLS,
+			]),
 		);
-		expect(SUBAGENT_TOOLS.length).toBe(3);
+		expect(SUBAGENT_TOOLS.length).toBe(7);
+	});
+
+	it("SUBAGENT_TOOLS is the concatenation of its two semantic sub-arrays (drift guard)", () => {
+		// Structural invariant — if anyone adds a tool to one of the
+		// sub-arrays but forgets the other, this fails. The
+		// concatenation in `extension.ts` is the contract.
+		expect(SUBAGENT_TOOLS.length).toBe(
+			PI_SUBAGENT_TOOLS.length + SUBAGENT_CONTROL_TOOLS.length,
+		);
+		expect(SUBAGENT_TOOLS).toEqual([...PI_SUBAGENT_TOOLS, ...SUBAGENT_CONTROL_TOOLS]);
 	});
 
 	it("BASELINE_TOOLS still contains the 7 baseline FS tools", () => {
@@ -187,7 +240,7 @@ describe("session_start hook text scan (GC-2026-081 + GC-2026-086)", () => {
 });
 
 describe("session_start end-to-end via MockPi (GC-2026-081 + GC-2026-086)", () => {
-	it("fires setActiveTools with exactly 34 entries: 15 existing + 3 todowrite* + 11 AFT + 5 ctx_*", async () => {
+	it("fires setActiveTools with exactly 38 entries: 19 existing + 3 todowrite* + 11 AFT + 5 ctx_*", async () => {
 		// Minimal MockPi — just enough surface to fire session_start.
 		const activeToolsCalls: string[][] = [];
 		const pi = {
@@ -233,13 +286,13 @@ describe("session_start end-to-end via MockPi (GC-2026-081 + GC-2026-086)", () =
 		for (const t of AFT_TOOLS) expect(tools).toContain(t);
 		// SC3 — ctx_* family
 		for (const t of CTX_TOOLS) expect(tools).toContain(t);
-		// SC4 — 15 existing still present
+		// SC4 — 19 existing still present (5 ORCHESTRATOR + 7 SUBAGENT + 7 BASELINE)
 		for (const t of ORCHESTRATOR_TOOLS) expect(tools).toContain(t);
 		for (const t of SUBAGENT_TOOLS) expect(tools).toContain(t);
 		for (const t of BASELINE_TOOLS) expect(tools).toContain(t);
-		// SC5 — 15 + 3 + 11 + 5 = 34, with no duplicates
-		expect(tools.length).toBe(34);
-		expect(new Set(tools).size).toBe(34);
+		// SC5 — 19 + 3 + 11 + 5 = 38, with no duplicates
+		expect(tools.length).toBe(38);
+		expect(new Set(tools).size).toBe(38);
 	});
 });
 
@@ -307,8 +360,8 @@ describe("setActiveTools order — AFT/ctx before BASELINE (GC-2026-087 SC1)", (
 		expect(lastCtxIdx).toBeLessThan(firstBaselineIdx);
 	});
 
-	it("keeps the 34-entry total after reorder (no silent additions / removals)", async () => {
+	it("keeps the 38-entry total after reorder (no silent additions / removals)", async () => {
 		const tools = await captureTools();
-		expect(tools.length).toBe(34);
+		expect(tools.length).toBe(38);
 	});
 });
