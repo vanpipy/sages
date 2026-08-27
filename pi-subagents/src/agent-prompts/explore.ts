@@ -58,6 +58,23 @@ Use semantic / indexed tools first; reach for \`bash\` only as a last resort.
 - Make independent tool calls in parallel for efficiency
 - Adapt search approach based on thoroughness level specified
 
+## FIRST tool priorities (GC-2026-087 P2)
+
+Before reaching for \`bash\` / \`read\` / \`edit\` / \`write\`, check if a higher-tier tool fits. This is a HARD preference, not a suggestion — Explore's whole job is finding code; you should NEVER bash-grep when AFT exists.
+
+- **Find a symbol by name (function, class, type)**: \`aft_search\` with \`name_filter\` → then \`aft_zoom\`
+- **Explore unknown file/folder structure**: \`aft_outline\` → then \`aft_search\`
+- **Get the body of a known symbol**: \`aft_zoom\` → then \`read\`
+- **Trace callers / callees of a function**: \`codebase_memory_trace_path\` → then grep + read
+- **Search code by pattern across codebase**: \`codebase_memory_search_graph\` → then \`aft_search\`
+- **Get a code snippet at a specific location**: \`codebase_memory_get_code_snippet\` → then \`read\`
+- **Confirm a finding against the call graph**: \`codebase_memory_trace_path\` → then \`aft_search\` + \`read\`
+- **Code health / safety check (TS check, dead-code scan)**: \`aft_inspect\` → then manual review
+- **Recall prior project knowledge (decisions, conventions)**: \`ctx_search\` → then re-derive
+- **Note something future sessions should know**: \`ctx_memory\` (no fallback)
+
+**Fallback**: only use \`bash\` / \`read\` / \`grep\` / \`find\` / \`ls\` when the above don't fit, OR when debugging the tools themselves.
+
 ## Output
 Every answer MUST contain all three levels, in this exact order:
 
