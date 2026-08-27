@@ -116,6 +116,70 @@ export const TODOWRITE_TOOLS: readonly string[] = [
 ];
 
 /**
+ * AFT (Agentic File Tools) suite registered by `@cortexkit/aft-pi` at
+ * extension boot. Eleven tools: structural code-search (`aft_search`),
+ * outline / file-tree (`aft_outline`), symbol-level read (`aft_zoom`),
+ * code-health diagnostics (`aft_inspect`), call-graph traversal
+ * (`aft_callgraph`), conflict detection (`aft_conflicts`), safe
+ * deletion / move / import-update (`aft_delete` / `aft_move` /
+ * `aft_import`), refactor primitives (`aft_refactor`), and safety /
+ * blast-radius (`aft_safety`).
+ *
+ * The orchestrator's constitution (DEVELOPER_PROMPT tool-preference
+ * ladder, AGENTS.md § "Tool preference order") repeatedly directs the
+ * LLM to use AFT BEFORE bash `grep` / `rg` / `find` / `cat` — yet
+ * prior to GC-2026-086 these tools were registered by the extension
+ * but hidden from the LLM by `setActiveTools`. Empirically surfaced
+ * during the GC-2026-086 live test round 2:
+ * `aft_search` returned "Tool aft_search not found".
+ *
+ * GC-2026-086: expose all eleven to the main-agent active toolset so
+ * the constitution directive ("MUST call `aft_search` /
+ * `aft_outline` / `aft_zoom` before any bash `grep` / `rg` / `find`
+ * / `cat`") becomes mechanically reachable end-to-end.
+ */
+export const AFT_TOOLS: readonly string[] = [
+	"aft_callgraph",
+	"aft_conflicts",
+	"aft_delete",
+	"aft_import",
+	"aft_inspect",
+	"aft_move",
+	"aft_outline",
+	"aft_refactor",
+	"aft_safety",
+	"aft_search",
+	"aft_zoom",
+];
+
+/**
+ * Magic-context (`ctx_*`) long-term memory tools registered by
+ * `@cortexkit/pi-magic-context` at extension boot. Five tools:
+ * cross-session recall (`ctx_search` / `ctx_memory`), note capture
+ * (`ctx_note`), recall-graph compaction (`ctx_reduce`), and
+ * per-result expansion (`ctx_expand`).
+ *
+ * The orchestrator's constitution (DEVELOPER_PROMPT § "Magic
+ * Context", AGENTS.md § "Tool preference order") directs the LLM to
+ * reach for `ctx_search` BEFORE re-deriving project knowledge ("did
+ * we solve this before", "where does X live", "what did we decide
+ * about Y"). pi-magic-context also registers `todowrite` (see
+ * `TODOWRITE_TOOLS` above), but `ctx_*` were not added in GC-2026-081
+ * — only the todowrite half of the suite was exposed.
+ *
+ * GC-2026-086: expose all five `ctx_*` tools so the long-term-memory
+ * directive ("MUST reach for `ctx_search` before re-deriving project
+ * knowledge") becomes reachable, not just the adjacent `todowrite`.
+ */
+export const CTX_TOOLS: readonly string[] = [
+	"ctx_search",
+	"ctx_memory",
+	"ctx_note",
+	"ctx_reduce",
+	"ctx_expand",
+];
+
+/**
  * Soft-mode reminder text. Fires once per session on the first `bash`
  * tool call to nudge the LLM toward the 4-stage DAG workflow when the
  * active todowrite exceeds 2 items (the historical `dag_threshold`).
@@ -200,6 +264,8 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 			...SUBAGENT_TOOLS,
 			...BASELINE_TOOLS,
 			...TODOWRITE_TOOLS,
+			...AFT_TOOLS,
+			...CTX_TOOLS,
 		];
 		pi.setActiveTools(tools);
 		(pi as unknown as {
