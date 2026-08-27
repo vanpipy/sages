@@ -29,6 +29,7 @@ import {
   loadYamlOrchestratorFile,
 } from "./state-persistence.js";
 import { renderTaskPrompt, validateTemplateParams } from "./template-loader.js";
+import { wrapRegisteredTool } from "./registered-tool-wrapper.js";
 import { KNOWN_SUBAGENT_IDS } from "@sages/pi-subagents";
 import { RunEvent } from "./observability/events.js";
 import { emitRunEvent } from "./observability/runner.js";
@@ -616,37 +617,9 @@ export function registerDAGSynthesizerTool(pi: any): void {
     description: "Stage 2: decompose goal into TaskNode DAG. Hard-validates: every SC covered, no cycles, batches contiguous, cross-batch deps only. Writes .pi/orchestrator/dag-{id}.yaml.",
     parameters: DAGParams,
 
-    async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      // GC-2026-089: wrap the execute result in the canonical ToolResult
-      // shape so pi-coding-agent's render-utils.js#getTextOutput can read
-      // result.content. Without this wrapper, `result.content` is undefined
-      // and the renderer crashes with `TypeError: Cannot read properties of
-      // undefined (reading 'filter')`. The underlying executeDAGSynthesize
-      // is unchanged.
-      try {
-        const result = await executeDAGSynthesize(params, { cwd: ctx.cwd });
-        // executeDAGSynthesize already returns canonical ToolResult shape
-        // (legacy). Pass through to avoid double-wrap; otherwise the
-        // outer text would contain the inner text as a JSON string and
-        // the parsed object would have no `status` field at top level.
-        const r = result as { content?: unknown[] } | null | undefined;
-        if (r && Array.isArray(r.content)) return result;
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [
-            {
-              type: "text",
-              text: `dag_synthesize error: ${message}`,
-            },
-          ],
-          details: { status: "error", error: message },
-        };
-      }
-    },
+    execute: wrapRegisteredTool<DAGInput, ReturnType<typeof executeDAGSynthesize>>(
+      "dag_synthesize",
+      (params, ctx) => executeDAGSynthesize(params, ctx),
+    ),
   });
 }
