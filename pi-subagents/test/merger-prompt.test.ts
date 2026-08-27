@@ -244,3 +244,67 @@ describe("merger-prompt: current-workspace isolation mode (GC-2026-017 P3)", () 
 		).toBeLessThan(canonicalIdx);
 	});
 });
+
+describe("merger-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
+	// GC-2026-087 P2: the merger is read-only on production code,
+	// so the default table applies minus edit/write. Two extra
+	// rows for the merger's actual workload: (a) inspect diff
+	// hunks with `read` against the worktree path; (b) classify
+	// hunk overlap with `aft_outline` on both sides.
+
+	it("declares a 'FIRST tool priorities' section header", () => {
+		expect(MERGER_PROMPT).toMatch(/^##\s+FIRST tool priorities.*$/m);
+	});
+
+	it("FIRST tool priorities section sits between Identity and Tool set", () => {
+		// Merger opens with identity, then "Tool set (read-only on
+		// production code)" — FIRST tool priorities belongs between
+		// them so the LLM sees the priority table before learning
+		// the (read-only) tool list.
+		const identityIdx =
+			MERGER_PROMPT.match(/^##\s+.*Your Identity.*$/m)?.index ?? -1;
+		const firstIdx =
+			MERGER_PROMPT.match(/^##\s+FIRST tool priorities.*$/m)?.index ?? -1;
+		const toolIdx =
+			MERGER_PROMPT.match(/^##\s+.*Tool set.*$/m)?.index ?? -1;
+		expect(identityIdx).toBeGreaterThanOrEqual(0);
+		expect(firstIdx).toBeGreaterThanOrEqual(0);
+		expect(toolIdx).toBeGreaterThanOrEqual(0);
+		expect(
+			firstIdx,
+			"FIRST tool priorities must come AFTER Identity",
+		).toBeGreaterThan(identityIdx);
+		expect(
+			firstIdx,
+			"FIRST tool priorities must come BEFORE Tool set",
+		).toBeLessThan(toolIdx);
+	});
+
+	it("includes at least 3 bullet entries (each '- **Task**: ...')", () => {
+		expect(MERGER_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			MERGER_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ?? "";
+		const entries = section
+			.split("\n")
+			.filter((l) => l.trim().startsWith("- **"));
+		expect(
+			entries.length,
+			`expected >= 3 bullet entries, got ${entries.length}`,
+		).toBeGreaterThanOrEqual(3);
+	});
+
+	it("mentions diff inspection with `read` and overlap classification with `aft_outline`", () => {
+		// Two merger-specific entries:
+		//   - inspect diff hunks → `read` (with worktree path)
+		//   - classify hunk overlap → `aft_outline` on both sides
+		// These are the merger's actual recurring calls; pinning them
+		// here keeps the prompt load-bearing for the merger role.
+		expect(MERGER_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			MERGER_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ?? "";
+		expect(section, "must surface aft_outline for overlap classification").toMatch(
+			/aft_outline/,
+		);
+		expect(section, "must surface read for diff inspection").toMatch(/`?read`?/);
+	});
+});

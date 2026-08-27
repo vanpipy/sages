@@ -214,3 +214,66 @@ describe("git-expert-prompt: invariants", () => {
 		expect(GIT_EXPERT_PROMPT.toLowerCase()).toContain("cross-subagent");
 	});
 });
+
+describe("git-expert-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
+	// GC-2026-087 P2: git-expert's primary tool is bash (no AFT
+	// equivalent for git internals — `git cat-file`, `git reflog`,
+	// `git fsck` are not indexed by AFT). The FIRST tool priorities
+	// section surfaces this so the LLM does not waste turns trying
+	// AFT on git object inspection. One merger-specific row added
+	// to the default table.
+
+	it("declares a 'FIRST tool priorities' section header", () => {
+		expect(GIT_EXPERT_PROMPT).toMatch(/^##\s+FIRST tool priorities.*$/m);
+	});
+
+	it("FIRST tool priorities section sits between Identity and Tool set", () => {
+		const identityIdx =
+			GIT_EXPERT_PROMPT.match(/^##\s+.*Your Identity.*$/m)?.index ?? -1;
+		const firstIdx =
+			GIT_EXPERT_PROMPT.match(/^##\s+FIRST tool priorities.*$/m)?.index ?? -1;
+		const toolIdx =
+			GIT_EXPERT_PROMPT.match(/^##\s+.*Tool set.*$/m)?.index ?? -1;
+		expect(identityIdx).toBeGreaterThanOrEqual(0);
+		expect(firstIdx).toBeGreaterThanOrEqual(0);
+		expect(toolIdx).toBeGreaterThanOrEqual(0);
+		expect(
+			firstIdx,
+			"FIRST tool priorities must come AFTER Identity",
+		).toBeGreaterThan(identityIdx);
+		expect(
+			firstIdx,
+			"FIRST tool priorities must come BEFORE Tool set",
+		).toBeLessThan(toolIdx);
+	});
+
+	it("includes at least 3 bullet entries (each '- **Task**: ...')", () => {
+		expect(GIT_EXPERT_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			GIT_EXPERT_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ??
+			"";
+		const entries = section
+			.split("\n")
+			.filter((l) => l.trim().startsWith("- **"));
+		expect(
+			entries.length,
+			`expected >= 3 bullet entries, got ${entries.length}`,
+		).toBeGreaterThanOrEqual(3);
+	});
+
+	it("names bash as the right tool for git internals (cat-file / reflog / fsck)", () => {
+		// The default table's `bash` fallback line is fine, but the
+		// git-expert-specific row must surface git internals
+		// explicitly so the LLM does not reach for AFT for git
+		// objects. Pin at least one git-internals verb (cat-file /
+		// reflog / fsck) in the section.
+		expect(GIT_EXPERT_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			GIT_EXPERT_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ??
+			"";
+		expect(
+			section,
+			"section must name a git-internals command (cat-file/reflog/fsck)",
+		).toMatch(/cat-file|reflog|fsck/);
+	});
+});

@@ -119,3 +119,62 @@ describe("plan-prompt: prompt contract", () => {
 		expect(PLAN_PROMPT).toContain("Do not use emojis");
 	});
 });
+
+describe("plan-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
+	// GC-2026-087 P2: Plan has ONLY `read` (extensions disabled by
+	// runtime config). The default tool preference table is N/A — a
+	// "FIRST tool priorities" section must instead explicitly state
+	// that Plan uses `read` for the three allowed operations and
+	// must NOT call any other tool. Pin the section's presence,
+	// the `read` priority, and the prohibition.
+
+	it("declares a 'FIRST tool priorities' section header", () => {
+		expect(PLAN_PROMPT).toMatch(/^##\s+FIRST tool priorities.*$/m);
+	});
+
+	it("FIRST tool priorities section states Plan has ONLY read", () => {
+		// Plan's runtime config pins builtinToolNames = ["read"] with
+		// extensions: false. The FIRST tool priorities section must
+		// surface this so the LLM does not try to call tools that
+		// don't exist in its session.
+		expect(PLAN_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			PLAN_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ?? "";
+		expect(
+			section,
+			"section must surface the read-only restriction",
+		).toMatch(/ONLY\s+`?read`|only.*`?read`?/i);
+	});
+
+	it("includes at least 3 bullet entries (each '- **Task**: ...')", () => {
+		expect(PLAN_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			PLAN_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ?? "";
+		const entries = section
+			.split("\n")
+			.filter((l) => l.trim().startsWith("- **"));
+		expect(
+			entries.length,
+			`expected >= 3 bullet entries, got ${entries.length}`,
+		).toBeGreaterThanOrEqual(3);
+	});
+
+	it("forbids other tools (AFT, codebase_memory, ctx_*, bash) in the section", () => {
+		// The section must explicitly forbid AFT / codebase_memory /
+		// ctx_ / bash — extensions are deliberately disabled for Plan
+		// (see default-agents.ts Plan entry), so reaching for them
+		// would fail at runtime. The section pins the prohibition so
+		// a future prose edit cannot quietly re-allow them.
+		expect(PLAN_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			PLAN_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ?? "";
+		// Must mention all forbidden families by name OR a blanket
+		// "no other tool" / "extensions disabled" phrasing. The
+		// easiest way to pin the intent: at least one explicit
+		// prohibition marker.
+		expect(
+			section,
+			"section must include an explicit prohibition",
+		).toMatch(/do not|don't|forbidden|prohibit|extensions.*disabled/i);
+	});
+});

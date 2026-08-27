@@ -526,3 +526,72 @@ describe("developer-prompt: current-workspace isolation mode (GC-2026-017 P3)", 
 		).toMatch(/^2\.\s+\*\*Current workspace/m);
 	});
 });
+
+describe("developer-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
+	// GC-2026-087 P2: audit showed subagents call baseline tools
+	// (bash/read/edit/write) at 92.8% — AFT / codebase_memory / ctx_*
+	// are loaded but ignored. Constitution tells the agent to prefer
+	// them, but the rule lives too far down in the prompt. The fix
+	// is a FIRST tool priorities section near the top — bullet
+	// entries that the LLM cannot skip. Pin the section's presence
+	// and entry count so a future prose edit cannot silently weaken
+	// it back to buried prose.
+
+	it("declares a 'FIRST tool priorities' section header", () => {
+		expect(DEVELOPER_PROMPT).toMatch(/^##\s+FIRST tool priorities.*$/m);
+	});
+
+	it("FIRST tool priorities section sits between Identity and Tool preference order", () => {
+		// The new section must be near the top — AFTER Identity (the
+		// role section) and BEFORE the longer Tool preference order
+		// prose. This positioning is what makes the preference
+		// unmissable to the LLM.
+		const identityIdx =
+			DEVELOPER_PROMPT.match(/^##\s+.*Your Identity.*$/m)?.index ?? -1;
+		const firstIdx =
+			DEVELOPER_PROMPT.match(/^##\s+FIRST tool priorities.*$/m)?.index ?? -1;
+		const toolIdx = DEVELOPER_PROMPT.match(
+			/^##\s+.*Tool preference order.*$/m,
+		)?.index ?? -1;
+		expect(identityIdx).toBeGreaterThanOrEqual(0);
+		expect(firstIdx).toBeGreaterThanOrEqual(0);
+		expect(toolIdx).toBeGreaterThanOrEqual(0);
+		expect(
+			firstIdx,
+			"FIRST tool priorities must come AFTER Identity",
+		).toBeGreaterThan(identityIdx);
+		expect(
+			firstIdx,
+			"FIRST tool priorities must come BEFORE Tool preference order",
+		).toBeLessThan(toolIdx);
+	});
+
+	it("includes at least 3 bullet entries (each '- **Task**: ...')", () => {
+		expect(DEVELOPER_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			DEVELOPER_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ??
+			"";
+		const entries = section
+			.split("\n")
+			.filter((l) => l.trim().startsWith("- **"));
+		expect(
+			entries.length,
+			`expected >= 3 bullet entries, got ${entries.length}`,
+		).toBeGreaterThanOrEqual(3);
+	});
+
+	it("references AFT, codebase_memory, and ctx_ tool families in the section", () => {
+		// The section must name all three indexed tool families so the
+		// LLM has concrete tools to reach for — naming the families
+		// without naming tools re-creates the buried-prose problem.
+		expect(DEVELOPER_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			DEVELOPER_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ??
+			"";
+		expect(section, "must reference AFT").toMatch(/aft_/);
+		expect(section, "must reference codebase_memory").toMatch(
+			/codebase_memory/,
+		);
+		expect(section, "must reference ctx_").toMatch(/ctx_/);
+	});
+});
