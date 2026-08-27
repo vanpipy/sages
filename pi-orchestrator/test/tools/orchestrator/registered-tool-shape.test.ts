@@ -487,7 +487,7 @@ describe("orchestrator_audit registered-tool shape (GC-2026-089)", () => {
 // ───────────────────────────────────────────────────────────────────────
 
 describe("subagent_status registered-tool shape (GC-2026-089)", () => {
-	it("registered execute returns canonical ToolResult shape (wraps plain {ok,...} executeSubagentStatus)", () => {
+	it("registered execute returns canonical ToolResult shape (wraps plain {ok,...} executeSubagentStatus)", async () => {
 		const { pi, getRegistered } = makeMockPi();
 		registerSubagentControlTools(pi);
 		const tool = getRegistered("subagent_status");
@@ -499,14 +499,17 @@ describe("subagent_status registered-tool shape (GC-2026-089)", () => {
 		]);
 
 		// subagent_* tools do not take cwd — pass a minimal ctx.
-		const result = tool!.execute("id", {}, undefined, undefined, {});
+		// GC-2026-090: wrapRegisteredTool always returns a Promise (the
+		// helper awaits the inner execute for pass-through detection),
+		// so callers must await — even when the inner is sync.
+		const result = await tool!.execute("id", {}, undefined, undefined, {});
 		assertCanonicalShape(result);
 		const parsed = parseResultText(result) as { ok?: boolean; total?: number };
 		expect(parsed.ok).toBe(true);
 		expect(parsed.total).toBe(2);
 	});
 
-	it("does NOT leak the underlying raw object shape at the top level", () => {
+	it("does NOT leak the underlying raw object shape at the top level", async () => {
 		// Pre-fix: result.content was undefined and the top-level keys
 		// were {ok, agents, total, ...}. Verify the wrapped shape wins.
 		const { pi, getRegistered } = makeMockPi();
@@ -514,7 +517,7 @@ describe("subagent_status registered-tool shape (GC-2026-089)", () => {
 		const tool = getRegistered("subagent_status")!;
 		setFakeRegistry([]);
 
-		const result = tool!.execute("id", {}, undefined, undefined, {});
+		const result = await tool!.execute("id", {}, undefined, undefined, {});
 		const r = result as Record<string, unknown>;
 		// The TOP-level keys MUST be the canonical ToolResult keys —
 		// { content, details?, isError? }. A raw `ok` field at the top
@@ -527,7 +530,7 @@ describe("subagent_status registered-tool shape (GC-2026-089)", () => {
 });
 
 describe("subagent_steer registered-tool shape (GC-2026-089)", () => {
-	it("registered execute returns canonical ToolResult shape", () => {
+	it("registered execute returns canonical ToolResult shape", async () => {
 		const { pi, getRegistered } = makeMockPi();
 		registerSubagentControlTools(pi);
 		const tool = getRegistered("subagent_steer");
@@ -538,7 +541,7 @@ describe("subagent_steer registered-tool shape (GC-2026-089)", () => {
 			{ id: "s", status: "running", session: fakeSession },
 		]);
 
-		const result = tool!.execute(
+		const result = await tool!.execute(
 			"id",
 			{ agent_id: "s", message: "hi" },
 			undefined,
@@ -550,13 +553,13 @@ describe("subagent_steer registered-tool shape (GC-2026-089)", () => {
 		expect(parsed.delivered).toBe(true);
 	});
 
-	it("registered execute returns ToolResult shape on unknown agent_id", () => {
+	it("registered execute returns ToolResult shape on unknown agent_id", async () => {
 		const { pi, getRegistered } = makeMockPi();
 		registerSubagentControlTools(pi);
 		const tool = getRegistered("subagent_steer")!;
 		setFakeRegistry([]);
 
-		const result = tool!.execute(
+		const result = await tool!.execute(
 			"id",
 			{ agent_id: "ghost", message: "hi" },
 			undefined,
@@ -570,7 +573,7 @@ describe("subagent_steer registered-tool shape (GC-2026-089)", () => {
 });
 
 describe("subagent_abort registered-tool shape (GC-2026-089)", () => {
-	it("registered execute returns canonical ToolResult shape", () => {
+	it("registered execute returns canonical ToolResult shape", async () => {
 		const { pi, getRegistered } = makeMockPi();
 		registerSubagentControlTools(pi);
 		const tool = getRegistered("subagent_abort");
@@ -578,7 +581,7 @@ describe("subagent_abort registered-tool shape (GC-2026-089)", () => {
 
 		setFakeRegistry([{ id: "a", status: "running" }]);
 
-		const result = tool!.execute(
+		const result = await tool!.execute(
 			"id",
 			{ agent_id: "a", reason: "deadline" },
 			undefined,
@@ -590,13 +593,13 @@ describe("subagent_abort registered-tool shape (GC-2026-089)", () => {
 		expect(parsed.stopped).toBe(true);
 	});
 
-	it("registered execute returns ToolResult shape on already-terminal agent", () => {
+	it("registered execute returns ToolResult shape on already-terminal agent", async () => {
 		const { pi, getRegistered } = makeMockPi();
 		registerSubagentControlTools(pi);
 		const tool = getRegistered("subagent_abort")!;
 		setFakeRegistry([{ id: "done", status: "completed" }]);
 
-		const result = tool!.execute(
+		const result = await tool!.execute(
 			"id",
 			{ agent_id: "done" },
 			undefined,

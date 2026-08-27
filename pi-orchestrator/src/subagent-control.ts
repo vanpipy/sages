@@ -20,6 +20,7 @@
  */
 import { Type, type Static } from "typebox";
 import type { AgentRecord } from "@sages/pi-subagents/types";
+import { wrapRegisteredTool } from "./registered-tool-wrapper.js";
 
 // ───────────────────────────────────────────────────────────────────────
 // Cross-package registry access
@@ -380,26 +381,9 @@ export function registerSubagentControlTools(pi: unknown): void {
 			"(id, type, status, started/completed timestamps; verbose adds lifetimeUsage, " +
 			"toolUses, compactionCount). Read-only — never mutates state.",
 		parameters: SubagentStatusParams,
-		execute: (_id, params) => {
-			try {
-				const result = executeSubagentStatus(params as SubagentStatusInput);
-				return {
-					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-					details: result,
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `subagent_status error: ${message}`,
-						},
-					],
-					details: { status: "error", error: message },
-				};
-			}
-		},
+		execute: wrapRegisteredTool("subagent_status", (params) =>
+			executeSubagentStatus(params as SubagentStatusInput),
+		),
 	});
 
 	api.registerTool({
@@ -409,26 +393,9 @@ export function registerSubagentControlTools(pi: unknown): void {
 			"Push a message into a running or queued subagent's session. If the session is " +
 			"not yet ready the message queues in pendingSteers and flushes when ready.",
 		parameters: SubagentSteerParams,
-		execute: (_id, params) => {
-			try {
-				const result = executeSubagentSteer(params as SubagentSteerInput);
-				return {
-					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-					details: result,
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `subagent_steer error: ${message}`,
-						},
-					],
-					details: { status: "error", error: message },
-				};
-			}
-		},
+		execute: wrapRegisteredTool("subagent_steer", (params) =>
+			executeSubagentSteer(params as SubagentSteerInput),
+		),
 	});
 
 	api.registerTool({
@@ -438,26 +405,9 @@ export function registerSubagentControlTools(pi: unknown): void {
 			"Hard-stop a running or queued subagent. Idempotent — already-terminal agents " +
 			"return stopped:false with a clear reason. Optional reason surfaces in record.error.",
 		parameters: SubagentAbortParams,
-		execute: (_id, params) => {
-			try {
-				const result = executeSubagentAbort(params as SubagentAbortInput);
-				return {
-					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-					details: result,
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `subagent_abort error: ${message}`,
-						},
-					],
-					details: { status: "error", error: message },
-				};
-			}
-		},
+		execute: wrapRegisteredTool("subagent_abort", (params) =>
+			executeSubagentAbort(params as SubagentAbortInput),
+		),
 	});
 
 	api.registerTool({
@@ -467,28 +417,8 @@ export function registerSubagentControlTools(pi: unknown): void {
 			"Re-enter an existing subagent session with a new prompt. Refuses if the agent " +
 			"is currently running or queued — those states already have an active prompt loop.",
 		parameters: SubagentResumeParams,
-		execute: async (_id, params) => {
-			try {
-				// GC-2026-089: executeSubagentResume is async — must await
-				// before JSON.stringify, otherwise the wrapper serializes a
-				// Promise (yielding "{}") instead of the resolved result.
-				const result = await executeSubagentResume(params as SubagentResumeInput);
-				return {
-					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-					details: result,
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `subagent_resume error: ${message}`,
-						},
-					],
-					details: { status: "error", error: message },
-				};
-			}
-		},
+		execute: wrapRegisteredTool("subagent_resume", async (params) =>
+			executeSubagentResume(params as SubagentResumeInput),
+		),
 	});
 }
