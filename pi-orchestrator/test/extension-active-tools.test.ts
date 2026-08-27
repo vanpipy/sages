@@ -1,22 +1,29 @@
 /**
- * extension-active-tools.test.ts — GC-2026-081
+ * extension-active-tools.test.ts — GC-2026-081 / GC-2026-086
  *
  * Asserts the session_start `setActiveTools` allowlist includes the
  * todowrite* tools (orchestrator's own todowwrite_compile +
  * todowrite_progress from GC-2026-074, plus pi-magic-context's
- * `todowrite`). Without this, the orchestrator's constitution
- * (templates/SYSTEM.md) advertises a tool the runtime hides — the
- * bug surfaced empirically during GC-2026-076 (8-SC / 2-task DAG ran
- * end-to-end with zero todowrite activity).
+ * `todowrite`), the AFT_* tools (GC-2026-086, registered by
+ * @cortexkit/aft-pi), and the ctx_* tools (GC-2026-086, registered by
+ * @cortexkit/pi-magic-context). Without these, the orchestrator's
+ * constitution (templates/SYSTEM.md, DEVELOPER_PROMPT, AGENTS.md)
+ * advertises tools the runtime hides — the bug surfaced empirically
+ * during GC-2026-076 (todowrite) and during GC-2026-086 round 2 live
+ * test (`aft_search` returned "Tool aft_search not found").
  *
  * Two layers of pinning:
- *   1. Direct constant array assertion — exports of TODOWRITE_TOOLS
- *      + the three existing ORCHESTRATOR/SUBAGENT/BASELINE arrays.
- *      If anyone removes a tool from the constant, this fires.
+ *   1. Direct constant array assertion — exports of TODOWRITE_TOOLS +
+ *      AFT_TOOLS + CTX_TOOLS + the three existing
+ *      ORCHESTRATOR/SUBAGENT/BASELINE arrays. If anyone removes a
+ *      tool from the constant, this fires.
  *   2. session_start hook text scan — read extension.ts as text and
- *      assert the spread expression is present and the literal call
+ *      assert each spread expression is present and the literal call
  *      to `setActiveTools(tools)` follows. Drift guard against
  *      silent removal of the spread itself.
+ *
+ * Total active toolset: 5 (ORCHESTRATOR) + 3 (SUBAGENT) + 7
+ * (BASELINE) + 3 (TODOWRITE) + 11 (AFT) + 5 (CTX) = 34.
  *
  * Run: cd pi-orchestrator && bun test ./test/extension-active-tools.test.ts
  */
@@ -31,6 +38,8 @@ import {
 	SUBAGENT_TOOLS,
 	BASELINE_TOOLS,
 	TODOWRITE_TOOLS,
+	AFT_TOOLS,
+	CTX_TOOLS,
 } from "../src/extension.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -46,6 +55,64 @@ describe("TODOWRITE_TOOLS constant (GC-2026-081)", () => {
 
 	it("is exactly 3 entries (no silent additions)", () => {
 		expect(TODOWRITE_TOOLS.length).toBe(3);
+	});
+});
+
+describe("AFT_TOOLS constant (GC-2026-086)", () => {
+	const EXPECTED_AFT = [
+		"aft_callgraph",
+		"aft_conflicts",
+		"aft_delete",
+		"aft_import",
+		"aft_inspect",
+		"aft_move",
+		"aft_outline",
+		"aft_refactor",
+		"aft_safety",
+		"aft_search",
+		"aft_zoom",
+	];
+
+	it("contains all 11 AFT tool names (completeness)", () => {
+		expect(AFT_TOOLS).toEqual(expect.arrayContaining(EXPECTED_AFT));
+	});
+
+	it("is exactly 11 entries (no silent additions / no missing)", () => {
+		expect(AFT_TOOLS.length).toBe(11);
+	});
+
+	it("SC1 — includes the literal string 'aft_search'", () => {
+		expect(AFT_TOOLS).toContain("aft_search");
+	});
+
+	it("SC2 — includes all 11 AFT tool names verbatim", () => {
+		for (const name of EXPECTED_AFT) {
+			expect(AFT_TOOLS).toContain(name);
+		}
+	});
+});
+
+describe("CTX_TOOLS constant (GC-2026-086)", () => {
+	const EXPECTED_CTX = [
+		"ctx_search",
+		"ctx_memory",
+		"ctx_note",
+		"ctx_reduce",
+		"ctx_expand",
+	];
+
+	it("contains all 5 ctx_* tool names (completeness)", () => {
+		expect(CTX_TOOLS).toEqual(expect.arrayContaining(EXPECTED_CTX));
+	});
+
+	it("is exactly 5 entries (no silent additions / no missing)", () => {
+		expect(CTX_TOOLS.length).toBe(5);
+	});
+
+	it("SC3 — includes all 5 ctx_* tool names verbatim", () => {
+		for (const name of EXPECTED_CTX) {
+			expect(CTX_TOOLS).toContain(name);
+		}
 	});
 });
 
@@ -78,7 +145,7 @@ describe("existing tool allowlist constants — regression (GC-2026-081)", () =>
 	});
 });
 
-describe("session_start hook text scan (GC-2026-081)", () => {
+describe("session_start hook text scan (GC-2026-081 + GC-2026-086)", () => {
 	const src = readFileSync(EXTENSION_TS_PATH, "utf-8");
 	// Locate the pi.on("session_start", () => { ... }); block.
 	const hookMatch = src.match(
@@ -90,8 +157,16 @@ describe("session_start hook text scan (GC-2026-081)", () => {
 		expect(hookMatch, "session_start hook must exist").not.toBeNull();
 	});
 
-	it("session_start hook spreads TODOWRITE_TOOLS", () => {
+	it("session_start hook spreads TODOWRITE_TOOLS (GC-2026-081)", () => {
 		expect(block).toContain("...TODOWRITE_TOOLS");
+	});
+
+	it("session_start hook spreads AFT_TOOLS (GC-2026-086)", () => {
+		expect(block).toContain("...AFT_TOOLS");
+	});
+
+	it("session_start hook spreads CTX_TOOLS (GC-2026-086)", () => {
+		expect(block).toContain("...CTX_TOOLS");
 	});
 
 	it("session_start hook spreads ORCHESTRATOR_TOOLS (regression)", () => {
@@ -111,8 +186,8 @@ describe("session_start hook text scan (GC-2026-081)", () => {
 	});
 });
 
-describe("session_start end-to-end via MockPi (GC-2026-081)", () => {
-	it("fires setActiveTools with exactly 18 entries: 15 existing + 3 todowrite*", async () => {
+describe("session_start end-to-end via MockPi (GC-2026-081 + GC-2026-086)", () => {
+	it("fires setActiveTools with exactly 34 entries: 15 existing + 3 todowrite* + 11 AFT + 5 ctx_*", async () => {
 		// Minimal MockPi — just enough surface to fire session_start.
 		const activeToolsCalls: string[][] = [];
 		const pi = {
@@ -149,18 +224,21 @@ describe("session_start end-to-end via MockPi (GC-2026-081)", () => {
 
 		expect(activeToolsCalls.length).toBe(1);
 		const tools = activeToolsCalls[0];
-		// SC1
+		// SC1 — todowrite family
 		expect(tools).toContain("todowrite");
-		// SC2
 		expect(tools).toContain("todowrite_compile");
-		// SC3
 		expect(tools).toContain("todowrite_progress");
+		// SC2 — AFT family
+		expect(tools).toContain("aft_search");
+		for (const t of AFT_TOOLS) expect(tools).toContain(t);
+		// SC3 — ctx_* family
+		for (const t of CTX_TOOLS) expect(tools).toContain(t);
 		// SC4 — 15 existing still present
 		for (const t of ORCHESTRATOR_TOOLS) expect(tools).toContain(t);
 		for (const t of SUBAGENT_TOOLS) expect(tools).toContain(t);
 		for (const t of BASELINE_TOOLS) expect(tools).toContain(t);
-		// 15 + 3 = 18, with no duplicates
-		expect(tools.length).toBe(18);
-		expect(new Set(tools).size).toBe(18);
+		// SC5 — 15 + 3 + 11 + 5 = 34, with no duplicates
+		expect(tools.length).toBe(34);
+		expect(new Set(tools).size).toBe(34);
 	});
 });
