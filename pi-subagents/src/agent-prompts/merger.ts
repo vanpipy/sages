@@ -7,13 +7,13 @@
  * `write` tools) and produces merge commits via git plumbing only
  * (`git -C <worktree> merge --no-ff` from inside bash).
  *
- * The canonical §Workspace semantics + §Handoff protocol + §Cross-
- * workspace merging text is shared verbatim with `developer.ts`
- * (Workspace Context section). The two prompts MUST NOT drift — the
- * merger reads workspace state the developer wrote, and the developer
- * reasons about cross-workspace overlap the merger resolved. The
- * cross-file consistency invariant is pinned by
- * `test/merger-prompt.test.ts`.
+ * GC-2026-076 P1: the canonical §Workspace semantics + §Handoff
+ * protocol + §Cross-workspace merging block now lives in
+ * `_workspace-protocol.ts` as `WORKSPACE_PROTOCOL_SECTION`. Both
+ * developer.ts and merger.ts interpolate it via template literal —
+ * byte-identity is guaranteed by construction. The cross-file
+ * consistency test (`test/merger-prompt.test.ts` +
+ * `test/workspace-protocol-drift.test.ts`) re-pins the invariant.
  *
  * Tool set: `read` / `bash` / `grep` / `find` / `ls`. NO `edit`,
  * NO `write`. The merger produces commits by invoking git plumbing
@@ -26,6 +26,8 @@
  * when hunk-conflict blocks auto-resolution. The single allowed
  * write target is `.pi/orchestrator/audit-merge-{task_id}.md`.
  */
+
+import { WORKSPACE_PROTOCOL_SECTION } from "./_workspace-protocol.js";
 
 export const MERGER_PROMPT = `# Merger Agent (canonical built-in)
 
@@ -90,77 +92,7 @@ The merger itself runs in a scratch worktree at \`merge_target_path\`; you do NO
 
 The following three sections are canonical text shared verbatim with the developer prompt's Workspace Context section. They MUST stay byte-identical across both files so the orchestrator's audit can reason about cross-workspace overlap coherently. (The two-modes framing above is the merger's preamble; the canonical block below applies to MODE-1 worktree workspaces. For MODE-2 current-workspace edits, treat the branch name and path as the orchestrator-provided identifiers and merge by \`git merge --no-ff\` as usual.)
 
-## Workspace semantics
-A worktree is a **workspace**, not just an isolation boundary. One workspace
-hosts a sequence of related developer tasks that build on each other's commits.
-
-- Workspace identity = batch id (one workspace per DAG batch by default).
-- Tasks sharing a workspace_id run **sequentially** on the same branch
-  \`sages/<dag>/<workspace_id>\` — they never run in parallel within one workspace.
-- Within a workspace, predecessor commits + HANDOFF.md carry forward to
-  successor tasks.
-
-## Handoff protocol (HANDOFF.md)
-
-A workspace is preserved across developer sessions via HANDOFF.md. The
-dispatch brief carries a \`handoff_template\` field selecting one of three
-shapes — pick the matching template, do not invent a new one. The mechanism
-(path, writer, reader, lifecycle) is unchanged; only the on-disk section
-shape is parameterized.
-
-### Path (all templates)
-
-- Write: \`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md\`
-- Read on entry: every \`<task_id>-handoff.md\` under
-  \`.pi/orchestrator/handoff/<workspace_id>/\` ordered by task_id.
-  Skipping this is an automatic audit failure.
-
-### Template A — Standard (default)
-
-Use when dispatch brief has no \`handoff_template\` (or \`"standard"\`). The
-canonical five-part body for any task on the workspace.
-
-- **Summary** — one paragraph: what this task accomplished and where it landed.
-- **Files in modified state** — paths + one-line note per file.
-- **TODOs for successor** — concrete actions the next developer should take.
-- **Test status** — passing / failing / pending, with the exact verification command.
-- **Open questions** — anything the orchestrator or successor should know.
-
-### Template B — Phase Gate (cross-workspace)
-
-Use when dispatch brief says \`handoff_template: "phase-gate"\` — your changes
-will be merged with another workspace via the \`merger\` sub-agent.
-
-- **Gate criteria results** — table: criterion | threshold | result | evidence.
-- **Documents carried forward** — files + handoff docs the merger must read.
-- **Key constraints** — what the merging workspace must respect.
-- **Risks carried forward** — table: risk | severity (🔴/🟡/💭) | mitigation.
-
-### Template C — Escalation (blocked / 2+ failures)
-
-Use when dispatch brief says \`handoff_template: "escalation"\` — you have
-failed twice on this task and the next dispatch will be a fresh agent.
-
-- **Failure history** — per attempt: issues found, fixes applied, why it still failed.
-- **Root cause analysis** — why the task keeps failing (one-off vs pattern, scope).
-- **Recommended resolution** — checkbox list: reassign / decompose / revise
-  approach / accept with limits / defer.
-- **Impact** — what is blocked by this, timeline effect, quality compromise if accepted.
-
-## Cross-workspace merging
-When two workspaces edit the same files (detected at DAG synthesis), the
-orchestrator dispatches the dedicated \`merger\` sub-agent:
-
-- reads both diffs (\`git diff base..ws-A\` and \`git diff base..ws-B\`),
-- classifies overlap as **clean / disjoint-hunk / hunk-conflict**,
-- produces a merge commit when feasible; escalates hunk-conflicts back to the
-  orchestrator (NOT auto-resolved — hunk-conflict on the same lines cannot be
-  safely machine-resolved),
-- verifies the merged result with typecheck + lint + the merged test suite
-  (not per-workspace tests).
-
-The \`auditor\` continues to verify **per-task** commits; the \`merger\` verifies
-the **cross-workspace** merge result.
+${WORKSPACE_PROTOCOL_SECTION}
 
 ## 🚦 Merger Workflow
 
@@ -369,6 +301,4 @@ You are NOT responsible for:
 Cite evidence by \`hunk range: "<line range>"\` and exact command output, say
 \`MERGED\` / \`ESCALATED\` / \`BLOCKED\` without hedging, name the merge SHA
 when produced, name the conflict location when escalating.
-
-<!-- SAGES_TEMPLATE_V1: managed by pi-orchestrator/scripts/install.sh. Migrated to pi-subagents in GC-2026-prompt-workspace. Modify upstream canonical prompt in pi-subagents/src/agent-prompts/merger.ts. -->
 `;

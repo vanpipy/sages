@@ -53,6 +53,15 @@ import { loadTodoFile, computeTodoDrift } from "./todo-sync.js";
 // uses Node ESM (relative path is correct in the monorepo).
 // @ts-ignore -- tsc rejects cross-package imports under rootDir.
 import { extractAuditFindings, type AuditFinding } from "../../pi-subagents/src/agent-runner.js";
+// GC-2026-076 P2: consume the developer-YAML cooperation shape that the
+// developer subagent now emits from its wired FINAL_VERDICT_ADDENDUM (P1).
+// Same cross-package pattern as extractAuditFindings above.
+// @ts-ignore -- tsc rejects cross-package imports under rootDir.
+import {
+	extractStructuredOutput,
+	type SubagentOutput,
+	type SubagentOutputStatus,
+} from "../../pi-subagents/src/agent-runner.js";
 // @ts-ignore -- tsc rejects cross-package imports under rootDir.
 import { readAllDiagnostics, DIAGNOSTICS_RELDIR } from "../../pi-subagents/src/diagnostic.js";
 
@@ -316,9 +325,15 @@ async function initAudit(
   const phases = getPhasesForDepth(depth);
   const phaseGuidance = buildWorkflowPhaseGuidance(phases);
 
-  // A3 — read auditor's per-task reports and aggregate
+  // A3 — read auditor's per-task reports and aggregate.
+  // The task reports (developer-side YAML carriers) are loaded first so we
+  // can pass them as the developer-messages map to aggregateTaskAudits.
+  // GC-2026-076 P2: this surfaces developer_commits / developer_tests_added /
+  // developer_files_changed / developer_status on the workflow summary when
+  // the developer emitted the wired FINAL_VERDICT YAML block (P1).
+  const taskReports = readTaskReports(cwd, tasks);
   const reports = readAuditReports(cwd, tasks);
-  const workflowSummary = aggregateTaskAudits(tasks, reports);
+  const workflowSummary = aggregateTaskAudits(tasks, reports, taskReports);
 
   // GC-2026-070: surface the retryable-failure rollup so the orchestrator
   // sees the hint even at the compact (non-verbose) audit-init summary.
@@ -337,7 +352,7 @@ async function initAudit(
   // may have missed. The findings are surfaced as audit-gate warnings;
   // they do NOT block the audit (workflowReady stays as the auditor's
   // verdict) but they trigger the orchestrator to record additional findings.
-  const taskReports = readTaskReports(cwd, tasks);
+  // (taskReports already loaded above for GC-2026-076 P2 cooperation.)
   // GC-2026-041: Use the full 5-rule extractAuditFindings from pi-subagents.
   // The inline 3-rule subset is gone. Each task's report is parsed and any
   // findings are surfaced as inline_findings for the orchestrator to record.
@@ -698,6 +713,18 @@ export interface TaskAuditSummary {
   has_report: boolean;
   verdict?: SubagentVerdict;
   findings_total: number;
+  /**
+   * GC-2026-076 P2 (developer-YAML cooperation): when the developer subagent
+   * emitted the wired FINAL_VERDICT YAML block (P1), these fields surface
+   * the parsed structured output. They are `undefined` when the developer
+   * message had no parseable YAML — distinguishing "no YAML emitted" from
+   * "YAML emitted with empty arrays". Both states are reachable and mean
+   * different things.
+   */
+  developer_commits?: string[];
+  developer_tests_added?: string[];
+  developer_files_changed?: string[];
+  developer_status?: SubagentOutputStatus;
 }
 
 /** Workflow-level rollup across all task audits. */
@@ -779,19 +806,91 @@ export function parseAuditReport(
 }
 
 /**
+ * GC-2026-076 P2: thin wrapper around `extractStructuredOutput` for the
+ * orchestrator side. Returns the parsed `SubagentOutput` when the developer
+ * message carries a well-formed YAML block, or `null` when the YAML is
+ * missing or malformed. The `null` is the discriminator between
+ * "developer did not emit YAML" and "developer emitted a YAML with empty
+ * arrays" — both are reachable and mean different things downstream.
+ */
+export function parseDeveloperYAML(message: string | null): SubagentOutput | null {
+  if (message == null) return null;
+  // extractStructuredOutput itself swallows malformed-input exceptions and
+  // returns null, so no defensive try/catch is needed here. The wrapper
+  // exists to make the orchestrator-side call site read more clearly than
+  // a raw cross-package import.
+  return extractStructuredOutput(message);
+}
+
+/**
+ * GC-2026-076 P2: YAML-preferring sibling of `parseAuditReport`. Prefers the
+ * developer's structured YAML when present (populating the new
+ * `developer_*` fields), but keeps the existing markdown-regex verdict path
+ * for backward compatibility with `.pi/orchestrator/audit-state-*.yaml` files
+ * written by pre-P2 auditor runs.
+ *
+ * - When `developerMessage` is `null`/`undefined`, behaves identically to
+ *   `parseAuditReport(taskId, content)` (the `developer_*` fields stay
+ *   `undefined`).
+ * - When the YAML parses cleanly, `developer_commits` / `developer_tests_added`
+ *   / `developer_files_changed` / `developer_status` are populated alongside
+ *   the verdict and `findings_total`.
+ * - When the YAML is malformed, `developer_*` fields stay `undefined` and
+ *   the verdict still surfaces from the markdown regex. No silent override.
+ *
+ * Disagreement between auditor markdown and developer YAML is surfaced
+ * independently: neither overwrites the other. For example, the auditor can
+ * report CERTIFIED while the developer reports `status: blocked` — the
+ * review system sees both signals.
+ */
+export function parseAuditReportV2(
+  taskId: string,
+  content: string | null,
+  developerMessage?: string | null,
+): TaskAuditSummary {
+  const base = parseAuditReport(taskId, content);
+  if (developerMessage == null) return base;
+
+  const parsed = parseDeveloperYAML(developerMessage);
+  if (parsed === null) return base;
+
+  return {
+    ...base,
+    developer_commits: parsed.deliverables.commits,
+    developer_tests_added: parsed.deliverables.testsAdded,
+    developer_files_changed: parsed.deliverables.filesChanged,
+    developer_status: parsed.status,
+  };
+}
+
+/**
  * Roll up per-task audit reports into a workflow-level summary.
  * Pure function — caller supplies the report contents map.
  *
  * Use this in `initAudit` to compute `workflowReady` / `blockingTasks` so the
  * LLM can see at a glance whether the workflow is ready to finalize.
+ *
+ * GC-2026-076 P2: `developerMessages` is an optional map keyed by task id;
+ * when supplied, `aggregateTaskAudits` calls `parseAuditReportV2` per task
+ * so the developer-YAML cooperation fields surface on the workflow summary.
+ * When omitted, the call sites fall through to `parseAuditReport` (the
+ * legacy regex path) — keeping every existing test signature green.
  */
 export function aggregateTaskAudits(
 	tasks: TaskNode[],
 	reports: Map<string, string | null>,
+	developerMessages?: Map<string, string | null>,
 ): WorkflowAuditSummary {
-	const summaries: TaskAuditSummary[] = tasks.map((t) =>
-		parseAuditReport(t.id, reports.get(t.id) ?? null),
-	);
+	const summaries: TaskAuditSummary[] = tasks.map((t) => {
+		if (developerMessages !== undefined) {
+			return parseAuditReportV2(
+				t.id,
+				reports.get(t.id) ?? null,
+				developerMessages.get(t.id) ?? null,
+			);
+		}
+		return parseAuditReport(t.id, reports.get(t.id) ?? null);
+	});
 	const blockingTasks = summaries
 		.filter((s) => !s.has_report || s.verdict !== "CERTIFIED")
 		.map((s) => s.task_id);
