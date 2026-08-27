@@ -256,8 +256,8 @@ export interface CookbookPostmortemResult {
 }
 
 export function verifyCookbookPostmortemConsistency(
-	gcIndexPath: string = join(PI_ROOT, "docs", "gc-index.md"),
-	postmortemDir: string = join(PI_ROOT, "docs", "postmortem"),
+	gcIndexPath: string = join(PI_ROOT, "..", "pi", "docs", "gc-index.md"),
+	postmortemDir: string = join(PI_ROOT, "..", "pi", "docs", "postmortem"),
 ): CookbookPostmortemResult {
 	if (!existsSync(gcIndexPath)) {
 		// gc-index.md is absent. Institutional coverage is suspended only
@@ -307,7 +307,7 @@ export function verifyCookbookPostmortemConsistency(
 		if (!target) continue;
 		if (!target.startsWith("../cookbook/") && !target.startsWith("cookbook/")) continue;
 		const tail = target.replace(/^\.\.\//, "").replace(/^cookbook\//, "cookbook/");
-		const abs = join(PI_ROOT, "docs", tail);
+		const abs = join(PI_ROOT, "..", "pi", "docs", tail);
 		if (!existsSync(abs)) missingCookbookLinks.push(target);
 	}
 
