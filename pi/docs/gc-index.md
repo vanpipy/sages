@@ -15,3 +15,4 @@ coverage (postmortem or carve-out).
 | ID | Title | Goal yaml | Postmortem |
 |---|---|---|---|
 | [GC-2026-076](./postmortem/GC-2026-076.md) | Wire voided subagent prompt sections + orchestrate developer YAML | [.pi/orchestrator/goal-GC-2026-076.yaml](../../.pi/orchestrator/goal-GC-2026-076.yaml) | [GC-2026-076.md](./postmortem/GC-2026-076.md) |
+| [GC-2026-081](./postmortem/GC-2026-081.md) | Expose todowrite + todowrite_compile + todowrite_progress in the orchestrator active toolset | [.pi/orchestrator/goal-GC-2026-081.yaml](../../.pi/orchestrator/goal-GC-2026-081.yaml) | [GC-2026-081.md](./postmortem/GC-2026-081.md) |

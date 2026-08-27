@@ -58,7 +58,7 @@ import {
  * to use `pi.setActiveTools(...)` so the LLM never sees disallowed
  * tool schemas in the first place.
  */
-const ORCHESTRATOR_TOOLS: readonly string[] = [
+export const ORCHESTRATOR_TOOLS: readonly string[] = [
 	"goal_contract_create",
 	"dag_synthesize",
 	"task_dispatch",
@@ -72,7 +72,7 @@ const ORCHESTRATOR_TOOLS: readonly string[] = [
  * orchestrator must opt them into the active toolset so the LLM can
  * see and call them.
  */
-const SUBAGENT_TOOLS: readonly string[] = [
+export const SUBAGENT_TOOLS: readonly string[] = [
 	"Agent",
 	"get_subagent_result",
 	"steer_subagent",
@@ -83,7 +83,7 @@ const SUBAGENT_TOOLS: readonly string[] = [
  * of profile (the orchestrator itself uses some of these for read-only
  * lookups during verification).
  */
-const BASELINE_TOOLS: readonly string[] = [
+export const BASELINE_TOOLS: readonly string[] = [
 	"bash",
 	"read",
 	"edit",
@@ -91,6 +91,28 @@ const BASELINE_TOOLS: readonly string[] = [
 	"grep",
 	"find",
 	"ls",
+];
+
+/**
+ * Todowrite tools exposed by the orchestrator + pi-magic-context extensions.
+ *
+ * `todowrite` is registered by `@cortexkit/pi-magic-context` at extension
+ * boot (default enabled). `todowrite_compile` + `todowrite_progress` are
+ * registered by the orchestrator's `registerTodowriteTools(pi)` (GC-2026-074).
+ *
+ * The orchestrator's constitution (templates/SYSTEM.md § "Soft mode",
+ * § "Tool Reference") repeatedly directs the LLM to use these tools for
+ * tracking multi-step work and reconciling DAG↔todo drift. Without this
+ * allowlist, `setActiveTools` hides the schemas from the LLM even when
+ * registered — empirically surfaced during GC-2026-076 (8-SC / 2-task
+ * DAG ran end-to-end with zero todowrite activity).
+ *
+ * GC-2026-081: expose all three to the main-agent active toolset.
+ */
+export const TODOWRITE_TOOLS: readonly string[] = [
+	"todowrite",
+	"todowrite_compile",
+	"todowrite_progress",
 ];
 
 /**
@@ -177,6 +199,7 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 			...ORCHESTRATOR_TOOLS,
 			...SUBAGENT_TOOLS,
 			...BASELINE_TOOLS,
+			...TODOWRITE_TOOLS,
 		];
 		pi.setActiveTools(tools);
 		(pi as unknown as {
