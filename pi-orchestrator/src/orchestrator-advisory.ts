@@ -56,7 +56,11 @@ import {
 } from "./chain-key.js";
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { classifyBashCommand } from "./bash-guard.js";
+import {
+	classifyBashCommand,
+	isConfigFileRead,
+	isStructuralExploration,
+} from "./bash-guard.js";
 
 export type OrchestratorAdvisoryRuleId =
 	| "dag_resynth_loop"
@@ -568,6 +572,117 @@ function detectNoProgressNoAudit(
 }
 
 // =============================================================================
+// Family classifier + family-mix reminder (GC-2026-087 SC3)
+// =============================================================================
+
+// GC-2026-087 SC3: family classifier + family counters for the tool-mix
+// reminder. The classifier buckets every tool name into one of six
+// families (aft, codebase, ctx, baseline, subagent_control,
+// orchestrator, other). The reminder fires once per session when:
+//   - total tool calls ≥ 10 (avoid premature noise)
+//   - baseline ratio > 80% (LLM is bash/read-heavy)
+//   - (aft + codebase + ctx) ratio < 5% (LLM has not adopted
+//     specialized tools despite prompt directives)
+// Rate-limited via `l1Ctx.alreadyAdvisedRules` so it never re-fires.
+export type ToolFamily =
+	| "aft"
+	| "codebase"
+	| "ctx"
+	| "baseline"
+	| "subagent_control"
+	| "orchestrator"
+	| "other";
+
+export function familyOfTool(toolName: string): ToolFamily {
+	if (toolName.startsWith("aft_")) return "aft";
+	if (toolName.startsWith("codebase_memory_")) return "codebase";
+	if (toolName.startsWith("ctx_")) return "ctx";
+	if (
+		toolName === "bash" ||
+		toolName === "read" ||
+		toolName === "edit" ||
+		toolName === "write" ||
+		toolName === "grep" ||
+		toolName === "find" ||
+		toolName === "ls" ||
+		toolName === "bash_status" ||
+		toolName === "bash_watch" ||
+		toolName === "bash_kill" ||
+		toolName === "bash_write" ||
+		toolName === "ast_grep_search" ||
+		toolName === "ast_grep_replace"
+	) {
+		return "baseline";
+	}
+	if (
+		toolName === "Agent" ||
+		toolName === "get_subagent_result" ||
+		toolName === "steer_subagent" ||
+		toolName === "subagent_status" ||
+		toolName === "subagent_steer" ||
+		toolName === "subagent_abort" ||
+		toolName === "subagent_resume"
+	) {
+		return "subagent_control";
+	}
+	if (
+		toolName === "goal_contract_create" ||
+		toolName === "dag_synthesize" ||
+		toolName === "task_dispatch" ||
+		toolName === "orchestrator_audit" ||
+		toolName === "sages_reminder" ||
+		toolName === "todowrite_compile" ||
+		toolName === "todowrite_progress"
+	) {
+		return "orchestrator";
+	}
+	return "other";
+}
+
+/** Empty counter initializer. Exported so tests can build counters
+ *  without re-typing the literal object shape. */
+export function emptyFamilyCounts(): Record<ToolFamily, number> {
+	return {
+		aft: 0,
+		codebase: 0,
+		ctx: 0,
+		baseline: 0,
+		subagent_control: 0,
+		orchestrator: 0,
+		other: 0,
+	};
+}
+
+/** Decide whether the family-mix reminder should fire given the
+ *  current family counters. Pure — no side effects. Returns the
+ *  reminder text if conditions are met, `null` otherwise. */
+export function familyMixReminderText(
+	familyCounts: Readonly<Record<ToolFamily, number>>,
+): string | null {
+	const sumAll =
+		familyCounts.aft +
+		familyCounts.codebase +
+		familyCounts.ctx +
+		familyCounts.baseline +
+		familyCounts.subagent_control +
+		familyCounts.orchestrator +
+		familyCounts.other;
+	if (sumAll < 10) return null;
+	if (sumAll === 0) return null;
+	const baselineRatio = familyCounts.baseline / sumAll;
+	const specializedRatio =
+		(familyCounts.aft + familyCounts.codebase + familyCounts.ctx) / sumAll;
+	if (baselineRatio <= 0.8) return null;
+	if (specializedRatio >= 0.05) return null;
+	const pct = Math.round(baselineRatio * 100);
+	return (
+		`Tool-mix warning: ${pct}% of your ${sumAll} tool calls so far ` +
+		`are baseline (bash/read/edit/write/grep/find/ls). ` +
+		`Consider whether aft_search / codebase_memory_search_graph / ctx_search fit here.`
+	);
+}
+
+// =============================================================================
 // Public API
 // =============================================================================
 
@@ -796,6 +911,11 @@ export function installOrchestratorAdvisoryHandlers(
 		alreadyAdvisedRules: new Set<string>(),
 		advisoriesBySeverity: { critical: 0, major: 0, minor: 0 },
 	};
+	// GC-2026-087 SC3: per-session family counter. Incremented on every
+	// tool_call post-event. Drives the family-mix reminder (fires once
+	// per session when baseline ≥ 80% and specialized < 5% past the
+	// 10-call floor). Pure in-memory state — not persisted.
+	const familyCounts: Record<ToolFamily, number> = emptyFamilyCounts();
 
 	const advisoryOptions: OrchestratorAdvisoryOptions = {
 		loadGoalScope: (goalId: string) => {
@@ -855,6 +975,9 @@ export function installOrchestratorAdvisoryHandlers(
 		if (orchestratorHistory.length > ORCHESTRATOR_ADVISORY_HISTORY_CAP) {
 			orchestratorHistory.splice(0, orchestratorHistory.length - ORCHESTRATOR_ADVISORY_HISTORY_CAP);
 		}
+		// GC-2026-087 SC3: family counter increment. Pure observation —
+		// never blocks. Drives the family-mix reminder below.
+		familyCounts[familyOfTool(toolName)] += 1;
 
 		const advisories = orchestratorAdvisoryFor(orchestratorHistory, l1Ctx, {
 			...advisoryOptions,
@@ -888,6 +1011,68 @@ export function installOrchestratorAdvisoryHandlers(
 					);
 					l1Ctx.alreadyAdvisedRules.add("aft-search-nudge");
 				}
+			}
+		}
+
+		// GC-2026-087 SC2: codebase promotion nudge. When the LLM runs
+		// STRUCTURAL exploration commands — `ls` / `tree` / `find` with
+		// no content-search flags — against a source path, point at
+		// `codebase_memory_search_graph` which maps the structural graph
+		// (call / inheritance / module boundaries) in one indexed call.
+		// Distinct from aft-search-nudge (which handles grep / rg /
+		// find -name content-search). Rate-limited via
+		// `l1Ctx.alreadyAdvisedRules` like the other nudges. Soft mode
+		// never blocks — the bash call still runs.
+		if (toolName === "bash" && !l1Ctx.alreadyAdvisedRules.has("codebase-search-nudge")) {
+			const command = (input as { command?: unknown }).command;
+			if (typeof command === "string" && command.length > 0) {
+				if (isStructuralExploration(command)) {
+					pi.appendEntry(
+						"system",
+						"💡 Structural file-tree exploration detected. Consider `codebase_memory_search_graph({ query: " +
+							'"' + "<structural question — e.g. 'modules in src/', 'callers of X'>" + '"' +
+							" })` for a graph-aware structural map.",
+					);
+					l1Ctx.alreadyAdvisedRules.add("codebase-search-nudge");
+				}
+			}
+		}
+
+		// GC-2026-087 SC2: ctx (long-term memory) promotion nudge. When
+		// the LLM reads a well-known small config / project-knowledge
+		// file (`cat README.md` / `head AGENTS.md` / `cat package.json`),
+		// point at `ctx_search` which may already hold prior project
+		// knowledge (decisions, conventions) the LLM would otherwise
+		// re-derive from scratch. Rate-limited like the others. Soft
+		// mode never blocks.
+		if (toolName === "bash" && !l1Ctx.alreadyAdvisedRules.has("ctx-search-nudge")) {
+			const command = (input as { command?: unknown }).command;
+			if (typeof command === "string" && command.length > 0) {
+				if (isConfigFileRead(command)) {
+					pi.appendEntry(
+						"system",
+						"💡 Project-knowledge file read detected. Consider `ctx_search({ query: " +
+							'"' + "<prior decisions / conventions relevant to this file>" + '"' +
+							" })` first — prior sessions may have already captured this knowledge.",
+					);
+					l1Ctx.alreadyAdvisedRules.add("ctx-search-nudge");
+				}
+			}
+		}
+
+		// GC-2026-087 SC3: family-mix reminder. Fires once per session
+		// when the LLM is baseline-heavy (≥ 80% of tool calls) and has
+		// not adopted specialized tools (< 5% aft + codebase + ctx)
+		// past a 10-call floor. The reminder is purely advisory — it
+		// does NOT block any tool call. Rate-limited via
+		// `l1Ctx.alreadyAdvisedRules` so it never re-fires after the
+		// first observation. Conditions / text are pure-tested in
+		// `familyMixReminderText()`.
+		if (!l1Ctx.alreadyAdvisedRules.has("tool-mix-nudge")) {
+			const reminderText = familyMixReminderText(familyCounts);
+			if (reminderText !== null) {
+				pi.appendEntry("system", reminderText);
+				l1Ctx.alreadyAdvisedRules.add("tool-mix-nudge");
 			}
 		}
 
