@@ -214,7 +214,34 @@ export function registerOrchestratorAuditTool(pi: any): void {
     parameters: OrchestratorAuditParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      return await executeOrchestratorAudit(params, { cwd: ctx.cwd });
+      // GC-2026-089: wrap the execute result in the canonical ToolResult
+      // shape so pi-coding-agent's render-utils.js#getTextOutput can read
+      // result.content. Without this wrapper, `result.content` is undefined
+      // and the renderer crashes with `TypeError: Cannot read properties of
+      // undefined (reading 'filter')`. The underlying executeOrchestratorAudit
+      // is unchanged.
+      try {
+        const result = await executeOrchestratorAudit(params, { cwd: ctx.cwd });
+        // executeOrchestratorAudit already returns canonical ToolResult shape
+        // (legacy). Pass through to avoid double-wrap.
+        const r = result as { content?: unknown[] } | null | undefined;
+        if (r && Array.isArray(r.content)) return result;
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          details: result,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `orchestrator_audit error: ${message}`,
+            },
+          ],
+          details: { status: "error", error: message },
+        };
+      }
     },
   });
 }

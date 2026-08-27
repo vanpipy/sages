@@ -360,12 +360,44 @@ export function registerTaskDispatcherTool(pi: any): void {
     parameters: TaskDispatchParams,
 
     async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      return executeTaskDispatch(params, { cwd: ctx.cwd });
+      // GC-2026-089: wrap the execute result in the canonical ToolResult
+      // shape (`{content: [{type: "text", text: JSON.stringify(result, null, 2)}]}`)
+      // so pi-coding-agent's render-utils.js#getTextOutput can read result.content.
+      // Without this wrapper, `result.content` is undefined and the renderer
+      // crashes with `TypeError: Cannot read properties of undefined (reading
+      // 'filter')`. The underlying executeTaskDispatch is unchanged.
+      try {
+        const result = await executeTaskDispatch(params, { cwd: ctx.cwd });
+        // If executeTaskDispatch already returned ToolResult shape, pass
+        // through to avoid double-wrap. Otherwise wrap uniformly.
+        const r = result as { content?: unknown[] } | null | undefined;
+        if (r && Array.isArray(r.content)) return result;
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          details: result,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `task_dispatch error: ${message}`,
+            },
+          ],
+          details: { status: "error", error: message },
+        };
+      }
     },
   });
 }
 
 function errorResponse(intent: string, errors: string[]): any {
+  // GC-2026-089: keep returning the canonical ToolResult shape so the
+  // registered-tool wrapper can detect-and-passthrough, and so direct
+  // callers (task-dispatcher-lifecycle.test.ts parse(r) = JSON.parse(r.content[0].text))
+  // continue to work. The wrapper does NOT need to re-wrap when it sees
+  // {content: [{type: "text", text: "..."}]} already.
   return { content: [{ type: "text", text: JSON.stringify({ status: "error", intent, validation: { errors } }) }] };
 }
 
