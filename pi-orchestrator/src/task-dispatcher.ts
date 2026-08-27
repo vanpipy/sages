@@ -31,6 +31,7 @@ import { ORCHESTRATOR_DIR, dagPath } from "./types.js";
 import { loadPlan } from "./dag-synthesizer.js";
 import { syncTodoForTask } from "./todo-sync.js";
 import { atomicWriteOrchestratorFile, isOrchestrationPlanState } from "./state-persistence.js";
+import { wrapRegisteredTool } from "./registered-tool-wrapper.js";
 import { defaultRunInBackground } from "@sages/pi-subagents";
 import { RunEvent } from "./observability/events.js";
 import { emitRunEvent } from "./observability/runner.js";
@@ -359,36 +360,10 @@ export function registerTaskDispatcherTool(pi: any): void {
     description: "Stage 3: build dispatch plan from approved DAG. Returns Agent tool calls per batch — LLM executes them. Does NOT spawn subagents directly.",
     parameters: TaskDispatchParams,
 
-    async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-      // GC-2026-089: wrap the execute result in the canonical ToolResult
-      // shape (`{content: [{type: "text", text: JSON.stringify(result, null, 2)}]}`)
-      // so pi-coding-agent's render-utils.js#getTextOutput can read result.content.
-      // Without this wrapper, `result.content` is undefined and the renderer
-      // crashes with `TypeError: Cannot read properties of undefined (reading
-      // 'filter')`. The underlying executeTaskDispatch is unchanged.
-      try {
-        const result = await executeTaskDispatch(params, { cwd: ctx.cwd });
-        // If executeTaskDispatch already returned ToolResult shape, pass
-        // through to avoid double-wrap. Otherwise wrap uniformly.
-        const r = result as { content?: unknown[] } | null | undefined;
-        if (r && Array.isArray(r.content)) return result;
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          details: result,
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [
-            {
-              type: "text",
-              text: `task_dispatch error: ${message}`,
-            },
-          ],
-          details: { status: "error", error: message },
-        };
-      }
-    },
+    execute: wrapRegisteredTool<TaskDispatchInput, ReturnType<typeof executeTaskDispatch>>(
+      "task_dispatch",
+      (params, ctx) => executeTaskDispatch(params, ctx),
+    ),
   });
 }
 
