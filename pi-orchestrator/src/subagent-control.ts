@@ -364,6 +364,14 @@ export function registerSubagentControlTools(pi: unknown): void {
 		}) => void;
 	};
 
+	// GC-2026-089: each registered subagent_* tool wraps its execute result in
+	// the canonical ToolResult shape `{content: [{type: "text", text: JSON.stringify(...)}]}`
+	// plus a try/catch that returns a structured error block. pi-coding-agent's
+	// render-utils.js#getTextOutput reads result.content.filter(...); without
+	// the wrapper, content is undefined and the renderer crashes with
+	// `TypeError: Cannot read properties of undefined (reading 'filter')`.
+	// The underlying executeSubagent* functions are unchanged.
+
 	api.registerTool({
 		name: "subagent_status",
 		label: "Subagent Status",
@@ -372,7 +380,26 @@ export function registerSubagentControlTools(pi: unknown): void {
 			"(id, type, status, started/completed timestamps; verbose adds lifetimeUsage, " +
 			"toolUses, compactionCount). Read-only — never mutates state.",
 		parameters: SubagentStatusParams,
-		execute: (_id, params) => executeSubagentStatus(params as SubagentStatusInput),
+		execute: (_id, params) => {
+			try {
+				const result = executeSubagentStatus(params as SubagentStatusInput);
+				return {
+					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+					details: result,
+				};
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `subagent_status error: ${message}`,
+						},
+					],
+					details: { status: "error", error: message },
+				};
+			}
+		},
 	});
 
 	api.registerTool({
@@ -382,7 +409,26 @@ export function registerSubagentControlTools(pi: unknown): void {
 			"Push a message into a running or queued subagent's session. If the session is " +
 			"not yet ready the message queues in pendingSteers and flushes when ready.",
 		parameters: SubagentSteerParams,
-		execute: (_id, params) => executeSubagentSteer(params as SubagentSteerInput),
+		execute: (_id, params) => {
+			try {
+				const result = executeSubagentSteer(params as SubagentSteerInput);
+				return {
+					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+					details: result,
+				};
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `subagent_steer error: ${message}`,
+						},
+					],
+					details: { status: "error", error: message },
+				};
+			}
+		},
 	});
 
 	api.registerTool({
@@ -392,7 +438,26 @@ export function registerSubagentControlTools(pi: unknown): void {
 			"Hard-stop a running or queued subagent. Idempotent — already-terminal agents " +
 			"return stopped:false with a clear reason. Optional reason surfaces in record.error.",
 		parameters: SubagentAbortParams,
-		execute: (_id, params) => executeSubagentAbort(params as SubagentAbortInput),
+		execute: (_id, params) => {
+			try {
+				const result = executeSubagentAbort(params as SubagentAbortInput);
+				return {
+					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+					details: result,
+				};
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `subagent_abort error: ${message}`,
+						},
+					],
+					details: { status: "error", error: message },
+				};
+			}
+		},
 	});
 
 	api.registerTool({
@@ -402,6 +467,28 @@ export function registerSubagentControlTools(pi: unknown): void {
 			"Re-enter an existing subagent session with a new prompt. Refuses if the agent " +
 			"is currently running or queued — those states already have an active prompt loop.",
 		parameters: SubagentResumeParams,
-		execute: (_id, params) => executeSubagentResume(params as SubagentResumeInput),
+		execute: async (_id, params) => {
+			try {
+				// GC-2026-089: executeSubagentResume is async — must await
+				// before JSON.stringify, otherwise the wrapper serializes a
+				// Promise (yielding "{}") instead of the resolved result.
+				const result = await executeSubagentResume(params as SubagentResumeInput);
+				return {
+					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+					details: result,
+				};
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `subagent_resume error: ${message}`,
+						},
+					],
+					details: { status: "error", error: message },
+				};
+			}
+		},
 	});
 }
