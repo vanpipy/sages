@@ -1,25 +1,23 @@
 /**
  * auditor-prompt.ts — Canonical system prompt for the built-in `auditor` agent.
  *
- * Built-in to pi-subagents as of DAG-2026-011 (Phase B) — the legacy
- * Sages `software-auditor` role (formerly shipped via
- * `pi-orchestrator/templates/agents/software-auditor.md` and installed to
- * `~/.pi/agent/agents/` by `pi/scripts/install.sh`) is no longer
- * accepted. Removed in GC-2026-014; see DAG-2026-011 Phase B for the
- * migration history.
+ * Built-in to pi-subagents as of DAG-2026-011 (Phase B). Modify the
+ * upstream canonical prompt in this file; the install path is a file-copy,
+ * not a template substitution (post GC-2026-073).
  *
- * SAGES_TEMPLATE_V1: managed by pi/scripts/install.sh. Migrated to
- * pi-subagents in DAG-2026-011 Phase B. Modify upstream canonical
- * prompt in pi-subagents/src/agent-prompts/auditor.ts. (Kept out of
- * the prompt literal so the LLM never sees the template-marker
- * comment.)
+ * GC-2026-076 P1: the void-suppressed FINAL_VERDICT_ADDENDUM is now
+ * concatenated into the runtime AUDITOR_PROMPT export — the orchestrator's
+ * extractStructuredOutput parser scans the auditor's final message for the
+ * same YAML schema every other agent emits. Wiring it in activates the
+ * audit gate's missing_yaml_block finding for the auditor role.
  *
  * The prompt carries the evidence-based audit discipline: default
  * "NEEDS WORK" verdict, re-run every verification command, separate
  * verification from the developer's narrative, structured audit report
  * with PASS/FAIL per criterion, automatic-FAIL triggers, and the
  * "verify only / no production edits" boundary. The prose is allowed
- * to evolve; the invariants are pinned by `test/auditor-prompt.test.ts`.
+ * to evolve; the invariants are pinned by `test/auditor-prompt.test.ts`
+ * and `test/auditor-prompt-runtime.test.ts`.
  *
  * `auditor` does not use a managed worktree: the role is read-only on
  * the orchestrator's repo and writes only to
@@ -27,6 +25,50 @@
  * `enforceDeveloperManagedIsolationPolicy` (developer-only) does not
  * apply — auditor is never forced into a worktree.
  */
+
+// GC-2026-037 T2: Final Verdict YAML schema.
+// Wired into AUDITOR_PROMPT — extractStructuredOutput in agent-runner.ts
+// parses the YAML block from every agent's final message, including the
+// auditor's. Without this section in the runtime export, the auditor
+// emits no parseable block and the audit gate fires missing_yaml_block.
+const FINAL_VERDICT_ADDENDUM = `
+## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
+
+Your final message MUST contain a single YAML fenced block at the end.
+The orchestrator parses it mechanically; a missing or malformed
+block fails the audit gate.
+
+\`\`\`yaml
+status: completed | blocked | partial
+deliverables:
+  files_changed: ["path/relative-to-repo", ...]
+  commits: ["sha1", "sha2", ...]
+  tests_added: ["path::test_name", ...]
+test_results:
+  pass: <number>
+  fail: <number>
+  fail_details:  # optional
+    - file: "test/foo.test.ts"
+      test: "edge case"
+      message: "expected 0 got 1"
+open_questions: []  # optional
+handoff_for_next_task: []  # optional
+\`\`\`
+
+Status values (choose the most honest):
+- completed: every SC verified CERTIFIED, every acceptance_cmd passes.
+- blocked: cannot verify; open_questions describes what is missing.
+- partial: some SCs CERTIFIED, some NEEDS WORK; fail_details lists issues.
+
+Field semantics:
+- files_changed: paths relative to the audited branch's repo root.
+- fail_details: one entry per unverified SC or failing test.
+- open_questions: blocking questions for the orchestrator.
+
+The orchestrator verifies the YAML against the actual bun test and bun
+run typecheck output. If your YAML says pass: 5 but the test output
+shows 4 passing, the audit gate REJECTS the dispatch.
+`;
 
 export const AUDITOR_PROMPT = `# Auditor Agent (canonical built-in)
 
@@ -294,50 +336,9 @@ AUDIT: .pi/orchestrator/audit-P5.md
 EVIDENCE: typecheck 0 errors, lint 0 warnings, 14/14 tests pass, SC1-SC5 all PASS
 CONCERNS: UserRepository.findByEmail() not covered by tests (test gap, not a fail)
 \`\`\`
+
+${FINAL_VERDICT_ADDENDUM}
 `;
-
-const FINAL_VERDICT_ADDENDUM = `
-## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
-
-Your final message MUST contain a single YAML fenced block at the end.
-The orchestrator parses it mechanically; a missing or malformed
-block fails the audit gate.
-
-\`\`\`yaml
-status: completed | blocked | partial
-deliverables:
-  files_changed: ["path/relative-to-repo", ...]
-  commits: ["sha1", "sha2", ...]
-  tests_added: ["path::test_name", ...]
-test_results:
-  pass: <number>
-  fail: <number>
-  fail_details:  # optional
-    - file: "test/foo.test.ts"
-      test: "edge case"
-      message: "expected 0 got 1"
-open_questions: []  # optional
-handoff_for_next_task: []  # optional
-\`\`\`
-
-Status values (choose the most honest):
-- completed: every SC verified CERTIFIED, every acceptance_cmd passes.
-- blocked: cannot verify; open_questions describes what is missing.
-- partial: some SCs CERTIFIED, some NEEDS WORK; fail_details lists issues.
-
-Field semantics:
-- files_changed: paths relative to the audited branch's repo root.
-- fail_details: one entry per unverified SC or failing test.
-- open_questions: blocking questions for the orchestrator.
-
-verifies the YAML against the actual bun test and bun run
-typecheck output. If your YAML says pass: 5 but the test output shows
-4 passing, the audit gate REJECTS the dispatch.
-`;
-
-// See developer.ts for the void FINAL_VERDICT_ADDENDUM rationale.
-void FINAL_VERDICT_ADDENDUM;
-
 const EXPLORATION_BUDGET_SECTION = `
 ## Exploration Budget (hard caps on read tools)
 
