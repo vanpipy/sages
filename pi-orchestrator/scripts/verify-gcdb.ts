@@ -28,9 +28,9 @@ import * as yaml from "js-yaml";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PI_ROOT = resolve(__dirname, "..");
 
-const GOAL_DIR = join(PI_ROOT, ".pi", "orchestrator");
-const POSTMORTEM_DIR = join(PI_ROOT, "docs", "postmortem");
-const GC_INDEX = join(PI_ROOT, "docs", "gc-index.md");
+const GOAL_DIR = join(PI_ROOT, "..", ".pi", "orchestrator");
+const POSTMORTEM_DIR = join(PI_ROOT, "..", "pi", "docs", "postmortem");
+const GC_INDEX = join(PI_ROOT, "..", "pi", "docs", "gc-index.md");
 
 /**
  * Find every `goal-GC-*.yaml` file under `goalDir`, parse the `id`
