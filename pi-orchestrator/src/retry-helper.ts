@@ -16,13 +16,13 @@
  * sub-agent's `AgentManager` owns `mode: "reuse"` worktree reuse (already
  * implemented); the orchestrator picks the call shape via `buildReDispatchSuggestion`.
  *
- * Cross-package import note: the failure-catalog lives in pi-subagents. The
- * `@ts-ignore` below mirrors the precedent in `orchestrator-audit.ts:53-56` —
- * runtime resolution is correct (Node ESM, monorepo) but tsc's rootDir check
- * rejects the relative path under package boundaries.
+ * Cross-package import note: the failure-catalog lives in pi-subagents.
+ * Relative imports work under our tsconfig (noEmit: true, no rootDir,
+ * moduleResolution: Bundler) — the prior `@ts-ignore` was defensive
+ * cruft, not a real tsc error. Mirrors the cleanup in
+ * `orchestrator-audit.ts`.
  */
-// @ts-ignore -- tsc rejects cross-package imports under rootDir.
-import { getFailureCatalog, renderFeedbackTemplate } from "../../pi-subagents/src/failure-catalog.js";
+import { getFailureCatalog, renderFeedbackTemplate } from "@sages/pi-subagents/failure-catalog";
 
 /**
  * Minimal shape we need from a DiagnosticJsonV1. We don't import the full

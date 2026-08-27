@@ -108,12 +108,20 @@ const DEFAULT_REMINDER_TEMPLATES: Record<SagesReminderType, string> = {
 };
 
 /**
- * Per-type actionable fix directives (GC-2026-055). Mirrors subagent advisory's
- * `RULE_FIX_DIRECTIVES` (pi-subagents/src/agent-runner.ts:2225). When the
- * reminder is injected without a `message` override, the call site can
- * prefer the fixdirective over the generic default template — the
- * directive is a concrete shell command the LLM can run, not a generic
- * "we found a problem" message.
+ * Per-type actionable fix directives (GC-2026-055). Mirrors the pattern
+ * of subagent advisory's `RULE_FIX_DIRECTIVES`
+ * (pi-subagents/src/agent-runner.ts:2427) — both expose per-condition
+ * actionable shell commands instead of generic prose, so the LLM can
+ * run the directive verbatim. The constant is intentionally inlined
+ * here rather than imported: the two surfaces have different key sets
+ * (subagent advisory keys are audit-finding rules; reminder keys are
+ * reminder types) and drift independently — see the comment on
+ * `SAGES_REMINDER_FIXDIRECTIVES` below for the key-to-action mapping.
+ *
+ * When the reminder is injected without a `message` override, the call
+ * site prefers the fixdirective over the generic default template —
+ * the directive is a concrete shell command the LLM can run, not a
+ * generic "we found a problem" message.
  *
  * Keep these to single-line shell invocations where possible. Tokens
  * are capped by the same 200-token limit as subagent advisory's advisories.
