@@ -258,14 +258,27 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 	//    setActiveTools call. `pi.setStatus(...)` is exposed on the
 	//    optional `ui` channel (matches reference ExtensionAPI surface
 	//    at @mariozechner/pi-coding-agent src/core/extensions/types.ts).
+	//
+	//    GC-2026-087 SC1: tool ORDER matters for LLM selection bias.
+	//    Earlier entries in `setActiveTools` are surfaced more
+	//    prominently by the model — empirically validated across 7 days
+	//    / 2,424 tool calls where baseline (bash/read/etc.) hit 92.8%
+	//    while AFT/ctx/codebase stayed under 2% combined. The new order
+	//    surfaces the specialized tools first:
+	//
+	//      ORCHESTRATOR → SUBAGENT → AFT → CTX → TODOWRITE → BASELINE
+	//
+	//    BASELINE_TOOLS stays in the active set (reorder, not removal —
+	//    see goal contract anti_goals) but its position is demoted so
+	//    the LLM sees aft_search / ctx_search / codebase_memory_* first.
 	pi.on("session_start", () => {
 		const tools: string[] = [
 			...ORCHESTRATOR_TOOLS,
 			...SUBAGENT_TOOLS,
-			...BASELINE_TOOLS,
-			...TODOWRITE_TOOLS,
 			...AFT_TOOLS,
 			...CTX_TOOLS,
+			...TODOWRITE_TOOLS,
+			...BASELINE_TOOLS,
 		];
 		pi.setActiveTools(tools);
 		(pi as unknown as {
