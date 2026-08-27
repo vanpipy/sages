@@ -415,3 +415,69 @@ describe("auditor-prompt: 🔴/🟡/💭 priority scheme (GC-2026-039 T2)", () =
 		expect(AUDITOR_PROMPT).toMatch(/^##\s+🚫\s+Automatic FAIL Triggers.*$/m);
 	});
 });
+
+describe("auditor-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
+	// GC-2026-087 P2: audit showed the auditor (like the developer)
+	// defaults to bash grep instead of AFT. A FIRST tool priorities
+	// section near the top of the prompt makes the preference
+	// unmissable. The auditor gets the default table plus one
+	// verification-specific row (typecheck / lint / test runs via
+	// bash — bash IS the right tool for those commands, no AFT
+	// alternative). Pin the section's presence, position, and
+	// minimum entry count.
+
+	it("declares a 'FIRST tool priorities' section header", () => {
+		expect(AUDITOR_PROMPT).toMatch(/^##\s+FIRST tool priorities.*$/m);
+	});
+
+	it("FIRST tool priorities section sits between Identity and Tool preference order", () => {
+		const identityIdx =
+			AUDITOR_PROMPT.match(/^##\s+.*Your Identity.*$/m)?.index ?? -1;
+		const firstIdx =
+			AUDITOR_PROMPT.match(/^##\s+FIRST tool priorities.*$/m)?.index ?? -1;
+		const toolIdx = AUDITOR_PROMPT.match(
+			/^##\s+.*Tool preference order.*$/m,
+		)?.index ?? -1;
+		expect(identityIdx).toBeGreaterThanOrEqual(0);
+		expect(firstIdx).toBeGreaterThanOrEqual(0);
+		expect(toolIdx).toBeGreaterThanOrEqual(0);
+		expect(
+			firstIdx,
+			"FIRST tool priorities must come AFTER Identity",
+		).toBeGreaterThan(identityIdx);
+		expect(
+			firstIdx,
+			"FIRST tool priorities must come BEFORE Tool preference order",
+		).toBeLessThan(toolIdx);
+	});
+
+	it("includes at least 3 bullet entries (each '- **Task**: ...')", () => {
+		expect(AUDITOR_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			AUDITOR_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ??
+			"";
+		const entries = section
+			.split("\n")
+			.filter((l) => l.trim().startsWith("- **"));
+		expect(
+			entries.length,
+			`expected >= 3 bullet entries, got ${entries.length}`,
+		).toBeGreaterThanOrEqual(3);
+	});
+
+	it("names bash as the right tool for verification commands (typecheck / test / lint)", () => {
+		// The auditor runs typecheck / lint / test via bash — bash IS
+		// the right tool there, no AFT alternative. The section must
+		// surface this so the LLM does not skip verification by
+		// over-applying the AFT preference.
+		expect(AUDITOR_PROMPT).toContain("## FIRST tool priorities");
+		const section =
+			AUDITOR_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ??
+			"";
+		expect(section, "must surface bash for verification").toMatch(/bash/);
+		expect(
+			section,
+			"must name a verification command (typecheck/lint/test)",
+		).toMatch(/typecheck|lint|test/i);
+	});
+});
