@@ -397,3 +397,73 @@ export function _getClassifyCacheSize(): number {
 export function _clearClassifyCache(): void {
 	classifyCache.clear();
 }
+
+// GC-2026-087 SC2: structural-exploration + small-config-read classifiers.
+// These two predicates extend `classifyBashCommand` with finer-grained
+// buckets so the orchestrator advisory can fire TWO additional nudges
+// (codebase-search-nudge + ctx-search-nudge) without polluting the
+// existing aft-search-nudge or breaking the bash-guard verdict set.
+
+// GC-2026-087 SC2: well-known small config / project-knowledge files
+// the orchestrator's `ctx_search` memory layer is likely to know about.
+// Conservative — listing only canonical filenames (no globs) so the
+// match is high-precision. Source-code files (foo.ts, index.js) are
+// deliberately excluded: those are AFT/codebase territory, not ctx.
+const CONFIG_FILE_PATTERN: RegExp =
+	/(?:^|[\s/])(README(?:\.[A-Za-z]+)?|AGENTS(?:\.[A-Za-z]+)?|CLAUDE(?:\.[A-Za-z]+)?|package\.json|tsconfig(?:\.[A-Za-z]+)?\.json|pyproject\.toml|Cargo\.toml|go\.mod|Makefile|\.editorconfig|\.gitignore|\.gitattributes|CHANGELOG(?:\.[A-Za-z]+)?)(?=$|[\s/])/;
+
+/** GC-2026-087 SC2: true when the bash command is structural exploration
+ *  (`ls` / `tree` / `find` without content-search flags) targeting a
+ *  source path. Triggers `codebase-search-nudge`.
+ *
+ *  Differs from aft-search-nudge:
+ *  - aft-search-nudge fires for grep / rg / find -name / find -path
+ *    (i.e. commands that match files BY CONTENT or NAME pattern)
+ *  - codebase-search-nudge fires for ls / tree / find -type d /
+ *    find <path> with no flags at all (i.e. commands that map the
+ *    file TREE / DIRECTORY structure)
+ *
+ *  Both nudges may fire on `find` if the command has both structural
+ *  and content intent (rare). The text is intentionally different so
+ *  the LLM can disambiguate. */
+export function isStructuralExploration(command: string): boolean {
+	const trimmed = command.trimStart();
+	if (!trimmed) return false;
+	if (hasWriteRedirect(trimmed)) return false;
+	const firstWordMatch = trimmed.match(/^\S+/);
+	const firstWord = firstWordMatch ? firstWordMatch[0] : "";
+	if (firstWord !== "ls" && firstWord !== "tree" && firstWord !== "find") return false;
+	// ls / tree → always structural (no content-search flags to confuse).
+	if (firstWord === "ls" || firstWord === "tree") {
+		return isCodeSearchPath(trimmed);
+	}
+	// find: structural only if no -name / -path / -regex / -exec / -delete /
+	// -print0 / -newer flags (which signal content-search intent, not
+	// tree walk). Pure `find <path>` and `find <path> -type d` qualify.
+	const hasContentFlag =
+		/(^|\s)-(name|path|regex|ipath|iregex|iname|lname|wholename|iwholename|exec|execdir|ok|okdir|delete|print0|newer|fprint|fprintf|ls|fls)\b/.test(
+			trimmed,
+		);
+	if (hasContentFlag) return false;
+	return isCodeSearchPath(trimmed);
+}
+
+/** GC-2026-087 SC2: true when the bash command is a read of a
+ *  well-known small config / project-knowledge file via `cat` /
+ *  `head` / `less` / `more`. Triggers `ctx-search-nudge`.
+ *
+ *  Excludes:
+ *  - write-intent (any redirect / pipe to file → not a read)
+ *  - source-code files (`cat src/foo.ts` → AFT territory)
+ *  - system files (`cat /etc/passwd` → not project knowledge) */
+export function isConfigFileRead(command: string): boolean {
+	const trimmed = command.trimStart();
+	if (!trimmed) return false;
+	const firstWordMatch = trimmed.match(/^\S+/);
+	const firstWord = firstWordMatch ? firstWordMatch[0] : "";
+	if (firstWord !== "cat" && firstWord !== "head" && firstWord !== "less" && firstWord !== "more") {
+		return false;
+	}
+	if (hasWriteRedirect(trimmed)) return false;
+	return CONFIG_FILE_PATTERN.test(trimmed);
+}
