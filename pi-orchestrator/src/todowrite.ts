@@ -279,8 +279,23 @@ export function registerTodowriteTools(pi: unknown): void {
 			".pi/orchestrator/todo-{dag_id}.yaml. After compile, every DAG transition auto-syncs " +
 			"the corresponding todo item (DAG is source of truth, todo is view).",
 		parameters: TodowriteCompileParams,
-		execute: (_id, params, _signal, _onUpdate, ctx) =>
-			executeTodowriteCompile(params as TodowriteCompileInput, { cwd: (ctx as { cwd: string }).cwd }),
+		// GC-2026-085: wrap the execute result in the canonical ToolResult
+		// shape ({ content: [{ type: "text", text: JSON.stringify(...) }] })
+		// so pi-coding-agent's render-utils.js#getTextOutput can find the
+		// `.content` array. Prior to this fix, the registered execute
+		// returned the plain CompileResult object directly, which crashed
+		// pi with `TypeError: Cannot read properties of undefined (reading
+		// 'filter')` whenever the tool was called. The underlying
+		// executeTodowriteCompile function is unchanged.
+		execute: (_id, params, _signal, _onUpdate, ctx) => {
+			const result = executeTodowriteCompile(
+				params as TodowriteCompileInput,
+				{ cwd: (ctx as { cwd: string }).cwd },
+			);
+			return {
+				content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+			};
+		},
 	});
 
 	api.registerTool({
@@ -291,8 +306,19 @@ export function registerTodowriteTools(pi: unknown): void {
 			"(todo_ahead / dag_ahead / *_orphaned) is surfaced as `drift[]` so the orchestrator's " +
 			"audit can flag desync. verbose:true echoes the raw YAMLs for debugging.",
 		parameters: TodowriteProgressParams,
-		execute: (_id, params, _signal, _onUpdate, ctx) =>
-			executeTodowriteProgress(params as TodowriteProgressInput, { cwd: (ctx as { cwd: string }).cwd }),
+		// GC-2026-085: same ToolResult-shape wrapper as todowrite_compile
+		// above. The underlying executeTodowriteProgress function is
+		// unchanged; only the registered-tool boundary is wrapped so the
+		// renderer's getTextOutput can read result.content.
+		execute: (_id, params, _signal, _onUpdate, ctx) => {
+			const result = executeTodowriteProgress(
+				params as TodowriteProgressInput,
+				{ cwd: (ctx as { cwd: string }).cwd },
+			);
+			return {
+				content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+			};
+		},
 	});
 }
 
