@@ -12,7 +12,9 @@
     "noEmit": true,
     "types": ["bun-types", "node"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@sages/pi-subagents": ["../pi-subagents/src/index.ts"],
+      "@sages/pi-subagents/*": ["../pi-subagents/src/*"]
     }
   },
   "include": ["src/**/*", "test/tools/**/*", "test/bash-guard.test.ts", "test/file-service.test.ts"],

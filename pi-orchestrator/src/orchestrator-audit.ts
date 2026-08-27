@@ -46,24 +46,19 @@ import { loadPlan } from "./dag-synthesizer.js";
 import { loadTodoFile, computeTodoDrift } from "./todo-sync.js";
 // GC-2026-041: Cross-package import. The full extractAuditFindings
 // parser lives in pi-subagents/src/agent-runner.ts (5 rules). The
-// ambient declaration in pi/types/pi-subagents-audit.d.ts declares
-// the module shape so tsc accepts the import. The ambient declaration
-// + a `// @ts-ignore` on the import line bypass the rootDir check
-// (which would otherwise reject with TS6059). Runtime resolution
-// uses Node ESM (relative path is correct in the monorepo).
-// @ts-ignore -- tsc rejects cross-package imports under rootDir.
-import { extractAuditFindings, type AuditFinding } from "../../pi-subagents/src/agent-runner.js";
+// Cross-package relative imports work under our tsconfig (noEmit: true,
+// no rootDir, moduleResolution: Bundler). The legacy `@ts-ignore` was
+// defensive cruft — no actual TS6059 fires.
+import { extractAuditFindings, type AuditFinding } from "@sages/pi-subagents/agent-runner";
 // GC-2026-076 P2: consume the developer-YAML cooperation shape that the
 // developer subagent now emits from its wired FINAL_VERDICT_ADDENDUM (P1).
 // Same cross-package pattern as extractAuditFindings above.
-// @ts-ignore -- tsc rejects cross-package imports under rootDir.
 import {
 	extractStructuredOutput,
 	type SubagentOutput,
 	type SubagentOutputStatus,
-} from "../../pi-subagents/src/agent-runner.js";
-// @ts-ignore -- tsc rejects cross-package imports under rootDir.
-import { readAllDiagnostics, DIAGNOSTICS_RELDIR } from "../../pi-subagents/src/diagnostic.js";
+} from "@sages/pi-subagents/agent-runner";
+import { readAllDiagnostics, DIAGNOSTICS_RELDIR } from "@sages/pi-subagents/diagnostic";
 
 const COMPLETE_OBSERVATION = Type.Object({
   verdict: Type.Union([Type.Literal("PASS"), Type.Literal("REVISE"), Type.Literal("REJECT")]),
@@ -936,8 +931,7 @@ export function gatherFailureModeStats(
 	// unknown via `?? undefined` on the lookup result below.
 	const catalog = (() => {
 		try {
-			// @ts-ignore -- tsc rejects cross-package imports under rootDir.
-			return require("../../pi-subagents/src/failure-catalog.js").getFailureCatalog(cwd);
+			return require("@sages/pi-subagents/failure-catalog").getFailureCatalog(cwd);
 		} catch {
 			return null;
 		}

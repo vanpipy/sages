@@ -19,7 +19,7 @@
  * exposed.
  */
 import { Type, type Static } from "typebox";
-import type { AgentRecord } from "../../pi-subagents/src/types.js";
+import type { AgentRecord } from "@sages/pi-subagents/types";
 
 // ───────────────────────────────────────────────────────────────────────
 // Cross-package registry access

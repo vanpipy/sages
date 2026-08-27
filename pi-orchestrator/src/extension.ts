@@ -67,15 +67,52 @@ export const ORCHESTRATOR_TOOLS: readonly string[] = [
 ];
 
 /**
- * Subagent tools registered by `@sages/pi-subagents` in the same
- * session. They are not registered by the orchestrator itself, but the
- * orchestrator must opt them into the active toolset so the LLM can
- * see and call them.
+ * Tools registered by `@sages/pi-subagents` (`pi-subagents/src/index.ts`
+ * lines 1154, 2040, 2138). `pi-subagents` owns the dispatch surface:
+ * spawn an agent (`Agent`), poll its result (`get_subagent_result`),
+ * inject a message into a running session (`steer_subagent`).
+ *
+ * Split out from `SUBAGENT_TOOLS` so the ownership boundary is
+ * visible at the type level — anything in this array is added by
+ * pi-subagents, anything in `SUBAGENT_CONTROL_TOOLS` is added by
+ * the orchestrator. Both arrays are concatenated into `SUBAGENT_TOOLS`
+ * for the active toolset.
  */
-export const SUBAGENT_TOOLS: readonly string[] = [
+export const PI_SUBAGENT_TOOLS = [
 	"Agent",
 	"get_subagent_result",
 	"steer_subagent",
+] as const;
+
+/**
+ * Tools registered by the orchestrator's own `registerSubagentControlTools`
+ * (GC-2026-073) and exposed to the orchestrator LLM via
+ * `pi.setActiveTools`. These delegate to the same `AgentManager`
+ * singleton via the shared globalThis registry key
+ * `Symbol.for("pi-subagents:manager")` — there is exactly one manager,
+ * shared end-to-end with the `Agent` tool.
+ *
+ * Surfaced during the orchestrator↔subagents seam audit: the
+ * orchestrator forces developer / auditor to background (per the
+ * `Agent` tool description), so the LLM needs schema-level access to
+ * status / steer / abort / resume to manage its own background
+ * dispatches. Hidden-by-default was an incident-response gap.
+ */
+export const SUBAGENT_CONTROL_TOOLS = [
+	"subagent_status",
+	"subagent_steer",
+	"subagent_abort",
+	"subagent_resume",
+] as const;
+
+/**
+ * Combined subagent toolset passed to `pi.setActiveTools` at
+ * `session_start`. Concatenation is the contract — `setActiveTools`
+ * is order-agnostic.
+ */
+export const SUBAGENT_TOOLS: readonly string[] = [
+	...PI_SUBAGENT_TOOLS,
+	...SUBAGENT_CONTROL_TOOLS,
 ];
 
 /**
