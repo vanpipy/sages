@@ -157,7 +157,11 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
   it("SMOKE-073-5: first bash tool_call fires the soft-mode reminder via appendEntry", async () => {
     const ext = await import("../../src/extension.js");
     ext.default(pi as any);
-    pi.fireToolCall({ toolName: "bash", input: { command: "ls -la" } });
+    // GC-2026-087 SC2: use `echo` instead of `ls -la` so the new
+    // codebase-search-nudge (which fires on `ls` / `tree` against source
+    // paths) doesn't add a second system entry. The soft-mode reminder
+    // is the only nudge that should fire here.
+    pi.fireToolCall({ toolName: "bash", input: { command: "echo hello" } });
     expect(pi.systemEntries.length).toBe(1);
     expect(pi.systemEntries[0].customType).toBe("system");
     const data = pi.systemEntries[0].data;
@@ -170,9 +174,13 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
   it("SMOKE-073-6: soft-mode reminder fires only once per session (subsequent bash → no new entry)", async () => {
     const ext = await import("../../src/extension.js");
     ext.default(pi as any);
-    pi.fireToolCall({ toolName: "bash", input: { command: "ls" } });
-    pi.fireToolCall({ toolName: "bash", input: { command: "cat foo.ts" } });
-    pi.fireToolCall({ toolName: "bash", input: { command: "rm foo.ts" } });
+    // GC-2026-087 SC2: use `echo` instead of `ls` / `cat foo.ts` / `rm foo.ts`
+    // so the new nudges (codebase-search / ctx-search / aft-search) don't
+    // add system entries. The smoke test asserts ONLY that the soft-mode
+    // reminder is rate-limited per session; other nudges are out of scope.
+    pi.fireToolCall({ toolName: "bash", input: { command: "echo one" } });
+    pi.fireToolCall({ toolName: "bash", input: { command: "echo two" } });
+    pi.fireToolCall({ toolName: "bash", input: { command: "echo three" } });
     expect(pi.systemEntries.length).toBe(1);
   });
 
