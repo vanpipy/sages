@@ -242,3 +242,73 @@ describe("session_start end-to-end via MockPi (GC-2026-081 + GC-2026-086)", () =
 		expect(new Set(tools).size).toBe(34);
 	});
 });
+
+describe("setActiveTools order — AFT/ctx before BASELINE (GC-2026-087 SC1)", () => {
+	async function captureTools(): Promise<string[]> {
+		const activeToolsCalls: string[][] = [];
+		const pi = {
+			setActiveTools(tools: string[]) {
+				activeToolsCalls.push(tools);
+			},
+			setStatus() {
+				/* noop */
+			},
+			registerTool() {
+				/* noop */
+			},
+			appendEntry() {
+				/* noop */
+			},
+			on(event: string, handler: unknown) {
+				if (event === "session_start") {
+					(handler as (e: unknown, c: unknown) => void)({}, {});
+				}
+			},
+		};
+		const ext = await import("../src/extension.js");
+		ext.default(pi as unknown as Parameters<typeof ext.default>[0]);
+		return activeToolsCalls[0]!;
+	}
+
+	it("places aft_search BEFORE bash (LLM adoption bias toward earlier tools)", async () => {
+		const tools = await captureTools();
+		expect(tools.indexOf("aft_search")).toBeLessThan(tools.indexOf("bash"));
+	});
+
+	it("places aft_outline BEFORE bash", async () => {
+		const tools = await captureTools();
+		expect(tools.indexOf("aft_outline")).toBeLessThan(tools.indexOf("bash"));
+	});
+
+	it("places ctx_search BEFORE bash", async () => {
+		const tools = await captureTools();
+		expect(tools.indexOf("ctx_search")).toBeLessThan(tools.indexOf("bash"));
+	});
+
+	it("places all AFT tools BEFORE all BASELINE tools", async () => {
+		const tools = await captureTools();
+		const lastAftIdx = Math.max(
+			...AFT_TOOLS.map((t) => tools.indexOf(t)).filter((i) => i >= 0),
+		);
+		const firstBaselineIdx = Math.min(
+			...BASELINE_TOOLS.map((t) => tools.indexOf(t)).filter((i) => i >= 0),
+		);
+		expect(lastAftIdx).toBeLessThan(firstBaselineIdx);
+	});
+
+	it("places all ctx_* tools BEFORE all BASELINE tools", async () => {
+		const tools = await captureTools();
+		const lastCtxIdx = Math.max(
+			...CTX_TOOLS.map((t) => tools.indexOf(t)).filter((i) => i >= 0),
+		);
+		const firstBaselineIdx = Math.min(
+			...BASELINE_TOOLS.map((t) => tools.indexOf(t)).filter((i) => i >= 0),
+		);
+		expect(lastCtxIdx).toBeLessThan(firstBaselineIdx);
+	});
+
+	it("keeps the 34-entry total after reorder (no silent additions / removals)", async () => {
+		const tools = await captureTools();
+		expect(tools.length).toBe(34);
+	});
+});
