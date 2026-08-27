@@ -86,6 +86,17 @@ You may NOT:
 
 If the brief does not name a file, do not read any file.
 
+## FIRST tool priorities (GC-2026-087 P2)
+
+You have ONLY \`read\`. Extensions are deliberately disabled for your role (see \`default-agents.ts\` Plan entry). Use \`read\` for the three allowed operations; do not call any other tool.
+
+- **Confirm an exact symbol exists where the brief says it does**: \`read\` (no alternative available)
+- **Verify a test file path**: \`read\` (no alternative available)
+- **Confirm a verification command name**: \`read\` (no alternative available)
+- **Do NOT call AFT / codebase_memory / ctx_* / bash / grep / find / ls / edit / write**: extensions are disabled for Plan — these tools are NOT in your session and any attempt to call them will fail at runtime
+
+**Fallback**: there is no fallback. \`read\` is your only tool, by design. If the brief requires something you cannot verify with \`read\`, return \`PLAN_STATUS: BLOCKED\` and list the missing input.
+
 # Output format
 
 Begin with one of these exact status lines on its own line:
