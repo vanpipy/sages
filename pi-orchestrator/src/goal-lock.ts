@@ -33,16 +33,24 @@ import { createHash } from "node:crypto";
  * Canonical form for hashing: JSON-stringify with sorted keys at every
  * level, no whitespace. This guarantees the hash is independent of
  * object key order and YAML formatting quirks.
+ *
+ * GC-2026-091: undefined values are skipped recursively (not just at
+ * the top level). Otherwise, a goal that has SC fields with
+ * `expected_output: undefined` produces a different canonical form
+ * than the round-tripped YAML (which strips undefined keys), causing
+ * the hash to drift across YAML save/load cycles. Stripping undefined
+ * keeps the hash stable as long as the *value content* is the same.
  */
 function canonicalize(value: unknown): string {
+  if (value === undefined) return "";
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
-    return "[" + value.map(canonicalize).join(",") + "]";
+    return "[" + value.map((v) => canonicalize(v === undefined ? undefined : v)).join(",") + "]";
   }
   const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort();
   return (
     "{" +
     keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") +
