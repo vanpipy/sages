@@ -17,6 +17,7 @@ import { TaskCompletion } from "./task-completion.ts";
 import { PlanQuality } from "./plan-quality.ts";
 import { ToolUse } from "./tool-use.ts";
 import { ToolCorrectness } from "./tool-correctness.ts";
+import { ToolAdoption } from "./tool-adoption.ts";
 import { setJudgeFn } from "./llm-judge/seam.ts";
 import { defaultJudgeFn } from "./llm-judge/judge.ts";
 
@@ -65,6 +66,7 @@ export function registerBuiltinMetrics(): void {
 	tryRegister(new PlanQuality());
 	tryRegister(new ToolUse());
 	tryRegister(new ToolCorrectness());
+	tryRegister(new ToolAdoption());
 }
 
 /** Test-only idempotent register: silently no-op if id already present. */
