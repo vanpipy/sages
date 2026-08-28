@@ -2,12 +2,34 @@
  * Tests for dag-synthesizer core validation logic.
  * Covers: cycle detection, batch contiguity, SC coverage,
  * cross-batch dependency direction, template whitelist, param validation.
+ *
+ * GC-2026-091: executeDAGSynthesize now auto-syncs the dag_id back to
+ * the goal contract (D2) and auto-compiles the todowrite view (D1) so
+ * the plan → DAG → todo chain is programmatically reliable. Tests for
+ * that behavior live at the bottom of this file.
  */
 
-import { describe, it, expect } from "bun:test";
+import { afterEach, beforeEach, describe, it, expect } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Value } from "typebox/value";
-import { validateDAG, buildPlan, TaskNodeSchema } from "@/dag-synthesizer.js";
-import type { GoalContract } from "@/types.js";
+import * as yaml from "js-yaml";
+import {
+	buildPlan,
+	executeDAGSynthesize,
+	loadGoalContract,
+	TaskNodeSchema,
+	validateDAG,
+} from "@/dag-synthesizer.js";
+import { loadTodoFile } from "@/todo-sync.js";
+import { buildGoalContract, buildLockedGoalContract } from "@/goal-contract.js";
+import { computeGoalHash } from "@/goal-lock.js";
+import {
+	atomicWriteOrchestratorFile,
+	isGoalContractState,
+} from "@/state-persistence.js";
+import type { GoalContract, OrchestrationPlan } from "@/types.js";
 
 const baseContract: GoalContract = {
   id: "GC-2025-test",
@@ -572,5 +594,178 @@ describe("TaskNodeSchema — handoff_template (GC-2026-039)", () => {
     // field, the cast is still valid (it's just a wider type) and the
     // assertion still locks the runtime behavior.
     expect((plan.tasks[0] as any).handoff_template).toBe("phase-gate");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GC-2026-091: executeDAGSynthesize auto-syncs dag_id to goal contract (D2)
+// and auto-compiles the todowrite view (D1) so the plan → DAG → todo
+// chain is programmatically reliable.
+// ─────────────────────────────────────────────────────────────────────────────
+
+let gc091Cwd: string;
+
+beforeEach(() => {
+  gc091Cwd = mkdtempSync(join(tmpdir(), "dag-synthesizer-091-test-"));
+});
+
+afterEach(() => {
+  if (existsSync(gc091Cwd)) rmSync(gc091Cwd, { recursive: true, force: true });
+});
+
+const GOAL_091_INPUT = {
+  id: "GC-2026-091",
+  title: "Reliable plan → DAG → todo chain",
+  rationale: "Program-level reliability for orchestrator state handoff",
+  success_criteria: [
+    { id: "SC1", criterion: "goal.yaml gains dag_id after dag_synthesize", verification_cmd: "bun run check:all" },
+    { id: "SC2", criterion: "todo file gains goal_id after todowrite_compile", verification_cmd: "bun run check:all" },
+  ],
+  anti_goals: ["do not change Magic Context internals"],
+  scope: { include: ["pi-orchestrator/src/"], exclude: ["pi-orchestrator/src/services/"] },
+  constraints: {},
+  done_definition: "All SCs pass and lock hash recomputes on every write",
+};
+
+function writeGoal(cwd: string, goal: GoalContract & { _lock_hash?: string }): void {
+  atomicWriteOrchestratorFile(cwd, `goal-${goal.id}.yaml`, yaml.dump(goal, { indent: 2, lineWidth: 120, noRefs: true }), {
+    owner: "orchestrator",
+    validate: isGoalContractState,
+  });
+}
+
+function makeDagInput(id: string, goalId: string) {
+  return {
+    goal_id: goalId,
+    tasks: [
+      {
+        id: "P1",
+        description: "Implement goal_id field on TodoFile",
+        plane: "Business" as const,
+        priority: "high" as const,
+        depends_on: [],
+        files: ["pi-orchestrator/src/todowrite.ts"],
+        subagent_type: "developer",
+        batch: 1,
+        isolation: "none" as const,
+        tdd: "strict" as const,
+        prompt: "Add `goal_id?: string` to TodoFile and populate from plan.goal_id in executeTodowriteCompile",
+        acceptance: { covers: ["SC1", "SC2"] },
+        output_schema: { kind: "code_changes" as const },
+        status: "pending" as const,
+        retry_count: 0,
+        max_retries: 2,
+      },
+    ],
+  };
+}
+
+describe("executeDAGSynthesize — GC-2026-091 plan → DAG → todo auto-sync", () => {
+  it("D2-1: writes dag_id back to the goal contract after the DAG is persisted", async () => {
+    const goal = buildGoalContract(GOAL_091_INPUT as any);
+    writeGoal(gc091Cwd, goal);
+
+    const result = await executeDAGSynthesize(
+      makeDagInput("DAG-2026-091", "GC-2026-091") as any,
+      { cwd: gc091Cwd },
+    );
+    expect(result.details).toBeTruthy();
+    expect(result.details!.plan.id).toBe("DAG-2026-091");
+
+    // The goal yaml on disk should now carry dag_id.
+    const reloaded = loadGoalContract(gc091Cwd, "GC-2026-091");
+    expect(reloaded).not.toBeNull();
+    expect(reloaded!.dag_id).toBe("DAG-2026-091");
+  });
+
+  it("D2-2: recomputes _lock_hash on the goal contract when one was set", async () => {
+    // Use the locked variant so we exercise the hash recomputation path.
+    const goal = buildLockedGoalContract(GOAL_091_INPUT as any);
+    const priorHash = goal._lock_hash;
+    expect(priorHash).toBeTruthy();
+    writeGoal(gc091Cwd, goal);
+
+    await executeDAGSynthesize(
+      makeDagInput("DAG-2026-091", "GC-2026-091") as any,
+      { cwd: gc091Cwd },
+    );
+
+    // Read raw yaml to inspect the persisted _lock_hash directly —
+    // loadGoalContract casts through GoalContract which doesn't expose
+    // _lock_hash, but the writeback helper must have written it.
+    const raw = readFileSync(join(gc091Cwd, ".pi/orchestrator/goal-GC-2026-091.yaml"), "utf8");
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    expect(parsed.dag_id).toBe("DAG-2026-091");
+    expect(typeof parsed._lock_hash).toBe("string");
+    // The new hash MUST equal computeGoalHash of the augmented goal
+    // (with dag_id set) — which differs from the prior hash because
+    // dag_id is now part of HASHED_FIELDS.
+    const augmented = { ...goal, dag_id: "DAG-2026-091" };
+    const expected = computeGoalHash(augmented as any);
+    expect(parsed._lock_hash).toBe(expected);
+    expect(parsed._lock_hash).not.toBe(priorHash);
+  });
+
+  it("D1-1: auto-compiles the todowrite view AFTER the DAG is persisted", async () => {
+    const goal = buildGoalContract(GOAL_091_INPUT as any);
+    writeGoal(gc091Cwd, goal);
+
+    await executeDAGSynthesize(
+      makeDagInput("DAG-2026-091", "GC-2026-091") as any,
+      { cwd: gc091Cwd },
+    );
+
+    // The todo file should exist and carry both dag_id and goal_id.
+    const todoPath = join(gc091Cwd, ".pi/orchestrator/todo-DAG-2026-091.yaml");
+    expect(existsSync(todoPath)).toBe(true);
+    const todo = loadTodoFile(gc091Cwd, "DAG-2026-091");
+    expect(todo).not.toBeNull();
+    expect(todo!.dag_id).toBe("DAG-2026-091");
+    expect(todo!.goal_id).toBe("GC-2026-091");
+    expect(todo!.items.length).toBe(1);
+  });
+
+  it("D1+D2 order: todo file's goal_id is set BEFORE the goal writeback so it doesn't dangle", async () => {
+    // The spec mandates order: D1 (todowrite_compile) before D2
+    // (goal writeback). Why: if D2 ran first, the todo file would be
+    // missing goal_id even though the goal contract now points at it.
+    // The order check is structural — we verify the artifacts at the
+    // end of the call, but the ordering is encoded in executeDAGSynthesize.
+    const goal = buildGoalContract(GOAL_091_INPUT as any);
+    writeGoal(gc091Cwd, goal);
+
+    await executeDAGSynthesize(
+      makeDagInput("DAG-2026-091", "GC-2026-091") as any,
+      { cwd: gc091Cwd },
+    );
+
+    const todo = loadTodoFile(gc091Cwd, "DAG-2026-091");
+    expect(todo!.goal_id).toBe("GC-2026-091");
+    const reloaded = loadGoalContract(gc091Cwd, "GC-2026-091");
+    expect(reloaded!.dag_id).toBe("DAG-2026-091");
+    // Both edges consistent: goal_id on todo matches the goal's id,
+    // and the goal's dag_id matches the todo's dag_id.
+    expect(todo!.goal_id).toBe(reloaded!.id);
+    expect(reloaded!.dag_id).toBe(todo!.dag_id);
+  });
+
+  it("ToolResult still wraps the synthesis response (post-compile)", async () => {
+    // Regression guard: the auto-sync additions must not change the
+    // outer ToolResult shape returned by executeDAGSynthesize. The
+    // call must still return `{ content: [{ type: "text", text: ... }] }`
+    // and the JSON inside must include the same `summary` / `next_step`
+    // fields that the LLM relies on.
+    const goal = buildGoalContract(GOAL_091_INPUT as any);
+    writeGoal(gc091Cwd, goal);
+
+    const result = await executeDAGSynthesize(
+      makeDagInput("DAG-2026-091", "GC-2026-091") as any,
+      { cwd: gc091Cwd },
+    );
+    expect(Array.isArray(result.content)).toBe(true);
+    const parsed = JSON.parse(result.content[0]!.text);
+    expect(parsed.status).toBe("in_progress");
+    expect(parsed.summary).toBeTruthy();
+    expect(parsed.next_step).toContain("task_dispatch");
   });
 });

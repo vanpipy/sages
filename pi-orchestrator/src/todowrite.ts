@@ -138,6 +138,13 @@ export function executeTodowriteCompile(params: TodowriteCompileInput, ctx: { cw
 	const file: TodoFile = {
 		schemaVersion: "v1",
 		dag_id: plan.id,
+		/**
+		 * GC-2026-091: mirror `plan.goal_id` onto the TodoFile so the
+		 * plan → DAG → todo → goal chain is end-to-end. Pre-GC-2026-091
+		 * todo files do not have this field; the validator and loader
+		 * accept its absence for backward compatibility.
+		 */
+		goal_id: plan.goal_id,
 		compiled_at: new Date().toISOString(),
 		compiled_from_todos: true,
 		items,

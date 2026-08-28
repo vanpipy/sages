@@ -33,16 +33,24 @@ import { createHash } from "node:crypto";
  * Canonical form for hashing: JSON-stringify with sorted keys at every
  * level, no whitespace. This guarantees the hash is independent of
  * object key order and YAML formatting quirks.
+ *
+ * GC-2026-091: undefined values are skipped recursively (not just at
+ * the top level). Otherwise, a goal that has SC fields with
+ * `expected_output: undefined` produces a different canonical form
+ * than the round-tripped YAML (which strips undefined keys), causing
+ * the hash to drift across YAML save/load cycles. Stripping undefined
+ * keeps the hash stable as long as the *value content* is the same.
  */
 function canonicalize(value: unknown): string {
+  if (value === undefined) return "";
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
-    return "[" + value.map(canonicalize).join(",") + "]";
+    return "[" + value.map((v) => canonicalize(v === undefined ? undefined : v)).join(",") + "]";
   }
   const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined).sort();
   return (
     "{" +
     keys.map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") +
@@ -65,6 +73,14 @@ export interface GoalContractLike {
   scope: { include: string[]; exclude: string[] };
   constraints: Record<string, unknown>;
   done_definition: string;
+  /**
+   * GC-2026-091: optional `dag_id` set by `dag_synthesize` once the
+   * goal contract has been decomposed into a DAG. Optional because
+   * pre-GC-2026-091 goals have no such field and the lock mechanism
+   * must keep working for them. When present, it participates in the
+   * lock hash (see HASHED_FIELDS).
+   */
+  dag_id?: string;
 }
 
 /** Fields included in the lock hash. The hash field itself is excluded. */
@@ -77,6 +93,16 @@ const HASHED_FIELDS = [
   "scope",
   "constraints",
   "done_definition",
+  /**
+   * GC-2026-091: dag_id is part of the lock. When `dag_synthesize`
+   * augments an existing goal with its synthesized DAG id, the lock
+   * is recomputed — adding `dag_id` invalidates the prior hash so the
+   * writeback is self-consistent. Lock integrity stays intact across
+   * the GC-2026-091 writeback because `dag_synthesize` recomputes
+   * `_lock_hash` via `computeGoalHash` before writing the goal yaml
+   * back to disk.
+   */
+  "dag_id",
 ] as const;
 
 export function computeGoalHash(goal: GoalContractLike): string {
