@@ -61,9 +61,9 @@ describe("MetricRegistry", () => {
 		expect(getMetric("a")).toBeUndefined();
 	});
 
-	test("registerBuiltinMetrics registers the 8 T2/T3/T4/GC-2026-066 built-ins", () => {
+	test("registerBuiltinMetrics registers the 9 T2/T3/T4/GC-2026-066/GC-2026-087 built-ins", () => {
 		// GC-2026-019 shipped 2 scaffolds; GC-2026-063 shipped 7 metrics; GC-2026-066
-		// adds tool_correctness = 8.
+		// adds tool_correctness = 8; GC-2026-087 follow-up adds tool_adoption = 9.
 		registerBuiltinMetrics();
 		const ids = listMetricIds();
 		expect(ids).toContain("step_efficiency");
@@ -74,7 +74,8 @@ describe("MetricRegistry", () => {
 		expect(ids).toContain("plan_quality");
 		expect(ids).toContain("tool_use");
 		expect(ids).toContain("tool_correctness");
-		expect(ids).toHaveLength(8);
+		expect(ids).toContain("tool_adoption");
+		expect(ids).toHaveLength(9);
 	});
 });
 
