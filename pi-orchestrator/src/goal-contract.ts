@@ -215,6 +215,13 @@ export function goalContractToYaml(gc: GoalContract & { _lock_hash?: string }): 
   lines.push("");
 
   lines.push(`done_definition: "${escapeYaml(gc.done_definition)}"`);
+  /**
+   * GC-2026-091: emit `dag_id` after `done_definition` to mirror the
+   * interface ordering in `GoalContract`. The `dag_synthesize`
+   * auto-sync sets this field at writeback time; legacy goals that
+   * pre-date GC-2026-091 simply omit it.
+   */
+  if (gc.dag_id) lines.push(`dag_id: "${escapeYaml(gc.dag_id)}"`);
 
   return lines.join("\n");
 }
