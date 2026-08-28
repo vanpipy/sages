@@ -55,6 +55,23 @@ export interface GoalContract {
 	};
 	/** Free-form completion definition */
 	done_definition: string;
+	/**
+	 * GC-2026-091: link from the goal contract back to the DAG it was
+	 * synthesized into. Populated by `dag_synthesize` after the DAG YAML
+	 * is written — i.e. the goal ↔ DAG edge is now programmatically
+	 * reliable instead of a hand-typed guess. Optional because:
+	 *
+	 *   1. Pre-GC-2026-091 goal YAMLs have no `dag_id` field. The
+	 *      validator (isGoalContractState) accepts the omission, and
+	 *      `loadGoalContract` returns a goal with `dag_id: undefined`.
+	 *   2. Newly-created goals (via `goal_contract_create`) do not have
+	 *      this field until `dag_synthesize` is called.
+	 *
+	 * The orchestrator's auto-sync (D2 step in `executeDAGSynthesize`)
+	 * atomically writes the goal yaml back with the new `dag_id` and
+	 * recomputes `_lock_hash` to keep the lock consistent.
+	 */
+	dag_id?: string;
 	/** ISO timestamp */
 	created_at: string;
 }
@@ -354,6 +371,17 @@ export interface TodoItem {
 export interface TodoFile {
 	schemaVersion: "v1";
 	dag_id: string;
+	/**
+	 * GC-2026-091: link from the todowrite view back to the goal contract
+	 * it shadows. Populated by `todowrite_compile` from the
+	 * OrchestrationPlan.goal_id at compile time so the todo view
+	 * carries the full plan → DAG → todo → goal chain end-to-end.
+	 *
+	 * Optional because pre-GC-2026-091 todo YAMLs have no `goal_id`
+	 * field — they continue to load through the `saveTodoFile`
+	 * validator and `loadTodoFile` reader.
+	 */
+	goal_id?: string;
 	compiled_at: string;
 	compiled_from_todos: boolean;
 	items: TodoItem[];

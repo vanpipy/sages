@@ -137,6 +137,68 @@ describe("todowrite: todowrite_compile", () => {
 		expect(out.ok).toBe(false);
 		expect(out.total).toBe(0);
 	});
+
+	// ───────────────────────────────────────────────────────────────────
+	// GC-2026-091: TodoFile.goal_id is populated from plan.goal_id at
+	// compile time so the plan -> DAG -> todo -> goal chain is end-to-end.
+	// ───────────────────────────────────────────────────────────────────
+
+	it("GC-2026-091: persisted TodoFile carries goal_id = plan.goal_id", () => {
+		const plan = makePlan("GC-2026-091-T1", [makeTask("P1")]);
+		writePlan(plan);
+		executeTodowriteCompile({ dag_id: "GC-2026-091-T1" }, { cwd });
+		const reloaded = loadTodoFile(cwd, "GC-2026-091-T1");
+		expect(reloaded).not.toBeNull();
+		expect(reloaded!.goal_id).toBe(plan.goal_id);
+		// Round-trip: the goal_id on disk must equal what was in the plan.
+		expect(reloaded!.goal_id).toBe(`goal-GC-2026-091-T1`);
+	});
+
+	it("GC-2026-091: goal_id round-trips through standalone executeTodowriteCompile path", () => {
+		// The dag-synthesize auto-sync calls executeTodowriteCompile with
+		// force: true (D1 step in executeDAGSynthesize). The goal_id must
+		// still be populated on the persisted file.
+		const plan = makePlan("GC-2026-091-T1-standalone", [makeTask("P1")]);
+		writePlan(plan);
+		const out = executeTodowriteCompile({ dag_id: "GC-2026-091-T1-standalone", force: true }, { cwd });
+		expect(out.ok).toBe(true);
+		const reloaded = loadTodoFile(cwd, "GC-2026-091-T1-standalone");
+		expect(reloaded!.goal_id).toBe(plan.goal_id);
+	});
+
+	it("GC-2026-091: legacy TodoFile without goal_id continues to load", () => {
+		// Pre-GC-2026-091 todo files have no goal_id. The validator chain
+		// in saveTodoFile must accept them on load (validator rejects ONLY
+		// on save — load is a read-only path).
+		const plan = makePlan("GC-2026-091-legacy", [makeTask("P1")]);
+		writePlan(plan);
+		// First compile writes a v1 file
+		executeTodowriteCompile({ dag_id: "GC-2026-091-legacy" }, { cwd });
+		// Now overwrite it with a legacy-shaped file (no goal_id) — this
+		// simulates reading a pre-GC-2026-091 todo yaml on disk.
+		const legacy = loadTodoFile(cwd, "GC-2026-091-legacy")!;
+		const legacyYaml = yaml.dump(
+			{
+				schemaVersion: "v1",
+				dag_id: legacy.dag_id,
+				compiled_at: legacy.compiled_at,
+				compiled_from_todos: legacy.compiled_from_todos,
+				items: legacy.items,
+				// intentionally no goal_id
+			},
+			{ indent: 2, lineWidth: 120, noRefs: true },
+		);
+		atomicWriteOrchestratorFile(cwd, "todo-GC-2026-091-legacy.yaml", legacyYaml, {
+			owner: "orchestrator",
+			validate: (v): v is typeof legacy => true,
+		});
+		const reloaded = loadTodoFile(cwd, "GC-2026-091-legacy");
+		expect(reloaded).not.toBeNull();
+		expect(reloaded!.goal_id).toBeUndefined();
+		// SchemaVersion + items still validate.
+		expect(reloaded!.schemaVersion).toBe("v1");
+		expect(reloaded!.items.length).toBe(1);
+	});
 });
 
 // ───────────────────────────────────────────────────────────────────────
