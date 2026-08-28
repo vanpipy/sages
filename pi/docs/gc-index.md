@@ -22,3 +22,7 @@ coverage (postmortem or carve-out).
 | [GC-2026-090](./postmortem/GC-2026-090.md) | Refactor: shared `wrapRegisteredTool` helper (eliminate 8-file copy-paste wrapper) | [.pi/orchestrator/goal-GC-2026-090.yaml](../../.pi/orchestrator/goal-GC-2026-090.yaml) | [GC-2026-090.md](./postmortem/GC-2026-090.md) |
 | [GC-2026-088](./postmortem/GC-2026-088.md) | Verifier path offset — institutional coverage now real | [.pi/orchestrator/goal-GC-2026-088.yaml](../../.pi/orchestrator/goal-GC-2026-088.yaml) | [GC-2026-088.md](./postmortem/GC-2026-088.md) |
 | [GC-2026-091](./postmortem/GC-2026-091.md) | Program-level reliable plan → DAG → todo chain (auto-sync + bidirectional refs) | [.pi/orchestrator/goal-GC-2026-091.yaml](../../.pi/orchestrator/goal-GC-2026-091.yaml) | [GC-2026-091.md](./postmortem/GC-2026-091.md) |
+
+## Open / no postmortem
+
+- **GC-2026-087** — FIRST tool priorities (P1: orchestrator tool-adoption, P2: 6-agent FIRST sections). Merged 2026-08-22 across two merges (`018e94f` P1, `7070915` P2). Postmortem deferred because the work was a pure mechanical rollout of tool-preference nudges with no follow-ups worth documenting at this time. Re-evaluate if a future GC touches the FIRST-priorities surface.
