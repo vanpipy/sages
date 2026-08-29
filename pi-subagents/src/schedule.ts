@@ -129,7 +129,7 @@ export class SubagentScheduler {
 		// caller still passing that spelling is a no-op here and surfaces
 		// as an unknown agent type elsewhere in the dispatch chain.
 		const canonical = resolveType(input.subagent_type) ?? input.subagent_type;
-		if (canonical === "developer") {
+		if (canonical.toLowerCase() === "developer") {
 			// Reject recurring developer schedules outright — the
 			// fire-time policy check can't recover from a malformed
 			// isolation object on a recurring schedule because the
