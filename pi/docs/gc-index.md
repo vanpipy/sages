@@ -23,6 +23,7 @@ coverage (postmortem or carve-out).
 | [GC-2026-088](./postmortem/GC-2026-088.md) | Verifier path offset — institutional coverage now real | [.pi/orchestrator/goal-GC-2026-088.yaml](../../.pi/orchestrator/goal-GC-2026-088.yaml) | [GC-2026-088.md](./postmortem/GC-2026-088.md) |
 | [GC-2026-091](./postmortem/GC-2026-091.md) | Subagent naming PascalCase canonical + git-expert removal | [.pi/orchestrator/goal-GC-2026-091.yaml](../../.pi/orchestrator/goal-GC-2026-091.yaml) | [GC-2026-091.md](./postmortem/GC-2026-091.md) |
 | [GC-2026-092](./postmortem/GC-2026-092.md) | subagents.json defaultModelsByType (per-type model overrides) | [.pi/orchestrator/goal-GC-2026-092.yaml](../../.pi/orchestrator/goal-GC-2026-092.yaml) | [GC-2026-092.md](./postmortem/GC-2026-092.md) |
+| [GC-2026-093](./postmortem/GC-2026-093.md) | Subagent rename: Plan → PlanCompiler (clarify role as compiler, not planner) | [.pi/orchestrator/goal-GC-2026-093.yaml](../../.pi/orchestrator/goal-GC-2026-093.yaml) | [GC-2026-093.md](./postmortem/GC-2026-093.md) |
 
 ## Open / no postmortem
 
