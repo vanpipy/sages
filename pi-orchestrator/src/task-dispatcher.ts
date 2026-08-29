@@ -213,16 +213,23 @@ export function buildDispatchPlan(
     const isLastBatch = i === sortedBatches.length - 1;
 
     const dispatchTasks: DispatchTask[] = tasks.map(t => {
+      // GC-2026-091: canonical subagent names are PascalCase
+      // (Developer/Auditor/Merger/Explore/Plan). The dispatcher's two
+      // developer-special-case checks (handoff_template injection +
+      // isolation default) must accept any casing so DAGs authored
+      // against either the new canonical name or the legacy lowercase
+      // round-trip cleanly. Lowercase here is the safe comparison
+      // (pi-subagents' resolveKey is also case-insensitive).
+      const isDeveloperType = (t.subagent_type ?? "").toLowerCase() === "developer";
       // GC-2026-039: developer tasks declare which HANDOFF.md template
       // to use on exit. Render the choice into the prompt as a separate
       // line so the developer picks the right template. Non-developer
       // tasks ignore handoff_template (they don't write HANDOFF.md), so
-      // we only inject for `subagent_type === "developer"`.
+      // we only inject for developer tasks.
       const basePrompt = injectUpstreamOutputs(plan, taskById, t);
-      const prompt =
-        t.subagent_type === "developer"
-          ? `${basePrompt}\n\nhandoff_template: ${t.handoff_template ?? "standard"}`
-          : basePrompt;
+      const prompt = isDeveloperType
+        ? `${basePrompt}\n\nhandoff_template: ${t.handoff_template ?? "standard"}`
+        : basePrompt;
       return {
         task_id: t.id,
         subagent_type: t.subagent_type,
@@ -235,14 +242,13 @@ export function buildDispatchPlan(
       //      managed worktree.
       // Non-developer tasks leave isolation undefined; the Agent tool's
       // own policy decides what to do with no isolation for those roles.
-      isolation:
-        t.subagent_type === "developer"
-          ? (t.isolation === "current-workspace"
-              ? "current-workspace"
-              : typeof t.isolation === "object" && t.isolation !== null
-                ? t.isolation
-                : { dag_id: plan.id, task_id: t.id, mode: "create" as const })
-          : undefined,
+      isolation: isDeveloperType
+        ? (t.isolation === "current-workspace"
+            ? "current-workspace"
+            : typeof t.isolation === "object" && t.isolation !== null
+              ? t.isolation
+              : { dag_id: plan.id, task_id: t.id, mode: "create" as const })
+        : undefined,
       run_in_background: t.run_in_background ?? defaultRunInBackground(t.subagent_type),
       wait_for: tasks.length > 1 ? "batch_completion" : "completion",
       report_path: `.pi/orchestrator/task-${t.id}-report.md`,
