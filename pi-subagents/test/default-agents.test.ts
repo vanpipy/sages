@@ -29,6 +29,49 @@ describe("default-agents: roster", () => {
 		expect(plan, "Plan must be registered").toBeDefined();
 	});
 
+	it("registers `PlanCompiler` as the canonical name (GC-2026-093)", () => {
+		// GC-2026-093: the canonical public name for the plan-compiler
+		// agent is `PlanCompiler`. The previous name `Plan` is kept as a
+		// legacy alias so existing DAG YAMLs (`subagent_type: "Plan"`)
+		// continue to resolve. The runtime contract (maxTurns, thinking,
+		// tools, inheritance) is unchanged — only the name changes.
+		expect(DEFAULT_AGENTS.has("PlanCompiler")).toBe(true);
+	});
+
+	it("keeps `Plan` as a legacy alias for backward compat (GC-2026-093)", () => {
+		// Existing DAG YAMLs and persisted run-records reference
+		// `subagent_type: "Plan"`. The rename is not a breaking change —
+		// both keys resolve to the same AgentConfig object.
+		expect(DEFAULT_AGENTS.has("Plan")).toBe(true);
+	});
+
+	it("`Plan` and `PlanCompiler` resolve to the SAME AgentConfig object (GC-2026-093)", () => {
+		// The two keys share a single underlying object so any future
+		// mutation (e.g. description tweak) propagates to both lookups
+		// without drift.
+		const plan = DEFAULT_AGENTS.get("Plan");
+		const planCompiler = DEFAULT_AGENTS.get("PlanCompiler");
+		expect(plan, "Plan must be registered").toBeDefined();
+		expect(planCompiler, "PlanCompiler must be registered").toBeDefined();
+		expect(plan).toBe(planCompiler);
+	});
+
+	it("the PlanCompiler AgentConfig.name field is the canonical 'PlanCompiler'", () => {
+		// The runtime resolves subagent_type strings via the Map key,
+		// but the AgentConfig.name field is the user-visible identity
+		// surfaced in audit records and tool descriptions. It must
+		// match the canonical spelling.
+		expect(DEFAULT_AGENTS.get("PlanCompiler")?.name).toBe("PlanCompiler");
+	});
+
+	it("the PlanCompiler AgentConfig.displayName field is the canonical 'PlanCompiler'", () => {
+		// Same rationale as the `name` assertion: displayName is the
+		// LLM-visible roster label.
+		expect(DEFAULT_AGENTS.get("PlanCompiler")?.displayName).toBe(
+			"PlanCompiler",
+		);
+	});
+
 	it("does NOT register `general-purpose` (removed in DAG-2026-011 Phase C)", () => {
 		expect(DEFAULT_AGENTS.has("general-purpose")).toBe(false);
 	});
@@ -455,11 +498,17 @@ describe("default-agents: auditor subagent isolation", () => {
  * future contributor weakens the prompt prose, these runtime knobs
  * keep Plan cheap and bounded.
  *
- * Public name stays `Plan`; the description must reflect the new
- * role; the tools list is the single source of truth for what Plan
- * can see; model + thinking + maxTurns pin the cost.
+ * GC-2026-093: the canonical public name is `PlanCompiler` (renamed
+ * from `Plan` to clarify that the orchestrator owns planning; this
+ * agent only compiles the Brief into a plan). The legacy `Plan` Map
+ * key is preserved as an alias, so these tests resolve `Plan` and
+ * continue to pin the same AgentConfig object — which now carries
+ * `name: "PlanCompiler"` and `displayName: "PlanCompiler"`.
  */
-describe("default-agents: Plan config (DAG-2026-017)", () => {
+describe("default-agents: PlanCompiler config (DAG-2026-017, GC-2026-093)", () => {
+	// Tests resolve the AgentConfig via the legacy `Plan` alias. The
+	// dual-key wiring (PlanCompiler canonical + Plan alias) means this
+	// returns the SAME object as `DEFAULT_AGENTS.get("PlanCompiler")`.
 	const plan = DEFAULT_AGENTS.get("Plan");
 
 	it("is registered with isDefault: true", () => {
@@ -470,8 +519,9 @@ describe("default-agents: Plan config (DAG-2026-017)", () => {
 		expect(plan?.promptMode).toBe("replace");
 	});
 
-	it("description frames Plan as a plan compiler, not an architect", () => {
-		expect(plan?.displayName).toBe("Plan");
+	it("description frames PlanCompiler as a plan compiler, not an architect (GC-2026-093)", () => {
+		// GC-2026-093: displayName is now `PlanCompiler` (canonical).
+		expect(plan?.displayName).toBe("PlanCompiler");
 		const desc = plan?.description.toLowerCase() ?? "";
 		// New identity pinned: the agent COMPIles a Planning Brief. The
 		// description MUST NOT promise architecture / exploration /
@@ -530,8 +580,10 @@ describe("default-agents: Plan config (DAG-2026-017)", () => {
 	});
 });
 
-describe("default-agents: Plan subagent isolation", () => {
+describe("default-agents: PlanCompiler subagent isolation (GC-2026-093)", () => {
 	it("excludes pi-subagents from its extension set", () => {
+		// GC-2026-093: resolve via the legacy `Plan` alias — both keys
+		// point at the same AgentConfig object.
 		const plan = DEFAULT_AGENTS.get("Plan");
 		expect(plan, "Plan must be registered as a default agent").toBeDefined();
 		const excludes = plan?.excludeExtensions ?? [];

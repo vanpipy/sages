@@ -295,6 +295,12 @@ describe("settings.resolveDeadlineMs: delegates to resolveRunConfig (SC3)", () =
 		expect(resolveDeadlineMs("Plan", undefined)).toBe(5 * 60_000);
 	});
 
+	it("canonical 'PlanCompiler' (GC-2026-093) → 5min (same as legacy 'Plan')", () => {
+		// PlanCompiler is now the canonical name; Plan remains the legacy alias.
+		// Both resolve to the same 5min budget via DEFAULT_PER_TYPE.
+		expect(resolveDeadlineMs("PlanCompiler", undefined)).toBe(5 * 60_000);
+	});
+
 	it("unknown type falls back to 20min (developer default)", () => {
 		expect(resolveDeadlineMs("not-a-real-type", undefined)).toBe(20 * 60_000);
 	});
