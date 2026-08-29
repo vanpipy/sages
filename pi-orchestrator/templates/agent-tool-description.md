@@ -43,10 +43,10 @@ Dependencies / sequencing:
 Known risks / open questions:
 ```
 
-`PlanCompiler` (legacy alias: `Plan`) is a bounded, read-only compiler of
-that brief. It must not redo exploration, choose architecture, or invent
-missing decisions. The main agent reviews `PLAN_STATUS: READY` before dispatch;
-missing decisions remain with the main agent and require `PLAN_STATUS: BLOCKED`.
+`PlanCompiler` is a bounded, read-only compiler of that brief. It must not
+redo exploration, choose architecture, or invent missing decisions. The main
+agent reviews `PLAN_STATUS: READY` before dispatch; missing decisions remain
+with the main agent and require `PLAN_STATUS: BLOCKED`.
 
 
 ## When not to use
@@ -68,7 +68,7 @@ The upstream default frames background as "parallelism". **Sages inverts this fo
 | Subagent type | `run_in_background` | Why |
 |---|---|---|
 | `Explore` | `false` (foreground) | Short, read-only, result feeds next stage |
-| `PlanCompiler` (alias `Plan`) | `false` (foreground) | Planning Brief compilation is short and reviewed by the main agent |
+| `PlanCompiler` | `false` (foreground) | Planning Brief compilation is short and reviewed by the main agent |
 | `Developer`          | **`true` (background)** | TDD RED→GREEN→REFACTOR is 1–10 min, can be steered |
 | `Auditor` | **`true` (background)** | Re-runs every verification_cmd, 30s–3 min, can be steered |
 

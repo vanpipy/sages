@@ -38,14 +38,12 @@ For single trivial tasks (one-line edit, single function), do NOT use this skill
 The main agent first understands and decides, including architecture, trade-offs,
 scope, acceptance, and dependencies. It then passes a complete Planning Brief
 to `PlanCompiler` for bounded compilation; the main agent reviews the result
-before implementation dispatch. (`PlanCompiler` is the canonical name for the
-agent previously called `Plan` — see GC-2026-093. `Plan` remains a legacy alias
-so existing DAG YAMLs and skill references keep working.)
+before implementation dispatch.
 
 | Stage | `subagent_type`     | Source                              | `run_in_background` | When to dispatch                                                                 |
 |-------|----------------------|--------------------------------------|---------------------|----------------------------------------------------------------------------------|
 | 1     | `Explore`            | **pi-subagents built-in**            | `false`             | "Where is X?" / "find all callers of Y" / pure codebase search                    |
-| 2     | `PlanCompiler` (alias `Plan`) | **pi-subagents built-in**    | `false`             | Compiles the main agent's Planning Brief; bounded read-only helper, not an architecture stage. |
+| 2     | `PlanCompiler`       | **pi-subagents built-in**            | `false`             | Compiles the main agent's Planning Brief; bounded read-only helper, not an architecture stage. |
 | 3     | `developer`         | **shipped** (pi-subagents built-in) | **`true`**          | Write production code + tests in a managed worktree, strict TDD                    |
 | 4     | `auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
 | Cross-workspace merge verification | `merger (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatched by the orchestrator after DAG synthesis detects cross-workspace file overlap; reads both diffs, classifies, produces merge commit or escalates hunk-conflict. |
