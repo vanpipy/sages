@@ -39,7 +39,7 @@ import {
 	parseManagedWorktreeRequest,
 } from "../src/worktree-contract.js";
 
-const CANONICAL = "developer";
+const CANONICAL = "Developer";
 const LEGACY_ALIAS = "software-developer";
 
 describe("developer-runtime: canonical developer resolves, legacy alias does not (GC-2026-014)", () => {

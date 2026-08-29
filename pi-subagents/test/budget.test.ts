@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	BudgetExceededError,
 	BudgetTracker,
+	budgetTypeFor,
 	defaultBudgets,
 	loadBudgetFromEnv,
 } from "../src/budget.js";
@@ -84,6 +85,32 @@ describe("budget: defaults + env override", () => {
 		const b = loadBudgetFromEnv("explorer");
 		expect(b.maxTurns).toBe(defaultBudgets.explorer.maxTurns);
 		expect(b.maxMs).toBe(defaultBudgets.explorer.maxMs);
+	});
+});
+
+describe("budget: canonical agent type -> budget type bridge (GC-2026-091)", () => {
+	// The registry canonical names are PascalCase (`Developer`, `Auditor`,
+	// `Explore`, `Merger`); the budget table keys stay lowercase and use
+	// `explorer` for the exploration agent. The bridge maps between them so
+	// a PascalCase dispatch does not silently fall back to the developer
+	// budget.
+	it("maps PascalCase canonical names onto the lowercase budget keys", () => {
+		expect(budgetTypeFor("Developer")).toBe("developer");
+		expect(budgetTypeFor("Auditor")).toBe("auditor");
+		expect(budgetTypeFor("Explore")).toBe("explorer");
+		expect(budgetTypeFor("Merger")).toBe("merger");
+	});
+
+	it("still accepts the legacy lowercase spellings", () => {
+		expect(budgetTypeFor("developer")).toBe("developer");
+		expect(budgetTypeFor("auditor")).toBe("auditor");
+		expect(budgetTypeFor("explorer")).toBe("explorer");
+		expect(budgetTypeFor("merger")).toBe("merger");
+	});
+
+	it("falls back to the developer budget for unknown / custom types", () => {
+		expect(budgetTypeFor("Plan")).toBe("developer");
+		expect(budgetTypeFor("my-custom-agent")).toBe("developer");
 	});
 });
 

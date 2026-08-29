@@ -330,7 +330,10 @@ export class AgentManager {
 		// isolation policy at the spawn boundary. The Agent tool dispatcher also
 		// checks this, but spawn() is the safety net for direct callers such as
 		// cross-extension RPC and the scheduler.
-		if (canonicalType === "developer") {
+		// GC-2026-091: canonical registry keys are PascalCase (`Developer`).
+		// Compare case-insensitively so persisted lowercase spellings and the
+		// canonical name both hit the policy.
+		if (canonicalType.toLowerCase() === "developer") {
 			const policyError = enforceDeveloperManagedIsolationPolicy(
 				canonicalType,
 				options.managedWorktree ?? options.isolation,

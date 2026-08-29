@@ -22,10 +22,10 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENTS } from "../src/default-agents.js";
 import { enforceDeveloperManagedIsolationPolicy } from "../src/invocation-config.js";
 
-const DEV = "developer";
+const DEV = "Developer";
 
 describe("developer-managed-isolation: policy", () => {
-	it("developer is the canonical agent the policy targets (sanity)", () => {
+	it("Developer is the canonical agent the policy targets (sanity)", () => {
 		expect(DEFAULT_AGENTS.has(DEV)).toBe(true);
 	});
 
