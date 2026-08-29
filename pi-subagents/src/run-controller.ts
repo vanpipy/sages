@@ -14,7 +14,7 @@
  *       > generic env > default
  *       params.max_turns > per-type env > generic env > default
  *     bucketTimeoutsMs is always DEFAULT_BUCKET_TIMEOUTS_MS.
- *     Unknown type falls back to developer defaults (20min / 60 turns).
+ *     Unknown type falls back to Developer defaults (20min / 200 turns).
  *
  *   - `cleanup()` is idempotent and clears all owned timers.
  *
@@ -92,12 +92,25 @@ export function renderBashTimeoutSection(): string {
 	].join("\n");
 }
 
-/** Agent type — open for custom types, but we only ship defaults for the four built-ins. */
+/**
+ * Agent type — open for custom types, but we only ship defaults for the
+ * five built-ins. The `(string & {})` tail lets the registry accept
+ * case-insensitive lookups (see `agent-types.resolveType`) while still
+ * giving callers autocomplete on the canonical PascalCase names.
+ *
+ * GC-2026-091: canonical names are PascalCase to match the
+ * `default-agents.ts` registry. The previous lowercase names
+ * (`developer`/`auditor`/`explorer`/`merger`) were never consistent
+ * with the registry keys (which were always `Explore`/`Plan` plus
+ * lowercase `developer`/`auditor`/`merger`); the rename fixes the
+ * `explorer` ≠ `Explore` mismatch and adds the missing `Plan` entry.
+ */
 export type AgentType =
-	| "developer"
-	| "auditor"
-	| "explorer"
-	| "merger"
+	| "Developer"
+	| "Auditor"
+	| "Explore"
+	| "Plan"
+	| "Merger"
 	| (string & {});
 
 export interface PerTypeDefaults {
@@ -105,13 +118,28 @@ export interface PerTypeDefaults {
 	maxTurns: number;
 }
 
+/**
+ * Per-type deadline + turn budgets.
+ *
+ * Source of truth for these values is `default-agents.ts` — the
+ * `maxTurns` field on each AgentConfig. Keeping this table in lockstep
+ * with that source prevents the budget from drifting between the
+ * registry (used by callers) and the runtime (used by the run
+ * controller).
+ *
+ * GC-2026-091: keys are PascalCase to match the `AgentType` union
+ * and the registry. `Plan` was missing before (its 5min / 12turn
+ * budget was inherited via the `settings.resolveDeadlineMs` legacy
+ * capitalized-name path); it is now a first-class member.
+ */
 export const DEFAULT_PER_TYPE: Record<AgentType, PerTypeDefaults> = {
-	developer: { deadlineMs: 20 * 60_000, maxTurns: 60 },
-	auditor: { deadlineMs: 20 * 60_000, maxTurns: 30 },
-	explorer: { deadlineMs: 5 * 60_000, maxTurns: 20 },
-	merger: { deadlineMs: 5 * 60_000, maxTurns: 20 },
+	Developer: { deadlineMs: 20 * 60_000, maxTurns: 200 },
+	Auditor: { deadlineMs: 20 * 60_000, maxTurns: 200 },
+	Explore: { deadlineMs: 5 * 60_000, maxTurns: 50 },
+	Plan: { deadlineMs: 5 * 60_000, maxTurns: 12 },
+	Merger: { deadlineMs: 5 * 60_000, maxTurns: 80 },
 };
-// Note: the developer defaults also serve as the floor for unknown types.
+// Note: the Developer defaults also serve as the floor for unknown types.
 
 /** Optional identity tags attached to the run for observability. */
 export interface RunIdentity {
@@ -139,7 +167,7 @@ function positiveInt(v: string | undefined, fallback: number): number {
  *   1. params.max_duration_minutes / params.max_turns (positive only)
  *   2. per-type env: SAGES_PI_AGENT_<TYPE>_BUDGET_{TURNS,MS}
  *   3. generic env:  SAGES_PI_AGENT_BUDGET_{TURNS,MS}
- *   4. DEFAULT_PER_TYPE[type] (or developer defaults for unknown types)
+ *   4. DEFAULT_PER_TYPE[type] (or Developer defaults for unknown types)
  *
  * bucketTimeoutsMs is always DEFAULT_BUCKET_TIMEOUTS_MS — the bucket
  * table is enforced by the bash wrapper, not chosen per-run.
@@ -151,7 +179,7 @@ export function resolveRunConfig(
 	identity: RunIdentity = {},
 ): RunConfig {
 	// run_controller_env_resolve: params > per-type env > generic env > default.
-	const base = DEFAULT_PER_TYPE[type] ?? DEFAULT_PER_TYPE.developer;
+	const base = DEFAULT_PER_TYPE[type] ?? DEFAULT_PER_TYPE.Developer;
 	const typeUpper = type.toUpperCase();
 
 	// Params win when given as a positive number; 0 / negative / undefined
