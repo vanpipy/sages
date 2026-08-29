@@ -116,8 +116,17 @@ export function getSettingsDefaultModelsByType(
 	}
 
 	// Cache miss (first call OR either file changed OR cwd changed). Re-read.
-	// Project overrides global, so use `??` not `||`.
-	const value = readField(project) ?? readField(global);
+	// Merge with project-overrides-global: spread global first, then project,
+	// so per-key project values win while global-only keys survive. Mirrors
+	// `loadSettings()`'s `{...global, ...project}` spread.
+	const projectMap = readField(project);
+	const globalMap = readField(global);
+	let value: Record<string, string> | undefined;
+	if (projectMap && globalMap) {
+		value = { ...globalMap, ...projectMap };
+	} else {
+		value = projectMap ?? globalMap;
+	}
 	cachedHash = fileHash;
 	cachedCwd = cwdKey;
 	cachedValue = value;
