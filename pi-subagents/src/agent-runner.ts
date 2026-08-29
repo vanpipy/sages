@@ -42,7 +42,7 @@ import { inc as profileInc, observe as profileObserve } from "./profile.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { ResourceMonitor, type ResourceSnapshot } from "./resource-monitor.js";
 import type { RunController } from "./run-controller.js";
-import { getNetworkAllowedDefault } from "./settings.js";
+import { getDefaultModelByType, getNetworkAllowedDefault } from "./settings.js";
 import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 import { toolDisplayName } from "./ui/agent-widget.js";
@@ -366,7 +366,16 @@ export function setGraceTurns(n: number): void {
 
 /**
  * Try to find the right model for an agent type.
- * Priority: explicit option > config.model > parent model.
+ *
+ * Priority (GC-2026-092 inserted a new layer):
+ *   1. per-type override from `subagents.json#defaultModelsByType`
+ *      (via `getDefaultModelByType(type)` — case-insensitive lookup)
+ *   2. explicit `config.model` (from AgentConfig.model hardcoded default)
+ *   3. parent session's model
+ *
+ * The caller-supplied `Agent({ model: "..." })` path lives one level up
+ * (at the call site, line 909 area) and remains the highest priority —
+ * this function is only consulted when the caller did NOT pass a model.
  */
 function resolveDefaultModel(
 	parentModel: Model<any> | undefined,
@@ -374,25 +383,49 @@ function resolveDefaultModel(
 		find(provider: string, modelId: string): Model<any> | undefined;
 		getAvailable?(): Model<any>[];
 	},
+	type: string,
 	configModel?: string,
 ): Model<any> | undefined {
+	// Helper: parse a "provider/model" string + check the registry. Returns
+	// the Model if found, undefined otherwise. Logs a warning and returns
+	// undefined if the registry doesn't have the model (don't crash — the
+	// user may have a stale or typo'd override).
+	const tryProviderModel = (value: string): Model<any> | undefined => {
+		const slashIdx = value.indexOf("/");
+		if (slashIdx === -1) return undefined;
+		const provider = value.slice(0, slashIdx);
+		const modelId = value.slice(slashIdx + 1);
+
+		// Build a set of available model keys for fast lookup
+		const available = registry.getAvailable?.();
+		const availableKeys = available
+			? new Set(available.map((m: any) => `${m.provider}/${m.id}`))
+			: undefined;
+		const isAvailable = (p: string, id: string) =>
+			!availableKeys || availableKeys.has(`${p}/${id}`);
+
+		const found = registry.find(provider, modelId);
+		if (found && isAvailable(provider, modelId)) return found;
+		return undefined;
+	};
+
+	// GC-2026-092: per-type override from subagents.json#defaultModelsByType.
+	// Case-insensitive lookup (handles PascalCase canonical + legacy lowercase).
+	const perTypeOverride = getDefaultModelByType(type);
+	if (perTypeOverride) {
+		const fromOverride = tryProviderModel(perTypeOverride);
+		if (fromOverride) return fromOverride;
+		// Registry didn't have the override's model — log a warning and fall
+		// through to configModel. The dispatcher shouldn't silently pick a
+		// different model when the user explicitly configured one.
+		console.warn(
+			`[pi-subagents] defaultModelsByType override for "${type}" = "${perTypeOverride}" not found in registry; falling through to configModel.`,
+		);
+	}
+
 	if (configModel) {
-		const slashIdx = configModel.indexOf("/");
-		if (slashIdx !== -1) {
-			const provider = configModel.slice(0, slashIdx);
-			const modelId = configModel.slice(slashIdx + 1);
-
-			// Build a set of available model keys for fast lookup
-			const available = registry.getAvailable?.();
-			const availableKeys = available
-				? new Set(available.map((m: any) => `${m.provider}/${m.id}`))
-				: undefined;
-			const isAvailable = (p: string, id: string) =>
-				!availableKeys || availableKeys.has(`${p}/${id}`);
-
-			const found = registry.find(provider, modelId);
-			if (found && isAvailable(provider, modelId)) return found;
-		}
+		const fromConfig = tryProviderModel(configModel);
+		if (fromConfig) return fromConfig;
 	}
 
 	return parentModel;
@@ -903,10 +936,10 @@ export async function runAgent(
 		}
 	}
 
-	// Resolve model: explicit option > config.model > parent model
+	// Resolve model: explicit option > per-type override (subagents.json) > config.model > parent model
 	const model =
 		options.model ??
-		resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig?.model);
+		resolveDefaultModel(ctx.model, ctx.modelRegistry, type, agentConfig?.model);
 
 	// Resolve thinking level: explicit option > agent config > undefined (inherit)
 	const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinking;
