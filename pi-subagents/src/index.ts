@@ -80,6 +80,7 @@ import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import {
 	applyAndEmitLoaded,
 	resolveDeadlineMs,
+	setDefaultModelsByType,
 	type SubagentsSettings,
 	saveAndEmitChanged,
 	type ToolDescriptionMode,
@@ -1012,6 +1013,12 @@ export default function (pi: ExtensionAPI) {
 			setFleetView: setFleetViewEnabled,
 			setWidgetMode: setWidgetMode,
 			setOutputTranscript: setOutputTranscript,
+			// GC-2026-092: per-type model override map (subagents.json#defaultModelsByType).
+			// The runtime read is `getDefaultModelByType(type)` in settings.ts; the
+			// runtime read of the persisted config is `getSettingsDefaultModelsByType`
+			// in settings-default-models-by-type.ts.
+			setDefaultModelsByType: (map) =>
+				setDefaultModelsByType(map),
 		},
 		(event, payload) => pi.events.emit(event, payload),
 	);

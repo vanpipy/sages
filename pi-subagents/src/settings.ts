@@ -104,6 +104,19 @@ export interface SubagentsSettings {
 	 * (`isolation: worktree`), or memory files.
 	 */
 	outputTranscript?: boolean;
+	/**
+	 * Per-type model override map. Keys are the canonical agent type names
+	 * (`Developer`, `Auditor`, `Explore`, `Plan`, `Merger`) or their legacy
+	 * lowercase spellings; the case-insensitive resolver maps both onto the
+	 * same Model. Values are `provider/model` strings (e.g. `"anthropic/claude-opus-4"`).
+	 *
+	 * GC-2026-092: slots into the resolution chain between the hardcoded
+	 * `AgentConfig.model` pin (e.g. developer/auditor → MiniMax/MiniMax-M3)
+	 * and the global `settings.json#defaultProvider/defaultModel` fallback.
+	 * Project subagents.json overrides global; absence means "use the
+	 * hardcoded default" — never silently substitutes a different model.
+	 */
+	defaultModelsByType?: Record<string, string>;
 }
 
 export type ToolDescriptionMode = "full" | "compact" | "custom";
@@ -127,6 +140,13 @@ export interface SettingsAppliers {
 	setFleetView: (b: boolean) => void;
 	setWidgetMode: (mode: WidgetMode) => void;
 	setOutputTranscript: (b: boolean) => void;
+	/**
+	 * GC-2026-092: replace the per-type model override map. Passing `undefined`
+	 * clears all overrides so every type falls through to AgentConfig.model
+	 * (the hardcoded default) and then to settings.json#defaultProvider/defaultModel.
+	 * Passing `{}` is a no-op (no overrides to apply).
+	 */
+	setDefaultModelsByType: (map: Record<string, string> | undefined) => void;
 }
 
 /** Emit callback — a subset of `pi.events.emit` to keep helpers testable. */
@@ -232,6 +252,27 @@ function sanitize(raw: unknown): SubagentsSettings {
 	if (typeof r.outputTranscript === "boolean") {
 		out.outputTranscript = r.outputTranscript;
 	}
+	if (r.defaultModelsByType && typeof r.defaultModelsByType === "object") {
+		const rawMap = r.defaultModelsByType as Record<string, unknown>;
+		const sanitized: Record<string, string> = {};
+		let kept = 0;
+		for (const [type, value] of Object.entries(rawMap)) {
+			// Drop empty keys, non-string values, and empty strings silently —
+			// matches the maxConcurrentByType "drop bad values silently" contract.
+			// The runtime helper applies the same sanitization in readField()
+			// so persisted-and-read views are consistent.
+			if (
+				typeof type === "string" &&
+				type.length > 0 &&
+				typeof value === "string" &&
+				value.length > 0
+			) {
+				sanitized[type] = value;
+				kept++;
+			}
+		}
+		if (kept > 0) out.defaultModelsByType = sanitized;
+	}
 	return out;
 }
 
@@ -313,6 +354,8 @@ export function applySettings(
 	if (s.widgetMode) appliers.setWidgetMode(s.widgetMode);
 	if (typeof s.outputTranscript === "boolean")
 		appliers.setOutputTranscript(s.outputTranscript);
+	if (s.defaultModelsByType)
+		appliers.setDefaultModelsByType(s.defaultModelsByType);
 }
 
 /**
@@ -478,4 +521,45 @@ export function setNetworkAllowedDefault(type: string, allowed: boolean): void {
 
 export function setNetworkAllowedDefaults(d: Record<string, boolean>): void {
 	networkAllowedByType = { ...networkAllowedByType, ...d };
+}
+
+// =============================================================================
+// GC-2026-092: Per-type model override map (`subagents.json#defaultModelsByType`).
+//
+// Mirrors the `maxConcurrentByType` pattern: a project-overrides-global
+// record keyed by agent type. Slot in the agent-runner.ts resolution chain:
+//   1. Caller-supplied `Agent({ model: "..." })` (line 907 of task-dispatcher
+//      at the time of this writing — agent-runner.ts's caller path)
+//   2. **THIS** per-type override (highest config-layer priority)
+//   3. `AgentConfig.model` hardcoded default (default-agents.ts)
+//   4. `settings.json#defaultProvider/defaultModel` global fallback
+//   5. Parent session model (inherited)
+//
+// Module-level state mirrors `networkAllowedByType`. Persistence lives in
+// subagents.json (per the SubagentsSettings field), and the runtime read
+// helper is `getSettingsDefaultModelsByType()` in
+// settings-default-models-by-type.ts (with the mtime+size stat-cache).
+// =============================================================================
+
+let defaultModelsByType: Record<string, string> | undefined;
+
+export function getDefaultModelByType(type: string): string | undefined {
+	if (!defaultModelsByType) return undefined;
+	// Case-insensitive lookup — the registry's resolveKey is case-insensitive
+	// and persisted DAG YAMLs may carry the legacy lowercase spelling.
+	const lower = type.toLowerCase();
+	for (const [k, v] of Object.entries(defaultModelsByType)) {
+		if (k.toLowerCase() === lower) return v;
+	}
+	return undefined;
+}
+
+export function setDefaultModelsByType(
+	map: Record<string, string> | undefined,
+): void {
+	// Pass undefined through as "no override" — every type falls through to
+	// AgentConfig.model. Passing `{}` is treated identically: empty map,
+	// no overrides.
+	defaultModelsByType =
+		map && Object.keys(map).length > 0 ? { ...map } : undefined;
 }
