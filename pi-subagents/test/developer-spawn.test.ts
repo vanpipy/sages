@@ -34,7 +34,7 @@ import {
 import { DEFAULT_AGENTS } from "../src/default-agents.js";
 import { makeRepoFixture, type RepoFixture } from "./_fixture.js";
 
-const CANONICAL = "developer";
+const CANONICAL = "Developer";
 const LEGACY_ALIAS = "software-developer";
 
 describe("developer-spawn: registry invariants (GC-2026-014)", () => {
@@ -43,7 +43,7 @@ describe("developer-spawn: registry invariants (GC-2026-014)", () => {
 		registerAgents(new Map());
 	});
 
-	it("registers the canonical `developer` under that exact name", () => {
+	it("registers the canonical `Developer` under that exact name", () => {
 		expect(DEFAULT_AGENTS.has(CANONICAL)).toBe(true);
 	});
 
@@ -51,8 +51,15 @@ describe("developer-spawn: registry invariants (GC-2026-014)", () => {
 		expect(DEFAULT_AGENTS.has(LEGACY_ALIAS)).toBe(false);
 	});
 
-	it("resolveType returns `developer` for the canonical spelling", () => {
-		expect(resolveType("developer")).toBe("developer");
+	it("resolveType returns `Developer` for the canonical spelling", () => {
+		expect(resolveType("Developer")).toBe("Developer");
+	});
+
+	it("resolveType is case-insensitive: legacy lowercase `developer` still resolves", () => {
+		// GC-2026-091: the canonical key is PascalCase, but persisted DAG
+		// YAMLs carry the old lowercase spelling. The resolver must keep
+		// mapping them onto the canonical name.
+		expect(resolveType("developer")).toBe("Developer");
 	});
 
 	it("resolveType returns `undefined` for the legacy spelling (alias removed in GC-2026-014)", () => {
