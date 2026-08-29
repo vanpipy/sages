@@ -1,5 +1,12 @@
 {
-  "_comment": "SAGES_TEMPLATE_V1: managed by pi-orchestrator/scripts/install.sh. pi-subagents reads toolDescriptionMode and looks up {{agentDir}}/agent-tool-description.md (installed by install.sh from pi-orchestrator/templates/agent-tool-description.md). Project-level .pi/subagents.json overrides this global; leave existing user keys intact — merge, don't replace. _sages_template_marker is a hidden key checked by uninstall_subagents_config to detect 'our install'.\n\ndefaultModelsByType: { Developer: 'anthropic/claude-opus-4', ... } — per-type model override; project subagents.json overrides global; case-insensitive lookup; slots into the agent-runner resolution chain between the hardcoded AgentConfig.model and the global settings.json#defaultProvider/defaultModel fallback (GC-2026-092).",
+  "_comment": "SAGES_TEMPLATE_V1: managed by pi-orchestrator/scripts/install.sh. pi-subagents reads toolDescriptionMode and looks up {{agentDir}}/agent-tool-description.md (installed by install.sh from pi-orchestrator/templates/agent-tool-description.md). Project-level .pi/subagents.json overrides this global; leave existing user keys intact — merge, don't replace. _sages_template_marker is a hidden key checked by uninstall_subagents_config to detect 'our install'.\n\ndefaultModelsByType: per-type model override (subagents.json); project subagents.json overrides global; case-insensitive lookup; slots into the agent-runner resolution chain between the hardcoded AgentConfig.model and the global settings.json#defaultProvider/defaultModel fallback (GC-2026-092). The defaults below ship MiniMax models (MiniMax/MiniMax-M3 for strong reasoning, minimax-m2.7-highspeed for fast/search) for every agent — see the post-merge GC-2026-092 postmortem for the rationale. To override per-project, write your own .pi/subagents.json with a different defaultModelsByType; project wins.",
   "toolDescriptionMode": "custom",
-  "_sages_template_marker": "SAGES_TEMPLATE_V1"
+  "_sages_template_marker": "SAGES_TEMPLATE_V1",
+  "defaultModelsByType": {
+    "Developer": "MiniMax/MiniMax-M3",
+    "Auditor":   "MiniMax/MiniMax-M3",
+    "Explore":   "minimax-m2.7-highspeed",
+    "Plan":      "minimax-m2.7-highspeed",
+    "Merger":    "minimax-m2.7-highspeed"
+  }
 }
