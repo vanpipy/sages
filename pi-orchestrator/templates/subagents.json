@@ -3,10 +3,10 @@
   "toolDescriptionMode": "custom",
   "_sages_template_marker": "SAGES_TEMPLATE_V1",
   "defaultModelsByType": {
-    "Developer": "MiniMax/MiniMax-M3",
-    "Auditor":   "MiniMax/MiniMax-M3",
-    "Explore":   "minimax-m2.7-highspeed",
-    "Plan":      "minimax-m2.7-highspeed",
-    "Merger":    "minimax-m2.7-highspeed"
+    "Developer": "minimax/MiniMax-M3",
+    "Auditor":   "minimax/MiniMax-M3",
+    "Explore":   "minimax/MiniMax-M2.7-highspeed",
+    "Plan":      "minimax/MiniMax-M2.7-highspeed",
+    "Merger":    "minimax/MiniMax-M2.7-highspeed"
   }
 }
