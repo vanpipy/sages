@@ -110,6 +110,7 @@ export type AgentType =
 	| "Auditor"
 	| "Explore"
 	| "Plan"
+	| "PlanCompiler"
 	| "Merger"
 	| (string & {});
 
@@ -137,6 +138,7 @@ export const DEFAULT_PER_TYPE: Record<AgentType, PerTypeDefaults> = {
 	Auditor: { deadlineMs: 20 * 60_000, maxTurns: 200 },
 	Explore: { deadlineMs: 5 * 60_000, maxTurns: 50 },
 	Plan: { deadlineMs: 5 * 60_000, maxTurns: 12 },
+	PlanCompiler: { deadlineMs: 5 * 60_000, maxTurns: 12 },
 	Merger: { deadlineMs: 5 * 60_000, maxTurns: 80 },
 };
 // Note: the Developer defaults also serve as the floor for unknown types.

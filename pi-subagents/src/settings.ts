@@ -432,7 +432,6 @@ const DEFAULT_DURATIONS_MS: Record<string, number> = {
 	developer: 20 * 60 * 1000,
 	auditor: 20 * 60 * 1000,
 	Explore: 5 * 60 * 1000,
-	Plan: 5 * 60 * 1000,
 };
 
 let durationDefaultsMs: Record<string, number> = { ...DEFAULT_DURATIONS_MS };
@@ -457,11 +456,17 @@ export function setSubagentDurationDefaults(d: Record<string, number>): void {
  *   2. per-type default via `resolveRunConfig` for canonical types
  *      (developer / auditor / explorer / merger). `resolveRunConfig`
  *      reads `DEFAULT_PER_TYPE` and honors per-type / generic env vars.
- *   3. Legacy `Explore` / `Plan` capitalized names are NOT in
- *      `DEFAULT_PER_TYPE` — fall back to `getSubagentDurationDefault`
- *      (the GC-2026-037 table that knows their 5-minute defaults).
+ *   3. Legacy `Explore` capitalized name is NOT in `DEFAULT_PER_TYPE` —
+ *      fall back to `getSubagentDurationDefault` (the GC-2026-037 table
+ *      that knows its 5-minute default).
  *   4. Unknown types fall back to the developer default (20min) via
  *      `resolveRunConfig`'s fallback semantics.
+ *
+ * GC-2026-093: removed `Plan` from this legacy branch — after
+ * GC-2026-091 added `Plan` to `DEFAULT_PER_TYPE`, the branch was
+ * redundant (Plan resolves to 5min via `resolveRunConfig`). `PlanCompiler`
+ * (the new canonical name) follows the same path. Only `Explore` still
+ * needs the legacy table.
  *
  * Signature kept stable for backward compat with existing callers
  * (index.ts executor). The body is intentionally short — the actual
@@ -474,13 +479,12 @@ export function resolveDeadlineMs(
 	if (overrideMinutes != null && overrideMinutes > 0) {
 		return Math.round(overrideMinutes * 60 * 1000);
 	}
-	// Legacy capitalized names: not in DEFAULT_PER_TYPE, would resolve
-	// to developer defaults (20min) under resolveRunConfig — too long
-	// for these short-lived agents. Use the GC-2026-037 per-type table.
-	if (type === "Explore" || type === "Plan") {
+	// Legacy capitalized name not in DEFAULT_PER_TYPE — use the GC-2026-037 table.
+	if (type === "Explore") {
 		return getSubagentDurationDefault(type);
 	}
-	// Canonical types delegate to resolveRunConfig — single source of truth.
+	// Canonical types (Developer, Auditor, Plan, PlanCompiler, Merger) delegate
+	// to resolveRunConfig — single source of truth.
 	return resolveRunConfig(type, {}, process.env).deadlineMs;
 }
 

@@ -39,8 +39,8 @@ const DEFAULT_AGENTS_FILE = join(
 
 // Built-ins that intentionally pin a model in the shipped config.
 // Explore pins anthropic/claude-haiku-4-5 for cheap read-only search;
-// Plan pins the same model with `thinking: "minimal"` so the main
-// agent's chosen reasoning model never bleeds into the plan compiler
+// PlanCompiler (formerly Plan) pins the same model with `thinking: "minimal"` so
+// the main agent's chosen reasoning model never bleeds into the plan compiler
 // (DAG-2026-017-plan-compiler). Developer and Auditor pin
 // MiniMax/MiniMax-M3 (Sages house model for implement/audit) with
 // silent fallback to the parent session's model when the registry
@@ -49,9 +49,15 @@ const DEFAULT_AGENTS_FILE = join(
 // pinning a Sonnet-class model on those would override the
 // orchestrator's choice and is a regression. (GC-2026-091: git-expert
 // removed; canonical names are PascalCase throughout.)
+//
+// GC-2026-093: `PlanCompiler` is the new canonical name for the plan
+// compiler (the agent that was called `Plan`). The literal `name:
+// "Plan",` is no longer in `default-agents.ts` — the dual-key Map entry
+// `["Plan", PLAN_AGENT]` points to the same constant whose `name` field
+// is `"PlanCompiler"`. The test extracts by the canonical name.
 const PINNED_MODEL_EXCEPTIONS = new Set([
 	"Explore",
-	"Plan",
+	"PlanCompiler",
 	"Developer",
 	"Auditor",
 ]);
@@ -126,7 +132,7 @@ describe("default-agents.ts: shipped built-in frontmatter (no third-party deps)"
 
   for (const name of [
     "Explore",
-    "Plan",
+    "PlanCompiler",
     "Developer",
     "Auditor",
   ] as const) {
