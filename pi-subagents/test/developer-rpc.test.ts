@@ -90,7 +90,7 @@ describe("developer-rpc: spawn RPC enforces the policy", () => {
 		fx = undefined;
 	});
 
-	it("returns a precise error envelope for canonical `developer` + legacy `worktree` literal", async () => {
+	it("returns a precise error envelope for canonical `Developer` + legacy `worktree` literal", async () => {
 		const requestId = "r1";
 		const reply = await new Promise<any>((resolve) => {
 			bus!.on(`subagents:rpc:spawn:reply:${requestId}`, (raw: any) =>
@@ -98,7 +98,7 @@ describe("developer-rpc: spawn RPC enforces the policy", () => {
 			);
 			bus!.emit("subagents:rpc:spawn", {
 				requestId,
-				type: "developer",
+				type: "Developer",
 				prompt: "implement the thing",
 				options: { description: "rpc spawn", isolation: "worktree" },
 			});
@@ -110,8 +110,30 @@ describe("developer-rpc: spawn RPC enforces the policy", () => {
 		expect(reply.error).toMatch(/explicit/i);
 	});
 
-	it("returns a precise error envelope for canonical `developer` without any isolation", async () => {
+	it("returns a precise error envelope for canonical `Developer` without any isolation", async () => {
 		const requestId = "r2";
+		const reply = await new Promise<any>((resolve) => {
+			bus!.on(`subagents:rpc:spawn:reply:${requestId}`, (raw: any) =>
+				resolve(raw),
+			);
+			bus!.emit("subagents:rpc:spawn", {
+				requestId,
+				type: "Developer",
+				prompt: "implement the thing",
+				options: { description: "rpc spawn" },
+			});
+		});
+		expect(reply.success).toBe(false);
+		expect(reply.error).toMatch(/developer/i);
+	});
+
+	it("accepts the legacy lowercase spelling case-insensitively (GC-2026-091)", async () => {
+		// The canonical registry key is `Developer` after GC-2026-091, but
+		// cross-extension callers (and persisted DAG YAMLs) still send
+		// `developer`. The RPC type check resolves case-insensitively, so
+		// the request reaches the managed-isolation policy instead of
+		// bouncing off an "unknown agent type" error.
+		const requestId = "r2b";
 		const reply = await new Promise<any>((resolve) => {
 			bus!.on(`subagents:rpc:spawn:reply:${requestId}`, (raw: any) =>
 				resolve(raw),
@@ -124,6 +146,7 @@ describe("developer-rpc: spawn RPC enforces the policy", () => {
 			});
 		});
 		expect(reply.success).toBe(false);
+		expect(reply.error).not.toMatch(/unknown agent type/i);
 		expect(reply.error).toMatch(/developer/i);
 	});
 
