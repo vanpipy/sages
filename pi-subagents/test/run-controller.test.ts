@@ -96,23 +96,27 @@ describe("run-controller: DEFAULT_BUCKET_TIMEOUTS_MS", () => {
 });
 
 describe("run-controller: DEFAULT_PER_TYPE", () => {
-	it("exports the four built-in types with the specified defaults", async () => {
+	it("exports the five built-in PascalCase types with the specified defaults", async () => {
 		const { DEFAULT_PER_TYPE } = await import("../src/run-controller.js");
-		expect(DEFAULT_PER_TYPE.developer).toEqual({
+		expect(DEFAULT_PER_TYPE.Developer).toEqual({
 			deadlineMs: 20 * 60_000,
-			maxTurns: 60,
+			maxTurns: 200,
 		});
-		expect(DEFAULT_PER_TYPE.auditor).toEqual({
+		expect(DEFAULT_PER_TYPE.Auditor).toEqual({
 			deadlineMs: 20 * 60_000,
-			maxTurns: 30,
+			maxTurns: 200,
 		});
-		expect(DEFAULT_PER_TYPE.explorer).toEqual({
+		expect(DEFAULT_PER_TYPE.Explore).toEqual({
 			deadlineMs: 5 * 60_000,
-			maxTurns: 20,
+			maxTurns: 50,
 		});
-		expect(DEFAULT_PER_TYPE.merger).toEqual({
+		expect(DEFAULT_PER_TYPE.Plan).toEqual({
 			deadlineMs: 5 * 60_000,
-			maxTurns: 20,
+			maxTurns: 12,
+		});
+		expect(DEFAULT_PER_TYPE.Merger).toEqual({
+			deadlineMs: 5 * 60_000,
+			maxTurns: 80,
 		});
 	});
 });
@@ -120,48 +124,48 @@ describe("run-controller: DEFAULT_PER_TYPE", () => {
 describe("run-controller: resolveRunConfig", () => {
 	it("returns DEFAULT_PER_TYPE[type] when params is empty and env is empty", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("developer", {}, {});
-		expect(cfg.type).toBe("developer");
+		const cfg = resolveRunConfig("Developer", {}, {});
+		expect(cfg.type).toBe("Developer");
 		expect(cfg.deadlineMs).toBe(20 * 60_000);
-		expect(cfg.maxTurns).toBe(60);
+		expect(cfg.maxTurns).toBe(200);
 		expect(cfg.bucketTimeoutsMs).toBeDefined();
 	});
 
 	it("params.max_duration_minutes overrides deadlineMs (positive only)", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("developer", { max_duration_minutes: 15 }, {});
+		const cfg = resolveRunConfig("Developer", { max_duration_minutes: 15 }, {});
 		expect(cfg.deadlineMs).toBe(15 * 60_000);
 
 		// Negative values fall through to default
-		const neg = resolveRunConfig("developer", { max_duration_minutes: -5 }, {});
+		const neg = resolveRunConfig("Developer", { max_duration_minutes: -5 }, {});
 		expect(neg.deadlineMs).toBe(20 * 60_000);
 
 		// Zero falls through to default
-		const zero = resolveRunConfig("developer", { max_duration_minutes: 0 }, {});
+		const zero = resolveRunConfig("Developer", { max_duration_minutes: 0 }, {});
 		expect(zero.deadlineMs).toBe(20 * 60_000);
 	});
 
 	it("params.max_turns overrides maxTurns", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("developer", { max_turns: 42 }, {});
+		const cfg = resolveRunConfig("Developer", { max_turns: 42 }, {});
 		expect(cfg.maxTurns).toBe(42);
 
 		// Zero / negative falls through
-		const zero = resolveRunConfig("developer", { max_turns: 0 }, {});
-		expect(zero.maxTurns).toBe(60);
+		const zero = resolveRunConfig("Developer", { max_turns: 0 }, {});
+		expect(zero.maxTurns).toBe(200);
 	});
 
 	it("falls back to default when params is undefined-equivalent", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("auditor", {}, {});
+		const cfg = resolveRunConfig("Auditor", {}, {});
 		expect(cfg.deadlineMs).toBe(20 * 60_000);
-		expect(cfg.maxTurns).toBe(30);
+		expect(cfg.maxTurns).toBe(200);
 	});
 
 	it("env.SAGES_PI_AGENT_BUDGET_TURNS as fallback (when params has nothing)", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
 		const env = { SAGES_PI_AGENT_BUDGET_TURNS: "42" };
-		const cfg = resolveRunConfig("explorer", {}, env);
+		const cfg = resolveRunConfig("Explore", {}, env);
 		expect(cfg.maxTurns).toBe(42);
 	});
 
@@ -171,14 +175,14 @@ describe("run-controller: resolveRunConfig", () => {
 			SAGES_PI_AGENT_BUDGET_TURNS: "42",
 			SAGES_PI_AGENT_AUDITOR_BUDGET_TURNS: "99",
 		};
-		const cfg = resolveRunConfig("auditor", {}, env);
+		const cfg = resolveRunConfig("Auditor", {}, env);
 		expect(cfg.maxTurns).toBe(99);
 	});
 
 	it("env.SAGES_PI_AGENT_BUDGET_MS as fallback for deadlineMs", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
 		const env = { SAGES_PI_AGENT_BUDGET_MS: String(7 * 60_000) };
-		const cfg = resolveRunConfig("developer", {}, env);
+		const cfg = resolveRunConfig("Developer", {}, env);
 		expect(cfg.deadlineMs).toBe(7 * 60_000);
 	});
 
@@ -188,7 +192,7 @@ describe("run-controller: resolveRunConfig", () => {
 			SAGES_PI_AGENT_BUDGET_MS: String(7 * 60_000),
 			SAGES_PI_AGENT_DEVELOPER_BUDGET_MS: String(3 * 60_000),
 		};
-		const cfg = resolveRunConfig("developer", {}, env);
+		const cfg = resolveRunConfig("Developer", {}, env);
 		expect(cfg.deadlineMs).toBe(3 * 60_000);
 	});
 
@@ -196,15 +200,15 @@ describe("run-controller: resolveRunConfig", () => {
 		const { resolveRunConfig, DEFAULT_BUCKET_TIMEOUTS_MS } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		expect(cfg.bucketTimeoutsMs).toBe(DEFAULT_BUCKET_TIMEOUTS_MS);
 	});
 
-	it("unknown type falls back to developer defaults (20min / 60turns)", async () => {
+	it("unknown type falls back to Developer defaults (20min / 200turns)", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
 		const cfg = resolveRunConfig("somerandomtype", {}, {});
 		expect(cfg.deadlineMs).toBe(20 * 60_000);
-		expect(cfg.maxTurns).toBe(60);
+		expect(cfg.maxTurns).toBe(200);
 	});
 
 	it("params take precedence over env", async () => {
@@ -214,7 +218,7 @@ describe("run-controller: resolveRunConfig", () => {
 			SAGES_PI_AGENT_DEVELOPER_BUDGET_MS: String(3 * 60_000),
 		};
 		const cfg = resolveRunConfig(
-			"developer",
+			"Developer",
 			{ max_duration_minutes: 45, max_turns: 10 },
 			env,
 		);
@@ -225,7 +229,7 @@ describe("run-controller: resolveRunConfig", () => {
 	it("carries runId and traceId when provided in params (or in env)", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
 		const cfg = resolveRunConfig(
-			"developer",
+			"Developer",
 			{},
 			{},
 			{ runId: "run-123", traceId: "trace-456" },
@@ -240,7 +244,7 @@ describe("run-controller: RunController constructor + signal", () => {
 		const { RunController, resolveRunConfig } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		const rc = new RunController(undefined, cfg);
 		expect(rc.signal).toBe(rc.abortController.signal);
 		expect(rc.signal.aborted).toBe(false);
@@ -251,7 +255,7 @@ describe("run-controller: RunController constructor + signal", () => {
 		const { RunController, resolveRunConfig } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		const parent = new AbortController();
 		const rc = new RunController(parent.signal, cfg);
 		// The composed signal must NOT be either source directly
@@ -269,7 +273,7 @@ describe("run-controller: RunController constructor + signal", () => {
 		const { RunController, resolveRunConfig } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		const rc = new RunController(undefined, cfg);
 		expect(rc.signal.aborted).toBe(false);
 		rc.cleanup();
@@ -279,7 +283,7 @@ describe("run-controller: RunController constructor + signal", () => {
 		const { RunController, resolveRunConfig } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		const parent = new AbortController();
 		parent.abort(new Error("parent-dead"));
 		const rc = new RunController(parent.signal, cfg);
@@ -295,7 +299,7 @@ describe("run-controller: signalForTool", () => {
 		const { RunController, resolveRunConfig } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		const rc = new RunController(undefined, cfg);
 		const sig = rc.signalForTool("read");
 		// Not the same as run signal (it has its own timer)
@@ -310,7 +314,7 @@ describe("run-controller: signalForTool", () => {
 			"../src/run-controller.js"
 		);
 		const cfg = {
-			type: "developer" as const,
+			type: "Developer" as const,
 			deadlineMs: 60_000,
 			maxTurns: 60,
 			bucketTimeoutsMs: DEFAULT_BUCKET_TIMEOUTS_MS,
@@ -328,7 +332,7 @@ describe("run-controller: signalForTool", () => {
 		const { RunController, resolveRunConfig } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		const rc = new RunController(undefined, cfg);
 		const sig = rc.signalForTool("read");
 		expect(sig.aborted).toBe(false);
@@ -343,7 +347,7 @@ describe("run-controller: elapsedMs", () => {
 		const { RunController, resolveRunConfig } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		const rc = new RunController(undefined, cfg);
 		const t1 = rc.elapsedMs();
 		// Sleep 10ms to ensure monotonicity
@@ -361,7 +365,7 @@ describe("run-controller: deadline + abort", () => {
 			"../src/run-controller.js"
 		);
 		const cfg = {
-			type: "developer" as const,
+			type: "Developer" as const,
 			deadlineMs: 50, // 50ms — fast for test
 			maxTurns: 60,
 			bucketTimeoutsMs: DEFAULT_BUCKET_TIMEOUTS_MS,
@@ -381,7 +385,7 @@ describe("run-controller: deadline + abort", () => {
 			"../src/run-controller.js"
 		);
 		const cfg = {
-			type: "developer" as const,
+			type: "Developer" as const,
 			deadlineMs: 100,
 			maxTurns: 60,
 			bucketTimeoutsMs: DEFAULT_BUCKET_TIMEOUTS_MS,
@@ -405,7 +409,7 @@ describe("run-controller: deadline + abort", () => {
 			"../src/run-controller.js"
 		);
 		const cfg = {
-			type: "developer" as const,
+			type: "Developer" as const,
 			deadlineMs: 30,
 			maxTurns: 60,
 			bucketTimeoutsMs: DEFAULT_BUCKET_TIMEOUTS_MS,
@@ -423,7 +427,7 @@ describe("run-controller: deadline + abort", () => {
 		const { RunController, resolveRunConfig } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		const rc = new RunController(undefined, cfg);
 		expect(rc.signal.aborted).toBe(false);
 		rc.abortController.abort(new Error("manual-abort"));
@@ -438,7 +442,7 @@ describe("run-controller: cleanup idempotency", () => {
 		const { RunController, resolveRunConfig } = await import(
 			"../src/run-controller.js"
 		);
-		const cfg = resolveRunConfig("developer", {}, {});
+		const cfg = resolveRunConfig("Developer", {}, {});
 		const rc = new RunController(undefined, cfg);
 		expect(() => rc.cleanup()).not.toThrow();
 		expect(() => rc.cleanup()).not.toThrow();

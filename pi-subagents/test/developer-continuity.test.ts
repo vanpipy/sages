@@ -71,7 +71,7 @@ import { AgentManager } from "../src/agent-manager.js";
 import { registerAgents, setDefaultsDisabled } from "../src/agent-types.js";
 import { makeRepoFixture, type RepoFixture } from "./_fixture.js";
 
-const CANONICAL = "developer";
+const CANONICAL = "Developer";
 
 describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 	let fx: RepoFixture | undefined;
