@@ -123,6 +123,41 @@ export function loadBudgetFromEnv(type: AgentType): Budget {
 }
 
 /**
+ * Bridge the registry's canonical agent type names (PascalCase: `Developer`,
+ * `Auditor`, `Explore`, `Merger`) onto the lowercase budget table keys
+ * (`developer`, `auditor`, `explorer`, `merger`). Legacy lowercase
+ * spellings pass through unchanged. Unknown / custom types fall back to
+ * the `developer` budget — the same fallback the AgentManager uses for
+ * the worktree-create isolation policy.
+ *
+ * GC-2026-091: the registry canonical names are PascalCase to match the
+ * `default-agents.ts` Map keys, but the budget table predates the rename
+ * and keeps lowercase keys. This bridge lets the dispatch path stay
+ * correct without a budget-table migration.
+ */
+export function budgetTypeFor(input: string): AgentType {
+	const lower = input.toLowerCase();
+	switch (lower) {
+		case "developer":
+		case "auditor":
+		case "explorer":
+		case "merger":
+			return lower;
+		case "explore":
+			// GC-2026-091: the registry canonical name is `Explore` (no
+			// trailing -r) to match the DEFAULT_AGENTS Map key. The budget
+			// table predates the rename and uses `explorer` (with -r).
+			// Bridge them so PascalCase dispatch lands on the right budget.
+			return "explorer";
+		default:
+			// Unknown / custom type — fall back to the developer budget
+			// so the agent gets the widest default envelope rather than
+			// an under-budgeted crash.
+			return "developer";
+	}
+}
+
+/**
  * Thrown by `BudgetTracker.tick()` when the configured budget is
  * exhausted. The error carries the handoff path the tracker wrote
  * (or attempted to write) so the orchestrator can pick up the partial

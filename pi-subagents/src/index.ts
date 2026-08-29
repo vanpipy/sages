@@ -1469,7 +1469,9 @@ Terse command-style prompts produce shallow, generic work.
 				// the unknown-type error above). The legacy `isolation:
 				// "worktree"` string literal AND missing / malformed
 				// isolation are still rejected here, BEFORE child execution.
-				if (subagentType === "developer") {
+				// GC-2026-091: the canonical registry key is PascalCase
+				// (`Developer`); compare case-insensitively.
+				if (subagentType.toLowerCase() === "developer") {
 					const policyError = enforceDeveloperManagedIsolationPolicy(
 						"developer",
 						params.isolation,

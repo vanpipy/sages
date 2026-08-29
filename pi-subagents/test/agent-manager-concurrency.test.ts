@@ -2,7 +2,7 @@
  * Per-type background concurrency — AgentManager.
  *
  * The Sages-wide policy (set in default-agents.ts and propagated here):
- *   - developer: 2, auditor: 2, Explore: 4, Plan: 2, merger: 1, git-expert: 1
+ *   - Developer: 2, Auditor: 2, Explore: 4, Plan: 2, Merger: 1
  *   - Global ceiling: 6 (max_concurrent in settings).
  *
  * These tests pin the resolution order at spawn time:
@@ -26,30 +26,30 @@ describe("AgentManager per-type concurrency", () => {
 
 	it("getMaxConcurrentByType returns a by-copy snapshot", () => {
 		const manager = new AgentManager();
-		manager.setMaxConcurrentByType({ developer: 2, auditor: 3 });
+		manager.setMaxConcurrentByType({ Developer: 2, Auditor: 3 });
 		const snap = manager.getMaxConcurrentByType();
-		expect(snap).toEqual({ developer: 2, auditor: 3 });
+		expect(snap).toEqual({ Developer: 2, Auditor: 3 });
 		// Mutating the returned snapshot must not affect internal state.
-		snap.developer = 99;
-		expect(manager.getMaxConcurrentByType().developer).toBe(2);
+		snap.Developer = 99;
+		expect(manager.getMaxConcurrentByType().Developer).toBe(2);
 		manager.dispose();
 	});
 
 	it("setMaxConcurrentByType drops invalid entries silently", () => {
 		const manager = new AgentManager();
 		manager.setMaxConcurrentByType({
-			developer: 2, // valid
-			auditor: 0, // < 1 -> dropped
+			Developer: 2, // valid
+			Auditor: 0, // < 1 -> dropped
 			planner: 1.5, // non-integer -> dropped
 			bad: "x", // wrong type -> dropped
 		} as unknown as Record<string, number>);
-		expect(manager.getMaxConcurrentByType()).toEqual({ developer: 2 });
+		expect(manager.getMaxConcurrentByType()).toEqual({ Developer: 2 });
 		manager.dispose();
 	});
 
 	it("setMaxConcurrentByType with undefined clears all overrides", () => {
 		const manager = new AgentManager();
-		manager.setMaxConcurrentByType({ developer: 2 });
+		manager.setMaxConcurrentByType({ Developer: 2 });
 		manager.setMaxConcurrentByType(undefined);
 		expect(manager.getMaxConcurrentByType()).toEqual({});
 		manager.dispose();
@@ -63,10 +63,10 @@ describe("AgentManager per-type concurrency", () => {
 			6,
 			undefined,
 			undefined,
-			(type) => (type === "developer" ? 2 : undefined),
+			(type) => (type === "Developer" ? 2 : undefined),
 		);
-		manager.setMaxConcurrentByType({ developer: 5 });
-		expect((manager as any).effectiveMaxFor("developer")).toBe(2);
+		manager.setMaxConcurrentByType({ Developer: 5 });
+		expect((manager as any).effectiveMaxFor("Developer")).toBe(2);
 		manager.dispose();
 	});
 
@@ -78,8 +78,8 @@ describe("AgentManager per-type concurrency", () => {
 			undefined,
 			() => undefined,
 		);
-		manager.setMaxConcurrentByType({ developer: 3 });
-		expect((manager as any).effectiveMaxFor("developer")).toBe(3);
+		manager.setMaxConcurrentByType({ Developer: 3 });
+		expect((manager as any).effectiveMaxFor("Developer")).toBe(3);
 		manager.dispose();
 	});
 
@@ -91,11 +91,11 @@ describe("AgentManager per-type concurrency", () => {
 
 	it("getRunningBackgroundByType returns current per-type counts", () => {
 		const manager = new AgentManager();
-		(manager as any).runningBackgroundByType.set("developer", 2);
-		(manager as any).runningBackgroundByType.set("auditor", 1);
+		(manager as any).runningBackgroundByType.set("Developer", 2);
+		(manager as any).runningBackgroundByType.set("Auditor", 1);
 		expect(manager.getRunningBackgroundByType()).toEqual({
-			developer: 2,
-			auditor: 1,
+			Developer: 2,
+			Auditor: 1,
 		});
 		manager.dispose();
 	});
@@ -108,15 +108,15 @@ describe("AgentManager per-type concurrency", () => {
 			6,
 			undefined,
 			undefined,
-			(type) => (type === "developer" ? 2 : undefined),
+			(type) => (type === "Developer" ? 2 : undefined),
 		);
 		(manager as any).runningBackground = 2;
-		(manager as any).runningBackgroundByType.set("developer", 2);
+		(manager as any).runningBackgroundByType.set("Developer", 2);
 
 		const id = manager.spawn(
 			{} as never,
 			{ cwd: process.cwd() } as never,
-			"developer",
+			"Developer",
 			"third developer",
 			{ description: "queued", isBackground: true, isolation: "current-workspace" } as never,
 		);
@@ -125,7 +125,7 @@ describe("AgentManager per-type concurrency", () => {
 			.listAgents()
 			.filter((a: any) => a.status === "queued");
 		expect(queued.length).toBe(1);
-		expect((manager as any).runningBackgroundByType.get("developer")).toBe(2);
+		expect((manager as any).runningBackgroundByType.get("Developer")).toBe(2);
 		expect((manager as any).runningBackground).toBe(2);
 		manager.dispose();
 	});
@@ -138,15 +138,15 @@ describe("AgentManager per-type concurrency", () => {
 			2,
 			undefined,
 			undefined,
-			(type) => (type === "developer" ? 4 : undefined),
+			(type) => (type === "Developer" ? 4 : undefined),
 		);
 		(manager as any).runningBackground = 2;
-		(manager as any).runningBackgroundByType.set("developer", 2);
+		(manager as any).runningBackgroundByType.set("Developer", 2);
 
 		const id = manager.spawn(
 			{} as never,
 			{ cwd: process.cwd() } as never,
-			"developer",
+			"Developer",
 			"third developer (global cap full)",
 			{ description: "queued", isBackground: true, isolation: "current-workspace" } as never,
 		);
@@ -167,10 +167,10 @@ describe("AgentManager per-type concurrency", () => {
 			6,
 			undefined,
 			undefined,
-			(type) => (type === "developer" ? 1 : undefined),
+			(type) => (type === "Developer" ? 1 : undefined),
 		);
 		(manager as any).runningBackground = 1;
-		(manager as any).runningBackgroundByType.set("developer", 1);
+		(manager as any).runningBackgroundByType.set("Developer", 1);
 
 		// bypassQueue=true means the cap check is skipped entirely. startAgent
 		// is then invoked; pi is {} so the downstream runAgent will fail, and
@@ -182,7 +182,7 @@ describe("AgentManager per-type concurrency", () => {
 			manager.spawn(
 				{} as never,
 				{ cwd: process.cwd() } as never,
-				"developer",
+				"Developer",
 				"bypass",
 				{
 					description: "bypass",

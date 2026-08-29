@@ -9,7 +9,7 @@
  *   error   → { success: false, error: string }
  */
 
-import { getAvailableTypes } from "./agent-types.js";
+import { getAvailableTypes, resolveType } from "./agent-types.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
 
 const MAX_PROMPT_BYTES = 256 * 1024;
@@ -108,7 +108,13 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
 		options?: any;
 	}>(events, "subagents:rpc:spawn", ({ type, prompt, options }) => {
 		const availableTypes = getAvailableTypes();
-		if (typeof type !== "string" || !availableTypes.includes(type)) {
+		// GC-2026-091: canonical registry keys are PascalCase. Resolve the
+		// caller-supplied spelling through the case-insensitive registry so
+		// legacy lowercase spellings (persisted DAG YAMLs, other extensions)
+		// keep working instead of bouncing off "unknown agent type".
+		const canonicalType =
+			typeof type === "string" ? resolveType(type) : undefined;
+		if (canonicalType === undefined) {
 			throw new Error(
 				`Unknown agent type "${String(type)}". Available types: ${availableTypes.join(", ")}`,
 			);
@@ -161,7 +167,9 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
 			normalizedOptions = { ...normalizedOptions, model: resolved };
 		}
 
-		return { id: manager.spawn(pi, ctx, type, prompt, normalizedOptions) };
+		return {
+			id: manager.spawn(pi, ctx, canonicalType, prompt, normalizedOptions),
+		};
 	});
 
 	const unsubStop = handleRpc<{ requestId: string; agentId: string }>(
