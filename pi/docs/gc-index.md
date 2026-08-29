@@ -21,7 +21,8 @@ coverage (postmortem or carve-out).
 | [GC-2026-089](./postmortem/GC-2026-089.md) | Defensive ToolResult wrapper for 8 orchestrator tools (prevent pi render crash) | [.pi/orchestrator/goal-GC-2026-089.yaml](../../.pi/orchestrator/goal-GC-2026-089.yaml) | [GC-2026-089.md](./postmortem/GC-2026-089.md) |
 | [GC-2026-090](./postmortem/GC-2026-090.md) | Refactor: shared `wrapRegisteredTool` helper (eliminate 8-file copy-paste wrapper) | [.pi/orchestrator/goal-GC-2026-090.yaml](../../.pi/orchestrator/goal-GC-2026-090.yaml) | [GC-2026-090.md](./postmortem/GC-2026-090.md) |
 | [GC-2026-088](./postmortem/GC-2026-088.md) | Verifier path offset — institutional coverage now real | [.pi/orchestrator/goal-GC-2026-088.yaml](../../.pi/orchestrator/goal-GC-2026-088.yaml) | [GC-2026-088.md](./postmortem/GC-2026-088.md) |
-| [GC-2026-091](./postmortem/GC-2026-091.md) | Program-level reliable plan → DAG → todo chain (auto-sync + bidirectional refs) | [.pi/orchestrator/goal-GC-2026-091.yaml](../../.pi/orchestrator/goal-GC-2026-091.yaml) | [GC-2026-091.md](./postmortem/GC-2026-091.md) |
+| [GC-2026-091](./postmortem/GC-2026-091.md) | Subagent naming PascalCase canonical + git-expert removal | [.pi/orchestrator/goal-GC-2026-091.yaml](../../.pi/orchestrator/goal-GC-2026-091.yaml) | [GC-2026-091.md](./postmortem/GC-2026-091.md) |
+| [GC-2026-092](./postmortem/GC-2026-092.md) | subagents.json defaultModelsByType (per-type model overrides) | [.pi/orchestrator/goal-GC-2026-092.yaml](../../.pi/orchestrator/goal-GC-2026-092.yaml) | [GC-2026-092.md](./postmortem/GC-2026-092.md) |
 
 ## Open / no postmortem
 
