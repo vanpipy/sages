@@ -1,17 +1,17 @@
 {
-  "_source_hash": "20b7f88ec0c96e06590ab111de6c82eadf1f1087a6aa88695fd60598ed1eef57",
-  "_generated_at": "2026-08-28T03:30:04.401Z",
+  "_source_hash": "201b16339f189e8241c9e56305ea19cabd508db3e660cb7a0ecaaca89e6bd364",
+  "_generated_at": "2026-08-29T13:35:54.037Z",
   "_source_files": [
     "../pi-subagents/src/default-agents.ts"
   ],
   "entries": [
     {
-      "id": "auditor",
+      "id": "Auditor",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": true
     },
     {
-      "id": "developer",
+      "id": "Developer",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": true
     },
@@ -21,12 +21,7 @@
       "run_in_background_default": false
     },
     {
-      "id": "git-expert",
-      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
-      "run_in_background_default": true
-    },
-    {
-      "id": "merger",
+      "id": "Merger",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": true
     },
