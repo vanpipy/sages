@@ -2,8 +2,8 @@
  * Sanity check: shipped subagent built-ins are well-formed.
  *
  * Phase A (DAG-2026-011) + Phase B (DAG-2026-011) + DAG-2026-011
- * Phase C — done: every default subagent (Explore, Plan, developer,
- * auditor) is a built-in in `pi-subagents/src/default-agents.ts`
+ * Phase C — done: every default subagent (Explore, Plan, Developer,
+ * Auditor) is a built-in in `pi-subagents/src/default-agents.ts`
  * rather than a shipped user-level template. This test now verifies
  * the empty templates/agents/ directory and pins the architectural
  * invariant via the built-in config checks.
@@ -41,18 +41,19 @@ const DEFAULT_AGENTS_FILE = join(
 // Explore pins anthropic/claude-haiku-4-5 for cheap read-only search;
 // Plan pins the same model with `thinking: "minimal"` so the main
 // agent's chosen reasoning model never bleeds into the plan compiler
-// (DAG-2026-017-plan-compiler). developer and auditor pin
+// (DAG-2026-017-plan-compiler). Developer and Auditor pin
 // MiniMax/MiniMax-M3 (Sages house model for implement/audit) with
 // silent fallback to the parent session's model when the registry
 // doesn't have it — see resolveDefaultModel in agent-runner.ts. Every
-// other built-in (merger, git-expert) inherits the parent model —
+// other built-in (Merger) inherits the parent model —
 // pinning a Sonnet-class model on those would override the
-// orchestrator's choice and is a regression.
+// orchestrator's choice and is a regression. (GC-2026-091: git-expert
+// removed; canonical names are PascalCase throughout.)
 const PINNED_MODEL_EXCEPTIONS = new Set([
 	"Explore",
 	"Plan",
-	"developer",
-	"auditor",
+	"Developer",
+	"Auditor",
 ]);
 
 it("templates/agents/ is EMPTY (no user-level subagent templates are shipped)", () => {
@@ -126,8 +127,8 @@ describe("default-agents.ts: shipped built-in frontmatter (no third-party deps)"
   for (const name of [
     "Explore",
     "Plan",
-    "developer",
-    "auditor",
+    "Developer",
+    "Auditor",
   ] as const) {
     it(`${name} config block exists with the required keys`, () => {
       const block = extractAgentBlock(name);
