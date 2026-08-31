@@ -55,6 +55,7 @@ import { extractAuditFindings, type AuditFinding } from "@sages/pi-subagents/age
 // Same cross-package pattern as extractAuditFindings above.
 import {
 	extractStructuredOutput,
+	extractStructuredOutputFromFile,
 	type SubagentOutput,
 	type SubagentOutputStatus,
 } from "@sages/pi-subagents/agent-runner";
@@ -330,7 +331,9 @@ async function initAudit(
   // the developer emitted the wired FINAL_VERDICT YAML block (P1).
   const taskReports = readTaskReports(cwd, tasks);
   const reports = readAuditReports(cwd, tasks);
-  const workflowSummary = aggregateTaskAudits(tasks, reports, taskReports);
+  // GC-2026-094 P4: thread cwd through to parseAuditReportV2 so the
+  // verdict-file fallback fires for boundary-aborted developer tasks.
+  const workflowSummary = aggregateTaskAudits(tasks, reports, taskReports, cwd);
 
   // GC-2026-070: surface the retryable-failure rollup so the orchestrator
   // sees the hint even at the compact (non-verbose) audit-init summary.
@@ -536,7 +539,11 @@ async function completeAudit(
   // — a downstream re-audit may have flipped a task from NEEDS WORK to
   // CERTIFIED between init and complete).
   const reports = readAuditReports(cwd, state.tasks);
-  const workflowSummary = aggregateTaskAudits(state.tasks, reports);
+  // GC-2026-094 P4: thread cwd through so the verdict-file fallback
+  // survives the complete path as well (init reads developer messages
+  // too; complete re-reads only the markdown audit reports — the file
+  // fallback is the only YAML source on this path).
+  const workflowSummary = aggregateTaskAudits(state.tasks, reports, undefined, cwd);
   if (verdict === "PASS" && !workflowSummary.workflowReady) {
     errors.push(
       `verdict:PASS requires all tasks certified; blocking: ${workflowSummary.blockingTasks.join(", ")}`,
@@ -820,6 +827,35 @@ export function parseDeveloperYAML(message: string | null): SubagentOutput | nul
 }
 
 /**
+ * GC-2026-094 P4: message-then-file sibling of `parseDeveloperYAML`. The
+ * developer subagent's final assistant message is the primary source, but
+ * when the loop is hard-aborted at the soft/hard turn limit the message
+ * often carries no YAML block. In that case the agent (per the
+ * `SOFT_LIMIT_STEER_MESSAGE` nudge wired in P3) writes a durable copy to
+ * `.pi/orchestrator/verdict-{task_id}.md`; we fall back to that file so
+ * the orchestrator's audit gate does not auto-fail on a missing YAML.
+ *
+ * - `parseDeveloperYAML(message)` is tried first — preserves the existing
+ *   contract (the agent's in-message verdict is authoritative when present).
+ * - `extractStructuredOutputFromFile(taskId, cwd)` is the fallback. Returns
+ *   `null` when the file does not exist or its contents cannot be parsed,
+ *   so absence of the file is indistinguishable from absence of the YAML.
+ * - When `cwd` is `undefined`, only the message path runs — keeps
+ *   `parseDeveloperYAML` semantics unchanged for callers that never opt in
+ *   to the file fallback (existing tests, e.g. orchestrator-audit-yaml).
+ */
+export function parseDeveloperYAMLWithFallback(
+  message: string | null,
+  taskId: string,
+  cwd?: string,
+): SubagentOutput | null {
+  const fromMessage = parseDeveloperYAML(message);
+  if (fromMessage !== null) return fromMessage;
+  if (cwd === undefined) return null;
+  return extractStructuredOutputFromFile(taskId, cwd);
+}
+
+/**
  * GC-2026-076 P2: YAML-preferring sibling of `parseAuditReport`. Prefers the
  * developer's structured YAML when present (populating the new
  * `developer_*` fields), but keeps the existing markdown-regex verdict path
@@ -844,11 +880,20 @@ export function parseAuditReportV2(
   taskId: string,
   content: string | null,
   developerMessage?: string | null,
+  cwd?: string,
 ): TaskAuditSummary {
   const base = parseAuditReport(taskId, content);
-  if (developerMessage == null) return base;
+  if (developerMessage == null && cwd === undefined) return base;
 
-  const parsed = parseDeveloperYAML(developerMessage);
+  // GC-2026-094 P4: when no developer message is supplied but a cwd is, the
+  // file-fallback path is the only source of developer-YAML cooperation
+  // data. parseDeveloperYAMLWithFallback handles message-then-file order
+  // for us and returns null when neither source yields a parseable block.
+  const parsed = parseDeveloperYAMLWithFallback(
+    developerMessage ?? null,
+    taskId,
+    cwd,
+  );
   if (parsed === null) return base;
 
   return {
@@ -877,13 +922,20 @@ export function aggregateTaskAudits(
 	tasks: TaskNode[],
 	reports: Map<string, string | null>,
 	developerMessages?: Map<string, string | null>,
+	cwd?: string,
 ): WorkflowAuditSummary {
 	const summaries: TaskAuditSummary[] = tasks.map((t) => {
-		if (developerMessages !== undefined) {
+		// GC-2026-094 P4: when cwd is supplied, route every task through
+		// parseAuditReportV2 so the verdict-file fallback can fire per
+		// task — even tasks whose developer message was lost to the
+		// boundary abort. When cwd is undefined, only opt-in via
+		// developerMessages (the GC-2026-076 P2 legacy path).
+		if (cwd !== undefined || developerMessages !== undefined) {
 			return parseAuditReportV2(
 				t.id,
 				reports.get(t.id) ?? null,
-				developerMessages.get(t.id) ?? null,
+				developerMessages?.get(t.id) ?? null,
+				cwd,
 			);
 		}
 		return parseAuditReport(t.id, reports.get(t.id) ?? null);
