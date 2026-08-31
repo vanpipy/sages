@@ -102,7 +102,7 @@ modes:
 
   - id: "subagent-timeout"
     name: "Sub-agent exceeded its turn or wall budget"
-    description: "The run was hard-aborted after max_turns plus grace, or after the budget tracker tripped. The partial work is on disk; the run is not resumable in place."
+    description: "The run was hard-aborted after max_turns plus grace, or after the budget tracker tripped. The partial work is on disk (commits, audit file, and — since GC-2026-094 — the verdict-{task_id}.md file when the agent follows the Boundary Discipline prompt section). The run is not resumable in place; re-dispatch with the durable artifacts as starting state."
     kind: "error"
     appliesTo: ["implement"]
     detection:
