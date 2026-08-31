@@ -454,8 +454,7 @@ describe("auditor-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
 	it("includes at least 3 bullet entries (each '- **Task**: ...')", () => {
 		expect(AUDITOR_PROMPT).toContain("## FIRST tool priorities");
 		const section =
-			AUDITOR_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ??
-			"";
+			AUDITOR_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ?? "";
 		const entries = section
 			.split("\n")
 			.filter((l) => l.trim().startsWith("- **"));
@@ -472,12 +471,71 @@ describe("auditor-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
 		// over-applying the AFT preference.
 		expect(AUDITOR_PROMPT).toContain("## FIRST tool priorities");
 		const section =
-			AUDITOR_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ??
-			"";
+			AUDITOR_PROMPT.split("## FIRST tool priorities")[1]?.split("##")[0] ?? "";
 		expect(section, "must surface bash for verification").toMatch(/bash/);
 		expect(
 			section,
 			"must name a verification command (typecheck/lint/test)",
 		).toMatch(/typecheck|lint|test/i);
+	});
+});
+
+describe("auditor-prompt: Boundary Discipline (GC-2026-094 P2)", () => {
+	// GC-2026-094 P2: in production, 3 developer + 1 auditor dispatches
+	// hit max_turns at ~60 tool_uses each. The auditor's
+	// `.pi/orchestrator/audit-{task_id}.md` is durable on disk and the
+	// orchestrator can parse the verdict from there via parseAuditReport,
+	// but the YAML verdict block in the final assistant message was lost
+	// when the loop aborted. The fix is a Boundary Discipline section
+	// that names the durable artifact, names the missing backup
+	// (`.pi/orchestrator/verdict-{task_id}.md`), and orders work so the
+	// durable file is written BEFORE the in-message YAML block is emitted.
+	//
+	// This describe pins the four invariants below. Prose may evolve;
+	// these assertions do not.
+
+	it("declares a 'Boundary Discipline' section header", () => {
+		expect(AUDITOR_PROMPT).toMatch(/^##\s+.*Boundary Discipline.*$/m);
+	});
+
+	it("names the durable verdict file path (.pi/orchestrator/verdict-{task_id}.md)", () => {
+		// The missing backup — the YAML verdict block must be mirrored to
+		// this file so extractStructuredOutput can read it from disk if
+		// the conversation loop is hard-aborted.
+		expect(AUDITOR_PROMPT).toContain(".pi/orchestrator/verdict-{task_id}.md");
+	});
+
+	it("explicitly notes that audit-{task_id}.md is already durable on disk", () => {
+		// The auditor already has ONE durable artifact (audit-{task_id}.md,
+		// written during Step 6 of the audit procedure). The section must
+		// surface this so the LLM does not duplicate the same file or
+		// skip it as a backup target.
+		expect(AUDITOR_PROMPT.toLowerCase()).toMatch(
+			/audit.*durable|already.*durable|durable.*audit/,
+		);
+	});
+
+	it("Boundary Discipline section is positioned BEFORE the YAML Final Verdict addendum", () => {
+		// The YAML block lives in the addendum header
+		// `## Final Verdict (Pinned Output Shape - GC-2026-037 T2)`.
+		// Boundary Discipline must precede it so it sets up the
+		// context for the YAML instructions.
+		const boundaryIdx =
+			AUDITOR_PROMPT.match(/^##\s+.*Boundary Discipline.*$/m)?.index ?? -1;
+		const yamlVerdictIdx =
+			AUDITOR_PROMPT.match(/^##\s+Final Verdict \(Pinned Output Shape.*$/m)
+				?.index ?? -1;
+		expect(
+			boundaryIdx,
+			"Boundary Discipline section must exist",
+		).toBeGreaterThanOrEqual(0);
+		expect(
+			yamlVerdictIdx,
+			"YAML Final Verdict addendum must exist",
+		).toBeGreaterThanOrEqual(0);
+		expect(
+			boundaryIdx,
+			"Boundary Discipline must precede the YAML Final Verdict addendum so it sets up the YAML context",
+		).toBeLessThan(yamlVerdictIdx);
 	});
 });
