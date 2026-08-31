@@ -31,6 +31,46 @@
 // parses the YAML block from every agent's final message, including the
 // auditor's. Without this section in the runtime export, the auditor
 // emits no parseable block and the audit gate fires missing_yaml_block.
+
+// GC-2026-094 P2: Boundary Discipline section.
+// Wired into AUDITOR_PROMPT just BEFORE the Final Verdict addendum so it
+// sets up the context for the YAML block below. Production postmortem
+// (GC-2026-094) showed 3 developer + 1 auditor dispatches all hit max_turns
+// at ~60 tool_uses. The audit-{task_id}.md report was already durable on
+// disk and parseAuditReport could recover the verdict from there, but the
+// YAML verdict block in the final assistant message was lost. This section
+// makes the durable backup explicit (`.pi/orchestrator/verdict-{task_id}.md`)
+// and orders work so the durable file is written BEFORE the in-message YAML
+// is emitted.
+const BOUNDARY_DISCIPLINE_SECTION = `
+## Boundary Discipline (max_turns Survival)
+
+You have a finite turn budget. The orchestrator **gracefully** steers you at the soft limit, then **hard-aborts** after \`graceTurns\` more turns.
+
+### Durability map
+
+You already have ONE durable artifact on disk: \`.pi/orchestrator/audit-{task_id}.md\` (you write it during Step 6 of the audit procedure, before the final message). The orchestrator parses the \`**Final Verdict**\` line and \`## Concerns\` bullets from that file even if the conversation loop is aborted — that's the audit's truth source.
+
+### The missing backup: the YAML verdict block
+
+The YAML block at the end of your final message is the **only** piece of structured output not yet on disk. Write the same YAML block to \`.pi/orchestrator/verdict-{task_id}.md\` AS YOU COMPLETE each criterion — not just at the end. If the loop aborts mid-final-message, that file is durable and \`extractStructuredOutput\` will read it from disk.
+
+### Order work by durability
+
+1. **First**: re-run every \`verification_cmd\` (the SCs' PASS/FAIL matrix is the durable content of the audit-{task_id}.md).
+2. **Second**: write the audit-{task_id}.md report — this lands on disk before your final message.
+3. **Last**: emit the YAML verdict block. Mirror it to \`.pi/orchestrator/verdict-{task_id}.md\` for the file-fallback path.
+
+### When the soft-limit steer fires
+
+Treat the orchestrator's one-shot nudge as your deadline. Within \`graceTurns\` more turns the hard abort fires:
+
+- Finish the audit-{task_id}.md report (already durable).
+- Mirror the YAML verdict to \`.pi/orchestrator/verdict-{task_id}.md\`.
+- THEN emit the YAML block in your final message (best-effort).
+
+Do **NOT** start new SCs, run new verification commands, or open new findings after the steer fires. Close the loop on what you have.
+`;
 const FINAL_VERDICT_ADDENDUM = `
 ## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
 
@@ -352,6 +392,8 @@ AUDIT: .pi/orchestrator/audit-P5.md
 EVIDENCE: typecheck 0 errors, lint 0 warnings, 14/14 tests pass, SC1-SC5 all PASS
 CONCERNS: UserRepository.findByEmail() not covered by tests (test gap, not a fail)
 \`\`\`
+
+${BOUNDARY_DISCIPLINE_SECTION}
 
 ${FINAL_VERDICT_ADDENDUM}
 `;
