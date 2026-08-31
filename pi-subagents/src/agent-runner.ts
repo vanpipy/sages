@@ -173,6 +173,32 @@ export const SUBAGENT_TOOL_NAMES = {
 const EXCLUDED_TOOL_NAMES: string[] = Object.values(SUBAGENT_TOOL_NAMES);
 
 /**
+ * GC-2026-094 P3: soft-limit steer message.
+ *
+ * Fired once when the agent first crosses `maxTurns`. Tells the agent
+ * that the hard abort fires in `graceTurns` more turns, and gives a
+ * specific wrap-up recipe:
+ *
+ *   1. Commit pending work to the worktree branch (durable).
+ *   2. Write the YAML verdict block to
+ *      `.pi/orchestrator/verdict-{task_id}.md` — the file-fallback
+ *      path so the orchestrator can still parse the verdict even if
+ *      the loop aborts before the final assistant message lands.
+ *   3. Emit the YAML block in the final message.
+ *
+ * Explicitly forbids starting new tests / refactors / exploration after
+ * this nudge. Exported so the boundary-survival test can pin the literal
+ * `.pi/orchestrator/verdict-{task_id}.md` token.
+ */
+export const SOFT_LIMIT_STEER_MESSAGE =
+	"You have reached your soft turn limit. The hard abort fires in `graceTurns` more turns. " +
+	"Wrap up NOW by: (1) committing any pending work to your worktree branch, " +
+	"(2) writing your YAML verdict block to `.pi/orchestrator/verdict-{task_id}.md` " +
+	"(the file-fallback path so the orchestrator can still parse it if the loop aborts), " +
+	"(3) emitting the YAML block in your final message. " +
+	"Do NOT start new tests, new refactors, or new exploration after this nudge.";
+
+/**
  * Canonical name of an extension for `extensions: [...]` allowlist matching.
  * Lowercased — extension names match case-insensitively so `extensions: [Mcp]`
  * resolves the same as `[mcp]`. Tool names within `ext:foo/bar` are not affected.
@@ -1132,9 +1158,7 @@ export async function runAgent(
 			if (maxTurns != null) {
 				if (!softLimitReached && turnCount >= maxTurns) {
 					softLimitReached = true;
-					session.steer(
-						"You have reached your turn limit. Wrap up immediately — provide your final answer now.",
-					);
+					session.steer(SOFT_LIMIT_STEER_MESSAGE);
 				} else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
 					aborted = true;
 					session.abort();
@@ -1640,6 +1664,31 @@ export function extractStructuredOutput(text: string): SubagentOutput | null {
 		openQuestions: asOpenQuestions(raw.open_questions),
 		handoffForNextTask: asHandoffs(raw.handoff_for_next_task),
 	};
+}
+
+/**
+ * GC-2026-094 P3: file-fallback for the final-message YAML block. If the
+ * agent's final assistant message has no YAML block (because the loop
+ * was aborted at the soft/hard turn limit), fall back to reading
+ * `.pi/orchestrator/verdict-{task_id}.md` from the worktree cwd.
+ *
+ * Returns `null` when the file does not exist or its contents cannot be
+ * parsed. The orchestrator can call this after `extractStructuredOutput`
+ * returns null on the final message; if either returns a parsed shape
+ * the verdict survives the boundary.
+ */
+export function extractStructuredOutputFromFile(
+	taskId: string,
+	cwd: string,
+): SubagentOutput | null {
+	const path = join(cwd, ".pi", "orchestrator", `verdict-${taskId}.md`);
+	let content: string;
+	try {
+		content = readFileSync(path, "utf8");
+	} catch {
+		return null;
+	}
+	return extractStructuredOutput(content);
 }
 
 /**
