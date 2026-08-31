@@ -1,6 +1,6 @@
 {
-  "_source_hash": "f58c77ea171b130ee943c2100b875a79335f2d11d41ddc02cd80acc3a5d355b4",
-  "_generated_at": "2026-08-29T15:21:43.417Z",
+  "_source_hash": "4d3afa99b60adb602b65ebe9f4160c7563116137b9473ebef256615e86111db7",
+  "_generated_at": "2026-08-31T10:12:04.650Z",
   "_source_files": [
     "src/orchestrator-audit.ts",
     "src/goal-contract.ts"
