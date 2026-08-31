@@ -595,3 +595,72 @@ describe("developer-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
 		expect(section, "must reference ctx_").toMatch(/ctx_/);
 	});
 });
+
+describe("developer-prompt: Boundary Discipline (GC-2026-094 P1)", () => {
+	// GC-2026-094 P1: 3 Developer + 1 Auditor all triggered max_turns abort
+	// at ~60 tool_uses. Substantive output (commits / audit-{task_id}.md)
+	// landed on disk, but the YAML verdict block in the final assistant
+	// message was lost. We bake "max_turns survival" discipline into the
+	// prompt so future agents:
+	//   1. order work by durability (commit-then-cleanup),
+	//   2. write the verdict to a durable file AS the work completes
+	//      (not only at the end), and
+	//   3. stop opening new work when the soft-limit steer fires.
+	// The prose may evolve; the four invariants below pin the contract.
+
+	function sectionIndex(name: string): number {
+		const re = new RegExp(`^##\\s+.*${name}.*$`, "m");
+		const m = DEVELOPER_PROMPT.match(re);
+		return m?.index ?? -1;
+	}
+
+	it("declares a 'Boundary Discipline' section header", () => {
+		// The section header must be a `## ...` line so it parses as
+		// a real section, not a passing mention.
+		expect(DEVELOPER_PROMPT).toMatch(/^##\s+.*Boundary Discipline.*$/m);
+	});
+
+	it("names the durable verdict path (.pi/orchestrator/verdict-{task_id}.md)", () => {
+		// The whole point of the section: write the YAML verdict to a
+		// file path the orchestrator can read even when the final
+		// assistant message is truncated by max_turns.
+		expect(DEVELOPER_PROMPT).toContain(".pi/orchestrator/verdict-{task_id}.md");
+	});
+
+	it("pins the commit-then-cleanup ordering rule", () => {
+		// The durability ordering must be stated explicitly. Either
+		// the literal "commit-then-cleanup" or the equivalent "commit
+		// before cleanup" phrasing is acceptable — the rule must
+		// appear in prose, not just be implied by structure.
+		expect(DEVELOPER_PROMPT).toMatch(
+			/commit-then-cleanup|commit.*before.*cleanup|core commit/i,
+		);
+	});
+
+	it("'Boundary Discipline' sits AFTER 'Checkpoint Protocol' and BEFORE 'Final Verdict'", () => {
+		// Positioning is part of the contract: the section is the
+		// bridge from the checkpoint/commit discipline into the final
+		// verdict — its prose references both and therefore must
+		// appear between them.
+		const checkpointIdx = sectionIndex("Checkpoint Protocol");
+		const boundaryIdx = sectionIndex("Boundary Discipline");
+		const verdictIdx = sectionIndex("Final Verdict");
+		expect(
+			checkpointIdx,
+			"'Checkpoint Protocol' must exist",
+		).toBeGreaterThanOrEqual(0);
+		expect(
+			boundaryIdx,
+			"'Boundary Discipline' must exist",
+		).toBeGreaterThanOrEqual(0);
+		expect(verdictIdx, "'Final Verdict' must exist").toBeGreaterThanOrEqual(0);
+		expect(
+			boundaryIdx,
+			"'Boundary Discipline' must come AFTER 'Checkpoint Protocol'",
+		).toBeGreaterThan(checkpointIdx);
+		expect(
+			boundaryIdx,
+			"'Boundary Discipline' must come BEFORE 'Final Verdict'",
+		).toBeLessThan(verdictIdx);
+	});
+});
