@@ -24,6 +24,7 @@ coverage (postmortem or carve-out).
 | [GC-2026-091](./postmortem/GC-2026-091.md) | Subagent naming PascalCase canonical + git-expert removal | [.pi/orchestrator/goal-GC-2026-091.yaml](../../.pi/orchestrator/goal-GC-2026-091.yaml) | [GC-2026-091.md](./postmortem/GC-2026-091.md) |
 | [GC-2026-092](./postmortem/GC-2026-092.md) | subagents.json defaultModelsByType (per-type model overrides) | [.pi/orchestrator/goal-GC-2026-092.yaml](../../.pi/orchestrator/goal-GC-2026-092.yaml) | [GC-2026-092.md](./postmortem/GC-2026-092.md) |
 | [GC-2026-093](./postmortem/GC-2026-093.md) | Subagent rename: Plan → PlanCompiler (clarify role as compiler, not planner) | [.pi/orchestrator/goal-GC-2026-093.yaml](../../.pi/orchestrator/goal-GC-2026-093.yaml) | [GC-2026-093.md](./postmortem/GC-2026-093.md) |
+| [GC-2026-094](./postmortem/GC-2026-094.md) | Sub-agent max_turns boundary survival: durable verdict file + commit-then-cleanup order | [.pi/orchestrator/goal-GC-2026-094.yaml](../../.pi/orchestrator/goal-GC-2026-094.yaml) | [GC-2026-094.md](./postmortem/GC-2026-094.md) |
 
 ## Open / no postmortem
 
