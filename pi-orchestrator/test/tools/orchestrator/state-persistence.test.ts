@@ -76,12 +76,12 @@ describe(".pi/orchestrator namespace ownership", () => {
     expect(classifyOrchestratorNamespace("audit-workflow.md")).toBe("orchestrator");
     expect(classifyOrchestratorNamespace("task-P1-report.md")).toBe("developer");
     expect(classifyOrchestratorNamespace("handoff/W1/P1-handoff.md")).toBe("developer");
-    expect(classifyOrchestratorNamespace("audit-P1.md")).toBe("auditor");
+    expect(classifyOrchestratorNamespace("audit-DAG-1-P1.md")).toBe("auditor");
   });
 
   it("rejects cross-namespace overwrite attempts and unowned names", () => {
     expect(() => assertOrchestratorNamespaceOwner("task-P1-report.md", "orchestrator")).toThrow(/owned by developer/i);
-    expect(() => assertOrchestratorNamespaceOwner("audit-P1.md", "developer")).toThrow(/owned by auditor/i);
+    expect(() => assertOrchestratorNamespaceOwner("audit-DAG-1-P1.md", "developer")).toThrow(/owned by auditor/i);
     expect(() => assertOrchestratorNamespaceOwner("goal-GC-test.yaml", "auditor")).toThrow(/owned by orchestrator/i);
     expect(() => assertOrchestratorNamespaceOwner("misc.txt", "developer")).toThrow(/unowned/i);
   });

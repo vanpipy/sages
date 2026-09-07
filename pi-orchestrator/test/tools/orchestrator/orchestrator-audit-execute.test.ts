@@ -104,8 +104,9 @@ function writePlan(plan: OrchestrationPlan) {
 	);
 }
 
-function writeTaskReport(taskId: string, verdict: "CERTIFIED" | "NEEDS WORK" | "BLOCKED") {
-	const path = join(cwd, ".pi", "orchestrator", `audit-${taskId}.md`);
+function writeTaskReport(planId: string, taskId: string, verdict: "CERTIFIED" | "NEEDS WORK" | "BLOCKED") {
+	// GC-2026-coupon-nonhit-block follow-up: audit-{dag_id}-{task_id}.md
+	const path = join(cwd, ".pi", "orchestrator", `audit-${planId}-${taskId}.md`);
 	writeFileSync(
 		path,
 		`# Audit Report: ${taskId}\n\n## Final Verdict\n\n**${verdict}**\n\n## Concerns\n\n- none\n`,
@@ -126,8 +127,8 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			const t2 = makeTask("P2", { subagent_type: "developer", batch: 2, depends_on: ["P1"] });
 			const plan = makePlan([t1, t2]);
 			writePlan(plan);
-			writeTaskReport("P1", "CERTIFIED");
-			writeTaskReport("P2", "CERTIFIED");
+			writeTaskReport(plan.id, "P1", "CERTIFIED");
+			writeTaskReport(plan.id, "P2", "CERTIFIED");
 
 			const r = parseResult(
 				await executeOrchestratorAudit({ dag_id: plan.id }, { cwd }),
@@ -156,7 +157,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
-			writeTaskReport("P1", "CERTIFIED");
+			writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 			// init → record one finding → complete (all in task scope so the
 			// persisted audit_identity stays bound to scope=task/scope_key=P1
@@ -182,7 +183,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			);
 
 			const declared = r.report_path;
-			expect(declared).toBe(join(cwd, ".pi", "orchestrator", "audit-P1.md"));
+			expect(declared).toBe(join(cwd, ".pi", "orchestrator", `audit-${plan.id}-P1.md`));
 			expect(existsSync(declared)).toBe(true);
 		});
 
@@ -190,7 +191,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
-			writeTaskReport("P1", "CERTIFIED");
+			writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 			await executeOrchestratorAudit({ dag_id: plan.id, batch: 1 }, { cwd });
 			await executeOrchestratorAudit(
@@ -213,7 +214,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			);
 
 			const declared = r.report_path;
-			expect(declared).toBe(join(cwd, ".pi", "orchestrator", "audit-1.md"));
+			expect(declared).toBe(join(cwd, ".pi", "orchestrator", `audit-${plan.id}-1.md`));
 			expect(existsSync(declared)).toBe(true);
 		});
 
@@ -221,7 +222,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
-			writeTaskReport("P1", "CERTIFIED");
+			writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 			await executeOrchestratorAudit({ dag_id: plan.id }, { cwd });
 			await executeOrchestratorAudit(
@@ -252,7 +253,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
-			writeTaskReport("P1", "CERTIFIED");
+			writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 			await executeOrchestratorAudit({ dag_id: plan.id }, { cwd });
 			const r = parseResult(
@@ -287,7 +288,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
-			writeTaskReport("P1", "CERTIFIED");
+			writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 			await executeOrchestratorAudit({ dag_id: plan.id }, { cwd });
 			const r = parseResult(
@@ -338,7 +339,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
-			writeTaskReport("P1", "CERTIFIED");
+			writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 			await executeOrchestratorAudit({ dag_id: plan.id }, { cwd });
 			const r = parseResult(
@@ -363,7 +364,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
-			writeTaskReport("P1", "CERTIFIED");
+			writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 			await executeOrchestratorAudit({ dag_id: plan.id }, { cwd });
 			await executeOrchestratorAudit(
@@ -394,7 +395,7 @@ describe("executeOrchestratorAudit (execute-path)", () => {
 			const t1 = makeTask("P1", { batch: 1 });
 			const plan = makePlan([t1]);
 			writePlan(plan);
-			writeTaskReport("P1", "CERTIFIED");
+			writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 			await executeOrchestratorAudit({ dag_id: plan.id }, { cwd });
 			await executeOrchestratorAudit(

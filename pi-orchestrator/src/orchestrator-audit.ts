@@ -5,7 +5,7 @@
  *
  * A3 split: per-task audit (re-run verification_cmd, inspect diff, check TDD
  * discipline) is delegated to the `auditor` subagent, which writes
- * `.pi/orchestrator/audit-{task_id}.md`. This tool pools those per-task
+ * `.pi/orchestrator/audit-{dag_id}-{task_id}.md`. This tool pools those per-task
  * reports and aggregates them into a workflow-level view — focusing on
  * cross-task consistency, SC coverage, and integration-level concerns.
  *
@@ -330,7 +330,7 @@ async function initAudit(
   // developer_files_changed / developer_status on the workflow summary when
   // the developer emitted the wired FINAL_VERDICT YAML block (P1).
   const taskReports = readTaskReports(cwd, tasks);
-  const reports = readAuditReports(cwd, tasks);
+  const reports = readAuditReports(cwd, plan, tasks);
   // GC-2026-094 P4: thread cwd through to parseAuditReportV2 so the
   // verdict-file fallback fires for boundary-aborted developer tasks.
   const workflowSummary = aggregateTaskAudits(tasks, reports, taskReports, cwd);
@@ -393,7 +393,7 @@ async function initAudit(
           subagent_type: t.subagent_type,
           acceptance_covers: t.acceptance.covers,
           self_check_cmd: t.acceptance.self_check_cmd,
-          report_path: taskAuditPath(cwd, t.id),
+          report_path: taskAuditPath(cwd, plan.id, t.id),
         })),
       } : {}),
     }) }],
@@ -538,7 +538,7 @@ async function completeAudit(
   // Re-read the per-task reports to compute workflowReady (always fresh
   // — a downstream re-audit may have flipped a task from NEEDS WORK to
   // CERTIFIED between init and complete).
-  const reports = readAuditReports(cwd, state.tasks);
+  const reports = readAuditReports(cwd, state.plan, state.tasks);
   // GC-2026-094 P4: thread cwd through so the verdict-file fallback
   // survives the complete path as well (init reads developer messages
   // too; complete re-reads only the markdown audit reports — the file
@@ -615,7 +615,7 @@ async function completeAudit(
   // (C1: report_path returned must equal the file actually written).
   const reportRelative = state.identity.scope === "workflow"
     ? WORKFLOW_AUDIT
-    : `${TASK_AUDIT_PREFIX}${state.identity.scope_key}.md`;
+    : `${TASK_AUDIT_PREFIX}${state.dag_id}-${state.identity.scope_key}.md`;
   const reportPath = join(cwd, ORCHESTRATOR_DIR, reportRelative);
   const result: OrchestratorAuditResult = {
     verdict,
@@ -1079,10 +1079,10 @@ export function runInlineGovernanceCheck(
  * This is the A3 glue: the orchestrator_audit tool at workflow level reads
  * auditor's per-task reports rather than re-running the audit.
  */
-function readAuditReports(cwd: string, tasks: TaskNode[]): Map<string, string | null> {
+function readAuditReports(cwd: string, plan: OrchestrationPlan, tasks: TaskNode[]): Map<string, string | null> {
 	const reports = new Map<string, string | null>();
 	for (const t of tasks) {
-		const path = taskAuditPath(cwd, t.id);
+		const path = taskAuditPath(cwd, plan.id, t.id);
 		if (existsSync(path)) {
 			try {
 				reports.set(t.id, readFileSync(path, "utf-8"));
