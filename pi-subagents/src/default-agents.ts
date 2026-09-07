@@ -31,6 +31,12 @@ const DEVELOPER_BUILTIN_TOOLS: readonly string[] = [
 	"ls",
 	"edit",
 	"write",
+	// GC-2026-coupon-nonhit-block follow-up (Path A): personal todowrite.
+	// Not in pi-coding-agent's BUILTIN_TOOL_NAMES; registered by
+	// runAgent via registerPersonalTodowriteTools(pi, {cwd: effectiveCwd}).
+	// Bypasses the typo check via the same-name entries in agent-types.ts.
+	"todowrite",
+	"todowrite_progress",
 ];
 
 /**
@@ -110,6 +116,8 @@ const AUDITOR_AGENT: AgentConfig = {
 		"against acceptance criteria using TDD evidence (test output, typecheck, " +
 		"lint, command results). Default verdict is NEEDS WORK unless overwhelming " +
 		"proof is provided.",
+	// GC-2026-coupon-nonhit-block follow-up (Path A): same personal todowrite
+	// set as Developer — audits also have multi-step verification flows.
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
 	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
 	// Symmetric with `developer`: the auditor is read-only on production

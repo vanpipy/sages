@@ -22,8 +22,19 @@ import type { AgentConfig } from "./types.js";
  */
 export const BUILTIN_TOOL_NAMES: string[] = [
 	...new Set(
-		[...createCodingTools("."), ...createReadOnlyTools(".")].map((t) => t.name),
+		[
+			...createCodingTools("."),
+			...createReadOnlyTools("."),
+		].map((t) => t.name),
 	),
+	// GC-2026-coupon-nonhit-block follow-up (Path A): personal todowrite.
+	// Registered by runAgent via registerPersonalTodowriteTools(pi, {cwd}).
+	// Listed here so the typo check (agent-runner.ts:898) accepts the names
+	// when they appear in an agent's `builtinToolNames`. The runtime tool
+	// instance is NOT derived from createCodingTools/createReadOnlyTools —
+	// these names only carry the allowlist-acceptance semantics.
+	"todowrite",
+	"todowrite_progress",
 ];
 
 /** Unified runtime registry of all agents (defaults + user-defined). */

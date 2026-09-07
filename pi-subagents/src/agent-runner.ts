@@ -44,6 +44,7 @@ import { ResourceMonitor, type ResourceSnapshot } from "./resource-monitor.js";
 import type { RunController } from "./run-controller.js";
 import { getDefaultModelByType, getNetworkAllowedDefault } from "./settings.js";
 import { preloadSkills } from "./skill-loader.js";
+import { registerPersonalTodowriteTools } from "./tools/personal-todowrite-tool.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 import { toolDisplayName } from "./ui/agent-widget.js";
 
@@ -687,6 +688,16 @@ export async function runAgent(
 	const networkAllowed =
 		options.network_allowed ?? getNetworkAllowedDefault(type);
 	const pi = wrapPiForNetworkGate(options.pi, networkAllowed);
+
+	// GC-2026-coupon-nonhit-block follow-up (Path A): register the personal
+	// todowrite tools on this agent's pi instance before session creation.
+	// The tools scope storage to `effectiveCwd` (resolved below) so Developer
+	// and Auditor sharing a worktree see the same list across calls within
+	// the dispatch. Tool names must also be in BUILTIN_TOOL_NAMES
+	// (updated in default-agents.ts) so the typo check below accepts them.
+	if (typeof (pi as { registerTool?: unknown }).registerTool === "function") {
+		registerPersonalTodowriteTools(pi, { cwd: effectiveCwd });
+	}
 
 	const env = await detectEnv(pi, effectiveCwd);
 
