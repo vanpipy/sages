@@ -71,8 +71,8 @@ function writePlan(plan: OrchestrationPlan) {
 	);
 }
 
-function writeTaskReport(taskId: string, verdict: "CERTIFIED" | "NEEDS WORK" | "BLOCKED") {
-	const path = join(cwd, ".pi", "orchestrator", `audit-${taskId}.md`);
+function writeTaskReport(planId: string, taskId: string, verdict: "CERTIFIED" | "NEEDS WORK" | "BLOCKED") {
+	const path = join(cwd, ".pi", "orchestrator", `audit-${planId}-${taskId}.md`);
 	writeFileSync(
 		path,
 		`# Audit Report: ${taskId}\n\n## Final Verdict\n\n**${verdict}**\n\n## Concerns\n\n- none\n`,
@@ -91,7 +91,7 @@ describe("orchestrator_audit init summary-by-default (GC-2026-063)", () => {
 		const t1 = makeTask("P1", { batch: 1 });
 		const plan = makePlan([t1]);
 		writePlan(plan);
-		writeTaskReport("P1", "CERTIFIED");
+		writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 		const r = parseResult(
 			await executeOrchestratorAudit({ dag_id: plan.id }, { cwd }),
@@ -115,7 +115,7 @@ describe("orchestrator_audit init summary-by-default (GC-2026-063)", () => {
 		const t1 = makeTask("P1", { batch: 1 });
 		const plan = makePlan([t1]);
 		writePlan(plan);
-		writeTaskReport("P1", "CERTIFIED");
+		writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 		const r = parseResult(
 			await executeOrchestratorAudit({ dag_id: plan.id, verbose: true }, { cwd }),
@@ -135,7 +135,7 @@ describe("orchestrator_audit init summary-by-default (GC-2026-063)", () => {
 		const t1 = makeTask("P1", { batch: 1 });
 		const plan = makePlan([t1]);
 		writePlan(plan);
-		writeTaskReport("P1", "CERTIFIED");
+		writeTaskReport(plan.id, "P1", "CERTIFIED");
 
 		await executeOrchestratorAudit({ dag_id: plan.id }, { cwd });
 		const r = parseResult(

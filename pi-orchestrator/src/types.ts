@@ -418,9 +418,13 @@ export function taskReportPath(cwd: string, taskId: string): string {
 	return `${cwd}/${ORCHESTRATOR_DIR}/${TASK_REPORT_PREFIX}${taskId}-report.md`;
 }
 
-/** Returns the path for a task audit report. */
-export function taskAuditPath(cwd: string, taskId: string): string {
-	return `${cwd}/${ORCHESTRATOR_DIR}/${TASK_AUDIT_PREFIX}${taskId}.md`;
+/** Returns the path for a task audit report.
+ * GC-2026-coupon-nonhit-block follow-up: namespace-prefixed with dag_id to
+ * avoid cross-DAG collision when multiple DAGs use the same task_id
+ * (e.g. P1) — Auditor writes to audit-{dag_id}-{task_id}.md, the
+ * orchestrator_audit tool reads them via readAuditReports. */
+export function taskAuditPath(cwd: string, dagId: string, taskId: string): string {
+	return `${cwd}/${ORCHESTRATOR_DIR}/${TASK_AUDIT_PREFIX}${dagId}-${taskId}.md`;
 }
 
 /** Returns the path for a todowrite YAML (GC-2026-074). */

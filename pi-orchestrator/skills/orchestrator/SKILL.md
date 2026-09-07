@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Orchestrate multi-task workflows via 4-stage DAG (goal → decompose → dispatch → audit). Coordinates `developer` (canonical) and `auditor` subagents for execution.
+description: Orchestrate multi-task workflows via 4-stage DAG (goal → decompose → dispatch → audit). Coordinates `Developer` (canonical) and `Auditor` subagents for execution.
 ---
 
 # Orchestrator - Multi-Task Workflow Coordinator
@@ -44,8 +44,8 @@ before implementation dispatch.
 |-------|----------------------|--------------------------------------|---------------------|----------------------------------------------------------------------------------|
 | 1     | `Explore`            | **pi-subagents built-in**            | `false`             | "Where is X?" / "find all callers of Y" / pure codebase search                    |
 | 2     | `PlanCompiler`       | **pi-subagents built-in**            | `false`             | Compiles the main agent's Planning Brief; bounded read-only helper, not an architecture stage. |
-| 3     | `developer`         | **shipped** (pi-subagents built-in) | **`true`**          | Write production code + tests in a managed worktree, strict TDD                    |
-| 4     | `auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
+| 3     | `Developer`         | **shipped** (pi-subagents built-in) | **`true`**          | Write production code + tests in a managed worktree, strict TDD                    |
+| 4     | `Auditor`   | **shipped** (this repo)              | **`true`**          | Certify Stage 3's work — re-run every verification_cmd, read-only on production   |
 | Cross-workspace merge verification | `merger (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatched by the orchestrator after DAG synthesis detects cross-workspace file overlap; reads both diffs, classifies, produces merge commit or escalates hunk-conflict. |
 | Git inspection / archaeology | `git-expert (pi-subagents built-in)` | **pi-subagents built-in** | **`true`**          | Dispatch when `git worktree add` fails, conflict preview is needed before merger, a commit appears lost, a bisect is required, branch hygiene is requested, or another subagent needs a runnable git procedure (see "When to dispatch git-expert" below). Read-only on production code; writes confined to `.pi/git-scratch-<task_id>-<suffix>/`. |
 
@@ -54,7 +54,7 @@ before implementation dispatch.
 > **DAG-2026-011 Phase C**: the `general-purpose` subagent was removed.
 > Ad-hoc research that doesn't fit a specific role should be done in
 > the main session (soft mode grants full tool access by default) or
-> by combining Stages 1 (`Explore`) and 2 (`Plan`). The `developer`
+> by combining Stages 1 (`Explore`) and 2 (`Plan`). The `Developer`
 > agent handles design-doc writes for design tasks; Stages 3-4 are
 > specialised on purpose.
 
@@ -129,8 +129,8 @@ For each batch (1 → N):
 1. Read the dispatch plan from task_dispatch output (or rebuild if needed)
 2. Spawn subagents in parallel (one Agent tool call per task in the batch):
    - Use run_in_background: true when batch has >1 task
-   - For `developer` tasks: use `isolation: { dag_id: DAG_ID, task_id: TASK_ID, mode: "create" }` (managed worktree object required by the Agent dispatcher)
-   - For other subagents (`auditor` / `Explore` / `Plan`): no `isolation` field (operate in dispatcher cwd)
+   - For `Developer` tasks: use `isolation: { dag_id: DAG_ID, task_id: TASK_ID, mode: "create" }` (managed worktree object required by the Agent dispatcher)
+   - For other subagents (`Auditor` / `Explore` / `Plan`): no `isolation` field (operate in dispatcher cwd)
    - The subagent receives its task's prompt from the dispatch plan
 3. Wait for all tasks in the batch to complete (get_subagent_result)
 4. Run orchestrator_audit({ dag_id, batch }) to verify the batch
@@ -144,15 +144,15 @@ When dispatching via the `Agent` tool, pick the right subagent type:
 
 | Task | Subagent | `isolation` |
 |--- |--- |--- |
-| Meta-file edits / design-doc writes (no code) | `developer` (with `tdd: none`) | `"current-workspace"` (no worktree; agent operates in dispatcher's cwd) — OR `{ dag_id, task_id, mode: "create" }` if a worktree is genuinely needed (e.g. parallel batch isolation) |
-| Production-code TDD work | `developer` (legacy alias: `developer`) | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
-| Serial follow-up in same workspace (multi-task DAG) | `developer` | `{ dag_id, task_id, mode: "reuse" }` (reuses the prior slot) |
-| Audit / evidence collection | `auditor` (alias: `auditor`) | none |
+| Meta-file edits / design-doc writes (no code) | `Developer` (with `tdd: none`) | `"current-workspace"` (no worktree; agent operates in dispatcher's cwd) — OR `{ dag_id, task_id, mode: "create" }` if a worktree is genuinely needed (e.g. parallel batch isolation) |
+| Production-code TDD work | `Developer` (legacy alias: `Developer`) | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
+| Serial follow-up in same workspace (multi-task DAG) | `Developer` | `{ dag_id, task_id, mode: "reuse" }` (reuses the prior slot) |
+| Audit / evidence collection | `Auditor` (alias: `Auditor`) | none |
 | Quick read-only search | `Explore` | none (built-in) |
 | Planning Brief compilation | `Plan` | none (built-in) |
 | Git inspection / backtrack / cross-subagent recipe | `git-expert` | none (read-only on production code; writes in `.pi/git-scratch-<task_id>-<suffix>/`) |
 
-The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. The `developer` agent now accepts three explicit isolation modes: `{ dag_id, task_id, mode: "create" }` (fresh worktree, default for production code), `{ dag_id, task_id, mode: "reuse" }` (re-enter existing worktree for serial follow-ups), or `"current-workspace"` (no worktree, agent runs in dispatcher's cwd — the explicit opt-out for meta-file edits and design-doc writes). `isolation: undefined` is rejected; every dispatch must name one.
+The legacy `isolation: "worktree"` string literal is **rejected** by the current Agent dispatcher. The `Developer` agent now accepts three explicit isolation modes: `{ dag_id, task_id, mode: "create" }` (fresh worktree, default for production code), `{ dag_id, task_id, mode: "reuse" }` (re-enter existing worktree for serial follow-ups), or `"current-workspace"` (no worktree, agent runs in dispatcher's cwd — the explicit opt-out for meta-file edits and design-doc writes). `isolation: undefined` is rejected; every dispatch must name one.
 
 #### When to dispatch `git-expert`
 
@@ -166,7 +166,7 @@ ad-hoc Git reasoning in chat. Concretely:
 | "Commit X is missing" / ref appears broken after a rebase / reset / branch delete | No procedure | `scenario: lost-commit` — fsck + reflog + recovery plan inside scratch |
 | "When did bug Y appear?" / "find the first bad commit" | Main agent does ad-hoc `git log -S` | `scenario: bisect` — runnable `git bisect run` script returned |
 | Periodic prune review (stale branches, orphaned worktrees, unreferenced tags) | Skip | `scenario: branch-hygiene` — prune candidate list (orchestrator executes deletes) |
-| Another subagent (`developer`, `merger`) needs a step-by-step git procedure | Inline hand-waving in dispatch prompt | `scenario: git-recipe-for-<role>` — format-pinned recipe with pre-conditions / steps / failure modes / verify / forbidden |
+| Another subagent (`Developer`, `merger`) needs a step-by-step git procedure | Inline hand-waving in dispatch prompt | `scenario: git-recipe-for-<role>` — format-pinned recipe with pre-conditions / steps / failure modes / verify / forbidden |
 
 `git-expert` is read-only on production code (no `edit` / `write` tools; all
 writes happen via `bash` inside `.pi/git-scratch-<task_id>-<suffix>/`,
@@ -177,7 +177,7 @@ don't guess. For DAG dispatch, set `task_template: "subagent-git-expert"`
 use `subagent_type: "git-expert"`. Full brief format and recognized
 scenarios are documented inline in the `git-expert` agent prompt.
 
-> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains extension-free bash. Under soft mode the bash-guard no longer blocks, so `isolated: true` is rarely needed; it remains available for subagents that explicitly require extension-free execution. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, handle directly in the main session (soft mode grants full tool access) or use the `auditor` agent with `isolated: true`.
+> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains extension-free bash. Under soft mode the bash-guard no longer blocks, so `isolated: true` is rarely needed; it remains available for subagents that explicitly require extension-free execution. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, handle directly in the main session (soft mode grants full tool access) or use the `Auditor` agent with `isolated: true`.
 
 ### Parallelism
 
@@ -187,12 +187,12 @@ When dispatching multiple sub-tasks for a single workflow stage:
 // ✓ one message, multiple background calls
 Agent({ subagent_type: "Explore", prompt: "...", run_in_background: true })
 Agent({ subagent_type: "Explore", prompt: "...", run_in_background: true })
-Agent({ subagent_type: "developer", isolation: {...}, prompt: "...", run_in_background: true })
+Agent({ subagent_type: "Developer", isolation: {...}, prompt: "...", run_in_background: true })
 ```
 
 Don't serialize when tasks are independent. Foreground is the default for `Explore`/`Plan` because the system expects these to be short helper tasks where the result feeds the next decision — use it deliberately for that case.
 
-Background is the default for `developer`/`auditor` (5-10 min TDD / audit) — collect results via notification or `get_subagent_result()`.
+Background is the default for `Developer`/`Auditor` (5-10 min TDD / audit) — collect results via notification or `get_subagent_result()`.
 
 ### When NOT to parallelize
 
@@ -210,7 +210,7 @@ The orchestrator's recent commit chain was all serial foreground — and that wa
 ```ts
 // Meta-file edit / design-doc write (developer in current workspace, no worktree)
 Agent({
-  subagent_type: "developer",
+  subagent_type: "Developer",
   isolation: "current-workspace",
   tdd: "none",
   prompt: "Edit AGENTS.md to add Z. Read first, edit, report diff.",
@@ -218,11 +218,11 @@ Agent({
 })
 
 // Meta-file edit that needs worktree isolation (e.g. parallel batch)
-Agent({ subagent_type: "developer", isolation: { dag_id, task_id, mode: "create" }, tdd: "none", prompt: "Write .pi/orchestrator/task-P3-design.md ...", run_in_background: true })
+Agent({ subagent_type: "Developer", isolation: { dag_id, task_id, mode: "create" }, tdd: "none", prompt: "Write .pi/orchestrator/task-P3-design.md ...", run_in_background: true })
 
 // Production-code TDD (developer + worktree)
 Agent({
-  subagent_type: "developer",
+  subagent_type: "Developer",
   isolation: { dag_id: <dag-id>, task_id: <task-id>, mode: "create" },
   prompt: "...",
   run_in_background: true,
@@ -230,14 +230,14 @@ Agent({
 
 // Serial follow-up in same workspace (reuse existing worktree)
 Agent({
-  subagent_type: "developer",
+  subagent_type: "Developer",
   isolation: { dag_id: <dag-id>, task_id: <task-id>, mode: "reuse" },
   prompt: "...",
   run_in_background: true,
 })
 
 // Audit (auditor)
-Agent({ subagent_type: "auditor", prompt: "...", run_in_background: true })
+Agent({ subagent_type: "Auditor", prompt: "...", run_in_background: true })
 
 // Git inspection / archaeology / cross-subagent recipe (git-expert)
 // Brief must carry task_id + scenario + repo_root; git-expert returns
@@ -260,8 +260,8 @@ Agent({
 The DAG's batch numbers should *roughly* follow the pipeline order, but batching is for parallelism within a stage, not across:
 - Batch 1 (research): one or more `Explore` tasks in parallel — discover all the things you'll need before planning
 - Batch 2 (planning): one or more `Plan` tasks, each consuming research outputs from Batch 1
-- Batches 3+ (implementation): one or more `developer` tasks per batch (managed-worktree-isolated, TDD)
-- Final batch (verification): one or more `auditor` tasks, each auditing a discrete chunk of implementation
+- Batches 3+ (implementation): one or more `Developer` tasks per batch (managed-worktree-isolated, TDD)
+- Final batch (verification): one or more `Auditor` tasks, each auditing a discrete chunk of implementation
 
 **For batch 1 specifically**:
 ```
@@ -337,7 +337,7 @@ diverges from the result.
 
 **Why A3 split?** Per-task audit (re-run verification_cmd, inspect diff, check
 TDD discipline) was duplicated 80% between `orchestrator_audit` and
-`auditor`. Now: auditor = per-task expert; orchestrator_audit
+`Auditor`. Now: auditor = per-task expert; orchestrator_audit
 = workflow-level aggregator. Zero overlap.
 
 **Audit tool call count (fast depth, batched findings)**:
@@ -392,7 +392,7 @@ orchestrator dispatches the dedicated `merger` sub-agent:
 - verifies the merged result with typecheck + lint + the merged test suite
   (not per-workspace tests).
 
-The `auditor` continues to verify **per-task** commits; the `merger` verifies
+The `Auditor` continues to verify **per-task** commits; the `merger` verifies
 the **cross-workspace** merge result.
 ```
 
@@ -419,12 +419,12 @@ This canonical text is mirrored byte-for-byte in
 **Process governance (built into orchestrator — no separate sage tools)**:
 - Design → `dag_synthesize` (typed goal contracts + DAGs replace ad-hoc MDD drafts)
 - Review → `goal_contract_create` (binary SC pass/fail replaces score-gating)
-- TDD execution → delegated to `developer` subagent (foreground until dispatch lands)
-- Audit → `orchestrator_audit` (workflow-level rollup; A3 split — per-task detail handled by `auditor`)
+- TDD execution → delegated to `Developer` subagent (foreground until dispatch lands)
+- Audit → `orchestrator_audit` (workflow-level rollup; A3 split — per-task detail handled by `Auditor`)
 
 **Write (delegated only — do NOT edit production code directly)**:
 - `edit`, `write` — only for orchestrator metadata in .pi/orchestrator/
-- Everything else → delegate to `developer` subagent
+- Everything else → delegate to `Developer` subagent
 
 ## Prompt Templates (auto-rendered)
 
@@ -448,7 +448,7 @@ The orchestrator can reference reusable prompt templates instead of writing ever
 | `subagent-explore` | Explore | Read-only enforcement + findings.json output schema |
 
 (`subagent-general-purpose` was removed in DAG-2026-011 Phase C. The
-canonical `auditor` template is `subagent-auditor`; the
+canonical `Auditor` template is `subagent-auditor`; the
 alias `subagent-auditor` is the Phase B canonical name.)
 
 ### Goal templates (copy fields into `goal_contract_create`)
@@ -509,7 +509,7 @@ recommended pattern remains the 4-stage DAG workflow for
 
 You do NOT (recommended):
 - Edit production code directly when your active todowrite has
-  >2 items (dispatch `developer` with managed worktree instead)
+  >2 items (dispatch `Developer` with managed worktree instead)
 - Re-decompose after dispatch (use steer_subagent or re-run with force)
 - Override the goal contract without user re-prompt
 - Skip stages when complexity warrants (recommended: 1 → 2 → 3 → 4)

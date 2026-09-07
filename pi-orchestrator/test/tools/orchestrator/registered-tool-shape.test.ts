@@ -447,7 +447,7 @@ describe("orchestrator_audit registered-tool shape (GC-2026-089)", () => {
 		const plan = makePlan("DAG-shape-audit", [makeTask("P1")]);
 		writePlan(plan);
 		writeFileSync(
-			join(cwd, ".pi", "orchestrator", "audit-P1.md"),
+			join(cwd, ".pi", "orchestrator", "audit-DAG-1-P1.md"),
 			"# Audit Report: P1\n\n## Final Verdict\n\n**CERTIFIED**\n\n",
 			"utf-8",
 		);

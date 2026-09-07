@@ -19,7 +19,7 @@ beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), "sages-audit-identity-"));
   mkdirSync(join(cwd, ".pi/orchestrator"), { recursive: true });
   writeFileSync(join(cwd, ".pi/orchestrator/dag-DAG-test.yaml"), yaml.dump(plan), "utf8");
-  writeFileSync(join(cwd, ".pi/orchestrator/audit-P1.md"), "# Audit\n\n## Final Verdict\n\n**CERTIFIED**\n", "utf8");
+  writeFileSync(join(cwd, ".pi/orchestrator/audit-DAG-test-P1.md"), "# Audit\n\n## Final Verdict\n\n**CERTIFIED**\n", "utf8");
 });
 afterEach(() => rmSync(cwd, { recursive: true, force: true }));
 const parse = (r: any) => JSON.parse(r.content[0].text);

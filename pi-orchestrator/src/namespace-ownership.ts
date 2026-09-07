@@ -16,7 +16,12 @@ const DEVELOPER_PATTERNS = [
   new RegExp(`^task-${SAFE_SEGMENT}-report\\.md$`),
   new RegExp(`^handoff/${SAFE_SEGMENT}/${SAFE_SEGMENT}-handoff\\.md$`),
 ];
-const AUDITOR_PATTERNS = [new RegExp(`^audit-${SAFE_SEGMENT}\\.md$`)];
+/** GC-2026-coupon-nonhit-block follow-up: audit-{dag_id}-{task_id}.md
+ * The dag_id segment is part of the path so concurrent DAGs (e.g. with P1/P2
+ * reused across goals) don't collide on shared filenames. */
+const AUDITOR_PATTERNS = [
+	new RegExp(`^audit-${SAFE_SEGMENT}-${SAFE_SEGMENT}\\.md$`),
+];
 
 function normalizeOwnedPath(path: string): string {
   if (!path || path.includes("\0") || path.includes("\\") || path.startsWith("/") || path.endsWith("/")) {

@@ -19,13 +19,13 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
 2. **Production code uses managed-worktree dispatch.** RECOMMENDED for
    `src/`, `test/`, `lib/`, every `pi-*/` subpackage
    (pi-orchestrator, pi-subagents, pi-codebase-memory, pi-evaluator),
-   or any root source file: dispatch `developer` with
+   or any root source file: dispatch `Developer` with
    `isolation: { dag_id, task_id, mode: "create" }` and use TDD. For ≤2-item
    workflows direct editing is also acceptable.
 3. **Root meta-files use current-workspace dispatch (lightweight).** For
    root-level docs and config (`.pi/orchestrator/*`, `.pi/agents/*`,
    `.claude/`, `.codex/`, root `README.md`, `AGENTS.md`, `package.json`,
-   `tsconfig*.json`, `.gitignore`, `.aft.jsonc`), dispatch `developer` with
+   `tsconfig*.json`, `.gitignore`, `.aft.jsonc`), dispatch `Developer` with
    `isolation: "current-workspace"` and `tdd: "none"`; review the diff before
    committing. Direct editing in the main session is also acceptable for
    ≤2-item workflows. **Every Sages package subtree (every `pi-*/`)
@@ -48,11 +48,11 @@ Load `pi/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 |---|---:|---|---|
 | `Explore` | no | Bounded, read-only search | none |
 | `Plan` | no | Compile a Planning Brief already decided by main | none |
-| `developer` | yes | TDD implementation or meta-file writing | explicit object or `"current-workspace"` |
-| `auditor` | yes | Re-run verification and certify evidence | read-only |
+| `Developer` | yes | TDD implementation or meta-file writing | explicit object or `"current-workspace"` |
+| `Auditor` | yes | Re-run verification and certify evidence | read-only |
 | `git-expert` | yes | Senior git inspection / backtrack / cross-subagent recipes | read-only (writes in `.pi/git-scratch-<task_id>-<suffix>/`) |
 
-Two additional built-ins extend the roster when needed: `merger` handles
+Two additional built-ins extend the roster when needed: `Merger` handles
 cross-workspace DAG merges (read-only inspection, writes only merge
 commits into a scratch branch) and `git-expert` performs deep git
 inspection, worktree / branch / merge diagnostics, and produces
@@ -215,7 +215,7 @@ recommendation mechanism is the profile-driven **dag_threshold**:
   `dag_threshold: 2`), the recommended pattern is
   the 4-stage DAG workflow (`goal_contract_create` → `dag_synthesize` →
   `task_dispatch` → `orchestrator_audit`) — or, equivalently, dispatching
-  `developer` with managed-worktree isolation for production code. The
+  `Developer` with managed-worktree isolation for production code. The
   TDD discipline, worktree isolation, and auditor evidence gate all
   pay off at this scale.
 - If your active `todowrite` has **≤2 items**, direct handling with
@@ -232,11 +232,54 @@ specific write actions as "production code". Drift is never blocked.
 There is **no previous-enforcement toggle** (no hard-mode toggle,
 no path gate). Soft mode is the only mode.
 
+## Orchestrator manual takeover (soft-mode contract — GC-2026-coupon-nonhit-block follow-up)
+
+When a dispatched subagent (typically `Developer` or `Auditor`) fails
+due to a runtime mismatch (e.g. tool-not-found Provider 400, network
+drop, partial output), the orchestrator is **expected to take over**
+the in-flight task. This is part of the soft-mode contract, not a
+fallback.
+
+### When to take over
+
+- The subagent's first tool call returns `Tool <name> not found` and the
+  provider aborts with `400 invalid_request_error: tool_use.input should
+  be a valid dictionary`.
+- The subagent loops without committing after two consecutive
+  `[checkpoint N/200]` reports.
+- The subagent emits `BLOCKED` without an actionable recovery plan.
+
+### How to take over
+
+1. **TDD discipline still applies** — write the failing test (RED),
+   confirm it fails for the right reason, then the minimum
+   implementation (GREEN), then refactor.
+2. **Read the agent's partial output** (transcript at
+   `/tmp/pi-subagents-*/.../tasks/<agent_id>.output`) before continuing.
+3. **Commit on the worker's worktree branch** if the dispatch used
+   `isolation: { mode: "create" }` — orchestrator-side commits land
+   directly on the worker's branch. If the dispatch used
+   `"current-workspace"`, commits land on the orchestrator's branch.
+4. **Record findings** in the dispatch's task report file
+   (`.pi/orchestrator/task-{task_id}-report.md`) with a `developer_commits`
+   list — the audit pipeline reads this to verify evidence.
+5. **Mark the task as completed** in the todo view and run
+   `orchestrator_audit` to advance to the next batch.
+
+### Why this is a contract, not a workaround
+
+Subagent templates and runtimes drift independently. A prompt template
+that references a tool not yet registered in the runtime will reliably
+abort. The orchestrator's job in soft mode is to **keep the workflow
+moving**, not to fail closed on a subagent hiccup. A successful takeover
+that lands the same commits is operationally equivalent to a successful
+subagent dispatch.
+
 ## Red lines
 
 1. **Subagent dispatch is RECOMMENDED for >2-item workflows.** When your
    active `todowrite` has more than two items, prefer the 4-stage DAG
-   workflow or dispatch `developer` with managed-worktree isolation
+   workflow or dispatch `Developer` with managed-worktree isolation
    (for production code) or `isolation: "current-workspace"` + `tdd:
    "none"` (for meta-file edits). The main agent may handle ≤2 tasks
    directly with `edit` / `write` / `bash`. The bash-guard is advisory
@@ -244,18 +287,18 @@ no path gate). Soft mode is the only mode.
    `cp` / `unlink` / `rmdir`).
 2. **Never use `isolation: "worktree"`.** Use the explicit managed-worktree
    object or `"current-workspace"`.
-3. **Never omit `developer` isolation.** Every developer dispatch must choose an
+3. **Never omit `Developer` isolation.** Every developer dispatch must choose an
    explicit mode.
 4. **Respect `.pi/orchestrator/` namespace ownership.** Subagents may write
    only their role-owned task report, handoff, or audit paths; they must not
    overwrite orchestrator workflow state.
 5. **Avoid destructive git operations** such as path checkout, hard reset,
    clean, or force push. Under soft mode these are no longer hard-blocked;
-   dispatch `developer` for an audit trail on complex workflows.
+   dispatch `Developer` for an audit trail on complex workflows.
 6. **Never use an unregistered task template.** Only `subagent-developer`,
    `subagent-auditor`, and `subagent-explore` are valid.
 7. **Never use an unregistered subagent type.** Valid types are `Explore`,
-   `Plan`, `developer`, `auditor`, and `merger`.
+   `Plan`, `Developer`, `Auditor`, and `Merger`.
 8. **Never self-declare workflow `PASS`.** Supply findings and let
    `orchestrator_audit` apply the evidence gate.
 9. **Never commit with `--no-verify`.** Repository hooks must run.

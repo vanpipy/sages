@@ -18,7 +18,7 @@ import type { AgentConfig } from "./types.js";
  *
  * The canonical `auditor` agent shares this set: \`edit\` / \`write\` are
  * available for the auditor's single allowed write target
- * (\`.pi/orchestrator/audit-{task_id}.md\`), and \`read\` / \`bash\` /
+ * (\`.pi/orchestrator/audit-{dag_id}-{task_id}.md\`), and \`read\` / \`bash\` /
  * \`grep\` / \`find\` / \`ls\` carry the verify-only re-run loop. The
  * auditor prompt itself enforces "no production edits" — the tools are
  * present, the policy is the prompt's job.
@@ -100,7 +100,7 @@ const DEVELOPER_AGENT: AgentConfig = {
  *
  * No managed-worktree policy: \`enforceDeveloperManagedIsolationPolicy\`
  * is `developer`-only. The auditor is read-only on the developer's
- * worktree and writes only to \`.pi/orchestrator/audit-{task_id}.md\`.
+ * worktree and writes only to \`.pi/orchestrator/audit-{dag_id}-{task_id}.md\`.
  */
 const AUDITOR_AGENT: AgentConfig = {
 	name: "Auditor",
