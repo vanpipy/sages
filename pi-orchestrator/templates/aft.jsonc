@@ -19,10 +19,22 @@
 
 	// ─── Feature flags ───────────────────────────────────────────────────────
 	// Without these, AFT runs in "degraded" mode (verified 2026-07-19):
+	//   - tool_surface: "recommended" (default) → aft_callgraph / aft_delete /
+	//                   aft_move / aft_refactor are NOT registered, only
+	//                   aft_outline / aft_zoom / aft_safety / aft_import /
+	//                   aft_conflicts / aft_inspect (and aft_search when
+	//                   semantic_search is also enabled). Switch to "all" to
+	//                   surface the full nav + refactor suite — the Sages
+	//                   constitution calls for aft_callgraph in particular.
 	//   - search_index: false → every grep is a full scan instead of trigram lookup
-	//   - semantic_search: false → no embedding-based concept search
+	//   - semantic_search: false → aft_search is not registered; this is the
+	//                   root cause of the recurring `Tool aft_search not
+	//                   found` reports in Sages sessions (verified 2026-09-08).
+	//                   First activation downloads the local ONNX model
+	//                   (~25 MB all-MiniLM-L6-v2); subsequent boots reuse it.
 	//   - validate_on_edit: "off" → writes/edits skip syntax check (catches typos later)
 	// ─────────────────────────────────────────────────────────────────────────
+	"tool_surface": "all",
 	"search_index": true,
 	"semantic_search": true,
 	"validate_on_edit": "syntax",
