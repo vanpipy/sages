@@ -4,7 +4,7 @@
  *
  * GC-2026-092: gives users a project-local + global way to override the
  * hardcoded `AgentConfig.model` pin (e.g. switch `Developer` from
- * `MiniMax/MiniMax-M3` to `anthropic/claude-opus-4`) without forking the
+ * `minimax-cn/MiniMax-M3` to `anthropic/claude-opus-4`) without forking the
  * package. The override slots into the resolution chain between the
  * `AgentConfig.model` hardcoded default and the global
  * `settings.json#defaultProvider/defaultModel` fallback.
