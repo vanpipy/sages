@@ -42,7 +42,7 @@ const DEFAULT_AGENTS_FILE = join(
 // PlanCompiler (formerly Plan) pins the same model with `thinking: "minimal"` so
 // the main agent's chosen reasoning model never bleeds into the plan compiler
 // (DAG-2026-017-plan-compiler). Developer and Auditor pin
-// MiniMax/MiniMax-M3 (Sages house model for implement/audit) with
+// minimax-cn/MiniMax-M3 (Sages house model for implement/audit) with
 // silent fallback to the parent session's model when the registry
 // doesn't have it — see resolveDefaultModel in agent-runner.ts. Every
 // other built-in (Merger) inherits the parent model —

@@ -111,7 +111,7 @@ export interface SubagentsSettings {
 	 * same Model. Values are `provider/model` strings (e.g. `"anthropic/claude-opus-4"`).
 	 *
 	 * GC-2026-092: slots into the resolution chain between the hardcoded
-	 * `AgentConfig.model` pin (e.g. developer/auditor → MiniMax/MiniMax-M3)
+	 * `AgentConfig.model` pin (e.g. developer/auditor → minimax-cn/MiniMax-M3)
 	 * and the global `settings.json#defaultProvider/defaultModel` fallback.
 	 * Project subagents.json overrides global; absence means "use the
 	 * hardcoded default" — never silently substitutes a different model.
