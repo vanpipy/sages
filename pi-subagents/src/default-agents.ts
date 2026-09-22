@@ -71,10 +71,10 @@ const DEVELOPER_AGENT: AgentConfig = {
 	maxTurns: 200,
 	// Default model + per-type cap (part of the Sages-wide concurrency policy:
 	// 2 concurrent developers is the supported DAG fan-out). When
-	// MiniMax/MiniMax-M3 is not in the user's registry, agent-runner.
+	// minimax-cn/MiniMax-M3 is not in the user's registry, agent-runner.
 	// resolveDefaultModel silently falls back to the parent session's model
 	// (the user chose the parent's model at session start; trust it).
-	model: "MiniMax/MiniMax-M3",
+	model: "minimax-cn/MiniMax-M3",
 	maxConcurrent: 2,
 };
 
@@ -133,11 +133,11 @@ const AUDITOR_AGENT: AgentConfig = {
 	// override via Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
 	// Default model + per-type cap (developer: 2 / auditor: 2 are part of the
-	// Sages-wide concurrency policy). When MiniMax/MiniMax-M3 is not in the
+	// Sages-wide concurrency policy). When minimax-cn/MiniMax-M3 is not in the
 	// user's registry, agent-runner.resolveDefaultModel silently falls back to
 	// the parent session's model — see AgentManager.effectiveMaxFor() for the
 	// cap merge order.
-	model: "MiniMax/MiniMax-M3",
+	model: "minimax-cn/MiniMax-M3",
 	maxConcurrent: 2,
 };
 
