@@ -42,7 +42,14 @@
     "node": ">=20"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.70.5"
+    "@earendil-works/pi-coding-agent": "^0.99.1",
+    "@earendil-works/pi-ai": "^0.99.1",
+    "@earendil-works/pi-tui": "^0.99.1"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.99.1",
+    "@earendil-works/pi-ai": "^0.99.1",
+    "@earendil-works/pi-tui": "^0.99.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

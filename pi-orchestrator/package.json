@@ -11,6 +11,7 @@
     "verify:namespace-ownership": "bun run scripts/verify-namespace-ownership.ts",
     "verify:soft-mode-mental-model": "bun run scripts/verify-soft-mode-mental-model.ts",
     "verify:gcdb": "bun run scripts/verify-gcdb.ts",
+    "verify:pi-universe": "bun run scripts/verify-pi-universe.ts",
     "gen:catalog": "bun run scripts/gen-catalog.ts"
   },
   "keywords": [
@@ -33,11 +34,10 @@
     ],
     "themes": []
   },
-  "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.70.5"
-  },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.70.5",
+    "@earendil-works/pi-coding-agent": "^0.99.1",
+    "@earendil-works/pi-ai": "^0.99.1",
+    "@earendil-works/pi-tui": "^0.99.1",
     "@sages/pi-subagents": "file:../pi-subagents",
     "js-yaml": "^5.2.0",
     "typebox": "^1.1.34"

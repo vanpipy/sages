@@ -19,7 +19,7 @@
  * TypeBox via the same import path as the rest of pi-subagents.
  */
 
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import {
 	loadTodos,
 	saveTodos,

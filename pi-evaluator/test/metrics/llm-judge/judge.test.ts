@@ -7,7 +7,7 @@
  *   - defaultJudgeFn: integration test via bun's mock.module('@mariozechner/pi-ai')
  *   - seam: setJudgeFn/getJudgeFn/clearJudgeFn round-trip + data_missing propagation
  */
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { parseJudgeReply } from "../../../src/metrics/llm-judge/judge.ts";
 import * as seam from "../../../src/metrics/llm-judge/seam.ts";
@@ -109,7 +109,7 @@ describe("defaultJudgeFn integration (mocked pi-ai)", () => {
 
 	test("calls complete() with right model + context, returns parsed score", async () => {
 		const completeCalls: unknown[] = [];
-		mock.module("@mariozechner/pi-ai", () => ({
+		mock.module("@earendil-works/pi-ai/compat", () => ({
 			complete: async (_model: unknown, ctx: unknown) => {
 				completeCalls.push(ctx);
 				return { content: [{ type: "text", text: '{"score": 0.77, "rationale": "ok"}' }] };
@@ -130,7 +130,7 @@ describe("defaultJudgeFn integration (mocked pi-ai)", () => {
 	});
 
 	test("missing API key → throws (seam converts to data_missing)", async () => {
-		mock.module("@mariozechner/pi-ai", () => ({
+		mock.module("@earendil-works/pi-ai/compat", () => ({
 			complete: async () => ({ content: [{ type: "text", text: "x" }] }),
 			getModel: () => ({ id: "x" }),
 			getEnvApiKey: () => undefined,
