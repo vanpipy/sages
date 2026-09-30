@@ -1,15 +1,10 @@
 {
-  "_source_hash": "1450b1d5e5d7fee0670ad0b7cefd7b6d95ac04b96777a3c4e647795751970fb0",
-  "_generated_at": "2026-09-30T18:23:35.954Z",
+  "_source_hash": "adf8c17b4bb11f906c1676b55ad16ab0606b53ef0db10970a6ab28a93f16aae5",
+  "_generated_at": "2026-09-30T18:27:00.052Z",
   "_source_files": [
     "../pi-subagents/src/default-agents.ts"
   ],
   "entries": [
-    {
-      "id": "auditor",
-      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
-      "run_in_background_default": true
-    },
     {
       "id": "Developer",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
