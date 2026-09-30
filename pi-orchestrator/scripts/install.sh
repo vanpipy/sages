@@ -308,6 +308,34 @@ except Exception as e:
 # ────────────────────────────────────────────────────────────
 
 write_codebase_memory_mcp_config() {
+  local target="$PI_DIR/agent/mcp-adapter.json"
+
+  # NEVER-TOUCH policy: if mcp-adapter.json already exists (the user
+  # created it manually, or a prior install populated it), leave it
+  # alone. The user owns this file.
+  if [[ -f "$target" ]]; then
+    echo "  Skipped $target (already exists, user-customized — preserved as-is)"
+    return 0
+  fi
+
+  mkdir -p "$PI_DIR/agent"
+
+  # Migration from pi 0.98 to 0.99: pi-mcp-adapter now reads
+  # mcp-adapter.json instead of mcp.json. If the user already has
+  # mcp.json with their own MCP server entries (goodluck-data,
+  # MiniMax, etc.), use it as the source — that way every server
+  # they configured is visible to pi-mcp-adapter, not just the
+  # codebase-memory-mcp that comes with sages.
+  if [[ -f "$PI_DIR/agent/mcp.json" ]]; then
+    cp "$PI_DIR/agent/mcp.json" "$target"
+    echo "  Wrote $target from existing mcp.json (preserves all user servers)"
+    echo "  Hint: pi-mcp-adapter no longer reads mcp.json. You can"
+    echo "    safely delete ~/.pi/agent/mcp.json once you have confirmed"
+    echo "    every server entry is in $target."
+    return 0
+  fi
+
+  # No mcp.json either — fall back to the bundled template.
   local template=""
   if [[ -f "$PI_CODEBASE_MEMORY_DEST_DIR/templates/mcp.json" ]]; then
     template="$PI_CODEBASE_MEMORY_DEST_DIR/templates/mcp.json"
@@ -316,18 +344,6 @@ write_codebase_memory_mcp_config() {
   fi
   [[ -z "$template" ]] && { echo "  Warning: codebase-memory-mcp mcp.json template not found"; return 0; }
 
-  # NEVER-TOUCH policy: install.sh only writes mcp-adapter.json on
-  # first install; afterwards, the file is user-owned and untouched
-  # on every rerun. The user's existing ~/.pi/agent/mcp.json (used
-  # by the built-in mcp extension) is also left alone — sage does not
-  # own it.
-  local target="$PI_DIR/agent/mcp-adapter.json"
-  if [[ -f "$target" ]]; then
-    echo "  Skipped $target (already exists, user-customized — preserved as-is)"
-    return 0
-  fi
-
-  mkdir -p "$PI_DIR/agent"
   cp "$template" "$target"
   echo "  Wrote $target from template"
 }
