@@ -1,6 +1,6 @@
 {
-  "_source_hash": "f4239da065931577cc34f6152435c4a4b4ee10e87b191bf28b16082093c785ea",
-  "_generated_at": "2026-09-30T17:47:09.765Z",
+  "_source_hash": "4b9a6d3b63115581dc48c8a7e81e026da70bd1bd170052251af2728059288322",
+  "_generated_at": "2026-09-30T17:48:06.171Z",
   "_source_files": [
     "src/observability/events.ts"
   ],
@@ -8,18 +8,6 @@
     {
       "name": "GoalCreated",
       "id": "run/goal_created",
-      "domain": "run",
-      "source": "src/observability/events.ts"
-    },
-    {
-      "name": "DagSynthesized",
-      "id": "run/dag_synthesized",
-      "domain": "run",
-      "source": "src/observability/events.ts"
-    },
-    {
-      "name": "DispatchStarted",
-      "id": "run/dispatch_started",
       "domain": "run",
       "source": "src/observability/events.ts"
     }
