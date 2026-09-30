@@ -328,9 +328,14 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 	//    across re-runs (file-read is cheap; the orchestrator only sees
 	//    this event once per session).
 	pi.on("before_agent_start", (event: any) => {
-		if (!existsSync(SYSTEM_PROMPT_TEMPLATE)) return;
+		if (!existsSync(SYSTEM_PROMPT_TEMPLATE)) return undefined;
 		const overlay = readFileSync(SYSTEM_PROMPT_TEMPLATE, "utf-8");
-		event.systemPrompt = overlay + "\n\n---\n\n" + (event.systemPrompt ?? "");
+		// pi 0.99 made event.systemPrompt a readonly getter — the
+		// replacement value goes in the BeforeAgentStartEventResult
+		// return shape, not on the event itself.
+		return {
+			systemPrompt: overlay + "\n\n---\n\n" + (event.systemPrompt ?? ""),
+		};
 	});
 
 	// 3. tool_call — fire the soft-mode reminder once per session on the

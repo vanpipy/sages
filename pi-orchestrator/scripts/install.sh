@@ -294,7 +294,17 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
-# codebase-memory-mcp: mcp.json merge + binary download
+# codebase-memory-mcp: mcp-adapter.json write + binary download
+#
+# pi 0.99 split MCP server config into two files:
+#   ~/.pi/agent/mcp.json         — read by the built-in 'mcp' extension
+#   ~/.pi/agent/mcp-adapter.json — read by the npm:pi-mcp-adapter
+#
+# Sages ships pi-mcp-adapter (it registers the /mcp command and takes
+# precedence over the built-in mcp extension), so the
+# codebase-memory-mcp server entry has to land in mcp-adapter.json
+# for sage's MCP clients to see it. mcp.json is left alone unless the
+# user opted in by creating one themselves.
 # ────────────────────────────────────────────────────────────
 
 write_codebase_memory_mcp_config() {
@@ -305,17 +315,21 @@ write_codebase_memory_mcp_config() {
     template="$LOCAL_REPO_ROOT/$PI_CODEBASE_MEMORY_SRC_REL/templates/mcp.json"
   fi
   [[ -z "$template" ]] && { echo "  Warning: codebase-memory-mcp mcp.json template not found"; return 0; }
-  # NEVER-TOUCH policy (v3): NEVER-TOUCH comment in install_*_config for the matching
-  # rationale + regression history. install.sh only writes mcp.json on first
-  # install; afterwards, the file is user-owned and untouched on every rerun.
-  if [[ -f "$PI_DIR/agent/mcp.json" ]]; then
-    echo "  Skipped mcp.json (already exists, user-customized — preserved as-is)"
+
+  # NEVER-TOUCH policy: install.sh only writes mcp-adapter.json on
+  # first install; afterwards, the file is user-owned and untouched
+  # on every rerun. The user's existing ~/.pi/agent/mcp.json (used
+  # by the built-in mcp extension) is also left alone — sage does not
+  # own it.
+  local target="$PI_DIR/agent/mcp-adapter.json"
+  if [[ -f "$target" ]]; then
+    echo "  Skipped $target (already exists, user-customized — preserved as-is)"
     return 0
   fi
 
   mkdir -p "$PI_DIR/agent"
-  cp "$template" "$PI_DIR/agent/mcp.json"
-  echo "  Wrote $PI_DIR/agent/mcp.json from template"
+  cp "$template" "$target"
+  echo "  Wrote $target from template"
 }
 
 # ────────────────────────────────────────────────────────────
