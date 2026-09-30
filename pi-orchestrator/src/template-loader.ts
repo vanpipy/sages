@@ -4,7 +4,7 @@
  * Templates live at:  ~/.pi/packages/sages/skills/orchestrator/templates/{prompts,goals,dag,responses}/
  *                   (or wherever the sages package is installed)
  *
- * Used by dag_synthesizer to render TaskNode.prompt from `task_template` + `task_params`.
+ * Used by workflow_run (GC-2) to render task prompts from `task_template` + `task_params`.
  *
  * Resolution (GC-2026-062): sages is a GLOBAL pi extension, so the package
  * must resolve from any cwd on any machine. The module knows its own
@@ -241,7 +241,7 @@ function evalCondition(cond: string, params: Record<string, unknown>): boolean {
 }
 
 /**
- * Render a TaskNode's prompt from its task_template + task_params.
+ * Render a workflow task's prompt from its task_template + task_params.
  * Returns null if template doesn't exist (caller should fall back to LLM-written prompt).
  *
  * Validates task_params against the template's expected schema before rendering —

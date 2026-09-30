@@ -10,9 +10,12 @@
  * The domain:
  *
  *   - run/*  — durable workflow milestones. Written to
- *     `.pi/orchestrator/audit-state-{dag_id}.yaml`. Survive process
- *     restarts. Consumers: orchestrator_audit, postmortem tooling, and
- *     integrate-time verification.
+ *     `.pi/orchestrator/audit-state-{goal_id}.yaml`. Survive process
+ *     restarts. Consumers: postmortem tooling.
+ *
+ * Post-GC-2026-orchestrator-simplify: the orchestrator emits only the
+ * `GoalCreated` event (DAG/DispatchStarted are gone — workflow_run in
+ * GC-2 may add `WorkflowStarted` / `WorkflowCompleted` etc.).
  *
  * Conventions:
  *   - Event names are lower-snake_case after the domain prefix.
@@ -25,10 +28,10 @@
 
 /**
  * A run/* event names a durable workflow milestone. Producers are
- * goal_contract_create, dag_synthesize, and task_dispatch. Consumers
- * are postmortem tooling (analysis) and integrate-time hooks.
+ * goal_contract_create (and, post-GC-2, workflow_run). Consumers are
+ * postmortem tooling (analysis).
  *
- * Records are written to `.pi/orchestrator/audit-state-{dag_id}.yaml`
+ * Records are written to `.pi/orchestrator/audit-state-{goal_id}.yaml`
  * under the `events:` array. The file format is preserved by
  * extension; this enum adds new members but does not change the
  * shape of the storage record.
@@ -36,12 +39,6 @@
 export enum RunEvent {
 	/** Fired after `goal_contract_create` writes the goal-*.yaml. */
 	GoalCreated = "run/goal_created",
-
-	/** Fired after `dag_synthesize` writes the dag-*.yaml. */
-	DagSynthesized = "run/dag_synthesized",
-
-	/** Fired after `task_dispatch` starts executing the dispatched tasks. */
-	DispatchStarted = "run/dispatch_started",
 }
 
 /** The literal union of valid domain prefixes. */
