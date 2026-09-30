@@ -1,6 +1,6 @@
 {
   "name": "@sages/pi-subagents",
-  "version": "0.14.2",
+  "version": "0.1.0",
   "description": "Sages fork — A pi extension extension that brings smart Claude Code-style autonomous sub-agents to pi.",
   "author": "vanpipy",
   "license": "MIT",
