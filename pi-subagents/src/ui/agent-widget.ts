@@ -92,14 +92,6 @@ const TOOL_DISPLAY: Record<string, string> = {
 	codebase_memory_manage_adr: "managing ADR",
 	codebase_memory_ingest_traces: "ingesting traces",
 
-	// ── Magic Context (long-term recall + todos, @cortexkit/pi-magic-context) ──
-	ctx_search: "searching memory",
-	ctx_expand: "expanding history",
-	ctx_memory: "writing memory",
-	ctx_note: "writing note",
-	ctx_reduce: "reclaiming context",
-	todowrite: "updating tasks",
-
 	// ── Sages orchestrator (4 DAG-stage tools, sages/src/tools/orchestrator) ──
 	goal_contract_create: "creating goal",
 	dag_synthesize: "synthesizing DAG",
