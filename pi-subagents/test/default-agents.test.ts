@@ -134,12 +134,13 @@ describe("default-agents: developer config", () => {
 		}
 	});
 
-	it("carries the required extensions: aft, pi-mcp-adapter, pi-magic-context", () => {
-		// `extensions` is the loader-level selector; it must include all three
+	it("carries the required extensions: aft, pi-mcp-adapter", () => {
+		// `extensions` is the loader-level selector; it must include both
 		// required extensions by canonical name so they load into the agent.
-		// GC-2026-012: the magic-context selector was renamed to its package
-		// name `pi-magic-context` so it survives the migration off the bare
-		// `magic-context` identifier that previously resolved by accident.
+		// GC-2026-remove-magic-context: pi-magic-context was dropped from the
+		// developer allowlist — magic-context is replaced by pi-tasks at the
+		// orchestrator layer and Sages' internal personal-todowrite covers
+		// the per-subagent tracker need.
 		const extensions = dev?.extensions;
 		expect(extensions).not.toBe(false);
 		const list =
@@ -147,8 +148,7 @@ describe("default-agents: developer config", () => {
 		expect(list, "developer must pin extensions to a list").not.toBeNull();
 		expect(list).toContain("aft");
 		expect(list).toContain("pi-mcp-adapter");
-		expect(list).toContain("pi-magic-context");
-		expect(list).not.toContain("magic-context");
+		expect(list).not.toContain("pi-magic-context");
 	});
 
 	it("disables skills (false) — same posture as the legacy Sages role", () => {
@@ -241,7 +241,7 @@ describe("default-agents: merger config (GC-2026-prompt-workspace)", () => {
 		}
 	});
 
-	it("carries the required extensions: aft, pi-mcp-adapter, pi-magic-context", () => {
+	it("carries the required extensions: aft, pi-mcp-adapter", () => {
 		// Symmetric with developer / auditor: the merger reaches for
 		// the same indexed semantic tools so it can read both diffs
 		// and classify overlap without shell grep.
@@ -252,7 +252,7 @@ describe("default-agents: merger config (GC-2026-prompt-workspace)", () => {
 		expect(list, "merger must pin extensions to a list").not.toBeNull();
 		expect(list).toContain("aft");
 		expect(list).toContain("pi-mcp-adapter");
-		expect(list).toContain("pi-magic-context");
+		expect(list).not.toContain("pi-magic-context");
 	});
 
 	it("disables skills (false) — merger is a deterministic tool, no project conventions", () => {
@@ -431,7 +431,7 @@ describe("default-agents: auditor config", () => {
 		}
 	});
 
-	it("carries the required extensions: aft, pi-mcp-adapter, pi-magic-context", () => {
+	it("carries the required extensions: aft, pi-mcp-adapter", () => {
 		// Symmetric with developer. The auditor prompt's tool preference
 		// order relies on these extensions being loaded.
 		const extensions = aud?.extensions;
@@ -441,7 +441,7 @@ describe("default-agents: auditor config", () => {
 		expect(list, "auditor must pin extensions to a list").not.toBeNull();
 		expect(list).toContain("aft");
 		expect(list).toContain("pi-mcp-adapter");
-		expect(list).toContain("pi-magic-context");
+		expect(list).not.toContain("pi-magic-context");
 	});
 
 	it("disables skills (false) — auditor re-derives conventions at audit time per First Action Protocol", () => {
@@ -540,9 +540,11 @@ describe("default-agents: PlanCompiler config (DAG-2026-017, GC-2026-093)", () =
 
 	it("disables extensions (false) — no codebase_memory / aft / ctx_search / magic-context", () => {
 		// The previous Plan config had `extensions: true`, which loaded
-		// aft / pi-mcp-adapter / pi-magic-context and let Plan run the
-		// full architecture scan. Flip to false so Plan cannot reach
-		// those tools even if the prompt drifted.
+		// aft / pi-mcp-adapter and let Plan run the full architecture
+		// scan. Flip to false so Plan cannot reach those tools even if
+		// the prompt drifted. (pi-magic-context is also absent — and
+		// removed entirely from pi-subagents as of
+		// GC-2026-remove-magic-context.)
 		expect(plan?.extensions).toBe(false);
 	});
 
