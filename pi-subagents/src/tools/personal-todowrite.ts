@@ -45,14 +45,14 @@ export interface PersonalTodoInput {
 	status?: TodoStatus;
 }
 
-const CACHE_DIR = join(homedir(), ".cache", "pi-subagents-todos");
+function cacheDir(): string { return join(homedir(), ".cache", "pi-subagents-todos"); }
 
 function todoFilePath(cwd: string): string {
 	// SHA-256 of cwd → first 16 hex chars (64 bits, ample collision space
 	// for the realistic agent count; collision probability ~0 for <1B
 	// entries per birthday).
 	const h = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
-	return join(CACHE_DIR, `${h}.json`);
+	return join(cacheDir(), `${h}.json`);
 }
 
 export function loadTodos(cwd: string): PersonalTodoItem[] {

@@ -150,7 +150,7 @@ export function captureToolStartAdvisory(
  * round-trips).
  */
 export function deliverPendingAdvisory(
-	session: { steer: (text: string) => Promise<void> | void },
+	session: { steer: (text: string) => Promise<unknown> },
 	pendingText: string | undefined,
 ): void {
 	if (pendingText !== undefined) {

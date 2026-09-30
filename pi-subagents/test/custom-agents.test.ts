@@ -50,20 +50,17 @@ const observedReadFilePaths: string[] = [];
 // reference at module scope, then referencing them from the factory via
 // closure, sidesteps the deadlock. Verified: 5 pass / 0 fail in 2.4s
 // (previously hung indefinitely at module load).
-const __actualEa = await import("@earendil-works/pi-coding-agent");
-vi.mock("@earendil-works/pi-coding-agent", async () => {
-	const actual = __actualEa;
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
+	const actual = await importOriginal();
 	return {
 		...actual,
 		getAgentDir: () => MOCK_GLOBAL_DIR,
 	};
 });
 
-const __actualFs = await import("node:fs");
-const __originalReadFileSync = __actualFs.readFileSync;
-vi.mock("node:fs", async () => {
-	const actual = __actualFs;
-	const originalReadFileSync = __originalReadFileSync;
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal();
+	const originalReadFileSync = actual.readFileSync;
 	return {
 		...actual,
 		readFileSync: ((
