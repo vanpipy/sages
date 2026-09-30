@@ -100,14 +100,14 @@ export function renderBashTimeoutSection(): string {
  *
  * GC-2026-091: canonical names are PascalCase to match the
  * `default-agents.ts` registry. The previous lowercase names
- * (`developer`/`auditor`/`explorer`/`merger`) were never consistent
+ * (`developer`/`reviewer`/`explorer`/`merger`) were never consistent
  * with the registry keys (which were always `Explore`/`Plan` plus
- * lowercase `developer`/`auditor`/`merger`); the rename fixes the
+ * `developer`/`reviewer`/`merger`); the rename fixes the
  * `explorer` ≠ `Explore` mismatch and adds the missing `Plan` entry.
  */
 export type AgentType =
 	| "Developer"
-	| "Auditor"
+	| "Reviewer"
 	| "Explore"
 	| "Plan"
 	| "PlanCompiler"
@@ -135,7 +135,7 @@ export interface PerTypeDefaults {
  */
 export const DEFAULT_PER_TYPE: Record<AgentType, PerTypeDefaults> = {
 	Developer: { deadlineMs: 20 * 60_000, maxTurns: 200 },
-	Auditor: { deadlineMs: 20 * 60_000, maxTurns: 200 },
+	Reviewer: { deadlineMs: 20 * 60_000, maxTurns: 200 },
 	Explore: { deadlineMs: 5 * 60_000, maxTurns: 50 },
 	Plan: { deadlineMs: 5 * 60_000, maxTurns: 12 },
 	PlanCompiler: { deadlineMs: 5 * 60_000, maxTurns: 12 },

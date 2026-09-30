@@ -22,7 +22,7 @@
 				"verify",
 				"commit",
 				"merge",
-				"auditor"
+				"reviewer"
 			]
 		},
 		"detection": {

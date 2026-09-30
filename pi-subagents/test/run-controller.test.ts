@@ -36,8 +36,8 @@ const ENV_KEYS = [
 	"SAGES_PI_AGENT_BUDGET_MS",
 	"SAGES_PI_AGENT_DEVELOPER_BUDGET_TURNS",
 	"SAGES_PI_AGENT_DEVELOPER_BUDGET_MS",
-	"SAGES_PI_AGENT_AUDITOR_BUDGET_TURNS",
-	"SAGES_PI_AGENT_AUDITOR_BUDGET_MS",
+	"SAGES_PI_AGENT_REVIEWER_BUDGET_TURNS",
+	"SAGES_PI_AGENT_REVIEWER_BUDGET_MS",
 	"SAGES_PI_AGENT_EXPLORER_BUDGET_TURNS",
 	"SAGES_PI_AGENT_EXPLORER_BUDGET_MS",
 	"SAGES_PI_AGENT_MERGER_BUDGET_TURNS",
@@ -102,7 +102,7 @@ describe("run-controller: DEFAULT_PER_TYPE", () => {
 			deadlineMs: 20 * 60_000,
 			maxTurns: 200,
 		});
-		expect(DEFAULT_PER_TYPE.Auditor).toEqual({
+		expect(DEFAULT_PER_TYPE.Reviewer).toEqual({
 			deadlineMs: 20 * 60_000,
 			maxTurns: 200,
 		});
@@ -157,7 +157,7 @@ describe("run-controller: resolveRunConfig", () => {
 
 	it("falls back to default when params is undefined-equivalent", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("Auditor", {}, {});
+		const cfg = resolveRunConfig("Reviewer", {}, {});
 		expect(cfg.deadlineMs).toBe(20 * 60_000);
 		expect(cfg.maxTurns).toBe(200);
 	});
@@ -173,9 +173,9 @@ describe("run-controller: resolveRunConfig", () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
 		const env = {
 			SAGES_PI_AGENT_BUDGET_TURNS: "42",
-			SAGES_PI_AGENT_AUDITOR_BUDGET_TURNS: "99",
+			SAGES_PI_AGENT_REVIEWER_BUDGET_TURNS: "99",
 		};
-		const cfg = resolveRunConfig("Auditor", {}, env);
+		const cfg = resolveRunConfig("Reviewer", {}, env);
 		expect(cfg.maxTurns).toBe(99);
 	});
 

@@ -48,7 +48,7 @@ import {
 } from "./handoff.js";
 import type { RunController } from "./run-controller.js";
 
-export type AgentType = "developer" | "auditor" | "explorer" | "merger";
+export type AgentType = "developer" | "reviewer" | "explorer" | "merger";
 
 /** A typed budget. `maxMs` is in milliseconds; `snapshotEveryTurns = 0`
  *  disables periodic snapshots. `partialTriggerPct` is a 0..1 ratio. */
@@ -66,7 +66,7 @@ export const defaultBudgets: Record<AgentType, Budget> = {
 		snapshotEveryTurns: 15,
 		partialTriggerPct: 0.8,
 	},
-	auditor: {
+	reviewer: {
 		maxTurns: 30,
 		maxMs: 10 * 60_000,
 		snapshotEveryTurns: 10,
@@ -139,10 +139,15 @@ export function budgetTypeFor(input: string): AgentType {
 	const lower = input.toLowerCase();
 	switch (lower) {
 		case "developer":
-		case "auditor":
+		case "reviewer":
 		case "explorer":
 		case "merger":
 			return lower;
+		case "auditor":
+			// GC-2026-rename-auditor: legacy alias — pre-rename code references
+			// `subagent_type: "auditor"`. Route to the same budget as the
+			// canonical `reviewer`.
+			return "reviewer";
 		case "explore":
 			// GC-2026-091: the registry canonical name is `Explore` (no
 			// trailing -r) to match the DEFAULT_AGENTS Map key. The budget
