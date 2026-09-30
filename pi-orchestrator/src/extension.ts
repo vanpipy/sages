@@ -1,31 +1,23 @@
 /**
  * @sages/pi-orchestrator — package entry point (default pi extension).
  *
- * Registers the 4-stage DAG orchestrator workflow tools, the
- * orchestrator advisory pipeline, and three session-level hooks that
- * used to live in the now-retired `@sages/pi` conductor:
+ * After GC-2026-orchestrator-simplify the orchestrator owns exactly
+ * ONE tool (`goal_contract_create`). The DAG, dispatch, audit, and
+ * reminder tools were removed — workflow is now driven by pi-tasks
+ * (TaskCreate × 4 + TaskExecute) and orchestrated at the workflow
+ * level by the future `workflow_run` tool (GC-2).
  *
- *   1. `session_start`        — `pi.setActiveTools([...])` replaces the
- *                               historical `profile.tools` filter;
- *                               `pi.setStatus(...)` shows the
- *                               orchestrator is active.
- *   2. `before_agent_start`   — prepend `templates/SYSTEM.md` (the
- *                               orchestrator constitution) to the LLM's
- *                               system prompt.
- *   3. `tool_call`            — fire a once-per-session soft-mode
- *                               reminder on the first `bash` call,
- *                               nudging the agent toward the 4-stage DAG
- *                               workflow for non-trivial work.
+ * Registers:
+ *   - `goal_contract_create` — the intent + lock contract tool
+ *   - `registerSubagentControlTools` — subagent_status / steer / abort / resume
+ *   - Orchestrator advisory pipeline (post-tool detector + nudges)
  *
- * Tool surface (4 + 1 reminder):
- *   - goal_contract_create — Stage 1 (turn intent into a verifiable contract)
- *   - dag_synthesize       — Stage 2 (decompose into a task DAG)
- *   - task_dispatch        — Stage 3 (build dispatch plan; LLM executes Agent calls)
- *   - orchestrator_audit   — Stage 4 (workflow-level audit rollup)
- *   - sages_reminder       — emit system reminder (one-shot)
+ * Three session-level hooks (preserved):
+ *   1. `session_start`        — `pi.setActiveTools([...])`
+ *   2. `before_agent_start`   — prepend `templates/SYSTEM.md`
+ *   3. `tool_call`            — soft-mode reminder (first bash call)
  *
- * Brainstorming is registered separately as a slash command (see the
- * brainstorming skill in `skills/brainstorming/`).
+ * Brainstorming is registered separately as a slash command.
  *
  * Peer dependencies:
  *   - @earendil-works/pi-coding-agent  — ExtensionAPI type
@@ -39,12 +31,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registerGoalContractTool } from "./goal-contract.js";
-import { registerDAGSynthesizerTool } from "./dag-synthesizer.js";
-import { registerTaskDispatcherTool } from "./task-dispatcher.js";
-import { registerOrchestratorAuditTool } from "./orchestrator-audit.js";
-import { registerSagesReminderTool } from "./sages-reminder.js";
 import { registerSubagentControlTools } from "./subagent-control.js";
-import { registerTodowriteTools } from "./todowrite.js";
 import {
 	installOrchestratorAdvisoryHandlers,
 	type OrchestratorAdvisoryRuntimeDeps,
@@ -52,18 +39,14 @@ import {
 
 /**
  * Tools always exposed to the main agent when the orchestrator
- * extension is loaded. Replaces the historical `profile.tools`
- * capability filter — the conductor previously blocked unlisted tools
- * via `pi.on("tool_call", { block: true })`, but the cleaner path is
- * to use `pi.setActiveTools(...)` so the LLM never sees disallowed
- * tool schemas in the first place.
+ * extension is loaded. After GC-2026-orchestrator-simplify this is
+ * just one entry: `goal_contract_create`. The workflow itself is
+ * driven by pi-tasks (TaskCreate / TaskExecute / etc.) which are
+ * registered by `@sages/pi-tasks` and exposed via the active
+ * toolset. GC-2 will add `workflow_run` here.
  */
 export const ORCHESTRATOR_TOOLS: readonly string[] = [
 	"goal_contract_create",
-	"dag_synthesize",
-	"task_dispatch",
-	"orchestrator_audit",
-	"sages_reminder",
 ];
 
 /**
@@ -71,12 +54,6 @@ export const ORCHESTRATOR_TOOLS: readonly string[] = [
  * lines 1154, 2040, 2138). `pi-subagents` owns the dispatch surface:
  * spawn an agent (`Agent`), poll its result (`get_subagent_result`),
  * inject a message into a running session (`steer_subagent`).
- *
- * Split out from `SUBAGENT_TOOLS` so the ownership boundary is
- * visible at the type level — anything in this array is added by
- * pi-subagents, anything in `SUBAGENT_CONTROL_TOOLS` is added by
- * the orchestrator. Both arrays are concatenated into `SUBAGENT_TOOLS`
- * for the active toolset.
  */
 export const PI_SUBAGENT_TOOLS = [
 	"Agent",
@@ -86,17 +63,10 @@ export const PI_SUBAGENT_TOOLS = [
 
 /**
  * Tools registered by the orchestrator's own `registerSubagentControlTools`
- * (GC-2026-073) and exposed to the orchestrator LLM via
- * `pi.setActiveTools`. These delegate to the same `AgentManager`
- * singleton via the shared globalThis registry key
+ * (GC-2026-073). These delegate to the same `AgentManager` singleton
+ * via the shared globalThis registry key
  * `Symbol.for("pi-subagents:manager")` — there is exactly one manager,
  * shared end-to-end with the `Agent` tool.
- *
- * Surfaced during the orchestrator↔subagents seam audit: the
- * orchestrator forces developer / auditor to background (per the
- * `Agent` tool description), so the LLM needs schema-level access to
- * status / steer / abort / resume to manage its own background
- * dispatches. Hidden-by-default was an incident-response gap.
  */
 export const SUBAGENT_CONTROL_TOOLS = [
 	"subagent_status",
@@ -107,8 +77,7 @@ export const SUBAGENT_CONTROL_TOOLS = [
 
 /**
  * Combined subagent toolset passed to `pi.setActiveTools` at
- * `session_start`. Concatenation is the contract — `setActiveTools`
- * is order-agnostic.
+ * `session_start`.
  */
 export const SUBAGENT_TOOLS: readonly string[] = [
 	...PI_SUBAGENT_TOOLS,
@@ -117,8 +86,7 @@ export const SUBAGENT_TOOLS: readonly string[] = [
 
 /**
  * Baseline file-system tools the main agent always needs regardless
- * of profile (the orchestrator itself uses some of these for read-only
- * lookups during verification).
+ * of profile.
  */
 export const BASELINE_TOOLS: readonly string[] = [
 	"bash",
@@ -131,49 +99,24 @@ export const BASELINE_TOOLS: readonly string[] = [
 ];
 
 /**
- * Todowrite tools exposed by the orchestrator + pi-magic-context extensions.
- *
- * `todowrite` is registered by `@cortexkit/pi-magic-context` at extension
- * boot (default enabled). `todowrite_compile` + `todowrite_progress` are
- * registered by the orchestrator's `registerTodowriteTools(pi)` (GC-2026-074).
- *
- * The orchestrator's constitution (templates/SYSTEM.md § "Soft mode",
- * § "Tool Reference") repeatedly directs the LLM to use these tools for
- * tracking multi-step work and reconciling DAG↔todo drift. Without this
- * allowlist, `setActiveTools` hides the schemas from the LLM even when
- * registered — empirically surfaced during GC-2026-076 (8-SC / 2-task
- * DAG ran end-to-end with zero todowrite activity).
- *
- * GC-2026-081: expose all three to the main-agent active toolset.
+ * Pi-tasks tools (registered by `@sages/pi-tasks`). Exposed so the LLM
+ * can drive the Implement → Review → optional Fix → Merge pipeline
+ * directly via TaskCreate / TaskList / TaskExecute / etc. GC-2 will
+ * add `workflow_run` as a one-shot pipeline runner on top of this.
  */
-export const TODOWRITE_TOOLS: readonly string[] = [
-	"todowrite",
-	"todowrite_compile",
-	"todowrite_progress",
+export const PI_TASKS_TOOLS: readonly string[] = [
+	"TaskCreate",
+	"TaskList",
+	"TaskGet",
+	"TaskUpdate",
+	"TaskOutput",
+	"TaskStop",
+	"TaskExecute",
 ];
 
 /**
  * AFT (Agentic File Tools) suite registered by `@cortexkit/aft-pi` at
- * extension boot. Eleven tools: structural code-search (`aft_search`),
- * outline / file-tree (`aft_outline`), symbol-level read (`aft_zoom`),
- * code-health diagnostics (`aft_inspect`), call-graph traversal
- * (`aft_callgraph`), conflict detection (`aft_conflicts`), safe
- * deletion / move / import-update (`aft_delete` / `aft_move` /
- * `aft_import`), refactor primitives (`aft_refactor`), and safety /
- * blast-radius (`aft_safety`).
- *
- * The orchestrator's constitution (DEVELOPER_PROMPT tool-preference
- * ladder, AGENTS.md § "Tool preference order") repeatedly directs the
- * LLM to use AFT BEFORE bash `grep` / `rg` / `find` / `cat` — yet
- * prior to GC-2026-086 these tools were registered by the extension
- * but hidden from the LLM by `setActiveTools`. Empirically surfaced
- * during the GC-2026-086 live test round 2:
- * `aft_search` returned "Tool aft_search not found".
- *
- * GC-2026-086: expose all eleven to the main-agent active toolset so
- * the constitution directive ("MUST call `aft_search` /
- * `aft_outline` / `aft_zoom` before any bash `grep` / `rg` / `find`
- * / `cat`") becomes mechanically reachable end-to-end.
+ * extension boot. Eleven tools.
  */
 export const AFT_TOOLS: readonly string[] = [
 	"aft_callgraph",
@@ -190,57 +133,23 @@ export const AFT_TOOLS: readonly string[] = [
 ];
 
 /**
- * Magic-context (`ctx_*`) long-term memory tools registered by
- * `@cortexkit/pi-magic-context` at extension boot. Five tools:
- * cross-session recall (`ctx_search` / `ctx_memory`), note capture
- * (`ctx_note`), recall-graph compaction (`ctx_reduce`), and
- * per-result expansion (`ctx_expand`).
- *
- * The orchestrator's constitution (DEVELOPER_PROMPT § "Magic
- * Context", AGENTS.md § "Tool preference order") directs the LLM to
- * reach for `ctx_search` BEFORE re-deriving project knowledge ("did
- * we solve this before", "where does X live", "what did we decide
- * about Y"). pi-magic-context also registers `todowrite` (see
- * `TODOWRITE_TOOLS` above), but `ctx_*` were not added in GC-2026-081
- * — only the todowrite half of the suite was exposed.
- *
- * GC-2026-086: expose all five `ctx_*` tools so the long-term-memory
- * directive ("MUST reach for `ctx_search` before re-deriving project
- * knowledge") becomes reachable, not just the adjacent `todowrite`.
- */
-export const CTX_TOOLS: readonly string[] = [
-	"ctx_search",
-	"ctx_memory",
-	"ctx_note",
-	"ctx_reduce",
-	"ctx_expand",
-];
-
-/**
  * Soft-mode reminder text. Fires once per session on the first `bash`
- * tool call to nudge the LLM toward the 4-stage DAG workflow when the
- * active todowrite exceeds 2 items (the historical `dag_threshold`).
- * Lives here, not in a profile, because the recommendation is
- * intrinsic to orchestrator operation — there is no user-facing
- * toggle. Mirrors `templates/SYSTEM.md` § "Soft mode" so a drift
- * check (the soft-mode verifier) can pin both sides byte-identical.
+ * tool call to nudge the LLM toward the pi-tasks-driven workflow when
+ * the active task list exceeds 2 items (the historical `dag_threshold`).
  */
-const SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — subagent dispatch recommended**
+const SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — workflow pipeline recommended**
 >
-> If this is part of a larger workflow (>2 items in your active todowrite,
-> i.e. above the **task-count threshold**), consider dispatching via the
-> 4-stage DAG workflow: goal → DAG → dispatch → audit. The developer /
-> auditor / merger / git-expert pipeline is the recommended approach for
-> complex multi-step work. For ≤2 tasks (below the task-count threshold),
-> direct handling is acceptable. This is a recommendation — the agent decides.
-> No commands are blocked.
+> If this is part of a larger workflow (>2 items in your active task list,
+> i.e. above the **task-count threshold**), consider driving it through
+> the pi-tasks workflow: \`goal_contract_create\` → \`TaskCreate\` × 4
+> (Implement / Review / optional Fix / Merge) → \`TaskExecute\`. For ≤2
+> tasks (below the task-count threshold), direct handling is acceptable.
+> This is a recommendation — the agent decides. No commands are blocked.
 `;
 
 /**
  * Path to `templates/SYSTEM.md` — the orchestrator constitution that
  * gets prepended to the LLM's system prompt on every agent start.
- * Module-relative so it works from the repo checkout AND from the
- * installed package at `~/.pi/packages/pi-orchestrator/`.
  */
 const SYSTEM_PROMPT_TEMPLATE = join(
 	dirname(fileURLToPath(import.meta.url)),
@@ -251,70 +160,30 @@ const SYSTEM_PROMPT_TEMPLATE = join(
 
 /**
  * Register all orchestrator tools on the pi extension. Idempotent.
- *
- * The optional `runtime` parameter is kept for backward compatibility
- * with older call sites (the conductor used to pass its goal/dag
- * loaders through this hook). New callers can omit it; the advisory
- * handlers will fall back to no-op loaders that simply return `null`
- * for any goal/dag lookup.
  */
 export function registerOrchestratorTools(
 	pi: ExtensionAPI,
 	runtime?: OrchestratorAdvisoryRuntimeDeps,
 ): void {
 	registerGoalContractTool(pi);
-	registerDAGSynthesizerTool(pi);
-	registerTaskDispatcherTool(pi);
-	registerOrchestratorAuditTool(pi);
-	registerSagesReminderTool(pi);
 	// GC-2026-073: programmatic LLM-facing tools for inspecting and
-	// controlling subagents — subagent_status / steer / abort / resume.
+	// controlling subagents.
 	registerSubagentControlTools(pi);
-	// GC-2026-074: todowrite view + DAG linkage (todowrite_compile /
-	// todowrite_progress). DAG↔todo auto-sync is wired inside task_dispatch.
-	registerTodowriteTools(pi);
-	// GC-2026-053: orchestrator tool_call audit wiring (the post-tool
-	// history-tracker, pre-tool blocker, tool_result error tracker, and
-	// message_end assistant-text tracker).
+	// GC-2026-053: orchestrator tool_call audit wiring.
 	installOrchestratorAdvisoryHandlers(pi, runtime);
 }
 
 /**
- * Install the three session-level hooks that used to live in the
- * retired `@sages/pi` conductor (GC-2026-073):
- *
- *   1. `session_start`       — setActiveTools + setStatus
- *   2. `before_agent_start`  — prepend templates/SYSTEM.md overlay
- *   3. `tool_call`           — once-per-session soft-mode reminder
- *
- * Exported so tests can assert the wiring without running through the
- * default-export entrypoint.
+ * Install the three session-level hooks.
  */
 export function installSessionHooks(pi: ExtensionAPI): void {
-	// 1. session_start — replace the profile.tools filter with a single
-	//    setActiveTools call. `pi.setStatus(...)` is exposed on the
-	//    optional `ui` channel (matches reference ExtensionAPI surface
-	//    at @earendil-works/pi-coding-agent src/core/extensions/types.ts).
-	//
-	//    GC-2026-087 SC1: tool ORDER matters for LLM selection bias.
-	//    Earlier entries in `setActiveTools` are surfaced more
-	//    prominently by the model — empirically validated across 7 days
-	//    / 2,424 tool calls where baseline (bash/read/etc.) hit 92.8%
-	//    while AFT/ctx/codebase stayed under 2% combined. The new order
-	//    surfaces the specialized tools first:
-	//
-	//      ORCHESTRATOR → SUBAGENT → AFT → CTX → TODOWRITE → BASELINE
-	//
-	//    BASELINE_TOOLS stays in the active set (reorder, not removal —
-	//    see goal contract anti_goals) but its position is demoted so
-	//    the LLM sees aft_search / ctx_search / codebase_memory_* first.
+	// 1. session_start — setActiveTools + setStatus.
 	pi.on("session_start", () => {
 		const tools: string[] = [
 			...ORCHESTRATOR_TOOLS,
+			...PI_TASKS_TOOLS,
 			...SUBAGENT_TOOLS,
 			...AFT_TOOLS,
-			...CTX_TOOLS,
-			...TODOWRITE_TOOLS,
 			...BASELINE_TOOLS,
 		];
 		pi.setActiveTools(tools);
@@ -323,25 +192,17 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 		}).setStatus?.("sages-orchestrator", "📜 orchestrator active");
 	});
 
-	// 2. before_agent_start — prepend the orchestrator constitution
-	//    (templates/SYSTEM.md) to the LLM's system prompt. Idempotent
-	//    across re-runs (file-read is cheap; the orchestrator only sees
-	//    this event once per session).
+	// 2. before_agent_start — prepend templates/SYSTEM.md.
 	pi.on("before_agent_start", (event: any) => {
 		if (!existsSync(SYSTEM_PROMPT_TEMPLATE)) return undefined;
 		const overlay = readFileSync(SYSTEM_PROMPT_TEMPLATE, "utf-8");
-		// pi 0.99 made event.systemPrompt a readonly getter — the
-		// replacement value goes in the BeforeAgentStartEventResult
-		// return shape, not on the event itself.
 		return {
 			systemPrompt: overlay + "\n\n---\n\n" + (event.systemPrompt ?? ""),
 		};
 	});
 
 	// 3. tool_call — fire the soft-mode reminder once per session on the
-	//    first bash call. The reminder is goal-orientation: it nudges
-	//    back toward staying aligned with the agent's goal; it does
-	//    NOT flag specific write actions as "production code".
+	// first bash call.
 	let reminderFired = false;
 	pi.on("tool_call", (event: any) => {
 		if (reminderFired) return undefined;
@@ -359,14 +220,11 @@ export function installSessionHooks(pi: ExtensionAPI): void {
  */
 export function registerBrainstormCommand(pi: ExtensionAPI): void {
 	// The brainstorm slash command is registered via the skill in
-	// `skills/brainstorming/SKILL.md` — pi loads it as a slash
-	// command from the skill metadata. No pi.registerCommand needed here.
+	// `skills/brainstorming/SKILL.md`.
 }
 
 /**
- * Default pi extension entrypoint. pi calls this once on package load.
- * Registers the orchestrator's 5 tools + advisory pipeline + the three
- * session-level hooks described above.
+ * Default pi extension entrypoint.
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
 	registerOrchestratorTools(pi);

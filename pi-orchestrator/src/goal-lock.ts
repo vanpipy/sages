@@ -1,30 +1,29 @@
 /**
  * goal-lock.ts — GC-2026-057
  *
- * Anti-cheat: detect when the LLM silently modifies a goal.yaml to
- * make success criteria easier (e.g. drop hard SCs, replace strict
- * verification_cmd with `echo yes`).
+ * Anti-cheat: detect when the LLM silently modifies a goal.yaml
+ * (scope drift, anti_goal relaxation, title / done_definition
+ * softening). After GC-2026-orchestrator-simplify the orchestrator no
+ * longer owns `success_criteria` — the Reviewer agent reads the goal
+ * intent directly. The lock continues to cover the intent-relevant
+ * fields that gate the workflow contract.
  *
  * Mechanism: at goal creation time, compute SHA-256 of the canonical
  * goal content. Store the hash in the goal.yaml itself (`_lock_hash`
- * field). On every read (loadGoalContract, used by dag_synthesize and
- * orchestrator_audit), recompute the hash and compare:
+ * field). On every read (loadGoalContract, used by future Reviewer
+ * tasks), recompute the hash and compare:
  *
  *   - match: goal is intact, return the parsed object
  *   - mismatch: emit a "goal_modified" warning, return null
- *     (caller treats null as "treat as fail" — orchestrator_audit
- *     can fail the workflow)
  *
- * The hash covers all SC-relevant fields (id, title, success_criteria,
+ * The hash covers the intent-relevant fields (id, title, rationale,
  * scope, anti_goals, done_definition) — NOT the hash itself or
  * metadata fields. This makes the hash field semantically meaningful
  * ("hash of the goal content excluding the hash field").
  *
  * Anti-goal of this GC: the lock is INFORMATIONAL, not enforcement.
  * The LLM could ignore the lock and proceed; the goal-modified
- * signal is captured in the audit chain. This is the right shape for
- * the current architecture: orchestrator_audit is the gate, and
- * the lock is a "evidence" for the audit to use.
+ * signal is captured in the audit chain.
  */
 
 import { createHash } from "node:crypto";
@@ -62,47 +61,28 @@ export interface GoalContractLike {
   id: string;
   title: string;
   rationale?: string;
-  success_criteria: Array<{
-    id: string;
-    criterion: string;
-    verification_cmd: string;
-    expected_output?: string;
-    severity?: "blocker" | "major" | "minor";
-  }>;
   anti_goals: string[];
   scope: { include: string[]; exclude: string[] };
   constraints: Record<string, unknown>;
   done_definition: string;
-  /**
-   * GC-2026-091: optional `dag_id` set by `dag_synthesize` once the
-   * goal contract has been decomposed into a DAG. Optional because
-   * pre-GC-2026-091 goals have no such field and the lock mechanism
-   * must keep working for them. When present, it participates in the
-   * lock hash (see HASHED_FIELDS).
-   */
-  dag_id?: string;
 }
 
-/** Fields included in the lock hash. The hash field itself is excluded. */
+/**
+ * Fields included in the lock hash. The hash field itself is excluded.
+ *
+ * GC-2026-orchestrator-simplify: `success_criteria` and `dag_id` are
+ * no longer GoalContract fields, so they no longer participate in
+ * the lock. The remaining fields capture the intent contract that
+ * the Reviewer agent reads to evaluate Implementer's output.
+ */
 const HASHED_FIELDS = [
   "id",
   "title",
   "rationale",
-  "success_criteria",
   "anti_goals",
   "scope",
   "constraints",
   "done_definition",
-  /**
-   * GC-2026-091: dag_id is part of the lock. When `dag_synthesize`
-   * augments an existing goal with its synthesized DAG id, the lock
-   * is recomputed — adding `dag_id` invalidates the prior hash so the
-   * writeback is self-consistent. Lock integrity stays intact across
-   * the GC-2026-091 writeback because `dag_synthesize` recomputes
-   * `_lock_hash` via `computeGoalHash` before writing the goal yaml
-   * back to disk.
-   */
-  "dag_id",
 ] as const;
 
 export function computeGoalHash(goal: GoalContractLike): string {

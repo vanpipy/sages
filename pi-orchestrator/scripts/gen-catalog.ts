@@ -1,17 +1,15 @@
 #!/usr/bin/env bun
 /**
- * gen-catalog.ts — GC-2026-047 T1.1 / GC-2026-048 T2.2
+ * gen-catalog.ts — GC-2026-047 T1.1 / GC-2026-048 T2.2 (orchestrator-simplify)
  *
- * Generates five catalog files under `pi/catalogs/` from current source:
+ * Generates catalog files under `pi/catalogs/` from current source.
+ * After GC-2026-orchestrator-simplify the orchestrator owns no DAG /
+ * dispatch / audit tool, so the catalogs that snapshotted those
+ * surfaces are gone. Three catalogs remain:
+ *
  *   - subagent.json   ← @sages/pi-subagents (DEFAULT_AGENTS, single
  *                        source of truth for subagent registration;
  *                        replaces GC-2026-048 subagents/registry.yaml)
- *   - isolation.json  ← pi-orchestrator/src/types.ts
- *                        (TaskNode.isolation union)
- *   - gate.json       ← pi-orchestrator/src/orchestrator-audit.ts
- *                        (g.* category vocabulary) +
- *                        pi-orchestrator/src/goal-contract.ts
- *                        (severity vocabulary)
  *   - event.json      ← pi-orchestrator/src/observability/events.ts
  *                        (RunEvent enum, GC-2026-050 taxonomy)
  *   - namespace.json  ← pi-orchestrator/src/namespace-ownership.ts
@@ -151,173 +149,25 @@ function extractSubagent(): {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Extractor 2 — isolation modes
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface IsolationEntry {
-	id: string;
-	kind: "object" | "literal";
-	valid_for_subagent: string[];
-}
-
-/**
- * Hardcoded `valid_for_subagent` mapping mirrors the current dispatch policy
- * (overlay §0 / Sages SKILL.md). It is intentionally a snapshot — future GCs
- * (G2 / G4) will replace this with a real policy registry.
- *
- * Source-of-truth location for the union itself is `types.ts` `TaskNode.isolation`.
- */
-const ISOLATION_VALID_FOR: Record<string, string[]> = {
-	"worktree-create": ["developer", "test-writer", "doc-writer", "migrator"],
-	"current-workspace": ["developer", "test-writer", "doc-writer", "migrator"],
-	none: ["Explore", "Plan", "auditor", "merger", "git-expert"],
-};
-
-function extractIsolation(): { entries: IsolationEntry[]; sources: SourceFile[] } {
-	const types = loadSource("src/types.ts");
-
-	// Locate the `isolation:` field on `TaskNode` and parse the union
-	// members. We expect three kinds:
-	//   1. `{ dag_id: ...; mode: "create" | "reuse" }`  → "worktree-create", kind=object
-	//   2. `"current-workspace"`                          → kind=literal
-	//   3. `"none"`                                       → kind=literal
-	const isoMatch = types.content.match(
-		/isolation\s*:\s*([\s\S]*?)\n\s*\/\*\*\s+Whether this task requires strict TDD/,
-	);
-	if (!isoMatch) {
-		throw new Error(
-			"isolation: `isolation:` field on TaskNode not found in types.ts",
-		);
-	}
-	const unionBody = isoMatch[1];
-
-	// 1. Object form: look for `mode: "create" | "reuse"` → "worktree-create"
-	const hasWorktreeObject = /mode\s*:\s*"create"\s*\|\s*"reuse"/.test(unionBody);
-	if (!hasWorktreeObject) {
-		throw new Error(
-			'isolation: object form mode: "create" | "reuse" not found',
-		);
-	}
-
-	// 2. Literal forms
-	const literalRegex = /\|\s*"([A-Za-z][A-Za-z0-9_-]*)"/g;
-	const literalIds: string[] = [];
-	let lm: RegExpExecArray | null;
-	while ((lm = literalRegex.exec(unionBody)) !== null) {
-		literalIds.push(lm[1]);
-	}
-	if (!literalIds.includes("current-workspace") || !literalIds.includes("none")) {
-		throw new Error(
-			`isolation: expected literals "current-workspace" and "none" in union, found [${literalIds.join(", ")}]`,
-		);
-	}
-
-	const entries: IsolationEntry[] = [
-		{
-			id: "worktree-create",
-			kind: "object",
-			valid_for_subagent: ISOLATION_VALID_FOR["worktree-create"]!,
-		},
-		{
-			id: "current-workspace",
-			kind: "literal",
-			valid_for_subagent: ISOLATION_VALID_FOR["current-workspace"]!,
-		},
-		{
-			id: "none",
-			kind: "literal",
-			valid_for_subagent: ISOLATION_VALID_FOR["none"]!,
-		},
-	];
-
-	return { entries, sources: [types] };
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Extractor 3 — gate catalogue
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface GateEntry {
-	id: string;
-	severity: string[];
-	validates: string;
-}
-
-const GATE_VALIDATES: Record<string, string> = {
-	ink: "task-level audit report presence (has_report + verdict=CERTIFIED)",
-	nose: "cross-task SC coverage against goal contract",
-	foot: "cross-cutting verification_cmd re-runs",
-	castration: "workflow-level security (orphaned worktrees, shared secrets)",
-	death: "long-term viability (orphaned branches, drive-by refactor)",
-};
-
-const SEVERITY_VALIDATES: Record<string, string> = {
-	critical: "defect finding → audit verdict downgraded to REJECT",
-	major: "defect finding → audit verdict downgraded to REVISE",
-	minor: "defect finding → score deduction, no verdict change",
-};
-
-function extractGate(): {
-	categories: GateEntry[];
-	severities: GateEntry[];
-	sources: SourceFile[];
-} {
-	const audit = loadSource("src/orchestrator-audit.ts");
-	const contract = loadSource("src/goal-contract.ts");
-
-	// Parse the gate category enum from orchestrator-audit.ts. The category
-	// is repeated across the `finding` + `findings` shapes; we extract the
-	// set of distinct values from any Type.Literal("ink")-style occurrence.
-	const catRegex = /Type\.Literal\("([a-z][a-z0-9_-]*)"\)/g;
-	const catSet = new Set<string>();
-	let am: RegExpExecArray | null;
-	while ((am = catRegex.exec(audit.content)) !== null) {
-		catSet.add(am[1]);
-	}
-	// Expected: ink, nose, foot, castration, death
-	for (const required of ["ink", "nose", "foot", "castration", "death"]) {
-		if (!catSet.has(required)) {
-			throw new Error(
-				`gate: category "${required}" not found in orchestrator-audit.ts (got [${[...catSet].join(", ")}])`,
-			);
-		}
-	}
-	const categories: GateEntry[] = ["ink", "nose", "foot", "castration", "death"].map(
-		(id) => ({
-			id,
-			severity: ["critical", "major", "minor"],
-			validates: GATE_VALIDATES[id]!,
-		}),
-	);
-
-	// Parse severity enum from goal-contract.ts. Look for the severity
-	// Type.Union([...]) on the success_criterion shape.
-	const sevRegex = /Type\.Literal\("([a-z]+)"\)/g;
-	const sevSet = new Set<string>();
-	let gm: RegExpExecArray | null;
-	while ((gm = sevRegex.exec(contract.content)) !== null) {
-		sevSet.add(gm[1]);
-	}
-	for (const required of ["blocker", "major", "minor"]) {
-		if (!sevSet.has(required)) {
-			// severity appears in the success_criterion shape — confirm presence
-			throw new Error(
-				`gate: severity "${required}" not found in goal-contract.ts (got [${[...sevSet].join(", ")}])`,
-			);
-		}
-	}
-	const severities: GateEntry[] = ["critical", "major", "minor"].map((id) => ({
-		id,
-		severity: [],
-		validates: SEVERITY_VALIDATES[id]!,
-	}));
-
-	return { categories, severities, sources: [audit, contract] };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Extractor 4 — event vocabulary
+// Extractor 2 (removed) — isolation modes
 //
+// GC-2026-orchestrator-simplify: TaskNode and its `isolation` union were
+// removed (no DAG / dispatch surface). The isolation.json catalog is
+// gone with them. Dispatch policy is now the responsibility of
+// pi-subagents and is out of scope for the orchestrator catalog.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Extractor 3 (removed) — gate catalogue
+//
+// GC-2026-orchestrator-simplify: orchestrator_audit.ts (and the
+// GaoYao 5-phase vocabulary — ink / nose / foot / castration / death)
+// is gone. Reviewer agent (Auditor) emits a CLEAN / NEEDS_WORK verdict
+// directly without a 5-phase taxonomy. The gate.json catalog is gone
+// with it.
+//
+// ─────────────────────────────────────────────────────────────────────────────
 // GC-2026-050 T4.2: the event taxonomy now lives in
 // `pi-orchestrator/src/observability/events.ts`. Three enums (RunEvent / StepEvent /
 // SeamEvent) cover 5 + 7 + 3 = 15 events, each prefixed with its domain
@@ -444,20 +294,6 @@ const CATALOGS: CatalogDescriptor[] = [
 		run: () => {
 			const { entries, sources } = extractSubagent();
 			return { payload: { entries }, sources };
-		},
-	},
-	{
-		name: "isolation",
-		run: () => {
-			const { entries, sources } = extractIsolation();
-			return { payload: { entries }, sources };
-		},
-	},
-	{
-		name: "gate",
-		run: () => {
-			const { categories, severities, sources } = extractGate();
-			return { payload: { categories, severities }, sources };
 		},
 	},
 	{
