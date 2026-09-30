@@ -3,18 +3,18 @@ export type OrchestratorNamespaceOwner = "orchestrator" | "developer" | "auditor
 const SAFE_SEGMENT = "[A-Za-z0-9][A-Za-z0-9._-]*";
 const ORCHESTRATOR_PATTERNS = [
 	new RegExp(`^goal-${SAFE_SEGMENT}\\.yaml$`),
-	new RegExp(`^dag-${SAFE_SEGMENT}\\.yaml$`),
 	new RegExp(`^audit-state-${SAFE_SEGMENT}\\.yaml$`),
-	/^audit-workflow\.md$/,
-	new RegExp(`^audit-rollup-(?:task|batch)-${SAFE_SEGMENT}\\.md$`),
 ];
 const DEVELOPER_PATTERNS = [
   new RegExp(`^task-${SAFE_SEGMENT}-report\\.md$`),
   new RegExp(`^handoff/${SAFE_SEGMENT}/${SAFE_SEGMENT}-handoff\\.md$`),
 ];
-/** GC-2026-coupon-nonhit-block follow-up: audit-{dag_id}-{task_id}.md
- * The dag_id segment is part of the path so concurrent DAGs (e.g. with P1/P2
- * reused across goals) don't collide on shared filenames. */
+/**
+ * GC-2026-coupon-nonhit-block follow-up: audit-{id}-{task_id}.md.
+ * After GC-2026-orchestrator-simplify the goal id replaces the DAG id
+ * segment (DAGs no longer exist), but the collision-prevention shape
+ * is preserved.
+ */
 const AUDITOR_PATTERNS = [
 	new RegExp(`^audit-${SAFE_SEGMENT}-${SAFE_SEGMENT}\\.md$`),
 ];

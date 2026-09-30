@@ -1,6 +1,6 @@
 {
-  "_source_hash": "c2d3d91c684730b696cf86f0d1047b39433088ac14b8d04aa6dcd8662b278a91",
-  "_generated_at": "2026-09-30T16:53:44.658Z",
+  "_source_hash": "c4ea053d61d0d996599436b27997d16269490bef822bc6f4374a394f6ab4969a",
+  "_generated_at": "2026-09-30T17:47:09.766Z",
   "_source_files": [
     "src/namespace-ownership.ts"
   ],
@@ -9,9 +9,7 @@
       "id": "orchestrator",
       "patterns": [
         "^goal-${SAFE_SEGMENT}\\\\.yaml$",
-        "^dag-${SAFE_SEGMENT}\\\\.yaml$",
-        "^audit-state-${SAFE_SEGMENT}\\\\.yaml$",
-        "^audit-rollup-(?:task|batch)-${SAFE_SEGMENT}\\\\.md$"
+        "^audit-state-${SAFE_SEGMENT}\\\\.yaml$"
       ]
     },
     {

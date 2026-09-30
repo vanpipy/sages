@@ -40,11 +40,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PI_ROOT = join(__dirname, "..");
 const CATALOGS_DIR = join(PI_ROOT, "catalogs");
 
-// The five canonical catalog names (mirrors `gen-catalog.ts`).
+// The canonical catalog names (mirrors `gen-catalog.ts`).
+// After GC-2026-orchestrator-simplify the orchestrator owns no DAG /
+// dispatch / audit tool, so the catalogs that snapshotted those
+// surfaces are gone. Only subagent / event / namespace remain.
 const CATALOG_NAMES = [
 	"subagent",
-	"isolation",
-	"gate",
 	"event",
 	"namespace",
 ] as const;
