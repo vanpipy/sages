@@ -31,14 +31,16 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
    ≤2-item workflows. **Every Sages package subtree (every `pi-*/`)
    is production code** — no carve-outs (GC-2026-029).
 
-## The 4 orchestrator tools
+## The orchestrator tool surface
 
-| Tool | Stage | Output |
-|---|---|---|
-| `goal_contract_create` | 1 | `.pi/orchestrator/goal-{id}.yaml` |
-| `dag_synthesize` | 2 | `.pi/orchestrator/dag-{id}.yaml` |
-| `task_dispatch` | 3 | Agent-call plan grouped by batch |
-| `orchestrator_audit` | 4 | `.pi/orchestrator/audit-workflow.md` |
+After GC-2026-orchestrator-simplify the orchestrator owns exactly
+one tool. DAG / dispatch / audit / reminder tools were removed —
+workflow is now driven by pi-tasks (TaskCreate × 4 + TaskExecute).
+GC-2 will add `workflow_run` as a one-shot pipeline runner.
+
+| Tool | Output |
+|---|---|
+| `goal_contract_create` | `.pi/orchestrator/goal-{id}.yaml` (intent + SHA-256 lock) |
 
 Load `pi/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 
@@ -47,18 +49,13 @@ Load `pi/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 | `subagent_type` | Background | Use | Isolation |
 |---|---:|---|---|
 | `Explore` | no | Bounded, read-only search | none |
-| `Plan` | no | Compile a Planning Brief already decided by main | none |
+| `PlanCompiler` | no | Compile a Planning Brief already decided by main | none |
 | `Developer` | yes | TDD implementation or meta-file writing | explicit object or `"current-workspace"` |
 | `Auditor` | yes | Re-run verification and certify evidence | read-only |
-| `git-expert` | yes | Senior git inspection / backtrack / cross-subagent recipes | read-only (writes in `.pi/git-scratch-<task_id>-<suffix>/`) |
+| `Merger` | yes | Cross-workspace merge (merge commit + branch push) | read-only inspection, writes merge commits to scratch branch |
 
-Two additional built-ins extend the roster when needed: `Merger` handles
-cross-workspace DAG merges (read-only inspection, writes only merge
-commits into a scratch branch) and `git-expert` performs deep git
-inspection, worktree / branch / merge diagnostics, and produces
-git-usage recipes for other subagents (read-only on production code;
-writes confined to `.pi/git-scratch-<task_id>-<suffix>/`). The complete
-invocation contract, isolation modes, and examples are in
+GC-2026-091 retired the `git-expert` subagent. The complete invocation
+contract, isolation modes, and examples are in
 `pi/templates/agent-tool-description.md`, installed as
 `~/.pi/agent/agent-tool-description.md` (the LLM-visible Agent tool
 description). `defaultRunInBackground()` in
@@ -135,23 +132,29 @@ flagging any id that has neither postmortem nor carve-out.
 
 ## Workflow at a glance
 
-1. **Goal:** call `goal_contract_create`; every binary success criterion needs a
-   runnable `verification_cmd`.
-2. **DAG:** call `dag_synthesize`; cover every criterion, keep batches
-   contiguous and acyclic, and use only `subagent-developer`,
-   `subagent-auditor`, or `subagent-explore` task templates.
-3. **Dispatch:** call `task_dispatch`, then invoke `Agent` in batch order and in
-   parallel only when tasks share no mutable state.
-4. **Audit:** collect per-task evidence and call `orchestrator_audit`. `PASS`
-   requires the minimum finding count and `workflowReady === true`; the tool
-   enforces this gate.
+After GC-2026-orchestrator-simplify the workflow is:
 
-State persists in `.pi/orchestrator/audit-state-{dag_id}.yaml` so work can
-resume after context compaction.
+1. **Goal:** call `goal_contract_create` to declare intent (title /
+   rationale / scope / anti_goals / done_definition + `_lock_hash`).
+2. **Pipeline:** use pi-tasks to build the 4-node task graph:
+   - `TaskCreate({ subject: "Implement", agentType: "Developer", blocks: ["Review"] })`
+   - `TaskCreate({ subject: "Review", agentType: "Auditor", blockedBy: ["Implement"], blocks: ["Fix", "Merge"] })`
+   - `TaskCreate({ subject: "Fix", agentType: "Developer", blockedBy: ["Review"] })`
+   - `TaskCreate({ subject: "Merge", agentType: "Merger", blockedBy: ["Fix"] })`
+3. **Execute:** call `TaskExecute(["implement"])` — pi-tasks
+   auto-cascade handles Implement → Review → optional Fix → Merge.
+4. **Review:** the Auditor agent reads `goal-{id}.yaml` directly +
+   Implement's task report and emits CLEAN / NEEDS_WORK. Fix is a
+   no-op when CLEAN. The Fix → Review loop is bounded by
+   `max_fix_iterations` (the future `workflow_run` tool, GC-2).
+
+State persists in `.pi/orchestrator/audit-state-{goal_id}.yaml` so work
+can resume after context compaction.
 
 ## Key paths
 
-- `.pi/orchestrator/goal-*.yaml`, `dag-*.yaml`, `audit-*.md` — workflow state
+- `.pi/orchestrator/goal-*.yaml`, `audit-state-*.yaml` — workflow state
+- pi-tasks store (per-session / project) — task graph
 - `pi-orchestrator/src/extension.ts` — orchestrator entrypoint
   (default export wires `registerOrchestratorTools` + the three
   session hooks: `session_start` `setActiveTools`, `before_agent_start`
@@ -206,30 +209,29 @@ The pre-commit hook (`orchestrator:typecheck` + `orchestrator:test`) still runs 
 
 If you change any source file listed in a catalog's `_source_files`, re-run `bun run gen:catalog` and commit the regenerated `pi-orchestrator/catalogs/*.json` along with the source change.
 
-## Soft mode and dag_threshold
+## Soft mode and the task-count threshold
 
 Under soft mode (GC-2026-031) nothing is mechanically blocked. The
-recommendation mechanism is the profile-driven **dag_threshold**:
+recommendation mechanism is the **task-count threshold**:
 
-- If your active `todowrite` has **>2 items** (the standard profile's
-  `dag_threshold: 2`), the recommended pattern is
-  the 4-stage DAG workflow (`goal_contract_create` → `dag_synthesize` →
-  `task_dispatch` → `orchestrator_audit`) — or, equivalently, dispatching
-  `Developer` with managed-worktree isolation for production code. The
-  TDD discipline, worktree isolation, and auditor evidence gate all
-  pay off at this scale.
-- If your active `todowrite` has **≤2 items**, direct handling with
+- If your active task list has **>2 items**, the recommended pattern is
+  the pi-tasks workflow (`goal_contract_create` → `TaskCreate` × 4
+  (Implement / Review / optional Fix / Merge) → `TaskExecute`) —
+  or, equivalently, dispatching `Developer` with managed-worktree
+  isolation for production code. The TDD discipline, worktree
+  isolation, and Reviewer evidence gate all pay off at this scale.
+- If your active task list has **≤2 items**, direct handling with
   `edit` / `write` / `bash` in the main session is also acceptable.
-  No DAG is required.
+  No task graph is required.
 
 Drift from the recommended pattern is **auto-steered**: the bash-guard
 classifier detects write-intent bash calls and the extension appends a
 once-per-session system reminder via `pi.appendEntry("system",
 SOFT_MODE_REMINDER)`. The reminder is goal-orientation — it nudges
-back toward staying aligned with your goal — it does **not** flag
+back toward staying aligned with your goal; it does **not** flag
 specific write actions as "production code". Drift is never blocked.
 
-There is **no previous-enforcement toggle** (no hard-mode toggle,
+There is **no hard-enforcement toggle** (no hard-mode toggle,
 no path gate). Soft mode is the only mode.
 
 ## Orchestrator manual takeover (soft-mode contract — GC-2026-coupon-nonhit-block follow-up)
@@ -257,14 +259,14 @@ fallback.
 2. **Read the agent's partial output** (transcript at
    `/tmp/pi-subagents-*/.../tasks/<agent_id>.output`) before continuing.
 3. **Commit on the worker's worktree branch** if the dispatch used
-   `isolation: { mode: "create" }` — orchestrator-side commits land
-   directly on the worker's branch. If the dispatch used
-   `"current-workspace"`, commits land on the orchestrator's branch.
+   a managed-worktree object (`{ dag_id, task_id, mode: "create" }`)
+   — orchestrator-side commits land directly on the worker's branch.
+   If the dispatch used `"current-workspace"`, commits land on the
+   orchestrator's branch.
 4. **Record findings** in the dispatch's task report file
    (`.pi/orchestrator/task-{task_id}-report.md`) with a `developer_commits`
-   list — the audit pipeline reads this to verify evidence.
-5. **Mark the task as completed** in the todo view and run
-   `orchestrator_audit` to advance to the next batch.
+   list — the Reviewer agent reads this to verify evidence.
+5. **Mark the task as completed** in the pi-tasks view (`TaskUpdate`).
 
 ### Why this is a contract, not a workaround
 
@@ -278,13 +280,14 @@ subagent dispatch.
 ## Red lines
 
 1. **Subagent dispatch is RECOMMENDED for >2-item workflows.** When your
-   active `todowrite` has more than two items, prefer the 4-stage DAG
-   workflow or dispatch `Developer` with managed-worktree isolation
-   (for production code) or `isolation: "current-workspace"` + `tdd:
-   "none"` (for meta-file edits). The main agent may handle ≤2 tasks
-   directly with `edit` / `write` / `bash`. The bash-guard is advisory
-   under soft mode — no commands are blocked (including `rm` / `mv` /
-   `cp` / `unlink` / `rmdir`).
+   active task list has more than two items, prefer the pi-tasks
+   workflow (`goal_contract_create` → `TaskCreate` × 4 → `TaskExecute`)
+   or dispatch `Developer` with managed-worktree isolation (for
+   production code) or `isolation: "current-workspace"` + `tdd: "none"`
+   (for meta-file edits). The main agent may handle ≤2 tasks directly
+   with `edit` / `write` / `bash`. The bash-guard is advisory under
+   soft mode — no commands are blocked (including `rm` / `mv` / `cp` /
+   `unlink` / `rmdir`).
 2. **Never use `isolation: "worktree"`.** Use the explicit managed-worktree
    object or `"current-workspace"`.
 3. **Never omit `Developer` isolation.** Every developer dispatch must choose an
@@ -295,13 +298,11 @@ subagent dispatch.
 5. **Avoid destructive git operations** such as path checkout, hard reset,
    clean, or force push. Under soft mode these are no longer hard-blocked;
    dispatch `Developer` for an audit trail on complex workflows.
-6. **Never use an unregistered task template.** Only `subagent-developer`,
-   `subagent-auditor`, and `subagent-explore` are valid.
-7. **Never use an unregistered subagent type.** Valid types are `Explore`,
-   `Plan`, `Developer`, `Auditor`, and `Merger`.
-8. **Never self-declare workflow `PASS`.** Supply findings and let
-   `orchestrator_audit` apply the evidence gate.
-9. **Never commit with `--no-verify`.** Repository hooks must run.
+6. **Never use an unregistered subagent type.** Valid types are `Explore`,
+   `PlanCompiler`, `Developer`, `Auditor`, and `Merger`.
+7. **Never self-declare workflow `PASS`.** The Reviewer (Auditor) agent
+   certifies the Implementer's output against the goal contract.
+8. **Never commit with `--no-verify`.** Repository hooks must run.
 10. **Never claim a tool result that was not returned.** Retry or report the
     failure instead.
 

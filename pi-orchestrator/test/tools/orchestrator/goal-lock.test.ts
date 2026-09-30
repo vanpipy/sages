@@ -1,5 +1,12 @@
 /**
- * goal-lock tests — GC-2026-057
+ * goal-lock tests — GC-2026-057 (adapted for GC-2026-orchestrator-simplify)
+ *
+ * After the simplify GC the lock covers the intent fields
+ * (id, title, rationale, anti_goals, scope, constraints, done_definition).
+ * success_criteria and dag_id are no longer GoalContract fields, so
+ * the SC-based anti-cheat tests are gone. The remaining tests cover
+ * the same property class (any intent-field mutation invalidates the
+ * lock) on the surviving fields.
  *
  * Covers:
  *  - computeGoalHash: deterministic, includes key fields, ignores hash
@@ -20,14 +27,6 @@ const BASE_GOAL: GoalContractLike = {
   id: "GC-2026-TEST",
   title: "Test goal",
   rationale: "For testing",
-  success_criteria: [
-    {
-      id: "SC1",
-      criterion: "Typecheck passes",
-      verification_cmd: "bun run typecheck",
-      severity: "blocker" as const,
-    },
-  ],
   anti_goals: ["do not break existing tests"],
   scope: { include: ["src/"], exclude: ["dist/"] },
   constraints: { must_use_existing_patterns: true },
@@ -48,7 +47,6 @@ describe("goal-lock: computeGoalHash (GC-2026-057)", () => {
     const reordered: GoalContractLike = {
       title: BASE_GOAL.title,
       id: BASE_GOAL.id,
-      success_criteria: BASE_GOAL.success_criteria,
       anti_goals: BASE_GOAL.anti_goals,
       rationale: BASE_GOAL.rationale,
       scope: BASE_GOAL.scope,
@@ -58,58 +56,49 @@ describe("goal-lock: computeGoalHash (GC-2026-057)", () => {
     expect(computeGoalHash(BASE_GOAL)).toBe(computeGoalHash(reordered));
   });
 
-  it("H-04: changing a success_criterion's verification_cmd changes hash", () => {
-    const a = { ...BASE_GOAL };
-    const b = {
-      ...BASE_GOAL,
-      success_criteria: [
-        { ...BASE_GOAL.success_criteria[0], verification_cmd: "echo placeholder" },
-      ],
-    };
-    expect(computeGoalHash(a)).not.toBe(computeGoalHash(b));
-  });
-
-  it("H-05: changing the title changes the hash", () => {
+  it("H-04: changing the title changes the hash", () => {
     const a = { ...BASE_GOAL };
     const b = { ...BASE_GOAL, title: "Different title" };
     expect(computeGoalHash(a)).not.toBe(computeGoalHash(b));
   });
 
-  it("H-06: adding a new SC changes the hash (anti-cheat detects dropped SCs)", () => {
+  it("H-05: changing rationale changes the hash", () => {
     const a = { ...BASE_GOAL };
-    const b = {
-      ...BASE_GOAL,
-      success_criteria: [
-        ...BASE_GOAL.success_criteria,
-        {
-          id: "SC2",
-          criterion: "Another criterion",
-          verification_cmd: "bun test",
-        },
-      ],
-    };
+    const b = { ...BASE_GOAL, rationale: "Different rationale" };
     expect(computeGoalHash(a)).not.toBe(computeGoalHash(b));
   });
 
-  it("H-07: removing a SC changes the hash", () => {
+  it("H-06: adding an anti_goal changes the hash (anti-cheat detects dropped anti_goals)", () => {
     const a = { ...BASE_GOAL };
-    const b = { ...BASE_GOAL, success_criteria: [] };
+    const b = { ...BASE_GOAL, anti_goals: [...BASE_GOAL.anti_goals, "extra rule"] };
     expect(computeGoalHash(a)).not.toBe(computeGoalHash(b));
   });
 
-  it("H-08: changing anti_goals changes the hash", () => {
+  it("H-07: removing an anti_goal changes the hash", () => {
     const a = { ...BASE_GOAL };
-    const b = { ...BASE_GOAL, anti_goals: ["different"] };
+    const b = { ...BASE_GOAL, anti_goals: [] };
     expect(computeGoalHash(a)).not.toBe(computeGoalHash(b));
   });
 
-  it("H-09: changing scope changes the hash", () => {
+  it("H-08: changing scope changes the hash", () => {
     const a = { ...BASE_GOAL };
     const b = { ...BASE_GOAL, scope: { include: [], exclude: [] } };
     expect(computeGoalHash(a)).not.toBe(computeGoalHash(b));
   });
 
-  it("H-10: whitespace in title doesn't change hash (YAML vs JSON)", () => {
+  it("H-09: changing done_definition changes the hash", () => {
+    const a = { ...BASE_GOAL };
+    const b = { ...BASE_GOAL, done_definition: "Different completion" };
+    expect(computeGoalHash(a)).not.toBe(computeGoalHash(b));
+  });
+
+  it("H-10: changing constraints changes the hash", () => {
+    const a = { ...BASE_GOAL };
+    const b = { ...BASE_GOAL, constraints: { test_coverage_min: 100 } };
+    expect(computeGoalHash(a)).not.toBe(computeGoalHash(b));
+  });
+
+  it("H-11: whitespace in title doesn't change the canonical form's hash surface (preserved)", () => {
     const a = { ...BASE_GOAL, title: "Test goal" };
     const b = { ...BASE_GOAL, title: "  Test goal  " };
     // Canonicalization does NOT strip whitespace inside string values —
@@ -149,15 +138,9 @@ describe("goal-lock: checkGoalLock (GC-2026-057)", () => {
     expect(r.reason).toBeUndefined();
   });
 
-  it("C-02: modified goal → intact=false, reason set", () => {
+  it("C-02: modified title → intact=false, reason set", () => {
     const locked = lockGoal(BASE_GOAL);
-    // Simulate the LLM modifying the goal after locking.
-    const tampered = {
-      ...locked,
-      success_criteria: [
-        { ...locked.success_criteria[0], verification_cmd: "echo yes" },
-      ],
-    };
+    const tampered = { ...locked, title: "Relaxed title" };
     const r = checkGoalLock(tampered, { mode: "audit" });
     expect(r.intact).toBe(false);
     expect(r.computed).not.toBe(locked._lock_hash);
@@ -165,17 +148,17 @@ describe("goal-lock: checkGoalLock (GC-2026-057)", () => {
     expect(r.reason).toContain("modified");
   });
 
-  it("C-03: dropped SC → intact=false (anti-cheat catches it)", () => {
+  it("C-03: dropped anti_goal → intact=false (anti-cheat catches it)", () => {
     const locked = lockGoal(BASE_GOAL);
-    const tampered = { ...locked, success_criteria: [] };
+    const tampered = { ...locked, anti_goals: [] };
     const r = checkGoalLock(tampered, { mode: "audit" });
     expect(r.intact).toBe(false);
     expect(r.reason).toContain("modified");
   });
 
-  it("C-04: relaxed title → intact=false", () => {
+  it("C-04: relaxed done_definition → intact=false", () => {
     const locked = lockGoal(BASE_GOAL);
-    const tampered = { ...locked, title: "Relaxed title" };
+    const tampered = { ...locked, done_definition: "Done." };
     const r = checkGoalLock(tampered, { mode: "audit" });
     expect(r.intact).toBe(false);
   });
@@ -205,39 +188,28 @@ describe("goal-lock: checkGoalLock (GC-2026-057)", () => {
 
 describe("goal-lock: end-to-end anti-cheat (GC-2026-057)", () => {
   it("E-01: full lock → modify → check → detect", () => {
-    // 1. LLM creates a strict goal
+    // 1. LLM creates a strict goal with two anti-goals and a tight scope.
     const original: GoalContractLike = {
-      ...BASE_GOAL,
-      success_criteria: [
-        {
-          id: "SC1",
-          criterion: "All tests pass with no skips",
-          verification_cmd: "bun test --no-skip",
-          severity: "blocker" as const,
-        },
-        {
-          id: "SC2",
-          criterion: "Typecheck passes",
-          verification_cmd: "bun run typecheck",
-          severity: "blocker" as const,
-        },
+      id: "GC-2026-anti-cheat",
+      title: "Strict goal",
+      rationale: "For anti-cheat",
+      anti_goals: [
+        "do not skip tests",
+        "do not add new dependencies",
       ],
+      scope: { include: ["src/"], exclude: ["vendor/"] },
+      constraints: { typecheck_required: true },
+      done_definition: "All checks green",
     };
 
     // 2. Lock the goal
     const locked = lockGoal(original);
 
-    // 3. LLM "cheats" by dropping SC2 and relaxing SC1
+    // 3. LLM "cheats" by dropping an anti_goal and relaxing the scope.
     const cheated = {
       ...locked,
-      success_criteria: [
-        {
-          id: "SC1",
-          criterion: "Some tests pass",
-          verification_cmd: "echo ok",
-          severity: "minor" as const,
-        },
-      ],
+      anti_goals: ["do not skip tests"], // dropped the dependency rule
+      scope: { include: ["src/", "vendor/"], exclude: [] }, // expanded
     };
 
     // 4. Check detects cheating

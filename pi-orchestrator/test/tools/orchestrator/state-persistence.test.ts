@@ -36,8 +36,12 @@ describe("shared orchestrator state persistence", () => {
     const cwd = mkdtempSync(join(tmpdir(), "sages-state-"));
     try {
       mkdirSync(join(cwd, ".pi/orchestrator"), { recursive: true });
-      writeFileSync(join(cwd, ".pi/orchestrator/dag-DAG-test.yaml"), "tasks: nope\n");
-      expect(() => loadYamlOrchestratorFile(cwd, "dag-DAG-test.yaml", {
+      // After GC-2026-orchestrator-simplify only goal-* and audit-state-* are
+      // owned by the orchestrator. Use audit-state-* for the malformed-load
+      // test since goal-* would also work but the schema there is more
+      // tied to GoalContract.
+      writeFileSync(join(cwd, ".pi/orchestrator/audit-state-test.yaml"), "tasks: nope\n");
+      expect(() => loadYamlOrchestratorFile(cwd, "audit-state-test.yaml", {
         owner: "orchestrator",
         validate: (value): value is { tasks: unknown[] } =>
           typeof value === "object" && value !== null && Array.isArray((value as any).tasks),
@@ -71,18 +75,24 @@ describe("shared orchestrator state persistence", () => {
 describe(".pi/orchestrator namespace ownership", () => {
   it("classifies orchestrator, developer, and auditor namespaces", () => {
     expect(classifyOrchestratorNamespace("goal-GC-test.yaml")).toBe("orchestrator");
-    expect(classifyOrchestratorNamespace("dag-DAG-test.yaml")).toBe("orchestrator");
-    expect(classifyOrchestratorNamespace("audit-state-DAG-test.yaml")).toBe("orchestrator");
-    expect(classifyOrchestratorNamespace("audit-workflow.md")).toBe("orchestrator");
+    expect(classifyOrchestratorNamespace("audit-state-test.yaml")).toBe("orchestrator");
     expect(classifyOrchestratorNamespace("task-P1-report.md")).toBe("developer");
     expect(classifyOrchestratorNamespace("handoff/W1/P1-handoff.md")).toBe("developer");
-    expect(classifyOrchestratorNamespace("audit-DAG-1-P1.md")).toBe("auditor");
+    expect(classifyOrchestratorNamespace("audit-GC-1-P1.md")).toBe("auditor");
   });
 
   it("rejects cross-namespace overwrite attempts and unowned names", () => {
     expect(() => assertOrchestratorNamespaceOwner("task-P1-report.md", "orchestrator")).toThrow(/owned by developer/i);
-    expect(() => assertOrchestratorNamespaceOwner("audit-DAG-1-P1.md", "developer")).toThrow(/owned by auditor/i);
+    expect(() => assertOrchestratorNamespaceOwner("audit-GC-1-P1.md", "developer")).toThrow(/owned by auditor/i);
     expect(() => assertOrchestratorNamespaceOwner("goal-GC-test.yaml", "auditor")).toThrow(/owned by orchestrator/i);
     expect(() => assertOrchestratorNamespaceOwner("misc.txt", "developer")).toThrow(/unowned/i);
+  });
+
+  it("dag-*.yaml and todo-*.yaml are no longer owned (deleted tool surface)", () => {
+    // After GC-2026-orchestrator-simplify neither DAG yaml nor todowrite
+    // yaml is part of the orchestrator namespace — they were owned by
+    // DAG / todowrite tools that no longer exist.
+    expect(classifyOrchestratorNamespace("dag-DAG-test.yaml")).toBeNull();
+    expect(classifyOrchestratorNamespace("todo-DAG-test.yaml")).toBeNull();
   });
 });

@@ -1,13 +1,23 @@
 ---
 name: orchestrator
-description: Orchestrate multi-task workflows via 4-stage DAG (goal → decompose → dispatch → audit). Coordinates `Developer` (canonical) and `Auditor` subagents for execution.
+description: Orchestrate multi-task workflows via pi-tasks (goal → TaskCreate × 4 → TaskExecute). Coordinates `Developer` (canonical) and `Auditor` subagents for execution. After GC-2026-orchestrator-simplify the orchestrator owns only `goal_contract_create`; DAG/dispatch/audit/reminder tools were removed.
 ---
 
 # Orchestrator - Multi-Task Workflow Coordinator
 
 ## Role
 
-The Orchestrator turns a user goal into a verifiable contract, decomposes it into a TaskNode DAG, dispatches tasks to specialized subagents, and audits the result. You are the **conductor, not a player** — you don't write code, search files, or run tests yourself; you orchestrate subagents that do.
+The Orchestrator turns a user goal into a verifiable contract, drives
+the Implement → Review → optional Fix → Merge pipeline through
+pi-tasks, and uses Reviewer (Auditor) agent feedback to iterate.
+After GC-2026-orchestrator-simplify the orchestrator owns only
+`goal_contract_create` — there is no DAG layer, no 4-stage workflow,
+no audit rollup tool. Workflow is driven at the LLM level via
+pi-tasks TaskCreate × 4 + TaskExecute.
+
+You are the **conductor, not a player** — you don't write code,
+search files, or run tests yourself; you orchestrate subagents
+that do.
 
 ## When to Use
 
@@ -26,11 +36,12 @@ For single trivial tasks (one-line edit, single function), do NOT use this skill
 - Main agent has full tool access (edit / write / aft_edit /
   apply_patch, unrestricted bash). Nothing is blocked.
 - Subagent dispatch is RECOMMENDED for workflows with >2 items
-  in the active todowrite; direct handling is acceptable for ≤2.
+  in the active task list; direct handling is acceptable for ≤2.
 - Stage 1: goal_contract_create → .pi/orchestrator/goal-{id}.yaml
-- Stage 2: dag_synthesize → .pi/orchestrator/dag-{id}.yaml
-- Stage 3: task_dispatch → for each batch: spawn subagents + wait + audit
-- Stage 4: final orchestrator_audit → .pi/orchestrator/audit-workflow.md
+- Stage 2: TaskCreate × 4 (Implement / Review / optional Fix / Merge)
+- Stage 3: TaskExecute([Implement]) — auto-cascade handles the rest
+- Review: Auditor reads goal.yaml directly, returns CLEAN or NEEDS_WORK
+- Stage 4 (Merge): Merger spawns when Fix is completed (cascade)
 ```
 
 ## Subagent Contract — The 4-Agent Pipeline
