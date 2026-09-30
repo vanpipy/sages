@@ -12,7 +12,7 @@ export interface SubagentsSettings {
 	maxConcurrent?: number;
 	/**
 	 * Per-agent-type background concurrency overrides. Each entry sets the cap
-	 * for one agent type (developer, auditor, Explore, Plan, merger, git-expert,
+	 * for one agent type (developer, reviewer, Explore, Plan, merger, git-expert,
 	 * or any user-defined name). The effective per-type cap at spawn time is
 	 * resolved by AgentManager.effectiveMaxFor():
 	 *   AgentConfig.maxConcurrent -> this map -> global maxConcurrent
@@ -59,7 +59,7 @@ export interface SubagentsSettings {
 	 */
 	scopeModels?: boolean;
 	/**
-	 * When true, the four built-in default agents (developer, auditor, Explore, Plan)
+	 * When true, the four built-in default agents (developer, reviewer, Explore, Plan)
 	 * are not registered at startup. User-defined agents from project/global custom
 	 * agent dirs are completely unaffected — only the hardcoded DEFAULT_AGENTS are suppressed.
 	 * Defaults to false.
@@ -106,12 +106,12 @@ export interface SubagentsSettings {
 	outputTranscript?: boolean;
 	/**
 	 * Per-type model override map. Keys are the canonical agent type names
-	 * (`Developer`, `Auditor`, `Explore`, `Plan`, `Merger`) or their legacy
+	 * (`Developer`, `Reviewer`, `Explore`, `Plan`, `Merger`) or their legacy
 	 * lowercase spellings; the case-insensitive resolver maps both onto the
 	 * same Model. Values are `provider/model` strings (e.g. `"anthropic/claude-opus-4"`).
 	 *
 	 * GC-2026-092: slots into the resolution chain between the hardcoded
-	 * `AgentConfig.model` pin (e.g. developer/auditor → minimax-cn/MiniMax-M3)
+	 * `AgentConfig.model` pin (e.g. developer/reviewer → minimax-cn/MiniMax-M3)
 	 * and the global `settings.json#defaultProvider/defaultModel` fallback.
 	 * Project subagents.json overrides global; absence means "use the
 	 * hardcoded default" — never silently substitutes a different model.
@@ -413,7 +413,7 @@ export function saveAndEmitChanged(
 //
 // The Agent tool executor merges the caller's AbortSignal with a deadline-driven
 // AbortController via AbortSignal.any. The deadline default depends on the
-// agent type (developer/auditor get 20min; Explore/Plan get 5min) and the
+// agent type (developer/reviewer get 20min; Explore/Plan get 5min) and the
 // caller may override via the `max_duration_minutes` Agent tool param.
 //
 // The functions in this block are module-level state, mirroring
@@ -430,7 +430,7 @@ const DEFAULT_DURATION_FLOOR_MS = 20 * 60 * 1000;
 
 const DEFAULT_DURATIONS_MS: Record<string, number> = {
 	developer: 20 * 60 * 1000,
-	auditor: 20 * 60 * 1000,
+	reviewer: 20 * 60 * 1000,
 	Explore: 5 * 60 * 1000,
 };
 
@@ -483,7 +483,7 @@ export function resolveDeadlineMs(
 	if (type === "Explore") {
 		return getSubagentDurationDefault(type);
 	}
-	// Canonical types (Developer, Auditor, Plan, PlanCompiler, Merger) delegate
+	// Canonical types (Developer, Reviewer, Plan, PlanCompiler, Merger) delegate
 	// to resolveRunConfig — single source of truth.
 	return resolveRunConfig(type, {}, process.env).deadlineMs;
 }
@@ -506,7 +506,7 @@ export function resolveDeadlineMs(
 
 const DEFAULT_NETWORK_ALLOWED_BY_TYPE: Record<string, boolean> = {
 	developer: false,
-	auditor: false,
+	reviewer: false,
 	Explore: false,
 	Plan: false,
 };

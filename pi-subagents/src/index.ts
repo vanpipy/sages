@@ -670,7 +670,7 @@ export default function (pi: ExtensionAPI) {
 		},
 		// getAgentMaxConcurrent: the manager asks this hook for AgentConfig-level
 		// caps at spawn time. Returns `cfg?.maxConcurrent` so default-agents.ts
-		// defaults (developer: 2, auditor: 2, ...) take effect without the
+		// defaults (developer: 2, reviewer: 2, ...) take effect without the
 		// manager importing the agent-config registry directly.
 		(type) => getAgentConfig(type)?.maxConcurrent,
 	);
@@ -871,7 +871,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// ---- Disable default agents configuration ----
-	// When enabled, the four hardcoded default agents (`developer`, `auditor`,
+	// When enabled, the four hardcoded default agents (`developer`, `reviewer`,
 	// `Explore`, `Plan`) are not registered. User-defined agents from
 	// project/global custom agent dirs are completely unaffected — only
 	// DEFAULT_AGENTS are suppressed. Defaults to false; opt-in via
@@ -1203,7 +1203,7 @@ Terse command-style prompts produce shallow, generic work.
 				max_duration_minutes: Type.Optional(
 					Type.Number({
 						description:
-							"GC-2026-037: wall-clock deadline in minutes (0.5-120). Overrides the per-agent-type default. Aborts with reason 'agent duration exceeded' if reached. Default: developer/auditor 20min, Explore/Plan 5min. Caller can still pass 0 to fall back to the per-type default.",
+							"GC-2026-037: wall-clock deadline in minutes (0.5-120). Overrides the per-agent-type default. Aborts with reason 'agent duration exceeded' if reached. Default: developer/reviewer 20min, Explore/Plan 5min. Caller can still pass 0 to fall back to the per-type default.",
 						minimum: 0.5,
 						maximum: 120,
 					}),
@@ -1454,7 +1454,7 @@ Terse command-style prompts produce shallow, generic work.
 				reloadCustomAgents();
 
 				const rawType = params.subagent_type as SubagentType;
-				// GC-2026-014: the `software-developer` / `software-auditor`
+				// GC-2026-014: the `software-developer` / `software-auditor` (renamed to `software-reviewer`)
 				// legacy spellings were removed — both fall through the
 				// case-insensitive registry lookup as unknown agent types and
 				// surface here as a precise error. The alias-aware resolver
@@ -1489,7 +1489,7 @@ Terse command-style prompts produce shallow, generic work.
 				}
 
 				// GC-2026-037: wall-clock deadline merge. Resolve the per-type
-				// default (developer/auditor 20min, Explore/Plan 5min) and let
+				// default (developer/reviewer 20min, Explore/Plan 5min) and let
 				// the caller override via params.max_duration_minutes. The
 				// merged signal is propagated to all downstream spawn/spawnAndWait
 				// calls below — the deadline timer fires abortController.abort
@@ -2306,7 +2306,7 @@ Terse command-style prompts produce shallow, generic work.
 			allNames.length === 0 && agents.length === 0
 				? "No agents found. Create specialized subagents that can be delegated to.\n\n" +
 					"Each subagent has its own context window, custom system prompt, and specific tools.\n\n" +
-					"Try creating: Code Reviewer, Security Auditor, Test Writer, or Documentation Writer.\n\n"
+					"Try creating: Code Reviewer, Security Reviewer, Test Writer, or Documentation Writer.\n\n"
 				: "";
 
 		if (noAgentsMsg) {
@@ -2982,7 +2982,7 @@ ${systemPrompt}
 					id: "disableDefaultAgents",
 					label: "Disable defaults",
 					description:
-						"Hide built-in agents (developer, auditor, Explore, Plan) — custom agents are unaffected",
+						"Hide built-in agents (developer, reviewer, Explore, Plan) — custom agents are unaffected",
 					currentValue: isDefaultsDisabled() ? "on" : "off",
 					values: ["on", "off"],
 				},

@@ -20,7 +20,7 @@ const PROMPT_DIR = join(import.meta.dirname, "../src/agent-prompts");
 
 const PROMPT_FILES = [
 	"developer.ts",
-	"auditor.ts",
+	"reviewer.ts",
 	"explore.ts",
 	"plan.ts",
 ] as const;

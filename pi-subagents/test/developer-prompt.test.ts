@@ -597,7 +597,7 @@ describe("developer-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
 });
 
 describe("developer-prompt: Boundary Discipline (GC-2026-094 P1)", () => {
-	// GC-2026-094 P1: 3 Developer + 1 Auditor all triggered max_turns abort
+	// GC-2026-094 P1: 3 Developer + 1 Reviewer all triggered max_turns abort
 	// at ~60 tool_uses. Substantive output (commits / audit-{task_id}.md)
 	// landed on disk, but the YAML verdict block in the final assistant
 	// message was lost. We bake "max_turns survival" discipline into the

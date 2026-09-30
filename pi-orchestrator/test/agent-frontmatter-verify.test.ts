@@ -59,7 +59,7 @@ const PINNED_MODEL_EXCEPTIONS = new Set([
 	"Explore",
 	"PlanCompiler",
 	"Developer",
-	"Auditor",
+	"Reviewer",
 ]);
 
 it("templates/agents/ is EMPTY (no user-level subagent templates are shipped)", () => {
@@ -134,7 +134,7 @@ describe("default-agents.ts: shipped built-in frontmatter (no third-party deps)"
     "Explore",
     "PlanCompiler",
     "Developer",
-    "Auditor",
+    "Reviewer",
   ] as const) {
     it(`${name} config block exists with the required keys`, () => {
       const block = extractAgentBlock(name);

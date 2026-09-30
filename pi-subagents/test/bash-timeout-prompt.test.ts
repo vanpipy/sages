@@ -9,7 +9,7 @@
  * Pinned invariants:
  *   - `renderBashTimeoutSection()` exists on run-controller.ts, returns
  *     a non-empty string containing each bucket's rendered time.
- *   - Each of `developer.ts`, `auditor.ts`, `plan.ts`, `explore.ts`
+ *   - Each of `developer.ts`, `reviewer.ts`, `plan.ts`, `explore.ts`
  *     calls `renderBashTimeoutSection()` in its source (proves the
  *     integration).
  *   - The drift test mutates `DEFAULT_BUCKET_TIMEOUTS_MS.read` and
@@ -30,7 +30,7 @@ const PROMPT_DIR = join(import.meta.dirname, "../src/agent-prompts");
 
 const PROMPT_FILES = [
 	"developer.ts",
-	"auditor.ts",
+	"reviewer.ts",
 	"explore.ts",
 	"plan.ts",
 ] as const;

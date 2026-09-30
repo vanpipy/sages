@@ -13,7 +13,7 @@ import { parseCheckpoint } from "../src/agent-runner.js";
 
 const PROMPTFiles = [
 	"developer.ts",
-	"auditor.ts",
+	"reviewer.ts",
 	"explore.ts",
 	"plan.ts",
 ] as const;

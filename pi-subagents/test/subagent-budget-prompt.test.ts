@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 
 const PROMPTFiles = [
 	"developer.ts",
-	"auditor.ts",
+	"reviewer.ts",
 	"explore.ts",
 	"plan.ts",
 ] as const;

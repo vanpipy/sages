@@ -2,7 +2,7 @@
  * Per-type background concurrency — AgentManager.
  *
  * The Sages-wide policy (set in default-agents.ts and propagated here):
- *   - Developer: 2, Auditor: 2, Explore: 4, Plan: 2, Merger: 1
+ *   - Developer: 2, Reviewer: 2, Explore: 4, Plan: 2, Merger: 1
  *   - Global ceiling: 6 (max_concurrent in settings).
  *
  * These tests pin the resolution order at spawn time:
@@ -26,9 +26,9 @@ describe("AgentManager per-type concurrency", () => {
 
 	it("getMaxConcurrentByType returns a by-copy snapshot", () => {
 		const manager = new AgentManager();
-		manager.setMaxConcurrentByType({ Developer: 2, Auditor: 3 });
+		manager.setMaxConcurrentByType({ Developer: 2, Reviewer: 3 });
 		const snap = manager.getMaxConcurrentByType();
-		expect(snap).toEqual({ Developer: 2, Auditor: 3 });
+		expect(snap).toEqual({ Developer: 2, Reviewer: 3 });
 		// Mutating the returned snapshot must not affect internal state.
 		snap.Developer = 99;
 		expect(manager.getMaxConcurrentByType().Developer).toBe(2);
@@ -39,7 +39,7 @@ describe("AgentManager per-type concurrency", () => {
 		const manager = new AgentManager();
 		manager.setMaxConcurrentByType({
 			Developer: 2, // valid
-			Auditor: 0, // < 1 -> dropped
+			Reviewer: 0, // < 1 -> dropped
 			planner: 1.5, // non-integer -> dropped
 			bad: "x", // wrong type -> dropped
 		} as unknown as Record<string, number>);
@@ -92,10 +92,10 @@ describe("AgentManager per-type concurrency", () => {
 	it("getRunningBackgroundByType returns current per-type counts", () => {
 		const manager = new AgentManager();
 		(manager as any).runningBackgroundByType.set("Developer", 2);
-		(manager as any).runningBackgroundByType.set("Auditor", 1);
+		(manager as any).runningBackgroundByType.set("Reviewer", 1);
 		expect(manager.getRunningBackgroundByType()).toEqual({
 			Developer: 2,
-			Auditor: 1,
+			Reviewer: 1,
 		});
 		manager.dispose();
 	});

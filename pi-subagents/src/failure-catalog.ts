@@ -42,7 +42,7 @@ export type FailureModeStage =
 	| "verify"
 	| "commit"
 	| "merge"
-	| "auditor";
+	| "reviewer";
 
 export type FailureDetection =
 	| {
@@ -452,7 +452,7 @@ const StageSchema = Type.Union([
 	Type.Literal("verify"),
 	Type.Literal("commit"),
 	Type.Literal("merge"),
-	Type.Literal("auditor"),
+	Type.Literal("reviewer"),
 ]);
 
 const DetectionSchema = Type.Union([

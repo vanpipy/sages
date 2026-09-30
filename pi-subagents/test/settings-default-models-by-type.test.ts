@@ -100,12 +100,12 @@ describe("settings-default-models-by-type: precedence + happy path", () => {
 		writeSubagentsJson(join(dirs.global, "subagents.json"), {
 			defaultModelsByType: {
 				Developer: developer,
-				Auditor: auditor,
+				Reviewer: auditor,
 			},
 		});
 		expect(getSettingsDefaultModelsByType(dirs.project)).toEqual({
 			Developer: developer,
-			Auditor: auditor,
+			Reviewer: auditor,
 		});
 	});
 
@@ -143,14 +143,14 @@ describe("settings-default-models-by-type: precedence + happy path", () => {
 			defaultModelsByType: { Developer: globalDeveloper },
 		});
 		writeSubagentsJson(join(dirs.project, ".pi", "subagents.json"), {
-			defaultModelsByType: { Auditor: projAuditor },
+			defaultModelsByType: { Reviewer: projAuditor },
 		});
 		// Helper returns the project-overrides-global result; how the
 		// merge is constructed (loadSettings does `{...global, ...project}`) is
 		// the user's contract: project wins per-key.
 		expect(getSettingsDefaultModelsByType(dirs.project)).toEqual({
 			Developer: globalDeveloper,
-			Auditor: projAuditor,
+			Reviewer: projAuditor,
 		});
 	});
 });
@@ -201,7 +201,7 @@ describe("settings-default-models-by-type: missing / malformed inputs", () => {
 		writeSubagentsJson(join(dirs.global, "subagents.json"), {
 			defaultModelsByType: {
 				Developer: developer,
-				Auditor: "",
+				Reviewer: "",
 				Explore: "   ",
 			},
 		});
@@ -211,7 +211,7 @@ describe("settings-default-models-by-type: missing / malformed inputs", () => {
 		const got = getSettingsDefaultModelsByType(dirs.project);
 		expect(got).toBeDefined();
 		expect(got?.Developer).toBe(developer);
-		expect(got?.Auditor).toBeUndefined();
+		expect(got?.Reviewer).toBeUndefined();
 		expect(got?.Explore).toBe("   ");
 	});
 
@@ -241,7 +241,7 @@ describe("settings-default-models-by-type: missing / malformed inputs", () => {
 	it("returns undefined when the map is empty after sanitization", () => {
 		// All entries are empty strings → after sanitization, the map is empty.
 		writeSubagentsJson(join(dirs.global, "subagents.json"), {
-			defaultModelsByType: { Developer: "", Auditor: "" },
+			defaultModelsByType: { Developer: "", Reviewer: "" },
 		});
 		expect(getSettingsDefaultModelsByType(dirs.project)).toBeUndefined();
 	});
