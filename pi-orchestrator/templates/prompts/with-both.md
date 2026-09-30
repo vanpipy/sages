@@ -28,13 +28,7 @@ AFT over `bash grep` / `rg`**.
 - `aft_zoom` — single symbol inspection
 - `aft_inspect` — code health
 
-## Magic Context — long-term memory
 
-`@cortexkit/pi-magic-context` provides cross-session memory.
-
-- `ctx_search` — recall past projects / decisions / notes
-- `ctx_note` — park a decision or follow-up
-- `ctx_expand` — recover full context from a session-history summary
 - `ctx_reduce` — manage the rolling tool-output buffer
 
 ## Reaching for the right tool

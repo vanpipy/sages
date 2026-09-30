@@ -22,7 +22,6 @@ import {
 	TaskNodeSchema,
 	validateDAG,
 } from "@/dag-synthesizer.js";
-import { loadTodoFile } from "@/todo-sync.js";
 import { buildGoalContract, buildLockedGoalContract } from "@/goal-contract.js";
 import { computeGoalHash } from "@/goal-lock.js";
 import {
@@ -706,50 +705,7 @@ describe("executeDAGSynthesize — GC-2026-091 plan → DAG → todo auto-sync",
     expect(parsed._lock_hash).not.toBe(priorHash);
   });
 
-  it("D1-1: auto-compiles the todowrite view AFTER the DAG is persisted", async () => {
-    const goal = buildGoalContract(GOAL_091_INPUT as any);
-    writeGoal(gc091Cwd, goal);
-
-    await executeDAGSynthesize(
-      makeDagInput("DAG-2026-091", "GC-2026-091") as any,
-      { cwd: gc091Cwd },
-    );
-
-    // The todo file should exist and carry both dag_id and goal_id.
-    const todoPath = join(gc091Cwd, ".pi/orchestrator/todo-DAG-2026-091.yaml");
-    expect(existsSync(todoPath)).toBe(true);
-    const todo = loadTodoFile(gc091Cwd, "DAG-2026-091");
-    expect(todo).not.toBeNull();
-    expect(todo!.dag_id).toBe("DAG-2026-091");
-    expect(todo!.goal_id).toBe("GC-2026-091");
-    expect(todo!.items.length).toBe(1);
-  });
-
-  it("D1+D2 order: todo file's goal_id is set BEFORE the goal writeback so it doesn't dangle", async () => {
-    // The spec mandates order: D1 (todowrite_compile) before D2
-    // (goal writeback). Why: if D2 ran first, the todo file would be
-    // missing goal_id even though the goal contract now points at it.
-    // The order check is structural — we verify the artifacts at the
-    // end of the call, but the ordering is encoded in executeDAGSynthesize.
-    const goal = buildGoalContract(GOAL_091_INPUT as any);
-    writeGoal(gc091Cwd, goal);
-
-    await executeDAGSynthesize(
-      makeDagInput("DAG-2026-091", "GC-2026-091") as any,
-      { cwd: gc091Cwd },
-    );
-
-    const todo = loadTodoFile(gc091Cwd, "DAG-2026-091");
-    expect(todo!.goal_id).toBe("GC-2026-091");
-    const reloaded = loadGoalContract(gc091Cwd, "GC-2026-091");
-    expect(reloaded!.dag_id).toBe("DAG-2026-091");
-    // Both edges consistent: goal_id on todo matches the goal's id,
-    // and the goal's dag_id matches the todo's dag_id.
-    expect(todo!.goal_id).toBe(reloaded!.id);
-    expect(reloaded!.dag_id).toBe(todo!.dag_id);
-  });
-
-  it("ToolResult still wraps the synthesis response (post-compile)", async () => {
+  it("ToolResult still wraps the synthesis response", async () => {
     // Regression guard: the auto-sync additions must not change the
     // outer ToolResult shape returned by executeDAGSynthesize. The
     // call must still return `{ content: [{ type: "text", text: ... }] }`

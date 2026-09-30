@@ -44,7 +44,7 @@ import { registerTaskDispatcherTool } from "./task-dispatcher.js";
 import { registerOrchestratorAuditTool } from "./orchestrator-audit.js";
 import { registerSagesReminderTool } from "./sages-reminder.js";
 import { registerSubagentControlTools } from "./subagent-control.js";
-import { registerTodowriteTools } from "./todowrite.js";
+
 import {
 	installOrchestratorAdvisoryHandlers,
 	type OrchestratorAdvisoryRuntimeDeps,
@@ -130,27 +130,7 @@ export const BASELINE_TOOLS: readonly string[] = [
 	"ls",
 ];
 
-/**
- * Todowrite tools exposed by the orchestrator + pi-magic-context extensions.
- *
- * `todowrite` is registered by `@cortexkit/pi-magic-context` at extension
- * boot (default enabled). `todowrite_compile` + `todowrite_progress` are
- * registered by the orchestrator's `registerTodowriteTools(pi)` (GC-2026-074).
- *
- * The orchestrator's constitution (templates/SYSTEM.md § "Soft mode",
- * § "Tool Reference") repeatedly directs the LLM to use these tools for
- * tracking multi-step work and reconciling DAG↔todo drift. Without this
- * allowlist, `setActiveTools` hides the schemas from the LLM even when
- * registered — empirically surfaced during GC-2026-076 (8-SC / 2-task
- * DAG ran end-to-end with zero todowrite activity).
- *
- * GC-2026-081: expose all three to the main-agent active toolset.
- */
-export const TODOWRITE_TOOLS: readonly string[] = [
-	"todowrite",
-	"todowrite_compile",
-	"todowrite_progress",
-];
+
 
 /**
  * AFT (Agentic File Tools) suite registered by `@cortexkit/aft-pi` at
@@ -189,45 +169,25 @@ export const AFT_TOOLS: readonly string[] = [
 	"aft_zoom",
 ];
 
-/**
- * Magic-context (`ctx_*`) long-term memory tools registered by
- * `@cortexkit/pi-magic-context` at extension boot. Five tools:
- * cross-session recall (`ctx_search` / `ctx_memory`), note capture
- * (`ctx_note`), recall-graph compaction (`ctx_reduce`), and
- * per-result expansion (`ctx_expand`).
- *
- * The orchestrator's constitution (DEVELOPER_PROMPT § "Magic
- * Context", AGENTS.md § "Tool preference order") directs the LLM to
- * reach for `ctx_search` BEFORE re-deriving project knowledge ("did
- * we solve this before", "where does X live", "what did we decide
- * about Y"). pi-magic-context also registers `todowrite` (see
- * `TODOWRITE_TOOLS` above), but `ctx_*` were not added in GC-2026-081
- * — only the todowrite half of the suite was exposed.
- *
- * GC-2026-086: expose all five `ctx_*` tools so the long-term-memory
- * directive ("MUST reach for `ctx_search` before re-deriving project
- * knowledge") becomes reachable, not just the adjacent `todowrite`.
- */
-export const CTX_TOOLS: readonly string[] = [
-	"ctx_search",
-	"ctx_memory",
-	"ctx_note",
-	"ctx_reduce",
-	"ctx_expand",
-];
+
 
 /**
  * Soft-mode reminder text. Fires once per session on the first `bash`
  * tool call to nudge the LLM toward the 4-stage DAG workflow when the
- * active todowrite exceeds 2 items (the historical `dag_threshold`).
+ * active task list exceeds 2 items (the historical `dag_threshold`).
  * Lives here, not in a profile, because the recommendation is
  * intrinsic to orchestrator operation — there is no user-facing
  * toggle. Mirrors `templates/SYSTEM.md` § "Soft mode" so a drift
  * check (the soft-mode verifier) can pin both sides byte-identical.
+ *
+ * Post-GC-2026-remove-magic-context: the magic-context todowrite is
+ * gone; the active task tracker is now Sages' internal
+ * pi-subagents/personal-todowrite (per-subagent) and pi-tasks
+ * TaskList (per-workflow).
  */
 const SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — subagent dispatch recommended**
 >
-> If this is part of a larger workflow (>2 items in your active todowrite,
+> If this is part of a larger workflow (>2 items in your active task list,
 > i.e. above the **task-count threshold**), consider dispatching via the
 > 4-stage DAG workflow: goal → DAG → dispatch → audit. The developer /
 > auditor / merger / git-expert pipeline is the recommended approach for
@@ -270,9 +230,7 @@ export function registerOrchestratorTools(
 	// GC-2026-073: programmatic LLM-facing tools for inspecting and
 	// controlling subagents — subagent_status / steer / abort / resume.
 	registerSubagentControlTools(pi);
-	// GC-2026-074: todowrite view + DAG linkage (todowrite_compile /
-	// todowrite_progress). DAG↔todo auto-sync is wired inside task_dispatch.
-	registerTodowriteTools(pi);
+	
 	// GC-2026-053: orchestrator tool_call audit wiring (the post-tool
 	// history-tracker, pre-tool blocker, tool_result error tracker, and
 	// message_end assistant-text tracker).
@@ -313,8 +271,6 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 			...ORCHESTRATOR_TOOLS,
 			...SUBAGENT_TOOLS,
 			...AFT_TOOLS,
-			...CTX_TOOLS,
-			...TODOWRITE_TOOLS,
 			...BASELINE_TOOLS,
 		];
 		pi.setActiveTools(tools);

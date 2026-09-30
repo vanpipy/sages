@@ -33,7 +33,6 @@ import { wrapRegisteredTool } from "./registered-tool-wrapper.js";
 import { KNOWN_SUBAGENT_IDS } from "@sages/pi-subagents";
 import { RunEvent } from "./observability/events.js";
 import { emitRunEvent } from "./observability/runner.js";
-import { executeTodowriteCompile } from "./todowrite.js";
 import { goalContractToYaml } from "./goal-contract.js";
 import { computeGoalHash } from "./goal-lock.js";
 
@@ -587,33 +586,6 @@ export async function executeDAGSynthesize(
     goal_id: plan.goal_id,
     task_count: plan.tasks.length,
   });
-
-  // ───────────────────────────────────────────────────────────────────
-  // GC-2026-091 — D1: auto-compile the todowrite view from the DAG
-  // BEFORE the goal contract writeback (D2). Order matters: the todo
-  // file's `goal_id` is populated from `plan.goal_id` during compile
-  // (todowrite.ts phase E), so it must run while the plan.goal_id
-  // edge is still consistent. If D1 fails, we surface the error in
-  // the synthesis response — the orchestrator's caller decides
-  // whether to retry. force:true so a stale todo file from a prior
-  // synthesize doesn't block the auto-sync.
-  // ───────────────────────────────────────────────────────────────────
-  const todoResult = executeTodowriteCompile({ dag_id: plan.id, force: true }, { cwd });
-  if (!todoResult.ok) {
-    return {
-      content: [{ type: "text", text: JSON.stringify({
-        status: "error",
-        intent: "DAG saved but todowrite_compile failed in the GC-2026-091 auto-sync. Re-run dag_synthesize after fixing the todo compile error.",
-        validation: {
-          errors: [
-            `todowrite_compile returned ok=false for dag_id="${plan.id}": ${JSON.stringify(todoResult)}`,
-          ],
-          warnings: result.warnings,
-          files_required: [path],
-        },
-      }) }],
-    };
-  }
 
   // ───────────────────────────────────────────────────────────────────
   // GC-2026-091 — D2: write dag_id back to the goal contract and
