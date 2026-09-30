@@ -54,7 +54,7 @@ const DEVELOPER_AGENT: AgentConfig = {
 		"Production-grade software implementation agent following strict " +
 		"test-driven development (TDD) discipline (RED → GREEN → REFACTOR).",
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
-	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
+	extensions: ["aft", "pi-mcp-adapter"],
 	// Subagent isolation: even though `extensions:` is an explicit allowlist
 	// (no `pi-subagents` entry) so the Agent tool cannot load by accident, we
 	// pin `excludeExtensions: ["pi-subagents"]` to make the policy explicit and
@@ -89,7 +89,7 @@ const DEVELOPER_AGENT: AgentConfig = {
  * Symmetry with `developer`:
  *   - same built-in tool set (7 tools, including \`edit\`/\`write\` for
  *     the auditor's single allowed write target)
- *   - same \`extensions: [aft, pi-mcp-adapter, pi-magic-context]\` so the
+ *   - same \`extensions: [aft, pi-mcp-adapter]\` so the
  *     auditor reaches for the same indexed semantic tools as the
  *     developer
  *   - same \`excludeExtensions: ["pi-subagents"]\` belt-and-suspenders
@@ -119,7 +119,7 @@ const AUDITOR_AGENT: AgentConfig = {
 	// GC-2026-coupon-nonhit-block follow-up (Path A): same personal todowrite
 	// set as Developer — audits also have multi-step verification flows.
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
-	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
+	extensions: ["aft", "pi-mcp-adapter"],
 	// Symmetric with `developer`: the auditor is read-only on production
 	// code by policy, but the Agent tool cannot load here regardless.
 	excludeExtensions: ["pi-subagents"],
@@ -163,9 +163,9 @@ const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
  * --no-ff` from inside bash; the merger never edits a file directly.
  *
  * Symmetry with `developer` / `auditor`:
- *   - same extensions (`aft`, `pi-mcp-adapter`, `pi-magic-context`) so
- *     the merger reaches for the same indexed semantic tools to read
- *     both diffs and classify overlap
+ *   - same extensions (`aft`, `pi-mcp-adapter`) so the merger reaches
+ *     for the same indexed semantic tools to read both diffs and
+ *     classify overlap
  *   - same `excludeExtensions: ["pi-subagents"]` belt-and-suspenders
  *     guard against recursive Agent dispatch
  *
@@ -196,7 +196,7 @@ const MERGER_AGENT: AgentConfig = {
 		"merged result with typecheck + lint + the merged test suite. Read-only on " +
 		"production code (no edit / write tools); hunk-conflicts escalate.",
 	builtinToolNames: READ_ONLY_TOOLS,
-	extensions: ["aft", "pi-mcp-adapter", "pi-magic-context"],
+	extensions: ["aft", "pi-mcp-adapter"],
 	excludeExtensions: ["pi-subagents"],
 	skills: false,
 	systemPrompt: MERGER_PROMPT,
@@ -237,6 +237,12 @@ const MERGER_AGENT: AgentConfig = {
  * codebase_memory / aft / ctx_search / magic-context), `thinking:
  * "minimal"` (no deep reasoning), `maxTurns: 12` (compile budget, not
  * exploration budget).
+
+ * GC-2026-remove-magic-context: the magic-context reference in this
+ * docstring is historical context for why PlanCompiler is pinned to
+ * `extensions: false` — magic-context (and the upstream todo + ctx_*
+ * tools it provided) is no longer loaded anywhere in pi-subagents.
+ * PlanCompiler's own config is unchanged (still `extensions: false`).
  *
  * GC-2026-093: the canonical public name is `PlanCompiler` (renamed
  * from `Plan` to clarify that this agent only compiles the Brief into
@@ -255,10 +261,11 @@ const PLAN_AGENT: AgentConfig = {
 	// read is allowed to confirm an exact symbol or path named in the
 	// brief.
 	builtinToolNames: ["read"],
-	// No extensions: codebase_memory_*, aft_*, ctx_search, and
-	// magic-context would each let PlanCompiler rebuild the
-	// architecture map from scratch. The main agent already did that
-	// work; PlanCompiler is forbidden from redoing it.
+	// No extensions: codebase_memory_*, aft_*, and ctx_search would
+	// each let PlanCompiler rebuild the architecture map from
+	// scratch. The main agent already did that work; PlanCompiler is
+	// forbidden from redoing it. (magic-context was removed in
+	// GC-2026-remove-magic-context.)
 	extensions: false,
 	excludeExtensions: ["pi-subagents"],
 	skills: false,

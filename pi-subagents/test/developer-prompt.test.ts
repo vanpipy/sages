@@ -15,9 +15,9 @@
  *   - First-action protocol (AGENTS.md / README / CLAUDE.md discovery)
  *   - Conventional Commits + author rules (no --author, no GIT_AUTHOR_*)
  *   - Write tools (read/edit/write, semantically)
- *   - Required extensions (aft, pi-mcp-adapter, magic-context) — encoded
- *     at the config layer, but the prompt must reference the loader
- *     behavior so the agent knows what extensions it inherits.
+ *   - Required extensions (aft, pi-mcp-adapter) — encoded at the config
+ *     layer, but the prompt must reference the loader behavior so the
+ *     agent knows what extensions it inherits.
  *   - Background self-contained behavior (no synchronous user interaction)
  *   - Original-repo protection (worktree isolation keeps changes off the
  *     orchestrator's main branch)

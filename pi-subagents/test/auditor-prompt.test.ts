@@ -20,8 +20,8 @@
  *   - "Verify only" — no production edits, single allowed write target
  *     is `.pi/orchestrator/audit-{dag_id}-{task_id}.md`
  *   - Semantic tool preference (AFT / MCP / Magic Context) over bash grep
- *   - Required extensions (aft, pi-mcp-adapter, magic-context) referenced
- *     so the agent knows what extensions it inherits
+ *   - Required extensions (aft, pi-mcp-adapter) referenced so the agent
+ *     knows what extensions it inherits
  *   - Background self-contained behavior (run_in_background: true)
  *   - Automatic FAIL triggers (drive-by refactoring, no todowrite, etc.)
  *   - Structured audit report template with PASS/FAIL per SC
