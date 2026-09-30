@@ -130,7 +130,7 @@ modes:
     name: "Unhandled infrastructure failure"
     description: "The catch-all for an error with no more specific mode: an uncaught exception, a provider error, or a transport failure. Q-F exists so that every diagnostic has a cause and none are written with a null."
     kind: "error"
-    appliesTo: ["pre-dispatch", "implement", "verify", "commit", "merge", "auditor"]
+    appliesTo: ["pre-dispatch", "implement", "verify", "commit", "merge", "reviewer"]
     detection:
       kind: "structured"
       matches: ["UnhandledException", "UncaughtException"]

@@ -1,12 +1,12 @@
 {
-  "_source_hash": "89deb23f09e3e4d80f6e2ededa5aa6086f966b4175c0f34070cd1ae66dbee790",
-  "_generated_at": "2026-09-30T17:48:06.170Z",
+  "_source_hash": "1450b1d5e5d7fee0670ad0b7cefd7b6d95ac04b96777a3c4e647795751970fb0",
+  "_generated_at": "2026-09-30T18:23:35.954Z",
   "_source_files": [
     "../pi-subagents/src/default-agents.ts"
   ],
   "entries": [
     {
-      "id": "Auditor",
+      "id": "auditor",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": true
     },
@@ -34,6 +34,11 @@
       "id": "PlanCompiler",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": false
+    },
+    {
+      "id": "Reviewer",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
     }
   ]
 }

@@ -131,7 +131,7 @@ export function resolveAgentInvocationConfig(
 			// already carries the project context the subagent needs;
 			// defaulting to false made subagents re-derive AGENTS.md /
 			// README.md / CLAUDE.md / package.json for 3–8 turns each spawn.
-			// The DEVELOPER + AUDITOR prompts now treat parent-injected
+			// The DEVELOPER + REVIEWER prompts now treat parent-injected
 			// context as authoritative and only fall back to file reads
 			// when no parent context was injected.
 			inheritContext:

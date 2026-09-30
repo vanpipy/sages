@@ -32,7 +32,7 @@ const ENV_KEYS = [
 	"SAGES_PI_AGENT_BUDGET_MS",
 	"SAGES_PI_AGENT_DEVELOPER_BUDGET_TURNS",
 	"SAGES_PI_AGENT_DEVELOPER_BUDGET_MS",
-	"SAGES_PI_AGENT_AUDITOR_BUDGET_TURNS",
+	"SAGES_PI_AGENT_REVIEWER_BUDGET_TURNS",
 	"SAGES_PI_AGENT_EXPLORER_BUDGET_TURNS",
 	"SAGES_PI_AGENT_MERGER_BUDGET_TURNS",
 ] as const;
@@ -63,9 +63,9 @@ describe("budget: defaults + env override", () => {
 		expect(defaultBudgets.developer.maxTurns).toBe(60);
 		expect(defaultBudgets.developer.maxMs).toBe(20 * 60_000);
 		expect(defaultBudgets.developer.snapshotEveryTurns).toBe(15);
-		expect(defaultBudgets.auditor.maxTurns).toBe(30);
-		expect(defaultBudgets.auditor.maxMs).toBe(10 * 60_000);
-		expect(defaultBudgets.auditor.snapshotEveryTurns).toBe(10);
+		expect(defaultBudgets.reviewer.maxTurns).toBe(30);
+		expect(defaultBudgets.reviewer.maxMs).toBe(10 * 60_000);
+		expect(defaultBudgets.reviewer.snapshotEveryTurns).toBe(10);
 		expect(defaultBudgets.explorer.maxTurns).toBe(20);
 		expect(defaultBudgets.explorer.maxMs).toBe(5 * 60_000);
 		expect(defaultBudgets.explorer.snapshotEveryTurns).toBe(7);
@@ -89,21 +89,21 @@ describe("budget: defaults + env override", () => {
 });
 
 describe("budget: canonical agent type -> budget type bridge (GC-2026-091)", () => {
-	// The registry canonical names are PascalCase (`Developer`, `Auditor`,
+	// The registry canonical names are PascalCase (`Developer`, `Reviewer`,
 	// `Explore`, `Merger`); the budget table keys stay lowercase and use
 	// `explorer` for the exploration agent. The bridge maps between them so
 	// a PascalCase dispatch does not silently fall back to the developer
 	// budget.
 	it("maps PascalCase canonical names onto the lowercase budget keys", () => {
 		expect(budgetTypeFor("Developer")).toBe("developer");
-		expect(budgetTypeFor("Auditor")).toBe("auditor");
+		expect(budgetTypeFor("Reviewer")).toBe("reviewer");
 		expect(budgetTypeFor("Explore")).toBe("explorer");
 		expect(budgetTypeFor("Merger")).toBe("merger");
 	});
 
 	it("still accepts the legacy lowercase spellings", () => {
 		expect(budgetTypeFor("developer")).toBe("developer");
-		expect(budgetTypeFor("auditor")).toBe("auditor");
+		expect(budgetTypeFor("auditor")).toBe("reviewer");
 		expect(budgetTypeFor("explorer")).toBe("explorer");
 		expect(budgetTypeFor("merger")).toBe("merger");
 	});

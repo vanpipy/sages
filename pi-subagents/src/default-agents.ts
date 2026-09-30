@@ -4,7 +4,7 @@
  * These are always available but can be overridden by user .md files with the same name.
  */
 
-import { AUDITOR_PROMPT } from "./agent-prompts/auditor.js";
+import { REVIEWER_PROMPT } from "./agent-prompts/reviewer.js";
 import { DEVELOPER_PROMPT } from "./agent-prompts/developer.js";
 import { EXPLORE_PROMPT } from "./agent-prompts/explore.js";
 import { MERGER_PROMPT } from "./agent-prompts/merger.js";
@@ -16,11 +16,11 @@ import type { AgentConfig } from "./types.js";
  * Mirrors the seven built-ins `pi-coding-agent` exposes
  * (`createCodingTools` ∪ `createReadOnlyTools`).
  *
- * The canonical `auditor` agent shares this set: \`edit\` / \`write\` are
- * available for the auditor's single allowed write target
- * (\`.pi/orchestrator/audit-{dag_id}-{task_id}.md\`), and \`read\` / \`bash\` /
+ * The canonical `Reviewer` agent shares this set: \`edit\` / \`write\` are
+ * available for the reviewer's single allowed write target
+ * (\`.pi/orchestrator/review-{goal_id}-{iteration}.md\`), and \`read\` / \`bash\` /
  * \`grep\` / \`find\` / \`ls\` carry the verify-only re-run loop. The
- * auditor prompt itself enforces "no production edits" — the tools are
+ * reviewer prompt itself enforces "no production edits" — the tools are
  * present, the policy is the prompt's job.
  */
 const DEVELOPER_BUILTIN_TOOLS: readonly string[] = [
@@ -95,44 +95,44 @@ const DEVELOPER_AGENT: AgentConfig = {
  *   - same \`excludeExtensions: ["pi-subagents"]\` belt-and-suspenders
  *     guard against recursive Agent dispatch
  *
- * Audit-specific:
- *   - \`runInBackground: true\` — full audits re-run every verification
+ * Reviewer-specific (GC-2026-rename-auditor; renamed from `auditor`):
+ *   - \`runInBackground: true\` — full reviews re-run every verification
  *     command (30s–3 min) and must not block the orchestrator
- *   - \`maxTurns: 200\` — the auditor's re-run loop (typecheck + lint +
+ *   - \`maxTurns: 200\` — the reviewer's re-run loop (typecheck + lint +
  *     tests + diff inspection + report write) is the budget per run;
  *     callers may override via Agent({ max_turns: ... })
- *   - \`skills: false\` — no project conventions; the auditor re-derives
- *     them at audit time per the First Action Protocol
+ *   - \`skills: false\` — no project conventions; the reviewer re-derives
+ *     them at review time per the First Action Protocol
  *
  * No managed-worktree policy: \`enforceDeveloperManagedIsolationPolicy\`
- * is `developer`-only. The auditor is read-only on the developer's
+ * is `developer`-only. The reviewer is read-only on the developer's
  * worktree and writes only to \`.pi/orchestrator/audit-{dag_id}-{task_id}.md\`.
  */
-const AUDITOR_AGENT: AgentConfig = {
-	name: "Auditor",
-	displayName: "Auditor",
+const REVIEWER_AGENT: AgentConfig = {
+	name: "Reviewer",
+	displayName: "Reviewer",
 	description:
-		"Strict evidence-based software auditor — verifies task completion " +
+		"Strict evidence-based code reviewer — verifies task completion " +
 		"against acceptance criteria using TDD evidence (test output, typecheck, " +
-		"lint, command results). Default verdict is NEEDS WORK unless overwhelming " +
+		"lint, command results). Default verdict is NEEDS_WORK unless overwhelming " +
 		"proof is provided.",
 	// GC-2026-coupon-nonhit-block follow-up (Path A): same personal todowrite
-	// set as Developer — audits also have multi-step verification flows.
+	// set as Developer — reviews also have multi-step verification flows.
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
 	extensions: ["aft", "pi-mcp-adapter"],
-	// Symmetric with `developer`: the auditor is read-only on production
+	// Symmetric with `developer`: the reviewer is read-only on production
 	// code by policy, but the Agent tool cannot load here regardless.
 	excludeExtensions: ["pi-subagents"],
 	skills: false,
-	systemPrompt: AUDITOR_PROMPT,
+	systemPrompt: REVIEWER_PROMPT,
 	promptMode: "replace",
 	isDefault: true,
 	runInBackground: true,
-	// Full audits re-run typecheck + lint + tests + diff inspection +
+	// Full reviews re-run typecheck + lint + tests + diff inspection +
 	// report write; 200 turns is the per-run budget. Caller may still
 	// override via Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
-	// Default model + per-type cap (developer: 2 / auditor: 2 are part of the
+	// Default model + per-type cap (developer: 2 / reviewer: 2 are part of the
 	// Sages-wide concurrency policy). When minimax-cn/MiniMax-M3 is not in the
 	// user's registry, agent-runner.resolveDefaultModel silently falls back to
 	// the parent session's model — see AgentManager.effectiveMaxFor() for the
@@ -203,7 +203,7 @@ const MERGER_AGENT: AgentConfig = {
 	promptMode: "replace",
 	isDefault: true,
 	runInBackground: true,
-	// Narrower than developer/auditor: read diffs, classify, produce one
+	// Narrower than developer/reviewer: read diffs, classify, produce one
 	// merge commit or escalate. Going over 80 turns means the brief was
 	// wrong, not that the merger needs more budget.
 	maxTurns: 80,
@@ -340,6 +340,6 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	// any future mutation propagates to both lookups without drift.
 	["Plan", PLAN_AGENT],
 	["Developer", DEVELOPER_AGENT],
-	["Auditor", AUDITOR_AGENT],
+	["Reviewer", REVIEWER_AGENT],
 	["Merger", MERGER_AGENT],
 ]);
