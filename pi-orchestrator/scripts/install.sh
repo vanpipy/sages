@@ -204,7 +204,10 @@ install_pi_codebase_memory() {
   echo "==> Installing pi-codebase-memory..."
 
   # Idempotent: if already registered in settings.json, only ensure files are present.
-  if is_pi_codebase_memory_installed; then
+  # The `--force` bypass mirrors the other peer installers (subagents, evaluator):
+  # when --force is set, always re-copy files + re-run bun install so the
+  # deployed package.json reflects the current repo state.
+  if is_pi_codebase_memory_installed && [[ "${FORCE:-false}" != true ]]; then
     echo "  pi-codebase-memory already installed"
     return 0
   fi
@@ -717,21 +720,22 @@ verify_critical_orchestrator_deps() {
 # latent bug — flag it.
 #
 # Critical sets (as of this commit):
-#   pi-subagents:   @sinclair/typebox, croner, nanoid
-#     (used by src/index.ts at extension load — without these the
-#      Agent tool registration throws "Cannot find module" at
-#      pi session start, mirroring the original js-yaml failure)
-#   pi-evaluator:   typebox (the npm package is published as
-#     @sinclair/typebox but its package.json declares name="typebox",
-#     so bun resolves it to node_modules/typebox/ not
-#     node_modules/@sinclair/typebox/. Both names accepted.)
+#   pi-subagents:   typebox, croner, nanoid
+#     typebox is in peerDependencies with "*" — pi's runtime provides
+#     it. bun hoists pi-coding-agent's bundled typebox@1.x into the
+#     same node_modules tree, so the runtime path is correct.
+#     croner + nanoid are workspace-level non-pi deps that pi-subagents
+#     uses at extension load (see src/index.ts); without them the
+#     Agent tool registration throws "Cannot find module" at pi
+#     session start, mirroring the original js-yaml failure.
+#   pi-evaluator:   typebox (same peer story as pi-subagents).
 #   pi-codebase-memory: no critical runtime deps — only peer
-#     `@mariozechner/pi-coding-agent` which pi provides.
+#     `@earendil-works/pi-coding-agent` which pi provides.
 
 verify_critical_subagents_deps() {
   local pkg_dir="$1"
   local missing=()
-  for dep in @sinclair/typebox croner nanoid; do
+  for dep in typebox croner nanoid; do
     if [[ ! -d "$pkg_dir/node_modules/$dep" ]]; then
       missing+=("$dep")
     fi
