@@ -21,10 +21,10 @@
 #     pi-subagents         → ~/.pi/packages/pi-subagents
 #     pi-evaluator         → ~/.pi/packages/pi-evaluator
 #
-#   npm-installed extensions (--prefix ~/.pi/agent/npm), versions
-#   pinned for reproducibility — see "Pinned npm-peer versions" below:
-#     pi-mcp-adapter@2.25.0              → npm:pi-mcp-adapter@2.25.0
-#     @cortexkit/pi-magic-context@0.36.1 → CortexKit's cross-session memory layer
+#   npm-installed extensions (--prefix ~/.pi/agent/npm), latest
+#   from the npm registry — no version pin (see header below):
+#     pi-mcp-adapter                  → npm:pi-mcp-adapter
+#     @cortexkit/pi-magic-context     → CortexKit's cross-session memory layer
 #
 #   Manual-only carve-out (intentionally NOT auto-installed):
 #     AFT (npm:@cortexkit/aft-pi) — binary provisioning is owned by the
@@ -1244,24 +1244,24 @@ except Exception as e:
 }
 
 # ──────────────────────────────────────────────────────────────────
-# Pinned npm-peer versions
+# npm-peer extensions — no version pin (latest from npm registry)
 #
-# Every npm: extension that install.sh installs has its version
-# locked at the PI_*_PKG constant declaration (e.g.,
-# PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter@2.25.0"). The pinned
-# form is used both for the `npm install` invocation and for the
-# settings.json registration — pi's package manager parses the
-# @version suffix and uses it for installed-vs-configured version
-# checks (parseSource in @earendil-works/pi-coding-agent/dist/core/
-# package-manager.js; `pinned: isExactNpmVersion(version)` and
-# `installedNpmMatchesConfiguredVersion` both key off the suffix).
+# Both `npm:` extension sources below are unpinned on purpose. Each
+# PI_*_PKG constant is the bare `npm:<name>` form (no `@version`
+# suffix). npm installs latest on each run, so install.sh tracks
+# upstream releases without an explicit bump. To pin a specific
+# version (rollback / known-good), append `@<x.y.z>` to the constant
+# and re-run install.sh --force.
 #
-# Updating a version is a deliberate change: bump the PI_*_PKG
-# constant, then re-run install.sh to refresh node_modules (use
-# --force to override an already-installed state).
+#   pi-mcp-adapter                → latest
+#   @cortexkit/pi-magic-context   → latest
 #
-#   pi-mcp-adapter                → 2.25.0
-#   @cortexkit/pi-magic-context   → 0.36.1
+# pi's package manager still parses the `npm:` form correctly even
+# without a version suffix (see parseSource in
+# @earendil-works/pi-coding-agent/dist/core/package-manager.js);
+# installed-vs-configured version checks fall back to a
+# ">= version-or-anything" comparison when the configured spec
+# carries no version.
 #
 # Local-peer (file-copy) packages — pi-orchestrator, pi-codebase-memory,
 # pi-subagents, pi-evaluator — are NOT pinned via npm and have NO
@@ -1282,11 +1282,12 @@ except Exception as e:
 # ──────────────────────────────────────────────────────────────────
 # pi-magic-context — CortexKit's persistent memory + context layer
 # (installs via pi; uses @earendil-works/pi-coding-agent as a peer)
-# PINNED: @cortexkit/pi-magic-context@0.36.1
+# FLOATING: latest from npm registry (no version pin)
 # ──────────────────────────────────────────────────────────────────
 
-# pi-magic-context package info (npm-installed, version pinned above)
-PI_MAGIC_CONTEXT_PKG="npm:@cortexkit/pi-magic-context@0.36.1"
+# pi-magic-context package info (npm-installed, latest; not pinned so
+# the install script tracks upstream releases without an explicit bump)
+PI_MAGIC_CONTEXT_PKG="npm:@cortexkit/pi-magic-context"
 MAGIC_CONTEXT_TEMPLATE="$SCRIPT_DIR/../templates/magic-context.jsonc"
 MAGIC_CONTEXT_CONFIG_PATH="$HOME/.config/cortexkit/magic-context.jsonc"
 
@@ -1472,7 +1473,7 @@ except Exception as e:
 
 # ────────────────────────────────────────────────────────────
 # pi-mcp-adapter — MCP (Model Context Protocol) server adapter for pi
-# PINNED: pi-mcp-adapter@2.25.0  (see "Pinned npm-peer versions" block above)
+# (npm-installed; see header for pinning policy)
 #
 # Mirrors the install_pi_magic_context npm-install pattern. The
 # `@napi-rs/keyring` native dep compiles via node-gyp on install; the
@@ -1482,7 +1483,8 @@ except Exception as e:
 # --ignore-scripts to build the native binary.
 # ────────────────────────────────────────────────────────────
 
-PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter@2.25.0"
+# pi-mcp-adapter (latest, no version pin — see header above)
+PI_MCP_ADAPTER_PKG="npm:pi-mcp-adapter"
 PI_MCP_ADAPTER_NODE_MODULES_DIR="$PI_DIR/agent/npm/node_modules/pi-mcp-adapter"
 
 is_pi_mcp_adapter_installed() {
