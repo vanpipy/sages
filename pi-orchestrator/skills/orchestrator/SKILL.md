@@ -177,7 +177,7 @@ don't guess. For DAG dispatch, set `task_template: "subagent-git-expert"`
 use `subagent_type: "git-expert"`. Full brief format and recognized
 scenarios are documented inline in the `git-expert` agent prompt.
 
-> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory / magic-context but gains extension-free bash. Under soft mode the bash-guard no longer blocks, so `isolated: true` is rarely needed; it remains available for subagents that explicitly require extension-free execution. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, handle directly in the main session (soft mode grants full tool access) or use the `Auditor` agent with `isolated: true`.
+> **Note**: `isolated: true` disables Sages extension loading entirely. The subagent loses AFT / codebase-memory but gains extension-free bash. Under soft mode the bash-guard no longer blocks, so `isolated: true` is rarely needed; it remains available for subagents that explicitly require extension-free execution. `general-purpose` was removed in DAG-2026-011 Phase C — for ad-hoc shell work, handle directly in the main session (soft mode grants full tool access) or use the `Auditor` agent with `isolated: true`.
 
 ### Parallelism
 

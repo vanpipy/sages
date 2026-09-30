@@ -107,7 +107,7 @@ describe("GC-2026-075 AFT nudge — subagent coverage", () => {
 
 		// Simulate a subagent session firing its own tool_call event.
 		// No orchestrator handler is bound to this pi — the subagent
-		// runs its own extension chain (aft, pi-mcp-adapter, pi-magic-context)
+		// runs its own extension chain (aft, pi-mcp-adapter)
 		// but NOT the orchestrator-advisory hook.
 		subagentPi.fireToolCall({
 			toolName: "bash",

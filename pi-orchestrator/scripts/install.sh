@@ -24,8 +24,6 @@
 #   npm-installed extensions (--prefix ~/.pi/agent/npm), latest
 #   from the npm registry — no version pin (see header below):
 #     pi-mcp-adapter                  → npm:pi-mcp-adapter
-#     @cortexkit/pi-magic-context     → CortexKit's cross-session memory layer
-#
 #   Manual-only carve-out (intentionally NOT auto-installed):
 #     AFT (npm:@cortexkit/aft-pi) — binary provisioning is owned by the
 #     AFT team; users run
@@ -35,8 +33,8 @@
 #     after installation.
 #
 # Selective install options:
-#   --orchestrator-only only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
-#   --system-only       only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)
+#   --orchestrator-only only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
+#   --system-only       only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -150,8 +148,8 @@ usage() {
   echo "  --prefix DIR       Set pi config dir (default: ~/.pi)"
   echo "  --force            Overwrite existing files"
   echo "  --uninstall        Remove installed files"
-  echo "  --orchestrator-only Only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
-  echo "  --system-only      Only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)"
+  echo "  --orchestrator-only Only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
+  echo "  --system-only      Only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)"
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --orchestrator-only | --system-only)."
@@ -1284,7 +1282,6 @@ except Exception as e:
 # and re-run install.sh --force.
 #
 #   pi-mcp-adapter                → latest
-#   @cortexkit/pi-magic-context   → latest
 #
 # pi's package manager still parses the `npm:` form correctly even
 # without a version suffix (see parseSource in
@@ -1308,169 +1305,34 @@ except Exception as e:
 #     npx @cortexkit/aft@latest setup --harness pi
 # manually.
 # ──────────────────────────────────────────────────────────────────
-
 # ──────────────────────────────────────────────────────────────────
-# pi-magic-context — CortexKit's persistent memory + context layer
-# (installs via pi; uses @earendil-works/pi-coding-agent as a peer)
-# FLOATING: latest from npm registry (no version pin)
+# cleanup_legacy_magic_context — one-shot cleanup for users who
+# installed the (now-removed) magic-context extension before
+# GC-2026-remove-magic-context. Idempotent: safe to run multiple
+# times, no-op when no legacy install exists.
+#
+# Removes:
+#   - the npm package at ~/.pi/agent/npm/node_modules/@cortexkit/pi-magic-context
+#   - the registration entry in ~/.pi/agent/settings.json (any form:
+#     legacy version-less, pinned @version, or /path/... local-fork)
+#   - the config at ~/.config/cortexkit/magic-context.jsonc (only
+#     when it carries our SAGES_TEMPLATE_V1 marker; user-customized
+#     configs are left alone)
 # ──────────────────────────────────────────────────────────────────
-
-# pi-magic-context package info (npm-installed, latest; not pinned so
-# the install script tracks upstream releases without an explicit bump)
-PI_MAGIC_CONTEXT_PKG="npm:@cortexkit/pi-magic-context"
-MAGIC_CONTEXT_TEMPLATE="$SCRIPT_DIR/../templates/magic-context.jsonc"
-MAGIC_CONTEXT_CONFIG_PATH="$HOME/.config/cortexkit/magic-context.jsonc"
-
-is_pi_magic_context_installed() {
-  # Auto-recovery invariant (mirrors is_pi_codebase_memory_installed):
-  # require BOTH settings.json registration AND node_modules dir on disk.
-  # PKG_PATTERN matches three forms so a legacy version-less entry does
-  # not silently no-op the install:
-  #   1. npm:@cortexkit/pi-magic-context       (legacy version-less)
-  #   2. npm:@cortexkit/pi-magic-context@X.Y.Z (pinned form — see block above)
-  #   3. /path/to/pi-magic-context              (hypothetical local-fork path)
+cleanup_legacy_magic_context() {
+  local pkg_dir="$PI_DIR/agent/npm/node_modules/@cortexkit/pi-magic-context"
   local settings="$PI_DIR/agent/settings.json"
-  local node_modules_dir="$PI_DIR/agent/npm/node_modules/@cortexkit/pi-magic-context"
-  [[ ! -f "$settings" ]] && return 1
-  python3 -c "
-import json, os, re, sys
-try:
-    d = json.load(open('$settings'))
-    PKG_PATTERN = re.compile(r'^(npm:@cortexkit/pi-magic-context(@.+)?|.*/pi-magic-context)\$')
-    registered = any(PKG_PATTERN.match(p) for p in d.get('packages', []))
-    if registered and os.path.isdir('$node_modules_dir'):
-        sys.exit(0)
-    sys.exit(1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null
-}
+  local config="$HOME/.config/cortexkit/magic-context.jsonc"
+  local touched=0
 
-# Idempotency rules for ~/.config/cortexkit/magic-context.jsonc mirror the
-# *_config pattern: only overwrite user-customized files when --force is
-# passed; degraded (empty) or missing files get the template.
-is_magic_context_config_degraded() {
-  [[ ! -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && return 0  # missing = trivially degraded
-  python3 -c "
-import json, sys
-try:
-    d = json.load(open('$MAGIC_CONTEXT_CONFIG_PATH'))
-    meaningful = [k for k in d if k not in ('\$schema', '_sages_template_marker')]
-    sys.exit(0 if not meaningful else 1)
-except Exception:
-    sys.exit(0)
-" 2>/dev/null
-}
-
-install_magic_context_config() {
-  if [[ ! -f "$MAGIC_CONTEXT_TEMPLATE" ]]; then
-    echo "  Warning: magic-context template not found at $MAGIC_CONTEXT_TEMPLATE"
-    return 0
+  # 1) Remove installed package files (best-effort).
+  if [[ -d "$pkg_dir" ]]; then
+    rm -rf "$pkg_dir" 2>/dev/null && echo "  Removed legacy pi-magic-context package files" && touched=1
   fi
 
-  mkdir -p "$(dirname "$MAGIC_CONTEXT_CONFIG_PATH")"
-
-  # Already installed by us → skip (matches *_config behavior).
-  if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && grep -q 'SAGES_TEMPLATE_V1' "$MAGIC_CONTEXT_CONFIG_PATH" 2>/dev/null && [[ "${FORCE:-false}" != true ]]; then
-    echo "  magic-context config already installed (use --force to reinstall)"
-    return 0
-  fi
-
-  # User-customized → preserve (matches *_config behavior).
-  if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && ! is_magic_context_config_degraded; then
-    echo "  magic-context config already exists with user customization (use --force to overwrite)"
-    return 0
-  fi
-
-  if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && is_magic_context_config_degraded; then
-    echo "  Upgrading degraded magic-context config (only \$schema, no feature flags)"
-  fi
-
-  cp "$MAGIC_CONTEXT_TEMPLATE" "$MAGIC_CONTEXT_CONFIG_PATH"
-  echo "  Installed magic-context config from template"
-}
-
-install_pi_magic_context() {
-  echo "==> Installing pi-magic-context..."
-
-  # Idempotent: skip if installed
-  if is_pi_magic_context_installed && [[ "${FORCE:-false}" != true ]]; then
-    echo "  pi-magic-context already installed (use --force to reinstall)"
-    install_magic_context_config
-    return 0
-  fi
-
-  # Force-install path: uninstall first
-  if [[ "${FORCE:-false}" == true ]] && is_pi_magic_context_installed; then
-    echo "  Force-reinstall: removing previous pi-magic-context first"
-    uninstall_pi_magic_context
-  fi
-
-  # 1) Install the npm package via pi. The interactive setup wizard
-  #    (`npx @cortexkit/magic-context@latest setup --harness pi`) prompts
-  #    for historian/dreamer/sidekick model choices and is meant for
-  #    first-time human installs. We skip the wizard and write the config
-  #    directly via install_magic_context_config below — the wizard can
-  #    still be run manually after install to refine the config.
-  #
-  #    The onnxruntime-node postinstall (used for embeddings) sometimes
-  #    fails on restricted CDN networks. Use --ignore-scripts to skip it
-  #    so semantic search stays off until ONNX can be installed manually.
-  if command -v pi &>/dev/null; then
-    echo "  Installing @cortexkit/pi-magic-context via pi (skipping onnx postinstall)..."
-    # npm 11 + scoped-package + `npm:` alias prefix breaks
-    # `Node.canDedupe` with `TypeError: Invalid Version`. Clean the
-    # prefix dir of stale lockfiles AND strip the `npm:` prefix from
-    # the npm install spec — settings.json keeps the `npm:` form for
-    # pi's transport hint, but the actual `npm install` uses bare
-    # `name@version`. Only register in settings.json on install
-    # success so a failed install doesn't leave pi with a dangling
-    # package pointer that crashes next start.
-    _clean_npm_prefix_dir "$PI_DIR/agent/npm"
-    local npm_spec="${PI_MAGIC_CONTEXT_PKG#npm:}"
-    if (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
-      npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$npm_spec" 2>&1 | tail -3); then
-      # Register in settings.json (matches the local-peer pattern).
-      # Normalize any legacy form (version-less or /path/...) to the single
-      # pinned form so future installs and updates see the version pin.
-      local settings="$PI_DIR/agent/settings.json"
-      mkdir -p "$(dirname "$settings")"
-      [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
-      python3 -c "
-import json, re
-f, pkg = '$settings', '$PI_MAGIC_CONTEXT_PKG'
-PKG_PATTERN = re.compile(r'^(npm:@cortexkit/pi-magic-context(@.+)?|.*/pi-magic-context)\$')
-try: d = json.load(open(f))
-except: d = {'packages': []}
-pkgs = [p for p in d.get('packages', []) if not PKG_PATTERN.match(p)]
-if pkg not in pkgs:
-    pkgs.append(pkg)
-d['packages'] = pkgs
-json.dump(d, open(f, 'w'), indent=2)
-print('  Registered', pkg)
-"
-    else
-      echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $npm_spec' manually"
-      echo "  Skipping settings.json registration (no dangling pointer for pi)"
-    fi
-  else
-    echo "  'pi' command not found; user must install manually"
-  fi
-
-  # 2) Write the magic-context config template (idempotent — skips if
-  #    user-customized).
-  install_magic_context_config
-
-  echo "  pi-magic-context installed"
-}
-
-uninstall_pi_magic_context() {
-  echo "==> Uninstalling pi-magic-context..."
-
-  # Manual cleanup: strip any form (legacy version-less, pinned @version,
-  # or /path/... local-fork) from settings.json.
-  local settings="$PI_DIR/agent/settings.json"
-  [[ -f "$settings" ]] && python3 -c "
+  # 2) Strip any form from settings.json.
+  if [[ -f "$settings" ]]; then
+    python3 -c "
 import json, re, sys
 try:
     d = json.load(open('$settings'))
@@ -1480,34 +1342,35 @@ try:
     if len(new_pkgs) != len(pkgs):
         d['packages'] = new_pkgs
         json.dump(d, open('$settings', 'w'), indent=2)
-        print('  Removed pi-magic-context from settings.json')
-except Exception as e:
+        print('  Removed legacy pi-magic-context registration from settings.json')
+        sys.exit(0)
     sys.exit(1)
-" 2>/dev/null || true
-
-  # Remove installed package files (best-effort).
-  rm -rf "$PI_DIR/agent/npm/node_modules/@cortexkit/pi-magic-context" 2>/dev/null && \
-    echo "  Removed pi-magic-context package files"
-
-  # NEVER-TOUCH policy (mirrors other *_config functions): only remove config
-  # if it carries our SAGES_TEMPLATE_V1 sentinel.
-  if [[ -f "$MAGIC_CONTEXT_CONFIG_PATH" ]] && grep -q 'SAGES_TEMPLATE_V1' "$MAGIC_CONTEXT_CONFIG_PATH" 2>/dev/null; then
-    rm -f "$MAGIC_CONTEXT_CONFIG_PATH"
-    echo "  Removed magic-context config (was our template)"
-  else
-    echo "  magic-context config is user-customized, leaving alone"
+except Exception:
+    sys.exit(1)
+" 2>/dev/null && touched=1
   fi
 
-  echo "  pi-magic-context uninstalled"
-}
+  # 3) NEVER-TOUCH policy: only remove config if it carries our
+  #    SAGES_TEMPLATE_V1 sentinel; user-customized configs are preserved.
+  if [[ -f "$config" ]] && grep -q 'SAGES_TEMPLATE_V1' "$config" 2>/dev/null; then
+    rm -f "$config"
+    echo "  Removed legacy magic-context config (was our template)"
+    touched=1
+  elif [[ -f "$config" ]]; then
+    echo "  Legacy magic-context config is user-customized, leaving alone"
+  fi
 
+  if [[ $touched -eq 0 ]]; then
+    echo "  No legacy pi-magic-context install found"
+  fi
+}
 # ────────────────────────────────────────────────────────────
 # pi-mcp-adapter — MCP (Model Context Protocol) server adapter for pi
 # (npm-installed; see header for pinning policy)
 #
-# Mirrors the install_pi_magic_context npm-install pattern. The
+# Mirrors the (now-removed) install_pi_magic_context npm-install pattern. The
 # `@napi-rs/keyring` native dep compiles via node-gyp on install; the
-# `--ignore-scripts` flag matches magic-context's onnx-postinstall skip
+# `--ignore-scripts` flag matches the previous magic-context onnx-postinstall skip
 # (used here for parity and to keep the install offline-safe). If the
 # user later needs OAuth credential storage, they can reinstall without
 # --ignore-scripts to build the native binary.
@@ -1558,10 +1421,10 @@ install_pi_mcp_adapter() {
 
   if command -v pi &>/dev/null; then
     echo "  Installing pi-mcp-adapter via npm (skipping postinstall scripts)..."
-    # cd to ${LOCAL_REPO_ROOT:-/tmp} to match the magic-context pattern; --prefix
+    # cd to ${LOCAL_REPO_ROOT:-/tmp} to match the prior magic-context pattern; --prefix
     # governs the install location so cwd is incidental.
     #
-    # Same `npm:` alias fix as magic-context above: strip the prefix from
+    # Same `npm:` alias fix as the prior magic-context install: strip the prefix from
     # the npm install spec (npm 11's `Node.canDedupe` chokes on
     # `npm:name@version` with `Invalid Version`) and clean stale
     # `.package-lock.json` files in the prefix dir. settings.json keeps
@@ -1634,7 +1497,7 @@ except Exception as e:
 # Mode 1: full install (default)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
+  echo "==> Installing pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1704,8 +1567,10 @@ install() {
   echo "==> Installing pi-orchestrator..."
   install_orchestrator_files || exit 1
 
-  # Install pi-magic-context (cross-session memory + context layer)
-  install_pi_magic_context || true
+  # GC-2026-remove-magic-context: pi-magic-context is no longer installed.
+  # Run cleanup_legacy_magic_context instead, for users upgrading from
+  # a pre-GC-2026-remove-magic-context install.
+  cleanup_legacy_magic_context || true
 
   # Install pi-mcp-adapter (MCP server adapter)
   install_pi_mcp_adapter || true
@@ -1756,7 +1621,7 @@ install() {
 # Mode 2: update orchestrator only (skip pi-codebase-memory and SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_orchestrator_only() {
-  echo "==> Installing orchestrator only (skip pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, skip SYSTEM.md)..."
+  echo "==> Installing orchestrator only (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, skip SYSTEM.md)..."
 
   # Pre-flight: pi is still required (orchestrator is a pi extension)
   install_pi_if_needed
@@ -1783,8 +1648,8 @@ install_orchestrator_only() {
     exit 1
   }
 
-  # Explicitly do NOT call install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_magic_context / install_pi_subagents / install_pi_evaluator / install_system_prompt
-  echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
+  # Explicitly do NOT call install_pi_codebase_memory / install_pi_mcp_adapter / install_pi_subagents / install_pi_evaluator / install_system_prompt
+  echo "  (skipped: pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1794,10 +1659,10 @@ install_orchestrator_only() {
 # Mode 3: update SYSTEM.md only (skip orchestrator and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)..."
+  echo "==> Installing SYSTEM.md only (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)..."
   # No git / pi needed — SYSTEM.md is standalone markdown
   install_system_prompt
-  echo "  (skipped: orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-magic-context, pi-subagents, pi-evaluator, subagent templates)"
+  echo "  (skipped: orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1807,7 +1672,7 @@ install_system_only() {
 # Uninstall (removes both orchestrator and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
+  echo "==> Uninstalling pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
 
   # Remove orchestrator
   if [[ -d "$PKG_DIR" ]]; then
@@ -1825,8 +1690,8 @@ uninstall() {
   uninstall_codebase_memory_mcp_binary
 
 
-  # Uninstall pi-magic-context (cross-session memory layer)
-  uninstall_pi_magic_context
+  # GC-2026-remove-magic-context: legacy magic-context cleanup runs as part of uninstall
+  cleanup_legacy_magic_context
 
   # Uninstall pi-mcp-adapter (MCP server adapter)
   uninstall_pi_mcp_adapter

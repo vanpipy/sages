@@ -29,7 +29,6 @@ import * as yaml from "js-yaml";
 import type { OrchestrationPlan, TaskNode } from "./types.js";
 import { ORCHESTRATOR_DIR, dagPath } from "./types.js";
 import { loadPlan } from "./dag-synthesizer.js";
-import { syncTodoForTask } from "./todo-sync.js";
 import { atomicWriteOrchestratorFile, isOrchestrationPlanState } from "./state-persistence.js";
 import { wrapRegisteredTool } from "./registered-tool-wrapper.js";
 import { defaultRunInBackground } from "@sages/pi-subagents";
@@ -483,14 +482,6 @@ export async function executeTaskDispatch(params: TaskDispatchInput, ctx: { cwd:
     const transitioned = transitionTask(plan, params.transition);
     if (transitioned.error) return errorResponse("Task lifecycle transition rejected.", [transitioned.error]);
 
-    // GC-2026-074: auto-sync the todowrite view with the new DAG state.
-    // DAG is the source of truth; the todo file is a view. The helper is
-    // best-effort — a no-op when no todo file exists yet, or when the
-    // task_id is not present in the todo (drift). The DAG transition has
-    // already succeeded at this point, so any sync failure is logged in
-    // the response details but does NOT fail the transition.
-    const todoSync = syncTodoForTask(cwd, plan, transitioned.task!);
-
     const planPath = savePlan(cwd, plan);
     // GC-2026-070: surface the retry-budget warning to the orchestrator. We
     // don't add it to `errors` (the transition is valid; the budget is the
@@ -511,7 +502,7 @@ export async function executeTaskDispatch(params: TaskDispatchInput, ctx: { cwd:
         plan_state: plan.state,
         ...(transitioned.retryBudgetExhausted ? { retry_budget_exhausted: transitioned.retryBudgetExhausted } : {}),
       }) }],
-      details: { task: transitioned.task, plan_path: planPath, todo_sync: todoSync },
+      details: { task: transitioned.task, plan_path: planPath },
     };
   }
 

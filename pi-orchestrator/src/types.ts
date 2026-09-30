@@ -351,57 +351,7 @@ export const DAG_PREFIX = "dag-";
 export const TASK_REPORT_PREFIX = "task-";
 export const TASK_AUDIT_PREFIX = "audit-";
 export const WORKFLOW_AUDIT = "audit-workflow.md";
-export const TODO_PREFIX = "todo-";
 
-/**
- * GC-2026-074: link key between a todowrite item and the TaskNode it
- * shadows. Set by `todowrite_compile` at compile time; the DAG is the
- * source of truth, the todo is the LLM-facing view.
- */
-export type TodoStatus = "pending" | "in_progress" | "completed" | "failed" | "skipped";
-
-export interface TodoItem {
-	todo_id: string;
-	task_id: string;
-	content: string;
-	status: TodoStatus;
-	last_synced_at: string | null;
-}
-
-export interface TodoFile {
-	schemaVersion: "v1";
-	dag_id: string;
-	/**
-	 * GC-2026-091: link from the todowrite view back to the goal contract
-	 * it shadows. Populated by `todowrite_compile` from the
-	 * OrchestrationPlan.goal_id at compile time so the todo view
-	 * carries the full plan → DAG → todo → goal chain end-to-end.
-	 *
-	 * Optional because pre-GC-2026-091 todo YAMLs have no `goal_id`
-	 * field — they continue to load through the `saveTodoFile`
-	 * validator and `loadTodoFile` reader.
-	 */
-	goal_id?: string;
-	compiled_at: string;
-	compiled_from_todos: boolean;
-	items: TodoItem[];
-}
-
-/**
- * Drift kind: how the LLM's todo view diverges from the DAG's task list.
- * "todo_ahead" / "dag_ahead" mean the two views disagree on completion
- * order; "todo_orphaned" / "task_orphaned" mean a record exists in one
- * view but not the other.
- */
-export type TodoDriftKind = "todo_ahead" | "dag_ahead" | "todo_orphaned" | "task_orphaned";
-
-export interface TodoDrift {
-	todo_id?: string;
-	task_id?: string;
-	todo_status?: TodoStatus;
-	dag_status?: TaskNode["status"];
-	drift_kind: TodoDriftKind;
-}
 
 /** Returns the path for a goal contract YAML. */
 export function goalContractPath(cwd: string, id: string): string {
@@ -425,9 +375,4 @@ export function taskReportPath(cwd: string, taskId: string): string {
  * orchestrator_audit tool reads them via readAuditReports. */
 export function taskAuditPath(cwd: string, dagId: string, taskId: string): string {
 	return `${cwd}/${ORCHESTRATOR_DIR}/${TASK_AUDIT_PREFIX}${dagId}-${taskId}.md`;
-}
-
-/** Returns the path for a todowrite YAML (GC-2026-074). */
-export function todoPath(cwd: string, dagId: string): string {
-	return `${cwd}/${ORCHESTRATOR_DIR}/${TODO_PREFIX}${dagId}.yaml`;
 }

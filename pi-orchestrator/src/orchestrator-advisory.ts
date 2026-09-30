@@ -630,9 +630,7 @@ export function familyOfTool(toolName: string): ToolFamily {
 		toolName === "dag_synthesize" ||
 		toolName === "task_dispatch" ||
 		toolName === "orchestrator_audit" ||
-		toolName === "sages_reminder" ||
-		toolName === "todowrite_compile" ||
-		toolName === "todowrite_progress"
+		toolName === "sages_reminder"
 	) {
 		return "orchestrator";
 	}
