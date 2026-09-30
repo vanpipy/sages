@@ -11,7 +11,7 @@
  * Uses a fake `pi` recorder (no live session).
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 
 import {
 	notifyOrchestrator,
