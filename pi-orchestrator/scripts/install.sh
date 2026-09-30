@@ -650,6 +650,31 @@ except Exception as e:
 # Shared: copy pi-orchestrator files from the local sages repo
 # ────────────────────────────────────────────────────────────
 
+# Clean stale lockfiles in the npm-prefix dir before any npm install.
+#
+# Background: npm 11.x arborist throws `TypeError: Invalid Version` from
+# `Node.canDedupe` whenever the prefix dir carries a `.package-lock.json`
+# written by an older npm that embedded version specifiers (e.g. with a
+# `npm:` alias prefix) which npm 11's SemVer parser cannot round-trip.
+# The dir accumulates such files across pi upgrades — once poisoned,
+# every subsequent `npm install --prefix ~/.pi/agent/npm` aborts.
+#
+# Surgical fix: drop the top-level `package-lock.json` and the interior
+# `node_modules/.package-lock.json`. The installed package directories
+# under `node_modules/` stay intact (we don't touch them), so a re-install
+# only re-resolves the tree, not the actual deps. If a previous install
+# was incomplete and the dir is fully unusable, the install below will
+# surface a clear error and the user can `rm -rf ~/.pi/agent/npm` manually.
+_clean_npm_prefix_dir() {
+    local prefix="$1"
+    [[ -d "$prefix" ]] || return 0
+    rm -f \
+        "$prefix/package-lock.json" \
+        "$prefix/node_modules/.package-lock.json" \
+        "$prefix/node_modules/.package-lock.json.tmp" \
+        2>/dev/null || true
+}
+
 # Critical-deps verification: confirm node_modules/<dep> exists for every
 # module that pi loads at extension-startup time (i.e. the require stack
 # pi-core hits before user code runs). If any are missing, pi will fail
@@ -1358,17 +1383,25 @@ install_pi_magic_context() {
   #    so semantic search stays off until ONNX can be installed manually.
   if command -v pi &>/dev/null; then
     echo "  Installing @cortexkit/pi-magic-context via pi (skipping onnx postinstall)..."
-    (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
-      npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_MAGIC_CONTEXT_PKG" 2>&1 | tail -3) || {
-      echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_MAGIC_CONTEXT_PKG' manually"
-    }
-    # Register in settings.json (matches the local-peer pattern).
-    # Normalize any legacy form (version-less or /path/...) to the single
-    # pinned form so future installs and updates see the version pin.
-    local settings="$PI_DIR/agent/settings.json"
-    mkdir -p "$(dirname "$settings")"
-    [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
-    python3 -c "
+    # npm 11 + scoped-package + `npm:` alias prefix breaks
+    # `Node.canDedupe` with `TypeError: Invalid Version`. Clean the
+    # prefix dir of stale lockfiles AND strip the `npm:` prefix from
+    # the npm install spec — settings.json keeps the `npm:` form for
+    # pi's transport hint, but the actual `npm install` uses bare
+    # `name@version`. Only register in settings.json on install
+    # success so a failed install doesn't leave pi with a dangling
+    # package pointer that crashes next start.
+    _clean_npm_prefix_dir "$PI_DIR/agent/npm"
+    local npm_spec="${PI_MAGIC_CONTEXT_PKG#npm:}"
+    if (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
+      npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$npm_spec" 2>&1 | tail -3); then
+      # Register in settings.json (matches the local-peer pattern).
+      # Normalize any legacy form (version-less or /path/...) to the single
+      # pinned form so future installs and updates see the version pin.
+      local settings="$PI_DIR/agent/settings.json"
+      mkdir -p "$(dirname "$settings")"
+      [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
+      python3 -c "
 import json, re
 f, pkg = '$settings', '$PI_MAGIC_CONTEXT_PKG'
 PKG_PATTERN = re.compile(r'^(npm:@cortexkit/pi-magic-context(@.+)?|.*/pi-magic-context)\$')
@@ -1381,6 +1414,10 @@ d['packages'] = pkgs
 json.dump(d, open(f, 'w'), indent=2)
 print('  Registered', pkg)
 "
+    else
+      echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $npm_spec' manually"
+      echo "  Skipping settings.json registration (no dangling pointer for pi)"
+    fi
   else
     echo "  'pi' command not found; user must install manually"
   fi
@@ -1487,18 +1524,23 @@ install_pi_mcp_adapter() {
     echo "  Installing pi-mcp-adapter via npm (skipping postinstall scripts)..."
     # cd to ${LOCAL_REPO_ROOT:-/tmp} to match the magic-context pattern; --prefix
     # governs the install location so cwd is incidental.
-    (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
-      npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$PI_MCP_ADAPTER_PKG" 2>&1 | tail -3) || {
-      echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $PI_MCP_ADAPTER_PKG' manually"
-    }
-
-    # Register in settings.json (matches the local-peer pattern).
-    # Normalize any legacy form (version-less or /path/...) to the single
-    # pinned form so future installs and updates see the version pin.
-    local settings="$PI_DIR/agent/settings.json"
-    mkdir -p "$(dirname "$settings")"
-    [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
-    python3 -c "
+    #
+    # Same `npm:` alias fix as magic-context above: strip the prefix from
+    # the npm install spec (npm 11's `Node.canDedupe` chokes on
+    # `npm:name@version` with `Invalid Version`) and clean stale
+    # `.package-lock.json` files in the prefix dir. settings.json keeps
+    # the `npm:` form for pi's transport hint. Only register on success.
+    _clean_npm_prefix_dir "$PI_DIR/agent/npm"
+    local npm_spec="${PI_MCP_ADAPTER_PKG#npm:}"
+    if (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
+      npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$npm_spec" 2>&1 | tail -3); then
+      # Register in settings.json (matches the local-peer pattern).
+      # Normalize any legacy form (version-less or /path/...) to the single
+      # pinned form so future installs and updates see the version pin.
+      local settings="$PI_DIR/agent/settings.json"
+      mkdir -p "$(dirname "$settings")"
+      [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
+      python3 -c "
 import json, re
 f, pkg = '$settings', '$PI_MCP_ADAPTER_PKG'
 PKG_PATTERN = re.compile(r'^(npm:pi-mcp-adapter(@.+)?|.*/pi-mcp-adapter)\$')
@@ -1511,6 +1553,10 @@ d['packages'] = pkgs
 json.dump(d, open(f, 'w'), indent=2)
 print('  Registered', pkg)
 "
+    else
+      echo "  Warning: npm install failed; try 'npm install --prefix ~/.pi/agent/npm --ignore-scripts $npm_spec' manually"
+      echo "  Skipping settings.json registration (no dangling pointer for pi)"
+    fi
   else
     echo "  'pi' command not found; user must install manually"
   fi
