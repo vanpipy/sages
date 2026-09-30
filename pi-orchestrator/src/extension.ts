@@ -28,7 +28,7 @@
  * brainstorming skill in `skills/brainstorming/`).
  *
  * Peer dependencies:
- *   - @mariozechner/pi-coding-agent  — ExtensionAPI type
+ *   - @earendil-works/pi-coding-agent  — ExtensionAPI type
  *   - @sages/pi-subagents           — Agent / get_subagent_result / steer_subagent
  */
 
@@ -36,7 +36,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registerGoalContractTool } from "./goal-contract.js";
 import { registerDAGSynthesizerTool } from "./dag-synthesizer.js";
@@ -294,7 +294,7 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 	// 1. session_start — replace the profile.tools filter with a single
 	//    setActiveTools call. `pi.setStatus(...)` is exposed on the
 	//    optional `ui` channel (matches reference ExtensionAPI surface
-	//    at @mariozechner/pi-coding-agent src/core/extensions/types.ts).
+	//    at @earendil-works/pi-coding-agent src/core/extensions/types.ts).
 	//
 	//    GC-2026-087 SC1: tool ORDER matters for LLM selection bias.
 	//    Earlier entries in `setActiveTools` are surfaced more

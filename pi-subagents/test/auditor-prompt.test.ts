@@ -18,7 +18,7 @@
  *   - Re-run every verification command (never trust the developer's report)
  *   - TDD discipline check (RED → GREEN → REFACTOR; tests written first)
  *   - "Verify only" — no production edits, single allowed write target
- *     is `.pi/orchestrator/audit-{task_id}.md`
+ *     is `.pi/orchestrator/audit-{dag_id}-{task_id}.md`
  *   - Semantic tool preference (AFT / MCP / Magic Context) over bash grep
  *   - Required extensions (aft, pi-mcp-adapter, magic-context) referenced
  *     so the agent knows what extensions it inherits
@@ -80,7 +80,7 @@ describe("auditor-prompt: invariants", () => {
 			/no.*(editing|modif).*production/,
 		);
 		// The audit file path is the single allowed write target.
-		expect(AUDITOR_PROMPT).toContain("audit-{task_id}.md");
+		expect(AUDITOR_PROMPT).toContain("audit-{dag_id}-{task_id}.md");
 	});
 
 	it("forbids writing Sages meta-files other than the audit report", () => {
@@ -483,7 +483,7 @@ describe("auditor-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
 describe("auditor-prompt: Boundary Discipline (GC-2026-094 P2)", () => {
 	// GC-2026-094 P2: in production, 3 developer + 1 auditor dispatches
 	// hit max_turns at ~60 tool_uses each. The auditor's
-	// `.pi/orchestrator/audit-{task_id}.md` is durable on disk and the
+	// `.pi/orchestrator/audit-{dag_id}-{task_id}.md` is durable on disk and the
 	// orchestrator can parse the verdict from there via parseAuditReport,
 	// but the YAML verdict block in the final assistant message was lost
 	// when the loop aborted. The fix is a Boundary Discipline section
@@ -505,8 +505,8 @@ describe("auditor-prompt: Boundary Discipline (GC-2026-094 P2)", () => {
 		expect(AUDITOR_PROMPT).toContain(".pi/orchestrator/verdict-{task_id}.md");
 	});
 
-	it("explicitly notes that audit-{task_id}.md is already durable on disk", () => {
-		// The auditor already has ONE durable artifact (audit-{task_id}.md,
+	it("explicitly notes that audit-{dag_id}-{task_id}.md is already durable on disk", () => {
+		// The auditor already has ONE durable artifact (audit-{dag_id}-{task_id}.md,
 		// written during Step 6 of the audit procedure). The section must
 		// surface this so the LLM does not duplicate the same file or
 		// skip it as a backup target.

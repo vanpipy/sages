@@ -63,9 +63,9 @@ describe("auditor-prompt runtime export: FINAL_VERDICT YAML schema (GC-2026-076 
 
 	it("preserves the auditor's verify-only contract and audit-file write target", () => {
 		// Regression guard: the auditor's single allowed write target is
-		// `.pi/orchestrator/audit-{task_id}.md`. Wiring YAML into the
+		// `.pi/orchestrator/audit-{dag_id}-{task_id}.md`. Wiring YAML into the
 		// runtime must NOT remove the path or the verify-only language.
 		expect(AUDITOR_PROMPT.toLowerCase()).toContain("verify only");
-		expect(AUDITOR_PROMPT).toContain("audit-{task_id}.md");
+		expect(AUDITOR_PROMPT).toContain("audit-{dag_id}-{task_id}.md");
 	});
 });

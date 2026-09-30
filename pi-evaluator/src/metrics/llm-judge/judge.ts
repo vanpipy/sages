@@ -1,7 +1,7 @@
 /**
  * pi-evaluator/src/metrics/llm-judge/judge.ts
  *
- * Wires the real `complete()` call from `@mariozechner/pi-ai` into the seam.
+ * Wires the real `complete()` call from `@earendil-works/pi-ai` into the seam.
  *
  * `defaultJudgeFn` is installed by `registerBuiltinMetrics` (called from
  * extension.ts on session_start). If `getEnvApiKey(provider)` returns
@@ -23,7 +23,7 @@ import {
 	complete,
 	getEnvApiKey,
 	getModel,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai/compat";
 import type { JudgeFn, JudgeFnResult, JudgeInput } from "./seam.ts";
 
 const DEFAULT_PROVIDER = "anthropic" as const;
@@ -91,7 +91,7 @@ function clamp(n: number): number {
 /**
  * The real LLM-judge function. Reads provider/model from JudgeInput (with
  * defaults), builds a `Context` from the criterion + evidence, calls
- * `complete()` from `@mariozechner/pi-ai`, parses the reply.
+ * `complete()` from `@earendil-works/pi-ai`, parses the reply.
  *
  * Throws on missing API key (the seam converts that to `data_missing:true`).
  */

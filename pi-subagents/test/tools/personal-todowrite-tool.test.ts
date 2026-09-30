@@ -6,7 +6,7 @@
  * These tests verify the registration contract (name, parameters, execute
  * semantics) without instantiating a real AgentSession.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

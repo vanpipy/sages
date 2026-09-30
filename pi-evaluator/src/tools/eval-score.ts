@@ -31,8 +31,8 @@
  * `state.active_workflow` from orchestrator events.
  */
 
-import { Type } from "typebox";
-import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import type { Dimension } from "../types.ts";
 import { createEvalState, type DimensionScore, type EvalState, type EvidenceRef } from "../state.ts";

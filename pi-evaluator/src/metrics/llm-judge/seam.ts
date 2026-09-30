@@ -4,7 +4,7 @@
  * LLM-judge seam for hybrid metrics (Goal Accuracy, Task Completion).
  *
  * T3 ships the seam only — the actual `complete()` call to
- * `@mariozechner/pi-ai` lands in T4. Today `judge()` returns a
+ * `@earendil-works/pi-ai` lands in T4. Today `judge()` returns a
  * `data_missing: true` result so the calling metric falls back to its
  * heuristic branch without throwing.
  *

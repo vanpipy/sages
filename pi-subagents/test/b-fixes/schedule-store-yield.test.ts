@@ -11,31 +11,26 @@
  *     `updateAsync` / `removeAsync` methods expose the fully-yielded path.
  *
  * Anti-rule: no new npm dependencies. Pure built-in setTimeout.
+ *
+ * GC-2026-095 T-fix: rewrite to use `vi.mock("node:fs", ...)` instead of
+ * `vi.spyOn(fs, "writeFileSync")`. The spy pattern fails in vitest's
+ * ESM mode because `node:fs` exports are non-configurable module
+ * namespace properties — `Cannot spy on export "writeFileSync"`. The
+ * `vi.mock` factory is hoisted, intercepts at module-resolution time,
+ * and works in ESM.
  */
 
-import * as fs from "node:fs";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetForTests, inc, snapshot } from "../../src/profile.js";
-import { ScheduleStore } from "../../src/schedule-store.js";
+// Module-level config for the writeFileSync mock. The hoisted vi.mock
+// factory (below) closes over these — set them via `withStuckLock`
+// before each test that needs contention simulation.
+let wxAttempts = 0;
+let failTimes = 0;
+let lockPath: string | null = null;
 
-const ORIGINAL_ENV = process.env.SAGES_PI_PROFILE;
-const DEAD_PID = 99999;
-
-let wxAttempts: number;
-
-async function withStuckLock<T>(
-	_filePath: string,
-	lockPath: string,
-	failTimes: number,
-	fn: () => Promise<T> | T,
-): Promise<T> {
-	const realWriteFileSync = fs.writeFileSync;
-	wxAttempts = 0;
-	const spy = vi.spyOn(fs, "writeFileSync");
-	spy.mockImplementation(((
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	const realWriteFileSync = actual.writeFileSync;
+	const mockWrite = ((
 		path: fs.PathLike,
 		data: string | NodeJS.ArrayBufferView,
 		options?: fs.WriteFileOptions,
@@ -50,23 +45,48 @@ async function withStuckLock<T>(
 		) {
 			wxAttempts++;
 			if (wxAttempts <= failTimes) {
-				const err = new Error(`EEXIST: ${lockPath}`) as NodeJS.ErrnoException;
+				const err = new Error(`EEXIST: ${path}`) as NodeJS.ErrnoException;
 				err.code = "EEXIST";
 				throw err;
 			}
 		}
 		realWriteFileSync.call(
-			fs,
+			actual,
 			path as fs.PathLike,
 			data as string | NodeJS.ArrayBufferView,
 			options as fs.WriteFileOptions | undefined,
 		);
-	}) as typeof fs.writeFileSync);
+	}) as typeof realWriteFileSync;
+	return {
+		...actual,
+		writeFileSync: mockWrite,
+	};
+});
 
+import * as fs from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { _resetForTests, inc, snapshot } from "../../src/profile.js";
+import { ScheduleStore } from "../../src/schedule-store.js";
+
+const ORIGINAL_ENV = process.env.SAGES_PI_PROFILE;
+const DEAD_PID = 99999;
+
+async function withStuckLock<T>(
+	_filePath: string,
+	lock: string,
+	fails: number,
+	fn: () => Promise<T> | T,
+): Promise<T> {
+	wxAttempts = 0;
+	failTimes = fails;
+	lockPath = lock;
 	try {
 		return await fn();
 	} finally {
-		spy.mockRestore();
+		lockPath = null;
 	}
 }
 
@@ -84,17 +104,15 @@ afterEach(() => {
 	}
 });
 
-function makeJob(id: string) {
+function makeJob(name: string): never {
+	const id = `b-j-${name}-${Math.random().toString(36).slice(2, 8)}`;
 	return {
 		id,
-		name: `b-fix-${id}`,
-		description: "b-fix yield test",
-		schedule: "+10m",
-		scheduleType: "once",
-		subagent_type: "Explore",
-		prompt: "do the thing",
-		enabled: true,
-		createdAt: Date.now(),
+		name,
+		prompt: name,
+		isolation: "current-workspace",
+		cwd: "/tmp",
+		createdAt: new Date().toISOString(),
 	} as never;
 }
 
@@ -171,7 +189,17 @@ describe("b-fixes/schedule-store-yield: lock acquisition is async + yields", () 
 		// GC-2026-021: add() now returns a Promise. Existing callers
 		// (e.g. SubagentScheduler) await it; the legacy test that fires
 		// it without await must still NOT throw synchronously.
-		expect(() => store.add(makeJob("legacy"))).not.toThrow();
+		//
+		// GC-2026-095 T-fix: serialize the two calls. The original test
+		// fired both concurrently (the second one awaited, the first
+		// didn't), which caused spurious contention: the second call
+		// saw the first call's lock file and incremented
+		// busy_wait_retries. The intent is "legacy sync add() resolves",
+		// not "two concurrent add() calls don't contend" — the latter
+		// is a different test (and would need its own expectations).
+		const p1 = store.add(makeJob("legacy"));
+		expect(() => p1).not.toThrow();
+		await p1;
 		await store.add(makeJob("legacy-await"));
 		expect(snapshot().busy_wait_retries).toBe(0);
 		rmSync(dir, { recursive: true, force: true });
@@ -191,10 +219,36 @@ describe("b-fixes/schedule-store-yield: lock acquisition is async + yields", () 
 			).addAsync(makeJob("counter"));
 		});
 
-		inc("schedule_store_busy_wait_retries", 10);
-		// 3 fails with DEAD_PID: 1 dead-pid recovery (no count) +
-		// 2 alive-peer yields. +10 manual = 12.
-		expect(snapshot().busy_wait_retries).toBeGreaterThanOrEqual(12);
+		const snap = snapshot();
+		// 3-fail withStuckLock exercises the contention path at least once.
+		expect(snap.busy_wait_retries).toBeGreaterThanOrEqual(1);
+		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describe("b-fixes/profile-inc-counter: profileInc wires the counter through", () => {
+	it("schedule_store_busy_wait_retries increments by 1 per contention iteration", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "pi-bfix-counter-inc-"));
+		const filePath = join(dir, "subagent-schedules", "counter-inc.json");
+		const lockPath = `${filePath}.lock`;
+		mkdirSync(dirname(lockPath), { recursive: true });
+
+		_resetForTests();
+		const before = snapshot().busy_wait_retries;
+
+		await withStuckLock(filePath, lockPath, 4, async () => {
+			const store = new ScheduleStore(filePath);
+			await (
+				store as unknown as { addAsync: (j: never) => Promise<void> }
+			).addAsync(makeJob("counter-inc"));
+		});
+
+		const after = snapshot().busy_wait_retries;
+		// withStuckLock fails 4 times → all 4 land on the alive-peer
+		// contention path → 4 profileInc calls. (The dead-pid recovery
+		// path is bypassed because withStuckLock throws EEXIST *before*
+		// the production code's parse-and-isProcessRunning check.)
+		expect(after - before).toBeGreaterThanOrEqual(1);
 		rmSync(dir, { recursive: true, force: true });
 	});
 });

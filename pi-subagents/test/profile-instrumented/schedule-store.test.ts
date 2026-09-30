@@ -16,31 +16,22 @@
  * `flag: "wx"` attempts, then lets the fourth succeed. A dead-pid lock file
  * (pid=99999) ensures the inner unlinkSync branch fires each retry — pinning
  * the full retry path, not just the "no breaker" case.
+ *
+ * GC-2026-095 T-fix: rewrite to use `vi.mock("node:fs", ...)` instead of
+ * `vi.spyOn(fs, "writeFileSync")`. ESM module namespace is non-configurable
+ * so the spy throws at create-time. vi.mock is hoisted and works in ESM.
  */
 
-import * as fs from "node:fs";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetForTests, inc, snapshot } from "../../src/profile.js";
-import { ScheduleStore } from "../../src/schedule-store.js";
+// Module-level config for the writeFileSync mock. The hoisted vi.mock
+// factory (below) closes over these — withStuckLock sets them per-test.
+let wxAttempts = 0;
+let failTimes = 0;
+let lockPath: string | null = null;
 
-const ORIGINAL_ENV = process.env.SAGES_PI_PROFILE;
-const DEAD_PID = 99999;
-
-let wxAttempts: number;
-
-async function withStuckLock<T>(
-	filePath: string,
-	lockPath: string,
-	failTimes: number,
-	fn: () => Promise<T> | T,
-): Promise<T> {
-	const realWriteFileSync = fs.writeFileSync;
-	wxAttempts = 0;
-	const spy = vi.spyOn(fs, "writeFileSync");
-	spy.mockImplementation(((
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	const realWriteFileSync = actual.writeFileSync;
+	const mockWrite = ((
 		path: fs.PathLike,
 		data: string | NodeJS.ArrayBufferView,
 		options?: fs.WriteFileOptions,
@@ -55,23 +46,48 @@ async function withStuckLock<T>(
 		) {
 			wxAttempts++;
 			if (wxAttempts <= failTimes) {
-				const err = new Error(`EEXIST: ${lockPath}`) as NodeJS.ErrnoException;
+				const err = new Error(`EEXIST: ${path}`) as NodeJS.ErrnoException;
 				err.code = "EEXIST";
 				throw err;
 			}
 		}
-		return realWriteFileSync.call(
-			fs,
+		realWriteFileSync.call(
+			actual,
 			path as fs.PathLike,
 			data as string | NodeJS.ArrayBufferView,
 			options as fs.WriteFileOptions | undefined,
 		);
-	}) as typeof fs.writeFileSync);
+	}) as typeof realWriteFileSync;
+	return {
+		...actual,
+		writeFileSync: mockWrite,
+	};
+});
 
+import * as fs from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { _resetForTests, inc, snapshot } from "../../src/profile.js";
+import { ScheduleStore } from "../../src/schedule-store.js";
+
+const ORIGINAL_ENV = process.env.SAGES_PI_PROFILE;
+const DEAD_PID = 99999;
+
+async function withStuckLock<T>(
+	_filePath: string,
+	lock: string,
+	fails: number,
+	fn: () => Promise<T> | T,
+): Promise<T> {
+	wxAttempts = 0;
+	failTimes = fails;
+	lockPath = lock;
 	try {
 		return await fn();
 	} finally {
-		spy.mockRestore();
+		lockPath = null;
 	}
 }
 
@@ -97,7 +113,7 @@ describe("profile-instrumented/schedule-store: lock contention is observable", (
 
 		// Pre-stage a stale lock file with a definitely-dead pid. acquireLock
 		// will read it, see the process is gone, unlink, and continue — leaving
-		// our writeFileSync spy to throw EEXIST again on the next attempt.
+		// our writeFileSync mock to throw EEXIST again on the next attempt.
 		fs.mkdirSync(dirname(lockPath), { recursive: true });
 		fs.writeFileSync(lockPath, String(DEAD_PID), "utf-8");
 
