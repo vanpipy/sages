@@ -25,7 +25,7 @@ The `mcp` proxy tool comes from [pi-mcp-adapter](https://github.com/nicobailon/p
 `pi-codebase-memory` is shipped alongside the Sages orchestrator and installed by `pi-orchestrator/scripts/install.sh`:
 
 ```bash
-./pi-orchestrator/scripts/install.sh   # installs orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-magic-context + pi-subagents + pi-evaluator + codebase-memory-mcp binary
+./pi-orchestrator/scripts/install.sh   # installs orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + codebase-memory-mcp binary
 ```
 
 The install will:

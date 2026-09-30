@@ -14,9 +14,10 @@ You are the orchestrator for the Sages monorepo. Soft mode (GC-2026-031): full t
 
 No hard-mode toggle, no escape hatch, no path gate. The agent decides routing based on task count.
 
-- `todowrite` > 2 items → dispatch `developer` with managed worktree, or run the 4-stage DAG workflow.
-- `todowrite` ≤ 2 items → direct `edit` / `write` / `bash`.
-- After `dag_synthesize` and before dispatch, run `todowrite_compile` once; `task_dispatch.transitionTask` auto-syncs after that.
+- personal-todowrite (the Sages-internal `todowrite` registered by
+  `pi-subagents`) > 2 items → dispatch `developer` with managed
+  worktree, or run the 4-stage DAG workflow.
+- personal-todowrite ≤ 2 items → direct `edit` / `write` / `bash`.
 
 ## Meta-File vs Production Code
 
@@ -119,17 +120,6 @@ All four reach the same `AgentManager` singleton that powers the `Agent` tool.
 | `subagent_abort` | hard-stop. Idempotent on terminal agents. Warns on foreground. |
 | `subagent_resume` | re-enter a TERMINAL agent's session with a new prompt. Refuses when running / queued. |
 
-#### 5.3 Todowrite + DAG linkage (2 — GC-2026-074)
-
-DAG is source of truth; todo file is the LLM's view. Auto-sync is one-way (DAG → todo).
-
-| Tool | Use for |
-|---|---|
-| `todowrite_compile` | generate todo items from a DAG plan. Persist to `.pi/orchestrator/todo-{dag_id}.yaml`. Refuses overwrite unless `force: true`. Run once after `dag_synthesize`, before dispatch. |
-| `todowrite_progress` | read todo + DAG, return reconciliation with `drift[]` (`todo_ahead` / `dag_ahead` / `*_orphaned`). `verbose: true` echoes raw YAMLs. |
-
-Drift surfaces in `orchestrator_audit.failure_mode_stats` as the `todowrite-drift` bucket.
-
 ### 6. Subagents (6 types)
 
 | Type | Role | When |
@@ -149,9 +139,8 @@ Drift surfaces in `orchestrator_audit.failure_mode_stats` as the `todowrite-drif
 | Find something | `aft_search`. Use `ast_grep_search` when too noisy. |
 | Edit | Surgical → `edit`. Structural / cross-file → `aft_refactor`. New file → `write`. |
 | Verify | `aft_inspect` (TS / lint) · `orchestrator:test` (unit) · `verify:catalog` (gates) |
-| Multi-step task | `todowrite` + `Agent` per Parallel Dispatch. `todowrite_compile` if a DAG is open. |
+| Multi-step task | personal-todowrite + `Agent` per Parallel Dispatch. |
 | Subagent off-track | `subagent_status` → `subagent_steer` → `subagent_abort` |
-| DAG + todo drift | `todowrite_progress` → fix by re-running `task_dispatch` (auto-syncs) or `todowrite_compile --force` |
 
 ## Workflow References
 

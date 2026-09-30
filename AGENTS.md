@@ -211,14 +211,16 @@ If you change any source file listed in a catalog's `_source_files`, re-run `bun
 Under soft mode (GC-2026-031) nothing is mechanically blocked. The
 recommendation mechanism is the profile-driven **dag_threshold**:
 
-- If your active `todowrite` has **>2 items** (the standard profile's
-  `dag_threshold: 2`), the recommended pattern is
+- If your active personal-todowrite (the Sages-internal
+  `todowrite` registered by `pi-subagents`) has **>2 items** (the
+  standard profile's `dag_threshold: 2`), the recommended pattern is
   the 4-stage DAG workflow (`goal_contract_create` → `dag_synthesize` →
   `task_dispatch` → `orchestrator_audit`) — or, equivalently, dispatching
   `Developer` with managed-worktree isolation for production code. The
   TDD discipline, worktree isolation, and auditor evidence gate all
   pay off at this scale.
-- If your active `todowrite` has **≤2 items**, direct handling with
+- If your active personal-todowrite (the Sages-internal one
+  registered by `pi-subagents`) has **≤2 items**, direct handling with
   `edit` / `write` / `bash` in the main session is also acceptable.
   No DAG is required.
 
@@ -278,7 +280,8 @@ subagent dispatch.
 ## Red lines
 
 1. **Subagent dispatch is RECOMMENDED for >2-item workflows.** When your
-   active `todowrite` has more than two items, prefer the 4-stage DAG
+   active personal-todowrite (the Sages-internal one registered by
+   `pi-subagents`) has more than two items, prefer the 4-stage DAG
    workflow or dispatch `Developer` with managed-worktree isolation
    (for production code) or `isolation: "current-workspace"` + `tdd:
    "none"` (for meta-file edits). The main agent may handle ≤2 tasks
