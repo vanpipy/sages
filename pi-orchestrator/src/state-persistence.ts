@@ -185,15 +185,5 @@ export function loadYamlOrchestratorFile<T>(
 export function isGoalContractState(value: unknown): value is Record<string, unknown> {
   const v = value as any;
   return !!v && typeof v === "object" && typeof v.id === "string" && typeof v.title === "string" &&
-    Array.isArray(v.success_criteria) && Array.isArray(v.anti_goals) && !!v.scope && typeof v.done_definition === "string";
-}
-
-export function isOrchestrationPlanState(value: unknown): value is Record<string, unknown> {
-  const v = value as any;
-  const statuses = new Set(["pending", "in_progress", "completed", "failed", "skipped"]);
-  const states = new Set(["draft", "approved", "executing", "completed", "failed"]);
-  return !!v && typeof v === "object" && typeof v.id === "string" && typeof v.goal_id === "string" &&
-    states.has(v.state) && Array.isArray(v.tasks) && v.tasks.every((task: any) =>
-      task && typeof task.id === "string" && statuses.has(task.status) &&
-      Number.isInteger(task.retry_count) && Number.isInteger(task.max_retries));
+    Array.isArray(v.anti_goals) && !!v.scope && typeof v.done_definition === "string";
 }

@@ -1,8 +1,12 @@
 /**
- * catalog.test.ts — GC-2026-047 T1.2
+ * catalog.test.ts — GC-2026-047 T1.2 (orchestrator-simplify)
  *
  * Verifies the catalog generator / verifier chain:
- *   - All 5 catalog files exist under pi/catalogs/ and parse as JSON.
+ *   - All 3 catalog files (subagent / event / namespace) exist under
+ *     pi/catalogs/ and parse as JSON. The isolation.json and gate.json
+ *     catalogs are gone — they snapshotted DAG / TaskNode.isolation and
+ *     the orchestrator_audit 5-phase vocabulary, both removed by
+ *     GC-2026-orchestrator-simplify.
  *   - Each catalog has the metadata fields `_source_hash` (64-char hex),
  *     `_generated_at`, and `_source_files` (non-empty array).
  *   - The non-metadata top-level body of each catalog is non-empty.
@@ -26,7 +30,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PI_ROOT = dirname(__dirname); // pi-orchestrator/test → pi-orchestrator/
 const CATALOGS_DIR = join(PI_ROOT, "catalogs");
-const CATALOG_NAMES = ["subagent", "isolation", "gate", "event", "namespace"] as const;
+const CATALOG_NAMES = ["subagent", "event", "namespace"] as const;
 type CatalogName = (typeof CATALOG_NAMES)[number];
 
 function catalogPath(name: CatalogName): string {
