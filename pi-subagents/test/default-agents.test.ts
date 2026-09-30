@@ -7,7 +7,7 @@
  * `isolation: "worktree"` field on the config itself.
  *
  * GC-2026-014: the Phase A / Phase B aliases (`software-developer` /
- * `software-auditor`) were removed entirely — both names now resolve as
+ * `software-reviewer`) were removed entirely — both names now resolve as
  * unknown agent types and are NOT in any roster entry or `aliases` field.
  * The "legacy aliases removed" invariants below pin that state.
  */
@@ -242,7 +242,7 @@ describe("default-agents: merger config (GC-2026-prompt-workspace)", () => {
 	});
 
 	it("carries the required extensions: aft, pi-mcp-adapter", () => {
-		// Symmetric with developer / auditor: the merger reaches for
+		// Symmetric with developer / reviewer: the merger reaches for
 		// the same indexed semantic tools so it can read both diffs
 		// and classify overlap without shell grep.
 		const extensions = merger?.extensions;
@@ -273,7 +273,7 @@ describe("default-agents: merger config (GC-2026-prompt-workspace)", () => {
 	});
 
 	it("sets a bounded maxTurns (80 — read both diffs + classify + merge + verify + report)", () => {
-		// Less than developer/auditor (200) because the merger is a
+		// Less than developer/reviewer (200) because the merger is a
 		// narrow tool: read diffs, classify, produce one merge commit
 		// or escalate. Going over 80 turns means the brief was wrong,
 		// not that the merger needs more budget.
@@ -307,7 +307,7 @@ describe("default-agents: subagent isolation", () => {
 		"Explore",
 		"Plan",
 		"Developer",
-		"Auditor",
+		"Reviewer",
 		"Merger",
 	] as const) {
 		it(`${name} excludes pi-subagents from its extension set`, () => {
@@ -337,7 +337,7 @@ describe("default-agents: per-agent maxTurns budgets", () => {
 		// the main agent under-specified the brief.
 		Plan: 12,
 		Developer: 200,
-		Auditor: 200,
+		Reviewer: 200,
 		Merger: 80,
 	};
 
@@ -382,30 +382,30 @@ describe("default-agents: per-agent maxTurns budgets", () => {
 	});
 });
 
-describe("default-agents: auditor (Phase B) — canonical `auditor` registered", () => {
-	it("registers the canonical `auditor` agent", () => {
-		expect(DEFAULT_AGENTS.has("Auditor")).toBe(true);
+describe("default-agents: reviewer (Phase B) — canonical `Reviewer` registered", () => {
+	it("registers the canonical `Reviewer` agent", () => {
+		expect(DEFAULT_AGENTS.has("Reviewer")).toBe(true);
 	});
 
-	it("does NOT register `software-auditor` (GC-2026-014: legacy alias removed)", () => {
+	it("does NOT register `software-reviewer` (GC-2026-014: legacy alias removed)", () => {
 		// The Phase B alias was dropped in GC-2026-014 along with the
 		// AgentConfig.aliases field.
-		expect(DEFAULT_AGENTS.has("software-auditor")).toBe(false);
+		expect(DEFAULT_AGENTS.has("software-reviewer")).toBe(false);
 	});
 });
 
-describe("default-agents: auditor config", () => {
-	const aud = DEFAULT_AGENTS.get("Auditor");
+describe("default-agents: reviewer config", () => {
+	const aud = DEFAULT_AGENTS.get("Reviewer");
 
 	it("is registered with isDefault: true", () => {
 		expect(aud?.isDefault).toBe(true);
 	});
 
-	it("has displayName 'Auditor' and description referencing the audit discipline", () => {
-		expect(aud?.displayName).toBe("Auditor");
-		expect(aud?.description.toLowerCase()).toContain("audit");
+	it("has displayName 'Reviewer' and description referencing the review discipline", () => {
+		expect(aud?.displayName).toBe("Reviewer");
+		expect(aud?.description.toLowerCase()).toContain("review");
 		// Default verdict stance is part of the public contract.
-		expect(aud?.description.toLowerCase()).toContain("needs work");
+		expect(aud?.description.toLowerCase()).toContain("needs_work");
 	});
 
 	it("uses promptMode: 'replace' so the canonical prompt replaces the parent identity", () => {
@@ -415,36 +415,35 @@ describe("default-agents: auditor config", () => {
 	it("carries the canonical system prompt (non-empty, references all three verdicts)", () => {
 		expect(typeof aud?.systemPrompt).toBe("string");
 		expect(aud?.systemPrompt.length).toBeGreaterThan(0);
-		expect(aud?.systemPrompt).toContain("CERTIFIED");
-		expect(aud?.systemPrompt).toContain("NEEDS WORK");
-		expect(aud?.systemPrompt).toContain("BLOCKED");
+		expect(aud?.systemPrompt).toContain("CLEAN");
+		expect(aud?.systemPrompt).toContain("NEEDS_WORK");
 	});
 
 	it("lists the same required built-in tools as developer (read, bash, grep, find, ls, edit, write)", () => {
-		// The auditor shares developer's tool set: edit/write are present
-		// for the single allowed write target (the audit-{task_id}.md
+		// The reviewer shares developer's tool set: edit/write are present
+		// for the single allowed write target (the review-{task_id}.md
 		// report). The "verify only / no production edits" rule lives
 		// in the prompt, not in the tool allowlist.
 		const tools = new Set(aud?.builtinToolNames ?? []);
 		for (const t of ["read", "bash", "grep", "find", "ls", "edit", "write"]) {
-			expect(tools.has(t), `auditor must include tool ${t}`).toBe(true);
+			expect(tools.has(t), `reviewer must include tool ${t}`).toBe(true);
 		}
 	});
 
 	it("carries the required extensions: aft, pi-mcp-adapter", () => {
-		// Symmetric with developer. The auditor prompt's tool preference
+		// Symmetric with developer. The reviewer prompt's tool preference
 		// order relies on these extensions being loaded.
 		const extensions = aud?.extensions;
 		expect(extensions).not.toBe(false);
 		const list =
 			extensions === true || extensions === undefined ? null : extensions;
-		expect(list, "auditor must pin extensions to a list").not.toBeNull();
+		expect(list, "reviewer must pin extensions to a list").not.toBeNull();
 		expect(list).toContain("aft");
 		expect(list).toContain("pi-mcp-adapter");
 		expect(list).not.toContain("pi-magic-context");
 	});
 
-	it("disables skills (false) — auditor re-derives conventions at audit time per First Action Protocol", () => {
+	it("disables skills (false) — reviewer re-derives conventions at audit time per First Action Protocol", () => {
 		expect(aud?.skills).toBe(false);
 	});
 
@@ -458,29 +457,29 @@ describe("default-agents: auditor config", () => {
 		expect(aud?.maxTurns).toBe(200);
 	});
 
-	it("does NOT copy the legacy `isolation: 'worktree'` literal — auditor is read-only on the developer's worktree", () => {
-		// The auditor never enters a managed worktree; it audits the
+	it("does NOT copy the legacy `isolation: 'worktree'` literal — reviewer is read-only on the developer's worktree", () => {
+		// The reviewer never enters a managed worktree; it audits the
 		// developer's worktree from the outside. `enforceDeveloperManagedIsolationPolicy`
 		// is `developer`-only.
 		expect(aud?.isolation).toBeUndefined();
 	});
 
-	it("does NOT carry a `software-auditor` alias (GC-2026-014: aliases field removed from AgentConfig)", () => {
+	it("does NOT carry a `software-reviewer` alias (GC-2026-014: aliases field removed from AgentConfig)", () => {
 		// The AgentConfig.aliases field was dropped entirely in GC-2026-014.
 		expect(aud?.aliases).toBeUndefined();
 	});
 });
 
-describe("default-agents: auditor subagent isolation", () => {
-	// Symmetric with developer: the auditor also pins
+describe("default-agents: reviewer subagent isolation", () => {
+	// Symmetric with developer: the reviewer also pins
 	// `excludeExtensions: ["pi-subagents"]` so the Agent tool cannot
 	// load by accident. The auditor's purpose is verify-only — letting
 	// it spawn further Agent calls would defeat the audit invariant.
-	it("auditor excludes pi-subagents from its extension set", () => {
-		const config = DEFAULT_AGENTS.get("Auditor");
+	it("reviewer excludes pi-subagents from its extension set", () => {
+		const config = DEFAULT_AGENTS.get("Reviewer");
 		expect(
 			config,
-			"auditor must be registered as a default agent",
+			"reviewer must be registered as a default agent",
 		).toBeDefined();
 		const excludes = config?.excludeExtensions ?? [];
 		expect(

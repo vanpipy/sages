@@ -18,7 +18,7 @@
  *
  * Storage path: `~/.cache/pi-subagents-todos/<cwd-hash>.json`
  *   - Out of the worktree (avoids accidental commit)
- *   - Cwd-keyed so Developer + Auditor sharing a worktree see the same list
+ *   - Cwd-keyed so Developer + Reviewer sharing a worktree see the same list
  *   - Cwd-hashed for safe filename (no `..` traversal)
  *
  * Anti-rule: no new npm dependencies (Node built-ins only).

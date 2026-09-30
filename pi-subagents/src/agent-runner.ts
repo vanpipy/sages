@@ -692,7 +692,7 @@ export async function runAgent(
 	// GC-2026-coupon-nonhit-block follow-up (Path A): register the personal
 	// todowrite tools on this agent's pi instance before session creation.
 	// The tools scope storage to `effectiveCwd` (resolved below) so Developer
-	// and Auditor sharing a worktree see the same list across calls within
+	// and Reviewer sharing a worktree see the same list across calls within
 	// the dispatch. Tool names must also be in BUILTIN_TOOL_NAMES
 	// (updated in default-agents.ts) so the typo check below accepts them.
 	if (typeof (pi as { registerTool?: unknown }).registerTool === "function") {
@@ -782,7 +782,7 @@ export async function runAgent(
 		// remaining defensive throw here is a belt-and-suspenders signal
 		// that the resolver was bypassed. The `general-purpose` fallback was
 		// removed with the agent itself (DAG-2026-011 Phase C), and the
-		// `software-developer` / `software-auditor` legacy aliases were
+		// `software-developer` / `software-auditor` (now `software-reviewer`) legacy aliases were
 		// removed in GC-2026-014 — there is no implicit "any unknown name →
 		// general-purpose" or alias mapping any more.
 		throw new Error(
@@ -886,7 +886,7 @@ export async function runAgent(
 		// GC-2026-020: Explore is the multiplicative CPU culprit because
 		// it inherits all default extensions (extensions: true) and is
 		// spawned most often. Counting + p50'd separately keeps the
-		// instrumentation distinguishable from developer/auditor reloads.
+		// instrumentation distinguishable from developer/reviewer reloads.
 		profileInc("explore_spawn_count");
 		// Best-effort count of extensions loaded. DefaultResourceLoader
 		// doesn't expose a public getter, but the discovered set
@@ -1116,9 +1116,9 @@ export async function runAgent(
 	// developer budget. The tracker writes its own handoff on snapshot
 	// / partial / final events; the rich handoff overwrite is the
 	// orchestrator's job (it knows the gc_id, task_id, and any SC state).
-	const agentTypeForBudget: "developer" | "auditor" | "explorer" | "merger" =
+	const agentTypeForBudget: "developer" | "reviewer" | "explorer" | "merger" =
 		type === "developer" ||
-		type === "auditor" ||
+		type === "reviewer" ||
 		type === "explorer" ||
 		type === "merger"
 			? type
@@ -1535,7 +1535,7 @@ export function getAgentConversation(session: AgentSession): string {
 // =============================================================================
 // GC-2026-037: structured YAML output (T2)
 //
-// Every subagent dispatch (developer / auditor / Explore / Plan) MUST
+// Every subagent dispatch (developer / reviewer / Explore / Plan) MUST
 // produce a final message containing a YAML block in the schema below.
 // `extractStructuredOutput` parses that block into a typed object the
 // orchestrator (and the audit gate) can consume mechanically. Missing or

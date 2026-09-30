@@ -33,7 +33,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AUDITOR_PROMPT } from "../src/agent-prompts/auditor.js";
+import { REVIEWER_PROMPT } from "../src/agent-prompts/reviewer.js";
 import { DEVELOPER_PROMPT } from "../src/agent-prompts/developer.js";
 import { EXPLORE_PROMPT } from "../src/agent-prompts/explore.js";
 import { PLAN_PROMPT } from "../src/agent-prompts/plan.js";
@@ -53,7 +53,7 @@ const MINIMAL_CWD = "/home/user/project";
  * A parent system prompt that contains main-agent identity markers.
  *
  * IMPORTANT: Phrasing here must NOT overlap with any role-prompt content.
- * The DEVELOPER_PROMPT says "RED → GREEN → REFACTOR"; the AUDITOR_PROMPT
+ * The DEVELOPER_PROMPT says "RED → GREEN → REFACTOR"; the REVIEWER_PROMPT
  * says "default to NEEDS WORK"; neither overlaps with the parent
  * phrasing. The parent prompt uses completely different language so the
  * test can distinguish role identity from parent identity.
@@ -77,7 +77,7 @@ describe("buildAgentPrompt — replace mode identity isolation", () => {
 			["Explore", EXPLORE_PROMPT],
 			["Plan", PLAN_PROMPT],
 			["developer", DEVELOPER_PROMPT],
-			["auditor", AUDITOR_PROMPT],
+			["auditor", REVIEWER_PROMPT],
 		] as const) {
 			it(`${agentName}: parent prompt content is absent in replace mode`, () => {
 				const config: AgentConfig = {
@@ -149,7 +149,7 @@ describe("buildAgentPrompt — replace mode identity isolation", () => {
 					// prose (where the marker text would be absent).
 					Plan: "plan compiler",
 					developer: "RED → GREEN → REFACTOR",
-					auditor: "evidence-based certification",
+					auditor: "Reviewer Agent (canonical built-in)",
 				};
 				expect(prompt).toContain(uniqueMarker[agentName]);
 			});
@@ -198,7 +198,7 @@ describe("buildAgentPrompt — replace mode identity isolation", () => {
 			["Explore", EXPLORE_PROMPT],
 			["Plan", PLAN_PROMPT],
 			["developer", DEVELOPER_PROMPT],
-			["auditor", AUDITOR_PROMPT],
+			["auditor", REVIEWER_PROMPT],
 		] as const) {
 			it(`${agentName}: output is identical whether parentSystemPrompt is undefined or a string`, () => {
 				const config: AgentConfig = {
@@ -234,7 +234,7 @@ describe("buildAgentPrompt — append mode intentional compatibility", () => {
 		["Explore", EXPLORE_PROMPT],
 		["Plan", PLAN_PROMPT],
 		["developer", DEVELOPER_PROMPT],
-		["auditor", AUDITOR_PROMPT],
+		["auditor", REVIEWER_PROMPT],
 	] as const) {
 		it(`${agentName}: parent system prompt IS included in append mode`, () => {
 			const config: AgentConfig = {
@@ -425,8 +425,8 @@ describe("prompts.ts — module-level invariants (sanity)", () => {
 		expect(DEVELOPER_PROMPT).toMatch(/RED.*GREEN.*REFACTOR/i);
 	});
 
-	it("AUDITOR_PROMPT declares sub-agent identity (Phase B)", () => {
-		expect(AUDITOR_PROMPT).toMatch(/NEEDS WORK/i);
-		expect(AUDITOR_PROMPT).toMatch(/verify/i);
+	it("REVIEWER_PROMPT declares sub-agent identity (Phase B)", () => {
+		expect(REVIEWER_PROMPT).toMatch(/NEEDS_WORK/);
+		expect(REVIEWER_PROMPT).toMatch(/verify/i);
 	});
 });
