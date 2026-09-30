@@ -36,7 +36,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import { Value } from "@sinclair/typebox/value";
+import { Value } from "typebox/value";
 
 import { PI_EVALUATOR_VERSION } from "./package-version.ts";
 import {
@@ -186,7 +186,7 @@ export function loadCoefficientsAt(path: string): LoadCoefficientsResult {
 	if (!Value.Check(CoefficientsConfigSchema, raw)) {
 		const errors = [...Value.Errors(CoefficientsConfigSchema, raw)];
 		const first = errors[0];
-		const where = first ? `${first.path || "(root)"}: ${first.message}` : "unknown";
+		const where = first ? `${first.instancePath || "(root)"}: ${first.message}` : "unknown";
 		throw new Error(`coefficients.json shape invalid: ${where}`);
 	}
 

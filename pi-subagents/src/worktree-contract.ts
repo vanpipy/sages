@@ -25,8 +25,8 @@
  * and the legacy `"worktree"` literal is still rejected at both surfaces.
  */
 
-import type { TSchema } from "@sinclair/typebox";
-import { Type } from "@sinclair/typebox";
+import type { TSchema } from "typebox";
+import { Type } from "typebox";
 import { validateIdentity } from "./worktree.js";
 
 /** Mode of provisioning the Agent manager performs on the worktree. */

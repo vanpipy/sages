@@ -25,8 +25,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type, type TSchema } from "typebox";
+import { Value } from "typebox/value";
 
 // =============================================================================
 // Types (design §5.2)
@@ -537,12 +537,12 @@ const DocumentSchema = Type.Object(
 );
 
 function describeErrors(
-	schema: Parameters<typeof Value.Errors>[0],
+	schema: TSchema,
 	value: unknown,
 ): string {
 	return [...Value.Errors(schema, value)]
 		.slice(0, 5)
-		.map((e) => `${e.path || "/"} ${e.message}`)
+		.map((e) => `${e.instancePath || "/"} ${e.message}`)
 		.join("; ");
 }
 

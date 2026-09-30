@@ -29,8 +29,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { getFailureCatalog } from "./failure-catalog.js";
 
 /** Sub-agent-owned; deliberately outside `.pi/orchestrator/` (memory rule #23). */
@@ -216,7 +216,7 @@ export function writeDiagnostic(
 	if (!Value.Check(DiagnosticJsonV1Schema, record)) {
 		const detail = [...Value.Errors(DiagnosticJsonV1Schema, record)]
 			.slice(0, 5)
-			.map((e) => `${e.path || "/"} ${e.message}`)
+			.map((e) => `${e.instancePath || "/"} ${e.message}`)
 			.join("; ");
 		throw new DiagnosticInvalid(`payload does not match v1 schema: ${detail}`);
 	}

@@ -29,7 +29,7 @@ import {
 	Spacer,
 	Text,
 } from "@earendil-works/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { AgentManager } from "./agent-manager.js";
 import {
 	getAgentConversation,

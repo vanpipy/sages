@@ -23,7 +23,7 @@
  *   - every dimension listed in `dimensions` is also referenced in
  *     `global.dimension_weights` (and vice versa)
  */
-import { Type, type Static } from "@sinclair/typebox";
+import { Type, type Static } from "typebox";
 
 /**
  * Per-signal coefficient: how to weight + how to normalize + which direction
