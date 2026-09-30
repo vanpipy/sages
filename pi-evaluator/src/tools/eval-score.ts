@@ -31,7 +31,7 @@
  * `state.active_workflow` from orchestrator events.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import type { Dimension } from "../types.ts";
