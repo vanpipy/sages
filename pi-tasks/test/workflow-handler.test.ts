@@ -50,7 +50,7 @@ function fakeEvents() {
     /** Snapshot how many times each channel was emitted on. */
     snapshot() {
       const captured: Record<string, unknown[]> = {};
-      for (const [channel, set] of handlers) {
+      for (const channel of handlers.keys()) {
         if (channel.startsWith("workflow:") || channel.startsWith("subagents:")) {
           captured[channel] = [];
         }
