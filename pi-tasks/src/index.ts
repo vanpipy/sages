@@ -33,6 +33,7 @@ import { reclaimGlobalSessionTasksDir, sessionTaskFile } from "./task-paths.js";
 import { TaskStore } from "./task-store.js";
 import { loadGlobalTasksConfig, loadTasksConfig } from "./tasks-config.js";
 import type { Task } from "./types.js";
+import { subscribeWorkflow } from "./workflow-handler.js";
 import { openSettingsMenu } from "./ui/settings-menu.js";
 import { TaskWidget, type UICtx } from "./ui/task-widget.js";
 
@@ -365,6 +366,34 @@ export default function (pi: ExtensionAPI) {
     widget.setActiveTask(task.id, false);
     widget.update();
   });
+
+  // ── Workflow subscription (GC-2026-path-B-swap) ───────────────────────
+  // Wire pi-tasks's subscribeWorkflow so planning-layer workflow_run
+  // (which emits "workflow:start") drives the static task graph + cascade.
+  // The subscribeWorkflow handler:
+  //   - on "workflow:start" → buildStaticWorkflowGraph + store.create × N + spawn Implement
+  //   - on "subagents:completed" → mark task complete, parseReviewerVerdict for
+  //     review phases, emit "workflow:phase-complete", cascade-spawn unblocked tasks
+  // spawnSubagent is reused for the agent dispatch — it goes through
+  // subagents:rpc:spawn so pi-subagents handles the actual agent lifecycle.
+  // The handler keeps its own agentToTask map, separate from agentTaskMap
+  // above; the two coexist because subscribeWorkflow's map covers workflow
+  // tasks while agentTaskMap covers ad-hoc TaskExecute tasks.
+  let workflowHandlerUnsub: (() => void) | undefined;
+  subscribeWorkflow(store, {
+    events: pi.events,
+    spawnAgent: async (task) => {
+      const type = String(task.metadata.agentType ?? task.subject);
+      return spawnSubagent(type, task.description, {
+        description: task.subject,
+        isBackground: true,
+      });
+    },
+  });
+  // Track the unsub so future reloads can detach cleanly (not currently used
+  // — extension factory runs once per session — but kept for symmetry with
+  // other listener registrations).
+  void workflowHandlerUnsub;
 
   // ── Context-scoped store initialization ──
   // Project paths cannot be resolved until an ExtensionContext is available.

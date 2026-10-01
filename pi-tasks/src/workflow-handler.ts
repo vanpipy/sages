@@ -200,9 +200,11 @@ export function subscribeWorkflow(
 		const isReview = task.metadata.phase === "review";
 		const resultStr = typeof data.result === "string" ? data.result : undefined;
 
-		// Review tasks: parse verdict, stamp metadata, emit workflow:phase-complete.
-		// Non-review tasks: mark completed silently — the planning layer reads
-		// their status from the store via TaskList, no event needed.
+		// Review tasks: parse verdict, stamp metadata.
+		// All tasks (review, implement, fix, merge): emit workflow:phase-complete
+		// so the planning layer can track each phase. GC-2026-path-B-swap extended
+		// path B's event contract — only reviews have a `verdict` field; non-review
+		// phases emit `phase: "implement" | "fix" | "merge"` with no verdict.
 		if (isReview && resultStr !== undefined) {
 			const verdict: ReviewerVerdict = parseReviewerVerdict(resultStr);
 			store.update(taskId, {
@@ -221,6 +223,14 @@ export function subscribeWorkflow(
 			});
 		} else {
 			store.update(taskId, { status: "completed" });
+			await events.emit("workflow:phase-complete", {
+				workflow_id: task.metadata.workflow_id ?? activeWorkflowId,
+				goal_id: task.metadata.workflow_run_goal_id ?? activeGoalId,
+				phase: task.metadata.phase,
+				iteration: task.metadata.iteration,
+				status: "completed",
+				task_id: taskId,
+			});
 		}
 
 		// Cascade: spawn every pending task whose blockers are all completed.

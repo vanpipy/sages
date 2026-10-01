@@ -251,7 +251,7 @@ describe("subscribeWorkflow — subagents:completed review", () => {
     expect(ev.status).toBe("completed");
   });
 
-  test("non-review completion does not parse verdict (Implement / Fix / Merge pass through)", async () => {
+  test("non-review completion emits phase-complete with phase=implement (no verdict)", async () => {
     const { events, store } = setup();
     const emitted: unknown[] = [];
     events.on("workflow:phase-complete", d => { emitted.push(d); });
@@ -269,7 +269,12 @@ describe("subscribeWorkflow — subagents:completed review", () => {
 
     const after = store.get(implement.id);
     expect(after?.metadata.verdict).toBeUndefined();
-    expect(emitted).toHaveLength(0);
+    expect(emitted).toHaveLength(1);
+    const ev = emitted[0] as Record<string, unknown>;
+    expect(ev.phase).toBe("implement");
+    expect(ev.verdict).toBeUndefined();
+    expect(ev.iteration).toBeUndefined();
+    expect(ev.status).toBe("completed");
   });
 });
 
