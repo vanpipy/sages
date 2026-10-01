@@ -696,6 +696,15 @@ interface RunContext {
 /**
  * Spawn a subagent and wait synchronously for completion.
  * Returns the agent record (with status, result, error).
+ *
+ * `isBackground` is left undefined (not `false`): the manager's
+ * `widgetAgents()` filter keeps `isBackground !== false` records
+ * visible in the default `"background"` widget mode (see
+ * agent-widget.ts:384), so the user sees the working spinner for
+ * the duration of the phase. `!options.isBackground` still evaluates
+ * true for `undefined`, which suppresses the individual completion
+ * nudge — workflow_run reports the result inline via the final
+ * tool result, so an extra "agent completed" toast would be noise.
  */
 async function spawnAndWait(
 	registry: SubagentRegistry,
@@ -705,11 +714,11 @@ async function spawnAndWait(
 	options: {
 		managedWorktree?: ManagedWorktreeRequest;
 		cwd?: string;
+		description: string;
 	},
 ): Promise<AgentRecord> {
 	const id = registry.spawn(pi, ctx, type, prompt, {
 		...options,
-		isBackground: false,
 		maxTurns: 200,
 	});
 	await registry.waitForAll();
@@ -829,6 +838,7 @@ export async function executeWorkflowRun(
 		try {
 			const record = await spawnAndWait(registry, runCtx, overrides.implement ?? "Developer", prompt, {
 				managedWorktree: wtRequest,
+				description: `Implement: ${goal.title}`,
 			});
 			const summary: TaskSummary & { agent_id: string } = {
 				id: record.id,
@@ -866,6 +876,7 @@ export async function executeWorkflowRun(
 		// unnecessary overhead.
 		const record = await spawnAndWait(registry, runCtx, overrides.review ?? "Reviewer", prompt, {
 			cwd: state.worktree_path,
+			description: `Review ${iteration}: ${goal!.title}`,
 		});
 		const verdict = parseReviewerVerdict(record.result);
 		const summary: ReviewSummary = {
@@ -924,6 +935,7 @@ export async function executeWorkflowRun(
 			const record = await spawnAndWait(registry, runCtx, overrides.fix ?? "Developer", fixPromptText, {
 				managedWorktree: worktreeRequest(goalId, "implement", state.branch),
 				cwd: state.worktree_path,
+				description: `Fix iter ${state.iterations_used}: ${goal.title}`,
 			});
 			const fixSummary: TaskSummary & { agent_id: string; iteration: number } = {
 				id: record.id,
@@ -983,6 +995,7 @@ export async function executeWorkflowRun(
 			const prompt = mergePrompt(goal, state.branch ?? "", state.worktree_path ?? "");
 			const record = await spawnAndWait(registry, runCtx, overrides.merge ?? "Merger", prompt, {
 				cwd: repoCwd, // Merge runs in the main checkout
+				description: `Merge: ${goal.title}`,
 			});
 			const summary: TaskSummary & { agent_id: string; merge_commit?: string } = {
 				id: record.id,
