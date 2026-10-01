@@ -20,6 +20,9 @@
 #     pi-codebase-memory   → ~/.pi/packages/pi-codebase-memory
 #     pi-subagents         → ~/.pi/packages/pi-subagents
 #     pi-evaluator         → ~/.pi/packages/pi-evaluator
+#     pi-tasks             → ~/.pi/packages/pi-tasks  (workflow engine: TaskCreate/TaskUpdate/TaskExecute/...)
+#                              GC-2026-install-pi-tasks: Sages fork of @tintinweb/pi-tasks v0.9.0.
+#                              Used by workflow_run for live progress visibility (GC-2026-pi-tasks-integration).
 #
 #   npm-installed extensions (--prefix ~/.pi/agent/npm), latest
 #   from the npm registry — no version pin (see header below):
@@ -137,6 +140,24 @@ PI_ORCHESTRATOR_PKG="$PI_ORCHESTRATOR_DEST_DIR"
 PI_EVALUATOR_SRC_REL="pi-evaluator"
 PI_EVALUATOR_DEST_DIR="$PI_DIR/packages/pi-evaluator"
 PI_EVALUATOR_PKG="$PI_EVALUATOR_DEST_DIR"
+
+# pi-tasks package info (sage peer, deployed by file-copy)
+# pi-tasks is the workflow engine: TaskCreate / TaskList / TaskUpdate /
+# TaskExecute (Claude Code-compatible task tracking). workflow_run
+# (the orchestrator's 5-phase pipeline runner, GC-2026-workflow-run)
+# creates 4 pi-tasks tasks for live progress visibility
+# (GC-2026-pi-tasks-integration). Without pi-tasks installed,
+# workflow_run still works — just without the live progress UI
+# (pi_tasks.* IDs in the result are empty strings).
+#
+# @sages/pi-tasks is the Sages fork of @tintinweb/pi-tasks v0.9.0
+# (added in commit 8fd2693; sagesized to @sages/* namespace). npm
+# upstream is intentionally NOT installed because the orchestrator
+# uses it for internal bookkeeping (TaskCreate × N for pi-tasks
+# integration) and registering both forms would conflict.
+PI_TASKS_SRC_REL="pi-tasks"
+PI_TASKS_DEST_DIR="$PI_DIR/packages/pi-tasks"
+PI_TASKS_PKG="$PI_TASKS_DEST_DIR"
 
 # No temp dir to clean up — install.sh sources files from LOCAL_REPO_ROOT
 # (derived above), so the historical TMP_DIR + clone trap is obsolete.
@@ -812,6 +833,30 @@ verify_critical_codebase_memory_deps() {
   return 0
 }
 
+# verify_critical_tasks_deps — GC-2026-install-pi-tasks
+# pi-tasks imports typebox at module-load time (for the TaskCreate /
+# TaskUpdate TypeBox parameter schemas in src/index.ts). typebox is
+# declared in pi-tasks/package.json#dependencies as "^1.1.34", not
+# peerDependencies, so it must be installed under pi-tasks/node_modules/.
+# Without it, TaskCreate throws "Cannot find module 'typebox'" at
+# pi session start.
+verify_critical_tasks_deps() {
+  local pkg_dir="$1"
+  local missing=()
+  if [[ ! -d "$pkg_dir/node_modules/typebox" ]]; then
+    missing+=("typebox")
+  fi
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "  ERROR: pi-tasks critical deps missing after bun install:"
+    for dep in "${missing[@]}"; do
+      echo "    - $pkg_dir/node_modules/$dep"
+    done
+    echo "  Run 'cd $pkg_dir && bun install' manually to recover"
+    return 1
+  fi
+  return 0
+}
+
 # Final gate: run all per-peer critical-deps verifies and exit 1 if
 # any peer is missing required modules. Called at the END of install()
 # so it catches:
@@ -843,6 +888,11 @@ verify_all_critical_install_deps() {
   fi
   if [[ -d "$PI_CODEBASE_MEMORY_DEST_DIR" ]]; then
     if ! verify_critical_codebase_memory_deps "$PI_CODEBASE_MEMORY_DEST_DIR"; then
+      missing_total=$((missing_total + 1))
+    fi
+  fi
+  if [[ -d "$PI_TASKS_DEST_DIR" ]]; then
+    if ! verify_critical_tasks_deps "$PI_TASKS_DEST_DIR"; then
       missing_total=$((missing_total + 1))
     fi
   fi
@@ -978,7 +1028,7 @@ setup_peer_node_modules_symlinks() {
 # setup_peer_node_modules_symlinks in install() so a fresh `bun install`
 # inside install_orchestrator_files cannot wipe the symlink.
 setup_orchestrator_peer_symlinks() {
-  for peer in pi-subagents pi-codebase-memory pi-evaluator; do
+  for peer in pi-subagents pi-codebase-memory pi-evaluator pi-tasks; do
     local peer_dir="$PI_DIR/packages/$peer"
     [[ ! -d "$peer_dir" ]] && continue  # user opted out (--orchestrator-only)
 
@@ -1272,6 +1322,136 @@ except Exception as e:
 }
 
 # ──────────────────────────────────────────────────────────────────
+# pi-tasks — workflow engine for pi (GC-2026-install-pi-tasks)
+#
+# pi-tasks exposes 7 Claude Code-compatible tools (TaskCreate, TaskList,
+# TaskGet, TaskUpdate, TaskOutput, TaskStop, TaskExecute). The
+# orchestrator's workflow_run tool (GC-2026-workflow-run) creates 4
+# pi-tasks tasks per pipeline (Implement / Review / Fix / Merge) tagged
+# with metadata.workflow_run_goal_id so the LLM can see live progress
+# via TaskList (GC-2026-pi-tasks-integration).
+#
+# pi-tasks is file-copied from $LOCAL_REPO_ROOT/pi-tasks (the Sages
+# fork of @tintinweb/pi-tasks v0.9.0). The npm upstream
+# (npm:@tintinweb/pi-tasks) is intentionally NOT installed because it
+# would conflict with the local fork by registering the same tool
+# names. If a user previously had the npm version installed,
+# uninstall_pi_tasks strips both forms.
+#
+# Critical runtime dep: typebox (declared in package.json#dependencies;
+# pi-tasks imports it at module-load time for the TypeBox parameter
+# schemas in src/index.ts). Without it, TaskCreate throws
+# "Cannot find module 'typebox'" at pi session start.
+# ──────────────────────────────────────────────────────────────────
+
+is_pi_tasks_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+  python3 -c "
+import json, os, sys
+try:
+    d = json.load(open('$settings'))
+    pkg = '$PI_TASKS_PKG'
+    if pkg in d.get('packages', []) and os.path.isdir(pkg):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_tasks_files() {
+  local src_root="$LOCAL_REPO_ROOT/$PI_TASKS_SRC_REL"
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in local sages repo, skipping pi-tasks files"
+    return 0
+  }
+  if [[ -d "$PI_TASKS_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-tasks files (exists, use --force)"
+  else
+    rm -rf "$PI_TASKS_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_TASKS_DEST_DIR"
+    echo "  Installed pi-tasks files to $PI_TASKS_DEST_DIR"
+  fi
+  if [[ -f "$PI_TASKS_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    if ! (cd "$PI_TASKS_DEST_DIR" && bun install 2>&1 | tail -10); then
+      echo "  ERROR: pi-tasks bun install failed"
+      echo "  Run 'cd $PI_TASKS_DEST_DIR && bun install' manually to diagnose"
+      return 1
+    elif ! verify_critical_tasks_deps "$PI_TASKS_DEST_DIR"; then
+      return 1
+    fi
+  fi
+}
+
+install_pi_tasks() {
+  echo "==> Installing pi-tasks..."
+  if is_pi_tasks_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  pi-tasks already installed (use --force to reinstall)"
+    return 0
+  fi
+  if ! install_pi_tasks_files; then
+    echo "  Error: install_pi_tasks_files failed, aborting"
+    return 1
+  fi
+  if is_pi_tasks_installed; then
+    echo "  pi-tasks already registered in settings.json"
+  else
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_TASKS_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+  fi
+  echo "  pi-tasks installed"
+}
+
+uninstall_pi_tasks() {
+  echo "==> Uninstalling pi-tasks..."
+
+  # 1) Strip BOTH forms from settings.json (handles legacy npm install + the local fork path).
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    new_pkgs = [p for p in pkgs if not (p == 'npm:@tintinweb/pi-tasks' or p.endswith('/pi-tasks') or p.endswith('@tintinweb/pi-tasks') or p.endswith('@sages/pi-tasks'))]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open(f, 'w'), indent=2)
+        print('  Removed pi-tasks entries from settings.json')
+except Exception as e:
+    print('  Warning:', e, file=sys.stderr)
+" 2>/dev/null || true
+
+  # 2) Remove the package directory if it exists.
+  if [[ -d "$PI_TASKS_DEST_DIR" ]]; then
+    rm -rf "$PI_TASKS_DEST_DIR"
+    echo "  Removed $PI_TASKS_DEST_DIR"
+  fi
+
+  # 3) Remove pi-tasks task files (~/.pi/tasks/) — best-effort, only
+  #    if the dir is empty after removal. We don't want to nuke a
+  #    user's existing task list silently.
+  local tasks_dir="$HOME/.pi/tasks"
+  if [[ -d "$tasks_dir" ]] && [[ -z "$(ls -A "$tasks_dir" 2>/dev/null)" ]]; then
+    rmdir "$tasks_dir" 2>/dev/null || true
+  fi
+
+  echo "  pi-tasks uninstalled"
+}
+
+# ──────────────────────────────────────────────────────────────────
 # npm-peer extensions — no version pin (latest from npm registry)
 #
 # Both `npm:` extension sources below are unpinned on purpose. Each
@@ -1497,7 +1677,7 @@ except Exception as e:
 # Mode 1: full install (default)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
+  echo "==> Installing pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + 4-agent subagent pipeline..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -1551,6 +1731,11 @@ install() {
   # after we dropped the npm:pi-codebase-memory (R-Dson) variant in favor of the local peer only.
   install_pi_codebase_memory || exit 1
   write_codebase_memory_mcp_config
+
+  # Install pi-tasks sage peer (workflow engine for workflow_run).
+  # GC-2026-install-pi-tasks: must land BEFORE install_orchestrator_files so
+  # the orchestrator's `file:../pi-tasks` dep can resolve during bun install.
+  install_pi_tasks || exit 1
 
   # Install codebase-memory-mcp binary (~50MB download from GitHub releases)
   install_codebase_memory_mcp_binary || {
@@ -1621,7 +1806,7 @@ install() {
 # Mode 2: update orchestrator only (skip pi-codebase-memory and SYSTEM.md)
 # ────────────────────────────────────────────────────────────
 install_orchestrator_only() {
-  echo "==> Installing orchestrator only (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, skip SYSTEM.md)..."
+  echo "==> Installing orchestrator only (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, pi-tasks, subagent templates, skip SYSTEM.md)..."
 
   # Pre-flight: pi is still required (orchestrator is a pi extension)
   install_pi_if_needed
@@ -1659,10 +1844,10 @@ install_orchestrator_only() {
 # Mode 3: update SYSTEM.md only (skip orchestrator and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 install_system_only() {
-  echo "==> Installing SYSTEM.md only (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)..."
+  echo "==> Installing SYSTEM.md only (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, pi-tasks, subagent templates)..."
   # No git / pi needed — SYSTEM.md is standalone markdown
   install_system_prompt
-  echo "  (skipped: orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)"
+  echo "  (skipped: orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, pi-tasks, subagent templates)"
 
   echo ""
   echo "Done! Restart pi: exit && pi"
@@ -1672,7 +1857,7 @@ install_system_only() {
 # Uninstall (removes both orchestrator and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + 4-agent subagent pipeline..."
+  echo "==> Uninstalling pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + 4-agent subagent pipeline..."
 
   # Remove orchestrator
   if [[ -d "$PKG_DIR" ]]; then
@@ -1703,6 +1888,9 @@ uninstall() {
 
   # Uninstall pi-evaluator (reward-mode extension)
   uninstall_pi_evaluator
+
+  # Uninstall pi-tasks (workflow engine) — GC-2026-install-pi-tasks
+  uninstall_pi_tasks
 
   # Uninstall agent-tool-description.md override + subagents.json setting.
   uninstall_agent_tool_description

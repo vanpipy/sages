@@ -12,6 +12,7 @@
     "verify:soft-mode-mental-model": "bun run scripts/verify-soft-mode-mental-model.ts",
     "verify:gcdb": "bun run scripts/verify-gcdb.ts",
     "verify:pi-universe": "bun run scripts/verify-pi-universe.ts",
+    "verify:all": "bun run scripts/verify-all.ts",
     "gen:catalog": "bun run scripts/gen-catalog.ts"
   },
   "keywords": [
@@ -42,6 +43,7 @@
   },
   "dependencies": {
     "@sages/pi-subagents": "file:../pi-subagents",
+    "@sages/pi-tasks": "file:../pi-tasks",
     "js-yaml": "^5.2.0"
   },
   "devDependencies": {
