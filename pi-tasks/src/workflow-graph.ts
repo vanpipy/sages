@@ -196,10 +196,14 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
     metadata: { ...meta, phase: "implement", agentType: "Developer" },
   };
 
+  // Collect the IDs of every non-Merge task so Merge can wait for all of them.
+  // Implement contributes itself; each Review_i / Fix_i contributes its placeholder.
+  const mergeBlockedBy: string[] = [PLACEHOLDER_IMPLEMENT];
   const tasks: TaskSpec[] = [implement];
 
   for (let i = 1; i <= max_fix_iterations; i++) {
     const isLastReview = i === max_fix_iterations;
+    const reviewId = placeholderReview(i);
     const reviewBlockedBy = i === 1 ? [PLACEHOLDER_IMPLEMENT] : [placeholderFix(i - 1)];
     const reviewBlocks = isLastReview
       ? [PLACEHOLDER_MERGE]
@@ -214,17 +218,20 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
       metadata: { ...meta, phase: "review", iteration: i, agentType: "Reviewer" },
     };
     tasks.push(review);
+    mergeBlockedBy.push(reviewId);
 
     if (!isLastReview) {
+      const fixId = placeholderFix(i);
       const fix: TaskSpec = {
         subject: `Fix ${i}: ${goal.title}`,
         description: fixDescription(goal, i, worktreePath, branch),
         agentType: "Developer",
-        blockedBy: [placeholderReview(i)],
+        blockedBy: [reviewId],
         blocks: [placeholderReview(i + 1), PLACEHOLDER_MERGE],
         metadata: { ...meta, phase: "fix", iteration: i, agentType: "Developer" },
       };
       tasks.push(fix);
+      mergeBlockedBy.push(fixId);
     }
   }
 
@@ -232,20 +239,11 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
     subject: `Merge: ${goal.title}`,
     description: mergeDescription(goal, branch, worktreePath),
     agentType: "Merger",
-    blockedBy: [PLACEHOLDER_IMPLEMENT, ...tasks.slice(1).map(t => `__${t.metadata.phase}_${t.metadata.iteration ?? 1}__`)],
+    blockedBy: mergeBlockedBy,
     blocks: [],
     metadata: { ...meta, phase: "merge", agentType: "Merger" },
   };
   tasks.push(merge);
-
-  // Reconstruct the merge blockedBy from the actually-created tasks so the
-  // helper stays declarative — slice(1) skips Implement.
-  const mergeBlockedBy = [PLACEHOLDER_IMPLEMENT];
-  for (const t of tasks.slice(1, -1)) {
-    if (t.metadata.phase === "review") mergeBlockedBy.push(placeholderReview(t.metadata.iteration as number));
-    if (t.metadata.phase === "fix") mergeBlockedBy.push(placeholderFix(t.metadata.iteration as number));
-  }
-  merge.blockedBy = mergeBlockedBy;
 
   return tasks;
 }
