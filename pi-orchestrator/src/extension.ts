@@ -40,11 +40,12 @@ import {
 
 /**
  * Tools always exposed to the main agent when the orchestrator
- * extension is loaded. After GC-2026-orchestrator-simplify this is
- * just one entry: `goal_contract_create`. The workflow itself is
- * driven by pi-tasks (TaskCreate / TaskExecute / etc.) which are
- * registered by `@sages/pi-tasks` and exposed via the active
- * toolset. GC-2 will add `workflow_run` here.
+ * extension is loaded. After GC-2026-workflow-run this is two entries:
+ * `goal_contract_create` (intent → goal.yaml) and `workflow_run`
+ * (one-shot 5-phase pipeline runner). The workflow inside
+ * `workflow_run` uses pi-tasks (TaskCreate / TaskExecute / etc.)
+ * for live progress visibility — the pi-tasks tools are registered
+ * by `@sages/pi-tasks` and exposed via the active toolset.
  */
 export const ORCHESTRATOR_TOOLS: readonly string[] = [
 	"goal_contract_create",
