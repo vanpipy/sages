@@ -133,6 +133,24 @@ afterEach(() => {
 
 const runCtx = { pi: {} as never, ctx: {} as never, repoCwd: TMP_ROOT };
 
+// GC-2026-pi-tasks-integration: a fake executeTool that captures calls.
+function makeFakeExecuteTool() {
+	const calls: { name: string; args: unknown }[] = [];
+	const idCounter = { n: 1 };
+	return {
+		executeTool: async (name: string, args: unknown) => {
+			calls.push({ name, args });
+			if (name === "TaskCreate") {
+				const id = String(idCounter.n++);
+				return { id, task: { id } };
+			}
+			if (name === "TaskUpdate") return { id: "x" };
+			return undefined;
+		},
+		_calls: () => calls,
+	};
+}
+
 // ───────────────────────────────────────────────────────────────────────
 // Verdict parsing
 // ───────────────────────────────────────────────────────────────────────
@@ -188,13 +206,52 @@ describe("executeWorkflowRun", () => {
 			{ type: "Reviewer", message: `Review complete. \`\`\`yaml\nverdict: CLEAN\nfindings: []\nscope_check: pass\nanti_goal_check: pass\n\`\`\``, status: "completed" },
 			{ type: "Merger", message: `Merged. \`\`\`yaml\nmerge_commit: deadbeef1234\n\`\`\``, status: "completed" },
 		]);
+		const fake = makeFakeExecuteTool();
+		const ctxWithFake = { ...runCtx, executeTool: fake.executeTool };
 
-		const result = await executeWorkflowRun({ goal_path: goalYamlRel }, runCtx);
+		const result = await executeWorkflowRun({ goal_path: goalYamlRel }, ctxWithFake);
 		expect(result.status).toBe("success");
 		expect(result.tasks.implement.status).toBe("completed");
 		expect(result.tasks.review.verdict).toBe("CLEAN");
 		expect((result.tasks.merge as { merge_commit?: string } | undefined)?.merge_commit).toBe("deadbeef1234");
 		expect(result.paths.merge_commit).toBe("deadbeef1234");
+
+		// GC-2026-pi-tasks-integration: 4 tasks were created + several updates.
+		const calls = fake._calls();
+		const creates = calls.filter((c) => c.name === "TaskCreate");
+		expect(creates.length).toBe(4);
+		const updates = calls.filter((c) => c.name === "TaskUpdate");
+		expect(updates.length).toBeGreaterThan(0);
+		// Each create carries metadata.workflow_run_goal_id.
+		for (const c of creates) {
+			const args = c.args as { metadata?: { workflow_run_goal_id?: string } };
+			expect(args.metadata?.workflow_run_goal_id).toBe("GC-test");
+		}
+		// result.pi_tasks carries the 4 IDs (1..4 from fake).
+		expect(result.pi_tasks.implement).toBeTruthy();
+		expect(result.pi_tasks.review).toBeTruthy();
+		expect(result.pi_tasks.fix).toBeTruthy();
+		expect(result.pi_tasks.merge).toBeTruthy();
+	});
+
+	it("works without executeTool (pi-tasks integration unavailable)", async () => {
+		registry._script([
+			{ type: "Developer", message: "Implementation done.", status: "completed" },
+			{
+				type: "Reviewer",
+				message:
+					"```yaml\nverdict: CLEAN\nfindings: []\nscope_check: pass\nanti_goal_check: pass\n```",
+				status: "completed",
+			},
+			{ type: "Merger", message: "```yaml\nmerge_commit: nope```", status: "completed" },
+		]);
+
+		const result = await executeWorkflowRun({ goal_path: goalYamlRel }, runCtx);
+		expect(result.status).toBe("success");
+		expect(result.pi_tasks.implement).toBe("");
+		expect(result.pi_tasks.review).toBe("");
+		expect(result.pi_tasks.fix).toBe("");
+		expect(result.pi_tasks.merge).toBe("");
 	});
 
 	it("fix loop: review NEEDS_WORK → fix → re-review CLEAN → merge", async () => {
