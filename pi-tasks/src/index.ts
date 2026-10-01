@@ -45,8 +45,12 @@ function debug(...args: unknown[]) {
 
 // ---- Helpers ----
 
-function textResult(msg: string) {
-  return { content: [{ type: "text" as const, text: msg }], details: undefined as any };
+function textResult<T = unknown>(msg: string, details?: T) {
+  // `details` flows back through the AgentToolCallOutcome envelope
+  // (`ctx.executeTool(...).result.details`). Programmatic callers
+  // (e.g. pi-orchestrator/workflow_run's piTasksCreate) read it
+  // to recover structured task IDs without parsing the text body.
+  return { content: [{ type: "text" as const, text: msg }], details: details as any };
 }
 
 /** Task tool names — used to detect task tool usage for reminder suppression. */
@@ -688,7 +692,12 @@ All tasks are created with status \`pending\`.
       if (params.agentType) meta.agentType = params.agentType;
       const task = store.create(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined);
       widget.update();
-      return Promise.resolve(textResult(`Task #${task.id} created successfully: ${task.subject}`));
+      return Promise.resolve(
+        textResult(
+          `Task #${task.id} created successfully: ${task.subject}`,
+          { id: task.id, task },
+        ),
+      );
     },
   });
 

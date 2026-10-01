@@ -134,6 +134,11 @@ afterEach(() => {
 const runCtx = { pi: {} as never, ctx: {} as never, repoCwd: TMP_ROOT };
 
 // GC-2026-pi-tasks-integration: a fake executeTool that captures calls.
+// The executeTool field here stands in for what the wrapper in
+// workflow-run-tool.ts hands to piTasksCreate / piTasksUpdate (the
+// unwrapped payload), NOT the raw AgentToolCallOutcome envelope. The
+// extraction logic has its own unit test (see executeTool-wrapper-
+// extract below).
 function makeFakeExecuteTool() {
 	const calls: { name: string; args: unknown }[] = [];
 	const idCounter = { n: 1 };

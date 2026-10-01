@@ -14,6 +14,21 @@
 import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { executeWorkflowRun, WorkflowRunParams, type WorkflowRunInput } from "./workflow-run.js";
 
+/**
+ * Unwrap an `AgentToolCallOutcome` (`{ toolCall, result, isError }`) into the
+ * payload a programmatic caller can read directly. Programmatic callers in
+ * workflow_run (piTasksCreate / piTasksUpdate) need the structured `details`,
+ * not the AgentToolCallOutcome envelope, so the LLM-facing tool extracts
+ * `result.details` here. Falls back to the whole outcome when the envelope
+ * shape is unexpected (defensive — the real pi runtime always provides it).
+ *
+ * Exported so the extraction logic has a unit-testable surface.
+ */
+export function unwrapExecuteToolOutcome(outcome: unknown): unknown {
+	const result = (outcome as { result?: { details?: unknown } } | undefined)?.result;
+	return result?.details ?? outcome;
+}
+
 export function registerWorkflowRunTool(pi: ExtensionAPI): void {
 	// Same `pi: any` workaround as goal_contract_create: pi-coding-agent's
 	// ToolDefinition uses AgentToolResult<unknown> internally which is
@@ -55,15 +70,8 @@ export function registerWorkflowRunTool(pi: ExtensionAPI): void {
 				pi,
 				ctx,
 				repoCwd: ctx.cwd,
-				executeTool: async (
-					name: string,
-					args: unknown,
-				): Promise<unknown> => {
-					const outcome = await ctx.executeTool(name, args);
-					// AgentToolCallOutcome — extract details if present.
-					const anyOutcome = outcome as { details?: unknown; content?: unknown };
-					return anyOutcome.details ?? anyOutcome.content ?? outcome;
-				},
+				executeTool: async (name, args) =>
+					unwrapExecuteToolOutcome(await ctx.executeTool(name, args)),
 			});
 			return {
 				content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

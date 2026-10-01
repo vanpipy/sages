@@ -76,6 +76,7 @@ interface ScriptedAgent {
 function installMockRegistry(script: ScriptedAgent[]) {
 	const agents = new Map<string, AgentRecord>();
 	const pendingScript = [...script];
+	const spawnOptions: Record<string, unknown>[] = [];
 
 	const registry = {
 		spawn(
@@ -83,7 +84,7 @@ function installMockRegistry(script: ScriptedAgent[]) {
 			_ctx: unknown,
 			type: string,
 			_prompt: string,
-			_options: Record<string, unknown>,
+			options: Record<string, unknown>,
 		): string {
 			const id = `agent-${agents.size + 1}`;
 			const next = pendingScript.shift() ?? {
@@ -91,10 +92,11 @@ function installMockRegistry(script: ScriptedAgent[]) {
 				message: "ok",
 				status: "completed" as const,
 			};
+			spawnOptions.push(options);
 			const record: AgentRecord = {
 				id,
 				type: type as AgentRecord["type"],
-				description: `mock ${type}`,
+				description: (options.description as string | undefined) ?? `mock ${type}`,
 				status: next.status,
 				result: next.message,
 				error: next.status === "failed" ? next.message : undefined,
@@ -111,7 +113,7 @@ function installMockRegistry(script: ScriptedAgent[]) {
 		waitForAll: async (): Promise<void> => {},
 	};
 	(globalThis as unknown as Record<symbol, unknown>)[Symbol.for("pi-subagents:manager")] = registry;
-	return { registry, agents };
+	return { registry, agents, spawnOptions };
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -137,6 +139,11 @@ function makeGoalYaml(id: string): string {
 
 function makeFakeExecuteTool(calls: { name: string; args: unknown }[]) {
 	let nextId = 1;
+	// The executeTool field here stands in for what the wrapper in
+	// workflow-run-tool.ts hands to piTasksCreate / piTasksUpdate —
+	// i.e. the unwrapped payload (result.details), NOT the raw
+	// AgentToolCallOutcome envelope. That extraction logic has its
+	// own unit test (see executeTool-wrapper-extract below).
 	return {
 		executeTool: async (name: string, args: unknown) => {
 			calls.push({ name, args });
@@ -145,7 +152,8 @@ function makeFakeExecuteTool(calls: { name: string; args: unknown }[]) {
 				return { id, task: { id } };
 			}
 			if (name === "TaskUpdate") {
-				return { id: "x" };
+				const id = (args as { id?: string })?.id ?? "x";
+				return { id };
 			}
 			return undefined;
 		},
@@ -219,6 +227,45 @@ describe("workflow_run end-to-end (mocked subagents)", () => {
 		// 4. Subagents were spawned in the right order
 		const spawnOrder = Array.from(agents.values()).map((a) => a.type);
 		expect(spawnOrder).toEqual(["Developer", "Reviewer", "Merger"]);
+	});
+
+	it("forwards a phase-specific description to every spawn call (fixes 'Developer undefined' UI)", async () => {
+		const goalId = "GC-e2e-desc";
+		const goalPath = `.pi/orchestrator/goal-${goalId}.yaml`;
+		writeFileSync(join(TMP_ROOT, goalPath), makeGoalYaml(goalId));
+
+		const { agents, spawnOptions } = installMockRegistry([
+			{
+				type: "Developer",
+				message: '```yaml\nstatus: completed\ncommits: ["a"]\n```',
+				status: "completed",
+			},
+			{
+				type: "Reviewer",
+				message: "```yaml\nverdict: CLEAN\nfindings: []\nscope_check: pass\nanti_goal_check: pass\n```",
+				status: "completed",
+			},
+			{ type: "Merger", message: "```yaml\nmerge_commit: deadbeef```", status: "completed" },
+		]);
+		const ctx = { ...runCtxBase, executeTool: makeFakeExecuteTool([]).executeTool };
+
+		await executeWorkflowRun({ goal_path: goalPath }, ctx);
+
+		// Every spawned agent must carry a description — never undefined.
+		// Before the fix spawnAndWait didn't forward description, so the
+		// widget rendered "Developer undefined" (regression coverage for
+		// GC-2026-pi-tasks-extraction-fix).
+		expect(spawnOptions.length).toBe(3);
+		for (const opts of spawnOptions) {
+			expect(typeof opts.description).toBe("string");
+			expect((opts.description as string).length).toBeGreaterThan(0);
+		}
+		// And the descriptions must surface on the AgentRecords the
+		// widget actually reads (not just the spawn options dict).
+		const descriptions = Array.from(agents.values()).map((a) => a.description);
+		expect(descriptions).toContain(`Implement: Test goal ${goalId}`);
+		expect(descriptions).toContain(`Review 1: Test goal ${goalId}`);
+		expect(descriptions).toContain(`Merge: Test goal ${goalId}`);
 	});
 
 	it("fix loop: NEEDS_WORK → Fix → re-review CLEAN → Merge → success with iterations_used=1", async () => {
