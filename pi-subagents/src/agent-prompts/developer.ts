@@ -137,6 +137,44 @@ The orchestrator sends a one-shot nudge when \`turnCount >= maxTurns\` telling y
 Do **NOT** start new work, add new tests, or do additional refactors after the steer fires. The remaining turns are for closing the loop, not opening it. Refusing new scope is the discipline — finishing the core commit is the win.
 `;
 
+// GC-2026-path-B-swap: Fix phase behavior — read blockedBy Review task's verdict.
+// Wired into DEVELOPER_PROMPT between Boundary Discipline and Final Verdict
+// because Fix agents only exist in path B's static task graph (Implement /
+// Review / Fix / Merge), and the cascade spawns a Fix task whenever a Review
+// reports NEEDS_WORK. The orchestrator depends on this section being present
+// to handle the CLEAN → empty-commit vs NEEDS_WORK → address-findings branch.
+const FIX_PHASE_BEHAVIOR_SECTION = `
+## Fix Phase Behavior (path B cascade)
+
+When the task you're executing is a Fix task (its subject matches "Fix \\d+: …"), it was spawned by the cascade because the previous Review reported **NEEDS_WORK**. Path B pre-creates a Fix task for every iteration of the review loop, so a Fix task may also be spawned when the prior Review was **CLEAN** — in that case there is nothing to fix and you must emit an empty commit to unblock the next phase.
+
+### First action: read the blockedBy Review task's verdict
+
+Use TaskGet on each id in your \`blockedBy\` list. Read \`task.metadata.verdict\`. If the verdict is missing (the Review task didn't store it for any reason), treat it as NEEDS_WORK with empty findings.
+
+### Branch on the verdict
+
+- **verdict.verdict === "CLEAN"** (no findings, or empty findings):
+  1. \`git commit --allow-empty -m "fix: review clean, no changes (iter N)"\`
+  2. Skip directly to writing the Final Verdict YAML block — no code edits.
+
+- **verdict.verdict === "NEEDS_WORK"**:
+  1. Read \`task.metadata.verdict.findings[]\` — each entry has \`severity\`, \`issue\`, optional \`location\`, optional \`recommendation\`.
+  2. Address each finding in order. \`severity: critical\` first, then \`major\`, then \`minor\`.
+  3. For each fix: write the minimum code change that addresses the finding, run typecheck + test, commit (\`fix(<scope>): <one-line description>\`).
+  4. If a finding is genuinely infeasible (e.g. asks for a refactor that contradicts the goal contract's \`anti_goals\`), commit \`docs: <finding id> deferred — see anti_goals\` so the next Review can decide.
+
+### What you should NOT do
+
+- Do NOT spawn another Developer agent or recursive \`Agent\` call — the orchestrator already handles the cascade.
+- Do NOT modify \`.pi/orchestrator/goal-{id}.yaml\` or \`.pi/orchestrator/workflow-{id}.yaml\` — those are orchestrator-owned.
+- Do NOT skip the empty-commit path when verdict is CLEAN — without a commit, the cascade stalls because Merge waits for ALL tasks to complete.
+
+### Commit discipline for Fix
+
+Land the commit BEFORE the Final Verdict YAML block, per the Boundary Discipline section. A Fix task that exhausts turns after addressing findings but before committing loses the work — committing the partial fix (\`wip: <finding> partial\`) is better than a clean final message with no commit on the branch.
+`;
+
 // GC-2026-037 T2: Final Verdict YAML schema.
 // Wired into DEVELOPER_PROMPT — extractStructuredOutput in agent-runner.ts
 // parses the YAML block, and the audit gate fires missing_yaml_block when
@@ -599,6 +637,8 @@ ${COMMIT_DISCIPLINE_SECTION}
 ${CHECKPOINT_PROTOCOL_SECTION}
 
 ${BOUNDARY_DISCIPLINE_SECTION}
+
+${FIX_PHASE_BEHAVIOR_SECTION}
 
 ${FINAL_VERDICT_ADDENDUM}
 `;
