@@ -22,10 +22,10 @@
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { subscribeWorkflow } from "../src/workflow-handler.js";
 import { TaskStore } from "../src/task-store.js";
 import type { Task } from "../src/types.js";
 import type { WorkflowStartPayload } from "../src/workflow-handler.js";
+import { subscribeWorkflow } from "../src/workflow-handler.js";
 
 // ── Fake event bus ─────────────────────────────────────────────────────
 
@@ -49,22 +49,23 @@ function fakeEvents() {
     },
     /** Snapshot how many times each channel was emitted on. */
     snapshot() {
-      const result: Record<string, unknown[]> = {};
+      const captured: Record<string, unknown[]> = {};
       for (const [channel, set] of handlers) {
         if (channel.startsWith("workflow:") || channel.startsWith("subagents:")) {
-          result[channel] = [];
+          captured[channel] = [];
         }
       }
       return {
         emit: (channel: string, data: unknown) => {
-          (result[channel] ??= []).push(data);
+          if (!captured[channel]) captured[channel] = [];
+          captured[channel].push(data);
           // Also fire on real handlers
           return Array.from(handlers.get(channel) ?? []).reduce(
             (p, h) => p.then(() => h(data)),
             Promise.resolve(),
           );
         },
-        captured: result,
+        captured,
       };
     },
   };
