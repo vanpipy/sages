@@ -121,8 +121,13 @@ function makeHarness(): Harness {
 		},
 	};
 
-	const run = async (input: WorkflowRunInput) => {
-		const result = await executeWorkflowRun(input, {
+	// NB: run() returns the Promise WITHOUT awaiting — the test fires events
+	// into the registered handlers to drive the workflow, then awaits the
+	// Promise to read the result. This mirrors production: the LLM's tool
+	// call awaits workflow_run while pi-tasks's cascade fires events from
+	// background agents.
+	const run = (input: WorkflowRunInput) => {
+		const result = executeWorkflowRun(input, {
 			pi: pi as unknown as Parameters<typeof executeWorkflowRun>[1]["pi"],
 			ctx: {} as Parameters<typeof executeWorkflowRun>[1]["ctx"],
 			repoCwd,
@@ -191,26 +196,27 @@ describe("executeWorkflowRun (path B slim)", () => {
 		expect(text).toContain("iterations_used: 0");
 	});
 
-	it("returns WorkflowRunOutput after all 4 phase categories complete", async () => {
-		const { result, emitted, handlers } = await harness.run({
+	it("returns WorkflowRunOutput after all phase categories complete", async () => {
+		const { result, emitted, handlers } = harness.run({
 			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
-			options: { max_fix_iterations: 3 },
+			options: { max_fix_iterations: 1 },
 		});
 
-		// Slim workflow_run returns immediately after emitting workflow:start;
-		// it then awaits phase-complete events. Drive completion by firing
-		// 4 phase-complete events: 3 reviews + 1 merge-pass-through marker.
-		// Implement/Fix phases do NOT emit phase-complete (only review does
-		// per the workflow-handler contract), so we model 3 reviews and one
-		// synthetic "all-implement-fix-merge done" marker to release workflow_run.
 		const phaseComplete = handlers.get("workflow:phase-complete");
 		expect(phaseComplete).toBeTruthy();
 
-		// Review 1: CLEAN (no fix loop).
+		const startPayload = emitted.find(e => e.channel === "workflow:start")!
+			.data as WorkflowStartPayload;
+
 		await phaseComplete!({
-			workflow_id: emitted.find(e => e.channel === "workflow:start")!.data
-				? (emitted.find(e => e.channel === "workflow:start")!.data as WorkflowStartPayload).workflow_id
-				: "wf-test",
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
+			phase: "implement",
+			status: "completed",
+			task_id: "t-implement",
+		});
+		await phaseComplete!({
+			workflow_id: startPayload.workflow_id,
 			goal_id: GOAL_ID,
 			phase: "review",
 			iteration: 1,
@@ -219,16 +225,24 @@ describe("executeWorkflowRun (path B slim)", () => {
 			findings_count: 0,
 			task_id: "t-review-1",
 		});
+		await phaseComplete!({
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
+			phase: "merge",
+			status: "completed",
+			task_id: "t-merge",
+		});
 
-		expect(result.status).toBe("success");
-		expect(result.goal_id).toBe(GOAL_ID);
-		expect(result.tasks.implement.id).toBeTruthy();
-		expect(result.tasks.review.verdict).toBe("CLEAN");
-		expect(result.tasks.merge).toBeTruthy();
+		const output = await result;
+		expect(output.status).toBe("success");
+		expect(output.goal_id).toBe(GOAL_ID);
+		expect(output.tasks.implement.id).toBeTruthy();
+		expect(output.tasks.review.verdict).toBe("CLEAN");
+		expect(output.tasks.merge).toBeTruthy();
 	});
 
 	it("returns status: blocked after max_fix_iterations NEEDS_WORK", async () => {
-		const { result, emitted, handlers } = await harness.run({
+		const { result, emitted, handlers } = harness.run({
 			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
 			options: { max_fix_iterations: 2 },
 		});
@@ -238,7 +252,13 @@ describe("executeWorkflowRun (path B slim)", () => {
 		const startPayload = emitted.find(e => e.channel === "workflow:start")!
 			.data as WorkflowStartPayload;
 
-		// 2 reviews both NEEDS_WORK — exhausts the budget of 2.
+		await phaseComplete!({
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
+			phase: "implement",
+			status: "completed",
+			task_id: "t-implement",
+		});
 		await phaseComplete!({
 			workflow_id: startPayload.workflow_id,
 			goal_id: GOAL_ID,
@@ -252,6 +272,14 @@ describe("executeWorkflowRun (path B slim)", () => {
 		await phaseComplete!({
 			workflow_id: startPayload.workflow_id,
 			goal_id: GOAL_ID,
+			phase: "fix",
+			iteration: 1,
+			status: "completed",
+			task_id: "t-fix-1",
+		});
+		await phaseComplete!({
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
 			phase: "review",
 			iteration: 2,
 			status: "completed",
@@ -260,25 +288,30 @@ describe("executeWorkflowRun (path B slim)", () => {
 			task_id: "t-review-2",
 		});
 
-		expect(result.status).toBe("blocked");
-		expect(result.blocked_at).toBe("review");
-		expect(result.iterations_used).toBe(2);
+		const output = await result;
+		expect(output.status).toBe("blocked");
+		expect(output.blocked_at).toBe("review");
+		expect(output.iterations_used).toBe(2);
 	});
 
 	it("subscribes to workflow:phase-complete (and unsubscribes on completion)", async () => {
-		const { emitted, handlers } = await harness.run({
+		const { result, emitted, handlers } = harness.run({
 			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
 			options: { max_fix_iterations: 1 },
 		});
 
-		// Verify a single subscription was opened.
 		expect(handlers.has("workflow:phase-complete")).toBe(true);
 		const phaseComplete = handlers.get("workflow:phase-complete")!;
-		expect(typeof phaseComplete).toBe("function");
 
-		// Drive success to completion so the workflow_run returns.
 		const startPayload = emitted.find(e => e.channel === "workflow:start")!
 			.data as WorkflowStartPayload;
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
+			phase: "implement",
+			status: "completed",
+			task_id: "t-implement",
+		});
 		await phaseComplete({
 			workflow_id: startPayload.workflow_id,
 			goal_id: GOAL_ID,
@@ -289,7 +322,15 @@ describe("executeWorkflowRun (path B slim)", () => {
 			findings_count: 0,
 			task_id: "t-review-1",
 		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
+			phase: "merge",
+			status: "completed",
+			task_id: "t-merge",
+		});
 
+		await result;
 		// After resolution the workflow_run should have called the unsub fn.
 		expect(handlers.has("workflow:phase-complete")).toBe(false);
 	});
