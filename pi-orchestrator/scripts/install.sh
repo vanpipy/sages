@@ -27,13 +27,22 @@
 #   npm-installed extensions (--prefix ~/.pi/agent/npm), latest
 #   from the npm registry — no version pin (see header below):
 #     pi-mcp-adapter                  → npm:pi-mcp-adapter
-#   Manual-only carve-out (intentionally NOT auto-installed):
-#     AFT (npm:@cortexkit/aft-pi) — binary provisioning is owned by the
-#     AFT team; users run
-#         npx @cortexkit/aft@latest setup --harness pi
-#     manually. pi-orchestrator/templates/aft.jsonc ships as a reference
-#     template the user can copy to ~/.config/cortexkit/aft.jsonc
-#     after installation.
+#     @cortexkit/aft-pi               → npm:@cortexkit/aft-pi
+#
+#   AFT (@cortexkit/aft-pi) — full install path baked into install.sh as
+#   of GC-2026-096. Three pieces, each soft-fail:
+#     1. AFT config (~/.config/cortexkit/aft.jsonc) — copied from
+#        pi-orchestrator/templates/aft.jsonc with SAGES_TEMPLATE_V1
+#        sentinel so uninstall can distinguish "ours" from user-customized.
+#     2. AFT plugin (@cortexkit/aft-pi npm peer) — installed to the same
+#        prefix as pi-mcp-adapter and registered in settings.json.
+#     3. AFT binary (~/.local/bin/aft) — downloaded from cortexkit/aft
+#        GitHub release matching the npm peer's pinned version. Verify
+#        via checksums.sha256. Mirrors install_codebase_memory_mcp_binary.
+#
+#   pi-orchestrator/scripts/install.ps1 and install.bat are NOT updated
+#   by this GC (Windows out of scope). TODO: implement Windows AFT
+#   install when those scripts get the same treatment.
 #
 # Selective install options:
 #   --orchestrator-only only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
@@ -50,15 +59,18 @@ PKG_NAME="pi-orchestrator"
 PKG_DIR="$PI_DIR/packages/$PKG_NAME"
 AGENT_DIR="$PI_DIR/agent"
 
-# Resolve this script's directory (works whether invoked by absolute path, symlink, or relative)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# Resolve this script's directory (works whether invoked by absolute path, symlink, or relative).
+# GC-2026-096: respect exported SCRIPT_DIR / LOCAL_REPO_ROOT so callers can
+# source install.sh in tests / sandboxed environments without these getting
+# overwritten. Falls back to BASH_SOURCE derivation when not set.
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)}"
 
 # Local sages repo root — parent directory of pi-orchestrator/.
 # install.sh no longer clones; it sources all four peer packages from
 # this directory. The sanity check below fails loud if install.sh
 # was misplaced (e.g., copied to /tmp without the surrounding repo
 # tree) so the install never silently skips a missing peer.
-LOCAL_REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LOCAL_REPO_ROOT="${LOCAL_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 if [[ ! -d "$LOCAL_REPO_ROOT/pi-orchestrator" \
    || ! -d "$LOCAL_REPO_ROOT/pi-codebase-memory" \
    || ! -d "$LOCAL_REPO_ROOT/pi-subagents" \
@@ -129,9 +141,7 @@ PI_SUBAGENTS_PKG="$PI_SUBAGENTS_DEST_DIR"
 # absorbs the conductor's session_start / before_agent_start /
 # tool_call hooks. There is no separate "sages" or "conductor"
 # install target.
-PI_ORCHESTRATOR_SRC_REL="pi-orchestrator"
 PI_ORCHESTRATOR_DEST_DIR="$PI_DIR/packages/pi-orchestrator"
-PI_ORCHESTRATOR_PKG="$PI_ORCHESTRATOR_DEST_DIR"
 
 # pi-evaluator package info (sage peer, deployed by file-copy)
 # pi-evaluator is the reward-mode extension (eval_score + eval_trend tools).
@@ -158,6 +168,34 @@ PI_EVALUATOR_PKG="$PI_EVALUATOR_DEST_DIR"
 PI_TASKS_SRC_REL="pi-tasks"
 PI_TASKS_DEST_DIR="$PI_DIR/packages/pi-tasks"
 PI_TASKS_PKG="$PI_TASKS_DEST_DIR"
+
+# AFT (@cortexkit/aft-pi) install info — GC-2026-096.
+#
+# Full install path baked into install.sh. Three pieces:
+#   - AFT_TEMPLATE  -> AFT_CONFIG   (config file)
+#   - npm:@cortexkit/aft-pi          (plugin)
+#   - AFT_BINARY                     (rust daemon)
+#
+# AFT_TEMPLATE is the source of truth; AFT_CONFIG is the deployed
+# config at ~/.config/cortexkit/aft.jsonc. AFT_SENTINEL stamps the
+# template body so uninstall can distinguish "we installed this" from
+# "user has customized this" (the magic-context.jsonc precedent).
+#
+# Mirrors pi-mcp-adapter's pinning policy (no @version suffix — install
+# always pulls latest from the npm registry; --force to roll).
+AFT_TEMPLATE="$SCRIPT_DIR/../templates/aft.jsonc"
+AFT_CONFIG="$HOME/.config/cortexkit/aft.jsonc"
+AFT_SENTINEL="SAGES_TEMPLATE_V1"
+AFT_NPM_PKG="npm:@cortexkit/aft-pi"
+AFT_NPM_DIR="$PI_DIR/agent/npm/node_modules/@cortexkit/aft-pi"
+# Binary lives at ~/.local/bin/aft (mirrors codebase-memory-mcp at
+# ~/.local/bin/codebase-memory-mcp). On PATH so users can run
+# `aft --version` directly.
+AFT_BINARY="$HOME/.local/bin/aft"
+AFT_BINARY_DIR="$(dirname "$AFT_BINARY")"
+# GitHub release source. Same release as the npm peer's bundled binary
+# version, resolved at install time from $AFT_NPM_DIR/package.json.
+AFT_RELEASE_REPO="cortexkit/aft"
 
 # No temp dir to clean up — install.sh sources files from LOCAL_REPO_ROOT
 # (derived above), so the historical TMP_DIR + clone trap is obsolete.
@@ -1674,6 +1712,273 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
+# AFT (@cortexkit/aft-pi) — full install path baked in (GC-2026-096)
+#
+# Three pieces, mirroring existing precedents:
+#   - AFT config (~/.config/cortexkit/aft.jsonc) — mirrors magic-context
+#     cleanup_legacy_magic_context sentinel pattern
+#   - AFT npm peer (@cortexkit/aft-pi) — mirrors install_pi_mcp_adapter
+#   - AFT binary (~/.local/bin/aft) — mirrors install_codebase_memory_mcp_binary
+#
+# All three are soft-fail (warn-and-continue) so a flaky network never
+# breaks the install. The one hard fail is binary checksum mismatch
+# (don't install a tampered binary).
+#
+# Windows installers (install.ps1 / install.bat) intentionally NOT
+# updated by this GC — TODO when those scripts get the same treatment.
+# ────────────────────────────────────────────────────────────
+
+is_aft_config_installed() {
+  # Sentinel-based detection — same pattern as install_agent_tool_description.
+  # Returns true iff the deployed config file exists AND carries the
+  # SAGES_TEMPLATE_V1 sentinel we stamp into the template body. A
+  # user-customized file (sentinel removed) returns false so install is
+  # a no-op for it (AC-4 — never clobber user customization).
+  [[ -f "$AFT_CONFIG" ]] && grep -q "$AFT_SENTINEL" "$AFT_CONFIG" 2>/dev/null
+}
+
+install_aft_config() {
+  echo "==> Installing AFT config..."
+  if [[ ! -f "$AFT_TEMPLATE" ]]; then
+    echo "  Error: AFT config template not found at $AFT_TEMPLATE"
+    echo "  (Re-download the sages repo or restore templates/aft.jsonc)"
+    return 1
+  fi
+  if is_aft_config_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  AFT config already installed (use --force to reinstall)"
+    return 0
+  fi
+  # User-customized detection: file exists without sentinel → leave alone
+  # unless --force explicitly overrides. Mirrors the agent-tool-description
+  # behavior (install_agent_tool_description).
+  if [[ -f "$AFT_CONFIG" ]] && ! is_aft_config_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  AFT config is user-customized (no SAGES_TEMPLATE_V1 sentinel); leaving alone"
+    echo "  Use --force to overwrite"
+    return 0
+  fi
+  mkdir -p "$(dirname "$AFT_CONFIG")"
+  cp "$AFT_TEMPLATE" "$AFT_CONFIG"
+  echo "  Installed AFT config at $AFT_CONFIG"
+}
+
+uninstall_aft_config() {
+  # Mirror uninstall_agent_tool_description: only remove files we
+  # installed. User-customized configs (no sentinel) are preserved.
+  if [[ ! -f "$AFT_CONFIG" ]]; then
+    return 0
+  fi
+  if grep -q "$AFT_SENTINEL" "$AFT_CONFIG" 2>/dev/null; then
+    rm -f "$AFT_CONFIG"
+    echo "  Removed $AFT_CONFIG (was our template)"
+  else
+    echo "  $AFT_CONFIG is user-customized, leaving alone"
+  fi
+}
+
+is_aft_pi_npm_installed() {
+  # Auto-recovery invariant: require BOTH settings.json registration
+  # AND node_modules dir on disk (mirrors is_pi_mcp_adapter_installed).
+  # PKG_PATTERN matches three forms so a legacy version-less entry does
+  # not silently no-op the install:
+  #   1. npm:@cortexkit/aft-pi          (this GC's preferred form)
+  #   2. npm:@cortexkit/aft-pi@X.Y.Z    (future pinned form)
+  #   3. /path/to/aft-pi                (hypothetical local-fork path)
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+  python3 -c "
+import json, os, re, sys
+try:
+    d = json.load(open('$settings'))
+    PKG_PATTERN = re.compile(r'^(npm:@cortexkit/aft-pi(@.+)?|.*/aft-pi)\$')
+    registered = any(PKG_PATTERN.match(p) for p in d.get('packages', []))
+    if registered and os.path.isdir('$AFT_NPM_DIR'):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_aft_pi_npm() {
+  echo "==> Installing @cortexkit/aft-pi npm peer..."
+  if is_aft_pi_npm_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  @cortexkit/aft-pi already installed (use --force to reinstall)"
+    return 0
+  fi
+  if [[ "${FORCE:-false}" == true ]] && is_aft_pi_npm_installed; then
+    echo "  Force-reinstall: removing previous @cortexkit/aft-pi first"
+    uninstall_aft_pi_npm
+  fi
+  # Soft-fail when pi CLI is missing — mirrors install_pi_mcp_adapter.
+  # Without pi on PATH we have no way to know whether the user intends
+  # to use the npm-prefix install or a different path.
+  if ! command -v pi &>/dev/null; then
+    echo "  'pi' command not found; user must install manually"
+    return 0
+  fi
+  _clean_npm_prefix_dir "$PI_DIR/agent/npm"
+  local npm_spec="${AFT_NPM_PKG#npm:}"
+  if (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
+    npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$npm_spec" 2>&1 | tail -3); then
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json, re
+f, pkg = '$settings', '$AFT_NPM_PKG'
+PKG_PATTERN = re.compile(r'^(npm:@cortexkit/aft-pi(@.+)?|.*/aft-pi)\$')
+try: d = json.load(open(f))
+except: d = {'packages': []}
+pkgs = [p for p in d.get('packages', []) if not PKG_PATTERN.match(p)]
+if pkg not in pkgs:
+    pkgs.append(pkg)
+d['packages'] = pkgs
+json.dump(d, open(f, 'w'), indent=2)
+print('  Registered', pkg)
+"
+  else
+    echo "  Warning: npm install failed; AFT tools won't be available until manually installed"
+    echo "  To retry: npm install --prefix $PI_DIR/agent/npm --ignore-scripts $npm_spec"
+  fi
+}
+
+uninstall_aft_pi_npm() {
+  # Strip any form (legacy version-less, pinned @version, or /path/...
+  # local-fork) from settings.json. Mirrors uninstall_pi_mcp_adapter.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json, re, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    PKG_PATTERN = re.compile(r'^(npm:@cortexkit/aft-pi(@.+)?|.*/aft-pi)\$')
+    new_pkgs = [p for p in pkgs if not PKG_PATTERN.match(p)]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open(f, 'w'), indent=2)
+        print('  Removed @cortexkit/aft-pi from settings.json')
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null || true
+
+  if [[ -d "$AFT_NPM_DIR" ]]; then
+    rm -rf "$AFT_NPM_DIR"
+    echo "  Removed $AFT_NPM_DIR"
+  fi
+
+  echo "  @cortexkit/aft-pi uninstalled"
+}
+
+install_aft_binary() {
+  echo "==> Installing AFT binary..."
+
+  # Resolve expected version from the just-installed npm peer, falling
+  # back to "latest" when the peer isn't installed yet. Reading the
+  # version from package.json pins the binary to exactly what
+  # @cortexkit/aft-pi bundles — avoids the "binary from one release,
+  # plugin from another" version-skew trap.
+  local expected_version=""
+  if [[ -f "$AFT_NPM_DIR/package.json" ]]; then
+    expected_version=$(python3 -c "import json; print(json.load(open('$AFT_NPM_DIR/package.json')).get('version',''))" 2>/dev/null)
+  fi
+  [[ -z "$expected_version" ]] && expected_version="latest"
+
+  # Decision 1 (B2): version-pinned probe across the standard AFT
+  # search path. If ANY candidate runs `aft --version` and reports
+  # the expected version, skip the download even with --force —
+  # preserves the user's working install across repair runs.
+  # Mismatched version falls through to the curl download path.
+  for candidate in \
+    "$HOME/.cache/aft/bin/v$expected_version/aft" \
+    "$AFT_BINARY" \
+    "$HOME/.cargo/bin/aft"; do
+    if [[ -x "$candidate" ]]; then
+      local actual
+      actual=$("$candidate" --version 2>/dev/null) || continue
+      if [[ "$actual" == "aft $expected_version" ]]; then
+        echo "  AFT binary v$expected_version already installed at $candidate, skipping download"
+        return 0
+      fi
+    fi
+  done
+
+  if ! command -v curl &>/dev/null; then
+    echo "  Error: curl required to install AFT binary"
+    echo "  Install curl or run 'npx @cortexkit/aft setup --harness pi --yes' manually"
+    return 1
+  fi
+
+  local os arch asset url checksums_url
+  os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  case "$os" in linux|darwin) ;; *) echo "  Error: unsupported OS $os"; return 1 ;; esac
+  arch=$(uname -m)
+  case "$arch" in
+    x86_64|amd64) arch="x64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) echo "  Error: unsupported arch $arch"; return 1 ;;
+  esac
+  asset="aft-${os}-${arch}"
+  # /releases/latest/download/ is GitHub's redirect-to-latest-tag pattern.
+  # For a specific known version we hit /releases/download/vVERSION/ directly.
+  if [[ "$expected_version" == "latest" ]]; then
+    url="https://github.com/${AFT_RELEASE_REPO}/releases/latest/download/${asset}"
+    checksums_url="https://github.com/${AFT_RELEASE_REPO}/releases/latest/download/checksums.sha256"
+  else
+    url="https://github.com/${AFT_RELEASE_REPO}/releases/download/v${expected_version}/${asset}"
+    checksums_url="https://github.com/${AFT_RELEASE_REPO}/releases/download/v${expected_version}/checksums.sha256"
+  fi
+
+  echo "  Downloading ${asset} v${expected_version}..."
+  local tmpdir; tmpdir=$(mktemp -d)
+  # Defense-in-depth timeouts: --connect-timeout 10 caps the TCP/HANDSHAKE
+  # phase (fast fail on unreachable hosts); --max-time 120 caps the whole
+  # transfer (prevents hung downloads). Without these, a flaky network can
+  # hang the install indefinitely.
+  if ! curl -fSL --progress-bar --connect-timeout 10 --max-time 120 -o "$tmpdir/$asset" "$url"; then
+    echo "  Warning: AFT binary download failed (network/proxy)."
+    echo "  AFT CLI will lazy-download on first tool use."
+    echo "  To retry manually: npx @cortexkit/aft setup --harness pi --yes"
+    rm -rf "$tmpdir"
+    return 0   # soft-fail per design section 4.7
+  fi
+
+  # Checksum verification — hard fail on mismatch (don't install a
+  # tampered binary), soft fail on fetch failure (don't block on infra
+  # issues; the GitHub release itself was the trust boundary).
+  if curl -fsSL --connect-timeout 10 --max-time 30 -o "$tmpdir/checksums.sha256" "$checksums_url" 2>/dev/null; then
+    if ! (cd "$tmpdir" && sha256sum -c --ignore-missing < checksums.sha256 2>&1 | grep -q "${asset}: OK"); then
+      echo "  ERROR: AFT binary checksum mismatch — possible tampering. Binary NOT installed."
+      rm -rf "$tmpdir"
+      return 1
+    fi
+  else
+    echo "  Warning: could not fetch checksums.sha256; skipping verification (network/proxy issue, not a security failure)"
+  fi
+
+  mkdir -p "$AFT_BINARY_DIR"
+  mv "$tmpdir/$asset" "$AFT_BINARY"
+  chmod +x "$AFT_BINARY"
+  rm -rf "$tmpdir"
+  echo "  Installed AFT binary at $AFT_BINARY (v$expected_version)"
+}
+
+uninstall_aft_binary() {
+  # Mirrors uninstall_codebase_memory_mcp_binary. We treat
+  # $HOME/.local/bin/aft as sages-owned; same convention as
+  # codebase-memory-mcp. Users with an independent `aft` install on
+  # PATH can resolve manually (rare).
+  if [[ -f "$AFT_BINARY" ]]; then
+    rm -f "$AFT_BINARY"
+    echo "  Removed $AFT_BINARY"
+  fi
+  echo "  AFT binary uninstalled"
+}
+
+# ────────────────────────────────────────────────────────────
+# Mode 1: full install (default)
+# ────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────
 # Mode 1: full install (default)
 # ────────────────────────────────────────────────────────────
 install() {
@@ -1759,6 +2064,14 @@ install() {
 
   # Install pi-mcp-adapter (MCP server adapter)
   install_pi_mcp_adapter || true
+
+  # Install AFT (@cortexkit/aft-pi) — GC-2026-096. Three soft-fail steps
+  # so a flaky network never breaks the install. Order: config → npm peer
+  # (so install_aft_binary can read the version from $AFT_NPM_DIR/package.json)
+  # → binary.
+  install_aft_config || true
+  install_aft_pi_npm || true
+  install_aft_binary || true
 
   # After ALL peer file copies are done, set up node_modules symlinks pointing
   # at the orchestrator's shared deps (idempotent — skipped if peers already
@@ -1880,6 +2193,12 @@ uninstall() {
 
   # Uninstall pi-mcp-adapter (MCP server adapter)
   uninstall_pi_mcp_adapter
+
+  # Uninstall AFT (@cortexkit/aft-pi) — GC-2026-096. Reverse order from
+  # install: config → npm peer → binary.
+  uninstall_aft_config || true
+  uninstall_aft_pi_npm || true
+  uninstall_aft_binary || true
 
 
 
