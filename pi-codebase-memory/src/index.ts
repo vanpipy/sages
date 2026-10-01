@@ -20,6 +20,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
+import { execFileSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**
@@ -37,13 +38,29 @@ function isInSagesWorkspace(cwd: string): boolean {
 }
 
 /**
- * Detect whether codebase-memory-mcp has indexed the current workspace
- * (looks for `.pi-codebase.json` in cwd). Absence means first-time use → needs
- * an initial `codebase-memory-mcp` indexing run.
+ * Detect whether codebase-memory-mcp has indexed the current workspace.
+ * Asks the binary (the source of truth in v0.9.0+) via `list_projects` and
+ * matches by `root_path`. Any subprocess failure is swallowed and reported
+ * as not-indexed so a broken binary cannot crash session_start.
  */
 function codebaseIndexExists(cwd: string): boolean {
 	if (!cwd) return false;
-	return fs.existsSync(path.join(cwd, ".pi-codebase.json"));
+	const home = process.env.HOME || os.homedir();
+	const binary = path.join(home, ".local", "bin", "codebase-memory-mcp");
+	try {
+		const stdout = execFileSync(binary, ["cli", "list_projects", "{}"], {
+			encoding: "utf8",
+			timeout: 5_000,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const parsed = JSON.parse(stdout) as {
+			projects?: Array<{ root_path?: string }>;
+		};
+		const projects = parsed.projects ?? [];
+		return projects.some((p) => p.root_path === cwd);
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -93,7 +110,7 @@ export default function piCodebaseMemory(pi: ExtensionAPI): void {
 	});
 
 	// ── Lifecycle: session_shutdown ───────────────────────────────────
-	// No state to flush; the upstream server persists `.pi-codebase.json`.
+	// No state to flush; the upstream server persists to `~/.pi/memory/memory.db`.
 	pi.on("session_shutdown", async () => {
 		// Future: cleanup tmp directories if any.
 	});
