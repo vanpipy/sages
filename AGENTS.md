@@ -34,15 +34,18 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
 ## The orchestrator tool surface
 
 After GC-2026-orchestrator-simplify the orchestrator owns exactly
-one tool. DAG / dispatch / audit / reminder tools were removed —
-workflow is now driven by pi-tasks (TaskCreate × 4 + TaskExecute).
-GC-2 will add `workflow_run` as a one-shot pipeline runner.
+two tools. DAG / dispatch / audit / reminder tools were removed;
+GC-2026-workflow-run added `workflow_run`, and GC-2026-path-B-swap
+replaced path A's 1060-line in-process state machine with a thin
+event-driven shim that emits `workflow:start` and waits for
+`workflow:phase-complete` from pi-tasks.
 
 | Tool | Output |
 |---|---|
 | `goal_contract_create` | `.pi/orchestrator/goal-{id}.yaml` (intent + SHA-256 lock) |
+| `workflow_run` | `.pi/orchestrator/workflow-{id}.yaml` + cascade task graph in pi-tasks |
 
-Load `pi/skills/orchestrator/SKILL.md` for the step-by-step workflow.
+Load `pi-orchestrator/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 
 ## The 5 subagents
 
@@ -51,15 +54,16 @@ Load `pi/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 | `Explore` | no | Bounded, read-only search | none |
 | `PlanCompiler` | no | Compile a Planning Brief already decided by main | none |
 | `Developer` | yes | TDD implementation or meta-file writing | explicit object or `"current-workspace"` |
-| `Auditor` | yes | Re-run verification and certify evidence | read-only |
+| `Reviewer` | yes | Multi-dim code review (5-dim, evidence-based) | explicit object (worktree-isolated) |
 | `Merger` | yes | Cross-workspace merge (merge commit + branch push) | read-only inspection, writes merge commits to scratch branch |
 
-GC-2026-091 retired the `git-expert` subagent. The complete invocation
+GC-2026-091 retired the `git-expert` subagent and renamed `Auditor`
+to `Reviewer` (GC-2026-rename-auditor). The complete invocation
 contract, isolation modes, and examples are in
-`pi/templates/agent-tool-description.md`, installed as
+`pi-orchestrator/templates/agent-tool-description.md`, installed as
 `~/.pi/agent/agent-tool-description.md` (the LLM-visible Agent tool
 description). `defaultRunInBackground()` in
-`pi/src/tools/orchestrator/task-dispatcher.ts` is the background-policy source
+`pi-subagents/src/agent-manager.ts` is the background-policy source
 of truth.
 
 ## Profiles
@@ -138,15 +142,16 @@ After GC-2026-orchestrator-simplify the workflow is:
    rationale / scope / anti_goals / done_definition + `_lock_hash`).
 2. **Pipeline:** use pi-tasks to build the 4-node task graph:
    - `TaskCreate({ subject: "Implement", agentType: "Developer", blocks: ["Review"] })`
-   - `TaskCreate({ subject: "Review", agentType: "Auditor", blockedBy: ["Implement"], blocks: ["Fix", "Merge"] })`
+   - `TaskCreate({ subject: "Review", agentType: "Reviewer", blockedBy: ["Implement"], blocks: ["Fix", "Merge"] })`
    - `TaskCreate({ subject: "Fix", agentType: "Developer", blockedBy: ["Review"] })`
    - `TaskCreate({ subject: "Merge", agentType: "Merger", blockedBy: ["Fix"] })`
 3. **Execute:** call `TaskExecute(["implement"])` — pi-tasks
    auto-cascade handles Implement → Review → optional Fix → Merge.
-4. **Review:** the Auditor agent reads `goal-{id}.yaml` directly +
+4. **Review:** the Reviewer agent reads `goal-{id}.yaml` directly +
    Implement's task report and emits CLEAN / NEEDS_WORK. Fix is a
    no-op when CLEAN. The Fix → Review loop is bounded by
-   `max_fix_iterations` (the future `workflow_run` tool, GC-2).
+   `max_fix_iterations` (the now-implemented `workflow_run` tool,
+   GC-2026-workflow-run).
 
 State persists in `.pi/orchestrator/audit-state-{goal_id}.yaml` so work
 can resume after context compaction.
@@ -236,7 +241,7 @@ no path gate). Soft mode is the only mode.
 
 ## Orchestrator manual takeover (soft-mode contract — GC-2026-coupon-nonhit-block follow-up)
 
-When a dispatched subagent (typically `Developer` or `Auditor`) fails
+When a dispatched subagent (typically `Developer` or `Reviewer`) fails
 due to a runtime mismatch (e.g. tool-not-found Provider 400, network
 drop, partial output), the orchestrator is **expected to take over**
 the in-flight task. This is part of the soft-mode contract, not a
@@ -299,8 +304,8 @@ subagent dispatch.
    clean, or force push. Under soft mode these are no longer hard-blocked;
    dispatch `Developer` for an audit trail on complex workflows.
 6. **Never use an unregistered subagent type.** Valid types are `Explore`,
-   `PlanCompiler`, `Developer`, `Auditor`, and `Merger`.
-7. **Never self-declare workflow `PASS`.** The Reviewer (Auditor) agent
+   `PlanCompiler`, `Developer`, `Reviewer`, and `Merger`.
+7. **Never self-declare workflow `PASS`.** The Reviewer agent
    certifies the Implementer's output against the goal contract.
 8. **Never commit with `--no-verify`.** Repository hooks must run.
 10. **Never claim a tool result that was not returned.** Retry or report the
