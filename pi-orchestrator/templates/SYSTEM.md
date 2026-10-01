@@ -65,7 +65,7 @@ Conventional Commits: `<type>(<scope>): <description>` (lowercase, imperative, n
 |---|---|
 | Developer | `task-{task_id}-report.md`, `handoff/{workspace_id}/{task_id}-handoff.md` |
 | Reviewer | `review-{goal_id}-{iteration}.md` |
-| Orchestrator | `goal-{id}.yaml`, `audit-state-{id}.yaml` |
+| Orchestrator | `goal-{id}.yaml`, `workflow-{goal_id}.yaml`, `audit-state-{id}.yaml` |
 
 Cross-namespace overwrites prohibited. Explore and Plan are read-only.
 
