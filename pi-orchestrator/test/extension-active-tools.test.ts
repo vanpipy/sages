@@ -102,9 +102,9 @@ describe("AFT_TOOLS constant (GC-2026-086)", () => {
 });
 
 describe("existing tool allowlist constants — regression (GC-2026-orchestrator-simplify)", () => {
-	it("ORCHESTRATOR_TOOLS contains exactly 1 tool: goal_contract_create", () => {
-		expect(ORCHESTRATOR_TOOLS).toEqual(["goal_contract_create"]);
-		expect(ORCHESTRATOR_TOOLS.length).toBe(1);
+	it("ORCHESTRATOR_TOOLS contains exactly 2 tools: goal_contract_create + workflow_run", () => {
+		expect(ORCHESTRATOR_TOOLS).toEqual(["goal_contract_create", "workflow_run"]);
+		expect(ORCHESTRATOR_TOOLS.length).toBe(2);
 	});
 
 	it("ORCHESTRATOR_TOOLS does NOT include any of the removed 4 tools", () => {
@@ -201,7 +201,7 @@ describe("session_start hook text scan (GC-2026-orchestrator-simplify)", () => {
 });
 
 describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", () => {
-	it("fires setActiveTools with 33 entries: 1 orchestrator + 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline", async () => {
+	it("fires setActiveTools with 34 entries: 2 orchestrator + 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline", async () => {
 		const activeToolsCalls: string[][] = [];
 		const pi = {
 			setActiveTools(tools: string[]) {
@@ -249,8 +249,8 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 		// BASELINE family
 		for (const t of BASELINE_TOOLS) expect(tools).toContain(t);
 		// Total: 1 + 7 + 7 + 11 + 7 = 33, no duplicates
-		expect(tools.length).toBe(33);
-		expect(new Set(tools).size).toBe(33);
+		expect(tools.length).toBe(34);
+		expect(new Set(tools).size).toBe(34);
 	});
 });
 
@@ -325,6 +325,6 @@ describe("setActiveTools order — pi-tasks/AFT before BASELINE", () => {
 
 	it("keeps the 33-entry total after reorder (no silent additions / removals)", async () => {
 		const tools = await captureTools();
-		expect(tools.length).toBe(33);
+		expect(tools.length).toBe(34);
 	});
 });

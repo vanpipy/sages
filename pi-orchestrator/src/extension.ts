@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registerGoalContractTool } from "./goal-contract.js";
+import { registerWorkflowRunTool } from "./workflow-run-tool.js";
 import { registerSubagentControlTools } from "./subagent-control.js";
 import {
 	installOrchestratorAdvisoryHandlers,
@@ -47,6 +48,7 @@ import {
  */
 export const ORCHESTRATOR_TOOLS: readonly string[] = [
 	"goal_contract_create",
+	"workflow_run",
 ];
 
 /**
@@ -166,6 +168,8 @@ export function registerOrchestratorTools(
 	runtime?: OrchestratorAdvisoryRuntimeDeps,
 ): void {
 	registerGoalContractTool(pi);
+	// GC-2026-workflow-run: one-shot 5-phase pipeline runner.
+	registerWorkflowRunTool(pi);
 	// GC-2026-073: programmatic LLM-facing tools for inspecting and
 	// controlling subagents.
 	registerSubagentControlTools(pi);
