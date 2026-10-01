@@ -86,6 +86,18 @@ export interface WorkflowRunOutput {
 		fix?: TaskSummary;
 		merge?: TaskSummary;
 	};
+	/**
+	 * GC-2026-pi-tasks-integration: pi-tasks task IDs created for each
+	 * pipeline phase. The LLM can read these via TaskList to see live
+	 * progress. Empty strings mean pi-tasks integration was unavailable
+	 * (pi-tasks extension not loaded or executeTool refused).
+	 */
+	pi_tasks: {
+		implement: string;
+		review: string;
+		fix: string;
+		merge: string;
+	};
 	unresolved_findings?: Finding[];
 	merge_error?: string;
 	paths: {
@@ -404,6 +416,96 @@ function saveWorkflowState(cwd: string, state: WorkflowState): void {
 }
 
 // ───────────────────────────────────────────────────────────────────────
+// GC-2026-pi-tasks-integration: drive pi-tasks TaskCreate / TaskUpdate
+// from inside the state machine so the LLM can see live phase progress
+// via TaskList. Failure modes (extension not loaded, executeTool
+// refused, validation errors) are silent — pi-tasks integration is a
+// UX enhancement, not a correctness gate.
+// ───────────────────────────────────────────────────────────────────────
+
+type TaskToolFn = (name: string, args: unknown) => Promise<unknown>;
+
+const PI_TASK_TOOLS = new Set([
+	"TaskCreate",
+	"TaskUpdate",
+	"TaskGet",
+	"TaskList",
+	"TaskOutput",
+	"TaskStop",
+	"TaskExecute",
+]);
+
+async function callTaskTool(fn: TaskToolFn | undefined, name: string, args: unknown): Promise<unknown> {
+	if (!fn) return undefined;
+	try {
+		return await fn(name, args);
+	} catch {
+		return undefined;
+	}
+}
+
+async function piTasksCreate(
+	fn: TaskToolFn | undefined,
+	subject: string,
+	description: string,
+	metadata: Record<string, unknown>,
+	blocks: string[] = [],
+): Promise<string> {
+	const outcome = (await callTaskTool(fn, "TaskCreate", {
+		subject,
+		description,
+		activeForm: subject,
+		metadata,
+	})) as { id?: string; task?: { id?: string } } | undefined;
+	const id = outcome?.id ?? outcome?.task?.id ?? "";
+	return id;
+}
+
+async function piTasksUpdate(
+	fn: TaskToolFn | undefined,
+	id: string,
+	fields: Record<string, unknown>,
+): Promise<void> {
+	if (!id) return;
+	await callTaskTool(fn, "TaskUpdate", { id, ...fields });
+}
+
+async function piTasksSetup(
+	fn: TaskToolFn | undefined,
+	goal: GoalContract,
+	goalId: string,
+): Promise<{ implement: string; review: string; fix: string; merge: string }> {
+	const metadata = { workflow_run_goal_id: goalId };
+	const implement = await piTasksCreate(
+		fn,
+		`Implement: ${goal.title}`,
+		`${goal.done_definition}\n\n(worktree: .pi/worktree/${goalId}/implement)`,
+		{ ...metadata, phase: "implement" },
+	);
+	const review = await piTasksCreate(
+		fn,
+		`Review: ${goal.title}`,
+		`5-dimension review (correctness/completeness/scope/anti-goal/docs) of implement output.`,
+		{ ...metadata, phase: "review" },
+		[implement].filter(Boolean),
+	);
+	const fix = await piTasksCreate(
+		fn,
+		`Fix loop: ${goal.title}`,
+		`Address review findings; iterate review until CLEAN or max_fix_iterations.`,
+		{ ...metadata, phase: "fix" },
+		[review].filter(Boolean),
+	);
+	const merge = await piTasksCreate(
+		fn,
+		`Merge: ${goal.title}`,
+		`Merge the worktree branch into main with --no-ff.`,
+		{ ...metadata, phase: "merge" },
+	);
+	return { implement, review, fix, merge };
+}
+
+// ───────────────────────────────────────────────────────────────────────
 // Phase prompts
 // ───────────────────────────────────────────────────────────────────────
 
@@ -557,6 +659,13 @@ interface RunContext {
 	pi: ExtensionAPI;
 	ctx: ExtensionContext;
 	repoCwd: string;
+	/**
+	 * Optional: invoke an LLM-facing tool by name with the given args.
+	 * workflow_run uses this to drive pi-tasks' TaskCreate / TaskUpdate
+	 * so the LLM can see live progress via TaskList. Returns the tool's
+	 * `details` payload (or content if no details), or undefined on error.
+	 */
+	executeTool?: (name: string, args: unknown) => Promise<unknown>;
 }
 
 /**
@@ -669,6 +778,7 @@ export async function executeWorkflowRun(
 				iterations: 0,
 			},
 		},
+		pi_tasks: { implement: "", review: "", fix: "", merge: "" },
 		paths: {
 			worktree: state.worktree_path ?? "",
 			branch: state.branch ?? "",
@@ -677,9 +787,17 @@ export async function executeWorkflowRun(
 		summary: "",
 	};
 
+	// GC-2026-pi-tasks-integration: pre-create the 4 phase tasks so the LLM
+	// sees live progress via TaskList. Best-effort — if pi-tasks isn't
+	// loaded or executeTool refused, the IDs stay empty and the pipeline
+	// continues with its own bookkeeping.
+	const piTaskIds = await piTasksSetup(runCtx.executeTool, goal, goalId);
+	result.pi_tasks = piTaskIds;
+
 	// ─── Phase: Implement ──────────────────────────────────────────────
 	if (!state.phases.implement || state.phases.implement.status !== "completed") {
 		state.current_phase = "implement";
+		await piTasksUpdate(runCtx.executeTool, piTaskIds.implement, { status: "in_progress" });
 		const branch = `sages/${goalId.toLowerCase()}-implement`;
 		const wtRequest = worktreeRequest(goalId, "implement");
 		const prompt = implementPrompt(goal, `<repo>/.pi/worktree/${goalId}/implement`);
@@ -697,6 +815,9 @@ export async function executeWorkflowRun(
 			state.phases.implement = summary;
 			state.worktree_path = `<repo>/.pi/worktree/${goalId}/implement`;
 			state.branch = branch;
+			await piTasksUpdate(runCtx.executeTool, piTaskIds.implement, {
+				status: summary.status,
+			});
 			saveWorkflowState(repoCwd, state);
 		} catch (err) {
 			state.current_phase = "blocked";
@@ -737,12 +858,17 @@ export async function executeWorkflowRun(
 
 	if (!state.phases.review || state.phases.review.status !== "completed") {
 		state.current_phase = "review";
+		await piTasksUpdate(runCtx.executeTool, piTaskIds.review, { status: "in_progress" });
 		try {
 			const summary = await runReview(1, "implement", []);
 			state.phases.review = summary;
+			await piTasksUpdate(runCtx.executeTool, piTaskIds.review, {
+				status: summary.status,
+			});
 			saveWorkflowState(repoCwd, state);
 		} catch (err) {
 			state.current_phase = "blocked";
+			await piTasksUpdate(runCtx.executeTool, piTaskIds.review, { status: "completed" });
 			saveWorkflowState(repoCwd, state);
 			result.status = "blocked";
 			result.blocked_at = "review";
@@ -761,6 +887,7 @@ export async function executeWorkflowRun(
 		state.iterations_used < maxFixIterations
 	) {
 		state.iterations_used += 1;
+		await piTasksUpdate(runCtx.executeTool, piTaskIds.fix, { status: "in_progress" });
 		const iter = state.iterations_used + 1; // iteration 2 = first fix
 		const findings: Finding[] = parseReviewerVerdict(
 			registry.getRecord(state.phases.review.agent_id)?.result,
@@ -783,9 +910,14 @@ export async function executeWorkflowRun(
 			};
 			fixPhases.push(fixSummary);
 			state.phases.fix = fixPhases;
+			await piTasksUpdate(runCtx.executeTool, piTaskIds.fix, {
+				status: fixSummary.status === "completed" ? "in_progress" : "completed",
+				activeForm: `Fix iteration ${state.iterations_used}`,
+			});
 			saveWorkflowState(repoCwd, state);
 		} catch (err) {
 			state.current_phase = "blocked";
+			await piTasksUpdate(runCtx.executeTool, piTaskIds.fix, { status: "completed" });
 			saveWorkflowState(repoCwd, state);
 			result.status = "blocked";
 			result.blocked_at = "review";
@@ -798,6 +930,9 @@ export async function executeWorkflowRun(
 		try {
 			const reReview = await runReview(iter, "fix", findings);
 			state.phases.review = reReview;
+			await piTasksUpdate(runCtx.executeTool, piTaskIds.review, {
+				status: reReview.status,
+			});
 			saveWorkflowState(repoCwd, state);
 		} catch (err) {
 			state.current_phase = "blocked";
@@ -818,6 +953,7 @@ export async function executeWorkflowRun(
 	// ─── Phase: Merge ──────────────────────────────────────────────────
 	if (state.phases.review?.verdict === "CLEAN") {
 		state.current_phase = "merge";
+		await piTasksUpdate(runCtx.executeTool, piTaskIds.merge, { status: "in_progress" });
 		try {
 			const prompt = mergePrompt(goal, state.branch ?? "", state.worktree_path ?? "");
 			const record = await spawnAndWait(registry, runCtx, overrides.merge ?? "Merger", prompt, {
@@ -832,6 +968,9 @@ export async function executeWorkflowRun(
 				merge_commit: parseMergeCommit(record.result),
 			};
 			state.phases.merge = summary;
+			await piTasksUpdate(runCtx.executeTool, piTaskIds.merge, {
+				status: summary.status,
+			});
 			saveWorkflowState(repoCwd, state);
 			result.tasks.merge = summary;
 			if (summary.merge_commit) {
@@ -849,6 +988,7 @@ export async function executeWorkflowRun(
 			}
 		} catch (err) {
 			state.current_phase = "blocked";
+			await piTasksUpdate(runCtx.executeTool, piTaskIds.merge, { status: "completed" });
 			saveWorkflowState(repoCwd, state);
 			result.status = "blocked";
 			result.blocked_at = "merge";
