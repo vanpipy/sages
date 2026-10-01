@@ -15,3 +15,5 @@ coverage (postmortem or carve-out).
 | ID | Title | Goal yaml | Postmortem |
 |---|---|---|---|
 | [GC-2026-096](./postmortem/GC-2026-096.md) | AFT install integration — bake config + npm peer + binary into install.sh | [.pi/orchestrator/goal-GC-2026-096.yaml](../../.pi/orchestrator/goal-GC-2026-096.yaml) | [GC-2026-096.md](./postmortem/GC-2026-096.md) |
+| [GC-2026-path-B-tracking](./postmortem/GC-2026-path-B-tracking.md) | Path B tracking layer: static graph + verdict parser + workflow:start listener in pi-tasks | [.pi/orchestrator/goal-GC-2026-path-B-tracking.yaml](../../.pi/orchestrator/goal-GC-2026-path-B-tracking.yaml) | [GC-2026-path-B-tracking.md](./postmortem/GC-2026-path-B-tracking.md) |
+| [GC-2026-path-B-swap](./postmortem/GC-2026-path-B-swap.md) | Path B swap: replace path A's workflow-run.ts with event-driven slim workflow_run | [.pi/orchestrator/goal-GC-2026-path-B-swap.yaml](../../.pi/orchestrator/goal-GC-2026-path-B-swap.yaml) | [GC-2026-path-B-swap.md](./postmortem/GC-2026-path-B-swap.md) |
