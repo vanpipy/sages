@@ -7,7 +7,7 @@
  * dispatcher, requiring the **explicit managed-worktree object form**:
  *
  *     {
- *       dag_id: string,
+ *       goal_id: string,
  *       task_id: string,
  *       worktree_id?: string,
  *       mode: "create" | "reuse",
@@ -31,7 +31,7 @@ describe("developer-managed-isolation: policy", () => {
 
 	it("passes when caller supplies an explicit managed-worktree object", () => {
 		const ok = enforceDeveloperManagedIsolationPolicy(DEV, {
-			dag_id: "DAG-2026-011",
+			goal_id: "DAG-2026-011",
 			task_id: "P1",
 			mode: "create",
 		});
@@ -40,7 +40,7 @@ describe("developer-managed-isolation: policy", () => {
 
 	it("accepts `reuse` mode too", () => {
 		const ok = enforceDeveloperManagedIsolationPolicy(DEV, {
-			dag_id: "DAG-2026-011",
+			goal_id: "DAG-2026-011",
 			task_id: "P1",
 			mode: "reuse",
 		});
@@ -72,17 +72,17 @@ describe("developer-managed-isolation: policy", () => {
 			enforceDeveloperManagedIsolationPolicy(DEV, {} as any),
 		).toBeDefined();
 		expect(
-			enforceDeveloperManagedIsolationPolicy(DEV, { dag_id: "DAG-1" } as any),
+			enforceDeveloperManagedIsolationPolicy(DEV, { goal_id: "DAG-1" } as any),
 		).toBeDefined();
 		expect(
 			enforceDeveloperManagedIsolationPolicy(DEV, {
-				dag_id: "DAG-1",
+				goal_id: "DAG-1",
 				task_id: "P1",
 			} as any),
 		).toBeDefined();
 		expect(
 			enforceDeveloperManagedIsolationPolicy(DEV, {
-				dag_id: "DAG-1",
+				goal_id: "DAG-1",
 				task_id: "P1",
 				mode: "explode",
 			} as any),

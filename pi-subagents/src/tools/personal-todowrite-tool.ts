@@ -1,19 +1,23 @@
 /**
- * personal-todowrite-tool.ts — GC-2026-coupon-nonhit-block follow-up (Path A).
+ * personal-todowrite-tool.ts — GC-2026-coupon-nonhit-block follow-up.
  *
- * Registers the personal todowrite / todowrite_progress tools with a
- * `pi` extension context. Storage is keyed by `effectiveCwd` (the
- * managed-worktree or current-workspace cwd) so the same agent
- * instance in a worktree sees consistent state across calls.
+ * GC-2026-path-B-field-renames (M12): renamed from
+ * `todowrite` / `todowrite_progress` to `agent_todowrite` /
+ * `agent_todowrite_progress`. The original names collided with the
+ * orchestrator's deleted DAG-view tools (same name, different storage,
+ * different purpose); the rename makes it unambiguous that this is
+ * the per-agent personal tracker.
+ *
+ * Registers the personal agent_todowrite / agent_todowrite_progress
+ * tools with a `pi` extension context. Storage is keyed by
+ * `effectiveCwd` (the managed-worktree or current-workspace cwd) so
+ * the same agent instance in a worktree sees consistent state across
+ * calls.
  *
  * Two tools:
- *   - `todowrite` (replace the list — Claude Code-compatible shape)
- *   - `todowrite_progress` (read the list + summary counts)
- *
- * The tool name `todowrite` is also used by `pi-orchestrator`'s DAG-view
- * todowrite (different purpose, different storage). Both are registered
- * when the orchestrator extension is present; the personal variant here
- * is the fallback for subagents that don't have a DAG.
+ *   - `agent_todowrite` (replace the list — Claude Code-compatible
+ *     shape)
+ *   - `agent_todowrite_progress` (read the list + summary counts)
  *
  * Anti-rule: no new npm dependencies (Node built-ins only). Uses
  * TypeBox via the same import path as the rest of pi-subagents.
@@ -75,14 +79,14 @@ export function registerPersonalTodowriteTools(
 	const api = pi as PiApi;
 
 	api.registerTool({
-		name: "todowrite",
+		name: "agent_todowrite",
 		label: "Personal TodoWrite (set)",
 		description:
 			"Replace your current task list. Each item: {id?, content, status?}. " +
 			"Omit `id` to let the server assign `todo-N`. " +
 			"Omit `status` to keep the prior status (defaults to 'pending' for new items). " +
 			"Use this BEFORE the first tool call on any task with 3+ steps to plan your work. " +
-			"Use `todowrite_progress` to read the current list. " +
+			"Use `agent_todowrite_progress` to read the current list. " +
 			"Storage: ~/.cache/pi-subagents-todos/<cwd-hash>.json (per worktree).",
 		parameters: Type.Object({
 			items: Type.Array(ITEM_SCHEMA, {
@@ -101,7 +105,7 @@ export function registerPersonalTodowriteTools(
 	});
 
 	api.registerTool({
-		name: "todowrite_progress",
+		name: "agent_todowrite_progress",
 		label: "Personal TodoWrite Progress",
 		description:
 			"Read your current task list with status counts and the in-progress item id. " +

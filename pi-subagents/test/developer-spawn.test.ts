@@ -15,7 +15,7 @@
  *   3. A valid managed-worktree object provisions the worktree and
  *      attaches the handoff to `record.managedWorktree` (path /
  *      branch / baseSha / baseRef / head / dirty / leaseToken /
- *      dag_id / task_id / worktree_id / repoRoot). Other agents
+ *      goal_id / task_id / worktree_id / repoRoot). Other agents
  *      (Explore / Plan) are unaffected.
  *
  * The integration tests use the `_fixture.ts` helper for real git

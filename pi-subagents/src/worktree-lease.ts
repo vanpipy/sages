@@ -17,7 +17,7 @@ export const DEFAULT_WORKTREE_CONCURRENCY_GATE_ENABLED = false;
 export const WORKTREE_LEASE_STALE_AFTER_MS = 35 * 60 * 1000;
 
 export type WorktreeLeaseConsumer = {
-	dagId: string;
+	goalId: string;
 	taskId: string;
 	worktreeId?: string;
 };
@@ -50,7 +50,7 @@ export class WorktreeConcurrencyGateRefused extends Error {
 				`reaches cap ${cap}; existing owners: ${owners
 					.map(
 						(owner) =>
-							`${owner.dagId}/${owner.taskId}${owner.worktreeId ? `/${owner.worktreeId}` : ""}`,
+							`${owner.goalId}/${owner.taskId}${owner.worktreeId ? `/${owner.worktreeId}` : ""}`,
 					)
 					.join(", ")}`,
 		);
@@ -69,7 +69,7 @@ function canonicalRepoRoot(repoRoot: string): string {
 function leaseId(repoRoot: string, consumer: WorktreeLeaseConsumer): string {
 	return createHash("sha256")
 		.update(
-			repoRoot + consumer.dagId + consumer.taskId + (consumer.worktreeId ?? ""),
+			repoRoot + consumer.goalId + consumer.taskId + (consumer.worktreeId ?? ""),
 		)
 		.digest("hex");
 }
@@ -94,7 +94,7 @@ function sameConsumer(
 	b: WorktreeLeaseConsumer,
 ): boolean {
 	return (
-		a.dagId === b.dagId &&
+		a.goalId === b.goalId &&
 		a.taskId === b.taskId &&
 		a.worktreeId === b.worktreeId
 	);
@@ -109,7 +109,7 @@ function isLease(value: unknown): value is WorktreeLease {
 		typeof lease.heartbeatAt === "number" &&
 		typeof lease.pid === "number" &&
 		!!lease.consumer &&
-		typeof lease.consumer.dagId === "string" &&
+		typeof lease.consumer.goalId === "string" &&
 		typeof lease.consumer.taskId === "string"
 	);
 }
@@ -233,7 +233,7 @@ export async function claimWorktreeLease(
 			writeDiagnostic({
 				dispatchId,
 				context: {
-					dagId: args.consumer.dagId,
+					goalId: args.consumer.goalId,
 					taskId: args.consumer.taskId,
 					worktreeId: args.consumer.worktreeId,
 				},
@@ -245,7 +245,7 @@ export async function claimWorktreeLease(
 					`existing owners: ${repoLeases
 						.map(
 							(lease) =>
-								`${lease.consumer.dagId}/${lease.consumer.taskId}` +
+								`${lease.consumer.goalId}/${lease.consumer.taskId}` +
 								(lease.consumer.worktreeId
 									? `/${lease.consumer.worktreeId}`
 									: ""),

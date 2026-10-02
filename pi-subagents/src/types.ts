@@ -17,12 +17,8 @@ export type SubagentType = string;
  * and `auditor` agents are also built-in but are NOT in this list —
  * they are not dispatched by the "Explore / Plan" pre-task defaults
  * path; they require explicit caller intent (a DAG task template, an
- * orchestrator audit, etc.).
- *
- * GC-2026-093: `PlanCompiler` is the new canonical name; `Plan` is the
- * legacy alias kept for backward compat (existing DAG YAMLs reference
- * `subagent_type: "Plan"`). */
-export const DEFAULT_AGENT_NAMES = ["Explore", "Plan", "PlanCompiler"] as const;
+ * orchestrator audit, etc.). */
+export const DEFAULT_AGENT_NAMES = ["Explore", "Plan"] as const;
 
 /** Memory scope for persistent agent memory. */
 export type MemoryScope = "user" | "project" | "local";
@@ -80,8 +76,8 @@ export interface ManagedWorktreeHandoff {
 	reused: boolean;
 	/** Opaque lease token; required by the release path. */
 	leaseToken: string;
-	/** dag identity carried for caller convenience. */
-	dag_id: string;
+	/** Goal identity carried for caller convenience. */
+	goal_id: string;
 	/** task_id / worktree_id carried for caller convenience. */
 	task_id: string;
 	/** worktree_id when supplied explicitly; defaults to task_id when absent. */

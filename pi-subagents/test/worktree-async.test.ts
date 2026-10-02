@@ -141,10 +141,10 @@ describe("worktree-async: createManagedWorktreeAsync (GC-2026-035)", () => {
 	it("T-ASYNC-03: provisions a worktree and returns the full ManagedWorktree shape", async () => {
 		const wt = await createManagedWorktreeAsync({
 			repoRoot: fx.root,
-			dag: "GC-2026-035",
+			goalId: "GC-2026-035",
 			worktree: "P1",
 		});
-		expect(wt.dag).toBe("GC-2026-035");
+		expect(wt.goalId).toBe("GC-2026-035");
 		expect(wt.worktree).toBe("P1");
 		expect(wt.repoRoot).toBe(fx.root);
 		expect(wt.branch).toBe("sages/GC-2026-035/P1");

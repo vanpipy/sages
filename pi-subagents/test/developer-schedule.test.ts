@@ -42,7 +42,7 @@ describe("developer-schedule: persistence", () => {
 	it("persists the explicit managed-worktree object verbatim (one-shot)", () => {
 		const scheduler = new SubagentScheduler();
 		const obj = {
-			dag_id: "DAG-2026-014",
+			goal_id: "DAG-2026-014",
 			task_id: "P2",
 			mode: "create" as const,
 		};
@@ -68,7 +68,7 @@ describe("developer-schedule: persistence", () => {
 				subagent_type: CANONICAL,
 				prompt: "do the thing",
 				isolation: {
-					dag_id: "DAG-2026-014",
+					goal_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -86,7 +86,7 @@ describe("developer-schedule: persistence", () => {
 				subagent_type: CANONICAL,
 				prompt: "do the thing",
 				isolation: {
-					dag_id: "DAG-2026-014",
+					goal_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -104,7 +104,7 @@ describe("developer-schedule: persistence", () => {
 				subagent_type: CANONICAL,
 				prompt: "do the thing",
 				isolation: {
-					dag_id: "DAG-2026-014",
+					goal_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -148,7 +148,7 @@ describe("developer-schedule: persistence", () => {
 				schedule: "+10m",
 				subagent_type: CANONICAL,
 				prompt: "do the thing",
-				isolation: { dag_id: "DAG-1" } as any,
+				isolation: { goal_id: "DAG-1" } as any,
 			}),
 		).toThrow(/developer/i);
 	});
