@@ -70,7 +70,7 @@ The upstream default frames background as "parallelism". **Sages inverts this fo
 | `Explore` | `false` (foreground) | Short, read-only, result feeds next stage |
 | `PlanCompiler` | `false` (foreground) | Planning Brief compilation is short and reviewed by the main agent |
 | `Developer`          | **`true` (background)** | TDD RED→GREEN→REFACTOR is 1–10 min, can be steered |
-| `Auditor` | **`true` (background)** | Re-runs every verification_cmd, 30s–3 min, can be steered |
+| `Reviewer` | **`true` (background)** | 5-dim review (correctness / completeness / scope / anti-goal / documentation), parses `verdict: CLEAN | NEEDS_WORK` from the final YAML fence, 30s–3 min, can be steered |
 
 Use `get_subagent_result(agent_id)` to collect when needed, or `steer_subagent(agent_id, "...")` to redirect mid-run. Don't wait synchronously for `Developer`/`Auditor` even if "the next step depends on it" — the notification arrives when the agent completes; the parent context stays free in the meantime. See `pi-orchestrator/skills/orchestrator/SKILL.md` for the full rationale and dispatch examples.
 

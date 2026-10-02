@@ -11,11 +11,12 @@ conventions, namespace ownership) live in SYSTEM.md, not here.
 
 {{#if loaded."@sages/pi-orchestrator"}}
 - **`@sages/pi-orchestrator`** — workflow governance
-  - `goal_contract_create` — turn intent into a verifiable contract
-  - `dag_synthesize` — decompose into a task DAG
-  - `task_dispatch` — spawn subagents per batch
-  - `orchestrator_audit` — workflow-level audit rollup
-  - `sages_reminder` — soft-mode reminder injector
+  - `goal_contract_create` — turn intent into a verifiable contract (writes `.pi/orchestrator/goal-{id}.yaml`)
+  - `workflow_run` — one-shot 5-phase pipeline (Implement → Review ⇆ Fix → Merge); emits `workflow:start`, waits for `workflow:phase-complete`, returns `WorkflowRunOutput`
+  - `subagent_status` — inspect running/queued/recently-finished subagents
+  - `subagent_steer` — push a message into a running or queued subagent session
+  - `subagent_abort` — hard-stop a subagent (idempotent on terminal agents)
+  - `subagent_resume` — re-enter a TERMINAL subagent session with a new prompt
 {{/if}}
 
 {{#if loaded."@sages/pi-subagents"}}
