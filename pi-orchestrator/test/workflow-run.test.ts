@@ -294,6 +294,85 @@ describe("executeWorkflowRun (path B slim)", () => {
 		expect(output.iterations_used).toBe(2);
 	});
 
+	it("returns status: blocked when Implement phase fails (status: 'failed')", async () => {
+		// GC-2026-pi-tasks-cascade-agentid: phase-complete events may carry
+		// status: "failed" when the subagent itself crashes (the GC-2026-096
+		// case). workflow_run must resolve immediately on failure instead of
+		// hanging forever waiting for a completion that will never come.
+		const { result, emitted, handlers } = harness.run({
+			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
+			options: { max_fix_iterations: 3 },
+		});
+
+		const phaseComplete = handlers.get("workflow:phase-complete");
+		expect(phaseComplete).toBeTruthy();
+		const startPayload = emitted.find(e => e.channel === "workflow:start")!
+			.data as WorkflowStartPayload;
+
+		await phaseComplete!({
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
+			phase: "implement",
+			status: "failed",
+			error: "SpawnOptions.cwd must be an absolute path",
+			task_id: "t-implement",
+		});
+
+		const output = await result;
+		expect(output.status).toBe("blocked");
+		expect(output.blocked_at).toBe("implement");
+		expect(output.merge_error).toContain("absolute path");
+		// After resolving, workflow_run must unsubscribe so future events on
+		// the same workflow_id don't bleed into this resolved output.
+		expect(handlers.has("workflow:phase-complete")).toBe(false);
+	});
+
+	it("returns status: blocked when a Fix phase fails (status: 'failed')", async () => {
+		// The failure path also covers fix_loop: a Review CLEAN + Fix that
+		// crashes mid-iteration must resolve the workflow as blocked rather
+		// than waiting for Review_N+1 that will never be spawned.
+		const { result, emitted, handlers } = harness.run({
+			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
+			options: { max_fix_iterations: 3 },
+		});
+
+		const phaseComplete = handlers.get("workflow:phase-complete");
+		expect(phaseComplete).toBeTruthy();
+		const startPayload = emitted.find(e => e.channel === "workflow:start")!
+			.data as WorkflowStartPayload;
+
+		await phaseComplete!({
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
+			phase: "implement",
+			status: "completed",
+			task_id: "t-implement",
+		});
+		await phaseComplete!({
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
+			phase: "review",
+			iteration: 1,
+			status: "completed",
+			verdict: "NEEDS_WORK",
+			findings_count: 1,
+			task_id: "t-review-1",
+		});
+		await phaseComplete!({
+			workflow_id: startPayload.workflow_id,
+			goal_id: GOAL_ID,
+			phase: "fix",
+			iteration: 1,
+			status: "failed",
+			error: "Fix agent timed out after 10 min",
+			task_id: "t-fix-1",
+		});
+
+		const output = await result;
+		expect(output.status).toBe("blocked");
+		expect(output.merge_error).toContain("timed out");
+	});
+
 	it("subscribes to workflow:phase-complete (and unsubscribes on completion)", async () => {
 		const { result, emitted, handlers } = harness.run({
 			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
