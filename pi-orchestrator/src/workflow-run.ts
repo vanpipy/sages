@@ -73,7 +73,10 @@ export interface WorkflowRunOutput {
 	status: "success" | "blocked";
 	goal_id: string;
 	iterations_used: number;
-	blocked_at?: "implement" | "review" | "merge";
+	// GC-2026-pi-tasks-cascade-agentid: extended with "fix" so a Fix-phase
+	// failure surfaces as blocked_at: "fix" rather than being aliased into
+	// "review" (the previous NEEDS_WORK exhaustion code path).
+	blocked_at?: "implement" | "review" | "fix" | "merge";
 	tasks: {
 		implement: TaskSummary & { agent_id: string };
 		review: ReviewSummary;
@@ -99,10 +102,16 @@ interface PhaseCompleteEvent {
 	goal_id: string;
 	phase: "implement" | "review" | "fix" | "merge";
 	iteration?: number;
-	status: "completed";
+	// GC-2026-pi-tasks-cascade-agentid: extended from "completed" to also
+	// carry "failed" — the tracking layer (subscribeWorkflow's subagents:failed
+	// listener) emits this when a phase's subagent itself crashes (the
+	// GC-2026-096 implement-failure case). workflow_run must resolve as
+	// blocked in that case instead of hanging forever.
+	status: "completed" | "failed";
 	verdict?: "CLEAN" | "NEEDS_WORK";
 	findings_count?: number;
 	task_id: string;
+	error?: string;
 }
 
 interface WorkflowState {
@@ -236,8 +245,34 @@ export async function executeWorkflowRun(
 
 			taskSummaries[ev.task_id] = {
 				id: ev.task_id,
-				status: "completed",
+				status: ev.status === "completed" ? "completed" : "failed",
+				...(ev.error && { error: ev.error }),
 			};
+
+			// GC-2026-pi-tasks-cascade-agentid: failure short-circuits the
+			// run. The remaining phases won't spawn — pi-tasks's cascade
+			// reverts the failed task to pending with lastError metadata —
+			// so we resolve as blocked immediately rather than waiting
+			// forever for a completion that will never come.
+			if (ev.status === "failed") {
+				state.current_phase = "blocked";
+				state.status = "blocked";
+				saveWorkflowState(repoCwd, state);
+				unsub();
+				resolveFn(
+					buildBlockedOutput(
+						goalId,
+						maxFixIterations,
+						state.iterations_used,
+						worktreePath,
+						branch,
+						taskSummaries,
+						ev.phase,
+						ev.error,
+					),
+				);
+				return;
+			}
 
 			if (ev.phase === "implement") {
 				implementDone = true;
@@ -317,14 +352,26 @@ function buildBlockedOutput(
 	worktreePath: string,
 	branch: string,
 	tasks: Record<string, TaskSummary>,
+	// GC-2026-pi-tasks-cascade-agentid: when a phase's subagent itself
+	// crashes (status: "failed" on the phase-complete), surface the
+	// failing phase + the error message in the LLM-facing output.
+	failedPhase?: "implement" | "review" | "fix" | "merge",
+	error?: string,
 ): WorkflowRunOutput {
+	const isFailure = failedPhase !== undefined;
 	return {
 		status: "blocked",
 		goal_id: goalId,
 		iterations_used: iterationsUsed,
-		blocked_at: "review",
+		blocked_at: isFailure ? failedPhase : "review",
 		tasks: {
-			implement: { ...tasks["t-implement"] ?? { id: "t-implement", status: "completed" }, agent_id: "t-implement" },
+			implement: {
+				...(tasks["t-implement"] ?? {}),
+				id: "t-implement",
+				agent_id: "t-implement",
+				status: failedPhase === "implement" ? "failed" : "completed",
+				...(isFailure && failedPhase === "implement" && error ? { error } : {}),
+			},
 			review: {
 				...tasks["t-review-final"] ?? {},
 				id: "t-review-final",
@@ -338,8 +385,11 @@ function buildBlockedOutput(
 		},
 		pi_tasks: { implement: "", review: "", fix: "", merge: "" },
 		unresolved_findings: [],
+		merge_error: isFailure ? error : undefined,
 		paths: { worktree: worktreePath, branch, goal_yaml: `.pi/orchestrator/goal-${goalId}.yaml` },
-		summary: `Max fix iterations (${maxFixIterations}) exhausted with NEEDS_WORK.`,
+		summary: isFailure
+			? `Goal ${goalId} blocked: ${failedPhase} phase failed (${error ?? "no error"}).`
+			: `Max fix iterations (${maxFixIterations}) exhausted with NEEDS_WORK.`,
 	};
 }
 

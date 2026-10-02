@@ -177,6 +177,16 @@ describe("subscribeWorkflow — workflow:start", () => {
     await events.emit("workflow:start", startPayload());
     await flush();
 
+    // GC-2026-pi-tasks-cascade-agentid: drive Implement completion first;
+    // only Implement is spawned by workflow:start (Review_1 is only
+    // spawned by the cascade after Implement completes).
+    const implement = store.list().find(t => t.metadata.phase === "implement")!;
+    await events.emit("subagents:completed", {
+      id: "agent-" + implement.id,
+      result: "ok",
+    });
+    await flush();
+
     const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
 
     // Reviewer reports CLEAN
@@ -197,6 +207,15 @@ describe("subscribeWorkflow — subagents:completed review", () => {
     const { events, store } = setup();
 
     await events.emit("workflow:start", startPayload());
+    await flush();
+
+    // GC-2026-pi-tasks-cascade-agentid: complete Implement first to spawn
+    // Review_1 via cascade.
+    const implement = store.list().find(t => t.metadata.phase === "implement")!;
+    await events.emit("subagents:completed", {
+      id: "agent-" + implement.id,
+      result: "ok",
+    });
     await flush();
 
     const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
@@ -233,6 +252,33 @@ describe("subscribeWorkflow — subagents:completed review", () => {
     await events.emit("workflow:start", startPayload());
     await flush();
 
+    // GC-2026-pi-tasks-cascade-agentid: drive Implement → Review_1 (CLEAN)
+    // → Fix_1 → Review_2 (the iteration=2 we want to test).
+    const completeImpl = store.list().find(t => t.metadata.phase === "implement")!;
+    await events.emit("subagents:completed", {
+      id: "agent-" + completeImpl.id,
+      result: "ok",
+    });
+    await flush();
+
+    const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
+    await events.emit("subagents:completed", {
+      id: "agent-" + review1.id,
+      result: "```yaml\nverdict: CLEAN\nfindings: []\n```",
+    });
+    await flush();
+
+    const fix1 = store.list().find(t => t.metadata.phase === "fix" && t.metadata.iteration === 1)!;
+    await events.emit("subagents:completed", {
+      id: "agent-" + fix1.id,
+      result: "ok",
+    });
+    await flush();
+
+    // emitted already has implement + review_1 + fix_1 phase-complete events;
+    // the next one will be review_2 (the one this test is actually about).
+    const before = emitted.length;
+
     const review2 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 2)!;
 
     await events.emit("subagents:completed", {
@@ -241,8 +287,9 @@ describe("subscribeWorkflow — subagents:completed review", () => {
     });
     await flush();
 
-    expect(emitted).toHaveLength(1);
-    const ev = emitted[0] as Record<string, unknown>;
+    const newEmitted = emitted.slice(before);
+    expect(newEmitted).toHaveLength(1);
+    const ev = newEmitted[0] as Record<string, unknown>;
     expect(ev.workflow_id).toBe("wf-1");
     expect(ev.goal_id).toBe("GC-TEST-WF");
     expect(ev.phase).toBe("review");
