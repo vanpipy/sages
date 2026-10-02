@@ -10,8 +10,9 @@
  *     `subagents/registry.yaml` duplicating agent metadata. Removed in
  *     favor of importing from pi-subagents (this file) so the canonical
  *     AgentConfig is the only place a new subagent needs to be added.
- *   - The orchestrator's `dag_synthesize` validator warns when a task's
- *     `subagent_type` is not in the registered set. The orchestrator's
+ *   - The orchestrator warns when a task's `subagent_type` is not in
+ *     the registered set (was: `dag_synthesize` validator — removed in
+ *     GC-2026-orchestrator-simplify). The orchestrator's
  *     `defaultRunInBackground(subagentType)` looks up the canonical
  *     AgentConfig to choose between foreground and background.
  *
