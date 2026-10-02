@@ -27,14 +27,17 @@ export const BUILTIN_TOOL_NAMES: string[] = [
 			...createReadOnlyTools("."),
 		].map((t) => t.name),
 	),
-	// GC-2026-coupon-nonhit-block follow-up (Path A): personal todowrite.
-	// Registered by runAgent via registerPersonalTodowriteTools(pi, {cwd}).
-	// Listed here so the typo check (agent-runner.ts:898) accepts the names
-	// when they appear in an agent's `builtinToolNames`. The runtime tool
-	// instance is NOT derived from createCodingTools/createReadOnlyTools —
-	// these names only carry the allowlist-acceptance semantics.
-	"todowrite",
-	"todowrite_progress",
+	// GC-2026-path-B-field-renames (M12): renamed from
+	// `todowrite` / `todowrite_progress` (which collided with the
+	// orchestrator's deleted DAG-view tools of the same name) to
+	// `agent_todowrite` / `agent_todowrite_progress`. Registered by
+	// runAgent via registerPersonalTodowriteTools(pi, {cwd}). Listed
+	// here so the typo check (agent-runner.ts:898) accepts the names
+	// when they appear in an agent's `builtinToolNames`. The runtime
+	// tool instance is NOT derived from createCodingTools/createReadOnlyTools
+	// — these names only carry the allowlist-acceptance semantics.
+	"agent_todowrite",
+	"agent_todowrite_progress",
 ];
 
 /** Unified runtime registry of all agents (defaults + user-defined). */
