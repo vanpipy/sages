@@ -14,13 +14,13 @@ coverage (postmortem or carve-out).
 
 | ID | Title | Goal yaml | Postmortem |
 |---|---|---|---|
-<<<<<<< Updated upstream
+| [GC-2026-pi-tasks-cascade-agentid](./postmortem/GC-2026-pi-tasks-cascade-agentid.md) | pi-tasks cascade: real agent-id tracking + subagents:failed listener | [.pi/orchestrator/goal-GC-2026-pi-tasks-cascade-agentid.yaml](../../.pi/orchestrator/goal-GC-2026-pi-tasks-cascade-agentid.yaml) | [GC-2026-pi-tasks-cascade-agentid.md](./postmortem/GC-2026-pi-tasks-cascade-agentid.md) |
 | [GC-2026-096](./postmortem/GC-2026-096.md) | AFT install integration — bake config + npm peer + binary into install.sh | [.pi/orchestrator/goal-GC-2026-096.yaml](../../.pi/orchestrator/goal-GC-2026-096.yaml) | [GC-2026-096.md](./postmortem/GC-2026-096.md) |
 | [GC-2026-path-B-tracking](./postmortem/GC-2026-path-B-tracking.md) | Path B tracking layer: static graph + verdict parser + workflow:start listener in pi-tasks | [.pi/orchestrator/goal-GC-2026-path-B-tracking.yaml](../../.pi/orchestrator/goal-GC-2026-path-B-tracking.yaml) | [GC-2026-path-B-tracking.md](./postmortem/GC-2026-path-B-tracking.md) |
 | [GC-2026-path-B-swap](./postmortem/GC-2026-path-B-swap.md) | Path B swap: replace path A's workflow-run.ts with event-driven slim workflow_run | [.pi/orchestrator/goal-GC-2026-path-B-swap.yaml](../../.pi/orchestrator/goal-GC-2026-path-B-swap.yaml) | [GC-2026-path-B-swap.md](./postmortem/GC-2026-path-B-swap.md) |
 | [GC-2026-path-B-audit-fixes](./postmortem/GC-2026-path-B-audit-fixes.md) | Path A → path B drift cleanup: 7 commits across README / SKILL / agent prompts / templates / comments | (no goal yaml — pure doc + template cleanup branch) | [GC-2026-path-B-audit-fixes.md](./postmortem/GC-2026-path-B-audit-fixes.md) |
 | [GC-2026-path-B-field-renames](./postmortem/GC-2026-path-B-field-renames.md) | Path B field renames: ManagedWorktreeRequest.dag_id → goal_id (compat shim) + personal todowrite → agent_todowrite | [.pi/orchestrator/goal-GC-2026-path-B-field-renames.yaml](../../.pi/orchestrator/goal-GC-2026-path-B-field-renames.yaml) | [GC-2026-path-B-field-renames.md](./postmortem/GC-2026-path-B-field-renames.md) |
-=======
+<<<<<<< Updated upstream
 | [GC-2026-076](./postmortem/GC-2026-076.md) | Wire voided subagent prompt sections + orchestrate developer YAML | [.pi/orchestrator/goal-GC-2026-076.yaml](../../.pi/orchestrator/goal-GC-2026-076.yaml) | [GC-2026-076.md](./postmortem/GC-2026-076.md) |
 | [GC-2026-081](./postmortem/GC-2026-081.md) | Expose todowrite + todowrite_compile + todowrite_progress in the orchestrator active toolset | [.pi/orchestrator/goal-GC-2026-081.yaml](../../.pi/orchestrator/goal-GC-2026-081.yaml) | [GC-2026-081.md](./postmortem/GC-2026-081.md) |
 | [GC-2026-085](./postmortem/GC-2026-085.md) | Wrap orchestrator todowrite tool returns in ToolResult shape | [.pi/orchestrator/goal-GC-2026-085.yaml](../../.pi/orchestrator/goal-GC-2026-085.yaml) | [GC-2026-085.md](./postmortem/GC-2026-085.md) |
