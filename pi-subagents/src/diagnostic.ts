@@ -8,7 +8,10 @@
  * readable hours later by an orchestrator that has forgotten everything.
  *
  * `cause` draws from the mechanism-1.3 catalog, so the two mechanisms share
- * one vocabulary and `orchestrator_audit` can bucket diagnostics by mode.
+ * one vocabulary. (Historical: the orchestrator's `orchestrator_audit`
+ * tool used to bucket diagnostics by mode; that tool was retired in
+ * GC-2026-orchestrator-simplify. The vocabulary is still useful for
+ * the diagnostics reader regardless.)
  *
  * Failure policy (Q-G): the write is synchronous — losing the record of a
  * failure to a fire-and-forget race is worse than a few milliseconds of exit
