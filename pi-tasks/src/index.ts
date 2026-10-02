@@ -382,12 +382,40 @@ export default function (pi: ExtensionAPI) {
   let workflowHandlerUnsub: (() => void) | undefined;
   subscribeWorkflow(store, {
     events: pi.events,
-    spawnAgent: async (task) => {
+    spawnAgent: async (task, ctx) => {
       const type = String(task.metadata.agentType ?? task.subject);
-      return spawnSubagent(type, task.description, {
+      const goalId = typeof task.metadata.workflow_run_goal_id === "string"
+        ? task.metadata.workflow_run_goal_id
+        : undefined;
+
+      // GC-2026-pi-tasks-cascade-agentid: the developer agent requires an
+      // explicit isolation choice at spawn time (see pi-subagents
+      // /invocation-config.ts:enforceDeveloperManagedIsolationPolicy).
+      // The orchestrator's workflow_run computes the worktree path at
+      // workflow:start time and threads it through `ctx.worktreePath`;
+      // we translate that into the { goal_id, task_id, mode: "create" }
+      // managed-worktree object that the spawn RPC expects.
+      //
+      // Without this, the very first implement spawn fails with
+      // "developer agent: an explicit isolation choice is required" and
+      // the workflow never advances past workflow:start.
+      const spawnOpts: Record<string, unknown> = {
         description: task.subject,
         isBackground: true,
-      });
+      };
+      if (
+        type.toLowerCase() === "developer" &&
+        goalId &&
+        ctx?.worktreePath
+      ) {
+        spawnOpts.isolation = {
+          goal_id: goalId,
+          task_id: String(task.id),
+          mode: "create",
+        };
+      }
+
+      return spawnSubagent(type, task.description, spawnOpts);
     },
   });
   // Track the unsub so future reloads can detach cleanly (not currently used
