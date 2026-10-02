@@ -143,7 +143,7 @@ describe("developer-prompt: tool preference order (GC-2026-012)", () => {
 		// todowrite precede bash and read).
 		const aftItem = section.match(/^1\.\s+\*\*AFT/m)?.index;
 		const mcpItem = section.match(/^2\.\s+\*\*MCP/m)?.index;
-		const todowriteItem = section.match(/^4\.\s+\*\*`?todowrite`?/m)?.index;
+		const todowriteItem = section.match(/^4\.\s+\*\*`?agent_todowrite`?/m)?.index;
 		const readItem = section.match(/^5\.\s+\*\*`?read`?/m)?.index;
 		const bashItem = section.match(/^6\.\s+\*\*`?bash`?/m)?.index;
 		expect(typeof aftItem, "must start with AFT as list item 1").toBe("number");
