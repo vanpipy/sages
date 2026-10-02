@@ -18,7 +18,10 @@ export { registerOrchestratorTools, registerBrainstormCommand } from "./extensio
 // Individual tool registrars
 export { registerGoalContractTool } from "./goal-contract.js";
 export { loadGoalContract } from "./goal-contract.js";
-export { registerSubagentControlTools } from "./subagent-control.js";
+
+// GC-2026-boundary-subagent-control: registerSubagentControlTools moved
+// to pi-subagents. Callers that need to wire the 4 control tools onto a
+// custom pi extension should now import from @sages/pi-subagents.
 
 // Brainstorming slash command
 export {

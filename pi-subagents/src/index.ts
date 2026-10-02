@@ -51,6 +51,7 @@ import {
 	resolveType,
 	setDefaultsDisabled,
 } from "./agent-types.js";
+import { registerSubagentControlTools } from "./subagent-control-tools.js";
 import { type RpcHandle, registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import {
@@ -692,12 +693,20 @@ export default function (pi: ExtensionAPI) {
 			manager.spawn(piRef, ctx, type, prompt, options),
 		getRecord: (id: string) => manager.getRecord(id),
 		// GC-2026-073: expose the LLM-facing control surface so the
-		// orchestrator's subagent_status / steer / abort / resume tools
-		// reach the same singleton that powers the Agent tool. The
-		// registry already mediates identity across multiple pi
-		// activations; adding methods here is purely additive — older
-		// callers (e.g. cross-extension RPC, ui widgets) only use the
-		// four-method surface above.
+		// subagent_status / steer / abort / resume tools reach the same
+		// singleton that powers the Agent tool. The registry already
+		// mediates identity across multiple pi activations; adding
+		// methods here is purely additive — older callers (e.g.
+		// cross-extension RPC, ui widgets) only use the four-method
+		// surface above.
+		//
+		// GC-2026-boundary-subagent-control: the 4 control tools are now
+		// owned by pi-subagents itself (see ./subagent-control-tools.ts).
+		// The orchestrator used to host them and reach into this
+		// registry via Symbol.for("pi-subagents:manager"); that
+		// cross-boundary dependency is removed. The registry remains
+		// for back-compat with test fixtures and any future
+		// cross-package integration.
 		steer: (id: string, message: string) => manager.steer(id, message),
 		abort: (id: string, reason?: unknown) => manager.abort(id, reason),
 		resume: (id: string, prompt: string) => manager.resume(id, prompt),
@@ -707,6 +716,19 @@ export default function (pi: ExtensionAPI) {
 	if (ownsManagerRegistry) {
 		(globalThis as any)[MANAGER_KEY] = registryEntry;
 	}
+
+	// GC-2026-boundary-subagent-control: register the 4 subagent control
+	// tools (subagent_status / steer / abort / resume). These used to live
+	// in pi-orchestrator/src/subagent-control.ts and reach across the
+	// package boundary via Symbol.for("pi-subagents:manager"); now they
+	// are owned by the runtime that owns the manager.
+	//
+	// Behavior change: previously the 4 tools were registered only when
+	// pi-orchestrator loaded alongside pi-subagents. They are now
+	// registered whenever pi-subagents loads. This matches the
+	// "runtime owns the runtime surface" design intent — every session
+	// with pi-subagents gets the same control tools.
+	registerSubagentControlTools(pi, manager);
 
 	// --- Cross-extension RPC via pi.events ---
 	let currentCtx: ExtensionContext | undefined;
@@ -3208,3 +3230,8 @@ export {
 	KNOWN_SUBAGENT_IDS,
 	defaultRunInBackground,
 } from "./subagent-info.js";
+
+// GC-2026-boundary-subagent-control: re-export the control-tools
+// registration so consumers (and tests) can wire them up to a custom
+// pi extension without depending on the internal file path.
+export { registerSubagentControlTools } from "./subagent-control-tools.js";

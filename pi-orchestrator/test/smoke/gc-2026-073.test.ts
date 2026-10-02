@@ -95,19 +95,18 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		pi = new MockPi();
 	});
 
-	it("SMOKE-073-1: default export registers the orchestrator's own tools (goal_contract_create + workflow_run + 4 subagent_control)", async () => {
+	it("SMOKE-073-1: default export registers the orchestrator's own tools (goal_contract_create + workflow_run)", async () => {
 		const ext = await import("../../src/extension.js");
 		expect(typeof ext.default).toBe("function");
 		ext.default(pi as any);
 		const toolNames = [...pi.tools.keys()].sort();
-		// After GC-2026-workflow-run the orchestrator registers 2
-		// orchestrator tools + 4 subagent control tools = 6 entries.
+		// GC-2026-boundary-subagent-control: the 4 subagent control tools
+		// (subagent_status / steer / abort / resume) moved out of the
+		// orchestrator and into pi-subagents. The orchestrator's
+		// default export now only registers the two orchestrator-owned
+		// tools. Those 4 are covered by pi-subagents' own smoke test.
 		expect(toolNames).toEqual([
 			"goal_contract_create",
-			"subagent_abort",
-			"subagent_resume",
-			"subagent_status",
-			"subagent_steer",
 			"workflow_run",
 		]);
 	});
