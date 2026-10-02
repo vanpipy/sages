@@ -44,56 +44,41 @@ describe("template-loader", () => {
   });
 
   describe("loadPromptTemplate", () => {
-    it("loads subagent-developer.md", () => {
+    // GC-2026-path-B-swap: subagent-developer.md is preserved as a
+    // path-A-compat reference. The canonical Developer prompt now lives
+    // in pi-subagents/src/agent-prompts/developer.ts (with the new
+    // Fix Phase Behavior section); the task description is rendered
+    // inline by pi-tasks/src/phase-prompts.ts. This template now
+    // documents its own obsolescence rather than carrying task params.
+    it("loads subagent-developer.md (preserved as path-A-compat reference)", () => {
       const content = loadPromptTemplate("subagent-developer");
       expect(content).not.toBeNull();
-      // Carries ONLY task-specific data (identity lives in agent definition)
-      expect(content).toContain("{{task_id}}");
-      expect(content).toContain("{{sc_list}}");
-      expect(content).toContain("{{files_to_touch}}");
-      expect(content).toContain("{{acceptance_cmd}}");
-      expect(content).toContain("{{workspace_id}}");
-      expect(content).toContain("{{upstream_handoffs}}");
-      // GC-2026-028: developer namespace owns
-      //   - task-<task_id>-report.md  (developer-owned per-task report)
-      //   - handoff/<workspace_id>/<task_id>-handoff.md  (developer-owned handoff)
-      expect(content).toContain(
-        ".pi/orchestrator/task-{{task_id}}-report.md",
-      );
-      expect(content).toContain(
-        ".pi/orchestrator/handoff/{{workspace_id}}/{{task_id}}-handoff.md",
-      );
+      expect(content).toContain("GC-2026-path-B-swap");
+      expect(content).toContain("phase-prompts.ts");
+      expect(content).toContain("Fix Phase Behavior");
     });
 
-    it("loads subagent-merger.md with merge-specific task data", () => {
+    // GC-2026-path-B-swap: subagent-merger.md is preserved as a
+    // path-A-compat reference. The canonical Merger prompt now lives
+    // in pi-subagents/src/agent-prompts/merger.ts; the cross-workspace
+    // merge protocol is rendered inline. This template now documents
+    // its own obsolescence rather than carrying merge-specific params.
+    it("loads subagent-merger.md (preserved as path-A-compat reference)", () => {
       const content = loadPromptTemplate("subagent-merger");
       expect(content).not.toBeNull();
-      for (const field of [
-        "task_id",
-        "task_title",
-        "branch_a",
-        "branch_b",
-        "base_ref",
-        "sc_list",
-        "escalation_path",
-        "worktree_path_a",
-        "worktree_path_b",
-      ]) {
-        expect(content).toContain(`{{${field}}}`);
-      }
-      expect(content).toContain("## Verification on Merge Result");
-      expect(content).toContain("## Reporting");
-      expect(content).toContain(
-        ".pi/orchestrator/audit-merge-{{task_id}}.md",
-      );
+      expect(content).toContain("GC-2026-path-B-swap");
+      expect(content).toContain("phase-prompts.ts");
+      expect(content).toContain("mergePrompt");
     });
 
-    it("loads subagent-auditor.md (renamed from subagent-software-auditor in GC-2026-014)", () => {
+    it("returns null for the deleted subagent-auditor template", () => {
+      // GC-2026-rename-auditor: prompt rewritten to multi-dimensional
+      // review (correctness / completeness / scope / anti-goal /
+      // documentation). The Reviewer canonical prompt now lives in
+      // pi-subagents/src/agent-prompts/reviewer.ts; the template-loader
+      // entry was deleted.
       const content = loadPromptTemplate("subagent-auditor");
-      expect(content).not.toBeNull();
-      expect(content).toContain("{{task_id}}");
-      expect(content).toContain("{{depth}}");
-      expect(content).toContain("{{task_report_path}}");
+      expect(content).toBeNull();
     });
 
     it("does NOT load the legacy subagent-software-auditor key (renamed in GC-2026-014)", () => {
@@ -163,8 +148,8 @@ describe("template-loader", () => {
       };
       const templateNames = [
         "subagent-developer",
-        "subagent-auditor",
         "subagent-explore",
+        "subagent-merger",
       ];
       for (const name of templateNames) {
         const rendered = renderWith(name);
@@ -190,20 +175,11 @@ describe("template-loader", () => {
       expect(content).toContain("anti_goals");
     });
 
-    it("loads dag-tdd-refactor.yaml", () => {
-      const content = loadDagTemplate("dag-tdd-refactor");
-      expect(content).not.toBeNull();
-      expect(content).toContain("tasks:");
-      expect(content).toContain("batch: 1");
-      expect(content).toContain("task_template:");
-    });
-
-    it("loads dag-bug-fix.yaml", () => {
-      const content = loadDagTemplate("dag-bug-fix");
-      expect(content).not.toBeNull();
-      expect(content).toContain("batch: 2");
-      expect(content).toContain("tdd: strict");
-    });
+    // GC-2026-path-B-swap: the dag/ directory was deleted — path B uses
+    // workflow_run (no DAG template). listTemplates("dag") now returns
+    // []; the per-file load tests are removed.
+    it.skip("loads dag-tdd-refactor.yaml (removed by GC-2026-path-B-swap)", () => {});
+    it.skip("loads dag-bug-fix.yaml (removed by GC-2026-path-B-swap)", () => {});
 
     it("returns null for response templates (removed in v2 — patterns inlined in SKILL.md)", () => {
       // Response templates were removed: prompts/ are the only file-based templates now.
@@ -268,7 +244,16 @@ describe("template-loader", () => {
   });
 
   describe("renderTaskPrompt", () => {
-    it("renders a developer task prompt with params", () => {
+    // GC-2026-path-B-swap: renderTaskPrompt is the path A mechanism.
+    // Path B builds the task prompt inline in
+    // `pi-tasks/src/phase-prompts.ts` and passes it as the task
+    // description. The two renderTaskPrompt cases below are kept as
+    // smoke tests for the template-loader machinery; new code should
+    // not depend on them.
+    it("renders a developer task prompt with params (path A compat)", () => {
+      // subagent-developer.md is now a path-A-compat reference doc.
+      // renderTaskPrompt returns its content (no template vars) regardless
+      // of params. Verify it loads and references the path B hand-off.
       const out = renderTaskPrompt("subagent-developer", {
         task_id: "P4",
         task_title: "Implement UserRepository",
@@ -278,28 +263,15 @@ describe("template-loader", () => {
         acceptance_cmd: "npm test",
       });
       expect(out).not.toBeNull();
-      // Task-specific content rendered correctly
-      expect(out).toContain("**ID**: P4");
-      expect(out).toContain("Implement UserRepository");
-      expect(out).toContain("- SC1: typecheck passes");
-      expect(out).toContain("src/auth/repository/UserRepository.ts");
-      expect(out).toContain("npm test");
+      expect(out).toContain("GC-2026-path-B-swap");
+      expect(out).toContain("phase-prompts.ts");
     });
 
-    it("renders auditor prompt with audit-specific data", () => {
-      const out = renderTaskPrompt("subagent-auditor", {
-        task_id: "P7",
-        task_title: "Audit refactor",
-        sc_list: "- SC1: refactor complete",
-        depth: "full",
-        task_report_path: ".pi/orchestrator/task-P7-report.md",
-        isolation: "none",
-      });
-      expect(out).not.toBeNull();
-      expect(out).toContain("**ID**: P7");
-      expect(out).toContain("**Depth**: full");
-      expect(out).toContain("**Audited Isolation**: none");
-      expect(out).toContain("task-P7-report.md");
+    // Auditor template was deleted (renamed to Reviewer). The
+    // renderTaskPrompt call should return null now.
+    it("returns null for the deleted subagent-auditor template", () => {
+      const out = renderTaskPrompt("subagent-auditor", { task_id: "P7" });
+      expect(out).toBeNull();
     });
 
     it("returns null for unknown template name", () => {
@@ -309,20 +281,21 @@ describe("template-loader", () => {
   });
 
   describe("listTemplates", () => {
-    it("returns the 4 known prompt templates (general-purpose removed in Phase C)", () => {
+    // GC-2026-path-B-swap: subagent-auditor.md was deleted (renamed
+    // to Reviewer; canonical prompt lives in
+    // pi-subagents/src/agent-prompts/reviewer.ts). The remaining
+    // 3 templates are path-A-shape but still loadable for legacy
+    // template-loader callers.
+    it("returns the 3 remaining path-A-compat prompt templates", () => {
       const names = listTemplates("prompts");
       expect(names).toContain("subagent-developer");
-      expect(names).toContain("subagent-auditor");
       expect(names).toContain("subagent-explore");
       expect(names).toContain("subagent-merger");
-      // general-purpose was removed in DAG-2026-011 Phase C — its
-      // template file is gone, the schema entry is gone. The subagent
-      // itself is no longer in `pi-subagents/src/default-agents.ts`.
+      expect(names).not.toContain("subagent-auditor");
       expect(names).not.toContain("subagent-general-purpose");
-      // The Phase A / Phase B aliases were removed in GC-2026-014.
       expect(names).not.toContain("subagent-software-developer");
       expect(names).not.toContain("subagent-software-auditor");
-      expect(names.length).toBe(4);
+      expect(names.length).toBe(3);
     });
 
     it("returns the 4 known goal templates", () => {
@@ -333,10 +306,11 @@ describe("template-loader", () => {
       expect(names).toContain("goal-add-tests");
     });
 
-    it("returns the 2 known dag templates", () => {
+    // GC-2026-path-B-swap: the dag/ directory was deleted. Path B uses
+    // workflow_run, not a DAG template. listTemplates("dag") returns [].
+    it("returns no dag templates (path B uses workflow_run, no DAG)", () => {
       const names = listTemplates("dag");
-      expect(names).toContain("dag-tdd-refactor");
-      expect(names).toContain("dag-bug-fix");
+      expect(names).toEqual([]);
     });
 
     it("returns empty for responses (templates/responses/ removed in v2)", () => {

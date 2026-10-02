@@ -1,62 +1,47 @@
-# Goal Template: fix-bug
+# Goal Template: fix-bug (path B)
 #
-# Use when: user reports a bug with reproduction steps
+# Reproduce + fix a specific bug. Use this when the user has a clear
+# repro or stack trace and wants a regression test + fix.
+#
+# The path B goal contract uses `done_definition` (one sentence)
+# instead of path A's `success_criteria[]` + `verification_cmd`.
+# The Reviewer reads `done_definition` directly and judges against it.
+#
+# Copy this template, fill in the bracketed `[...]` placeholders, and
+# pass to `goal_contract_create`. Then `workflow_run(goal_path)`
+# drives the 5-phase pipeline (Implement → Review ⇆ Fix → Merge).
+#
+# Example fields filled in:
+#   id: "GC-2026-152"
+#   title: "Fix NPE on empty user list"
 
-id: GC-{date}-{short}
-title: "Fix [bug summary, ≤120 chars]"
+id: "GC-[YYYY-NNN]"
+title: "[≤120 char title describing the bug]"
 rationale: |
-  [what the user observed + business impact]
-
-success_criteria:
-  - id: SC1
-    criterion: "Reproduction test fails BEFORE the fix and passes AFTER (RED → GREEN)"
-    verification_cmd: "npm test -- --grep '[reproduction test name]'"
-  - id: SC2
-    criterion: "All existing tests still pass (no regression)"
-    verification_cmd: "npm test 2>&1 | tail -5"
-  - id: SC3
-    criterion: "Root cause identified and documented in code comment or commit message"
-    verification_cmd: "git log --format='%B' -1 | grep -i 'root cause\\|fixes #'"
-  - id: SC4
-    criterion: "Edge cases nearby covered by additional tests"
-    verification_cmd: "npm test -- --grep '[bug area]'"
-  - id: SC5
-    criterion: "Typecheck + lint pass"
-    verification_cmd: "npm run typecheck && npm run lint"
+  Bug repro:
+  - input: [minimal failing input]
+  - observed: [current behavior]
+  - expected: [correct behavior]
 
 anti_goals:
-  - "Do not 'fix' by suppressing the symptom (e.g. catching and ignoring)"
-  - "Do not change unrelated modules"
-  - "Do not add new dependencies for the fix"
-  - "Do not skip writing the reproduction test (RED is non-negotiable)"
+  - "no unrelated refactors"
+  - "no dependency upgrades"
 
 scope:
   include:
-    - "[file/area with bug]"
-    - "[test file for reproduction]"
+    - "src/[module]/[file].ts"     # primary fix site
+    - "test/[module]/[file].test.ts"  # regression test
   exclude:
-    - "[unrelated areas]"
+    - "src/[unrelated]/"
 
 constraints:
   must_use_existing_patterns: true
   max_dependency_additions: 0
-  test_coverage_min: 80
+  test_coverage_min: 90
   typecheck_required: true
   lint_required: true
 
 done_definition: |
-  Reproduction test exists + SC1-SC5 verified + bug verified fixed (manual if needed)
-
-parallelism_notes: |
-  # Background-default for implement + audit (verified 2026-07-24).
-  #
-  # Even in a small bug-fix flow (3 batches), the implement step
-  # (RED reproduction + GREEN fix) and the audit step are long enough
-  # to be worth backgrounding — see pi-orchestrator/skills/orchestrator/SKILL.md.
-  phases:
-    - id: explore
-      run_in_background: false
-    - id: implement
-      run_in_background: true
-    - id: audit
-      run_in_background: true
+  Regression test `test/[module]/[file].test.ts` fails on `main` (no
+  fix) and passes on the fix branch; existing test suite still passes;
+  no unrelated test or production code changes outside the listed scope.

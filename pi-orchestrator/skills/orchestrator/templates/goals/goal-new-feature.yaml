@@ -1,73 +1,46 @@
-# Goal Template: new-feature
+# Goal Template: new-feature (path B)
 #
-# Use when: user asks to add a new feature / endpoint / module
+# Add a new module / endpoint / export. Use this when the user wants
+# new behavior added to the codebase (not just a refactor or bug
+# fix).
+#
+# The path B goal contract uses `done_definition` (one sentence)
+# instead of path A's `success_criteria[]` + `verification_cmd`.
+# The Reviewer reads `done_definition` directly and judges against it.
+#
+# Copy this template, fill in the bracketed `[...]` placeholders, and
+# pass to `goal_contract_create`. Then `workflow_run(goal_path)`
+# drives the 5-phase pipeline (Implement → Review ⇆ Fix → Merge).
+#
+# Example fields filled in:
+#   id: "GC-2026-153"
+#   title: "Add /api/v2/auth/refresh endpoint"
 
-id: GC-{date}-{short}
-title: "Add [feature name] — [brief scope, ≤120 chars]"
-rationale: |
-  [user-facing value + business context]
-
-success_criteria:
-  - id: SC1
-    criterion: "New [endpoint/module] exists at [path] and exposes [signature]"
-    verification_cmd: "[file exists check] && grep -E '[expected export]' [path]"
-  - id: SC2
-    criterion: "Happy-path unit tests cover the new [endpoint/module]"
-    verification_cmd: "npm test -- --grep '[feature name]'"
-  - id: SC3
-    criterion: "Error paths covered (validation failure, dependency failure, auth failure)"
-    verification_cmd: "npm test -- --grep '[feature name].error'"
-  - id: SC4
-    criterion: "Typecheck and lint pass with no new warnings"
-    verification_cmd: "npm run typecheck && npm run lint"
-  - id: SC5
-    criterion: "Integration with existing [system] verified end-to-end"
-    verification_cmd: "[project integration test command]"
+id: "GC-[YYYY-NNN]"
+title: "[≤120 char title for the new feature]"
+rationale: "[why this feature is needed; what user problem it solves]"
 
 anti_goals:
-  - "Do not break existing [API/module] behavior"
-  - "Do not introduce hardcoded test fixtures"
-  - "Do not skip error handling for the 'easy' path"
-  - "Do not change unrelated modules"
+  - "no breaking changes to existing public API"
+  - "no new external dependencies"
 
 scope:
   include:
-    - "[path/to/new/module/]"
-    - "[path/to/new/tests/]"
-    - "[integration points]"
+    - "src/[module]/[new-file].ts"
+    - "src/[module]/index.ts"     # re-exports
+    - "test/[module]/[new-file].test.ts"
   exclude:
-    - "[unrelated modules]"
+    - "src/[unrelated]/"
 
 constraints:
   must_use_existing_patterns: true
-  max_dependency_additions: [0 or N — depends on feature]
-  test_coverage_min: 80
+  max_dependency_additions: 0
+  test_coverage_min: 90
   typecheck_required: true
   lint_required: true
 
 done_definition: |
-  All SC1-SC5 verified + audit PASS ≥ 90 + user-facing behavior documented
-
-parallelism_notes: |
-  # Background-default for implement + audit (verified 2026-07-24).
-  #
-  # "Implementation" (developer) and "audit" (auditor)
-  # are long-running, high-latency phases. The orchestrator MUST spawn
-  # them with `run_in_background: true` so the parent agent can
-  # continue work (e.g. review other diffs, run steer_subagent) while
-  # the subagent runs. Without this, the orchestrator's main context
-  # is blocked for the entire implementation + audit duration.
-  #
-  # Frontend phases (Explore / Plan) remain foreground — they are
-  # short, dependency-ordered, and their result feeds directly into
-  # the next batch's prompt. See pi-orchestrator/skills/orchestrator/SKILL.md for the
-  # full rule and rationale.
-  phases:
-    - id: explore
-      run_in_background: false
-    - id: plan
-      run_in_background: false
-    - id: implement
-      run_in_background: true
-    - id: audit
-      run_in_background: true
+  `[module]/[new-file].ts` exports `[function/class] [Name]` with the
+  signature documented in `docs/api/[feature].md`; called from
+  `[caller]` (or registered in `[route file]`); behavior verified by
+  the integration test in `test/[module]/[new-file].integration.test.ts`.
