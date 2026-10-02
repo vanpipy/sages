@@ -4,7 +4,7 @@
  * Pins the Agent boundary's contract around the managed-worktree domain:
  *
  *   1. The JSON schema for the Agent tool's `isolation` field accepts an
- *      explicit worktree object — `{ dag_id, task_id, worktree_id?, mode }`
+ *      explicit worktree object — `{ goal_id, task_id, worktree_id?, mode }`
  *      — and rejects the legacy `"worktree"` string literal with a precise
  *      error message that names the missing fields, BEFORE any child agent
  *      runs. Never falls back to the legacy /tmp-backed ephemeral worktree.
@@ -166,11 +166,11 @@ afterEach(() => {
 describe("agent-worktree-contract: parseManagedWorktreeRequest", () => {
 	it("parses the canonical request shape", () => {
 		const req = parseManagedWorktreeRequest({
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 		});
-		expect(req.dag_id).toBe("GC-2026-008");
+		expect(req.goal_id).toBe("GC-2026-008");
 		expect(req.task_id).toBe("P1");
 		expect(req.mode).toBe("create");
 	});
@@ -182,12 +182,12 @@ describe("agent-worktree-contract: parseManagedWorktreeRequest", () => {
 		expect(() => parseManagedWorktreeRequest("worktree")).toThrow(
 			/explicit worktree object/i,
 		);
-		expect(() => parseManagedWorktreeRequest("worktree")).toThrow(/dag_id/);
+		expect(() => parseManagedWorktreeRequest("worktree")).toThrow(/goal_id/);
 	});
 
 	it("accepts mode='reuse' and forwards worktree_id", () => {
 		const req = parseManagedWorktreeRequest({
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			worktree_id: "wt-2",
 			mode: "reuse",
@@ -199,7 +199,7 @@ describe("agent-worktree-contract: parseManagedWorktreeRequest", () => {
 	it("rejects unknown mode", () => {
 		expect(() =>
 			parseManagedWorktreeRequest({
-				dag_id: "GC-2026-008",
+				goal_id: "GC-2026-008",
 				task_id: "P1",
 				mode: "dup" as any,
 			}),
@@ -211,10 +211,10 @@ describe("agent-worktree-contract: parseManagedWorktreeRequest", () => {
 			parseManagedWorktreeRequest({ task_id: "P1", mode: "create" }),
 		).toThrow();
 		expect(() =>
-			parseManagedWorktreeRequest({ dag_id: "GC-2026-008", mode: "create" }),
+			parseManagedWorktreeRequest({ goal_id: "GC-2026-008", mode: "create" }),
 		).toThrow();
 		expect(() =>
-			parseManagedWorktreeRequest({ dag_id: "GC-2026-008", task_id: "P1" }),
+			parseManagedWorktreeRequest({ goal_id: "GC-2026-008", task_id: "P1" }),
 		).toThrow();
 	});
 });
@@ -224,7 +224,7 @@ describe("agent-worktree-contract: validateManagedWorktreeRequest", () => {
 		expect(() =>
 			validateManagedWorktreeRequest(
 				parseManagedWorktreeRequest({
-					dag_id: "GC-2026-008",
+					goal_id: "GC-2026-008",
 					task_id: "P1",
 					mode: "create",
 				}),
@@ -237,7 +237,7 @@ describe("agent-worktree-contract: validateManagedWorktreeRequest", () => {
 		expect(() =>
 			validateManagedWorktreeRequest(
 				parseManagedWorktreeRequest({
-					dag_id: "../escape",
+					goal_id: "../escape",
 					task_id: "P1",
 					mode: "create",
 				}),
@@ -267,8 +267,10 @@ describe("agent-worktree-contract: the runtime request type is a single source o
 	it("MANAGED_WORKTREE_REQUEST_TYPE describes the schema the Agent tool exposes", () => {
 		expect(MANAGED_WORKTREE_REQUEST_TYPE.type).toBe("object");
 		expect(MANAGED_WORKTREE_REQUEST_TYPE.required).toEqual(
-			expect.arrayContaining(["dag_id", "task_id", "mode"]),
+			expect.arrayContaining(["task_id", "mode"]),
 		);
+		expect(MANAGED_WORKTREE_REQUEST_TYPE.required).not.toContain("goal_id");
+		expect(MANAGED_WORKTREE_REQUEST_TYPE.required).not.toContain("goal_id");
 		expect(MANAGED_WORKTREE_REQUEST_TYPE.required).not.toContain("worktree_id");
 	});
 });
@@ -309,14 +311,14 @@ describe("agent-worktree-contract: worktree lease", () => {
 		expect(() =>
 			releaseManagedWorktreeLease({
 				token: "no-such-token-12345",
-				dag: "x",
+				goalId: "x",
 				worktree: "y",
 			} as any),
 		).not.toThrow();
 		expect(
 			releaseManagedWorktreeLease({
 				token: "no-such-token-12345",
-				dag: "x",
+				goalId: "x",
 				worktree: "y",
 			} as any),
 		).toBe(false);
@@ -347,7 +349,7 @@ describe("agent-worktree-contract: deleteManagedWorktree (host-owned release)", 
 
 	it("removes the worktree path, the marker, and (when requested) the branch", async () => {
 		const wt: ManagedWorktreeRequest = {
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 		};
@@ -387,7 +389,7 @@ describe("agent-worktree-contract: deleteManagedWorktree (host-owned release)", 
 
 		const result = manager.releaseManagedWorktree({
 			repoRoot: fx.root,
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			deleteBranch: true,
 		});
@@ -403,7 +405,7 @@ describe("agent-worktree-contract: deleteManagedWorktree (host-owned release)", 
 
 	it("preserves the branch when deleteBranch is not requested", async () => {
 		const wt: ManagedWorktreeRequest = {
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 		};
@@ -423,7 +425,7 @@ describe("agent-worktree-contract: deleteManagedWorktree (host-owned release)", 
 		await new Promise((r) => setImmediate(r));
 		const result = manager.releaseManagedWorktree({
 			repoRoot: fx.root,
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 		});
 		expect(result.removed).toBe(true);
@@ -469,7 +471,7 @@ describe("agent-worktree-contract: deleteManagedWorktree (host-owned release)", 
 
 	it("the workspacePath passed to runAgent is the managed worktree path exactly", async () => {
 		const wt: ManagedWorktreeRequest = {
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 		};
@@ -513,7 +515,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 	it("two sequential spawns of the same (dag, task_id) reuse a single worktree when mode='reuse'", async () => {
 		const manager = new AgentManager();
 		const createReq: ManagedWorktreeRequest = {
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 		};
@@ -534,7 +536,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 		const pathA = recA.managedWorktree!.path;
 
 		const reuseReq: ManagedWorktreeRequest = {
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			worktree_id: undefined,
 			mode: "reuse",
@@ -569,7 +571,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 			{
 				description: "handoff",
 				managedWorktree: {
-					dag_id: "GC-2026-008",
+					goal_id: "GC-2026-008",
 					task_id: "P1",
 					mode: "create",
 				},
@@ -608,7 +610,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 			{
 				description: "bg",
 				managedWorktree: {
-					dag_id: "GC-2026-008",
+					goal_id: "GC-2026-008",
 					task_id: "P1",
 					mode: "create",
 				},
@@ -644,7 +646,7 @@ describe("agent-worktree-contract: identity preservation", () => {
 			{
 				description: "abort-me",
 				managedWorktree: {
-					dag_id: "GC-2026-008",
+					goal_id: "GC-2026-008",
 					task_id: "P1",
 					mode: "create",
 				},
@@ -696,7 +698,7 @@ describe("agent-worktree-contract: handoff shape is JSON-stringifiable", () => {
 			{
 				description: "rt",
 				managedWorktree: {
-					dag_id: "GC-2026-008",
+					goal_id: "GC-2026-008",
 					task_id: "P1",
 					mode: "create",
 				},
@@ -729,8 +731,10 @@ describe("agent-worktree-contract: P2 — base_ref field in the request", () => 
 	it("MANAGED_WORKTREE_REQUEST_TYPE does NOT require base_ref (it's optional)", () => {
 		const required = MANAGED_WORKTREE_REQUEST_TYPE.required ?? [];
 		expect(required).toEqual(
-			expect.arrayContaining(["dag_id", "task_id", "mode"]),
+			expect.arrayContaining(["task_id", "mode"]),
 		);
+		expect(required).not.toContain("goal_id");
+		expect(required).not.toContain("goal_id");
 		expect(required).not.toContain("base_ref");
 		expect(required).not.toContain("worktree_id");
 	});
@@ -748,7 +752,7 @@ describe("agent-worktree-contract: P2 — base_ref field in the request", () => 
 
 	it("parseManagedWorktreeRequest omits base_ref when caller does not supply it", () => {
 		const parsed = parseManagedWorktreeRequest({
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 		});
@@ -757,7 +761,7 @@ describe("agent-worktree-contract: P2 — base_ref field in the request", () => 
 
 	it("parseManagedWorktreeRequest preserves a valid base_ref verbatim", () => {
 		const parsed = parseManagedWorktreeRequest({
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 			base_ref: "feature/x",
@@ -767,7 +771,7 @@ describe("agent-worktree-contract: P2 — base_ref field in the request", () => 
 
 	it("parseManagedWorktreeRequest accepts origin/<branch> refs", () => {
 		const parsed = parseManagedWorktreeRequest({
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 			base_ref: "origin/feature/x",
@@ -777,7 +781,7 @@ describe("agent-worktree-contract: P2 — base_ref field in the request", () => 
 
 	it("parseManagedWorktreeRequest accepts tag-like refs with dots", () => {
 		const parsed = parseManagedWorktreeRequest({
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 			base_ref: "v1.2.3",
@@ -788,7 +792,7 @@ describe("agent-worktree-contract: P2 — base_ref field in the request", () => 
 	it("parseManagedWorktreeRequest rejects non-string base_ref", () => {
 		expect(() =>
 			parseManagedWorktreeRequest({
-				dag_id: "GC-2026-008",
+				goal_id: "GC-2026-008",
 				task_id: "P1",
 				mode: "create",
 				base_ref: 42,
@@ -796,7 +800,7 @@ describe("agent-worktree-contract: P2 — base_ref field in the request", () => 
 		).toThrow(/base_ref/);
 		expect(() =>
 			parseManagedWorktreeRequest({
-				dag_id: "GC-2026-008",
+				goal_id: "GC-2026-008",
 				task_id: "P1",
 				mode: "create",
 				base_ref: null,
@@ -807,7 +811,7 @@ describe("agent-worktree-contract: P2 — base_ref field in the request", () => 
 	it("parseManagedWorktreeRequest rejects empty-string base_ref", () => {
 		expect(() =>
 			parseManagedWorktreeRequest({
-				dag_id: "GC-2026-008",
+				goal_id: "GC-2026-008",
 				task_id: "P1",
 				mode: "create",
 				base_ref: "",
@@ -823,7 +827,7 @@ describe("agent-worktree-contract: P2 — base_ref field in the request", () => 
 		// separation here so a future contributor doesn't "promote" the
 		// regex into the parser and lose the rich error messages.
 		const parsed = parseManagedWorktreeRequest({
-			dag_id: "GC-2026-008",
+			goal_id: "GC-2026-008",
 			task_id: "P1",
 			mode: "create",
 			base_ref: "../escape",

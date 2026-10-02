@@ -27,7 +27,7 @@ function fixtureRepo(name: string): string {
 
 function writeLease(
 	repoRoot: string,
-	consumer: { dagId: string; taskId: string; worktreeId?: string },
+	consumer: { goalId: string; taskId: string; worktreeId?: string },
 	heartbeatAt = Date.now(),
 ): string {
 	const lease = {
@@ -59,14 +59,14 @@ describe("worktree lease concurrency gate", () => {
 	});
 
 	test("refuses a new lease when live count reaches the cap and names owners", async () => {
-		writeLease(repoRoot, { dagId: "DAG", taskId: "T1" });
-		writeLease(repoRoot, { dagId: "DAG", taskId: "T2" });
-		writeLease(repoRoot, { dagId: "DAG", taskId: "T3" });
+		writeLease(repoRoot, { goalId: "DAG", taskId: "T1" });
+		writeLease(repoRoot, { goalId: "DAG", taskId: "T2" });
+		writeLease(repoRoot, { goalId: "DAG", taskId: "T3" });
 
 		await expect(
 			claimWorktreeLease({
 				repoRoot,
-				consumer: { dagId: "DAG", taskId: "T4" },
+				consumer: { goalId: "DAG", taskId: "T4" },
 				cap: 3,
 				gateEnabled: true,
 			}),
@@ -74,7 +74,7 @@ describe("worktree lease concurrency gate", () => {
 		await expect(
 			claimWorktreeLease({
 				repoRoot,
-				consumer: { dagId: "DAG", taskId: "T4" },
+				consumer: { goalId: "DAG", taskId: "T4" },
 				cap: 3,
 				gateEnabled: true,
 			}),
@@ -82,7 +82,7 @@ describe("worktree lease concurrency gate", () => {
 	});
 
 	test("reuses a live lease for the same consumer idempotently", async () => {
-		const consumer = { dagId: "DAG", taskId: "T1", worktreeId: "slot" };
+		const consumer = { goalId: "DAG", taskId: "T1", worktreeId: "slot" };
 		const first = await claimWorktreeLease({
 			repoRoot,
 			consumer,
@@ -105,7 +105,7 @@ describe("worktree lease concurrency gate", () => {
 
 	test("canonicalizes a symlinked repository root for lease identity", async () => {
 		const alias = `${repoRoot}-alias`;
-		const consumer = { dagId: "DAG", taskId: "T1" };
+		const consumer = { goalId: "DAG", taskId: "T1" };
 		try {
 			// The fixture directory contains a .git marker and is sufficient for
 			// lease storage; a symlink exercises the canonical repo comparison.
@@ -132,10 +132,10 @@ describe("worktree lease concurrency gate", () => {
 	});
 
 	test("cap zero disables the gate even when enabled", async () => {
-		writeLease(repoRoot, { dagId: "DAG", taskId: "T1" });
+		writeLease(repoRoot, { goalId: "DAG", taskId: "T1" });
 		const lease = await claimWorktreeLease({
 			repoRoot,
-			consumer: { dagId: "DAG", taskId: "T2" },
+			consumer: { goalId: "DAG", taskId: "T2" },
 			cap: 0,
 			gateEnabled: true,
 		});
@@ -151,14 +151,14 @@ describe("worktree lease concurrency gate", () => {
 
 		await claimWorktreeLease({
 			repoRoot,
-			consumer: { dagId: "DAG", taskId: "T1" },
+			consumer: { goalId: "DAG", taskId: "T1" },
 			cap: 0,
 			gateEnabled: true,
 			bypass: true,
 		});
 		await claimWorktreeLease({
 			repoRoot,
-			consumer: { dagId: "DAG", taskId: "T2" },
+			consumer: { goalId: "DAG", taskId: "T2" },
 			cap: 0,
 			gateEnabled: true,
 			bypass: true,
@@ -176,11 +176,11 @@ describe("worktree lease concurrency gate", () => {
 test("leasePath uses the canonical identity hash", () => {
 	const repoRoot = fixtureRepo("hash");
 	try {
-		const consumer = { dagId: "DAG", taskId: "T1", worktreeId: "W1" };
+		const consumer = { goalId: "DAG", taskId: "T1", worktreeId: "W1" };
 		const canonical = repoRoot;
 		const expectedHash = createHash("sha256")
 			.update(
-				canonical + consumer.dagId + consumer.taskId + consumer.worktreeId,
+				canonical + consumer.goalId + consumer.taskId + consumer.worktreeId,
 			)
 			.digest("hex");
 		expect(leasePath(repoRoot, consumer)).toBe(

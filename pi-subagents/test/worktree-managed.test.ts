@@ -118,7 +118,7 @@ describe("worktree-managed: create from origin/main", () => {
 	it("provisions worktree at <repo>/.pi/worktree/<dag>/<worktree> with base = origin/main", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		expect(wt.path).toBe(join(fx.root, ".pi/worktree/GC-2026-008/P1"));
@@ -145,7 +145,7 @@ describe("worktree-managed: create from origin/main", () => {
 		const newSha = runGitPushAdvance(fx);
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		expect(wt.baseSha).toBe(newSha);
@@ -222,7 +222,7 @@ describe("worktree-managed: no fallback (stricter than the upstream Agent-isolat
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 				// fetch: false — otherwise the push above would re-import
 				//          origin/main via the `initial-non-main` push. (Actually
@@ -240,7 +240,7 @@ describe("worktree-managed: no fallback (stricter than the upstream Agent-isolat
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: empty,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 			}),
 		).toThrow();
@@ -254,7 +254,7 @@ describe("worktree-managed: no fallback (stricter than the upstream Agent-isolat
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.remote,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 			}),
 		).toThrow();
@@ -383,7 +383,7 @@ describe("worktree-managed: create with explicit base_ref (P2)", () => {
 	it("explicit base_ref 'origin/main' produces baseRef='origin/main' (same as default)", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			base_ref: "origin/main",
 		});
@@ -403,7 +403,7 @@ describe("worktree-managed: create with explicit base_ref (P2)", () => {
 
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			base_ref: "feature/local",
 		});
@@ -432,7 +432,7 @@ describe("worktree-managed: create with explicit base_ref (P2)", () => {
 
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			base_ref: "origin/feature/published",
 		});
@@ -445,7 +445,7 @@ describe("worktree-managed: create with explicit base_ref (P2)", () => {
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 				base_ref: "../etc/passwd",
 			}),
@@ -457,7 +457,7 @@ describe("worktree-managed: create with explicit base_ref (P2)", () => {
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 				base_ref: "does/not/exist",
 			}),
@@ -485,7 +485,7 @@ describe("worktree-managed: marker schema v2 (P2)", () => {
 		const { readManagedWorktreeMarker } = await import("../src/worktree.js");
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			base_ref: "origin/main",
 		});
@@ -512,7 +512,7 @@ describe("worktree-managed: marker schema v2 (P2)", () => {
 			JSON.stringify({
 				schema: 1,
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 				path: "/tmp/fake",
 				branch: "sages/GC-2026-008/P1",

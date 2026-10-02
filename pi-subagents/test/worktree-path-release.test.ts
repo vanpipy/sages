@@ -44,7 +44,7 @@ describe("worktree-path-release: containment", () => {
 		// Provision through the identity helper so a real worktree exists.
 		createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-028",
+			goalId: "GC-2026-028",
 			worktree: "P1",
 		});
 		const contained = join(fx.root, ".pi", "worktree", "GC-2026-028", "P1");

@@ -320,11 +320,15 @@ export function pruneWorktrees(cwd: string): void {
 /**
  * Identifier components for a managed worktree. Both must pass
  * {@link validateIdentity} before any on-disk operation runs.
+ *
+ * GC-2026-path-B-field-renames: `dag` was renamed to `goalId` for
+ * path-B semantic clarity. The path format
+ * `<repoRoot>/.pi/worktree/<goalId>/<worktree>` is unchanged.
  */
 export interface ManagedWorktreeIdentity {
-	/** Goal / DAG id, e.g. `GC-2026-008`. */
-	dag: string;
-	/** Task / worktree id within the DAG, e.g. `P1`. */
+	/** Goal id, e.g. `GC-2026-008`. */
+	goalId: string;
+	/** Task / worktree id within the goal, e.g. `P1`. */
 	worktree: string;
 }
 
@@ -523,11 +527,11 @@ export const MANAGED_WORKTREE_MARKER = ".pi-worktree.json";
  */
 export function markerPath(
 	repoRoot: string,
-	dag: string,
+	goalId: string,
 	worktree: string,
 ): string {
-	validateIdentity(dag, worktree);
-	return join(repoRoot, ".pi", "worktree-state", dag, `${worktree}.json`);
+	validateIdentity(goalId, worktree);
+	return join(repoRoot, ".pi", "worktree-state", goalId, `${worktree}.json`);
 }
 
 /**
@@ -545,7 +549,7 @@ export function markerPath(
 export interface ManagedWorktreeMarker {
 	schema: 1 | 2;
 	repoRoot: string;
-	dag: string;
+	goalId: string;
 	worktree: string;
 	path: string; // absolute worktree path (informational)
 	branch: string;
@@ -558,7 +562,7 @@ export interface ManagedWorktreeMarker {
 	createdAt: number; // epoch ms
 }
 
-/** Read the marker for a given (repoRoot, dag, worktree) tuple, else null.
+/** Read the marker for a given (repoRoot, goalId, worktree) tuple, else null.
  *
  * Returns null if any component of the marker path doesn't resolve or the
  * JSON is missing/invalid. Callers must never silently fall back — a missing
@@ -571,10 +575,10 @@ export interface ManagedWorktreeMarker {
  * reuse contract's `baseRef` comparison works uniformly across versions. */
 export function readManagedWorktreeMarker(
 	repoRoot: string,
-	dag: string,
+	goalId: string,
 	worktree: string,
 ): ManagedWorktreeMarker | null {
-	const fp = markerPath(repoRoot, dag, worktree);
+	const fp = markerPath(repoRoot, goalId, worktree);
 	if (!existsSync(fp)) return null;
 	try {
 		const raw = readFileSync(fp, "utf8");
@@ -598,7 +602,7 @@ export function readManagedWorktreeMarker(
 }
 
 function writeManagedWorktreeMarker(marker: ManagedWorktreeMarker): void {
-	const fp = markerPath(marker.repoRoot, marker.dag, marker.worktree);
+	const fp = markerPath(marker.repoRoot, marker.goalId, marker.worktree);
 	// The marker lives at `<repoRoot>/.pi/worktree-state/<dag>/<worktree>.json`;
 	// the intermediate directories are repo-level state and are NOT created by
 	// `git worktree add`. Create them on demand so the first provision on a
@@ -610,10 +614,10 @@ function writeManagedWorktreeMarker(marker: ManagedWorktreeMarker): void {
 /** Remove the marker for a managed worktree. Idempotent. */
 export function deleteManagedWorktreeMarker(
 	repoRoot: string,
-	dag: string,
+	goalId: string,
 	worktree: string,
 ): void {
-	const fp = markerPath(repoRoot, dag, worktree);
+	const fp = markerPath(repoRoot, goalId, worktree);
 	try {
 		if (existsSync(fp)) {
 			unlinkSync(fp);
@@ -623,10 +627,11 @@ export function deleteManagedWorktreeMarker(
 	}
 }
 
-/** Validate the `(dag, worktree)` tuple. Throws on any structural problem. */
-export function validateIdentity(dag: string, worktree: string): void {
+/** Validate the `(goalId, worktree)` tuple. Throws on any structural problem. */
+export function validateIdentity(goalId: string,
+	worktree: string): void {
 	for (const [name, value] of [
-		["dag", dag],
+		["goalId", goalId],
 		["worktree", worktree],
 	] as const) {
 		if (typeof value !== "string") {
@@ -658,7 +663,7 @@ export function validateIdentity(dag: string, worktree: string): void {
 export interface ManagedWorktree extends ManagedWorktreeIdentity {
 	/** Absolute path to the on-disk worktree, after realpath normalization. */
 	path: string;
-	/** Branch checked out in the worktree. Always `sages/<dag>/<worktree>`. */
+	/** Branch checked out in the worktree. Always `sages/<goalId>/<worktree>`. */
 	branch: string;
 	/** sha of the commit the worktree was provisioned from (pinned at first provision). */
 	baseSha: string;
@@ -671,7 +676,7 @@ export interface ManagedWorktree extends ManagedWorktreeIdentity {
 	 * remote-tracking when the caller explicitly asks for a remote ref.
 	 */
 	baseRef: string;
-	/** Repo root hosting `.pi/worktree/<dag>/<worktree>`. */
+	/** Repo root hosting `.pi/worktree/<goalId>/<worktree>`. */
 	repoRoot: string;
 	/** True when the helper re-entered an existing managed worktree. */
 	reused: boolean;
@@ -759,10 +764,10 @@ export interface ManagedWorktreeReleaseResult {
  */
 export function worktreePath(
 	repoRoot: string,
-	dag: string,
+	goalId: string,
 	worktree: string,
 ): string {
-	validateIdentity(dag, worktree);
+	validateIdentity(goalId, worktree);
 	let realRoot: string;
 	try {
 		realRoot = realpathSync(repoRoot);
@@ -773,7 +778,7 @@ export function worktreePath(
 			throw err;
 		}
 	}
-	const candidate = normalize(join(realRoot, ".pi", "worktree", dag, worktree));
+	const candidate = normalize(join(realRoot, ".pi", "worktree", goalId, worktree));
 	// Containment: `<candidate>` must live under `<realRoot>/`. Symlink-aware.
 	const rel = relative(realRoot, candidate);
 	if (rel === "" || rel.startsWith("..") || rel.startsWith(sep)) {
@@ -784,10 +789,10 @@ export function worktreePath(
 	return candidate;
 }
 
-/** The branch carried by every managed worktree: `sages/<dag>/<worktree>`. */
-export function branchName(dag: string, worktree: string): string {
-	validateIdentity(dag, worktree);
-	return `sages/${dag}/${worktree}`;
+/** The branch carried by every managed worktree: `sages/<goalId>/<worktree>`. */
+export function branchName(goalId: string, worktree: string): string {
+	validateIdentity(goalId, worktree);
+	return `sages/${goalId}/${worktree}`;
 }
 
 /**
@@ -834,8 +839,8 @@ function noteWorktreeOwnershipMismatch(
 	// problem can never mask the ownership error we are re-throwing.
 	try {
 		writeDiagnostic({
-			dispatchId: `${opts.dag}-${opts.worktree}-worktree`,
-			context: { dagId: opts.dag, taskId: opts.worktree },
+			dispatchId: `${opts.goalId}-${opts.worktree}-worktree`,
+			context: { goalId: opts.goalId, taskId: opts.worktree },
 			subagentType: "worktree-provision",
 			outcome: "error",
 			cause: "worktree-ownership-mismatch",
@@ -855,7 +860,7 @@ function createManagedWorktreeInner(
 	// GC-2026-032: this is the hottest orchestrator dispatch path — every
 	// developer task provisions (or re-enters) a worktree through here.
 	const wtCreateT0 = Date.now();
-	validateIdentity(opts.dag, opts.worktree);
+	validateIdentity(opts.goalId, opts.worktree);
 	let realRoot: string;
 	try {
 		realRoot = realpathSync(opts.repoRoot);
@@ -958,8 +963,8 @@ function createManagedWorktreeInner(
 		);
 	}
 
-	const path = worktreePath(realRoot, opts.dag, opts.worktree);
-	const branch = branchName(opts.dag, opts.worktree);
+	const path = worktreePath(realRoot, opts.goalId, opts.worktree);
+	const branch = branchName(opts.goalId, opts.worktree);
 
 	// Pre-check: if a path already exists at the target, decide reuse-vs-error.
 	const pathExists = existsSync(path);
@@ -977,7 +982,7 @@ function createManagedWorktreeInner(
 		// slot was provisioned against the same baseline as this call.
 		return reuseManagedWorktree({
 			repoRoot: realRoot,
-			dag: opts.dag,
+			goalId: opts.goalId,
 			worktree: opts.worktree,
 			path,
 			branch,
@@ -1010,7 +1015,7 @@ function createManagedWorktreeInner(
 	const marker: ManagedWorktreeMarker = {
 		schema: 2,
 		repoRoot: realRoot,
-		dag: opts.dag,
+		goalId: opts.goalId,
 		worktree: opts.worktree,
 		path,
 		branch,
@@ -1028,7 +1033,7 @@ function createManagedWorktreeInner(
 		branch,
 		baseSha,
 		baseRef: resolvedBaseRef,
-		dag: opts.dag,
+		goalId: opts.goalId,
 		worktree: opts.worktree,
 		repoRoot: realRoot,
 		reused: false,
@@ -1063,7 +1068,7 @@ export async function createManagedWorktreeAsync(
 	// version contributes to `worktree_create_ms` and `worktree_create_count`
 	// (one observation per call, just like the sync path).
 	const wtCreateT0 = Date.now();
-	validateIdentity(opts.dag, opts.worktree);
+	validateIdentity(opts.goalId, opts.worktree);
 
 	// Pre-check cluster: 3 independent reads fire concurrently. Only the
 	// git calls go through `Promise.all`; `realpathSync` is sync <1ms and
@@ -1176,8 +1181,8 @@ export async function createManagedWorktreeAsync(
 		);
 	}
 
-	const path = worktreePath(realRoot, opts.dag, opts.worktree);
-	const branch = branchName(opts.dag, opts.worktree);
+	const path = worktreePath(realRoot, opts.goalId, opts.worktree);
+	const branch = branchName(opts.goalId, opts.worktree);
 
 	const pathExists = existsSync(path);
 	if (pathExists) {
@@ -1191,7 +1196,7 @@ export async function createManagedWorktreeAsync(
 		// sequential; safe to call from an async function.
 		return reuseManagedWorktree({
 			repoRoot: realRoot,
-			dag: opts.dag,
+			goalId: opts.goalId,
 			worktree: opts.worktree,
 			path,
 			branch,
@@ -1213,7 +1218,7 @@ export async function createManagedWorktreeAsync(
 	const marker: ManagedWorktreeMarker = {
 		schema: 2,
 		repoRoot: realRoot,
-		dag: opts.dag,
+		goalId: opts.goalId,
 		worktree: opts.worktree,
 		path,
 		branch,
@@ -1231,7 +1236,7 @@ export async function createManagedWorktreeAsync(
 		branch,
 		baseSha,
 		baseRef: resolvedBaseRef,
-		dag: opts.dag,
+		goalId: opts.goalId,
 		worktree: opts.worktree,
 		repoRoot: realRoot,
 		reused: false,
@@ -1240,7 +1245,7 @@ export async function createManagedWorktreeAsync(
 
 function reuseManagedWorktree(args: {
 	repoRoot: string;
-	dag: string;
+	goalId: string;
 	worktree: string;
 	path: string;
 	branch: string;
@@ -1254,7 +1259,7 @@ function reuseManagedWorktree(args: {
 	const wtReuseT0 = Date.now();
 	const {
 		repoRoot,
-		dag,
+		goalId,
 		worktree,
 		path,
 		branch,
@@ -1265,7 +1270,7 @@ function reuseManagedWorktree(args: {
 	// 1. Read the persisted marker. Mismatch on any of (repoRoot, dag,
 	//    worktree, branch) is a refusal — a different managed worktree owns
 	//    this slot.
-	const marker = readManagedWorktreeMarker(repoRoot, dag, worktree);
+	const marker = readManagedWorktreeMarker(repoRoot, goalId, worktree);
 	if (!marker) {
 		throw new Error(
 			`managed-worktree: cannot reuse ${path} — no .pi-worktree.json marker was found. ` +
@@ -1275,7 +1280,7 @@ function reuseManagedWorktree(args: {
 	}
 	for (const [field, expected] of [
 		["repoRoot", repoRoot],
-		["dag", dag],
+		["goalId", goalId],
 		["worktree", worktree],
 		["branch", branch],
 	] as const) {
@@ -1397,7 +1402,7 @@ function reuseManagedWorktree(args: {
 		branch,
 		baseSha: marker.baseSha,
 		baseRef: marker.baseRef,
-		dag,
+		goalId,
 		worktree,
 		repoRoot,
 		reused: true,
@@ -1511,7 +1516,7 @@ export function releaseManagedWorktree(
 	// (subsequent reuse calls just throw "identity mismatch" because the
 	// on-disk worktree will be gone), but a clean release also tidies the
 	// repoRoot state directory.
-	deleteManagedWorktreeMarker(wt.repoRoot, wt.dag, wt.worktree);
+	deleteManagedWorktreeMarker(wt.repoRoot, wt.goalId, wt.worktree);
 
 	profileObserve("worktree_release_ms", Date.now() - wtReleaseT0);
 	profileInc("worktree_release_count");
@@ -1765,7 +1770,7 @@ function formatGitErr(err: unknown): string {
  */
 export interface ManagedWorktreeLease {
 	token: string;
-	dag: string;
+	goalId: string;
 	worktree: string;
 }
 
@@ -1784,22 +1789,22 @@ const LEASE_TOKENS = new Map<string, ManagedWorktreeLease>(); // token -> lease
  * Process-local by design — see the section header for rationale.
  */
 export function acquireManagedWorktreeLease(
-	dag: string,
+	goalId: string,
 	worktree: string,
 ): ManagedWorktreeLease {
-	validateIdentity(dag, worktree);
+	validateIdentity(goalId, worktree);
 	for (const held of LEASE_TOKENS.values()) {
-		if (held.dag === dag && held.worktree === worktree) {
+		if (held.goalId === goalId && held.worktree === worktree) {
 			throw new Error(
-				`managed-worktree: lease already held for ${dag}/${worktree} ` +
-					`(path: .pi/worktree/${dag}/${worktree}). ` +
+				`managed-worktree: lease already held for ${goalId}/${worktree} ` +
+					`(path: .pi/worktree/${goalId}/${worktree}). ` +
 					`Concurrent spawns against the same managed-worktree slot are refused; ` +
-					`serialize spawns or use a distinct (dag, worktree) for parallel tasks.`,
+					`serialize spawns or use a distinct (goalId, worktree) for parallel tasks.`,
 			);
 		}
 	}
 	const token = randomUUID();
-	const lease: ManagedWorktreeLease = { token, dag, worktree };
+	const lease: ManagedWorktreeLease = { token, goalId, worktree };
 	LEASE_TOKENS.set(token, lease);
 	return lease;
 }
@@ -1816,12 +1821,12 @@ export function releaseManagedWorktreeLease(
 	if (!lease || !lease.token) return false;
 	const held = LEASE_TOKENS.get(lease.token);
 	if (!held) return false;
-	if (held.dag !== lease.dag || held.worktree !== lease.worktree) {
+	if (held.goalId !== lease.goalId || held.worktree !== lease.worktree) {
 		// Token is real but for a different (dag, worktree). Refuse — the caller
 		// almost certainly passed the wrong lease descriptor.
 		throw new Error(
-			`managed-worktree: lease token ${lease.token} belongs to ${held.dag}/${held.worktree}, ` +
-				`not ${lease.dag}/${lease.worktree}`,
+			`managed-worktree: lease token ${lease.token} belongs to ${held.goalId}/${held.worktree}, ` +
+				`not ${lease.goalId}/${lease.worktree}`,
 		);
 	}
 	LEASE_TOKENS.delete(lease.token);
@@ -1833,12 +1838,12 @@ export function releaseManagedWorktreeLease(
  * the slot is free. Pure read — does NOT acquire.
  */
 export function readManagedWorktreeLease(
-	dag: string,
+	goalId: string,
 	worktree: string,
 ): string | null {
-	validateIdentity(dag, worktree);
+	validateIdentity(goalId, worktree);
 	for (const held of LEASE_TOKENS.values()) {
-		if (held.dag === dag && held.worktree === worktree) return held.token;
+		if (held.goalId === goalId && held.worktree === worktree) return held.token;
 	}
 	return null;
 }
@@ -1850,7 +1855,7 @@ export function clearAllManagedWorktreeLeases(): void {
 
 /** Options accepted by {@link deleteManagedWorktree} / {@link deleteManagedWorktreeByPath}. */
 export interface DeleteManagedWorktreeOptions {
-	/** When true, also delete the `sages/<dag>/<worktree>` branch after the worktree is removed. */
+	/** When true, also delete the `sages/<goalId>/<worktree>` branch after the worktree is removed. */
 	deleteBranch?: boolean;
 }
 
@@ -1882,12 +1887,12 @@ export interface DeleteManagedWorktreeResult {
 export function deleteManagedWorktree(
 	args: {
 		repoRoot: string;
-		dag: string;
+		goalId: string;
 		worktree: string;
 	} & DeleteManagedWorktreeOptions,
 ): DeleteManagedWorktreeResult {
-	const { repoRoot, dag, worktree } = args;
-	validateIdentity(dag, worktree);
+	const { repoRoot, goalId, worktree } = args;
+	validateIdentity(goalId, worktree);
 	let realRoot: string;
 	try {
 		realRoot = realpathSync(repoRoot);
@@ -1897,8 +1902,8 @@ export function deleteManagedWorktree(
 		}
 		throw err;
 	}
-	const path = worktreePath(realRoot, dag, worktree);
-	const branch = branchName(dag, worktree);
+	const path = worktreePath(realRoot, goalId, worktree);
+	const branch = branchName(goalId, worktree);
 	return deleteManagedWorktreeByPathImpl({
 		repoRoot: realRoot,
 		path,
@@ -1963,9 +1968,9 @@ export function deleteManagedWorktreeByPath(
 	// Path-segment under containment root = `<dag>/<worktree>` — recover them
 	// for branch deletion.
 	const segments = got.slice(expected.length + 1).split(sep);
-	const dag = segments[0] ?? "";
+	const goalId = segments[0] ?? "";
 	const worktree = segments[1] ?? "";
-	const branch = branchName(dag, worktree);
+	const branch = branchName(goalId, worktree);
 	return deleteManagedWorktreeByPathImpl({
 		repoRoot: realRoot,
 		path: got,
