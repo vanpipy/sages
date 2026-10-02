@@ -3,13 +3,14 @@
  *
  * Stage 1 of orchestrator workflow: turn user intent into a verifiable contract.
  *
- * After GC-2026-orchestrator-simplify this tool no longer requires
- * `success_criteria[]` or `verification_cmd` — the Reviewer agent reads
- * the goal intent (title / rationale / scope / anti_goals / done_definition)
- * directly and evaluates the Implementer's output against it. The
- * orchestrator's pipeline driver (pi-tasks, or future workflow_run)
- * picks up the contract and runs the Implement → Review → optional Fix →
- * Merge sequence.
+ * After GC-2026-orchestrator-simplify + GC-2026-path-B-swap this tool
+ * no longer requires `success_criteria[]` or `verification_cmd` — the
+ * Reviewer agent reads the goal intent (title / rationale / scope /
+ * anti_goals / done_definition) directly and evaluates the
+ * Implementer's output against it. The orchestrator's pipeline driver
+ * is `workflow_run` (or, for escape-hatch shapes, pi-tasks's
+ * `TaskCreate` + `TaskExecute`); both pick up the contract and run the
+ * Implement → Review → optional Fix → Merge sequence.
  *
  * Hard rules (enforced):
  *   1. anti_goals may be empty but not undefined

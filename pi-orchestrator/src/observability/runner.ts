@@ -2,14 +2,20 @@
  * runner — durable run/* event emitter.
  *
  * Appends a single run/* event record to
- * `.pi/orchestrator/audit-state-{dag_id}.yaml`. Preserves the existing
+ * `.pi/orchestrator/audit-state-{goal_id}.yaml`. Preserves the existing
  * audit-state format (top-level yaml mapping with an `events:` array
  * of {name, domain, ts, payload?} records). Reads the current state,
  * appends the new event, writes back via a temp + rename so the file
  * never appears half-written.
  *
+ * GC-2026-path-B-swap: parameter renamed from `dagId` to `goalId` to
+ * match the path B semantic (the orchestrator no longer has a DAG —
+ * the value is always a goal_id from `goal-{id}.yaml`). The file
+ * naming `audit-state-{goal_id}.yaml` is unchanged so existing
+ * audit-state files on disk remain parseable.
+ *
  * Concurrency: only one orchestrator instance writes the audit-state
- * file for a given dag_id at a time. The acquire/release lock around
+ * file for a given goal_id at a time. The acquire/release lock around
  * the temp+rename keeps a concurrent read-modify-write consistent.
  *
  * Why not `atomicWriteOrchestratorFile` from state-persistence? This
@@ -44,26 +50,26 @@ export interface AuditEvent {
 }
 
 /**
- * Append a run/* event to `.pi/orchestrator/audit-state-{dag_id}.yaml`.
+ * Append a run/* event to `.pi/orchestrator/audit-state-{goal_id}.yaml`.
  *
  * Creates the directory + file if absent. Asserts that `event` is a
  * `run/*` member (other domains are routed to their own emitter).
  *
  * The audit-state file is read on every call, so the caller is
  * protected against lost appends even if multiple processes are
- * writing the same dag_id at the same time (lock-based serialization
+ * writing the same goal_id at the same time (lock-based serialization
  * within this process; cross-process locking is the orchestrator's
  * responsibility, not this emitter's).
  */
 export function emitRunEvent(
-  dagId: string,
+  goalId: string,
   event: RunEvent,
   payload?: Record<string, unknown>,
 ): void {
   if (domainOf(event) !== "run") {
     throw new Error(`emitRunEvent called with non-run event: ${event}`);
   }
-  const path = auditStatePath(dagId);
+  const path = auditStatePath(goalId);
   ensureDir();
   const state = readAuditState(path);
   const record: AuditEvent = {
@@ -76,8 +82,8 @@ export function emitRunEvent(
   writeAuditState(path, state);
 }
 
-function auditStatePath(dagId: string): string {
-  return join(ORCHESTRATOR_DIR, `audit-state-${dagId}.yaml`);
+function auditStatePath(goalId: string): string {
+  return join(ORCHESTRATOR_DIR, `audit-state-${goalId}.yaml`);
 }
 
 function ensureDir(): void {

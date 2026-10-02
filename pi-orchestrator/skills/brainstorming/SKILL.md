@@ -203,7 +203,7 @@ Fix any issues inline. No need to re-review — just fix and move on.
 
 **Mode A — standalone (no orchestrator active)**: brainstorming is the **recommended first step** for any new feature/change. After approval, suggest `/orchestrate` or auto-transition to `goal_contract_create` if user consents.
 
-**Mode B — auto-transition (orchestrator active)**: when design is approved, auto-invoke `goal_contract_create` with the design as rationale. The orchestrator then synthesizes a DAG via `dag_synthesize` for the design's tasks and notifies the user.
+**Mode B — auto-transition (orchestrator active)**: when design is approved, auto-invoke `goal_contract_create` with the design as rationale. The orchestrator then runs `workflow_run(goal_path)` to drive the 5-phase pipeline (Implement → Review ⇆ Fix → Merge) and notifies the user.
 
 If user says "defer"/"save"/"later", save the design to `.pi/orchestrator/designs/` and don't start the orchestrator. "exit"/"cancel" ends without proceeding.
 
@@ -235,7 +235,7 @@ When you anticipate visual questions (mockups, layouts, diagrams):
 ## Related Skills
 
 - **Grill-Me**: Standalone decision tree resolver (embedded in brainstorming)
-- **Orchestrator**: Goal contract + DAG synthesis + dispatch + audit (after brainstorming approval, auto-invoked via `goal_contract_create`)
+- **Orchestrator**: Goal contract + workflow_run pipeline (after brainstorming approval, auto-invoked via `goal_contract_create` → `workflow_run(goal_path)`)
 
 ## Example: Simple Feature
 

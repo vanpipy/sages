@@ -4,6 +4,13 @@
  * Templates live at:  ~/.pi/packages/sages/skills/orchestrator/templates/{prompts,goals,dag,responses}/
  *                   (or wherever the sages package is installed)
  *
+ * GC-2026-path-B-swap: path B renders task prompts inline via
+ * `pi-tasks/src/phase-prompts.ts` (`implementPrompt` / `reviewPrompt` /
+ * `fixPrompt` / `mergePrompt`) and embeds them as the task description
+ * when TaskCreate fires. The renderTaskPrompt machinery below is
+ * preserved as a path-A-compat reference for callers that still pass
+ * taskTemplate + taskParams; new code should use pi-tasks directly.
+ *
  * Used by workflow_run (GC-2) to render task prompts from `task_template` + `task_params`.
  *
  * Resolution (GC-2026-062): sages is a GLOBAL pi extension, so the package

@@ -7,12 +7,13 @@
  * code review across 5 dimensions. Renamed to `Reviewer` to match the work
  * and to align with the Plan → PlanCompiler rename (GC-2026-093).
  *
- * GC-2026-rename-auditor: prompt rewritten from SC verification
- * (verification_cmd, PASS/FAIL) to multi-dimensional code review
- * (correctness / completeness / scope adherence / anti-goal compliance /
- * documentation), emitting CLEAN / NEEDS_WORK verdict. Discipline
- * preserved: evidence-based, default-NEEDS_WORK, read-only on the worktree
- * (no production edits — the Fix agent owns that).
+ * GC-2026-rename-auditor: prompt rewritten from path A's SC verification
+ * (which used the deleted `verification_cmd` mechanism) to path B's
+ * multi-dimensional code review (correctness / completeness / scope
+ * adherence / anti-goal compliance / documentation), emitting
+ * CLEAN / NEEDS_WORK verdict. Discipline preserved: evidence-based,
+ * default-NEEDS_WORK, read-only on the worktree (no production edits
+ * — the Fix agent owns that).
  *
  * The role's final assistant message MUST contain a single fenced YAML block
  * conforming to the FINAL_VERDICT_ADDENDUM schema below. workflow_run

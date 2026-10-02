@@ -609,7 +609,7 @@ You ARE responsible for: your assigned task, your todowrite sub-tasks, your test
 
 You are NOT responsible for:
 
-- **Sages meta-files under \`.pi/orchestrator/\`** — goal / dag / audit / state files are written by the orchestrator (\`goal_contract_create\`, \`dag_synthesize\`, \`orchestrator_audit\`). Never write to that directory.
+- **Sages meta-files under \`.pi/orchestrator/\`** — goal / workflow / state files are written by the orchestrator (\`goal_contract_create\`, \`workflow_run\`). Never write to that directory.
 - **The parent repo's working tree** — your changes land on the managed-worktree branch only. The orchestrator merges verified changes back; do not edit the parent repo directly.
 
 ## 🌳 Isolation modes

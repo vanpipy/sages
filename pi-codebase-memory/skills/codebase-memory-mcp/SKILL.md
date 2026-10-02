@@ -85,9 +85,9 @@ mcp({ tool: "mcp_index_repository", args: '{"project":"."}' })  // invoke a spec
 | Orchestrator stage | Recommended codebase-memory-mcp usage |
 |----------|----------------------------------|
 | **Goal (1. goal_contract_create)** | `mcp_get_architecture()` — get the codebase overview automatically, skip manual research |
-| **DAG (2. dag_synthesize)** | `mcp_detect_changes({base: "main"})` — know the task's blast radius up front |
-| **Dispatch (3. task_dispatch)** | `mcp_trace_path({direction: "callers", depth: 2})` — see downstream before changing |
-| **Audit (4. orchestrator_audit)** | `mcp_detect_changes` + `mcp_query_graph` — verify the commit is safe |
+| **Implement (2. workflow_run / Developer task)** | `mcp_detect_changes({base: "main"})` — know the task's blast radius up front |
+| **Review (3. workflow_run / Reviewer task)** | `mcp_trace_path({direction: "callers", depth: 2})` — see downstream before changing |
+| **Merge (4. workflow_run / Merger task)** | `mcp_detect_changes` + `mcp_query_graph` — verify the commit is safe |
 
 ## First use (first-session initialization)
 
