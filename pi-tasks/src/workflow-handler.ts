@@ -64,7 +64,10 @@ export interface WorkflowEventBus {
 }
 
 /** Spawns the given task as a subagent. Returns the agent id the executor will use. */
-export type WorkflowSpawnAgent = (task: Task) => Promise<string>;
+export type WorkflowSpawnAgent = (
+	task: Task,
+	ctx?: { worktreePath?: string },
+) => Promise<string>;
 
 export interface SubscribeWorkflowOptions {
 	events: WorkflowEventBus;
@@ -76,9 +79,13 @@ export interface SubscribeWorkflowOptions {
  * detaches both listeners.
  *
  * The handler keeps two pieces of internal state:
- *   - `agentToTask` — reverse index from agent id → task id (covers all
- *     workflow tasks, pre-populated at workflow:start so the cascade test
- *     can simulate any task's completion by id).
+ *   - `agentToTask` — reverse index from agent id → task id, populated at
+ *     spawn time (workflow:start + each cascade spawn) using the real id
+ *     returned by spawnAgent. The previous design pre-populated this map
+ *     with synthetic `agent-${task.id}` keys at workflow:start, which only
+ *     matched the same synthetic shape tests used. Production spawn (pi-subagents
+ *     returns real UUID prefixes) never matched, so the cascade stalled on
+ *     the first phase (GC-2026-pi-tasks-cascade-agentid).
  *   - `completedIds` — set of task ids that have completed, used to drive
  *     the cascade without scanning the store on every event.
  */
@@ -123,15 +130,7 @@ export function subscribeWorkflow(
 			created.push(t);
 		}
 
-		// 3. Pre-register every task's expected agent id → task id. The fake
-		//    spawnAgent in tests returns `agent-${task.id}`; doing this here
-		//    means the cascade test can drive any phase by emitting
-		//    subagents:completed with the id it computed locally.
-		for (const t of created) {
-			agentToTask.set(`agent-${t.id}`, t.id);
-		}
-
-		// 4. Wire blockedBy edges. Each spec lists placeholder ids; resolve
+		// 3. Wire blockedBy edges. Each spec lists placeholder ids; resolve
 		//    them to real task ids by phase + iteration, then call
 		//    store.update({ addBlockedBy }).
 		const resolvePlaceholder = (placeholder: string): string => {
@@ -174,11 +173,19 @@ export function subscribeWorkflow(
 			}
 		}
 
-		// 5. Spawn the Implement task. It has no blockedBy so it runs first;
-		//    its completion unblocks Review_1 via the cascade below.
+		// 4. Spawn the Implement task. It has no blockedBy so it runs first;
+//    its completion unblocks Review_1 via the cascade below.
+//
+//    GC-2026-pi-tasks-cascade-agentid: record the spawn's return value
+//    as the agent id (post-spawn, not pre-registered). Pre-registering
+//    synthetic IDs here used to "work" only because the test fixtures
+//    returned that same synthetic shape; production spawn returns real
+//    UUID prefixes and the lookup at onSubagentCompleted missed every
+//    real id, stalling the cascade after the first phase.
 		const implement = created.find(x => x.metadata.phase === "implement");
 		if (!implement) throw new Error("Implement task missing from created graph");
-		const agentId = await spawnAgent(implement);
+		const agentId = await spawnAgent(implement, { worktreePath: payload.worktree_path });
+		agentToTask.set(agentId, implement.id);
 		store.update(implement.id, { status: "in_progress", owner: agentId });
 	};
 
@@ -236,6 +243,12 @@ export function subscribeWorkflow(
 		// Cascade: spawn every pending task whose blockers are all completed.
 		// We walk the whole store; in practice a workflow has 3–11 tasks so
 		// the scan is cheap and avoids per-task subscription bookkeeping.
+		//
+		// GC-2026-pi-tasks-cascade-agentid: same fix as onWorkflowStart —
+		// record the spawn's return value as the agent id, then stamp it
+		// on the task as owner. The handler relies on agentToTask to map
+		// subagents:completed → taskId, so the entry must reflect the real
+		// id the subagent runtime (pi-subagents/agent-manager.ts:346) emits.
 		const all = store.list();
 		for (const t of all) {
 			if (t.status !== "pending") continue;
@@ -243,16 +256,56 @@ export function subscribeWorkflow(
 			if (!t.blockedBy.every(id => completedIds.has(id))) continue;
 
 			const agentId = await spawnAgent(t);
+			agentToTask.set(agentId, t.id);
 			store.update(t.id, { status: "in_progress", owner: agentId });
 		}
 	};
 
+	// GC-2026-pi-tasks-cascade-agentid: subagents:failed listener. Mirrors
+	// onSubagentCompleted's contract — look up the task by the real agent id,
+	// revert it to pending with lastError metadata so a retry can be driven
+	// from the orchestrator, and emit workflow:phase-complete with status:
+	// "failed" so workflow_run resolves the run as "blocked" instead of
+	// hanging forever (the GC-2026-096 implement-failure case).
+	const onSubagentFailed = async (raw: unknown): Promise<void> => {
+		const data = raw as { id?: string; error?: string; status?: string };
+		if (!data || typeof data.id !== "string") return;
+		const taskId = agentToTask.get(data.id);
+		if (!taskId) return; // not a workflow task; let the existing handler process it
+		const task = store.get(taskId);
+		if (!task) return;
+
+		agentToTask.delete(data.id);
+
+		const errMsg = typeof data.error === "string" ? data.error : data.status ?? "agent failed";
+		store.update(taskId, {
+			status: "pending",
+			metadata: {
+				...task.metadata,
+				result: null,
+				lastError: errMsg,
+			},
+		});
+
+		await events.emit("workflow:phase-complete", {
+			workflow_id: task.metadata.workflow_id ?? activeWorkflowId,
+			goal_id: task.metadata.workflow_run_goal_id ?? activeGoalId,
+			phase: task.metadata.phase,
+			iteration: task.metadata.iteration,
+			status: "failed",
+			error: errMsg,
+			task_id: taskId,
+		});
+	};
+
 	const unsubStart = events.on("workflow:start", onWorkflowStart);
 	const unsubComplete = events.on("subagents:completed", onSubagentCompleted);
+	const unsubFailed = events.on("subagents:failed", onSubagentFailed);
 
 	return () => {
 		unsubStart();
 		unsubComplete();
+		unsubFailed();
 	};
 }
 
