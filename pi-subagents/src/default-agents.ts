@@ -16,11 +16,11 @@ import type { AgentConfig } from "./types.js";
  * Mirrors the seven built-ins `pi-coding-agent` exposes
  * (`createCodingTools` ∪ `createReadOnlyTools`).
  *
- * The canonical `Reviewer` agent shares this set: \`edit\` / \`write\` are
- * available for the reviewer's single allowed write target
- * (\`.pi/orchestrator/review-{goal_id}-{iteration}.md\`), and \`read\` / \`bash\` /
+ * The canonical `auditor` agent shares this set: \`edit\` / \`write\` are
+ * available for the auditor's single allowed write target
+ * (\`.pi/orchestrator/audit-{task_id}.md\`), and \`read\` / \`bash\` /
  * \`grep\` / \`find\` / \`ls\` carry the verify-only re-run loop. The
- * reviewer prompt itself enforces "no production edits" — the tools are
+ * auditor prompt itself enforces "no production edits" — the tools are
  * present, the policy is the prompt's job.
  */
 const DEVELOPER_BUILTIN_TOOLS: readonly string[] = [
@@ -31,12 +31,6 @@ const DEVELOPER_BUILTIN_TOOLS: readonly string[] = [
 	"ls",
 	"edit",
 	"write",
-	// GC-2026-coupon-nonhit-block follow-up (Path A): personal todowrite.
-	// Not in pi-coding-agent's BUILTIN_TOOL_NAMES; registered by
-	// runAgent via registerPersonalTodowriteTools(pi, {cwd: effectiveCwd}).
-	// Bypasses the typo check via the same-name entries in agent-types.ts.
-	"todowrite",
-	"todowrite_progress",
 ];
 
 /**
@@ -71,10 +65,10 @@ const DEVELOPER_AGENT: AgentConfig = {
 	maxTurns: 200,
 	// Default model + per-type cap (part of the Sages-wide concurrency policy:
 	// 2 concurrent developers is the supported DAG fan-out). When
-	// minimax-cn/MiniMax-M3 is not in the user's registry, agent-runner.
+	// MiniMax/MiniMax-M3 is not in the user's registry, agent-runner.
 	// resolveDefaultModel silently falls back to the parent session's model
 	// (the user chose the parent's model at session start; trust it).
-	model: "minimax-cn/MiniMax-M3",
+	model: "MiniMax/MiniMax-M3",
 	maxConcurrent: 2,
 };
 
@@ -95,18 +89,18 @@ const DEVELOPER_AGENT: AgentConfig = {
  *   - same \`excludeExtensions: ["pi-subagents"]\` belt-and-suspenders
  *     guard against recursive Agent dispatch
  *
- * Reviewer-specific (GC-2026-rename-auditor; renamed from `auditor`):
- *   - \`runInBackground: true\` — full reviews re-run every verification
+ * Audit-specific:
+ *   - \`runInBackground: true\` — full audits re-run every verification
  *     command (30s–3 min) and must not block the orchestrator
- *   - \`maxTurns: 200\` — the reviewer's re-run loop (typecheck + lint +
+ *   - \`maxTurns: 200\` — the auditor's re-run loop (typecheck + lint +
  *     tests + diff inspection + report write) is the budget per run;
  *     callers may override via Agent({ max_turns: ... })
- *   - \`skills: false\` — no project conventions; the reviewer re-derives
- *     them at review time per the First Action Protocol
+ *   - \`skills: false\` — no project conventions; the auditor re-derives
+ *     them at audit time per the First Action Protocol
  *
  * No managed-worktree policy: \`enforceDeveloperManagedIsolationPolicy\`
- * is `developer`-only. The reviewer is read-only on the developer's
- * worktree and writes only to \`.pi/orchestrator/audit-{dag_id}-{task_id}.md\`.
+ * is `developer`-only. The auditor is read-only on the developer's
+ * worktree and writes only to \`.pi/orchestrator/audit-{task_id}.md\`.
  */
 const REVIEWER_AGENT: AgentConfig = {
 	name: "Reviewer",
@@ -116,11 +110,9 @@ const REVIEWER_AGENT: AgentConfig = {
 		"against acceptance criteria using TDD evidence (test output, typecheck, " +
 		"lint, command results). Default verdict is NEEDS_WORK unless overwhelming " +
 		"proof is provided.",
-	// GC-2026-coupon-nonhit-block follow-up (Path A): same personal todowrite
-	// set as Developer — reviews also have multi-step verification flows.
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
 	extensions: ["aft", "pi-mcp-adapter"],
-	// Symmetric with `developer`: the reviewer is read-only on production
+	// Symmetric with `developer`: the auditor is read-only on production
 	// code by policy, but the Agent tool cannot load here regardless.
 	excludeExtensions: ["pi-subagents"],
 	skills: false,
@@ -128,16 +120,16 @@ const REVIEWER_AGENT: AgentConfig = {
 	promptMode: "replace",
 	isDefault: true,
 	runInBackground: true,
-	// Full reviews re-run typecheck + lint + tests + diff inspection +
+	// Full audits re-run typecheck + lint + tests + diff inspection +
 	// report write; 200 turns is the per-run budget. Caller may still
 	// override via Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
-	// Default model + per-type cap (developer: 2 / reviewer: 2 are part of the
-	// Sages-wide concurrency policy). When minimax-cn/MiniMax-M3 is not in the
+	// Default model + per-type cap (developer: 2 / auditor: 2 are part of the
+	// Sages-wide concurrency policy). When MiniMax/MiniMax-M3 is not in the
 	// user's registry, agent-runner.resolveDefaultModel silently falls back to
 	// the parent session's model — see AgentManager.effectiveMaxFor() for the
 	// cap merge order.
-	model: "minimax-cn/MiniMax-M3",
+	model: "MiniMax/MiniMax-M3",
 	maxConcurrent: 2,
 };
 
@@ -163,9 +155,9 @@ const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
  * --no-ff` from inside bash; the merger never edits a file directly.
  *
  * Symmetry with `developer` / `auditor`:
- *   - same extensions (`aft`, `pi-mcp-adapter`) so the merger reaches
- *     for the same indexed semantic tools to read both diffs and
- *     classify overlap
+ *   - same extensions (`aft`, `pi-mcp-adapter`, `pi-magic-context`) so
+ *     the merger reaches for the same indexed semantic tools to read
+ *     both diffs and classify overlap
  *   - same `excludeExtensions: ["pi-subagents"]` belt-and-suspenders
  *     guard against recursive Agent dispatch
  *
@@ -203,7 +195,7 @@ const MERGER_AGENT: AgentConfig = {
 	promptMode: "replace",
 	isDefault: true,
 	runInBackground: true,
-	// Narrower than developer/reviewer: read diffs, classify, produce one
+	// Narrower than developer/auditor: read diffs, classify, produce one
 	// merge commit or escalate. Going over 80 turns means the brief was
 	// wrong, not that the merger needs more budget.
 	maxTurns: 80,
@@ -218,81 +210,36 @@ const MERGER_AGENT: AgentConfig = {
 };
 
 /**
- * Canonical `PlanCompiler` agent.
- *
- * Built-in to pi-subagents as the lightweight plan compiler. The main
- * agent (orchestrator) owns planning — exploration, architecture
- * decisions, trade-off weighing, goal-contract + DAG synthesis.
- * PlanCompiler takes a self-contained Planning Brief from the main
- * agent and renders it into an ordered implementation plan OR returns
- * PLAN_STATUS: BLOCKED listing the missing inputs. PlanCompiler must
- * NOT re-decide architecture, weigh trade-offs, or explore the repo.
- * See `src/agent-prompts/plan.ts` for the contract and
- * `test/default-agents.test.ts` + `test/plan-prompt.test.ts` for the
- * pinned invariants.
- *
- * DAG-2026-017: the runtime contract pins these knobs even if a future
- * contributor weakens the prompt prose — `builtinToolNames: ["read"]`
- * (no search/grep/find/ls/bash/edit/write), `extensions: false` (no
- * codebase_memory / aft / ctx_search / magic-context), `thinking:
- * "minimal"` (no deep reasoning), `maxTurns: 12` (compile budget, not
- * exploration budget).
-
- * GC-2026-remove-magic-context: the magic-context reference in this
- * docstring is historical context for why PlanCompiler is pinned to
- * `extensions: false` — magic-context (and the upstream todo + ctx_*
- * tools it provided) is no longer loaded anywhere in pi-subagents.
- * PlanCompiler's own config is unchanged (still `extensions: false`).
- *
- * GC-2026-093: the canonical public name is `PlanCompiler` (renamed
- * from `Plan` to clarify that this agent only compiles the Brief into
- * a plan — the orchestrator owns planning). The legacy `Plan` Map key
- * is preserved below as an alias pointing at this same AgentConfig
- * object so existing DAG YAMLs (`subagent_type: "Plan"`) continue to
- * resolve without a breaking change.
+ * GC-2026-093: Plan was renamed to PlanCompiler. The Plan alias is
+ * preserved for backward compat (legacy DAG YAML files / scripts that
+ * reference "Plan"). Both keys point at the same AgentConfig.
  */
 const PLAN_AGENT: AgentConfig = {
 	name: "PlanCompiler",
 	displayName: "PlanCompiler",
+	// DAG-2026-017: PlanCompiler is a lightweight plan compiler. The main
+	// agent supplies a self-contained Planning Brief (problem +
+	// chosen approach + scope + acceptance + verification); PlanCompiler
+	// compiles it into an ordered implementation plan or returns
+	// PLAN_STATUS: BLOCKED listing what's missing. PlanCompiler must NOT
+	// re-decide architecture, weigh trade-offs, or explore the repo.
 	description:
 		"Plan compiler — converts a main-agent Planning Brief into an ordered implementation plan or returns PLAN_STATUS: BLOCKED with the missing inputs. Does not explore the repo or pick implementation approaches.",
-	// `read` only. The brief is authoritative, so PlanCompiler never
-	// needs search/grep/find/ls/bash/edit/write. A single explicit
-	// read is allowed to confirm an exact symbol or path named in the
-	// brief.
 	builtinToolNames: ["read"],
-	// No extensions: codebase_memory_*, aft_*, and ctx_search would
-	// each let PlanCompiler rebuild the architecture map from
-	// scratch. The main agent already did that work; PlanCompiler is
-	// forbidden from redoing it. (magic-context was removed in
-	// GC-2026-remove-magic-context.)
+	// No extensions: codebase_memory_*, aft_*, ctx_search, and
+	// magic-context would each let PlanCompiler rebuild the architecture
+	// map from scratch. The main agent already did that work.
 	extensions: false,
 	excludeExtensions: ["pi-subagents"],
 	skills: false,
-	// Pin a cheap, fixed model + minimal thinking so PlanCompiler
-	// cannot inherit a costly reasoning model from the main agent.
 	model: "anthropic/claude-haiku-4-5",
 	thinking: "minimal",
 	systemPrompt: PLAN_PROMPT,
 	promptMode: "replace",
 	isDefault: true,
-	// Compile budget, not exploration budget. Going over 12 turns
-	// means the main agent under-specified the brief; PlanCompiler
-	// should have returned BLOCKED instead.
 	maxTurns: 12,
-	// PlanCompiler returns a single compiled plan inline. Foreground
-	// keeps the orchestrator loop tight; the brief is small enough
-	// that it does not justify a background queue.
 	runInBackground: false,
-	// Deliberate: the main agent owns the conversation. PlanCompiler
-	// must receive only the self-contained Brief the main agent chose
-	// to send — NOT the entire upstream transcript. Without this
-	// isolation, PlanCompiler would re-derive decisions from chat
-	// history.
 	inheritContext: false,
-	// Per-type concurrency cap: PlanCompiler runs in Stage 2 batches.
-	// 2 concurrent keeps PlanCompiler + Explore (4) under the global
-	// 6 cap.
 	maxConcurrent: 2,
 };
 
@@ -330,15 +277,8 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			runInBackground: false,
 		},
 	],
-	[
-		"PlanCompiler",
-		PLAN_AGENT,
-	],
-	// GC-2026-093: legacy alias for backward compat. Existing DAG YAMLs
-	// and persisted run-records reference `subagent_type: "Plan"`. The
-	// alias points at the same AgentConfig object as `PlanCompiler` so
-	// any future mutation propagates to both lookups without drift.
 	["Plan", PLAN_AGENT],
+	["PlanCompiler", PLAN_AGENT],
 	["Developer", DEVELOPER_AGENT],
 	["Reviewer", REVIEWER_AGENT],
 	["Merger", MERGER_AGENT],

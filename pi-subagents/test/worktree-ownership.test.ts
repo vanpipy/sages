@@ -168,12 +168,12 @@ describe("worktree integration call sites", () => {
 		fixture = makeRepoFixture("ownership-managed");
 		const created = createManagedWorktree({
 			repoRoot: fixture.root,
-			dag: "DAG",
+			goalId: "DAG",
 			worktree: "T1",
 		});
 		const reused = createManagedWorktree({
 			repoRoot: fixture.root,
-			dag: "DAG",
+			goalId: "DAG",
 			worktree: "T1",
 			reuse: true,
 		});

@@ -1,12 +1,14 @@
 /**
- * worktree-contract.ts — GC-2026-008 P2 / GC-2026-017.
+ * worktree-contract.ts — GC-2026-008 P2 / GC-2026-017 / GC-2026-path-B-field-renames.
  *
  * The Agent-boundary contract for the managed-worktree domain. Three jobs:
  *
  *   1. Parse the explicit worktree request that the Agent tool now accepts.
- *      `{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`. Refuse
- *      the legacy `"worktree"` string literal at the type boundary — without
- *      an explicit object, dispatch MUST reject before child execution.
+ *      `{ goal_id (preferred) | dag_id (deprecated), task_id, worktree_id?, mode: "create" | "reuse" }`.
+ *      Pass `goal_id`; `dag_id` is accepted for one release as a backward-
+ *      compat shim. Pass exactly one of them — both-or-neither is rejected.
+ *      The legacy `"worktree"` string literal is refused at the type boundary
+ *      — without an explicit object, dispatch MUST reject before child execution.
  *
  *   2. Re-export the runtime schema (`MANAGED_WORKTREE_REQUEST_TYPE`) so the
  *      Agent tool's JSON schema and the parser agree on field names. Single
@@ -23,6 +25,11 @@
  * `undefined` to signal "no managed worktree") — the object-form parser
  * `parseManagedWorktreeRequest` is unchanged and still refuses strings,
  * and the legacy `"worktree"` literal is still rejected at both surfaces.
+ *
+ * GC-2026-path-B-field-renames: `dag_id` is renamed to `goal_id` for path-B
+ * semantic clarity (the orchestrator has no DAG concept). Both names are
+ * accepted by the parser; the canonical output uses `goal_id`. After one
+ * release the compat shim is removed (follow-up GC).
  */
 
 import type { TSchema } from "typebox";
@@ -34,6 +41,9 @@ export type ManagedWorktreeMode = "create" | "reuse";
 
 /**
  * Explicit worktree request accepted by the Agent tool's `isolation` field.
+ *
+ * Pass `goal_id` (preferred). `dag_id` is accepted as a deprecated alias
+ * for one release — see the parser for the both-or-neither rejection rule.
  *
  * `worktree_id` is optional — defaults to the task_id at the worktree helper.
  * `mode: "create"` errors when the slot is occupied (no silent reuse);
@@ -49,7 +59,9 @@ export type ManagedWorktreeMode = "create" | "reuse";
  * (e.g. `origin/feature/x`) trigger `git fetch origin <branch>` first.
  */
 export interface ManagedWorktreeRequest {
-	dag_id: string;
+	goal_id: string;
+	/** @deprecated Prefer `goal_id`. Accepted as a compat shim for one release. */
+	dag_id?: string;
 	task_id: string;
 	worktree_id?: string;
 	mode: ManagedWorktreeMode;
@@ -59,52 +71,76 @@ export interface ManagedWorktreeRequest {
 /**
  * Runtime JSON schema describing the explicit worktree request. Mirrors
  * `ManagedWorktreeRequest` exactly — Type.Object's reflection captures all
- * three required fields plus the optional `worktree_id`. Used by the
- * `Agent` tool's `parameters` (Type.Object) registration in `index.ts`.
+ * required fields plus the optional `worktree_id`. Used by the `Agent`
+ * tool's `parameters` (Type.Object) registration in `index.ts`.
+ *
+ * GC-2026-path-B-field-renames: `goal_id` is the primary field;
+ * `dag_id` is marked deprecated. LLMs that read the schema see both
+ * names; LLMs that emit one field see no error (the parser accepts
+ * either). LLMs that emit both are rejected at parse time.
  */
-export const MANAGED_WORKTREE_REQUEST_TYPE: TSchema = Type.Object({
-	dag_id: Type.String({
-		description:
-			'DAG / goal id (e.g. "GC-2026-008"). Combined with task_id into a managed ' +
-			"worktree at <repoRoot>/.pi/worktree/<dag_id>/<task_id>.",
-		pattern: "^[A-Za-z0-9_-]+$",
-	}),
-	task_id: Type.String({
-		description:
-			'Task / worktree id within the DAG (e.g. "P1"). Must satisfy [A-Za-z0-9_-]+.',
-		pattern: "^[A-Za-z0-9_-]+$",
-	}),
-	worktree_id: Type.Optional(
-		Type.String({
+export const MANAGED_WORKTREE_REQUEST_TYPE: TSchema = Type.Object(
+	{
+		goal_id: Type.Optional(
+			Type.String({
+				description:
+					'Goal id (e.g. "GC-2026-008"). Combined with task_id into a managed ' +
+					"worktree at <repoRoot>/.pi/worktree/<goal_id>/<task_id>.",
+				pattern: "^[A-Za-z0-9_-]+$",
+			}),
+		),
+		dag_id: Type.Optional(
+			Type.String({
+				description:
+					'[DEPRECATED — prefer goal_id] DAG / goal id (e.g. "GC-2026-008"). ' +
+					"Accepted as a backward-compat alias for goal_id; removed in the next release.",
+				pattern: "^[A-Za-z0-9_-]+$",
+			}),
+		),
+		task_id: Type.String({
 			description:
-				"Optional sub-id within a task — used when multiple worktrees belong " +
-				"to the same task. Defaults to task_id when omitted.",
+				'Task / worktree id within the goal (e.g. "P1"). Must satisfy [A-Za-z0-9_-]+.',
 			pattern: "^[A-Za-z0-9_-]+$",
 		}),
-	),
-	mode: Type.Union([Type.Literal("create"), Type.Literal("reuse")], {
-		description:
-			'"create" provisions a fresh managed worktree (errors on collision); ' +
-			'"reuse" re-enters the existing managed worktree at the same slot ' +
-			"(errors on identity mismatch).",
-	}),
-	base_ref: Type.Optional(
-		Type.String({
+		worktree_id: Type.Optional(
+			Type.String({
+				description:
+					"Optional sub-id within a task — used when multiple worktrees belong " +
+					"to the same task. Defaults to task_id when omitted.",
+				pattern: "^[A-Za-z0-9_-]+$",
+			}),
+		),
+		mode: Type.Union([Type.Literal("create"), Type.Literal("reuse")], {
 			description:
-				'Optional base ref. Accepts local branches ("main", "feature/x"), ' +
-				'remote-tracking refs ("origin/main", "origin/feature/x"), or any safe git ref. ' +
-				"Omit to default to the current working directory's branch " +
-				'(upstream tracking ref if set, else local branch, else "origin/main" fallback). ' +
-				"Refused at provision time if the ref does not resolve.",
-			pattern: "^[A-Za-z0-9._/-]+$",
+				'"create" provisions a fresh managed worktree (errors on collision); ' +
+				'"reuse" re-enters the existing managed worktree at the same slot ' +
+				"(errors on identity mismatch).",
 		}),
-	),
-});
+		base_ref: Type.Optional(
+			Type.String({
+				description:
+					'Optional base ref. Accepts local branches ("main", "feature/x"), ' +
+					'remote-tracking refs ("origin/main", "origin/feature/x"), or any safe git ref. ' +
+					"Omit to default to the current working directory's branch " +
+					'(upstream tracking ref if set, else local branch, else "origin/main" fallback). ' +
+					"Refused at provision time if the ref does not resolve.",
+				pattern: "^[A-Za-z0-9._/-]+$",
+			}),
+		),
+	},
+	{
+		description:
+			"Managed worktree request. Pass exactly one of goal_id (preferred) " +
+			"or dag_id (deprecated alias). Pass neither → parse error. Pass both → " +
+			"parse error (ambiguous).",
+	},
+);
 
 /**
  * Parsed and validated worktree request, ready to be handed to the
- * `AgentManager`. Same shape as `ManagedWorktreeRequest` — kept as a
- * distinct type so call sites downstream of the parser can be tagged.
+ * `AgentManager`. Same shape as `ManagedWorktreeRequest` but with
+ * `goal_id` always populated (canonical) and `dag_id` stripped (the
+ * compat alias is dropped after parsing).
  */
 export type ParsedManagedWorktreeRequest = ManagedWorktreeRequest;
 
@@ -121,24 +157,46 @@ export function parseManagedWorktreeRequest(
 		throw new Error(
 			'Agent isolation: the legacy "worktree" string literal is no longer accepted. ' +
 				"Pass an explicit worktree object instead: " +
-				'{ dag_id: string, task_id: string, worktree_id?: string, mode: "create" | "reuse" }. ' +
+				'{ goal_id: string, task_id: string, worktree_id?: string, mode: "create" | "reuse" }. ' +
 				"See pi-subagents/src/worktree-contract.ts for the schema.",
 		);
 	}
 	if (input == null || typeof input !== "object") {
 		throw new Error(
 			`Agent isolation: expected an explicit worktree object ` +
-				`({ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }), got ${JSON.stringify(input)}.`,
+				`({ goal_id, task_id, worktree_id?, mode: "create" | "reuse" }), got ${JSON.stringify(input)}.`,
 		);
 	}
 	const obj = input as Record<string, unknown>;
-	const dag_id = obj.dag_id;
+	const goal_id_raw = obj.goal_id;
+	const dag_id_raw = obj.dag_id;
 	const task_id = obj.task_id;
 	const worktree_id = obj.worktree_id;
 	const mode = obj.mode;
 
+	// GC-2026-path-B-field-renames: accept goal_id OR dag_id, but not both.
+	// Both-or-neither is a hard error.
+	const has_goal_id = typeof goal_id_raw === "string" && goal_id_raw.length > 0;
+	const has_dag_id = typeof dag_id_raw === "string" && dag_id_raw.length > 0;
+	let goal_id: string | undefined;
+	if (has_goal_id && has_dag_id) {
+		throw new Error(
+			"Agent isolation: pass exactly one of goal_id (preferred) or dag_id " +
+				"(deprecated alias). Both were provided — ambiguous.",
+		);
+	} else if (has_goal_id) {
+		goal_id = goal_id_raw;
+	} else if (has_dag_id) {
+		goal_id = dag_id_raw;
+	} else {
+		throw new Error(
+			"Agent isolation: pass exactly one of goal_id (preferred) or dag_id " +
+				'(deprecated alias). Neither was provided.',
+		);
+	}
+
 	for (const [name, value] of [
-		["dag_id", dag_id],
+		["goal_id", goal_id],
 		["task_id", task_id],
 	] as const) {
 		if (typeof value !== "string" || value.length === 0) {
@@ -167,7 +225,7 @@ export function parseManagedWorktreeRequest(
 		}
 	}
 	const parsed: ParsedManagedWorktreeRequest = {
-		dag_id: dag_id as string,
+		goal_id: goal_id as string,
 		task_id: task_id as string,
 		worktree_id: worktree_id as string | undefined,
 		mode,
@@ -175,7 +233,7 @@ export function parseManagedWorktreeRequest(
 	};
 	// Delegate identity validation to the worktree helper so both surfaces
 	// speak the same constraint language. Throws on path-traversal / whitespace.
-	validateIdentity(parsed.dag_id, parsed.worktree_id ?? parsed.task_id);
+	validateIdentity(parsed.goal_id, parsed.worktree_id ?? parsed.task_id);
 	return parsed;
 }
 
@@ -186,7 +244,7 @@ export function parseManagedWorktreeRequest(
 export function validateManagedWorktreeRequest(
 	req: ParsedManagedWorktreeRequest,
 ): void {
-	validateIdentity(req.dag_id, req.worktree_id ?? req.task_id);
+	validateIdentity(req.goal_id, req.worktree_id ?? req.task_id);
 }
 
 /**

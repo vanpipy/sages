@@ -41,7 +41,7 @@ describe("worktree-lifecycle: inspect is read-only", () => {
 	it("inspect never invokes git add/commit/merge/stash/reset", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 
@@ -98,7 +98,7 @@ describe("worktree-lifecycle: inspect is read-only", () => {
 	it("inspect classifies clean state accurately", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 
@@ -113,7 +113,7 @@ describe("worktree-lifecycle: inspect is read-only", () => {
 	it("inspect reports dirty files only", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		writeFileSync(join(wt.path, "staged.txt"), "stage me\n");
@@ -137,7 +137,7 @@ describe("worktree-lifecycle: inspect is read-only", () => {
 	it("inspect records the on-disk path and reports no merge instruction", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		const report = inspectManagedWorktree(wt);
@@ -161,7 +161,7 @@ describe("worktree-lifecycle: release", () => {
 	it("removes the worktree when the state is clean (no commits ahead, no dirty files)", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 
@@ -180,7 +180,7 @@ describe("worktree-lifecycle: release", () => {
 	it("preserves the worktree when uncommitted changes exist", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		writeFileSync(join(wt.path, "in-progress.txt"), "not done yet\n");
@@ -197,7 +197,7 @@ describe("worktree-lifecycle: release", () => {
 	it("preserves the worktree when commits are ahead of origin/main but no work is dirty", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		runGit(["commit", "--allow-empty", "-m", "feat: implementation commit"], {
@@ -213,7 +213,7 @@ describe("worktree-lifecycle: release", () => {
 	it("force: true removes the worktree even when changes exist", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		writeFileSync(join(wt.path, "abandoned.txt"), "will be lost\n");
@@ -227,7 +227,7 @@ describe("worktree-lifecycle: release", () => {
 	it("release on a missing worktree is a noop and reports the reason", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		// Drop the path manually to simulate crash recovery.
@@ -242,7 +242,7 @@ describe("worktree-lifecycle: release", () => {
 	it("release does not stage, commit, or merge as side effects", () => {
 		const wt = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		writeFileSync(join(wt.path, "draft.txt"), "before release\n");

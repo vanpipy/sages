@@ -1258,15 +1258,15 @@ Terse command-style prompts produce shallow, generic work.
 							}),
 							Type.Object(
 								{
-									dag_id: Type.String({
+									goal_id: Type.String({
 										description:
-											'DAG / goal id (e.g. "GC-2026-008"). Combined with task_id into a managed ' +
-											"worktree at <repoRoot>/.pi/worktree/<dag_id>/<task_id>.",
+											'Goal id (e.g. "GC-2026-008"). Combined with task_id into a managed ' +
+											"worktree at <repoRoot>/.pi/worktree/<goal_id>/<task_id>.",
 										pattern: "^[A-Za-z0-9_-]+$",
 									}),
 									task_id: Type.String({
 										description:
-											"Task / worktree id within the DAG. Must satisfy [A-Za-z0-9_-]+.",
+											"Task / worktree id within the goal. Must satisfy [A-Za-z0-9_-]+.",
 										pattern: "^[A-Za-z0-9_-]+$",
 									}),
 									worktree_id: Type.Optional(
@@ -1312,7 +1312,7 @@ Terse command-style prompts produce shallow, generic work.
 								'(1) the literal "worktree" — legacy, rejected for Sages callers; ' +
 								'(2) GC-2026-017: the literal "current-workspace" — explicit opt-in to run ' +
 								"in the caller's own cwd with no managed worktree; " +
-								"(3) the explicit managed-worktree object — { dag_id, task_id, worktree_id?, " +
+								"(3) the explicit managed-worktree object — { goal_id, task_id, worktree_id?, " +
 								'mode: "create" | "reuse" } (canonical surface). ' +
 								"See pi-subagents/src/worktree-contract.ts.",
 						},
@@ -1643,7 +1643,7 @@ Terse command-style prompts produce shallow, generic work.
 					return textResult(
 						'Agent isolation: the legacy "worktree" string literal is no longer accepted. ' +
 							"Pass an explicit worktree object instead: " +
-							'{ dag_id: string, task_id: string, worktree_id?: string, mode: "create" | "reuse" }. ' +
+							'{ goal_id: string, task_id: string, worktree_id?: string, mode: "create" | "reuse" }. ' +
 							"See pi-subagents/src/worktree-contract.ts for the schema.",
 					);
 				}
@@ -2775,7 +2775,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
 				// `enforceDeveloperManagedIsolationPolicy`). The wizard
 				// generates a fresh worktree per generation request.
 				managedWorktree: {
-					dag_id: "agent-generation",
+					goal_id: "agent-generation",
 					task_id: name,
 					mode: "create",
 				},

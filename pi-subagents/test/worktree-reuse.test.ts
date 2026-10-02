@@ -38,13 +38,13 @@ describe("worktree-reuse: default refuses silent reuse", () => {
 	it("throws when a worktree already exists at the target path and reuse is not set", () => {
 		createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 			}),
 		).toThrow(/already|exist|reuse/i);
@@ -60,7 +60,7 @@ describe("worktree-reuse: default refuses silent reuse", () => {
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 			}),
 		).toThrow();
@@ -79,7 +79,7 @@ describe("worktree-reuse: explicit reuse", () => {
 	it("returns the existing worktree when reuse: true and identity matches", () => {
 		const first = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		// Fast-forward origin/main so we can prove baseSha is recorded as the
@@ -88,7 +88,7 @@ describe("worktree-reuse: explicit reuse", () => {
 
 		const second = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			reuse: true,
 		});
@@ -107,19 +107,19 @@ describe("worktree-reuse: explicit reuse", () => {
 	it("the create result indicates reuse via an `identity` field preserved across calls", () => {
 		const first = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
-		expect(first.dag).toBe("GC-2026-008");
+		expect(first.goalId).toBe("GC-2026-008");
 		expect(first.worktree).toBe("P1");
 
 		const second = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			reuse: true,
 		});
-		expect(second.dag).toBe(first.dag);
+		expect(second.goalId).toBe(first.goalId);
 		expect(second.worktree).toBe(first.worktree);
 	});
 });
@@ -136,7 +136,7 @@ describe("worktree-reuse: mismatched reuse rejected", () => {
 	it("throws when reuse: true but the existing branch has been overwritten", () => {
 		const first = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 
@@ -151,7 +151,7 @@ describe("worktree-reuse: mismatched reuse rejected", () => {
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 				reuse: true,
 			}),
@@ -165,7 +165,7 @@ describe("worktree-reuse: mismatched reuse rejected", () => {
 	it("throws when a different shared ref has been checked out under the same path", () => {
 		const first = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 
@@ -177,7 +177,7 @@ describe("worktree-reuse: mismatched reuse rejected", () => {
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 				reuse: true,
 			}),
@@ -187,12 +187,12 @@ describe("worktree-reuse: mismatched reuse rejected", () => {
 	it("a different (dag, worktree) tuple never collides with the first", () => {
 		createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 		});
 		const wt2 = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P2",
 		});
 		expect(wt2.path).toBe(join(fx.root, ".pi/worktree/GC-2026-008/P2"));
@@ -207,7 +207,7 @@ describe("worktree-reuse: mismatched reuse rejected", () => {
 		try {
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 			});
 		} catch (e) {
@@ -218,7 +218,7 @@ describe("worktree-reuse: mismatched reuse rejected", () => {
 			try {
 				createManagedWorktree({
 					repoRoot: fx.root,
-					dag: "GC-2026-008",
+					goalId: "GC-2026-008",
 					worktree: "P1",
 				});
 			} catch (e) {
@@ -252,7 +252,7 @@ describe("worktree-reuse: refuse to provision over an unrelated worktree on disk
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 			}),
 		).toThrow();
@@ -285,7 +285,7 @@ describe("worktree-reuse: P2 — baseRef mismatch refused", () => {
 		runGit(["checkout", "-b", "feature/x"], { cwd: fx.root });
 		const first = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			base_ref: "feature/x",
 		});
@@ -299,7 +299,7 @@ describe("worktree-reuse: P2 — baseRef mismatch refused", () => {
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 				reuse: true,
 			}),
@@ -312,7 +312,7 @@ describe("worktree-reuse: P2 — baseRef mismatch refused", () => {
 		runGit(["checkout", "-b", "feature/x"], { cwd: fx.root });
 		const first = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			base_ref: "feature/x",
 		});
@@ -321,7 +321,7 @@ describe("worktree-reuse: P2 — baseRef mismatch refused", () => {
 		// Reuse with the matching base_ref — must succeed.
 		const second = createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			reuse: true,
 			base_ref: "feature/x",
@@ -335,7 +335,7 @@ describe("worktree-reuse: P2 — baseRef mismatch refused", () => {
 		runGit(["checkout", "-b", "feature/x"], { cwd: fx.root });
 		createManagedWorktree({
 			repoRoot: fx.root,
-			dag: "GC-2026-008",
+			goalId: "GC-2026-008",
 			worktree: "P1",
 			base_ref: "feature/x",
 		});
@@ -347,7 +347,7 @@ describe("worktree-reuse: P2 — baseRef mismatch refused", () => {
 		expect(() =>
 			createManagedWorktree({
 				repoRoot: fx.root,
-				dag: "GC-2026-008",
+				goalId: "GC-2026-008",
 				worktree: "P1",
 				reuse: true,
 				base_ref: "main",

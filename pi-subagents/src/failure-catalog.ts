@@ -109,7 +109,7 @@ export const KNOWN_TEMPLATE_VARS = [
 	"stderr_digest",
 	"sha",
 	"task_id",
-	"dag_id",
+	"goal_id",
 	"mode_id",
 	"verifier_output",
 ] as const;

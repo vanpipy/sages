@@ -6,7 +6,7 @@
  *
  *   1. After spawn(), `record.managedWorktree` carries the full handoff
  *      set — path, branch, baseSha, baseRef, head, dirty, reused,
- *      leaseToken, dag_id, task_id, worktree_id, repoRoot.
+ *      leaseToken, goal_id, task_id, worktree_id, repoRoot.
  *   2. A subsequent `steer_subagent` call leaves the handoff unchanged
  *      (deep equality). Steering is a control-plane operation that
  *      must not mutate the worktree identity.
@@ -96,7 +96,7 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 				description: "spawn under test",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-014",
+					goal_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -112,7 +112,7 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 
 		const handoff = record!.managedWorktree;
 		expect(handoff).toBeDefined();
-		expect(handoff!.dag_id).toBe("DAG-2026-014");
+		expect(handoff!.goal_id).toBe("DAG-2026-014");
 		expect(handoff!.task_id).toBe("P2");
 		expect(handoff!.worktree_id).toBe("P2");
 		expect(handoff!.branch).toMatch(/^sages\/DAG-2026-014\/P2$/);
@@ -143,7 +143,7 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 				description: "create",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-014",
+					goal_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -168,7 +168,7 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 				description: "reuse",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-014",
+					goal_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "reuse",
 				},
@@ -179,7 +179,7 @@ describe("developer-continuity: spawn populates the handoff end-to-end", () => {
 		// Identity (path / branch / dag / task) is preserved across reuse.
 		expect(h2!.path).toBe(h1!.path);
 		expect(h2!.branch).toBe(h1!.branch);
-		expect(h2!.dag_id).toBe(h1!.dag_id);
+		expect(h2!.goal_id).toBe(h1!.goal_id);
 		expect(h2!.task_id).toBe(h1!.task_id);
 
 		manager.abort(id2);
@@ -209,7 +209,7 @@ describe("developer-continuity: steer / getRecord / resume preserve the handoff"
 				description: "steer target",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-014",
+					goal_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -241,7 +241,7 @@ describe("developer-continuity: steer / getRecord / resume preserve the handoff"
 				description: "background target",
 				isBackground: true,
 				managedWorktree: {
-					dag_id: "DAG-2026-014",
+					goal_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -266,7 +266,7 @@ describe("developer-continuity: steer / getRecord / resume preserve the handoff"
 				description: "resume target",
 				isBackground: false,
 				managedWorktree: {
-					dag_id: "DAG-2026-014",
+					goal_id: "DAG-2026-014",
 					task_id: "P2",
 					mode: "create",
 				},
@@ -282,7 +282,7 @@ describe("developer-continuity: steer / getRecord / resume preserve the handoff"
 		const resumed = manager.getRecord(id);
 		expect(resumed).toBeDefined();
 		expect(resumed!.managedWorktree).toBeDefined();
-		expect(resumed!.managedWorktree!.dag_id).toBe(handoff!.dag_id);
+		expect(resumed!.managedWorktree!.goal_id).toBe(handoff!.goal_id);
 		expect(resumed!.managedWorktree!.task_id).toBe(handoff!.task_id);
 		expect(resumed!.managedWorktree!.path).toBe(handoff!.path);
 		expect(resumed!.managedWorktree!.branch).toBe(handoff!.branch);

@@ -14,7 +14,23 @@ coverage (postmortem or carve-out).
 
 | ID | Title | Goal yaml | Postmortem |
 |---|---|---|---|
+<<<<<<< Updated upstream
 | [GC-2026-096](./postmortem/GC-2026-096.md) | AFT install integration — bake config + npm peer + binary into install.sh | [.pi/orchestrator/goal-GC-2026-096.yaml](../../.pi/orchestrator/goal-GC-2026-096.yaml) | [GC-2026-096.md](./postmortem/GC-2026-096.md) |
 | [GC-2026-path-B-tracking](./postmortem/GC-2026-path-B-tracking.md) | Path B tracking layer: static graph + verdict parser + workflow:start listener in pi-tasks | [.pi/orchestrator/goal-GC-2026-path-B-tracking.yaml](../../.pi/orchestrator/goal-GC-2026-path-B-tracking.yaml) | [GC-2026-path-B-tracking.md](./postmortem/GC-2026-path-B-tracking.md) |
 | [GC-2026-path-B-swap](./postmortem/GC-2026-path-B-swap.md) | Path B swap: replace path A's workflow-run.ts with event-driven slim workflow_run | [.pi/orchestrator/goal-GC-2026-path-B-swap.yaml](../../.pi/orchestrator/goal-GC-2026-path-B-swap.yaml) | [GC-2026-path-B-swap.md](./postmortem/GC-2026-path-B-swap.md) |
 | [GC-2026-path-B-audit-fixes](./postmortem/GC-2026-path-B-audit-fixes.md) | Path A → path B drift cleanup: 7 commits across README / SKILL / agent prompts / templates / comments | (no goal yaml — pure doc + template cleanup branch) | [GC-2026-path-B-audit-fixes.md](./postmortem/GC-2026-path-B-audit-fixes.md) |
+=======
+| [GC-2026-076](./postmortem/GC-2026-076.md) | Wire voided subagent prompt sections + orchestrate developer YAML | [.pi/orchestrator/goal-GC-2026-076.yaml](../../.pi/orchestrator/goal-GC-2026-076.yaml) | [GC-2026-076.md](./postmortem/GC-2026-076.md) |
+| [GC-2026-081](./postmortem/GC-2026-081.md) | Expose todowrite + todowrite_compile + todowrite_progress in the orchestrator active toolset | [.pi/orchestrator/goal-GC-2026-081.yaml](../../.pi/orchestrator/goal-GC-2026-081.yaml) | [GC-2026-081.md](./postmortem/GC-2026-081.md) |
+| [GC-2026-085](./postmortem/GC-2026-085.md) | Wrap orchestrator todowrite tool returns in ToolResult shape | [.pi/orchestrator/goal-GC-2026-085.yaml](../../.pi/orchestrator/goal-GC-2026-085.yaml) | [GC-2026-085.md](./postmortem/GC-2026-085.md) |
+| [GC-2026-086](./postmortem/GC-2026-086.md) | Expose aft_* + ctx_* tools in the orchestrator active toolset | [.pi/orchestrator/goal-GC-2026-086.yaml](../../.pi/orchestrator/goal-GC-2026-086.yaml) | [GC-2026-086.md](./postmortem/GC-2026-086.md) |
+| [GC-2026-089](./postmortem/GC-2026-089.md) | Defensive ToolResult wrapper for 8 orchestrator tools (prevent pi render crash) | [.pi/orchestrator/goal-GC-2026-089.yaml](../../.pi/orchestrator/goal-GC-2026-089.yaml) | [GC-2026-089.md](./postmortem/GC-2026-089.md) |
+| [GC-2026-090](./postmortem/GC-2026-090.md) | Refactor: shared `wrapRegisteredTool` helper (eliminate 8-file copy-paste wrapper) | [.pi/orchestrator/goal-GC-2026-090.yaml](../../.pi/orchestrator/goal-GC-2026-090.yaml) | [GC-2026-090.md](./postmortem/GC-2026-090.md) |
+| [GC-2026-088](./postmortem/GC-2026-088.md) | Verifier path offset — institutional coverage now real | [.pi/orchestrator/goal-GC-2026-088.yaml](../../.pi/orchestrator/goal-GC-2026-088.yaml) | [GC-2026-088.md](./postmortem/GC-2026-088.md) |
+| [GC-2026-091](./postmortem/GC-2026-091.md) | Subagent naming PascalCase canonical + git-expert removal | [.pi/orchestrator/goal-GC-2026-091.yaml](../../.pi/orchestrator/goal-GC-2026-091.yaml) | [GC-2026-091.md](./postmortem/GC-2026-091.md) |
+| [GC-2026-092](./postmortem/GC-2026-092.md) | subagents.json defaultModelsByType (per-type model overrides) | [.pi/orchestrator/goal-GC-2026-092.yaml](../../.pi/orchestrator/goal-GC-2026-092.yaml) | [GC-2026-092.md](./postmortem/GC-2026-092.md) |
+
+## Open / no postmortem
+
+- **GC-2026-087** — FIRST tool priorities (P1: orchestrator tool-adoption, P2: 6-agent FIRST sections). Merged 2026-08-22 across two merges (`018e94f` P1, `7070915` P2). Postmortem deferred because the work was a pure mechanical rollout of tool-preference nudges with no follow-ups worth documenting at this time. Re-evaluate if a future GC touches the FIRST-priorities surface.
+>>>>>>> Stashed changes

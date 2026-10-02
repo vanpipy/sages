@@ -465,7 +465,7 @@ describe("developer-prompt: current-workspace isolation mode (GC-2026-017 P3)", 
 	// object shape) when in current-workspace mode.
 	//
 	// Two modes coexist:
-	//   1. Managed worktree (default): isolation = { dag_id, task_id, mode }
+	//   1. Managed worktree (default): isolation = { goal_id, task_id, mode }
 	//   2. Current workspace (opt-in): isolation = "current-workspace"
 	//
 	// The prose is allowed to evolve; the three invariants below are not.
