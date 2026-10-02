@@ -11,8 +11,15 @@
  *
  * Registers:
  *   - `goal_contract_create` — the intent + lock contract tool
- *   - `registerSubagentControlTools` — subagent_status / steer / abort / resume
  *   - Orchestrator advisory pipeline (post-tool detector + nudges)
+ *
+ * GC-2026-boundary-subagent-control: the subagent control tools
+ * (subagent_status / steer / abort / resume) used to be registered
+ * here. They are now owned by pi-subagents itself — the runtime
+ * that owns the AgentManager also owns the tools that operate on it.
+ * The orchestrator's `setActiveTools` still gates their visibility
+ * via the `SUBAGENT_CONTROL_TOOLS` constant below, so non-orchestrator
+ * sessions can opt in or out via `setActiveTools` policy.
  *
  * Three session-level hooks (preserved):
  *   1. `session_start`        — `pi.setActiveTools([...])`
@@ -34,7 +41,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registerGoalContractTool } from "./goal-contract.js";
 import { registerWorkflowRunTool } from "./workflow-run-tool.js";
-import { registerSubagentControlTools } from "./subagent-control.js";
 import {
 	installOrchestratorAdvisoryHandlers,
 	type OrchestratorAdvisoryRuntimeDeps,
@@ -173,9 +179,6 @@ export function registerOrchestratorTools(
 	registerGoalContractTool(pi);
 	// GC-2026-workflow-run: one-shot 5-phase pipeline runner.
 	registerWorkflowRunTool(pi);
-	// GC-2026-073: programmatic LLM-facing tools for inspecting and
-	// controlling subagents.
-	registerSubagentControlTools(pi);
 	// GC-2026-053: orchestrator tool_call audit wiring.
 	installOrchestratorAdvisoryHandlers(pi, runtime);
 }
