@@ -5,8 +5,8 @@
  * (scope drift, anti_goal relaxation, title / done_definition
  * softening). After GC-2026-orchestrator-simplify the orchestrator no
  * longer owns `success_criteria` — the Reviewer agent reads the goal
- * intent directly. The lock continues to cover the intent-relevant
- * fields that gate the workflow contract.
+ * intent directly. The lock covers the intent-relevant fields:
+ * title / rationale / scope / anti_goals / done_definition.
  *
  * Mechanism: at goal creation time, compute SHA-256 of the canonical
  * goal content. Store the hash in the goal.yaml itself (`_lock_hash`
