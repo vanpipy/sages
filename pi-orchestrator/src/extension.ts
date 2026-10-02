@@ -1,11 +1,13 @@
 /**
  * @sages/pi-orchestrator — package entry point (default pi extension).
  *
- * After GC-2026-orchestrator-simplify the orchestrator owns exactly
- * ONE tool (`goal_contract_create`). The DAG, dispatch, audit, and
- * reminder tools were removed — workflow is now driven by pi-tasks
- * (TaskCreate × 4 + TaskExecute) and orchestrated at the workflow
- * level by the future `workflow_run` tool (GC-2).
+ * After GC-2026-orchestrator-simplify + GC-2026-workflow-run +
+ * GC-2026-path-B-swap the orchestrator owns exactly TWO tools
+ * (`goal_contract_create` + `workflow_run`). The DAG, dispatch,
+ * audit, and reminder tools were removed. workflow_run is a thin
+ * event-driven shim that emits `workflow:start` to pi-tasks and waits
+ * for `workflow:phase-complete`; pi-tasks's `subscribeWorkflow` does
+ * the cascade.
  *
  * Registers:
  *   - `goal_contract_create` — the intent + lock contract tool
