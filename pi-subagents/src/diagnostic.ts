@@ -69,7 +69,7 @@ export interface DiagnosticJsonV1 {
 	schemaVersion: "v1";
 	emittedAt: string;
 	dispatchId: string;
-	context: { dagId?: string; taskId?: string; worktreeId?: string };
+	context: { goalId?: string; taskId?: string; worktreeId?: string };
 	subagentType: string;
 	outcome: DiagnosticOutcome;
 	cause: string;
@@ -118,7 +118,7 @@ export const DiagnosticJsonV1Schema = Type.Object(
 		dispatchId: Type.String({ minLength: 1 }),
 		context: Type.Object(
 			{
-				dagId: Type.Optional(Type.String()),
+				goalId: Type.Optional(Type.String()),
 				taskId: Type.Optional(Type.String()),
 				worktreeId: Type.Optional(Type.String()),
 			},
@@ -144,7 +144,7 @@ export const DiagnosticJsonV1Schema = Type.Object(
 
 export interface WriteDiagnosticArgs {
 	dispatchId: string;
-	context?: { dagId?: string; taskId?: string; worktreeId?: string };
+	context?: { goalId?: string; taskId?: string; worktreeId?: string };
 	subagentType: string;
 	outcome: DiagnosticOutcome;
 	cause: string;

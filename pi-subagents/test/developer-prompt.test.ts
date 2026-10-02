@@ -143,7 +143,7 @@ describe("developer-prompt: tool preference order (GC-2026-012)", () => {
 		// todowrite precede bash and read).
 		const aftItem = section.match(/^1\.\s+\*\*AFT/m)?.index;
 		const mcpItem = section.match(/^2\.\s+\*\*MCP/m)?.index;
-		const todowriteItem = section.match(/^4\.\s+\*\*`?todowrite`?/m)?.index;
+		const todowriteItem = section.match(/^4\.\s+\*\*`?agent_todowrite`?/m)?.index;
 		const readItem = section.match(/^5\.\s+\*\*`?read`?/m)?.index;
 		const bashItem = section.match(/^6\.\s+\*\*`?bash`?/m)?.index;
 		expect(typeof aftItem, "must start with AFT as list item 1").toBe("number");
@@ -465,7 +465,7 @@ describe("developer-prompt: current-workspace isolation mode (GC-2026-017 P3)", 
 	// object shape) when in current-workspace mode.
 	//
 	// Two modes coexist:
-	//   1. Managed worktree (default): isolation = { dag_id, task_id, mode }
+	//   1. Managed worktree (default): isolation = { goal_id, task_id, mode }
 	//   2. Current workspace (opt-in): isolation = "current-workspace"
 	//
 	// The prose is allowed to evolve; the three invariants below are not.

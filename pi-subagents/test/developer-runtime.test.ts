@@ -116,12 +116,12 @@ describe("developer-runtime: normalizeWorktreeIsolation rejects the legacy liter
 
 	it("parses a valid explicit object verbatim", () => {
 		const req = normalizeWorktreeIsolation({
-			dag_id: "DAG-2026-014",
+			goal_id: "DAG-2026-014",
 			task_id: "P1",
 			mode: "create",
 		});
 		expect(req).toBeDefined();
-		expect(req?.dag_id).toBe("DAG-2026-014");
+		expect(req?.goal_id).toBe("DAG-2026-014");
 		expect(req?.task_id).toBe("P1");
 		expect(req?.mode).toBe("create");
 	});
@@ -136,7 +136,7 @@ describe("developer-runtime: normalizeWorktreeIsolation rejects the legacy liter
 describe("developer-runtime: enforceDeveloperManagedIsolationPolicy unit checks", () => {
 	it("accepts a valid managed-worktree object under the canonical name", () => {
 		const ok = enforceDeveloperManagedIsolationPolicy(CANONICAL, {
-			dag_id: "DAG-2026-014",
+			goal_id: "DAG-2026-014",
 			task_id: "P1",
 			mode: "create",
 		});
@@ -170,12 +170,12 @@ describe("developer-runtime: enforceDeveloperManagedIsolationPolicy unit checks"
 		).toBeDefined();
 		expect(
 			enforceDeveloperManagedIsolationPolicy(CANONICAL, {
-				dag_id: "DAG-1",
+				goal_id: "DAG-1",
 			} as any),
 		).toBeDefined();
 		expect(
 			enforceDeveloperManagedIsolationPolicy(CANONICAL, {
-				dag_id: "DAG-1",
+				goal_id: "DAG-1",
 				task_id: "P1",
 				mode: "explode",
 			} as any),

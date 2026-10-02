@@ -68,7 +68,7 @@ describe("GC-2026-045 — worktree concurrency gate diagnostic wire", () => {
 		// AND leave a diagnostic on disk. This is the wire under test.
 		const occupied = await claimWorktreeLease({
 			repoRoot,
-			consumer: { dagId: "DAG-2026-045", taskId: "T1" },
+			consumer: { goalId: "DAG-2026-045", taskId: "T1" },
 			cap: 1,
 			gateEnabled: true,
 		});
@@ -80,7 +80,7 @@ describe("GC-2026-045 — worktree concurrency gate diagnostic wire", () => {
 		await expect(
 			claimWorktreeLease({
 				repoRoot,
-				consumer: { dagId: "DAG-2026-045", taskId: "T2" },
+				consumer: { goalId: "DAG-2026-045", taskId: "T2" },
 				cap: 1,
 				gateEnabled: true,
 			}),
@@ -99,7 +99,7 @@ describe("GC-2026-045 — worktree concurrency gate diagnostic wire", () => {
 		expect(onDisk.cause).toBe("worktree-concurrency-cap-reached");
 		expect(onDisk.outcome).toBe("needs-work");
 		expect(onDisk.subagentType).toBe("developer");
-		expect(onDisk.context.dagId).toBe("DAG-2026-045");
+		expect(onDisk.context.goalId).toBe("DAG-2026-045");
 		expect(onDisk.context.taskId).toBe("T2");
 		expect(onDisk.detail).toMatch(/cap.*1/i);
 		expect(typeof onDisk.dispatchId).toBe("string");
@@ -111,14 +111,14 @@ describe("GC-2026-045 — worktree concurrency gate diagnostic wire", () => {
 		// must not produce a forensic record for an event that did not happen.
 		await claimWorktreeLease({
 			repoRoot,
-			consumer: { dagId: "DAG-2026-045", taskId: "T1" },
+			consumer: { goalId: "DAG-2026-045", taskId: "T1" },
 			cap: 1,
 			gateEnabled: false,
 		});
 
 		const res = await claimWorktreeLease({
 			repoRoot,
-			consumer: { dagId: "DAG-2026-045", taskId: "T2" },
+			consumer: { goalId: "DAG-2026-045", taskId: "T2" },
 			cap: 1,
 			gateEnabled: false,
 		});
@@ -139,7 +139,7 @@ describe("GC-2026-045 — worktree concurrency gate diagnostic wire", () => {
 		// the caller thinking the lease was claimed.
 		await claimWorktreeLease({
 			repoRoot,
-			consumer: { dagId: "DAG-2026-045", taskId: "T1" },
+			consumer: { goalId: "DAG-2026-045", taskId: "T1" },
 			cap: 1,
 			gateEnabled: true,
 		});
@@ -151,7 +151,7 @@ describe("GC-2026-045 — worktree concurrency gate diagnostic wire", () => {
 		await expect(
 			claimWorktreeLease({
 				repoRoot,
-				consumer: { dagId: "DAG-2026-045", taskId: "T2" },
+				consumer: { goalId: "DAG-2026-045", taskId: "T2" },
 				cap: 1,
 				gateEnabled: true,
 			}),

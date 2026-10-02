@@ -43,7 +43,7 @@ afterEach(() => {
 function base(overrides: Record<string, unknown> = {}) {
 	return {
 		dispatchId: "GC-2026-044-T2-1",
-		context: { dagId: "DAG-2026-044", taskId: "T2" },
+		context: { goalId: "DAG-2026-044", taskId: "T2" },
 		subagentType: "developer",
 		outcome: "aborted" as const,
 		cause: "subagent-timeout",

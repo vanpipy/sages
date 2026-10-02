@@ -455,12 +455,12 @@ export class AgentManager {
 			// lease is in-process; the orchestrator's parent session serializes
 			// spawns on its own anyway, but tooling like the test runner that
 			// exercises contract paths in parallel still relies on this guard.
-			const lease = acquireManagedWorktreeLease(req.dag_id, worktreeId);
+			const lease = acquireManagedWorktreeLease(req.goal_id, worktreeId);
 			managedWorktreeLeaseToken = lease.token;
 			try {
 				const wt = createManagedWorktree({
 					repoRoot: baseCwd,
-					dag: req.dag_id,
+					goalId: req.goal_id,
 					worktree: worktreeId,
 					reuse: req.mode === "reuse",
 					// Forward the caller's explicit base_ref (or undefined to
@@ -493,7 +493,7 @@ export class AgentManager {
 					dirty,
 					reused: wt.reused,
 					leaseToken: lease.token,
-					dag_id: req.dag_id,
+					goal_id: req.goal_id,
 					task_id: req.task_id,
 					worktree_id: worktreeId,
 					repoRoot: wt.repoRoot,
@@ -526,7 +526,7 @@ export class AgentManager {
 					try {
 						releaseManagedWorktreeLease({
 							token: managedWorktreeLeaseToken,
-							dag: managedWorktreeHandoff!.dag_id,
+							goalId: managedWorktreeHandoff!.goal_id,
 							worktree: managedWorktreeHandoff!.worktree_id,
 						});
 					} catch {
@@ -690,7 +690,7 @@ export class AgentManager {
 					try {
 						releaseManagedWorktreeLease({
 							token: managedWorktreeLeaseToken,
-							dag: managedWorktreeHandoff.dag_id,
+							goalId: managedWorktreeHandoff.goal_id,
 							worktree: managedWorktreeHandoff.worktree_id,
 						});
 					} catch {
@@ -763,7 +763,7 @@ export class AgentManager {
 					try {
 						releaseManagedWorktreeLease({
 							token: managedWorktreeLeaseToken,
-							dag: managedWorktreeHandoff.dag_id,
+							goalId: managedWorktreeHandoff.goal_id,
 							worktree: managedWorktreeHandoff.worktree_id,
 						});
 					} catch {
@@ -987,7 +987,7 @@ export class AgentManager {
 		args:
 			| {
 					repoRoot: string;
-					dag_id: string;
+					goal_id: string;
 					task_id: string;
 					worktree_id?: string;
 					deleteBranch?: boolean;
@@ -1022,14 +1022,14 @@ export class AgentManager {
 		// Use the contract parser to normalize id fields BEFORE going through
 		// the worktree-domain helpers — single identity-validation surface.
 		parseManagedWorktreeRequest({
-			dag_id: args.dag_id,
+			goal_id: args.goal_id,
 			task_id: args.task_id,
 			worktree_id: args.worktree_id,
 			mode: "create",
 		});
 		const res = deleteManagedWorktree({
 			repoRoot: args.repoRoot,
-			dag: args.dag_id,
+			goalId: args.goal_id,
 			worktree: worktree_id,
 			deleteBranch: args.deleteBranch,
 		});

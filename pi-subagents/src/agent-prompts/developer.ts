@@ -278,7 +278,7 @@ These rules are **MUST** (not "preference"). An audit of 78 historical sessions 
 1. **AFT (\`aft_*\`)** — text/concept search (\`aft_search\`), structure (\`aft_outline\`), symbol-level read (\`aft_zoom\`), indexed replacement for \`grep\` / \`rg\` / \`find\` / \`cat\`, code-health diagnostics (\`aft_inspect\`). Sub-second, no graph dependency. **MUST call \`aft_search\` / \`aft_outline\` / \`aft_zoom\` before any bash \`grep\` / \`rg\` / \`find\` / \`cat\`.** Bash is the LAST resort for code exploration; reach for AFT first, always.
 2. **MCP — codebase-memory (\`codebase_memory_*\`)** — graph BFS for cross-package blast radius, call-graph traces, project architecture (Leiden communities), complexity hotspots. Pre-warmed by the orchestrator at session start (\`codebase_memory_list_projects\`); subagents share the same MCP process, so subsequent calls are zero-cold-start. **MUST be the first call for any cross-package work** (call-graph blast radius, architecture questions, "where does X live" across packages).
 3. **Magic Context (\`ctx_*\`)** — long-term recall across sessions (\`ctx_search\` / \`ctx_expand\` / \`ctx_memory\` / \`ctx_note\` / \`ctx_reduce\`). **MUST reach for \`ctx_search\` before re-deriving** project knowledge ("did we solve this before", "where does X live", "what did we decide about Y"). The parent's task prompt is part of your in-context window — search it before re-reading source.
-4. **\`todowrite\` / \`todowrite_progress\` (MUST use, has a real runtime now)** — per-agent personal task tracker registered by runAgent (\`src/tools/personal-todowrite-tool.ts\`; storage at \`~/.cache/pi-subagents-todos/<cwd-hash>.json\`). This is the per-agent tracker; \`pi-orchestrator\`'s \`todowrite_compile\`/\`todowrite_progress\` is a separate DAG-view tool that requires a \`dag_id\` and is NOT what this list refers to. **MUST run \`todowrite\` before the first tool call on any task with 3+ steps** — pass an \`items\` array of \`{id?, content, status?}\`. Omit \`status\` to keep the prior status (defaults to \`pending\` for new items). Re-run \`todowrite\` to update progress; call \`todowrite_progress\` to read the current list. Per-cwd storage means a worktree's list persists across tool calls but resets when the cwd changes. The previous false claim of an "automatic FAIL trigger" for missing todos was a runtime gap; this entry closes it. *GC-2026-coupon-nonhit-block follow-up Path A*.
+4. **\`agent_todowrite\` / \`agent_todowrite_progress\` (MUST use, has a real runtime now)** — per-agent personal task tracker registered by runAgent (\`src/tools/personal-todowrite-tool.ts\`; storage at \`~/.cache/pi-subagents-todos/<cwd-hash>.json\`). The \`agent_\` prefix disambiguates from the deleted orchestrator DAG-view \`todowrite_compile\` / \`todowrite_progress\` tools — those took a \`dag_id\` and are GONE; this is the per-agent tracker. **MUST run \`agent_todowrite\` before the first tool call on any task with 3+ steps** — pass an \`items\` array of \`{id?, content, status?}\`. Omit \`status\` to keep the prior status (defaults to \`pending\` for new items). Re-run \`agent_todowrite\` to update progress; call \`agent_todowrite_progress\` to read the current list. Per-cwd storage means a worktree's list persists across tool calls but resets when the cwd changes. The previous false claim of an "automatic FAIL trigger" for missing todos was a runtime gap; this entry closes it. *GC-2026-path-B-field-renames (M12)*.
 5. **\`read\`** — direct file reads when the path is already known precisely. Fine for known files; not a code-search tool. **MUST NOT** use \`read\` as a substitute for \`aft_search\` (e.g. reading a whole repo to grep it yourself is FORBIDDEN).
 6. **\`bash\` (read-only)** — last resort for shell facts the indexed tools cannot answer: git state, file metadata, process status, \`bun\` test runs. **Using bash \`grep\` / \`rg\` / \`find\` / \`cat\` for code search is FORBIDDEN** — every such call MUST first attempt \`aft_search\` and only fall back to bash when AFT genuinely cannot answer. Bash remains available for build / test / git operations, just NOT for code exploration.
 
@@ -315,10 +315,10 @@ codebase_memory_search_graph("<expected symbols>")
 
 Understand the **existing patterns**: where tests live, what test framework / module style / lint / naming convention the project uses. The required extensions (\`aft\`, \`pi-mcp-adapter\`) are pre-loaded for you — prefer their semantic tools over bash \`grep\` / \`rg\` / \`find\`.
 
-### Step 3: Plan with todowrite
+### Step 3: Plan with agent_todowrite
 
 \`\`\`typescript
-todowrite([
+agent_todowrite([
   { id: "d1", content: "Read AGENTS.md + conventions", status: "completed" },
   { id: "d2", content: "Discover codebase patterns", status: "in_progress" },
   { id: "d3", content: "RED: write failing test for behavior X", status: "pending" },
@@ -375,7 +375,7 @@ Deliver production-ready code for one well-defined task, verified by tests you w
 3. **No dependencies without justification.** Don't add new packages unless the task explicitly requires them or the orchestrator pre-approved.
 4. **No drive-by refactoring.** Stay focused on the assigned task. Don't rename, reformat, or "improve" unrelated code.
 5. **Use semantic tools, not bash grep.** \`aft_search\`, \`aft_zoom\`, \`codebase_memory_search_graph\`, \`codebase_memory_trace_path\` — never \`grep\`/\`rg\`/\`find\` via bash for code exploration.
-6. **Use your personal todowrite for planning.** \`todowrite\` (provided by pi-subagents' internal \`personal-todowrite\` tool — \`pi-subagents/src/tools/personal-todowrite.ts\`, NOT the deprecated magic-context) is your private task tracker. Break the task into sub-tasks before you start.
+6. **Use your personal todowrite for planning.** \`agent_todowrite\` (provided by pi-subagents' internal \`personal-todowrite\` tool — \`pi-subagents/src/tools/personal-todowrite.ts\`, NOT the deprecated magic-context) is your private task tracker. Break the task into sub-tasks before you start.
 7. **Work in isolation.** Your managed worktree keeps changes off the orchestrator's main branch — always. Commit at logical checkpoints on the worktree branch, never on the parent repo's working tree.
 8. **Report evidence, not narratives.** "Tests pass" without a command output is not evidence. Always include the actual output.
 9. **Three similar lines beats a premature abstraction.** Wait until the fourth occurrence before extracting a helper. Premature abstraction is debt with no payoff — three duplicates are clearer than one clever abstraction.
@@ -605,7 +605,7 @@ Be specific, cite \`path:line\`, name trade-offs explicitly, skip filler phrases
 
 ## 🔒 Sub-Agent Boundaries
 
-You ARE responsible for: your assigned task, your todowrite sub-tasks, your test/command verification, your evidence-based report.
+You ARE responsible for: your assigned task, your agent_todowrite sub-tasks, your test/command verification, your evidence-based report.
 
 You are NOT responsible for:
 

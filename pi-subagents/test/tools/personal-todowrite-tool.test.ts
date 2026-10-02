@@ -76,12 +76,12 @@ function exec<T = unknown>(name: string, params: unknown): { content: Array<{ ty
 
 describe("registerPersonalTodowriteTools", () => {
 	it("registers two tools with the expected names", () => {
-		expect(pi.tools.has("todowrite")).toBe(true);
-		expect(pi.tools.has("todowrite_progress")).toBe(true);
+		expect(pi.tools.has("agent_todowrite")).toBe(true);
+		expect(pi.tools.has("agent_todowrite_progress")).toBe(true);
 	});
 
-	it("todowrite replaces the list (Claude Code-compatible shape)", async () => {
-		const result = exec("todowrite", {
+	it("agent_todowrite replaces the list (Claude Code-compatible shape)", async () => {
+		const result = exec("agent_todowrite", {
 			items: [
 				{ content: "Read AGENTS.md", status: "completed" },
 				{ content: "Write RED test", status: "in_progress" },
@@ -101,38 +101,38 @@ describe("registerPersonalTodowriteTools", () => {
 		expect(onDisk).toHaveLength(3);
 	});
 
-	it("todowrite with empty items clears the list", () => {
-		exec("todowrite", {
+	it("agent_todowrite with empty items clears the list", () => {
+		exec("agent_todowrite", {
 			items: [
 				{ content: "x", status: "pending" },
 				{ content: "y", status: "pending" },
 			],
 		});
 		expect(loadTodos(cwd)).toHaveLength(2);
-		exec("todowrite", { items: [] });
+		exec("agent_todowrite", { items: [] });
 		expect(loadTodos(cwd)).toEqual([]);
 	});
 
-	it("todowrite preserves prior status when re-setting without status", () => {
-		exec("todowrite", {
+	it("agent_todowrite preserves prior status when re-setting without status", () => {
+		exec("agent_todowrite", {
 			items: [{ id: "t1", content: "foo", status: "in_progress" }],
 		});
-		const back = exec("todowrite", {
+		const back = exec("agent_todowrite", {
 			items: [{ id: "t1", content: "foo" }],
 		});
 		const parsed = JSON.parse(back.content[0].text);
 		expect(parsed.items[0].status).toBe("in_progress");
 	});
 
-	it("todowrite_progress returns the current list + summary", () => {
-		exec("todowrite", {
+	it("agent_todowrite_progress returns the current list + summary", () => {
+		exec("agent_todowrite", {
 			items: [
 				{ content: "a", status: "completed" },
 				{ content: "b", status: "in_progress" },
 				{ content: "c", status: "pending" },
 			],
 		});
-		const result = exec("todowrite_progress", {});
+		const result = exec("agent_todowrite_progress", {});
 		const parsed = JSON.parse(result.content[0].text);
 		expect(parsed.items).toHaveLength(3);
 		expect(parsed.summary).toEqual({
@@ -148,8 +148,8 @@ describe("registerPersonalTodowriteTools", () => {
 		});
 	});
 
-	it("todowrite_progress on an empty list returns summary zeros", () => {
-		const result = exec("todowrite_progress", {});
+	it("agent_todowrite_progress on an empty list returns summary zeros", () => {
+		const result = exec("agent_todowrite_progress", {});
 		const parsed = JSON.parse(result.content[0].text);
 		expect(parsed.items).toEqual([]);
 		expect(parsed.summary).toEqual({
@@ -170,8 +170,8 @@ describe("registerPersonalTodowriteTools", () => {
 		try {
 			const piB = new FakePi();
 			registerPersonalTodowriteTools(piB, { cwd: cwdB });
-			pi.tools.get("todowrite")!.execute("a", { items: [{ content: "A", status: "pending" }] }, undefined, undefined, { cwd });
-			piB.tools.get("todowrite")!.execute("b", { items: [{ content: "B", status: "completed" }] }, undefined, undefined, { cwd: cwdB });
+			pi.tools.get("agent_todowrite")!.execute("a", { items: [{ content: "A", status: "pending" }] }, undefined, undefined, { cwd });
+			piB.tools.get("agent_todowrite")!.execute("b", { items: [{ content: "B", status: "completed" }] }, undefined, undefined, { cwd: cwdB });
 			expect(loadTodos(cwd)).toHaveLength(1);
 			expect(loadTodos(cwdB)).toHaveLength(1);
 			expect(loadTodos(cwd)[0].content).toBe("A");
