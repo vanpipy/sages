@@ -14,7 +14,7 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
    access (`edit`, `write`, `aft_edit`, `apply_patch`, unrestricted `bash`)
    — nothing is stripped on session startup and no bash command is blocked
    (including `rm` / `mv` / `cp` / `unlink` / `rmdir`). The bash-guard is
-    a classifier under soft mode, not a gate. See "Soft mode and dag_threshold"
+    a classifier under soft mode, not a gate. See "Soft Mode (the only mode)"
     below for the recommendation mechanism.
 2. **Production code uses managed-worktree dispatch.** RECOMMENDED for
    `src/`, `test/`, `lib/`, every `pi-*/` subpackage
