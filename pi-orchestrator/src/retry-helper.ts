@@ -1,9 +1,10 @@
 /**
  * retry-helper.ts — GC-2026-070 mechanism: orchestrator-side re-dispatch helper.
  *
- * Bridges the failure-mode catalog (declared in `pi-subagents/src/data/failure-modes.v1.yaml`)
- * to a structured suggestion the orchestrator LLM can act on. The catalog's
- * `handler.kind` discriminates three re-dispatch shapes:
+ * Bridges the failure-mode catalog (declared in `src/data/failure-modes.v1.yaml`,
+ * moved from pi-subagents as of GC-2026-failure-catalog-move) to a structured
+ * suggestion the orchestrator LLM can act on. The catalog's `handler.kind`
+ * discriminates three re-dispatch shapes:
  *
  *   - `retry-subagent` → render `feedbackTemplate` with prior stderr digest
  *     attached, return `{promptPrefix, retryBudgetLeft, suggestedIsolation: "reuse"}`.
@@ -16,13 +17,12 @@
  * sub-agent's `AgentManager` owns `mode: "reuse"` worktree reuse (already
  * implemented); the orchestrator picks the call shape via `buildReDispatchSuggestion`.
  *
- * Cross-package import note: the failure-catalog lives in pi-subagents.
- * Relative imports work under our tsconfig (noEmit: true, no rootDir,
- * moduleResolution: Bundler) — the prior `@ts-ignore` was defensive
- * cruft, not a real tsc error. Mirrors the cleanup in
- * `orchestrator-audit.ts`.
+ * GC-2026-failure-catalog-move: the failure-catalog is now owned by
+ * pi-orchestrator (same package as this file). The previous
+ * `@sages/pi-subagents/failure-catalog` import was the last cross-package
+ * synchronous value import in the monorepo.
  */
-import { getFailureCatalog, renderFeedbackTemplate } from "@sages/pi-subagents/failure-catalog";
+import { getFailureCatalog, renderFeedbackTemplate } from "./failure-catalog.js";
 
 /**
  * Minimal shape we need from a DiagnosticJsonV1. We don't import the full

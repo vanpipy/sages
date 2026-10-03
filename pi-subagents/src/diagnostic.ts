@@ -34,6 +34,10 @@ import {
 import { isAbsolute, join, resolve } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+// GC-2026-failure-catalog-move: failure-catalog lives in pi-orchestrator now.
+// pi-subagents keeps an internal copy of the full parser for diagnostic.ts's
+// 3 call sites. install.sh copies the canonical YAML from
+// pi-orchestrator/src/data/ into pi-subagents/src/data/ at install.
 import { getFailureCatalog } from "./failure-catalog.js";
 
 /** Sub-agent-owned; deliberately outside `.pi/orchestrator/` (memory rule #23). */
