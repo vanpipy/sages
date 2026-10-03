@@ -56,5 +56,3 @@ export * from "./bash-guard.js";
 
 export * as Observability from "./observability/index.js";
 export * from "./orchestrator-advisory.js";
-export * as ProjectAnalyzer from "./utils/analyzer/index.js";
-export * as FileService from "./services/index.js";
