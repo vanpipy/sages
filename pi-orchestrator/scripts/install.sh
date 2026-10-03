@@ -1151,6 +1151,25 @@ install_pi_subagents_files() {
     cp -r "$src_root" "$PI_SUBAGENTS_DEST_DIR"
     echo "  Installed pi-subagents files to $PI_SUBAGENTS_DEST_DIR"
   fi
+
+  # GC-2026-failure-catalog-move: pi-orchestrator owns the failure-catalog
+  # data + parser as of this GC. pi-subagents/src/diagnostic.ts still
+  # needs to read the catalog YAML at runtime (3 call sites: allIds,
+  # matches, lookup). The data file ships in both packages' installs
+  # so each can read its own copy without cross-package path resolution.
+  # The canonical source is $LOCAL_REPO_ROOT/pi-orchestrator/src/data/;
+  # we copy it to $PI_SUBAGENTS_DEST_DIR/src/data/ here. Drift is bounded
+  # by the install.sh copy step (single source of truth on disk).
+  local catalog_src="$LOCAL_REPO_ROOT/pi-orchestrator/src/data/failure-modes.v1.yaml"
+  local catalog_dst_dir="$PI_SUBAGENTS_DEST_DIR/src/data"
+  if [[ -f "$catalog_src" ]]; then
+    mkdir -p "$catalog_dst_dir"
+    cp "$catalog_src" "$catalog_dst_dir/failure-modes.v1.yaml"
+    if [[ -f "$LOCAL_REPO_ROOT/pi-orchestrator/src/data/failure-modes.v1.schema.json" ]]; then
+      cp "$LOCAL_REPO_ROOT/pi-orchestrator/src/data/failure-modes.v1.schema.json" \
+        "$catalog_dst_dir/failure-modes.v1.schema.json"
+    fi
+  fi
   if [[ -f "$PI_SUBAGENTS_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
     # Drop --silent + add verify_critical_subagents_deps — mirror of
     # the orchestrator fix at commit e2e0101. pi-subagents imports
