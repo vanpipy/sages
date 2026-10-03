@@ -676,46 +676,20 @@ export default function (pi: ExtensionAPI) {
 		(type) => getAgentConfig(type)?.maxConcurrent,
 	);
 
-	// Expose manager via Symbol.for() global registry for cross-package access.
-	// Standard Node.js pattern for cross-package singletons (used by OpenTelemetry, etc.).
+	// GC-2026-boundary-subagent-control removed the orchestrator's
+	// Symbol.for("pi-subagents:manager") cross-package dependency.
+	// GC-2026-institutional-coverage removes the globalThis registry
+	// publish itself — no production consumer reads
+	// globalThis[Symbol.for("pi-subagents:manager")] now (verified by
+	// `git grep -r 'pi-subagents:manager' pi-*/src/` returning only
+	// documentation comments and the historical Context7 snippet in
+	// the GC-2026-073 commit). The cross-package singleton pattern was
+	// useful when pi-orchestrator needed runtime access, but after the
+	// boundary cleanup every consumer is co-located in this package.
 	//
-	// Claim the slot only if it's free: subagent sessions re-activate this
-	// extension in the same process (session.bindExtensions in agent-runner.ts),
-	// and unconditionally overwriting would point the registry at a short-lived
-	// child manager — and the child's shutdown would then delete the root
-	// session's entry. The first activation (the root session) wins; child
-	// activations leave it alone.
-	const MANAGER_KEY = Symbol.for("pi-subagents:manager");
-	const registryEntry = {
-		waitForAll: () => manager.waitForAll(),
-		hasRunning: () => manager.hasRunning(),
-		spawn: (piRef: any, ctx: any, type: string, prompt: string, options: any) =>
-			manager.spawn(piRef, ctx, type, prompt, options),
-		getRecord: (id: string) => manager.getRecord(id),
-		// GC-2026-073: expose the LLM-facing control surface so the
-		// subagent_status / steer / abort / resume tools reach the same
-		// singleton that powers the Agent tool. The registry already
-		// mediates identity across multiple pi activations; adding
-		// methods here is purely additive — older callers (e.g.
-		// cross-extension RPC, ui widgets) only use the four-method
-		// surface above.
-		//
-		// GC-2026-boundary-subagent-control: the 4 control tools are now
-		// owned by pi-subagents itself (see ./subagent-control-tools.ts).
-		// The orchestrator used to host them and reach into this
-		// registry via Symbol.for("pi-subagents:manager"); that
-		// cross-boundary dependency is removed. The registry remains
-		// for back-compat with test fixtures and any future
-		// cross-package integration.
-		steer: (id: string, message: string) => manager.steer(id, message),
-		abort: (id: string, reason?: unknown) => manager.abort(id, reason),
-		resume: (id: string, prompt: string) => manager.resume(id, prompt),
-		listAgents: () => manager.listAgents(),
-	};
-	const ownsManagerRegistry = (globalThis as any)[MANAGER_KEY] === undefined;
-	if (ownsManagerRegistry) {
-		(globalThis as any)[MANAGER_KEY] = registryEntry;
-	}
+	// If a future extension needs cross-package access, the right shape
+	// is a typed RPC channel (see pi-tasks's subagents:rpc:spawn), not
+	// an untyped globalThis singleton.
 
 	// GC-2026-boundary-subagent-control: register the 4 subagent control
 	// tools (subagent_status / steer / abort / resume). These used to live
@@ -801,14 +775,8 @@ export default function (pi: ExtensionAPI) {
 		rpcHandle?.unsubPing();
 		rpcHandle = undefined;
 		currentCtx = undefined;
-		// Only release the global slot if this activation claimed it — a child
-		// session's shutdown must not delete the root session's registry entry.
-		if (
-			ownsManagerRegistry &&
-			(globalThis as any)[MANAGER_KEY] === registryEntry
-		) {
-			delete (globalThis as any)[MANAGER_KEY];
-		}
+		// GC-2026-institutional-coverage: the globalThis manager registry
+		// was removed; nothing to release here.
 		scheduler.stop();
 		manager.abortAll();
 		for (const timer of pendingNudges.values()) clearTimeout(timer);
