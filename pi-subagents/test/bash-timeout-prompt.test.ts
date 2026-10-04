@@ -9,34 +9,48 @@
  * Pinned invariants:
  *   - `renderBashTimeoutSection()` exists on run-controller.ts, returns
  *     a non-empty string containing each bucket's rendered time.
- *   - Each of `developer.ts`, `reviewer.ts`, `plan.ts`, `explore.ts`
- *     calls `renderBashTimeoutSection()` in its source (proves the
- *     integration).
+ *   - Each prompt either (a) calls `renderBashTimeoutSection()` inline
+ *     (explore.ts, plan.ts) OR (b) imports a section constant from
+ *     `_sections/bash-timeout.ts` (developer.ts, reviewer.ts, post
+ *     GC-2026-prompt-parser-contract-cleanup). The shared section file
+ *     itself calls `renderBashTimeoutSection()`.
  *   - The drift test mutates `DEFAULT_BUCKET_TIMEOUTS_MS.read` and
  *     asserts the new value appears in the rendered output — proves
  *     the prompt is generated, not hand-written.
  *
  * Design reference: `.pi/orchestrator/design-timeout-architecture.md`
- * Phase 4 (Prompt generation). The design keeps `BASH_TIMEOUT_SECTION`
- * as a module-internal const (declared and `void`-suppressed), so this
- * test asserts the source-text integration rather than runtime export.
+ * Phase 4 (Prompt generation). The shared `_sections/bash-timeout.ts`
+ * keeps `BASH_TIMEOUT_SECTION` as a module-internal const (declared and
+ * `export`ed for shared use), so this test asserts the source-text
+ * integration at both the prompt-file level AND the section-file level.
  */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { DEVELOPER_PROMPT } from "../src/agent-prompts/developer.js";
+import { REVIEWER_PROMPT } from "../src/agent-prompts/reviewer.js";
+
 const PROMPT_DIR = join(import.meta.dirname, "../src/agent-prompts");
 
-const PROMPT_FILES = [
-	"developer.ts",
-	"reviewer.ts",
-	"explore.ts",
-	"plan.ts",
-] as const;
+// Post GC-2026-prompt-parser-contract-cleanup: Developer + Reviewer import
+// the section from _sections/bash-timeout.ts. Explore + Plan carry the
+// section inline with their own renderBashTimeoutSection() call.
+const INLINE_PROMPT_FILES = ["explore.ts", "plan.ts"] as const;
+const IMPORTED_PROMPT_FILES = ["developer.ts", "reviewer.ts"] as const;
+
+const RENDERED_PROMPTS: Record<"developer.ts" | "reviewer.ts", string> = {
+	"developer.ts": DEVELOPER_PROMPT,
+	"reviewer.ts": REVIEWER_PROMPT,
+};
 
 function readPrompt(name: string): string {
 	return readFileSync(join(PROMPT_DIR, name), "utf8");
+}
+
+function readSection(name: string): string {
+	return readFileSync(join(PROMPT_DIR, "_sections", name), "utf8");
 }
 
 describe("run-controller: renderBashTimeoutSection", () => {
@@ -71,7 +85,6 @@ describe("run-controller: renderBashTimeoutSection", () => {
 		const { DEFAULT_BUCKET_TIMEOUTS_MS, renderBashTimeoutSection } =
 			await import("../src/run-controller.js");
 		const text = renderBashTimeoutSection();
-		// Each bucket value is divided by 1000 to render seconds.
 		expect(text).toContain(`${DEFAULT_BUCKET_TIMEOUTS_MS.read / 1000}s`);
 		expect(text).toContain(`${DEFAULT_BUCKET_TIMEOUTS_MS.search / 1000}s`);
 		expect(text).toContain(`${DEFAULT_BUCKET_TIMEOUTS_MS.test / 1000}s`);
@@ -93,16 +106,13 @@ describe("run-controller: renderBashTimeoutSection", () => {
 			await import("../src/run-controller.js");
 		const originalRead = DEFAULT_BUCKET_TIMEOUTS_MS.read;
 		try {
-			// Mutate to a value that no hand-written text would contain.
 			DEFAULT_BUCKET_TIMEOUTS_MS.read = 7777;
 			const text = renderBashTimeoutSection();
-			// 7777 / 1000 = 7.777 (must appear; proves generated, not hand-written)
 			expect(text).toContain("7.777s");
 			expect(text).toMatch(/\bread\b/);
 		} finally {
 			DEFAULT_BUCKET_TIMEOUTS_MS.read = originalRead;
 		}
-		// After restore, the default 5s value should be present again.
 		const restored = renderBashTimeoutSection();
 		expect(restored).toContain("5s");
 	});
@@ -122,11 +132,11 @@ describe("run-controller: renderBashTimeoutSection", () => {
 });
 
 describe("agent prompts: each calls renderBashTimeoutSection (source integration)", () => {
-	for (const name of PROMPT_FILES) {
+	// Inline-section prompts: explore.ts, plan.ts — calls renderBashTimeoutSection
+	// directly in their source.
+	for (const name of INLINE_PROMPT_FILES) {
 		it(`${name} source contains a call to renderBashTimeoutSection()`, () => {
 			const prompt = readPrompt(name);
-			// Either direct call or template-literal interpolation is fine —
-			// both prove the section is derived from the function.
 			expect(prompt).toMatch(/renderBashTimeoutSection\s*\(/);
 		});
 
@@ -138,11 +148,6 @@ describe("agent prompts: each calls renderBashTimeoutSection (source integration
 		});
 
 		it(`${name} no longer carries hand-written bucket text outside the function call`, () => {
-			// Once `renderBashTimeoutSection()` is wired in, the *source*
-			// should not duplicate the per-bucket bullets (those live in
-			// the function output, not the prompt file's source).
-			// We assert this by checking the source does NOT contain the
-			// legacy hand-written bullets that pre-dated this GC.
 			const prompt = readPrompt(name);
 			expect(prompt).not.toMatch(
 				/^- \*\*read\*\* \(cat \/ head \/ tail \/ less\): 5s timeout$/m,
@@ -153,36 +158,66 @@ describe("agent prompts: each calls renderBashTimeoutSection (source integration
 		});
 
 		it(`${name} source's BASH_TIMEOUT_SECTION references the rendered header`, () => {
-			// The source declares `const BASH_TIMEOUT_SECTION = ... renderBashTimeoutSection() ...`
-			// — proving the new file shape.
 			const prompt = readPrompt(name);
 			expect(prompt).toMatch(
 				/BASH_TIMEOUT_SECTION\s*=[^;]*renderBashTimeoutSection\s*\([^)]*\)/,
 			);
 		});
 	}
+
+	// Imported-section prompts (GC-2026-prompt-parser-contract-cleanup):
+	// developer.ts, reviewer.ts import the section constant from
+	// `_sections/bash-timeout.ts`. The source file no longer contains a
+	// direct renderBashTimeoutSection() call. We assert the import path
+	// exists and that the shared section file calls the function.
+	for (const name of IMPORTED_PROMPT_FILES) {
+		it(`${name} source imports _sections/bash-timeout`, () => {
+			const prompt = readPrompt(name);
+			expect(prompt).toMatch(
+				/from\s+["']\.\/_sections\/bash-timeout\.js["']/,
+			);
+		});
+	}
+
+	it(`_sections/bash-timeout.ts calls renderBashTimeoutSection() (shared for developer + reviewer)`, () => {
+		const section = readSection("bash-timeout.ts");
+		expect(section).toMatch(/renderBashTimeoutSection\s*\(/);
+	});
+
+	it(`_sections/bash-timeout.ts imports renderBashTimeoutSection from ../../run-controller`, () => {
+		const section = readSection("bash-timeout.ts");
+		expect(section).toMatch(
+			/import\s+\{[^}]*\brenderBashTimeoutSection\b[^}]*\}\s+from\s+["'][^"']*run-controller\.js["']/,
+		);
+	});
 });
 
 describe("agent prompts: each renders the runtime-current values via the function", () => {
-	for (const name of PROMPT_FILES) {
+	for (const name of INLINE_PROMPT_FILES) {
 		it(`${name}'s generated section contains the current DEFAULT_BUCKET_TIMEOUTS_MS.read value`, async () => {
 			const { DEFAULT_BUCKET_TIMEOUTS_MS, renderBashTimeoutSection } =
 				await import("../src/run-controller.js");
-			// The rendered section text must carry the read value at runtime.
-			// (This is what each prompt will see at module load.)
 			const rendered = renderBashTimeoutSection();
 			const expected = `${DEFAULT_BUCKET_TIMEOUTS_MS.read / 1000}s`;
 			expect(rendered).toContain(expected);
-			// And the source-side wiring must call renderBashTimeoutSection.
 			const prompt = readPrompt(name);
 			expect(prompt).toContain("renderBashTimeoutSection()");
-			// The two together prove: prompt file uses the function AND the
-			// function output contains the runtime values — i.e., the prompt
-			// gets the right text.
 			expect(
 				rendered.includes(expected) &&
 					prompt.includes("renderBashTimeoutSection()"),
 			).toBe(true);
+		});
+	}
+
+	// Imported-section prompts: assert the rendered prompt contains the
+	// current bucket value (proves the import chain delivers the right text).
+	for (const name of IMPORTED_PROMPT_FILES) {
+		it(`${name}'s rendered prompt contains the current DEFAULT_BUCKET_TIMEOUTS_MS.read value`, async () => {
+			const { DEFAULT_BUCKET_TIMEOUTS_MS } = await import(
+				"../src/run-controller.js"
+			);
+			const expected = `${DEFAULT_BUCKET_TIMEOUTS_MS.read / 1000}s`;
+			expect(RENDERED_PROMPTS[name]).toContain(expected);
 		});
 	}
 });
