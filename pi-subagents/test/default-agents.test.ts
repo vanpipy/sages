@@ -473,7 +473,9 @@ describe("default-agents: reviewer subagent isolation", () => {
  *
  * Public name stays `Plan`; the description must reflect the new
  * role; the tools list is the single source of truth for what Plan
- * can see; model + thinking + maxTurns pin the cost.
+ * can see; maxTurns pins the cost (model + thinking were
+ * removed in GC-2026-subagent-model-inheritance — PlanCompiler now
+ * inherits the parent session's model).
  */
 describe("default-agents: Plan config (DAG-2026-017)", () => {
 	const plan = DEFAULT_AGENTS.get("Plan");
@@ -518,14 +520,16 @@ describe("default-agents: Plan config (DAG-2026-017)", () => {
 		expect(plan?.skills).toBe(false);
 	});
 
-	it("uses fixed lightweight model anthropic/claude-haiku-4-5", () => {
-		// Cost guard: Plan must not inherit the main agent's model.
-		// haiku is the same model Explore uses for cheap read-only work.
-		expect(plan?.model).toBe("anthropic/claude-haiku-4-5");
+	it("GC-2026-subagent-model-inheritance: Plan inherits parent model (no hardcoded pin)", () => {
+		// GC-2026-subagent-model-inheritance removes the model pin.
+		// Users who want PlanCompiler on a cheap model can pin it via
+		// subagents.json#defaultModelsByType["PlanCompiler"]; the
+		// default is to inherit whatever the main agent uses.
+		expect(plan?.model).toBeUndefined();
 	});
 
-	it("uses thinking: 'minimal'", () => {
-		expect(plan?.thinking).toBe("minimal");
+	it("GC-2026-subagent-model-inheritance: Plan no longer hardcodes thinking", () => {
+		expect(plan?.thinking).toBeUndefined();
 	});
 
 	it("sets maxTurns = 12 (compile budget, not exploration budget)", () => {

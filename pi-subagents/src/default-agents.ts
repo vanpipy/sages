@@ -63,12 +63,12 @@ const DEVELOPER_AGENT: AgentConfig = {
 	// turns is the budget per individual run. Caller may still override via
 	// Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
-	// Default model + per-type cap (part of the Sages-wide concurrency policy:
-	// 2 concurrent developers is the supported DAG fan-out). When
-	// MiniMax/MiniMax-M3 is not in the user's registry, agent-runner.
-	// resolveDefaultModel silently falls back to the parent session's model
-	// (the user chose the parent's model at session start; trust it).
-	model: "MiniMax/MiniMax-M3",
+	// GC-2026-subagent-model-inheritance: model field removed. Subagents
+	// inherit the parent session's model by default. The
+	// `subagents.json#defaultModelsByType` map is the explicit override
+	// path — users who want a stronger model for code work can pin
+	// Developer/Reviewer there. Sages-wide concurrency policy: 2
+	// concurrent developers is the supported DAG fan-out.
 	maxConcurrent: 2,
 };
 
@@ -124,12 +124,12 @@ const REVIEWER_AGENT: AgentConfig = {
 	// report write; 200 turns is the per-run budget. Caller may still
 	// override via Agent({ max_turns: ... }) at spawn time.
 	maxTurns: 200,
-	// Default model + per-type cap (developer: 2 / auditor: 2 are part of the
-	// Sages-wide concurrency policy). When MiniMax/MiniMax-M3 is not in the
-	// user's registry, agent-runner.resolveDefaultModel silently falls back to
-	// the parent session's model — see AgentManager.effectiveMaxFor() for the
-	// cap merge order.
-	model: "MiniMax/MiniMax-M3",
+	// GC-2026-subagent-model-inheritance: model field removed. Reviewer
+	// inherits the parent session's model by default. The
+	// `subagents.json#defaultModelsByType["Reviewer"]` map is the
+	// explicit override path. Sages-wide concurrency policy: 2 concurrent
+	// reviewers is the supported DAG fan-out. See
+	// AgentManager.effectiveMaxFor() for the cap merge order.
 	maxConcurrent: 2,
 };
 
@@ -232,8 +232,10 @@ const PLAN_AGENT: AgentConfig = {
 	extensions: false,
 	excludeExtensions: ["pi-subagents"],
 	skills: false,
-	model: "anthropic/claude-haiku-4-5",
-	thinking: "minimal",
+	// GC-2026-subagent-model-inheritance: model + thinking fields removed.
+	// PlanCompiler inherits the parent session's model by default.
+	// `subagents.json#defaultModelsByType["PlanCompiler"]` is the explicit
+	// override path.
 	systemPrompt: PLAN_PROMPT,
 	promptMode: "replace",
 	isDefault: true,
@@ -257,11 +259,10 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			// dispatch further Agent calls — its budget is dedicated to one search job.
 			excludeExtensions: ["pi-subagents"],
 			skills: true,
-			// Sages house model for read-only search. When unavailable in the
-			// user's registry, agent-runner.resolveDefaultModel silently falls
-			// back to the parent session's model — see AgentManager
-			// effectiveMaxFor for the per-type cap merge order.
-			model: "minimax-m2.7-highspeed",
+			// GC-2026-subagent-model-inheritance: model field removed. Explore
+			// inherits the parent session's model by default. Users who want a
+			// fast search model can pin it via
+			// `subagents.json#defaultModelsByType["Explore"]`.
 			systemPrompt: EXPLORE_PROMPT,
 			promptMode: "replace",
 			isDefault: true,
