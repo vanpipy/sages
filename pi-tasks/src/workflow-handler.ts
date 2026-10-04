@@ -28,6 +28,7 @@
  * production wires it into `pi.events` + the AgentManager singleton.
  */
 
+import { join } from "node:path";
 import type { TaskStore } from "./task-store.js";
 import type { Task } from "./types.js";
 import { parseReviewerVerdict, type ReviewerVerdict } from "./verdict-parser.js";
@@ -119,6 +120,11 @@ export function subscribeWorkflow(
 		});
 
 		// 2. Create every task. order is preserved (Implement, Review_1, …, Merge).
+		// GC-2026-prompt-parser-contract-cleanup #4: after creating each Review
+		// task, replace the `__review_task_id__` placeholder in its description
+		// with the real id. The Reviewer reads this to know where to write the
+		// durable verdict-{task_id}.md backup, and the parser in
+		// `onSubagentCompleted` uses the same path for the file-fallback.
 		const created: Task[] = [];
 		for (const spec of specs) {
 			const t = store.create(
@@ -127,6 +133,13 @@ export function subscribeWorkflow(
 				spec.subject,
 				{ ...spec.metadata, workflow_id: payload.workflow_id },
 			);
+			if (spec.metadata.phase === "review") {
+				const replaced = t.description.replace(/__review_task_id__/g, t.id);
+				if (replaced !== t.description) {
+					store.update(t.id, { description: replaced });
+					t.description = replaced;
+				}
+			}
 			created.push(t);
 		}
 
@@ -213,7 +226,19 @@ export function subscribeWorkflow(
 		// path B's event contract — only reviews have a `verdict` field; non-review
 		// phases emit `phase: "implement" | "fix" | "merge"` with no verdict.
 		if (isReview && resultStr !== undefined) {
-			const verdict: ReviewerVerdict = parseReviewerVerdict(resultStr);
+			// GC-2026-prompt-parser-contract-cleanup: pass the durable
+			// verdict-{task_id}.md path so the parser falls back to the
+			// Reviewer's atomic-rename write when the message fence is
+			// missing (e.g. max_turns hard-abort truncated the message).
+			const verdictFilePath = join(
+				process.cwd(),
+				".pi",
+				"orchestrator",
+				`verdict-${taskId}.md`,
+			);
+			const verdict: ReviewerVerdict = parseReviewerVerdict(resultStr, {
+				verdictFilePath,
+			});
 			store.update(taskId, {
 				status: "completed",
 				metadata: { verdict },
