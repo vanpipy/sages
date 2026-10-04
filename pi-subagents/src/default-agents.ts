@@ -48,7 +48,7 @@ const DEVELOPER_AGENT: AgentConfig = {
 		"Production-grade software implementation agent following strict " +
 		"test-driven development (TDD) discipline (RED → GREEN → REFACTOR).",
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
-	extensions: ["aft", "pi-mcp-adapter"],
+	extensions: ["aft-pi", "pi-mcp-adapter"],
 	// Subagent isolation: even though `extensions:` is an explicit allowlist
 	// (no `pi-subagents` entry) so the Agent tool cannot load by accident, we
 	// pin `excludeExtensions: ["pi-subagents"]` to make the policy explicit and
@@ -111,7 +111,7 @@ const REVIEWER_AGENT: AgentConfig = {
 		"lint, command results). Default verdict is NEEDS_WORK unless overwhelming " +
 		"proof is provided.",
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
-	extensions: ["aft", "pi-mcp-adapter"],
+	extensions: ["aft-pi", "pi-mcp-adapter"],
 	// Symmetric with `developer`: the auditor is read-only on production
 	// code by policy, but the Agent tool cannot load here regardless.
 	excludeExtensions: ["pi-subagents"],
@@ -188,7 +188,7 @@ const MERGER_AGENT: AgentConfig = {
 		"merged result with typecheck + lint + the merged test suite. Read-only on " +
 		"production code (no edit / write tools); hunk-conflicts escalate.",
 	builtinToolNames: READ_ONLY_TOOLS,
-	extensions: ["aft", "pi-mcp-adapter"],
+	extensions: ["aft-pi", "pi-mcp-adapter"],
 	excludeExtensions: ["pi-subagents"],
 	skills: false,
 	systemPrompt: MERGER_PROMPT,
