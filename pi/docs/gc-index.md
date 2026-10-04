@@ -37,6 +37,7 @@ coverage (postmortem or carve-out).
 | [GC-2026-path-B-swap](./postmortem/GC-2026-path-B-swap.md) | Path B swap: replace path A's workflow-run.ts with event-driven slim workflow_run | [.pi/orchestrator/goal-GC-2026-path-B-swap.yaml](../../.pi/orchestrator/goal-GC-2026-path-B-swap.yaml) | [GC-2026-path-B-swap.md](./postmortem/GC-2026-path-B-swap.md) |
 | [GC-2026-path-B-audit-fixes](./postmortem/GC-2026-path-B-audit-fixes.md) | Path A → path B drift cleanup: 7 commits across README / SKILL / agent prompts / templates / comments | (no goal yaml — pure doc + template cleanup branch) | [GC-2026-path-B-audit-fixes.md](./postmortem/GC-2026-path-B-audit-fixes.md) |
 | [GC-2026-path-B-field-renames](./postmortem/GC-2026-path-B-field-renames.md) | Path B field renames: ManagedWorktreeRequest.dag_id → goal_id (compat shim) + personal todowrite → agent_todowrite | [.pi/orchestrator/goal-GC-2026-path-B-field-renames.yaml](../../.pi/orchestrator/goal-GC-2026-path-B-field-renames.yaml) | [GC-2026-path-B-field-renames.md](./postmortem/GC-2026-path-B-field-renames.md) |
+| [GC-2026-prompt-parser-contract-cleanup](./postmortem/GC-2026-prompt-parser-contract-cleanup.md) | AFT canonical name fix + shared prompt-sections library + strict verdict-parser + soft-mode-safe merge | [.pi/orchestrator/goal-GC-2026-prompt-parser-contract-cleanup.yaml](../../.pi/orchestrator/goal-GC-2026-prompt-parser-contract-cleanup.yaml) | [GC-2026-prompt-parser-contract-cleanup.md](./postmortem/GC-2026-prompt-parser-contract-cleanup.md) |
 
 ## Open / no postmortem
 
