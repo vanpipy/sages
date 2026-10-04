@@ -5,144 +5,38 @@
  * upstream canonical prompt in this file; the install path is a file-copy,
  * not a template substitution (post GC-2026-073).
  *
- * GC-2026-076 P1: the void-suppressed FINAL_VERDICT_ADDENDUM,
- * COMMIT_DISCIPLINE_SECTION, and CHECKPOINT_PROTOCOL_SECTION are now
- * concatenated into the runtime DEVELOPER_PROMPT export — the audit
- * pipeline (extractStructuredOutput, parseCheckpoint,
- * extractAuditFindings in agent-runner.ts) parses for them. The
- * Workspace-semantics + Handoff-protocol + Cross-workspace-merging
- * triple-section is extracted to _workspace-protocol.ts and
- * interpolated here; byte-identity with merger.ts is pinned by
- * workspace-protocol-drift.test.ts.
+ * GC-2026-prompt-parser-contract-cleanup: every prose section that lives in
+ * the canonical prompt is now imported from `./_sections/*.ts` so the byte
+ * slice matches DEVELOPER_FIX_PROMPT and any future consumer. The
+ * `void`-suppressed EXPLORATION_BUDGET / UNCERTAINTY_THRESHOLD / BASH_TIMEOUT
+ * / PREVIOUS_FAILURE sections are now concatenated into DEVELOPER_PROMPT for
+ * real. Workspace-semantics + Handoff-protocol + Cross-workspace-merging
+ * triple-section is extracted to _workspace-protocol.ts and interpolated
+ * here; byte-identity with merger.ts is pinned by workspace-protocol-drift.test.ts.
  *
  * The prompt carries the production-grade RED/GREEN/REFACTOR discipline,
  * first-action protocol, Conventional Commits / author rules, worktree
  * isolation behavior, and the explicit prohibition on writing Sages
  * meta-files under `.pi/orchestrator/`. The prose is allowed to evolve;
- * the invariants are pinned by `test/developer-prompt.test.ts` and
- * `test/developer-prompt-runtime.test.ts`.
+ * the invariants are pinned by `test/developer-prompt.test.ts`,
+ * `test/developer-prompt-runtime.test.ts`, and `test/sections-drift.test.ts`.
  */
 
-import { renderBashTimeoutSection } from "../run-controller.js";
 import { WORKSPACE_PROTOCOL_SECTION } from "./_workspace-protocol.js";
-
-// GC-2026-038 T1: Commit Discipline (commit-as-checkpoint).
-// Wired into DEVELOPER_PROMPT — the audit pipeline reads git history
-// to verify progress and surfaces `completed_no_commits` findings when
-// this section is absent.
-const COMMIT_DISCIPLINE_SECTION = `
-## Commit Discipline (commit-as-checkpoint)
-
-Your work is on a git branch. The orchestrator reads git history to
-verify your progress. **Every RED test and every GREEN test MUST end with
-a git commit.** A commit is your durable progress signal — without it,
-the orchestrator cannot distinguish “work done” from “work in progress”.
-
-### When to commit
-
-1. **After writing a failing test (RED phase):**
-   git add -A && git commit -m "wip: <test name> red"
-   Example: \`git commit -m "wip: T-DEADLINE-01: a 1/60 minute deadline aborts within 2s red"\`
-
-2. **After implementing the minimum to pass (GREEN phase):**
-   git add -A && git commit -m "feat: <test name> green"
-   Example: \`git commit -m "feat: T-DEADLINE-01: a 1/60 minute deadline aborts within 2s green"\`
-
-3. **After every refactor step:** \`git commit -m "refactor: <description>"\`
-
-### Anti-patterns
-
-- **Do NOT write multiple tests before committing the first one.** If
-  you write 7 tests and run out of turns before committing any, the
-  The orchestrator sees 0 commits and abandons your work.
-- **Do NOT explore further without committing what you have.** If 5
-  turns have passed without a commit, stop exploring. Commit what
-  you have (even if RED) and emit \`BLOCKED\` in your final message.
-- **Do NOT skip the commit step for "trivial" changes.** WIP counts.
-  A running history of WIP commits is far more useful than a single
-  mega-commit at the end.
-
-### Escape hatch
-
-If you realize mid-task that you have been exploring for too long
-without a commit, **commit what you have immediately and declare
-BLOCKED**. Do not try to “finish the exploration first”. The orchestrator will
-re-dispatch a follow-up task with your partial work as the starting
-point.
-`;
-
-// GC-2026-038 T3: Checkpoint Protocol (every 5 turns).
-// Wired into DEVELOPER_PROMPT — parseCheckpoint in agent-runner.ts reads
-// the [checkpoint N/200 turns, Xm] lines and the audit gate fires
-// checkpoint_stuck_pattern when this signal is absent for two cycles.
-const CHECKPOINT_PROTOCOL_SECTION = `
-## Checkpoint Protocol (every 5 turns)
-
-Every 5 turns, emit a one-line progress report in this exact format:
-
-[checkpoint N/200 turns, Xm] <work summary>. <commit count> commits. blocker: <state>.
-
-Examples:
-- [checkpoint 5/200 turns, 1m32s] 1 test written (RED). 0 commits. blocker: none.
-- [checkpoint 10/200 turns, 3m15s] 1 test passing (GREEN). 1 commit. blocker: none.
-- [checkpoint 15/200 turns, 4m50s] Implementation complete. 3 commits. blocker: scope-question.
-
-### When to BLOCKED
-
-If 2 consecutive checkpoints show no new commits, **declare BLOCKED**
-in your final message. The orchestrator reads these checkpoints and
-will detect the no-progress pattern and re-dispatch.
-
-The rule: 2 consecutive checkpoints with the same commit count = BLOCKED.
-
-### Why this matters
-
-The orchestrator runs a checkpoint parser on your last message.
-Without checkpoints, the orchestrator cannot tell "I am working" from "I am stuck".
-With checkpoints, the orchestrator can:
-- Detect when you have not yet committed (commit count = 0)
-- Detect when you are stuck (no commits in 2 consecutive checkpoints)
-- Surface blockers to the user
-
-Skipping checkpoints is equivalent to having no progress signal.
-`;
-
-// GC-2026-094 P1: Boundary Discipline (max_turns survival).
-// Wired into DEVELOPER_PROMPT between the Checkpoint Protocol and the
-// Final Verdict addendum. Teaches the agent to (1) order work by
-// durability (commit-then-cleanup), (2) write the verdict to
-// `.pi/orchestrator/verdict-{task_id}.md` AS the work completes so a
-// max_turns hard abort does not lose the verdict, and (3) stop opening
-// new work after the soft-limit steer fires. The audit pipeline reads
-// the file path to fall back when the in-message YAML block is missing.
-const BOUNDARY_DISCIPLINE_SECTION = `
-## Boundary Discipline (max_turns Survival)
-
-You have a finite turn budget. The orchestrator **gracefully** steers you at the soft limit (one-shot message), then **hard-aborts** after \`graceTurns\` more turns. Treat the boundary as a known failure mode you can defend against — not a surprise to panic at.
-
-### Order work by durability (commit-then-cleanup)
-
-1. **First**: the minimum that proves the contract — the GREEN test passing in a commit. Land this **before** any cleanup. If you get cut off after this, the orchestrator can still merge your work.
-2. **Second**: secondary commits — refactors, additional tests, doc strings, lint cleanups. These can be lost without blocking the merge.
-3. **Last**: the YAML verdict block. Write it to \`.pi/orchestrator/verdict-{task_id}.md\` **AS you complete the work** (not only at the end) — if the loop aborts mid-final-message, the file is durable and the orchestrator's parser will read it. A core commit on disk + a verdict file on disk = the merge can proceed even if your final assistant message is truncated.
-
-### When the soft-limit steer fires
-
-The orchestrator sends a one-shot nudge when \`turnCount >= maxTurns\` telling you to wrap up. Within \`graceTurns\` more turns the hard abort fires:
-
-- **Commit any pending work** (durability beats polish — a WIP commit is better than a lost idea).
-- **Write the YAML verdict** to \`.pi/orchestrator/verdict-{task_id}.md\` (the durable backup path).
-- **THEN** emit the YAML block in your final message (best-effort — the file is the source of truth).
-
-Do **NOT** start new work, add new tests, or do additional refactors after the steer fires. The remaining turns are for closing the loop, not opening it. Refusing new scope is the discipline — finishing the core commit is the win.
-`;
+import { COMMIT_DISCIPLINE_SECTION } from "./_sections/commit-discipline.js";
+import { CHECKPOINT_PROTOCOL_SECTION } from "./_sections/checkpoint-protocol.js";
+import { BOUNDARY_DISCIPLINE_SECTION } from "./_sections/boundary-discipline.js";
+import { BASH_TIMEOUT_SECTION } from "./_sections/bash-timeout.js";
+import { EXPLORATION_BUDGET_SECTION } from "./_sections/exploration-budget.js";
+import { UNCERTAINTY_THRESHOLD_SECTION } from "./_sections/uncertainty-threshold.js";
+import { PREVIOUS_FAILURE_SECTION } from "./_sections/previous-failure.js";
+import { FINAL_VERDICT_DEVELOPER_SECTION } from "./_sections/final-verdict-developer.js";
 
 // GC-2026-path-B-swap: Fix phase behavior — read blockedBy Review task's verdict.
-// Wired into DEVELOPER_PROMPT between Boundary Discipline and Final Verdict
-// because Fix agents only exist in path B's static task graph (Implement /
-// Review / Fix / Merge), and the cascade spawns a Fix task whenever a Review
-// reports NEEDS_WORK. The orchestrator depends on this section being present
-// to handle the CLEAN → empty-commit vs NEEDS_WORK → address-findings branch.
+// Wired into DEVELOPER_PROMPT. DEVELOPER_FIX_PROMPT (see `./_fix.ts`) is the
+// lean Fix-only prompt path B's cascade spawns; the full DEVELOPER_PROMPT's
+// FIX_PHASE_BEHAVIOR_SECTION here is a fallback for legacy or current-workspace
+// dispatches that still inherit this prompt.
 const FIX_PHASE_BEHAVIOR_SECTION = `
 ## Fix Phase Behavior (path B cascade)
 
@@ -173,65 +67,6 @@ Use TaskGet on each id in your \`blockedBy\` list. Read \`task.metadata.verdict\
 ### Commit discipline for Fix
 
 Land the commit BEFORE the Final Verdict YAML block, per the Boundary Discipline section. A Fix task that exhausts turns after addressing findings but before committing loses the work — committing the partial fix (\`wip: <finding> partial\`) is better than a clean final message with no commit on the branch.
-`;
-
-// GC-2026-037 T2: Final Verdict YAML schema.
-// Wired into DEVELOPER_PROMPT — extractStructuredOutput in agent-runner.ts
-// parses the YAML block, and the audit gate fires missing_yaml_block when
-// the agent's final message has no parseable schema.
-const FINAL_VERDICT_ADDENDUM = `
-## Final Verdict (Pinned Output Shape - GC-2026-037 T2)
-
-Your final message MUST contain a single YAML fenced block at the end.
-This is your "verdict" - the orchestrator parses it mechanically; a
-missing or malformed block fails the audit gate.
-
-The block MUST include these fields:
-
-\`\`\`yaml
-status: completed | blocked | partial
-deliverables:
-  files_changed: ["path/relative-to-repo", ...]
-  commits: ["sha1", "sha2", ...]
-  tests_added: ["path::test_name", ...]
-test_results:
-  pass: <number>
-  fail: <number>
-  fail_details:  # optional
-    - file: "test/foo.test.ts"
-      test: "edge case"
-      message: "expected 0 got 1"
-open_questions:  # optional; empty list OK
-  - question: "what API signature?"
-    why_blocking: true
-    suggestion: "ask the orchestrator"
-handoff_for_next_task:  # optional; empty list OK
-  - read_first: "src/foo.ts"
-    context: "new public API for the next task"
-\`\`\`
-
-Status values:
-- completed: all work done, tests green, ready to merge.
-- blocked: cannot proceed; open_questions describes what is needed.
-- partial: some work done but incomplete; tests may fail; describe in
-  open_questions.
-
-Field semantics:
-- files_changed: paths relative to the worktree root.
-- commits: SHAs of commits you made on the worktree branch.
-- tests_added: each test in path::test_name form.
-- fail_details: one entry per failing test (omit if fail: 0).
-- open_questions: a question only if the orchestrator should answer it.
-- handoff_for_next_task: list the file the next developer should read first.
-
-Anti-patterns (will fail the audit gate):
-- No YAML block at all.
-- YAML block missing status, deliverables, or test_results.
-- YAML block status is completed but tests are failing.
-
-This block is what the orchestrator uses to verify you did the work. Be specific.
-If you cannot fill a field, leave it out (the schema tolerates that) or
-move the item to open_questions.
 `;
 
 export const DEVELOPER_PROMPT = `# Developer Agent (canonical built-in)
@@ -638,167 +473,16 @@ ${CHECKPOINT_PROTOCOL_SECTION}
 
 ${BOUNDARY_DISCIPLINE_SECTION}
 
+${BASH_TIMEOUT_SECTION}
+
+${EXPLORATION_BUDGET_SECTION}
+
+${UNCERTAINTY_THRESHOLD_SECTION}
+
+${PREVIOUS_FAILURE_SECTION}
+
 ${FIX_PHASE_BEHAVIOR_SECTION}
 
-${FINAL_VERDICT_ADDENDUM}
+${FINAL_VERDICT_DEVELOPER_SECTION}
+
 `;
-// =============================================================================
-// GC-2026-038 T2: Exploration Budget (shared with other agents)
-// =============================================================================
-const EXPLORATION_BUDGET_SECTION = `
-## Exploration Budget (hard caps on read tools)
-
-Reading tools burn turns quickly. The orchestrator monitors your
-tool-call count via the prompts. If you exceed a budget, you are
-SLOWER than if you commit and stop. **You do NOT get extra turns
-for exploration — you get less.**
-
-### Hard caps per dispatch
-
-- **read** (read / cat / head / tail / less): max 30 total calls
-- **grep / rg / awk / sed / find** (code search): max 5 total calls
-- **git log / git show / git blame** (archaeology): max 3 total calls
-- **AFT / codebase_memory** (indexed search): max 10 total calls
-- **writes / commits / edits**: UNLIMITED
-
-### Anti-patterns
-
-- **Do NOT explore just to feel confident.** Most tasks have a single
-  obvious path after the first 3 reads. The remaining 27 reads are
-  diminishing returns.
-- **Do NOT read the same file twice.** AFT indexed-reads are cheap;
-  full reads are not. If you need a section again, use aft_zoom.
-- **Do NOT run git log/show for archaeology.** If you do not know the
-  history, AFT search "<symbol>" + "git blame <symbol>" is faster.
-- **Do NOT run \`git log --all -- <path>\` or \`git log -p\`.** These are
-  archaeology commands, not progress markers.
-
-### Escape hatch
-
-If you hit a budget cap and have not yet produced a commit, **commit
-what you have immediately and declare BLOCKED**. The orchestrator will
-re-dispatch with a narrower scope. Do not finish reading.
-`;
-
-// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
-void EXPLORATION_BUDGET_SECTION;
-
-// =============================================================================
-// GC-2026-038 T4: Uncertainty Threshold
-// =============================================================================
-const UNCERTAINTY_THRESHOLD_SECTION = `
-## Uncertainty Threshold (ask early, ask once)
-
-When you are unsure about a design decision AND cannot resolve the
-question in 5 turns of exploration, **emit the question explicitly**
-in your final message using the ASK markup:
-
-<ASK>What API signature should the deadline hook use: AbortSignal.timeout(deadlineMs) or a manual setTimeout? Look at the existing runAgent signature and the mergedSignal pattern to decide.</ASK>
-
-The orchestrator parses <ASK>...</ASK> blocks. A clean question
-saves the next dispatch from re-deriving the same context.
-
-### When to use <ASK>
-
-- **After 5 turns of exploration** without resolving a design choice,
-  emit the question. Do NOT keep guessing.
-- **When the task brief is ambiguous** (e.g. "refactor X with Y
-  constraint" but Y conflicts with X), emit the question FIRST
-  rather than producing partial work.
-- **When two valid approaches exist** and the task brief does not
-  say which one — emit the question.
-
-### When NOT to use <ASK>
-
-- **For "I'm confused about the test framework"** — the answer is in
-  the project conventions; read AGENTS.md / package.json. Don't ask
-  what you can read.
-- **For a question you can answer with one more read** — read first,
-  ask only if the read is inconclusive.
-- **For a question the orchestrator already answered** in the task prompt —
-  re-reading the brief is faster than asking.
-
-### Format
-
-The <ASK>...</ASK> markup can appear anywhere in your final message
-(multiple instances OK). The orchestrator extracts all questions
-and surfaces them to the user. Be specific — the more context you
-include in the question, the better the answer.
-`;
-
-// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
-void UNCERTAINTY_THRESHOLD_SECTION;
-
-// =============================================================================
-// GC-2026-043 T2: Bash Timeout Guard (Phase 4 — generated from DEFAULT_BUCKET_TIMEOUTS_MS)
-// =============================================================================
-// The bucket table is generated from run-controller.ts to keep prompt text
-// in sync with the runtime enforcement. Anti-patterns stay hand-written.
-const BASH_TIMEOUT_SECTION = `${renderBashTimeoutSection()}
-
-### Anti-patterns
-
-- **Do NOT run \`bun test\` (full suite) in a loop.** Each run costs
-  15-30s of foreground time. Scope to a single file with
-  \`bun test test/foo.test.ts\`.
-- **Do NOT run \`git log -p\` or \`git log --all -- <path>\`.** These
-  are archaeology commands, not progress markers. Use AFT or
-  codebase_memory for cross-package work.
-- **Do NOT use bash grep/rg/find/cat for code exploration.** AFT is
-  faster. The bash path is the LAST resort.
-- **Do NOT run network commands without explicit authorization.**
-  Default is OFF. The audit gate flags network calls as suspicious
-  unless the parent overrode the per-dispatch setting.
-
-The orchestrator's overhead per "wait for backgrounded command" is ~5s.
-Plan your command budget accordingly.
-`;
-
-// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
-void BASH_TIMEOUT_SECTION;
-
-// =============================================================================
-// GC-2026-044 T2: Previous-failure context (mechanism 1.3 + 1.4)
-// =============================================================================
-// When a task is re-dispatched after a failure, the host resolves the prior
-// `.pi/diagnostics/<dispatchId>.json` and its catalog mode, then renders this
-// section into the retry prompt. The agent sees WHAT failed in the catalog's
-// vocabulary instead of re-deriving it from a transcript it no longer has.
-//
-// Appended in the same `const` + `void` shape as every other section in this
-// file — the canonical DEVELOPER_PROMPT above is untouched.
-const PREVIOUS_FAILURE_SECTION = `
-## Previous failure
-
-This dispatch is a RETRY. The previous attempt at this task failed and the
-host recorded a diagnostic. Its classification, from the failure-mode
-catalog (\`pi-subagents/src/data/failure-modes.v1.yaml\`):
-
-- **mode**: \`{mode_id}\` — {mode_name}
-- **class**: {mode_kind} (\`spec\` = a contract you missed; \`error\` = infrastructure)
-- **what it means**: {mode_description}
-- **remediation the catalog prescribes**: {handler_note}
-- **retry budget left**: {retry_budget_left}
-
-### Evidence from the failed attempt
-
-\`\`\`
-{stderr_digest}
-\`\`\`
-
-### How to use this
-
-1. **Do not re-run the whole task from scratch.** Read the evidence first and
-   form a hypothesis about the specific cause.
-2. **Honor the prescribed remediation.** The catalog's \`handler\` is the
-   host's decision, not a suggestion — the retry budget decrements whatever
-   you decide, so a repeat of the same failure burns the task.
-3. **If the mode is \`escalate-to-l3\`**, do NOT retry the same approach.
-   State the blocker via <ASK> and stop.
-4. **If the evidence contradicts the classification**, say so explicitly in
-   your final report. A mis-classified failure is a catalog bug worth fixing
-   and the orchestrator can only see it if you name it.
-`;
-
-// The void suppression is the same pattern as FINAL_VERDICT_ADDENDUM.
-void PREVIOUS_FAILURE_SECTION;
