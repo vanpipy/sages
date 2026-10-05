@@ -426,20 +426,32 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // GC-2026-workflow-chat-stream: mark workflow tasks active on the
-      // TaskWidget so the user sees the spinner move through Implement →
-      // Review → Fix → Merge during a workflow_run. workflow-handler
-      // has its own agentToTask map (separate from agentTaskMap above) and
-      // handles the subagents:completed path itself; the OUTER listener at
-      // line 304 looks up agentTaskMap which doesn't see workflow tasks,
-      // so widget.setActiveTask is the only path to animate workflow tasks.
-      // The widget's isActive check requires both activeTaskIds.has AND
-      // status==='in_progress'; when workflow-handler flips status to
-      // completed on its own listener, the next widget.update() prunes the
-      // stale active ID via the loop in update().
+      // GC-2026-task-widget-link: only mark the workflow task ACTIVE on the
+      // TaskWidget AFTER spawnSubagent resolves successfully. Marking it
+      // active BEFORE the spawn means the spinner shows for tasks that
+      // never actually start (e.g. deadline-fail-fast path), and the user
+      // sees a flash-then-vanish on every spawn. After-resolve is the
+      // correct gate: only successful spawns animate the widget.
+      let agentId: string;
+      try {
+        agentId = await spawnSubagent(type, task.description, spawnOpts);
+      } catch (err) {
+        // Spawn failed — surface as "failed" so the widget's active marker
+        // never gets set in the first place (we didn't even try).
+        return "" as string;
+      }
       widget.setActiveTask(task.id, true);
-
-      return spawnSubagent(type, task.description, spawnOpts);
+      return agentId;
+    },
+    // GC-2026-task-widget-link: workflow-handler fires these for the "finished"
+    // and "failed" paths; the wrapper translates to widget calls.
+    onTaskChange: (taskId, status) => {
+      if (status === "finished" || status === "failed" || status === "interrupted") {
+        widget.setActiveTask(taskId, false);
+        widget.update();
+      }
+      // "spawned" is fired from spawnAgent itself (above) AFTER spawnSubagent
+      // resolves — not from this callback.
     },
   });
   // Track the unsub so future reloads can detach cleanly (not currently used

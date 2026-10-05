@@ -85,6 +85,23 @@ export type WorkflowSpawnAgent = (
 export interface SubscribeWorkflowOptions {
 	events: WorkflowEventBus;
 	spawnAgent: WorkflowSpawnAgent;
+	/**
+	 * GC-2026-task-widget-link: optional callback the workflow handler
+	 * fires whenever a workflow task's lifecycle state should be reflected
+	 * in the host UI (TaskWidget active markers, etc.). The wrapper in
+	 * pi-tasks/src/index.ts wires this to `widget.setActiveTask` + `widget.update`.
+	 *
+	 * status is one of: "spawned" (subagent dispatched, task is now in flight),
+	 * "finished" (subagent completed normally), "failed" (subagent crashed),
+	 * "interrupted" (parent aborted or deadline fired).
+	 *
+	 * The wrapper is responsible for translating this into the host's
+	 * TaskWidget API. The handler does NOT depend on the TaskWidget directly.
+	 */
+	onTaskChange?: (
+		taskId: string,
+		status: "spawned" | "finished" | "failed" | "interrupted",
+	) => void;
 }
 
 /**
@@ -106,7 +123,7 @@ export function subscribeWorkflow(
 	store: TaskStore,
 	options: SubscribeWorkflowOptions,
 ): () => void {
-	const { events, spawnAgent } = options;
+	const { events, spawnAgent, onTaskChange } = options;
 	const agentToTask = new Map<string, string>();
 	const completedIds = new Set<string>();
 	// workflow_id is stamped onto every task's metadata so the cascade
@@ -459,6 +476,14 @@ export function subscribeWorkflow(
 		agentToTask.delete(data.id);
 		completedIds.add(taskId);
 
+		// GC-2026-task-widget-link: notify the host UI that the workflow task
+		// finished. The wrapper in pi-tasks/src/index.ts translates this into
+		// `widget.setActiveTask(taskId, false)` + `widget.update()`. Without
+		// this fire, the TaskWidget's activeTaskIds entry stays in place until
+		// the 150ms timer naturally prunes it based on status — but the
+		// timer may not have started if the spawn failed fast enough.
+		onTaskChange?.(taskId, "finished");
+
 		const isReview = task.metadata.phase === "review";
 		const resultStr = typeof data.result === "string" ? data.result : undefined;
 
@@ -614,6 +639,10 @@ export function subscribeWorkflow(
 		if (!task) return;
 
 		agentToTask.delete(data.id);
+
+		// GC-2026-task-widget-link: see onSubagentCompleted above — the host
+		// UI needs to know the task failed so it can clear the active marker.
+		onTaskChange?.(taskId, "failed");
 
 		const errMsg = typeof data.error === "string" ? data.error : data.status ?? "agent failed";
 		store.update(taskId, {
