@@ -58,6 +58,7 @@ const AgentStatusSchema = Type.Union([
 	Type.Literal("steered"),
 	Type.Literal("aborted"),
 	Type.Literal("stopped"),
+	Type.Literal("parent_aborted"),
 	Type.Literal("error"),
 ]);
 
@@ -71,6 +72,7 @@ const SubagentStatusParams = Type.Object({
 				Type.Literal("steered"),
 				Type.Literal("aborted"),
 				Type.Literal("stopped"),
+				Type.Literal("parent_aborted"),
 				Type.Literal("error"),
 			],
 			{ description: "Filter by agent lifecycle status. Omit = all statuses." },

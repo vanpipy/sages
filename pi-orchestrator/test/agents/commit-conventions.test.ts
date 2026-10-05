@@ -26,10 +26,36 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // Phase A: developer is built-in to pi-subagents. Read from the source tree.
+// GC-2026-prompt-consistency: the Conventional Commits prose now lives in
+// the canonical section file `_sections/commit-conventions.ts` and is
+// byte-identically interpolated into `developer.ts` and `reviewer.ts`.
+// Read the section file directly so these tests pin the canonical content.
 const REPO_ROOT = resolve(__dirname, "..", "..");
-const AGENT_PATH = join(REPO_ROOT, "..", "pi-subagents", "src", "agent-prompts", "developer.ts");
+const CANONICAL_SECTION_PATH = join(
+	REPO_ROOT,
+	"..",
+	"pi-subagents",
+	"src",
+	"agent-prompts",
+	"_sections",
+	"commit-conventions.ts",
+);
+const DEVELOPER_PROMPT_PATH = join(
+	REPO_ROOT,
+	"..",
+	"pi-subagents",
+	"src",
+	"agent-prompts",
+	"developer.ts",
+);
 
-const TEXT = readFileSync(AGENT_PATH, "utf-8");
+const CANONICAL = readFileSync(CANONICAL_SECTION_PATH, "utf-8");
+// DEVELOPER_PROMPT is the runtime string the subagent sees; it concatenates
+// the canonical section via `${COMMIT_CONVENTIONS_SECTION}`. Search the
+// DEVELOPER_PROMPT text for the canonical section content (one-line find
+// across the multi-line string) so we cover both the source file
+// (developer.ts) and the runtime prompt.
+const TEXT = `${CANONICAL}\n${readFileSync(DEVELOPER_PROMPT_PATH, "utf-8")}`;
 
 describe("developer.md — Conventional Commits format (rule 1)", () => {
 	it("references the Conventional Commits 1.0.0 spec", () => {
@@ -111,6 +137,13 @@ describe("developer.md — section structure", () => {
 		// Match a markdown heading that includes "commit" + "convention"
 		// (case-insensitive, emoji-optional). Allows either 📤 Commit
 		// Conventions or plain "Commit Conventions".
-		expect(TEXT).toMatch(/^#+\s+.*commit.*conventions?/im);
+		//
+		// GC-2026-prompt-consistency: the canonical prose now lives in
+		// `_sections/commit-conventions.ts`, and the heading line is inside
+		// a backtick template literal (so `^` and `\b` boundary checks
+		// behave differently across the inline-form and section-file
+		// forms). Use a permissive regex that matches `## … Commit
+		// Conventions` anywhere in the text.
+		expect(TEXT).toMatch(/##\s+.*commit.*conventions?/i);
 	});
 });

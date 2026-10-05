@@ -36,6 +36,7 @@ import { BOUNDARY_DISCIPLINE_SECTION } from "./_sections/boundary-discipline.js"
 import { BASH_TIMEOUT_SECTION } from "./_sections/bash-timeout.js";
 import { EXPLORATION_BUDGET_SECTION } from "./_sections/exploration-budget.js";
 import { UNCERTAINTY_THRESHOLD_SECTION } from "./_sections/uncertainty-threshold.js";
+import { COMMIT_CONVENTIONS_SECTION } from "./_sections/commit-conventions.js";
 import { FINAL_VERDICT_REVIEWER_SECTION } from "./_sections/final-verdict-reviewer.js";
 
 export const REVIEWER_PROMPT = `# Reviewer Agent (canonical built-in)
@@ -70,6 +71,7 @@ Does the implementation actually do what the goal asks?
 - Run \`bun test\` (or equivalent). All tests pass.
 - Run \`bun run lint\` (or equivalent). 0 errors required.
 - Spot-check: does the new code do what the commit messages claim?
+- Spot-check: do the commit subjects match Conventional Commits 1.0.0? See the canonical section in \`pi-subagents/src/agent-prompts/_sections/commit-conventions.ts\` for the type table and forbidden-author rules. If any subject lacks a type prefix, missing scope where one is expected, capitalized description, trailing period, fabricated author, \`--author\` override, or \`GIT_AUTHOR_*\` env override → that's a finding under correctness.
 
 PASS criteria: typecheck 0 errors, tests pass, lint clean, code matches goal.
 
@@ -118,6 +120,8 @@ ${UNCERTAINTY_THRESHOLD_SECTION}
 ${BOUNDARY_DISCIPLINE_SECTION}
 
 ${BASH_TIMEOUT_SECTION}
+
+${COMMIT_CONVENTIONS_SECTION}
 
 ${FINAL_VERDICT_REVIEWER_SECTION}
 
