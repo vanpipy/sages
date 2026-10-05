@@ -206,20 +206,30 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 	});
 
 	// 2. before_agent_start — prepend templates/SYSTEM.md.
-	pi.on("before_agent_start", (event: any) => {
+	pi.on("before_agent_start", (event: unknown) => {
 		if (!existsSync(SYSTEM_PROMPT_TEMPLATE)) return undefined;
 		const overlay = readFileSync(SYSTEM_PROMPT_TEMPLATE, "utf-8");
+		const systemPrompt =
+			typeof event === "object" && event !== null && "systemPrompt" in event
+				? (event as { systemPrompt?: string }).systemPrompt
+				: undefined;
 		return {
-			systemPrompt: overlay + "\n\n---\n\n" + (event.systemPrompt ?? ""),
+			systemPrompt: overlay + "\n\n---\n\n" + (systemPrompt ?? ""),
 		};
 	});
 
 	// 3. tool_call — fire the soft-mode reminder once per session on the
-	// first bash call.
+	// first side-effecting tool call (bash / edit / write). GC-2026-098
+	// L3: previously gated on bash only; if the LLM began a workflow
+	// with edit/write directly (no bash), the nudge was missed.
 	let reminderFired = false;
-	pi.on("tool_call", (event: any) => {
+	pi.on("tool_call", (event: unknown) => {
 		if (reminderFired) return undefined;
-		if (event?.toolName !== "bash") return undefined;
+		const toolName =
+			typeof event === "object" && event !== null && "toolName" in event
+				? (event as { toolName?: string }).toolName
+				: undefined;
+		if (toolName !== "bash" && toolName !== "edit" && toolName !== "write") return undefined;
 		reminderFired = true;
 		pi.appendEntry("system", SOFT_MODE_REMINDER);
 		return undefined;

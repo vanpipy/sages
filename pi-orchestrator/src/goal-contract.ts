@@ -32,6 +32,7 @@ import {
 	loadYamlOrchestratorFile,
 } from "./state-persistence.js";
 import { wrapRegisteredTool } from "./registered-tool-wrapper.js";
+import { lockGoal } from "./goal-lock.js";
 import { RunEvent } from "./observability/events.js";
 import { emitRunEvent } from "./observability/runner.js";
 
@@ -186,7 +187,6 @@ export function buildGoalContract(input: GoalContractInput): GoalContract {
  * `./goal-lock.js`.
  */
 export function buildLockedGoalContract(input: GoalContractInput): GoalContract & { _lock_hash: string } {
-	const { lockGoal } = require("./goal-lock.js") as typeof import("./goal-lock.js");
 	const base = buildGoalContract(input);
 	return lockGoal(base);
 }

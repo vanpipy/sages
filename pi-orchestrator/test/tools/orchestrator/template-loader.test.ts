@@ -11,10 +11,7 @@ import {
   findTemplatesRoot,
   loadPromptTemplate,
   loadGoalTemplate,
-  loadDagTemplate,
-  loadResponseTemplate,
   renderTemplate,
-  renderTaskPrompt,
   listTemplates,
 } from "@/template-loader.js";
 
@@ -106,62 +103,9 @@ describe("template-loader", () => {
       const content = loadPromptTemplate("nonexistent-template-xxx");
       expect(content).toBeNull();
     });
-
-    /**
-     * Skill prompt templates must NOT duplicate content that already lives
-     * in the agent definition (templates/agents/software-*.md). Identity
-     * content — TDD discipline, Spawn Mode, First Action Protocol, Output
-     * Contract, Sub-Agent Boundaries — is loaded by pi-subagents as the
-     * subagent's identity body; re-stating it in the task prompt wastes
-     * context and risks drift (the 2026-07-24 commit-conventions work
-     * already exposed drift between the two layers).
-     */
-    it("skill prompts do NOT duplicate agent identity content", () => {
-      // Render each prompt with minimal params, then assert the rendered
-      // body has no identity-section headings (those belong in the agent
-      // definition loaded by pi-subagents, not the task prompt).
-      const identitySections = [
-        /^##\s+.*Spawn Mode/im,
-        /^##\s+.*First Action Protocol/im,
-        /^##\s+.*Output Contract/im,
-        /^##\s+.*Sub-Agent Boundaries/im,
-        /^##\s+.*TDD Discipline/im,
-        /^###\s+RED/im,
-        /^###\s+GREEN/im,
-        /^###\s+REFACTOR/im,
-      ];
-      const renderWith = (name: string): string => {
-        const params: Record<string, unknown> = {
-          task_id: "P1",
-          task_title: "Test task",
-          sc_list: "- SC1: x",
-          upstream_outputs: "(none)",
-          files_to_touch: "src/foo.ts",
-          acceptance_cmd: "echo ok",
-        };
-        if (name === "subagent-auditor") {
-          params.depth = "full";
-          params.task_report_path = ".pi/orchestrator/task-P1-report.md";
-          params.isolation = "none";
-        }
-        return renderTaskPrompt(name, params) ?? "";
-      };
-      const templateNames = [
-        "subagent-developer",
-        "subagent-explore",
-        "subagent-merger",
-      ];
-      for (const name of templateNames) {
-        const rendered = renderWith(name);
-        expect(rendered.length).toBeGreaterThan(0);
-        for (const re of identitySections) {
-          expect(rendered).not.toMatch(re);
-        }
-      }
-    });
   });
 
-  describe("loadGoalTemplate / loadDagTemplate / loadResponseTemplate", () => {
+  describe("loadGoalTemplate", () => {
     it("loads goal-refactor.yaml", () => {
       const content = loadGoalTemplate("goal-refactor");
       expect(content).not.toBeNull();
@@ -173,19 +117,6 @@ describe("template-loader", () => {
       const content = loadGoalTemplate("goal-fix-bug");
       expect(content).not.toBeNull();
       expect(content).toContain("anti_goals");
-    });
-
-    // GC-2026-path-B-swap: the dag/ directory was deleted — path B uses
-    // workflow_run (no DAG template). listTemplates("dag") now returns
-    // []; the per-file load tests are removed.
-    it.skip("loads dag-tdd-refactor.yaml (removed by GC-2026-path-B-swap)", () => {});
-    it.skip("loads dag-bug-fix.yaml (removed by GC-2026-path-B-swap)", () => {});
-
-    it("returns null for response templates (removed in v2 — patterns inlined in SKILL.md)", () => {
-      // Response templates were removed: prompts/ are the only file-based templates now.
-      // LLM composes response patterns inline from SKILL.md §6.4.
-      const content = loadResponseTemplate("goal-intake");
-      expect(content).toBeNull();
     });
   });
 
@@ -243,43 +174,6 @@ describe("template-loader", () => {
     });
   });
 
-  describe("renderTaskPrompt", () => {
-    // GC-2026-path-B-swap: renderTaskPrompt is the path A mechanism.
-    // Path B builds the task prompt inline in
-    // `pi-tasks/src/phase-prompts.ts` and passes it as the task
-    // description. The two renderTaskPrompt cases below are kept as
-    // smoke tests for the template-loader machinery; new code should
-    // not depend on them.
-    it("renders a developer task prompt with params (path A compat)", () => {
-      // subagent-developer.md is now a path-A-compat reference doc.
-      // renderTaskPrompt returns its content (no template vars) regardless
-      // of params. Verify it loads and references the path B hand-off.
-      const out = renderTaskPrompt("subagent-developer", {
-        task_id: "P4",
-        task_title: "Implement UserRepository",
-        sc_list: "- SC1: typecheck passes\n- SC2: tests pass",
-        upstream_outputs: "(none)",
-        files_to_touch: "src/auth/repository/UserRepository.ts",
-        acceptance_cmd: "npm test",
-      });
-      expect(out).not.toBeNull();
-      expect(out).toContain("GC-2026-path-B-swap");
-      expect(out).toContain("phase-prompts.ts");
-    });
-
-    // Auditor template was deleted (renamed to Reviewer). The
-    // renderTaskPrompt call should return null now.
-    it("returns null for the deleted subagent-auditor template", () => {
-      const out = renderTaskPrompt("subagent-auditor", { task_id: "P7" });
-      expect(out).toBeNull();
-    });
-
-    it("returns null for unknown template name", () => {
-      const out = renderTaskPrompt("nonexistent-template", {});
-      expect(out).toBeNull();
-    });
-  });
-
   describe("listTemplates", () => {
     // GC-2026-path-B-swap: subagent-auditor.md was deleted (renamed
     // to Reviewer; canonical prompt lives in
@@ -308,15 +202,9 @@ describe("template-loader", () => {
 
     // GC-2026-path-B-swap: the dag/ directory was deleted. Path B uses
     // workflow_run, not a DAG template. listTemplates("dag") returns [].
-    it("returns no dag templates (path B uses workflow_run, no DAG)", () => {
-      const names = listTemplates("dag");
-      expect(names).toEqual([]);
-    });
-
     it("returns empty for responses (templates/responses/ removed in v2)", () => {
       // v2: response patterns are inlined in SKILL.md §6.4
-      // listTemplates still works for prompts/goals/dag, just not responses
-      const names = listTemplates("responses");
+      const names = listTemplates("responses" as "prompts" | "goals");
       expect(names).toEqual([]);
     });
   });

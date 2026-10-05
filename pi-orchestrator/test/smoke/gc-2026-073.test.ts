@@ -197,13 +197,16 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		expect(pi.systemEntries.length).toBe(1);
 	});
 
-	it("SMOKE-073-7: non-bash tool_call does NOT trigger the reminder", async () => {
+	it("SMOKE-073-7: read tool_call does NOT trigger the reminder; bash/edit/write do (GC-2026-098 L3)", async () => {
+		// GC-2026-098 L3: the soft-mode reminder gate was extended from
+		// bash-only to bash/edit/write. Sessions that begin with edit
+		// (no bash) should still see the nudge. read/grep/find stay
+		// silent — read-only operations don't signal workflow-worthy work.
 		const ext = await import("../../src/extension.js");
 		ext.default(pi as any);
 		pi.fireToolCall({ toolName: "read", input: { path: "foo.ts" } });
-		pi.fireToolCall({ toolName: "edit", input: { path: "foo.ts" } });
 		expect(pi.systemEntries.length).toBe(0);
-		pi.fireToolCall({ toolName: "bash", input: { command: "echo x" } });
+		pi.fireToolCall({ toolName: "edit", input: { path: "foo.ts" } });
 		expect(pi.systemEntries.length).toBe(1);
 	});
 });
