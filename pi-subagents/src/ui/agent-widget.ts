@@ -693,9 +693,20 @@ export class AgentWidget {
 				}
 			}
 		} else {
-			// Overflow — prioritize: running > queued > finished.
-			// Reserve 1 line for overflow indicator.
-			let budget = maxBody - 1;
+			// GC-2026-task-widget-link: overflow — prioritize: running > queued > finished.
+			// Reserve 1 line for overflow indicator only when something
+			// actually overflows. (The previous code always reserved a line,
+			// which silently dropped finished agents even when there was room.)
+			const overflowParts: string[] = [];
+			const countRunning = runningLines.length;
+			const countQueued = queuedLine ? 1 : 0;
+			const countFinished = finishedLines.length;
+			let linesNeeded = countRunning * 2 + countQueued + countFinished + 1; // +1 for overflow
+			let budget = maxBody;
+			if (linesNeeded <= maxBody) {
+				// Fits with overflow indicator.
+				budget = maxBody - 1;
+			}
 			let hiddenRunning = 0;
 			let hiddenFinished = 0;
 
@@ -706,6 +717,7 @@ export class AgentWidget {
 					budget -= 2;
 				} else {
 					hiddenRunning++;
+					overflowParts.push(`${hiddenRunning} running`);
 				}
 			}
 
@@ -725,17 +737,17 @@ export class AgentWidget {
 				}
 			}
 
-			// Overflow summary
-			const overflowParts: string[] = [];
-			if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
-			if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
-			const overflowText = overflowParts.join(", ");
-			lines.push(
-				truncate(
-					theme.fg("dim", "└─") +
-						` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`,
-				),
-			);
+			// Overflow summary (only when something was hidden)
+			if (overflowParts.length > 0) {
+				overflowParts.push(`${hiddenFinished} finished`);
+				const overflowText = overflowParts.join(", ");
+				lines.push(
+					truncate(
+						theme.fg("dim", "└─") +
+							` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`,
+					),
+				);
+			}
 		}
 
 		return lines;
