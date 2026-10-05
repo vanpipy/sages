@@ -32,15 +32,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const ENV_KEYS = [
-	"SAGES_PI_AGENT_BUDGET_TURNS",
 	"SAGES_PI_AGENT_BUDGET_MS",
-	"SAGES_PI_AGENT_DEVELOPER_BUDGET_TURNS",
 	"SAGES_PI_AGENT_DEVELOPER_BUDGET_MS",
-	"SAGES_PI_AGENT_REVIEWER_BUDGET_TURNS",
 	"SAGES_PI_AGENT_REVIEWER_BUDGET_MS",
-	"SAGES_PI_AGENT_EXPLORER_BUDGET_TURNS",
 	"SAGES_PI_AGENT_EXPLORER_BUDGET_MS",
-	"SAGES_PI_AGENT_MERGER_BUDGET_TURNS",
 	"SAGES_PI_AGENT_MERGER_BUDGET_MS",
 ] as const;
 
@@ -96,104 +91,131 @@ describe("run-controller: DEFAULT_BUCKET_TIMEOUTS_MS", () => {
 });
 
 describe("run-controller: DEFAULT_PER_TYPE", () => {
-	it("exports the five built-in PascalCase types with the specified defaults", async () => {
+	it("GC-2026-subagent-time-only-limits: every type gets 30 min default (uniform envelope)", async () => {
 		const { DEFAULT_PER_TYPE } = await import("../src/run-controller.js");
-		expect(DEFAULT_PER_TYPE.Developer).toEqual({
-			deadlineMs: 30 * 60_000,
-			maxTurns: 300,
-		});
-		expect(DEFAULT_PER_TYPE.Reviewer).toEqual({
-			deadlineMs: 30 * 60_000,
-			maxTurns: 300,
-		});
-		expect(DEFAULT_PER_TYPE.Explore).toEqual({
-			deadlineMs: 10 * 60_000,
-			maxTurns: 50,
-		});
-		expect(DEFAULT_PER_TYPE.Plan).toEqual({
-			deadlineMs: 5 * 60_000,
-			maxTurns: 12,
-		});
-		expect(DEFAULT_PER_TYPE.Merger).toEqual({
-			deadlineMs: 5 * 60_000,
-			maxTurns: 80,
-		});
+		expect(DEFAULT_PER_TYPE.Developer).toEqual({ deadlineMs: 30 * 60_000 });
+		expect(DEFAULT_PER_TYPE.Reviewer).toEqual({ deadlineMs: 30 * 60_000 });
+		expect(DEFAULT_PER_TYPE.Explore).toEqual({ deadlineMs: 30 * 60_000 });
+		expect(DEFAULT_PER_TYPE.Plan).toEqual({ deadlineMs: 30 * 60_000 });
+		expect(DEFAULT_PER_TYPE.PlanCompiler).toEqual({ deadlineMs: 30 * 60_000 });
+		expect(DEFAULT_PER_TYPE.Merger).toEqual({ deadlineMs: 30 * 60_000 });
+	});
+
+	it("has exactly the six expected type keys (PascalCase)", async () => {
+		const { DEFAULT_PER_TYPE } = await import("../src/run-controller.js");
+		const keys = Object.keys(DEFAULT_PER_TYPE).sort();
+		expect(keys).toEqual([
+			"Developer",
+			"Explore",
+			"Merger",
+			"Plan",
+			"PlanCompiler",
+			"Reviewer",
+		]);
+	});
+
+	it("each entry has only a deadlineMs field (no maxTurns)", async () => {
+		const { DEFAULT_PER_TYPE } = await import("../src/run-controller.js");
+		for (const entry of Object.values(DEFAULT_PER_TYPE)) {
+			expect(entry).not.toHaveProperty("maxTurns");
+		}
+	});
+});
+
+describe("run-controller: deadline envelope (GC-2026-subagent-time-only-limits)", () => {
+	it("MIN_DEADLINE_MS = 30 * 60_000 and MAX_DEADLINE_MS = 120 * 60_000", async () => {
+		const { MIN_DEADLINE_MS, MAX_DEADLINE_MS } = await import(
+			"../src/run-controller.js"
+		);
+		expect(MIN_DEADLINE_MS).toBe(30 * 60_000);
+		expect(MAX_DEADLINE_MS).toBe(120 * 60_000);
+	});
+
+	it("clampDeadlineMs clamps below the floor to MIN_DEADLINE_MS", async () => {
+		const { clampDeadlineMs, MIN_DEADLINE_MS } = await import(
+			"../src/run-controller.js"
+		);
+		expect(clampDeadlineMs(5 * 60_000)).toBe(MIN_DEADLINE_MS);
+		expect(clampDeadlineMs(0)).toBe(MIN_DEADLINE_MS);
+		expect(clampDeadlineMs(-100)).toBe(MIN_DEADLINE_MS);
+		expect(clampDeadlineMs(NaN)).toBe(MIN_DEADLINE_MS);
+	});
+
+	it("clampDeadlineMs clamps above the ceiling to MAX_DEADLINE_MS", async () => {
+		const { clampDeadlineMs, MAX_DEADLINE_MS } = await import(
+			"../src/run-controller.js"
+		);
+		expect(clampDeadlineMs(240 * 60_000)).toBe(MAX_DEADLINE_MS);
+		expect(clampDeadlineMs(9999 * 60_000)).toBe(MAX_DEADLINE_MS);
+	});
+
+	it("clampDeadlineMs passes through values within the envelope", async () => {
+		const { clampDeadlineMs } = await import("../src/run-controller.js");
+		expect(clampDeadlineMs(45 * 60_000)).toBe(45 * 60_000);
+		expect(clampDeadlineMs(60 * 60_000)).toBe(60 * 60_000);
+		expect(clampDeadlineMs(120 * 60_000)).toBe(120 * 60_000);
 	});
 });
 
 describe("run-controller: resolveRunConfig", () => {
-	it("returns DEFAULT_PER_TYPE[type] when params is empty and env is empty", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("Developer", {}, {});
-		expect(cfg.type).toBe("Developer");
-		expect(cfg.deadlineMs).toBe(30 * 60_000);
-		expect(cfg.maxTurns).toBe(300);
-		expect(cfg.bucketTimeoutsMs).toBeDefined();
-	});
 
-	it("params.max_duration_minutes overrides deadlineMs (positive only)", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("Developer", { max_duration_minutes: 15 }, {});
-		expect(cfg.deadlineMs).toBe(15 * 60_000);
+	it("params.max_duration_minutes overrides deadlineMs (positive only; clamped to [30,120] envelope)", async () => {
+		const { resolveRunConfig, MIN_DEADLINE_MS, MAX_DEADLINE_MS } = await import(
+			"../src/run-controller.js"
+		);
+		// 15 min < MIN (30) → clamped to floor
+		const below = resolveRunConfig("Developer", { max_duration_minutes: 15 }, {});
+		expect(below.deadlineMs).toBe(MIN_DEADLINE_MS);
 
-		// Negative values fall through to default
+		// 60 min within envelope
+		const mid = resolveRunConfig("Developer", { max_duration_minutes: 60 }, {});
+		expect(mid.deadlineMs).toBe(60 * 60_000);
+
+		// 240 min > MAX (120) → clamped to ceiling
+		const above = resolveRunConfig("Developer", { max_duration_minutes: 240 }, {});
+		expect(above.deadlineMs).toBe(MAX_DEADLINE_MS);
+
+		// Negative values fall through to default (30 min)
 		const neg = resolveRunConfig("Developer", { max_duration_minutes: -5 }, {});
-		expect(neg.deadlineMs).toBe(30 * 60_000);
+		expect(neg.deadlineMs).toBe(MIN_DEADLINE_MS);
 
 		// Zero falls through to default
 		const zero = resolveRunConfig("Developer", { max_duration_minutes: 0 }, {});
-		expect(zero.deadlineMs).toBe(30 * 60_000);
+		expect(zero.deadlineMs).toBe(MIN_DEADLINE_MS);
 	});
 
-	it("params.max_turns overrides maxTurns", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("Developer", { max_turns: 42 }, {});
-		expect(cfg.maxTurns).toBe(42);
-
-		// Zero / negative falls through
-		const zero = resolveRunConfig("Developer", { max_turns: 0 }, {});
-		expect(zero.maxTurns).toBe(300);
-	});
-
-	it("falls back to default when params is undefined-equivalent", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("Reviewer", {}, {});
-		expect(cfg.deadlineMs).toBe(30 * 60_000);
-		expect(cfg.maxTurns).toBe(300);
-	});
-
-	it("env.SAGES_PI_AGENT_BUDGET_TURNS as fallback (when params has nothing)", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const env = { SAGES_PI_AGENT_BUDGET_TURNS: "42" };
-		const cfg = resolveRunConfig("Explore", {}, env);
-		expect(cfg.maxTurns).toBe(42);
-	});
-
-	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_TURNS overrides per-type", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const env = {
-			SAGES_PI_AGENT_BUDGET_TURNS: "42",
-			SAGES_PI_AGENT_REVIEWER_BUDGET_TURNS: "99",
-		};
-		const cfg = resolveRunConfig("Reviewer", {}, env);
-		expect(cfg.maxTurns).toBe(99);
-	});
-
-	it("env.SAGES_PI_AGENT_BUDGET_MS as fallback for deadlineMs", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
+	it("env.SAGES_PI_AGENT_BUDGET_MS as fallback for deadlineMs (clamped to envelope)", async () => {
+		const { resolveRunConfig, MIN_DEADLINE_MS } = await import(
+			"../src/run-controller.js"
+		);
+		// 7 min < MIN → clamped to floor
 		const env = { SAGES_PI_AGENT_BUDGET_MS: String(7 * 60_000) };
 		const cfg = resolveRunConfig("Developer", {}, env);
-		expect(cfg.deadlineMs).toBe(7 * 60_000);
+		expect(cfg.deadlineMs).toBe(MIN_DEADLINE_MS);
 	});
 
-	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS overrides per-type deadlineMs", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
+	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS overrides per-type deadlineMs (clamped)", async () => {
+		const { resolveRunConfig, MIN_DEADLINE_MS } = await import(
+			"../src/run-controller.js"
+		);
 		const env = {
 			SAGES_PI_AGENT_BUDGET_MS: String(7 * 60_000),
 			SAGES_PI_AGENT_DEVELOPER_BUDGET_MS: String(3 * 60_000),
 		};
 		const cfg = resolveRunConfig("Developer", {}, env);
-		expect(cfg.deadlineMs).toBe(3 * 60_000);
+		// Both values are below MIN → both clamp to floor; per-type wins by
+		// the floor value (same value), so we only assert the floor.
+		expect(cfg.deadlineMs).toBe(MIN_DEADLINE_MS);
+	});
+
+	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS in envelope is respected", async () => {
+		const { resolveRunConfig } = await import("../src/run-controller.js");
+		const env = {
+			SAGES_PI_AGENT_BUDGET_MS: String(45 * 60_000),
+			SAGES_PI_AGENT_DEVELOPER_BUDGET_MS: String(60 * 60_000),
+		};
+		const cfg = resolveRunConfig("Developer", {}, env);
+		expect(cfg.deadlineMs).toBe(60 * 60_000); // per-type wins within envelope
 	});
 
 	it("bucketTimeoutsMs is always DEFAULT_BUCKET_TIMEOUTS_MS", async () => {
@@ -204,27 +226,7 @@ describe("run-controller: resolveRunConfig", () => {
 		expect(cfg.bucketTimeoutsMs).toBe(DEFAULT_BUCKET_TIMEOUTS_MS);
 	});
 
-	it("unknown type falls back to Developer defaults (20min / 200turns)", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const cfg = resolveRunConfig("somerandomtype", {}, {});
-		expect(cfg.deadlineMs).toBe(30 * 60_000);
-		expect(cfg.maxTurns).toBe(300);
-	});
 
-	it("params take precedence over env", async () => {
-		const { resolveRunConfig } = await import("../src/run-controller.js");
-		const env = {
-			SAGES_PI_AGENT_DEVELOPER_BUDGET_TURNS: "99",
-			SAGES_PI_AGENT_DEVELOPER_BUDGET_MS: String(3 * 60_000),
-		};
-		const cfg = resolveRunConfig(
-			"Developer",
-			{ max_duration_minutes: 45, max_turns: 10 },
-			env,
-		);
-		expect(cfg.deadlineMs).toBe(45 * 60_000);
-		expect(cfg.maxTurns).toBe(10);
-	});
 
 	it("carries runId and traceId when provided in params (or in env)", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");

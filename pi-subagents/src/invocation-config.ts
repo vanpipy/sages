@@ -13,7 +13,6 @@ import {
 interface AgentInvocationParams {
 	model?: string;
 	thinking?: string;
-	max_turns?: number;
 	run_in_background?: boolean;
 	inherit_context?: boolean;
 	isolated?: boolean;
@@ -45,7 +44,6 @@ export function resolveAgentInvocationConfig(
 	modelInput?: string;
 	modelFromParams: boolean;
 	thinking?: ThinkingLevel;
-	maxTurns?: number;
 	inheritContext: boolean;
 	runInBackground: boolean;
 	isolated: boolean;
@@ -125,7 +123,6 @@ export function resolveAgentInvocationConfig(
 			thinking: (agentConfig?.thinking ?? params.thinking) as
 				| ThinkingLevel
 				| undefined,
-			maxTurns: agentConfig?.maxTurns ?? params.max_turns,
 			// GC-2026-016: inheritContext defaults to true. The audit of 78
 			// historical sessions showed the orchestrator's task prompt
 			// already carries the project context the subagent needs;
@@ -151,7 +148,6 @@ export function resolveAgentInvocationConfig(
 		thinking: (agentConfig?.thinking ?? params.thinking) as
 			| ThinkingLevel
 			| undefined,
-		maxTurns: agentConfig?.maxTurns ?? params.max_turns,
 		// GC-2026-016: inheritContext defaults to true. See the comment on
 		// the agentPinned branch above for the audit rationale.
 		inheritContext:

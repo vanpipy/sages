@@ -242,12 +242,13 @@ describe("default-agents: merger config (GC-2026-prompt-workspace)", () => {
 		expect(merger?.inheritContext).toBe(false);
 	});
 
-	it("sets a bounded maxTurns (80 — read both diffs + classify + merge + verify + report)", () => {
-		// Less than developer/reviewer (200) because the merger is a
-		// narrow tool: read diffs, classify, produce one merge commit
-		// or escalate. Going over 80 turns means the brief was wrong,
-		// not that the merger needs more budget.
-		expect(merger?.maxTurns).toBe(80);
+	it("GC-2026-subagent-time-only-limits: merger no longer sets maxTurns (lifecycle limit removed)", () => {
+		// GC-2026-subagent-time-only-limits removed the maxTurns field
+		// from AgentConfig. The merger (and every other default agent)
+		// has no per-agent turn budget — the wall-clock deadline is the
+		// only lifecycle limit (30–120 min envelope, applied via the
+		// run controller + DEFAULT_PER_TYPE.Developer fallback).
+		expect(merger?.maxTurns).toBeUndefined();
 	});
 
 	it("does NOT carry an isolation policy — merger uses no worktree, operates against supplied worktree paths", () => {
@@ -295,62 +296,6 @@ describe("default-agents: subagent isolation", () => {
 	}
 });
 
-describe("default-agents: per-agent maxTurns budgets", () => {
-	// The runtime resolves `maxTurns` as
-	//   options.maxTurns ?? agentConfig?.maxTurns ?? defaultMaxTurns
-	// so an explicit per-agent budget takes precedence over the global default.
-	// Caller-supplied `Agent({ max_turns: ... })` still wins at spawn time.
-	const expected: Record<string, number> = {
-		Explore: 50,
-		// Plan is a lightweight compiler; the budget covers one Brief +
-		// verified file reads + READY/BLOCKED write. Going over means
-		// the main agent under-specified the brief.
-		Plan: 12,
-		Developer: 200,
-		Reviewer: 200,
-		Merger: 80,
-	};
-
-	for (const [name, limit] of Object.entries(expected)) {
-		it(`${name} sets maxTurns = ${limit}`, () => {
-			const config = DEFAULT_AGENTS.get(name);
-			expect(config?.maxTurns, `${name} must pin maxTurns`).toBe(limit);
-		});
-	}
-
-	it("every default agent sets an explicit maxTurns (no global-default fallthrough)", () => {
-		// A future contributor who adds a new default agent and forgets to
-		// set `maxTurns` would silently inherit the global default — which
-		// is `undefined` (unlimited) at startup. This test guards against
-		// that by requiring every default to declare its own budget.
-		for (const [name, config] of DEFAULT_AGENTS) {
-			expect(
-				typeof config.maxTurns,
-				`default agent "${name}" must declare an explicit maxTurns`,
-			).toBe("number");
-			expect(
-				(config.maxTurns ?? 0) > 0,
-				`default agent "${name}" maxTurns must be positive`,
-			).toBe(true);
-		}
-	});
-
-	it("maxTurns budgets are within the settings ceiling (defense-in-depth)", () => {
-		// `MAX_TURNS_CEILING = 10_000` (settings.ts) bounds what `sanitize()`
-		// accepts from project / global subagents.json. The hardcoded agent
-		// defaults skip sanitize() (they're in source, not config) but the
-		// values should still stay well below the ceiling so future
-		// settings-layer overrides can never be silently stricter than the
-		// hardcoded default.
-		const MAX_TURNS_CEILING = 10_000;
-		for (const [name, config] of DEFAULT_AGENTS) {
-			expect(
-				(config.maxTurns ?? 0) <= MAX_TURNS_CEILING,
-				`default agent "${name}" maxTurns must be <= ${MAX_TURNS_CEILING}`,
-			).toBe(true);
-		}
-	});
-});
 
 describe("default-agents: reviewer (Phase B) — canonical `Reviewer` registered", () => {
 	it("registers the canonical `Reviewer` agent", () => {
@@ -425,11 +370,6 @@ describe("default-agents: reviewer config", () => {
 		expect(aud?.runInBackground).toBe(true);
 	});
 
-	it("sets maxTurns = 200 (re-run loop + diff inspection + report write)", () => {
-		// Symmetric with developer; audits need a generous budget for
-		// typecheck + lint + tests + diff inspection + report write.
-		expect(aud?.maxTurns).toBe(200);
-	});
 
 	it("does NOT copy the legacy `isolation: 'worktree'` literal — reviewer is read-only on the developer's worktree", () => {
 		// The reviewer never enters a managed worktree; it audits the
@@ -532,9 +472,6 @@ describe("default-agents: Plan config (DAG-2026-017)", () => {
 		expect(plan?.thinking).toBeUndefined();
 	});
 
-	it("sets maxTurns = 12 (compile budget, not exploration budget)", () => {
-		expect(plan?.maxTurns).toBe(12);
-	});
 
 	it("runInBackground = false (Plan returns a compiled plan inline)", () => {
 		// Default at runtime is false, but the config field MUST be

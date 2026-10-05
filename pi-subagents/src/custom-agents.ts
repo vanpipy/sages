@@ -149,7 +149,8 @@ function loadFromDir(
 			skills: inheritField(fm.skills ?? fm.inherit_skills),
 			model: str(fm.model),
 			thinking: str(fm.thinking) as ThinkingLevel | undefined,
-			maxTurns: nonNegativeInt(fm.max_turns),
+			// GC-2026-subagent-time-only-limits: maxTurns removed from
+			// AgentConfig. Wall-clock deadline is the only lifecycle limit.
 			persistSession:
 				fm.persist_session != null ? fm.persist_session === true : undefined,
 			outputTranscript:

@@ -2,19 +2,24 @@
  * run-controller.ts — Single source of truth for per-run timeouts.
  *
  * Design (GC-2026-040 Phase 1, replaces scattered GC-2026-022 / GC-2026-037 T1 /
- * GC-2026-038 T5 mechanisms). Reference: `.pi/orchestrator/design-timeout-architecture.md`.
+ * GC-2026-038 T5 mechanisms; GC-2026-subagent-time-only-limits removes
+ * turn-based limits and pins the wall-clock deadline envelope).
  *
  *   - `RunController` is one per agent run. It owns:
- *       - the deadline timer (wall-clock ceiling)
+ *       - the deadline timer (wall-clock ceiling, clamped to
+ *         [MIN_DEADLINE_MS, MAX_DEADLINE_MS])
  *       - the per-bucket tool-call timers (via `signalForTool(bucket)`)
  *       - composition with a parent signal via `AbortSignal.any`
  *
  *   - `resolveRunConfig(type, params, env)` honors the priority chain:
  *       params.max_duration_minutes (positive only) > per-type env
  *       > generic env > default
- *       params.max_turns > per-type env > generic env > default
+ *     Every resolution path is clamped to [MIN_DEADLINE_MS,
+ *     MAX_DEADLINE_MS] so an out-of-band config (e.g. a hand-edited
+ *     subagents.json with defaultMaxMinutes=5) cannot shrink the
+ *     deadline below the operational floor.
  *     bucketTimeoutsMs is always DEFAULT_BUCKET_TIMEOUTS_MS.
- *     Unknown type falls back to Developer defaults (20min / 200 turns).
+ *     Unknown type falls back to Developer defaults.
  *
  *   - `cleanup()` is idempotent and clears all owned timers.
  *
@@ -26,6 +31,7 @@
  *   - run_controller_deadline:     deadline timer fire
  *   - run_controller_tool_signal:  per-bucket signal composition
  *   - run_controller_cleanup:      idempotent timer cleanup
+ *   - run_controller_deadline_envelope: deadline clamp [30, 120] min
  */
 
 export type BucketKey =
@@ -122,32 +128,54 @@ export type AgentType =
 
 export interface PerTypeDefaults {
 	deadlineMs: number;
-	maxTurns: number;
 }
 
 /**
- * Per-type deadline + turn budgets.
- *
- * Source of truth for these values is `default-agents.ts` — the
- * `maxTurns` field on each AgentConfig. Keeping this table in lockstep
- * with that source prevents the budget from drifting between the
- * registry (used by callers) and the runtime (used by the run
- * controller).
+ * GC-2026-subagent-time-only-limits: the only lifecycle limit on a
+ * subagent is its wall-clock deadline. The previous turn-based limit
+ * (`maxTurns` / graceTurns) is removed — agents run until the deadline
+ * timer fires. Source of truth for the per-type defaults is
+ * `default-agents.ts` (the runtime falls back to this table for
+ * types without a registry entry, e.g. user-defined custom agents).
  *
  * GC-2026-091: keys are PascalCase to match the `AgentType` union
- * and the registry. `Plan` was missing before (its 5min / 12turn
- * budget was inherited via the `settings.resolveDeadlineMs` legacy
+ * and the registry. `Plan` was missing before (its 5min budget was
+ * inherited via the `settings.resolveDeadlineMs` legacy
  * capitalized-name path); it is now a first-class member.
  */
 export const DEFAULT_PER_TYPE: Record<AgentType, PerTypeDefaults> = {
-	Developer: { deadlineMs: 30 * 60_000, maxTurns: 300 },
-	Reviewer: { deadlineMs: 30 * 60_000, maxTurns: 300 },
-	Explore: { deadlineMs: 10 * 60_000, maxTurns: 50 },
-	Plan: { deadlineMs: 5 * 60_000, maxTurns: 12 },
-	PlanCompiler: { deadlineMs: 5 * 60_000, maxTurns: 12 },
-	Merger: { deadlineMs: 5 * 60_000, maxTurns: 80 },
+	Developer: { deadlineMs: 30 * 60_000 },
+	Reviewer: { deadlineMs: 30 * 60_000 },
+	Explore: { deadlineMs: 30 * 60_000 },
+	Plan: { deadlineMs: 30 * 60_000 },
+	PlanCompiler: { deadlineMs: 30 * 60_000 },
+	Merger: { deadlineMs: 30 * 60_000 },
 };
 // Note: the Developer defaults also serve as the floor for unknown types.
+
+/** Wall-clock deadline envelope — every subagent runs for at least
+ *  30 minutes, at most 120 minutes, regardless of config. The
+ *  envelope catches two footguns: (1) a too-small env var
+ *  (SAGES_PI_AGENT_BUDGET_MS=300000) silently stranding the agent,
+ *  (2) a too-large env var (SAGES_PI_AGENT_BUDGET_MS=86400000)
+ *  hiding the deadline abort for a day.
+ *
+ *  GC-2026-subagent-time-only-limits: this is the only operational
+ *  safety net on a subagent run. Turn-counting limits were removed
+ *  because they bottomed out workflows mid-task (Developer agent
+ *  aborted at 60 turns during GC-2026-097 implementation). */
+export const MIN_DEADLINE_MS = 30 * 60_000;
+export const MAX_DEADLINE_MS = 120 * 60_000;
+
+/** Clamp deadlineMs into the [MIN_DEADLINE_MS, MAX_DEADLINE_MS] envelope.
+ *  Single source of truth — every resolution path in resolveRunConfig
+ *  flows through this. Exported so tests + downstream callers can
+ *  reason about the bounds without re-implementing the clamp. */
+export function clampDeadlineMs(ms: number): number {
+	if (!Number.isFinite(ms) || ms < MIN_DEADLINE_MS) return MIN_DEADLINE_MS;
+	if (ms > MAX_DEADLINE_MS) return MAX_DEADLINE_MS;
+	return ms;
+}
 
 /** Optional identity tags attached to the run for observability. */
 export interface RunIdentity {
@@ -158,7 +186,6 @@ export interface RunIdentity {
 export interface RunConfig extends RunIdentity {
 	type: AgentType;
 	deadlineMs: number;
-	maxTurns: number;
 	bucketTimeoutsMs: BucketTimeouts;
 }
 
@@ -172,17 +199,18 @@ function positiveInt(v: string | undefined, fallback: number): number {
 /**
  * Resolve the run config for a given agent type. Precedence:
  *
- *   1. params.max_duration_minutes / params.max_turns (positive only)
- *   2. per-type env: SAGES_PI_AGENT_<TYPE>_BUDGET_{TURNS,MS}
- *   3. generic env:  SAGES_PI_AGENT_BUDGET_{TURNS,MS}
+ *   1. params.max_duration_minutes (positive only)
+ *   2. per-type env: SAGES_PI_AGENT_<TYPE>_BUDGET_MS
+ *   3. generic env:  SAGES_PI_AGENT_BUDGET_MS
  *   4. DEFAULT_PER_TYPE[type] (or Developer defaults for unknown types)
  *
+ * Every resolution path is clamped to [MIN_DEADLINE_MS, MAX_DEADLINE_MS].
  * bucketTimeoutsMs is always DEFAULT_BUCKET_TIMEOUTS_MS — the bucket
  * table is enforced by the bash wrapper, not chosen per-run.
  */
 export function resolveRunConfig(
 	type: AgentType,
-	params: { max_duration_minutes?: number; max_turns?: number },
+	params: { max_duration_minutes?: number },
 	env: NodeJS.ProcessEnv,
 	identity: RunIdentity = {},
 ): RunConfig {
@@ -193,9 +221,8 @@ export function resolveRunConfig(
 	// Params win when given as a positive number; 0 / negative / undefined
 	// fall through to env (per-type → generic → default).
 	const paramsMinutes = params.max_duration_minutes;
-	const paramsTurns = params.max_turns;
 
-	const deadlineMs =
+	const rawDeadlineMs =
 		paramsMinutes !== undefined && paramsMinutes > 0
 			? paramsMinutes * 60_000
 			: positiveInt(
@@ -203,18 +230,12 @@ export function resolveRunConfig(
 					positiveInt(env.SAGES_PI_AGENT_BUDGET_MS, base.deadlineMs),
 				);
 
-	const maxTurns =
-		paramsTurns !== undefined && paramsTurns > 0
-			? paramsTurns
-			: positiveInt(
-					env[`SAGES_PI_AGENT_${typeUpper}_BUDGET_TURNS`],
-					positiveInt(env.SAGES_PI_AGENT_BUDGET_TURNS, base.maxTurns),
-				);
+	// run_controller_deadline_envelope: clamp to [30, 120] min.
+	const deadlineMs = clampDeadlineMs(rawDeadlineMs);
 
 	return {
 		type,
 		deadlineMs,
-		maxTurns,
 		bucketTimeoutsMs: DEFAULT_BUCKET_TIMEOUTS_MS,
 		runId: identity.runId,
 		traceId: identity.traceId,

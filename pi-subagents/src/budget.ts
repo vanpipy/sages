@@ -265,14 +265,21 @@ export class BudgetTracker {
 		return Number(process.hrtime.bigint() - this.startNs) / 1_000_000;
 	}
 
-	/** Effective maxTurns: from runController when set, else from Budget. */
+	/**
+	 * Effective maxTurns. GC-2026-subagent-time-only-limits: the runController
+	 * no longer carries maxTurns (it was removed along with the runtime turn
+	 * counter). The Budget's per-budget maxTurns is the only remaining source
+	 * — used for handoff snapshot cadence, not for lifecycle abort.
+	 */
 	private effectiveMaxTurns(): number {
-		if (this.runController !== undefined)
-			return this.runController.config.maxTurns;
 		return this.budget.maxTurns;
 	}
 
-	/** Effective maxMs: runController.config.deadlineMs when set, else Budget.maxMs. */
+	/**
+	 * Effective maxMs: runController.config.deadlineMs when set, else Budget.maxMs.
+	 * The runController's deadline is now the only lifecycle ceiling; the
+	 * Budget's maxMs is the handoff cadence.
+	 */
 	private effectiveMaxMs(): number {
 		if (this.runController !== undefined)
 			return this.runController.config.deadlineMs;

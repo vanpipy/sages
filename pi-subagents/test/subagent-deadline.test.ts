@@ -104,11 +104,6 @@ vi.mock("../src/agent-runner.js", () => ({
 		GET_RESULT: "get_subagent_result",
 		STEER: "steer_subagent",
 	},
-	getDefaultMaxTurns: () => 30,
-	setDefaultMaxTurns: () => undefined,
-	getGraceTurns: () => 5,
-	setGraceTurns: () => undefined,
-	normalizeMaxTurns: (n?: number) => (n == null ? undefined : Math.max(0, n)),
 }));
 
 import { AgentManager } from "../src/agent-manager.js";
@@ -169,18 +164,26 @@ describe("subagent wall-clock deadline: settings resolution (GC-2026-037 T1)", (
 		expect(getSubagentDurationDefault("Explore")).toBe(5 * 60 * 1000);
 	});
 
-	it("T-DEADLINE-03d: resolveDeadlineMs priority — caller override > per-type default > 30min floor", () => {
-		// No override → per-type default
-		expect(resolveDeadlineMs("developer", undefined)).toBe(20 * 60 * 1000);
-		expect(resolveDeadlineMs("Explore", undefined)).toBe(5 * 60 * 1000);
-		expect(resolveDeadlineMs("not-a-type", undefined)).toBe(20 * 60 * 1000);
+	it("GC-2026-subagent-time-only-limits: deadlineMs clamped to [30, 120] min envelope", () => {
+		// No override → per-type default clamped to floor (30 min).
+		// Developer/Explore/etc all use DEFAULT_PER_TYPE now (uniform 30 min),
+		// so any of them returns 30 min when no override.
+		expect(resolveDeadlineMs("developer", undefined)).toBe(30 * 60 * 1000);
+		expect(resolveDeadlineMs("Explore", undefined)).toBe(30 * 60 * 1000);
+		expect(resolveDeadlineMs("not-a-type", undefined)).toBe(30 * 60 * 1000);
 
-		// Caller-supplied minutes wins
-		expect(resolveDeadlineMs("developer", 30)).toBe(30 * 60 * 1000);
-		expect(resolveDeadlineMs("Explore", 0.5)).toBe(0.5 * 60 * 1000);
+		// Caller-supplied minutes within envelope wins
+		expect(resolveDeadlineMs("developer", 60)).toBe(60 * 60 * 1000);
+
+		// Caller-supplied minutes below MIN → clamped to floor
+		expect(resolveDeadlineMs("Explore", 0.5)).toBe(30 * 60 * 1000);
+
+		// Caller-supplied minutes above MAX → clamped to ceiling
+		expect(resolveDeadlineMs("developer", 240)).toBe(120 * 60 * 1000);
 
 		// Caller-supplied override also wins for unknown types
-		expect(resolveDeadlineMs("not-a-type", 1)).toBe(1 * 60 * 1000);
+		expect(resolveDeadlineMs("not-a-type", 1)).toBe(30 * 60 * 1000);
+		expect(resolveDeadlineMs("not-a-type", 45)).toBe(45 * 60 * 1000);
 	});
 });
 

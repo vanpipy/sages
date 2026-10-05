@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { resolveRunConfig } from "./run-controller.js";
+import { clampDeadlineMs, resolveRunConfig } from "./run-controller.js";
 import type { JoinMode, WidgetMode } from "./types.js";
 
 export interface SubagentsSettings {
@@ -19,13 +19,6 @@ export interface SubagentsSettings {
 	 * Entries must be positive integers; sanitize() drops bad values silently.
 	 */
 	maxConcurrentByType?: Record<string, number>;
-	/**
-	 * 0 = unlimited — the extension's single source of truth for that convention:
-	 * `normalizeMaxTurns()` in agent-runner.ts treats 0 → `undefined`, and the
-	 * `/agents` → Settings input prompt explicitly says "0 = unlimited".
-	 */
-	defaultMaxTurns?: number;
-	graceTurns?: number;
 	defaultJoinMode?: JoinMode;
 	/**
 	 * Master switch for the schedule subagent feature. Defaults to `true`.
@@ -130,8 +123,6 @@ export interface SettingsAppliers {
 	 * no-op (no overrides to apply).
 	 */
 	setMaxConcurrentByType: (map: Record<string, number> | undefined) => void;
-	setDefaultMaxTurns: (n: number) => void;
-	setGraceTurns: (n: number) => void;
 	setDefaultJoinMode: (mode: JoinMode) => void;
 	setSchedulingEnabled: (b: boolean) => void;
 	setScopeModels: (enabled: boolean) => void;
@@ -169,8 +160,6 @@ const VALID_WIDGET_MODES: ReadonlySet<string> = new Set<WidgetMode>([
 // make no operational sense (e.g. 1e6 concurrent subagents). Permissive enough
 // that any realistic power-user setting passes through.
 const MAX_CONCURRENT_CEILING = 1024;
-const MAX_TURNS_CEILING = 10_000;
-const GRACE_TURNS_CEILING = 1_000;
 
 /** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
 function sanitize(raw: unknown): SubagentsSettings {
@@ -204,20 +193,6 @@ function sanitize(raw: unknown): SubagentsSettings {
 			}
 		}
 		if (kept > 0) out.maxConcurrentByType = sanitized;
-	}
-	if (
-		Number.isInteger(r.defaultMaxTurns) &&
-		(r.defaultMaxTurns as number) >= 0 &&
-		(r.defaultMaxTurns as number) <= MAX_TURNS_CEILING
-	) {
-		out.defaultMaxTurns = r.defaultMaxTurns as number;
-	}
-	if (
-		Number.isInteger(r.graceTurns) &&
-		(r.graceTurns as number) >= 1 &&
-		(r.graceTurns as number) <= GRACE_TURNS_CEILING
-	) {
-		out.graceTurns = r.graceTurns as number;
 	}
 	if (
 		typeof r.defaultJoinMode === "string" &&
@@ -338,9 +313,6 @@ export function applySettings(
 		appliers.setMaxConcurrent(s.maxConcurrent);
 	if (s.maxConcurrentByType)
 		appliers.setMaxConcurrentByType(s.maxConcurrentByType);
-	if (typeof s.defaultMaxTurns === "number")
-		appliers.setDefaultMaxTurns(s.defaultMaxTurns);
-	if (typeof s.graceTurns === "number") appliers.setGraceTurns(s.graceTurns);
 	if (s.defaultJoinMode) appliers.setDefaultJoinMode(s.defaultJoinMode);
 	if (typeof s.schedulingEnabled === "boolean")
 		appliers.setSchedulingEnabled(s.schedulingEnabled);
@@ -476,12 +448,15 @@ export function resolveDeadlineMs(
 	type: string,
 	overrideMinutes: number | undefined,
 ): number {
+	// GC-2026-subagent-time-only-limits: every resolution path flows through
+	// clampDeadlineMs so out-of-band configs (env vars, legacy defaults)
+	// cannot shrink the deadline below the 30-min floor.
 	if (overrideMinutes != null && overrideMinutes > 0) {
-		return Math.round(overrideMinutes * 60 * 1000);
+		return clampDeadlineMs(Math.round(overrideMinutes * 60 * 1000));
 	}
 	// Legacy capitalized name not in DEFAULT_PER_TYPE — use the GC-2026-037 table.
 	if (type === "Explore") {
-		return getSubagentDurationDefault(type);
+		return clampDeadlineMs(getSubagentDurationDefault(type));
 	}
 	// Canonical types (Developer, Reviewer, Plan, PlanCompiler, Merger) delegate
 	// to resolveRunConfig — single source of truth.
