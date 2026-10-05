@@ -490,7 +490,15 @@ export class AgentWidget {
 		a: {
 			id: string;
 			type: SubagentType;
-			status: string;
+			status:
+				| "queued"
+				| "running"
+				| "completed"
+				| "steered"
+				| "parent_aborted"
+				| "aborted"
+				| "stopped"
+				| "error";
 			description: string;
 			toolUses: number;
 			startedAt: number;
@@ -521,6 +529,16 @@ export class AgentWidget {
 		} else if (a.status === "stopped") {
 			icon = theme.fg("dim", "■");
 			statusText = theme.fg("dim", " stopped");
+		} else if (a.status === "parent_aborted") {
+			// GC-2026-subagent-interruption-minimal: distinct visual signal
+			// from `"aborted"` (the agent's own deadline) and `"stopped"`
+			// (user-invoked). The "⏹ interrupted" glyph + the recorded
+			// reason help the user distinguish a parent-abort cascade
+			// (workflow pause, session end, deadline) from other end
+			// states.
+			icon = theme.fg("error", "⏹");
+			const reason = a.error ? `: ${a.error.slice(0, 60)}` : "";
+			statusText = theme.fg("error", ` interrupted${reason}`);
 		} else if (a.status === "error") {
 			icon = theme.fg("error", "✗");
 			const errMsg = a.error ? `: ${a.error.slice(0, 60)}` : "";

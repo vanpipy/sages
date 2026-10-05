@@ -174,6 +174,14 @@ export interface AgentRecord {
 		| "running"
 		| "completed"
 		| "steered"
+		/**
+		 * GC-2026-subagent-interruption-minimal: aborted because the parent
+		 * signal fired (user closed pi, session ended, or workflow_run
+		 * aborted the cascade). Distinct from `"aborted"` (the agent's own
+		 * deadline hit — no external interruption) and `"stopped"` (the user
+		 * explicitly invoked `subagent_stop` or the Agent tool cancelled).
+		 */
+		| "parent_aborted"
 		| "aborted"
 		| "stopped"
 		| "error";
