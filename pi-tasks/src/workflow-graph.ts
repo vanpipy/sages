@@ -4,11 +4,13 @@
  *
  * Path A's `pi-orchestrator/src/workflow-run.ts` had a 1060-line state machine
  * that did the looping in-process. Path B moves the loop into the task
- * dependency cascade: every possible Review/Fix iteration is created up
- * front, and the cascade engine releases each one as its predecessor
- * completes. A Fix agent whose Reviewer said CLEAN makes an empty commit
- * (no-op); a Fix agent whose Reviewer said NEEDS_WORK addresses the
- * findings. Either way, the next phase is unblocked.
+ * dependency cascade.
+ *
+ * GC-2026-verdict-states-and-dynamic-cascade: the static graph no longer
+ * pre-creates Fix tasks. The handler creates Fix on demand when a Review
+ * reports NEEDS_WORK (capped by `max_fix_iterations`) or the workflow is
+ * redesigned (NEEDS_REDESIGN spawns a new Implement). NEEDS_CLARIFICATION
+ * pauses the workflow without creating new tasks.
  *
  * Placeholder IDs (`__implement__`, `__review_1__`, …) are used in `blocks` /
  * `blockedBy` so the graph is fully described before any task is created.
@@ -27,8 +29,13 @@ export interface WorkflowGoal {
 
 export interface WorkflowGraphInput {
   goal: WorkflowGoal;
-  /** Number of Fix iterations. With N iterations there are N+1 Review phases.
-   *  Must be >= 1. Default 3 → 7 tasks (Implement + 3 reviews + 2 fixes + Merge). */
+  /**
+   * Number of Fix iterations allowed. Each iteration is one
+   * Review→Fix cycle. With N iterations there are N+1 Review phases
+   * (Review_1..Review_{N+1}). Must be >= 1. Default 3 → 5 tasks in
+   * the static graph (Implement + 3 Reviews + Merge; Fix tasks are
+   * created dynamically on NEEDS_WORK).
+   */
   max_fix_iterations: number;
   /** Goal id stamped into every task's metadata for cross-phase correlation. */
   workflow_run_goal_id: string;
@@ -92,6 +99,9 @@ function reviewDescription(goal: WorkflowGoal, iteration: number, worktreePath: 
   // falls back to this file when the final message fence is missing.
   // GC-2026-prompt-parser-contract-cleanup #4/#5: tell the Reviewer to
   // atomic-rename the file BEFORE the final message.
+  // GC-2026-verdict-states-and-dynamic-cascade: the verdict schema now has
+  // 4 states (CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION)
+  // and `open_question` is required for NEEDS_CLARIFICATION.
   const taskIdPlaceholder = "__review_task_id__";
   return [
     `# Review phase (implement iteration ${iteration})`,
@@ -118,16 +128,25 @@ function reviewDescription(goal: WorkflowGoal, iteration: number, worktreePath: 
     `Run the 5-dimension review (correctness, completeness, scope adherence, anti-goal compliance, documentation).`,
     `Read .pi/orchestrator/review-${goal.id}-${iteration}.md for the durable evidence trail pattern.`,
     ``,
-    `## Output — pinned YAML schema`,
+    `## Output — pinned YAML schema (4-state verdict, GC-2026-verdict-states-and-dynamic-cascade)`,
     `Final message MUST contain a fenced \`\`\`yaml block with:`,
-    `verdict: CLEAN | NEEDS_WORK`,
-    `findings: [...]   # empty list [] for CLEAN; non-empty + NEEDS_WORK otherwise`,
+    `verdict: CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION`,
+    `findings: [...]   # empty list [] for CLEAN; non-empty for NEEDS_WORK / NEEDS_REDESIGN; ignored for NEEDS_CLARIFICATION`,
+    `open_question: "<question>"   # required when verdict: NEEDS_CLARIFICATION`,
     `scope_check: pass | fail | absent   # absent needs scope_check_skipped: <reason>`,
     `anti_goal_check: pass | fail | absent   # absent needs anti_goal_check_skipped: <reason>`,
     `evidence: { typecheck, tests, lint, files_read, commands_run }`,
     ``,
-    `Default to NEEDS_WORK. Only CLEAN if every dimension has explicit evidence and findings list is empty.`,
+    `### When to choose each verdict`,
+    ``,
+    `- **CLEAN**: every dimension passes; findings list is empty. The implementation matches the goal contract.`,
+    `- **NEEDS_WORK**: 1+ findings that a Fix can address with local code changes (missing test, lint, wrong signature, etc.). The findings list is non-empty. The orchestrator spawns Fix → Review loop.`,
+    `- **NEEDS_REDESIGN**: the implementation is fundamentally wrong in a way Fix can't patch (architecture mismatch, wrong abstraction layer, scope/goal interpretation error). The orchestrator spawns a NEW Implement (skipping remaining Fix iterations). Use this when re-running Fix with the same goal would still fail.`,
+    `- **NEEDS_CLARIFICATION**: the goal contract itself is ambiguous and you cannot proceed without user input. Provide \`open_question:\` with a specific, answerable question. The orchestrator pauses the workflow and surfaces the question to the user.`,
+    ``,
+    `Default to NEEDS_WORK. Only emit CLEAN if every dimension has explicit evidence and findings list is empty.`,
     `CLEAN with non-empty findings is malformed → parser downgrades to NEEDS_WORK.`,
+    `Unknown verdict values default to NEEDS_WORK.`,
     ``,
     `## Durable backup (atomic rename BEFORE final message)`,
     `Your task id is \`${taskIdPlaceholder}\` (resolved at dispatch time). Before you emit the final message, write the same YAML block to \`.pi/orchestrator/verdict-${taskIdPlaceholder}.md\` via atomic rename (\`tmpfile -> rename\`). The parser falls back to this file if the message fence is missing.`,
@@ -206,17 +225,32 @@ function mergeDescription(goal: WorkflowGoal, branch: string, worktreePath: stri
 /**
  * Translate a goal contract into the static task graph that drives path B.
  *
- * The graph always has one Implement task at the root and one Merge task at
- * the end. Between them, `max_fix_iterations` Review tasks alternate with
- * `max_fix_iterations - 1` Fix tasks:
+ * GC-2026-verdict-states-and-dynamic-cascade: the graph no longer pre-creates
+ * Fix tasks. Path B's old design interleaved Review + Fix + Review + Fix +
+ * ... + Review + Merge. The static graph now has only:
+ *
+ *   Implement + max_fix_iterations Reviews + Merge  (= max_fix_iterations + 2 tasks)
+ *
+ * Fix tasks are created ON DEMAND by `subscribeWorkflow`'s cascade handler
+ * when a Review completes with verdict=NEEDS_WORK. The handler:
+ *   - creates a Fix task spec (using `fixDescription` + the prior review's
+ *     metadata)
+ *   - adds a `blockedBy` edge from `Review_{i+1}` to the new `Fix_i` so the
+ *     review chain pauses for the Fix
+ *   - emits `workflow:phase-complete` for the Fix so workflow-run.ts can
+ *     increment `last_review_iteration`
+ *
+ * With the static chain (Review_i → Review_{i+1}), a clean Review_i lets
+ * Review_{i+1} proceed immediately without burning a Fix dispatch.
  *
  *   max_fix_iterations=1 →  Implement, Review_1, Merge                 (3 tasks)
- *   max_fix_iterations=2 →  Implement, Review_1, Fix_1, Review_2, Merge (5 tasks)
- *   max_fix_iterations=3 →  Implement, Review_1, Fix_1, Review_2, Fix_2, Review_3, Merge (7 tasks)
+ *   max_fix_iterations=2 →  Implement, Review_1, Review_2, Merge       (4 tasks)
+ *   max_fix_iterations=3 →  Implement, Review_1, Review_2, Review_3, Merge (5 tasks)
  *
- * Every Review task blocks a Fix task (if it isn't the last) AND Merge.
- * Every Fix task blocks the next Review AND Merge. Merge waits for ALL
- * tasks in the graph, so the cascade collects every iteration.
+ * Every Review blocks the next Review AND Merge. The Merge task waits for
+ * ALL Reviews so the workflow_run can collect verdict history. NEEDS_REDESIGN
+ * spawns a new Implement task (handled by workflow-handler); NEEDS_CLARIFICATION
+ * pauses the workflow without creating new tasks.
  */
 export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] {
   const { goal, max_fix_iterations, workflow_run_goal_id } = input;
@@ -237,18 +271,23 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
     metadata: { ...meta, phase: "implement", agentType: "Developer" },
   };
 
-  // Collect the IDs of every non-Merge task so Merge can wait for all of them.
-  // Implement contributes itself; each Review_i / Fix_i contributes its placeholder.
+  // Collect every non-Merge task id so Merge can wait for all of them.
+  // Implement contributes itself; each Review_i contributes its placeholder.
   const mergeBlockedBy: string[] = [PLACEHOLDER_IMPLEMENT];
   const tasks: TaskSpec[] = [implement];
 
   for (let i = 1; i <= max_fix_iterations; i++) {
     const isLastReview = i === max_fix_iterations;
     const reviewId = placeholderReview(i);
-    const reviewBlockedBy = i === 1 ? [PLACEHOLDER_IMPLEMENT] : [placeholderFix(i - 1)];
+    // GC-2026-verdict-states-and-dynamic-cascade: Review_{i+1} is blocked
+    // by Review_i directly. The Fix task (when created on demand) ALSO
+    // blocks Review_{i+1}; the cascade handler adds that edge after
+    // creating Fix_i. So Review_{i+1}.blockedBy at creation = [Review_i];
+    // after a Fix_i dispatch it's [Review_i, Fix_i].
+    const reviewBlockedBy = i === 1 ? [PLACEHOLDER_IMPLEMENT] : [placeholderReview(i - 1)];
     const reviewBlocks = isLastReview
       ? [PLACEHOLDER_MERGE]
-      : [placeholderFix(i), PLACEHOLDER_MERGE];
+      : [placeholderReview(i + 1), PLACEHOLDER_MERGE];
 
     const review: TaskSpec = {
       subject: `Review ${i}: ${goal.title}`,
@@ -260,20 +299,6 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
     };
     tasks.push(review);
     mergeBlockedBy.push(reviewId);
-
-    if (!isLastReview) {
-      const fixId = placeholderFix(i);
-      const fix: TaskSpec = {
-        subject: `Fix ${i}: ${goal.title}`,
-        description: fixDescription(goal, i, worktreePath, branch),
-        agentType: "Developer",
-        blockedBy: [reviewId],
-        blocks: [placeholderReview(i + 1), PLACEHOLDER_MERGE],
-        metadata: { ...meta, phase: "fix", iteration: i, agentType: "Developer" },
-      };
-      tasks.push(fix);
-      mergeBlockedBy.push(fixId);
-    }
   }
 
   const merge: TaskSpec = {
@@ -287,4 +312,86 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
   tasks.push(merge);
 
   return tasks;
+}
+
+/**
+ * GC-2026-verdict-states-and-dynamic-cascade: build a Fix task spec on
+ * demand when a Review completes with verdict=NEEDS_WORK. Called from
+ * `subscribeWorkflow`'s cascade handler after parsing the Review verdict.
+ *
+ * The Fix task is bound to the originating review's real task id
+ * (`blockedBy: [reviewTaskId]`) so the cascade releases it after the
+ * review. The handler also adds `Fix → Review_{i+1}` as a blockedBy edge
+ * on Review_{i+1} so the chain pauses for the fix.
+ *
+ * @param goal           the workflow goal (for scope / anti_goals / branch)
+ * @param iteration      1-based Fix iteration number (1..max_fix_iterations)
+ * @param worktreePath   absolute worktree path (same as Implement uses)
+ * @param branch         git branch name (same as Implement uses)
+ * @param reviewTaskId   the real task id of the Review that requested this Fix
+ * @param nextReviewId   the real task id of Review_{iteration+1} to wire the edge to
+ *                       (undefined when this is the iteration AFTER the last
+ *                        review — see workflow-handler for the cap)
+ * @param workflow_run_goal_id  metadata stamp (matches static-graph tasks)
+ */
+export function buildFixTaskSpec(args: {
+  goal: WorkflowGoal;
+  iteration: number;
+  worktreePath: string;
+  branch: string;
+  reviewTaskId: string;
+  nextReviewId?: string;
+  workflow_run_goal_id: string;
+}): TaskSpec {
+  const { goal, iteration, worktreePath, branch, reviewTaskId, nextReviewId, workflow_run_goal_id } = args;
+  const blocks = nextReviewId ? [nextReviewId, PLACEHOLDER_MERGE] : [PLACEHOLDER_MERGE];
+  return {
+    subject: `Fix ${iteration}: ${goal.title}`,
+    description: fixDescription(goal, iteration, worktreePath, branch),
+    agentType: "Developer",
+    blockedBy: [reviewTaskId],
+    blocks,
+    metadata: {
+      workflow_run_goal_id,
+      phase: "fix",
+      iteration,
+      agentType: "Developer",
+    },
+  };
+}
+
+/**
+ * GC-2026-verdict-states-and-dynamic-cascade: build a fresh Implement task
+ * spec when a Review reports verdict=NEEDS_REDESIGN. The new Implement
+ * gets a synthetic subject (`Implement (redesign N): <title>`) so the
+ * task graph UI shows it as a separate dispatch. blockedBy: [reviewTaskId]
+ * so the cascade waits for the review; blocks: [Review_1 placeholder,
+ * Merge placeholder] so the new chain eventually funnels into Merge.
+ *
+ * The handler is responsible for adding the new implement's real task id
+ * to Review_1's `blockedBy` list (resetting the chain).
+ */
+export function buildRedesignImplementTaskSpec(args: {
+  goal: WorkflowGoal;
+  redesignNumber: number;
+  worktreePath: string;
+  branch: string;
+  reviewTaskId: string;
+  workflow_run_goal_id: string;
+}): TaskSpec {
+  const { goal, redesignNumber, worktreePath, branch, reviewTaskId, workflow_run_goal_id } = args;
+  return {
+    subject: `Implement (redesign ${redesignNumber}): ${goal.title}`,
+    description: implementDescription(goal, worktreePath),
+    agentType: "Developer",
+    blockedBy: [reviewTaskId],
+    blocks: [placeholderReview(1), PLACEHOLDER_MERGE],
+    metadata: {
+      workflow_run_goal_id,
+      phase: "implement",
+      iteration: redesignNumber,
+      agentType: "Developer",
+      isRedesign: true,
+    },
+  };
 }
