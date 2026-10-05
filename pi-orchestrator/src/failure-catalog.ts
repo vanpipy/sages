@@ -827,3 +827,17 @@ export function getFailureCatalog(cwd?: string): FailureCatalog {
 export function resetFailureCatalogCache(): void {
 	cached = undefined;
 }
+
+/**
+ * GC-2026-097 M5: synchronous boot-time validation. Throws
+ * `FailureCatalogInvalid` at session_start (when the extension is
+ * loaded) if the shipped catalog is missing or schema-invalid, so the
+ * user sees "catalog broken" immediately instead of 4 tool calls
+ * later when the first failure lookup happens deep in a workflow.
+ *
+ * Side effect: warms the singleton cache. Subsequent
+ * `getFailureCatalog()` calls are no-ops.
+ */
+export function validateFailureCatalogOnBoot(): void {
+	getFailureCatalog();
+}

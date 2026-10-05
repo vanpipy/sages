@@ -24,6 +24,7 @@ import {
 	familyOfTool,
 	emptyFamilyCounts,
 	familyMixReminderText,
+	installOrchestratorAdvisoryHandlers,
 	RULE_FIX_DIRECTIVES,
 	DEFAULT_ADVISORY_BUDGET_BY_SEVERITY,
 	ADVISORY_MAX_TOKENS,
@@ -442,8 +443,20 @@ describe("orchestrator advisory: family classifier", () => {
 		expect(familyOfTool("subagent_abort")).toBe("subagent_control");
 	});
 
-	it("FAM-6: goal_contract_create -> orchestrator family", () => {
+	it("FAM-6: goal_contract_create + workflow_run -> orchestrator family", () => {
 		expect(familyOfTool("goal_contract_create")).toBe("orchestrator");
+		expect(familyOfTool("workflow_run")).toBe("orchestrator");
+	});
+
+	it("GC-2026-097 M3b: TaskCreate / TaskList / TaskGet / TaskUpdate / TaskOutput / TaskStop / TaskExecute -> tasks family", () => {
+		for (const t of ["TaskCreate", "TaskList", "TaskGet", "TaskUpdate", "TaskOutput", "TaskStop", "TaskExecute"]) {
+			expect(familyOfTool(t)).toBe("tasks");
+		}
+	});
+
+	it("GC-2026-097 M3b: emptyFamilyCounts initializes the tasks family to 0", () => {
+		const counts = emptyFamilyCounts();
+		expect(counts.tasks).toBe(0);
 	});
 
 	it("FAM-7: deleted tools (dag_synthesize/task_dispatch/orchestrator_audit/sages_reminder/todowrite_*) -> 'other' (not orchestrator)", () => {
@@ -466,7 +479,60 @@ describe("orchestrator advisory: family classifier", () => {
 		expect(counts.baseline).toBe(0);
 		expect(counts.subagent_control).toBe(0);
 		expect(counts.orchestrator).toBe(0);
+		expect(counts.tasks).toBe(0);
 		expect(counts.other).toBe(0);
+	});
+});
+
+// GC-2026-097 L4: installOrchestratorAdvisoryHandlers resets all
+// closure-scoped state on each session_start, so a long-lived pi
+// process that hosts multiple sessions doesn't permanently silence
+// nudges after the first session fires them.
+describe("orchestrator advisory: session_start reset (GC-2026-097 L4)", () => {
+	function makeMockPi() {
+		const handlers: Record<string, Array<(event: unknown, ctx?: unknown) => void | Promise<void>>> = {};
+		const appended: Array<{ type: string; data: unknown }> = [];
+		return {
+			pi: {
+				on(event: string, handler: (event: unknown, ctx?: unknown) => void | Promise<void>) {
+					(handlers[event] ??= []).push(handler);
+				},
+				appendEntry(type: string, data: unknown) {
+					appended.push({ type, data });
+				},
+			},
+			fire(event: string, payload: unknown) {
+				for (const h of handlers[event] ?? []) h(payload);
+			},
+			appended,
+		};
+	}
+
+	it("L4-1: nudges that already fired in session A can fire again in session B", () => {
+		const m = makeMockPi();
+		const handlers = installOrchestratorAdvisoryHandlers(m.pi);
+
+		// Session A: trigger the repeat_call_chain nudge (3x same read).
+		for (let i = 0; i < 3; i++) {
+			m.fire("tool_call", { toolName: "read", input: { path: "/tmp/x.ts" }, timestamp: 1000 + i * 100 });
+		}
+		// alreadyAdvisedRules should now contain "repeat_call_chain".
+		expect(handlers.alreadyAdvisedRules.has("repeat_call_chain")).toBe(true);
+		expect(handlers.historyLength()).toBeGreaterThan(0);
+
+		// Session B: a new session_start clears the state.
+		m.fire("session_start", {});
+
+		// alreadyAdvisedRules is reset.
+		expect(handlers.alreadyAdvisedRules.has("repeat_call_chain")).toBe(false);
+		expect(handlers.advisoriesBySeverity.major).toBe(0);
+		expect(handlers.historyLength()).toBe(0);
+
+		// Same nudge should fire again.
+		for (let i = 0; i < 3; i++) {
+			m.fire("tool_call", { toolName: "read", input: { path: "/tmp/x.ts" }, timestamp: 5000 + i * 100 });
+		}
+		expect(handlers.alreadyAdvisedRules.has("repeat_call_chain")).toBe(true);
 	});
 });
 

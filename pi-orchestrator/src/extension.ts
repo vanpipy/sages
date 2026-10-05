@@ -45,6 +45,7 @@ import {
 	installOrchestratorAdvisoryHandlers,
 	type OrchestratorAdvisoryRuntimeDeps,
 } from "./orchestrator-advisory.js";
+import { validateFailureCatalogOnBoot } from "./failure-catalog.js";
 
 /**
  * Tools always exposed to the main agent when the orchestrator
@@ -235,8 +236,13 @@ export function registerBrainstormCommand(pi: ExtensionAPI): void {
 
 /**
  * Default pi extension entrypoint.
+ *
+ * GC-2026-097 M5: synchronously validate the failure-catalog at boot
+ * (NOT on first lookup) so a malformed shipped catalog throws at
+ * session_start instead of deep in a workflow 4 tool calls later.
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
+	validateFailureCatalogOnBoot();
 	registerOrchestratorTools(pi);
 	installSessionHooks(pi);
 }
