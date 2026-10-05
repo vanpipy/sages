@@ -165,10 +165,16 @@ export function subscribeWorkflow(
 		maxRedesigns = payload.max_redesigns ?? 1;
 
 		// 1. Build the static graph (pure function — no store side-effects).
+		// GC-2026-workflow-worktree-namespace: thread `worktreePath` + `branch`
+		// from the planning layer (workflow:start payload) instead of letting
+		// the graph builder hardcode them. The two must agree — the dispatch
+		// brief is the contract each agent reads to find its worktree + branch.
 		const specs = buildStaticWorkflowGraph({
 			goal: payload.goal,
 			max_fix_iterations: payload.max_fix_iterations,
 			workflow_run_goal_id: payload.goal_id,
+			worktreePath: payload.worktree_path,
+			branch: deriveBranch(payload.goal_id),
 		});
 
 		// 2. Create every task. order is preserved (Implement, Review_1, …, Merge).
@@ -261,6 +267,15 @@ export function subscribeWorkflow(
 	// from the next Review (Fix case) or Review_1 (Redesign case) so the
 	// cascade respects the new task.
 
+	// GC-2026-workflow-worktree-namespace: canonical branch derivation. The
+	// branch is goal_id_lowercase + "-implement" (no sages/ prefix). Matches
+	// what workflow-run.ts records in workflow-{goal_id}.yaml (after this
+	// GC drops its stale sages/ prefix) and what the agent creates via
+	// git checkout -b.
+	function deriveBranch(goalId: string): string {
+		return `${goalId.toLowerCase()}-implement`;
+	}
+
 	/**
 	 * NEEDS_WORK dispatch: create Fix_i (where i = fixIterationsUsed + 1).
 	 * The new Fix is blockedBy the originating Review and adds itself to
@@ -298,7 +313,11 @@ export function subscribeWorkflow(
 			goal,
 			iteration: nextIteration,
 			worktreePath: payload_worktree_path,
-			branch: `${goal.id.toLowerCase()}-implement`,
+			// GC-2026-workflow-worktree-namespace: thread the same branch
+			// the static graph used so Fix commits land on the same
+			// branch Review will re-evaluate (previously this was a
+			// local string literal that drifted if the naming changed).
+			branch: deriveBranch(activeGoalId ?? goal.id),
 			reviewTaskId: reviewTask.id,
 			nextReviewId: nextReview?.id,
 			workflow_run_goal_id: activeGoalId ?? "",
@@ -347,7 +366,8 @@ export function subscribeWorkflow(
 			goal,
 			redesignNumber: nextNumber,
 			worktreePath: payload_worktree_path,
-			branch: `${goal.id.toLowerCase()}-implement`,
+			// GC-2026-workflow-worktree-namespace: same thread as Fix above.
+			branch: deriveBranch(activeGoalId ?? goal.id),
 			reviewTaskId: reviewTask.id,
 			workflow_run_goal_id: activeGoalId ?? "",
 		});

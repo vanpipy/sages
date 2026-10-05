@@ -197,6 +197,33 @@ describe("executeWorkflowRun (path B slim)", () => {
 		expect(text).toContain("iterations_used: 0");
 	});
 
+	// GC-2026-workflow-worktree-namespace: the recorded branch must match
+	// what the dispatch brief tells the agent to create (and what the
+	// agent actually checks out via git checkout -b). The previous
+	// implementation recorded `sages/GOAL_ID-implement` while the brief
+	// used `goal_id_lower-implement` -- that disagreement made
+	// workflow-{id}.yaml point at a non-existent ref.
+	it("records branch WITHOUT the stale `sages/` prefix (GC-2026-workflow-worktree-namespace)", async () => {
+		await harness.run({
+			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
+			options: { max_fix_iterations: 1 },
+		});
+
+		const statePath = join(
+			harness.repoCwd,
+			".pi",
+			"orchestrator",
+			`workflow-${GOAL_ID}.yaml`,
+		);
+		const text = readFileSync(statePath, "utf-8");
+		// Branch line must use the canonical format the dispatch brief uses
+		// (no `sages/` prefix).
+		expect(text).toMatch(new RegExp(`branch: ${GOAL_ID.toLowerCase()}-implement\\b`));
+		expect(text).not.toContain(`branch: sages/${GOAL_ID.toLowerCase()}-implement`);
+		// worktree_path remains under .pi/worktree/GOAL_ID/implement/.
+		expect(text).toMatch(new RegExp(`worktree_path: .*\\.pi/worktree/${GOAL_ID}/implement`));
+	});
+
 	it("returns WorkflowRunOutput after all phase categories complete", async () => {
 		const { result, emitted, handlers } = harness.run({
 			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,

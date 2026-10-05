@@ -34,11 +34,17 @@ const baseGoal = {
 	done_definition: "Login is rate-limited after 5 attempts/min",
 };
 
+// GC-2026-workflow-worktree-namespace: worktreePath + branch are now REQUIRED
+// parameters threaded in from the planning layer (workflow-run.ts emits them
+// in workflow:start payload). Removing the hardcoded `process.cwd()` and
+// `${goal.id.toLowerCase()}-implement` defaults is the whole point of this GC.
 function input(max_fix_iterations = 3): WorkflowGraphInput {
 	return {
 		goal: baseGoal,
 		max_fix_iterations,
 		workflow_run_goal_id: "GC-TEST-001",
+		worktreePath: "/repo/.pi/worktree/GC-TEST-001/implement",
+		branch: "gc-test-001-implement",
 	};
 }
 
@@ -155,6 +161,67 @@ describe("buildStaticWorkflowGraph", () => {
 			"__review_1__",
 			"__review_2__",
 		]);
+	});
+});
+
+describe("buildStaticWorkflowGraph — worktreePath + branch threading (GC-2026-workflow-worktree-namespace)", () => {
+	const WT_PATH = "/repo/.pi/worktree/GC-TEST-001/implement";
+	const BRANCH = "gc-test-001-implement";
+
+	test("Implement description embeds the passed worktreePath + branch", () => {
+		const tasks = buildStaticWorkflowGraph({
+			goal: baseGoal,
+			max_fix_iterations: 1,
+			workflow_run_goal_id: "GC-TEST-001",
+			worktreePath: WT_PATH,
+			branch: BRANCH,
+		});
+		const implement = tasks.find(t => t.metadata.phase === "implement");
+		expect(implement).toBeDefined();
+		expect(implement!.description).toContain(WT_PATH);
+		expect(implement!.description).toContain(BRANCH);
+	});
+
+	test("Review description embeds the passed worktreePath + branch", () => {
+		const tasks = buildStaticWorkflowGraph({
+			goal: baseGoal,
+			max_fix_iterations: 2,
+			workflow_run_goal_id: "GC-TEST-001",
+			worktreePath: WT_PATH,
+			branch: BRANCH,
+		});
+		const review = tasks.find(t => t.metadata.phase === "review");
+		expect(review).toBeDefined();
+		expect(review!.description).toContain(WT_PATH);
+		expect(review!.description).toContain(BRANCH);
+	});
+
+	test("Merge description embeds the passed branch (and worktreePath)", () => {
+		const tasks = buildStaticWorkflowGraph({
+			goal: baseGoal,
+			max_fix_iterations: 1,
+			workflow_run_goal_id: "GC-TEST-001",
+			worktreePath: WT_PATH,
+			branch: BRANCH,
+		});
+		const merge = tasks.find(t => t.metadata.phase === "merge");
+		expect(merge).toBeDefined();
+		expect(merge!.description).toContain(BRANCH);
+		expect(merge!.description).toContain(WT_PATH);
+	});
+
+	test("description does NOT embed process.cwd() (no caller-cwd leakage)", () => {
+		const tasks = buildStaticWorkflowGraph({
+			goal: baseGoal,
+			max_fix_iterations: 1,
+			workflow_run_goal_id: "GC-TEST-001",
+			worktreePath: WT_PATH,
+			branch: BRANCH,
+		});
+		for (const t of tasks) {
+			expect(t.description).not.toMatch(/Worktree: .*\.pi\/orchestrator/);
+			expect(t.description).not.toContain(`Branch: sages/${BRANCH}`);
+		}
 	});
 });
 

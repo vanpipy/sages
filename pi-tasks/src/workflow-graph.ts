@@ -39,6 +39,14 @@ export interface WorkflowGraphInput {
   max_fix_iterations: number;
   /** Goal id stamped into every task's metadata for cross-phase correlation. */
   workflow_run_goal_id: string;
+  // GC-2026-workflow-worktree-namespace: worktreePath + branch are now
+  // REQUIRED parameters threaded from the planning layer
+  // (workflow-run.ts emits them in the workflow:start payload). The prior
+  // hardcoded defaults (process.cwd() for worktreePath, a goal_id-derived
+  // branch) drifted out of sync with workflow-run.ts's recorded values and
+  // with what AgentManager actually provisions on disk.
+  worktreePath: string;
+  branch: string;
 }
 
 export interface TaskSpec {
@@ -284,8 +292,11 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
   }
 
   const meta = { workflow_run_goal_id };
-  const branch = `${goal.id.toLowerCase()}-implement`;
-  const worktreePath = process.cwd(); // Best-effort default; handler may override.
+  // GC-2026-workflow-worktree-namespace: branch + worktreePath are
+  // REQUIRED inputs (see WorkflowGraphInput above). The handler now
+  // threads them from the workflow:start payload — no more hardcoded
+  // defaults here.
+  const { branch, worktreePath } = input;
 
   const implement: TaskSpec = {
     subject: `Implement: ${goal.title}`,

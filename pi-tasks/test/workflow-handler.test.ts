@@ -233,6 +233,31 @@ describe("subscribeWorkflow — workflow:start (GC-2026-verdict-states-and-dynam
     expect(spawned.metadata.phase).toBe("implement");
   });
 
+  // GC-2026-workflow-worktree-namespace: dispatch brief for Implement must
+  // embed the payload's worktree_path + the canonical branch derivation.
+  // Previously the brief hardcoded process.cwd() and a goal-id-derived
+  // branch, drifting from what workflow-run.ts recorded.
+  test("Implement dispatch brief embeds the payload worktree_path + canonical branch", async () => {
+    const { events, spawnAgent } = setup();
+
+    const customPath = "/abs/custom-worktree-from-payload";
+    await events.emit(
+      "workflow:start",
+      startPayload({ worktree_path: customPath }),
+    );
+    await flush();
+
+    expect(spawnAgent).toHaveBeenCalledTimes(1);
+    const implementTask = spawnAgent.mock.calls[0][0];
+    expect(implementTask.description).toContain(customPath);
+    // Branch: lowercase goal_id + "-implement" (no `sages/` prefix, no
+    // `/implement/` subpath). This matches workflow-run.ts's recorded
+    // value and what the agent creates via `git checkout -b`.
+    expect(implementTask.description).toContain("Branch: gc-test-wf-implement");
+    expect(implementTask.description).not.toContain("Branch: sages/gc-test-wf-implement");
+    expect(implementTask.description).not.toMatch(/Worktree: .*\.pi\/orchestrator/);
+  });
+
   test("max_fix_iterations=2 produces 4 tasks (Implement + 2 Reviews + Merge)", async () => {
     const { store, events } = setup();
 
