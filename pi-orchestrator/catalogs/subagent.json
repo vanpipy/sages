@@ -1,6 +1,6 @@
 {
-  "_source_hash": "bfd5f53dfbb05d16794ec2037bf55d52d7a19413180564268ffd58a3250c408b",
-  "_generated_at": "2026-10-04T16:22:31.477Z",
+  "_source_hash": "6704abfeece24a67bd09c08bd5ad87f52bd6aef9e6c375a22c7dc055fc5b9219",
+  "_generated_at": "2026-10-05T03:42:27.252Z",
   "_source_files": [
     "../pi-subagents/src/default-agents.ts"
   ],
@@ -14,6 +14,11 @@
       "id": "Explore",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": false
+    },
+    {
+      "id": "Fix",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
     },
     {
       "id": "Merger",

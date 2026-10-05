@@ -171,7 +171,7 @@ describe("buildFixTaskSpec (GC-2026-verdict-states-and-dynamic-cascade)", () => 
 		});
 
 		expect(spec.subject).toBe("Fix 1: Add login rate limit");
-		expect(spec.agentType).toBe("Developer");
+		expect(spec.agentType).toBe("Fix");
 		expect(spec.metadata.phase).toBe("fix");
 		expect(spec.metadata.iteration).toBe(1);
 		// Fix is blockedBy the requesting review

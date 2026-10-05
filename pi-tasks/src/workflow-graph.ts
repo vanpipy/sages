@@ -348,14 +348,18 @@ export function buildFixTaskSpec(args: {
   return {
     subject: `Fix ${iteration}: ${goal.title}`,
     description: fixDescription(goal, iteration, worktreePath, branch),
-    agentType: "Developer",
+    // GC-2026-prompt-parser-contract-cleanup + GC-2026-verdict-states-and-dynamic-cascade
+    // follow-up: dispatch with the lean Fix agent type so DEVELOPER_FIX_PROMPT
+    // is selected instead of the full DEVELOPER_PROMPT. The dispatch handler
+    // looks up `Fix` in DEFAULT_AGENTS.
+    agentType: "Fix",
     blockedBy: [reviewTaskId],
     blocks,
     metadata: {
       workflow_run_goal_id,
       phase: "fix",
       iteration,
-      agentType: "Developer",
+      agentType: "Fix",
     },
   };
 }

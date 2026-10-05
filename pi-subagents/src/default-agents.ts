@@ -6,6 +6,7 @@
 
 import { REVIEWER_PROMPT } from "./agent-prompts/reviewer.js";
 import { DEVELOPER_PROMPT } from "./agent-prompts/developer.js";
+import { DEVELOPER_FIX_PROMPT } from "./agent-prompts/_fix.js";
 import { EXPLORE_PROMPT } from "./agent-prompts/explore.js";
 import { MERGER_PROMPT } from "./agent-prompts/merger.js";
 import { PLAN_PROMPT } from "./agent-prompts/plan.js";
@@ -245,6 +246,47 @@ const PLAN_AGENT: AgentConfig = {
 	maxConcurrent: 2,
 };
 
+/**
+ * GC-2026-prompt-parser-contract-cleanup + GC-2026-verdict-states-and-dynamic-cascade follow-up:
+ * the canonical `fix` agent uses the lean DEVELOPER_FIX_PROMPT (110 lines
+ * covering commit discipline + boundary discipline + final-verdict +
+ * fix-specific process). Path B's Fix cascade dispatches this agent type
+ * (see `pi-tasks/src/workflow-handler.ts:dispatchFixForReview` and
+ * `pi-tasks/src/workflow-graph.ts:buildFixTaskSpec`).
+ *
+ * Same tool set as Developer (same code-write capabilities needed for
+ * addressing findings). Same inheritance / model policy — inherits parent
+ * session model + budget. The prompt override is the only delta vs
+ * Developer.
+ */
+const FIX_AGENT: AgentConfig = {
+	name: "Fix",
+	displayName: "Fix",
+	description:
+		"Lean fix-only Developer prompt for path B's Fix cascade. Reads the previous Review's verdict metadata (findings + open_question + scope/anti_goal checks), addresses each finding by severity, or emits an empty commit on CLEAN. No TDD or design ceremony — the previous Review already verified the contract; this task only patches.",
+	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
+	// Same extensions + exclusions as Developer. The cascade handler
+	// doesn't pass `aft` explicitly because pi-subagents's loader
+	// resolves canonical names at spawn time; keeping the same list
+	// as Developer is the conservative choice.
+	extensions: ["aft-pi", "pi-mcp-adapter"],
+	excludeExtensions: ["pi-subagents"],
+	skills: false,
+	systemPrompt: DEVELOPER_FIX_PROMPT,
+	promptMode: "replace",
+	isDefault: true,
+	// Fix runs RED → GREEN on findings. 100 turns is enough for typical
+	// fix scope (the previous Review already verified the contract).
+	maxTurns: 100,
+	// Per-type concurrency cap: 2 — same as Developer (Fix tasks run in
+	// parallel within a single workflow's fix-loop).
+	maxConcurrent: 2,
+	// Fix is dispatched with the previous Review's verdict metadata in
+	// its brief — no need to fork the parent's chat history.
+	inheritContext: false,
+	runInBackground: true,
+};
+
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	[
 		"Explore",
@@ -283,4 +325,5 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	["Developer", DEVELOPER_AGENT],
 	["Reviewer", REVIEWER_AGENT],
 	["Merger", MERGER_AGENT],
+	["Fix", FIX_AGENT],
 ]);
