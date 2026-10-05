@@ -601,13 +601,21 @@ export default function (pi: ExtensionAPI) {
 	// Background completion: route through group join or send individual nudge
 	const manager = new AgentManager(
 		(record) => {
-			// Emit lifecycle event based on terminal status
+			// Emit lifecycle event based on terminal status.
+			// GC-2026-subagent-interruption-minimal: a parent-interrupted agent
+			// (`status === "parent_aborted"`) gets its own event channel so
+			// the orchestrator / main agent can decide retry vs escalate
+			// separately from `subagents:failed` (which is for genuine
+			// errors and user-initiated stops).
+			const isParentAborted = record.status === "parent_aborted";
 			const isError =
 				record.status === "error" ||
 				record.status === "stopped" ||
 				record.status === "aborted";
 			const eventData = buildEventData(record);
-			if (isError) {
+			if (isParentAborted) {
+				pi.events.emit("subagents:parent_aborted", eventData);
+			} else if (isError) {
 				pi.events.emit("subagents:failed", eventData);
 			} else {
 				pi.events.emit("subagents:completed", eventData);

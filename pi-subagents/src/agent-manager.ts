@@ -180,6 +180,24 @@ interface SpawnOptions {
 	network_allowed?: boolean;
 }
 
+/**
+ * GC-2026-subagent-interruption-minimal: normalize an abort reason into
+ * a string suitable for `record.error`. Errors → message; strings →
+ * verbatim; anything else → String(reason). Returns `undefined` for
+ * `undefined` reasons so callers that don't supply a reason don't
+ * accidentally clobber an earlier `record.error`.
+ *
+ * Lives at module scope (not as a class method) because `record.error`
+ * is set from multiple paths — `.then()`, `.catch()`, and `abort()` —
+ * each wanting the same normalization.
+ */
+function formatAbortReason(reason: unknown): string | undefined {
+	if (reason === undefined) return undefined;
+	if (reason instanceof Error) return reason.message;
+	if (typeof reason === "string") return reason;
+	return String(reason);
+}
+
 export class AgentManager {
 	private agents = new Map<string, AgentRecord>();
 	private cleanupInterval: ReturnType<typeof setInterval>;
@@ -587,7 +605,14 @@ export class AgentManager {
 			// record.error capture surfaces the caller's abort cause
 			// (e.g. "agent duration exceeded 20min") instead of a generic
 			// AbortError string.
-			const onParentAbort = () => this.abort(id, options.signal!.reason);
+			//
+			// GC-2026-subagent-interruption-minimal: distinguish parent
+			// signal abort from user-initiated stop. `stopSubagent` calls
+			// `abort()` WITHOUT a reason → status="stopped". `onParentAbort`
+			// fires with the parent signal's reason → status="parent_aborted"
+			// so the host's `subagents:parent_aborted` event can surface a
+			// different UX (orchestrator can decide to retry vs escalate).
+			const onParentAbort = () => this.abort(id, options.signal!.reason, "parent");
 			options.signal.addEventListener("abort", onParentAbort, { once: true });
 			detachParentSignal = () =>
 				options.signal!.removeEventListener("abort", onParentAbort);
@@ -648,23 +673,39 @@ export class AgentManager {
 			},
 		})
 			.then(({ responseText, session, aborted, steered, failure }) => {
-				// Don't overwrite status if externally stopped via abort()
-				if (record.status !== "stopped") {
-					// Precedence: a hard abort keeps "aborted"; then a failed final turn
-					// (provider error that pi resolved instead of rejecting, #144) is an
-					// honest "error" — not a completion with an empty or stale result.
-					if (aborted) {
+			// Don't overwrite status if externally stopped via abort()
+			if (record.status !== "stopped" && record.status !== "parent_aborted") {
+				// Precedence: a hard abort keeps the status set by abort() (parent_aborted
+				// when the abort signal had a source="parent"/"internal"; aborted for
+				// other cases); then a failed final turn (provider error that pi
+				// resolved instead of rejecting, #144) is an honest "error" — not a
+				// completion with an empty or stale result.
+				if (aborted) {
+					// GC-2026-subagent-interruption-minimal: default aborted to
+					// "aborted" unless abort() already classified the source as parent.
+					if (record.status !== "parent_aborted") {
 						record.status = "aborted";
-					} else if (failure) {
-						record.status = "error";
-						record.error = failure;
-					} else {
-						record.status = steered ? "steered" : "completed";
 					}
+					// GC-2026-subagent-interruption-minimal: write the abort reason
+					// into record.error so the host's `subagents:parent_aborted` (or
+					// `subagents:failed`) payload carries why the agent ended. The
+					// abort controller's reason may be an Error (AbortError message),
+					// a string, or undefined — formatAbortReason normalizes.
+					const reason = record.abortController?.signal.reason;
+					const formatted = formatAbortReason(reason);
+					if (formatted !== undefined && record.error === undefined) {
+						record.error = formatted;
+					}
+				} else if (failure) {
+					record.status = "error";
+					record.error = failure;
+				} else {
+					record.status = steered ? "steered" : "completed";
 				}
-				record.result = responseText;
-				record.session = session;
-				record.completedAt ??= Date.now();
+			}
+			record.result = responseText;
+			record.session = session;
+			record.completedAt ??= Date.now();
 
 				detach();
 
@@ -740,12 +781,21 @@ export class AgentManager {
 				return responseText;
 			})
 			.catch((err) => {
-				// Don't overwrite status if externally stopped via abort()
-				if (record.status !== "stopped") {
-					record.status = "error";
-				}
-				record.error = err instanceof Error ? err.message : String(err);
-				record.completedAt ??= Date.now();
+			// Don't overwrite status if externally stopped via abort()
+			if (
+				record.status !== "stopped" &&
+				record.status !== "parent_aborted"
+			) {
+				record.status = "error";
+			}
+			// GC-2026-subagent-interruption-minimal: share the format helper
+			// with .then() so the catch path normalizes identically. Don't
+			// clobber an existing record.error (e.g. abort reason that
+			// already set it).
+			if (record.error === undefined) {
+				record.error = formatAbortReason(err);
+			}
+			record.completedAt ??= Date.now();
 
 				detach();
 
@@ -953,14 +1003,19 @@ export class AgentManager {
 		return [...this.agents.values()].sort((a, b) => b.startedAt - a.startedAt);
 	}
 
-	abort(id: string, reason?: unknown): boolean {
+	abort(id: string, reason?: unknown, source?: "user" | "parent" | "internal"): boolean {
 		const record = this.agents.get(id);
 		if (!record) return false;
 
 		// Remove from queue if queued
 		if (record.status === "queued") {
 			this.queue = this.queue.filter((q) => q.id !== id);
-			record.status = "stopped";
+			// GC-2026-subagent-interruption-minimal: queued abort honors the
+			// `source` discriminator so the host can surface different events.
+			record.status = source === "parent" ? "parent_aborted" : "stopped";
+			// GC-2026-subagent-interruption-minimal: persist abort reason so
+			// the host's `subagents:parent_aborted` payload carries context.
+			record.error = formatAbortReason(reason);
 			this.noteFinishOnce(record);
 			record.completedAt = Date.now();
 			return true;
@@ -973,7 +1028,21 @@ export class AgentManager {
 		// undefined when the caller didn't supply one (preserves prior
 		// behavior — runAgent sees a bare AbortError with no reason).
 		record.abortController?.abort(reason);
-		record.status = "stopped";
+		// GC-2026-subagent-interruption-minimal: the `source` argument
+		// discriminates user-initiated stop from external interruption.
+		// - "parent": the parent signal fired (session ended, workflow
+		//   pause, etc.) → status="parent_aborted" so the host can fire
+		//   `subagents:parent_aborted` and the orchestrator can decide
+		//   retry vs escalate.
+		// - undefined / "user": user-initiated stop → status="stopped".
+		// - "internal": deadline timer fired within RunController →
+		//   status="parent_aborted" too (it's an external interrupt from
+		//   the subagent's perspective even though it's self-fired).
+		record.status =
+			source === "parent" || source === "internal" ? "parent_aborted" : "stopped";
+		// GC-2026-subagent-interruption-minimal: persist abort reason so
+		// the host's `subagents:parent_aborted` payload carries context.
+		record.error = formatAbortReason(reason);
 		this.noteFinishOnce(record);
 		record.completedAt = Date.now();
 		return true;
