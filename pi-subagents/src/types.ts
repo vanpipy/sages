@@ -106,7 +106,6 @@ export interface AgentConfig {
 	skills: true | string[] | false;
 	model?: string;
 	thinking?: ThinkingLevel;
-	maxTurns?: number;
 	/** Persist this subagent as a normal pi session instead of keeping it in memory only. */
 	persistSession?: boolean;
 	/** Write the subagent's .output transcript. Defaults to true; false suppresses only that transcript. */
@@ -276,7 +275,6 @@ export interface AgentInvocation {
 	/** Short display name when the subagent's model differs from the parent's; absent when inherited. */
 	modelName?: string;
 	thinking?: ThinkingLevel;
-	maxTurns?: number;
 	isolated?: boolean;
 	inheritContext?: boolean;
 	runInBackground?: boolean;
@@ -290,7 +288,6 @@ export interface NotificationDetails {
 	status: string;
 	toolUses: number;
 	turnCount: number;
-	maxTurns?: number;
 	totalTokens: number;
 	durationMs: number;
 	outputFile?: string;

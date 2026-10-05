@@ -33,12 +33,7 @@ import { Type } from "typebox";
 import { AgentManager } from "./agent-manager.js";
 import {
 	getAgentConversation,
-	getDefaultMaxTurns,
-	getGraceTurns,
-	normalizeMaxTurns,
 	SUBAGENT_TOOL_NAMES,
-	setDefaultMaxTurns,
-	setGraceTurns,
 	steerAgent,
 } from "./agent-runner.js";
 import {
@@ -163,12 +158,11 @@ function formatLifetimeTokens(o: { lifetimeUsage: LifetimeUsage }): string {
  * Create an AgentActivity state and spawn callbacks for tracking tool usage.
  * Used by both foreground and background paths to avoid duplication.
  */
-function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
+function createActivityTracker(onStreamUpdate?: () => void) {
 	const state: AgentActivity = {
 		activeTools: new Map(),
 		toolUses: 0,
 		turnCount: 1,
-		maxTurns,
 		responseText: "",
 		session: undefined,
 		lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
@@ -334,7 +328,6 @@ function buildDetails(
 		toolUses: record.toolUses,
 		tokens: formatLifetimeTokens(record),
 		turnCount: activity?.turnCount,
-		maxTurns: activity?.maxTurns,
 		durationMs: (record.completedAt ?? Date.now()) - record.startedAt,
 		status: record.status as AgentDetails["status"],
 		agentId: record.id,
@@ -362,7 +355,6 @@ function buildNotificationDetails(
 		status: record.status,
 		toolUses: record.toolUses,
 		turnCount: activity?.turnCount ?? 0,
-		maxTurns: activity?.maxTurns,
 		totalTokens,
 		durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
 		outputFile: record.outputFile,
@@ -406,9 +398,9 @@ export default function (pi: ExtensionAPI) {
 
 				// Line 2: stats
 				const parts: string[] = [];
-				if (d.turnCount > 0) parts.push(formatTurns(d.turnCount, d.maxTurns));
-				if (d.toolUses > 0)
-					parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
+			if (d.turnCount > 0) parts.push(formatTurns(d.turnCount));
+			if (d.toolUses > 0)
+				parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
 				if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));
 				if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
 				if (parts.length) {
@@ -1000,10 +992,8 @@ export default function (pi: ExtensionAPI) {
 	applyAndEmitLoaded(
 		{
 			setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
-			setMaxConcurrentByType: (map) => manager.setMaxConcurrentByType(map),
-			setDefaultMaxTurns,
-			setGraceTurns,
-			setDefaultJoinMode,
+		setMaxConcurrentByType: (map) => manager.setMaxConcurrentByType(map),
+		setDefaultJoinMode,
 			setSchedulingEnabled,
 			setScopeModels: setScopeModelsEnabled,
 			setDisableDefaultAgents: setDisableDefaultAgents,
@@ -1191,18 +1181,11 @@ Terse command-style prompts produce shallow, generic work.
 						description: `Thinking level: ${THINKING_LEVELS.join(", ")}. Overrides agent default.`,
 					}),
 				),
-				max_turns: Type.Optional(
-					Type.Number({
-						description:
-							"Maximum number of agentic turns before stopping. Omit for unlimited (default).",
-						minimum: 1,
-					}),
-				),
 				max_duration_minutes: Type.Optional(
 					Type.Number({
 						description:
-							"GC-2026-037: wall-clock deadline in minutes (0.5-120). Overrides the per-agent-type default. Aborts with reason 'agent duration exceeded' if reached. Default: developer/reviewer 20min, Explore/Plan 5min. Caller can still pass 0 to fall back to the per-type default.",
-						minimum: 0.5,
+							"GC-2026-037 + GC-2026-subagent-time-only-limits: wall-clock deadline in minutes (30-120). Overrides the per-agent-type default (30 min for all built-in types). Aborts with reason 'agent duration exceeded' if reached. Caller can still pass 0 to fall back to the per-type default, or pass a value outside [30, 120] to have it clamped to the envelope.",
+						minimum: 0,
 						maximum: 120,
 					}),
 				),
@@ -1349,7 +1332,7 @@ Terse command-style prompts produce shallow, generic work.
 					if (d.modelName) parts.push(d.modelName);
 					if (d.tags) parts.push(...d.tags);
 					if (d.turnCount != null && d.turnCount > 0) {
-						parts.push(formatTurns(d.turnCount, d.maxTurns));
+						parts.push(formatTurns(d.turnCount));
 					}
 					if (d.toolUses > 0)
 						parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
@@ -1426,7 +1409,11 @@ Terse command-style prompts produce shallow, generic work.
 					return new Text(line, 0, 0);
 				}
 
-				// ---- Error / Aborted (hard max_turns) ----
+				// ---- Error / Aborted (deadline or explicit abort) ----
+				// GC-2026-subagent-time-only-limits: the "max turns exceeded"
+				// message is replaced with a generic "Aborted" — the only
+				// lifecycle limit on a subagent is now the wall-clock
+				// deadline, which carries its own reason string.
 				const s = stats(details);
 				let line = theme.fg("error", "✗") + (s ? " " + s : "");
 
@@ -1436,7 +1423,7 @@ Terse command-style prompts produce shallow, generic work.
 						theme.fg("error", `  ⎿  Error: ${details.error ?? "unknown"}`);
 				} else {
 					line +=
-						"\n" + theme.fg("warning", "  ⎿  Aborted (max turns exceeded)");
+						"\n" + theme.fg("warning", "  ⎿  Aborted");
 				}
 
 				return new Text(line, 0, 0);
@@ -1673,15 +1660,12 @@ Terse command-style prompts produce shallow, generic work.
 								.replace(/^Claude\s+/i, "")
 								.toLowerCase()
 						: undefined;
-				const effectiveMaxTurns = normalizeMaxTurns(
-					resolvedConfig.maxTurns ?? getDefaultMaxTurns(),
-				);
+				// GC-2026-subagent-time-only-limits: maxTurns removed. The wall-clock
+				// deadline is the only lifecycle limit; the deadline lives in
+				// resolvedConfig.deadlineMs (clamped to [30, 120] min envelope).
 				const agentInvocation: AgentInvocation = {
 					modelName,
 					thinking,
-					// Explicit value only — the default fallback would just add noise.
-					// Normalize so `0` (unlimited) doesn't surface as a misleading "max turns: 0".
-					maxTurns: normalizeMaxTurns(resolvedConfig.maxTurns),
 					isolated,
 					inheritContext,
 					runInBackground,
@@ -1744,7 +1728,6 @@ Terse command-style prompts produce shallow, generic work.
 							prompt: params.prompt as string,
 							model: params.model as string | undefined,
 							thinking: thinking,
-							max_turns: effectiveMaxTurns,
 							isolated: isolated,
 							isolation: isolation,
 						});
@@ -1800,7 +1783,7 @@ Terse command-style prompts produce shallow, generic work.
 				// Background execution
 				if (runInBackground) {
 					const { state: bgState, callbacks: bgCallbacks } =
-						createActivityTracker(effectiveMaxTurns);
+						createActivityTracker();
 
 					// Wrap onSessionCreated to wire output file streaming.
 					// The callback lazily reads record.outputFile (set right after spawn)
@@ -1824,7 +1807,6 @@ Terse command-style prompts produce shallow, generic work.
 						id = manager.spawn(pi, ctx, subagentType, params.prompt, {
 							description: params.description,
 							model,
-							maxTurns: effectiveMaxTurns,
 							isolated,
 							inheritContext,
 							thinkingLevel: thinking,
@@ -1912,7 +1894,6 @@ Terse command-style prompts produce shallow, generic work.
 						toolUses: fgState.toolUses,
 						tokens: formatLifetimeTokens(fgState),
 						turnCount: fgState.turnCount,
-						maxTurns: fgState.maxTurns,
 						durationMs: Date.now() - startedAt,
 						status: "running",
 						activity: describeActivity(
@@ -1930,7 +1911,7 @@ Terse command-style prompts produce shallow, generic work.
 				};
 
 				const { state: fgState, callbacks: fgCallbacks } =
-					createActivityTracker(effectiveMaxTurns, streamUpdate);
+						createActivityTracker(streamUpdate);
 
 				// Wire session creation: register in widget + stream to output file.
 				// The output file path is set synchronously after spawn (below),
@@ -1980,7 +1961,6 @@ Terse command-style prompts produce shallow, generic work.
 						{
 							description: params.description,
 							model,
-							maxTurns: effectiveMaxTurns,
 							isolated,
 							inheritContext,
 							thinkingLevel: thinking,
@@ -2586,7 +2566,6 @@ Terse command-style prompts produce shallow, generic work.
 		fmFields.push(`tools: ${cfg.builtinToolNames?.join(", ") || "all"}`);
 		if (cfg.model) fmFields.push(`model: ${cfg.model}`);
 		if (cfg.thinking) fmFields.push(`thinking: ${cfg.thinking}`);
-		if (cfg.maxTurns) fmFields.push(`max_turns: ${cfg.maxTurns}`);
 		fmFields.push(`prompt_mode: ${cfg.promptMode}`);
 		if (cfg.extensions === false) fmFields.push("extensions: false");
 		else if (Array.isArray(cfg.extensions))
@@ -2733,7 +2712,6 @@ description: <one-line description shown in UI>
 tools: <comma-separated built-in tools: read, bash, edit, write, grep, find, ls. Use "none" for no tools. Omit for all tools>
 model: <optional model as "provider/modelId", e.g. "anthropic/claude-haiku-4-5". Omit to inherit parent model>
 thinking: <optional thinking level: ${THINKING_LEVELS.join(", ")}. Omit to inherit>
-max_turns: <optional max agentic turns. 0 or omit for unlimited (default)>
 prompt_mode: <"replace" (body IS the full system prompt) or "append" (body is appended to default prompt). Default: replace>
 extensions: <true (inherit all MCP/extension tools), false (none), or comma-separated names. Default: true>
 skills: <true (inherit all), false (none), or comma-separated skill names to preload into prompt. Default: true>
@@ -2777,7 +2755,6 @@ Write the file using the write tool. Only write the file, nothing else.`;
 					task_id: name,
 					mode: "create",
 				},
-				maxTurns: 5,
 			},
 		);
 
@@ -2903,10 +2880,6 @@ ${systemPrompt}
 	function snapshotSettings(): SubagentsSettings {
 		return {
 			maxConcurrent: manager.getMaxConcurrent(),
-			// 0 = unlimited — per SubagentsSettings.defaultMaxTurns docstring and
-			// normalizeMaxTurns() in agent-runner.ts (which maps 0 → undefined).
-			defaultMaxTurns: getDefaultMaxTurns() ?? 0,
-			graceTurns: getGraceTurns(),
 			defaultJoinMode: getDefaultJoinMode(),
 			schedulingEnabled: isSchedulingEnabled(),
 			scopeModels: isScopeModelsEnabled(),
@@ -2920,15 +2893,11 @@ ${systemPrompt}
 
 	const NUMERIC_IDS = new Set([
 		"maxConcurrent",
-		"defaultMaxTurns",
-		"graceTurns",
 	]);
 
 	async function showSettings(ctx: ExtensionCommandContext) {
 		function buildItems(): SettingItem[] {
 			const mc = manager.getMaxConcurrent();
-			const dmt = getDefaultMaxTurns() ?? 0;
-			const gt = getGraceTurns();
 
 			return [
 				{
@@ -2937,21 +2906,6 @@ ${systemPrompt}
 					description: "Max concurrent background agents (Enter to type)",
 					currentValue: String(mc),
 					values: [String(mc)],
-				},
-				{
-					id: "defaultMaxTurns",
-					label: "Default max turns",
-					description:
-						"Default max turns before wrap-up (0 = unlimited, Enter to type)",
-					currentValue: String(dmt),
-					values: [String(dmt)],
-				},
-				{
-					id: "graceTurns",
-					label: "Grace turns",
-					description: "Grace turns after wrap-up steer (Enter to type)",
-					currentValue: String(gt),
-					values: [String(gt)],
 				},
 				{
 					id: "joinMode",
@@ -3025,21 +2979,6 @@ ${systemPrompt}
 				if (n >= 1) {
 					manager.setMaxConcurrent(n);
 					notifyApplied(ctx, `Max concurrency set to ${n}`);
-				}
-			} else if (id === "defaultMaxTurns") {
-				const n = parseInt(value, 10);
-				if (n === 0) {
-					setDefaultMaxTurns(undefined);
-					notifyApplied(ctx, "Default max turns set to unlimited");
-				} else if (n >= 1) {
-					setDefaultMaxTurns(n);
-					notifyApplied(ctx, `Default max turns set to ${n}`);
-				}
-			} else if (id === "graceTurns") {
-				const n = parseInt(value, 10);
-				if (n >= 1) {
-					setGraceTurns(n);
-					notifyApplied(ctx, `Grace turns set to ${n}`);
 				}
 			} else if (id === "joinMode") {
 				setDefaultJoinMode(value as JoinMode);
@@ -3147,15 +3086,11 @@ ${systemPrompt}
 			const current =
 				result === "maxConcurrent"
 					? String(manager.getMaxConcurrent())
-					: result === "defaultMaxTurns"
-						? String(getDefaultMaxTurns() ?? 0)
-						: String(getGraceTurns());
+					: "(removed: GC-2026-subagent-time-only-limits)";
 
 			const label =
 				result === "maxConcurrent"
 					? "Max concurrency (1+)"
-					: result === "defaultMaxTurns"
-						? "Default max turns (0 = unlimited)"
 						: "Grace turns (1+)";
 
 			// Loop until user enters a valid integer or cancels (Esc / null).

@@ -174,29 +174,13 @@ export const SUBAGENT_TOOL_NAMES = {
 const EXCLUDED_TOOL_NAMES: string[] = Object.values(SUBAGENT_TOOL_NAMES);
 
 /**
- * GC-2026-094 P3: soft-limit steer message.
- *
- * Fired once when the agent first crosses `maxTurns`. Tells the agent
- * that the hard abort fires in `graceTurns` more turns, and gives a
- * specific wrap-up recipe:
- *
- *   1. Commit pending work to the worktree branch (durable).
- *   2. Write the YAML verdict block to
- *      `.pi/orchestrator/verdict-{task_id}.md` — the file-fallback
- *      path so the orchestrator can still parse the verdict even if
- *      the loop aborts before the final assistant message lands.
- *   3. Emit the YAML block in the final message.
- *
- * Explicitly forbids starting new tests / refactors / exploration after
- * this nudge. Exported so the boundary-survival test can pin the literal
- * `.pi/orchestrator/verdict-{task_id}.md` token.
+ * GC-2026-subagent-time-only-limits: SOFT_LIMIT_STEER_MESSAGE removed
+ * along with the maxTurns enforcement it gated on. The wall-clock
+ * deadline (30–120 min envelope) is the only lifecycle limit on a
+ * subagent run. Agents that want a wrap-up reminder should use the
+ * `verdict-{task_id}.md` file-fallback pattern explicitly in their
+ * prompt rather than relying on a runtime nudge.
  */
-export const SOFT_LIMIT_STEER_MESSAGE =
-	"You have reached your soft turn limit. The hard abort fires in `graceTurns` more turns. " +
-	"Wrap up NOW by: (1) committing any pending work to your worktree branch, " +
-	"(2) writing your YAML verdict block to `.pi/orchestrator/verdict-{task_id}.md` " +
-	"(the file-fallback path so the orchestrator can still parse it if the loop aborts), " +
-	"(3) emitting the YAML block in your final message. " +
 	"Do NOT start new tests, new refactors, or new exploration after this nudge.";
 
 /**
@@ -361,36 +345,6 @@ export function parseExtSelectors(entries: string[]): {
 	return { extNames, narrowing };
 }
 
-/** Default max turns. undefined = unlimited (no turn limit). */
-let defaultMaxTurns: number | undefined;
-
-/** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
-export function normalizeMaxTurns(n: number | undefined): number | undefined {
-	if (n == null || n === 0) return undefined;
-	return Math.max(1, n);
-}
-
-/** Get the default max turns value. undefined = unlimited. */
-export function getDefaultMaxTurns(): number | undefined {
-	return defaultMaxTurns;
-}
-/** Set the default max turns value. undefined or 0 = unlimited, otherwise minimum 1. */
-export function setDefaultMaxTurns(n: number | undefined): void {
-	defaultMaxTurns = normalizeMaxTurns(n);
-}
-
-/** Additional turns allowed after the soft limit steer message. */
-let graceTurns = 5;
-
-/** Get the grace turns value. */
-export function getGraceTurns(): number {
-	return graceTurns;
-}
-/** Set the grace turns value (minimum 1). */
-export function setGraceTurns(n: number): void {
-	graceTurns = Math.max(1, n);
-}
-
 /**
  * Try to find the right model for an agent type.
  *
@@ -470,7 +424,6 @@ export interface RunOptions {
 	/** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
 	agentId?: string;
 	model?: Model<any>;
-	maxTurns?: number;
 	signal?: AbortSignal;
 	/**
 	 * GC-2026-043: when the caller passes a `RunController`, the runner
@@ -1103,12 +1056,10 @@ export async function runAgent(
 
 	options.onSessionCreated?.(session);
 
-	// Track turns for graceful max_turns enforcement
+	// Track turn count for observability (no enforcement — the wall-clock
+	// deadline in RunController is the only lifecycle limit on a subagent
+	// run; GC-2026-subagent-time-only-limits removed max_turns / graceTurns).
 	let turnCount = 0;
-	const maxTurns = normalizeMaxTurns(
-		options.maxTurns ?? agentConfig?.maxTurns ?? defaultMaxTurns,
-	);
-	let softLimitReached = false;
 	let aborted = false;
 
 	// GC-2026-022: per-run budget tracker. The four built-in types each
@@ -1164,15 +1115,6 @@ export async function runAgent(
 					session.abort();
 				} else {
 					throw err;
-				}
-			}
-			if (maxTurns != null) {
-				if (!softLimitReached && turnCount >= maxTurns) {
-					softLimitReached = true;
-					session.steer(SOFT_LIMIT_STEER_MESSAGE);
-				} else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
-					aborted = true;
-					session.abort();
 				}
 			}
 		}
@@ -1335,14 +1277,14 @@ export async function runAgent(
 	// result, which is gone as soon as the orchestrator's context is compacted.
 	// Clean runs write nothing — `diagnosticForRunResult` returns null for those.
 	emitRunDiagnostic(
-		{ aborted, steered: softLimitReached, failure },
+		{ aborted, steered: false, failure },
 		type,
 		options,
 		effectiveCwd,
 		options.pi,
 	);
 
-	return { responseText, session, aborted, steered: softLimitReached, failure };
+	return { responseText, session, aborted, steered: false, failure };
 }
 
 /**

@@ -110,79 +110,6 @@ function makeRunController(
 // SC1: BudgetTracker accepts runController — maxTurns from rc.config
 // =============================================================================
 
-describe("budget + RunController: maxTurns from runController.config (SC1)", () => {
-	it("RED→GREEN: ticks past legacy Budget.maxTurns do not throw when runController is set", () => {
-		// Legacy budget has maxTurns: 999 (effectively unlimited).
-		const legacyBudget: Budget = {
-			maxTurns: 999,
-			maxMs: 999_999_999,
-			snapshotEveryTurns: 0,
-			partialTriggerPct: 0.8,
-		};
-		// runController caps at 4 turns (implementation throws at turn N when
-		// maxTurns=N — BudgetTracker.evaluate: pctTurns=turns/maxTurns >= 1
-		// → throws on the Nth tick. Tests assert "3 OK ticks + 4th-throws").
-		const rc = makeRunController({ max_turns: 4 });
-		const tracker = new BudgetTracker(legacyBudget, undefined, {
-			runController: rc,
-		});
-		// Ticks 1, 2, 3 — all within rc's limit. Should not throw.
-		tracker.tick();
-		tracker.tick();
-		tracker.tick();
-		// Tick 4 — exceeds rc.config.maxTurns=4. Throws BudgetExceededError
-		// based on rc, NOT on legacy budget (999).
-		expect(() => tracker.tick()).toThrow();
-	});
-
-	it("BudgetExceededError reflects rc.config.maxTurns as the threshold", () => {
-		const legacyBudget: Budget = {
-			maxTurns: 999,
-			maxMs: 999_999_999,
-			snapshotEveryTurns: 0,
-			partialTriggerPct: 0.8,
-		};
-		// max_turns:4 → throws on the 4th tick (turns/4 >= 1 when turns=4).
-		const rc = makeRunController({ max_turns: 4 });
-		const tracker = new BudgetTracker(legacyBudget, undefined, {
-			runController: rc,
-		});
-		tracker.tick();
-		tracker.tick();
-		tracker.tick();
-		try {
-			tracker.tick();
-			expect.unreachable("expected BudgetExceededError");
-		} catch (err) {
-			expect(err).toBeInstanceOf(Error);
-			expect((err as Error).name).toBe("BudgetExceededError");
-			// Error message must reference 4 (the rc maxTurns), not 999.
-			expect((err as Error).message).toMatch(/4/);
-			expect((err as Error).message).not.toMatch(/999/);
-		}
-	});
-
-	it("getProgress().pctTurns reflects rc.config.maxTurns, not Budget.maxTurns", () => {
-		const legacyBudget: Budget = {
-			maxTurns: 1000, // legacy says 1000
-			maxMs: 999_999_999,
-			snapshotEveryTurns: 0,
-			partialTriggerPct: 0.8,
-		};
-		const rc = makeRunController({ max_turns: 10 }); // rc says 10
-		const tracker = new BudgetTracker(legacyBudget, undefined, {
-			runController: rc,
-		});
-		tracker.tick(); // 1/10 of rc → 0.1; would be 1/1000 of legacy → 0.001
-		const p = tracker.getProgress();
-		// 1 turn of 10 → 10%.
-		expect(p.pctTurns).toBeCloseTo(0.1, 5);
-		// NOT 0.001 (which is what legacy 1000 would give).
-		expect(p.pctTurns).toBeGreaterThan(0.05);
-		// Also: don't throw yet — 1 of 10 is fine.
-		expect(() => tracker.tick()).not.toThrow();
-	});
-});
 
 // =============================================================================
 // SC1 (continued): pctMs from runController.elapsedMs() / rc.config.deadlineMs
@@ -268,7 +195,7 @@ describe("budget: legacy backward compat (no runController)", () => {
 	it("loadBudgetFromEnv still works as fallback (SC2)", () => {
 		const b = loadBudgetFromEnv("developer");
 		expect(b.maxTurns).toBe(60);
-		expect(b.maxMs).toBe(30 * 60_000);
+		expect(b.maxMs).toBe(20 * 60_000); // matches defaultBudgets.developer.maxMs
 	});
 });
 
@@ -276,39 +203,47 @@ describe("budget: legacy backward compat (no runController)", () => {
 // SC3: resolveDeadlineMs delegates to resolveRunConfig for canonical types
 // =============================================================================
 
-describe("settings.resolveDeadlineMs: delegates to resolveRunConfig (SC3)", () => {
-	it("canonical type 'developer' → 20min default (resolveRunConfig path)", () => {
-		// Default: 20 min from DEFAULT_PER_TYPE.developer.
+describe("settings.resolveDeadlineMs: delegates to resolveRunConfig (SC3) — GC-2026-subagent-time-only-limits", () => {
+	it("canonical type 'developer' → 30min (DEFAULT_PER_TYPE.developer)", () => {
 		expect(resolveDeadlineMs("developer", undefined)).toBe(30 * 60_000);
 	});
 
-	it("canonical type 'auditor' → 20min default", () => {
+	it("canonical type 'auditor' → 30min (DEFAULT_PER_TYPE.Reviewer fallback)", () => {
+		// Auditor → Reviewer via case-insensitive resolver.
 		expect(resolveDeadlineMs("auditor", undefined)).toBe(30 * 60_000);
 	});
 
-	it("legacy type 'Explore' → 5min (kept via getSubagentDurationDefault)", () => {
-		// Explore is NOT in DEFAULT_PER_TYPE — must keep the 5min default.
-		expect(resolveDeadlineMs("Explore", undefined)).toBe(5 * 60_000);
+	it("legacy 'Explore' → 5min source but clamped to 30min envelope floor", () => {
+		// The GC-2026-037 legacy table still has 5min, but clampDeadlineMs
+		// raises it to MIN_DEADLINE_MS (30min) per the GC-2026-subagent-time-only-limits
+		// envelope. The clamp is the single source of truth for the floor.
+		expect(resolveDeadlineMs("Explore", undefined)).toBe(30 * 60_000);
 	});
 
-	it("legacy type 'Plan' → 5min (kept via getSubagentDurationDefault)", () => {
-		expect(resolveDeadlineMs("Plan", undefined)).toBe(5 * 60_000);
+	it("legacy 'Plan' → 5min source but clamped to 30min envelope floor", () => {
+		expect(resolveDeadlineMs("Plan", undefined)).toBe(30 * 60_000);
 	});
 
-	it("canonical 'PlanCompiler' (GC-2026-093) → 5min (same as legacy 'Plan')", () => {
-		// PlanCompiler is now the canonical name; Plan remains the legacy alias.
-		// Both resolve to the same 5min budget via DEFAULT_PER_TYPE.
-		expect(resolveDeadlineMs("PlanCompiler", undefined)).toBe(5 * 60_000);
+	it("canonical 'PlanCompiler' (GC-2026-093) → 30min (DEFAULT_PER_TYPE.PlanCompiler)", () => {
+		expect(resolveDeadlineMs("PlanCompiler", undefined)).toBe(30 * 60_000);
 	});
 
-	it("unknown type falls back to 30min (developer default)", () => {
+	it("unknown type falls back to 30min (DEFAULT_PER_TYPE.Developer fallback)", () => {
 		expect(resolveDeadlineMs("not-a-real-type", undefined)).toBe(30 * 60_000);
 	});
 
-	it("caller-supplied override wins (positive only)", () => {
-		expect(resolveDeadlineMs("developer", 30)).toBe(30 * 60_000);
-		expect(resolveDeadlineMs("Explore", 0.5)).toBe(0.5 * 60_000);
-		expect(resolveDeadlineMs("not-a-type", 1)).toBe(1 * 60_000);
+	it("caller-supplied override wins (within envelope)", () => {
+		expect(resolveDeadlineMs("developer", 60)).toBe(60 * 60_000);
+		expect(resolveDeadlineMs("not-a-type", 45)).toBe(45 * 60_000);
+	});
+
+	it("caller-supplied override below MIN is clamped to 30min floor", () => {
+		expect(resolveDeadlineMs("Explore", 0.5)).toBe(30 * 60_000);
+		expect(resolveDeadlineMs("not-a-type", 1)).toBe(30 * 60_000);
+	});
+
+	it("caller-supplied override above MAX is clamped to 120min ceiling", () => {
+		expect(resolveDeadlineMs("developer", 240)).toBe(120 * 60_000);
 	});
 
 	it("zero / negative override falls through to default", () => {
@@ -316,12 +251,15 @@ describe("settings.resolveDeadlineMs: delegates to resolveRunConfig (SC3)", () =
 		expect(resolveDeadlineMs("developer", -5)).toBe(30 * 60_000);
 	});
 
-	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS flows through (resolveRunConfig delegation)", () => {
-		// Per-type env override must reach resolveDeadlineMs via the
-		// resolveRunConfig delegation. If resolveDeadlineMs short-circuits
-		// before calling resolveRunConfig, this test fails.
+	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS flows through (resolveRunConfig delegation), clamped", () => {
 		process.env.SAGES_PI_AGENT_DEVELOPER_BUDGET_MS = String(7 * 60_000);
-		expect(resolveDeadlineMs("developer", undefined)).toBe(7 * 60_000);
+		// 7 min < MIN → clamped to 30 min.
+		expect(resolveDeadlineMs("developer", undefined)).toBe(30 * 60_000);
+	});
+
+	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS within envelope is respected", () => {
+		process.env.SAGES_PI_AGENT_DEVELOPER_BUDGET_MS = String(45 * 60_000);
+		expect(resolveDeadlineMs("developer", undefined)).toBe(45 * 60_000);
 	});
 });
 

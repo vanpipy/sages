@@ -16,7 +16,6 @@ const MAX_PROMPT_BYTES = 256 * 1024;
 const RPC_SPAWN_OPTION_KEYS = new Set([
 	"description",
 	"model",
-	"maxTurns",
 	"isolated",
 	"inheritContext",
 	"thinkingLevel",

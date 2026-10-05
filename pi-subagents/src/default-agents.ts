@@ -62,8 +62,6 @@ const DEVELOPER_AGENT: AgentConfig = {
 	runInBackground: true,
 	// Developer tasks run RED → GREEN → REFACTOR cycles plus exploration, so 200
 	// turns is the budget per individual run. Caller may still override via
-	// Agent({ max_turns: ... }) at spawn time.
-	maxTurns: 200,
 	// GC-2026-subagent-model-inheritance: model field removed. Subagents
 	// inherit the parent session's model by default. The
 	// `subagents.json#defaultModelsByType` map is the explicit override
@@ -93,9 +91,9 @@ const DEVELOPER_AGENT: AgentConfig = {
  * Audit-specific:
  *   - \`runInBackground: true\` — full audits re-run every verification
  *     command (30s–3 min) and must not block the orchestrator
- *   - \`maxTurns: 200\` — the auditor's re-run loop (typecheck + lint +
- *     tests + diff inspection + report write) is the budget per run;
- *     callers may override via Agent({ max_turns: ... })
+ *   - Wall-clock deadline (30 min default, 120 min max) is the only
+ *     lifecycle limit; GC-2026-subagent-time-only-limits removed the
+ *     previous maxTurns budget
  *   - \`skills: false\` — no project conventions; the auditor re-derives
  *     them at audit time per the First Action Protocol
  *
@@ -121,10 +119,9 @@ const REVIEWER_AGENT: AgentConfig = {
 	promptMode: "replace",
 	isDefault: true,
 	runInBackground: true,
-	// Full audits re-run typecheck + lint + tests + diff inspection +
-	// report write; 200 turns is the per-run budget. Caller may still
-	// override via Agent({ max_turns: ... }) at spawn time.
-	maxTurns: 200,
+	// GC-2026-subagent-time-only-limits: maxTurns removed — wall-clock
+	// deadline (30–120 min) is the only lifecycle limit. Reviewer
+	// inherits 30 min from DEFAULT_PER_TYPE.Reviewer.
 	// GC-2026-subagent-model-inheritance: model field removed. Reviewer
 	// inherits the parent session's model by default. The
 	// `subagents.json#defaultModelsByType["Reviewer"]` map is the
@@ -166,10 +163,9 @@ const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
  *   - `runInBackground: true` — cross-workspace verification runs
  *     typecheck + lint + test (30s–3min); must not block the
  *     orchestrator
- *   - `maxTurns: 80` — narrower than developer/auditor (200); the
- *     merger is a deterministic tool: read diffs, classify, one merge
- *     commit OR escalate. Going over 80 turns means the brief was
- *     wrong, not that the merger needs more budget
+ *   - Wall-clock deadline (30 min default, 120 min max) is the only
+ *     lifecycle limit; GC-2026-subagent-time-only-limits removed the
+ *     previous maxTurns: 80 budget
  *   - `inheritContext: false` — the merger is a deterministic tool; it
  *     must NOT fork the parent's chat history. The brief carries the
  *     workspace-A + workspace-B branches, SC ids, and worktree paths
@@ -199,7 +195,6 @@ const MERGER_AGENT: AgentConfig = {
 	// Narrower than developer/auditor: read diffs, classify, produce one
 	// merge commit or escalate. Going over 80 turns means the brief was
 	// wrong, not that the merger needs more budget.
-	maxTurns: 80,
 	// Per-type concurrency cap: 1 — the merger is stateful (HANDOFF.md +
 	// worktree pairing) and concurrent merge attempts on overlapping
 	// workspaces would race. Single-flight.
@@ -240,7 +235,6 @@ const PLAN_AGENT: AgentConfig = {
 	systemPrompt: PLAN_PROMPT,
 	promptMode: "replace",
 	isDefault: true,
-	maxTurns: 12,
 	runInBackground: false,
 	inheritContext: false,
 	maxConcurrent: 2,
@@ -277,7 +271,6 @@ const FIX_AGENT: AgentConfig = {
 	isDefault: true,
 	// Fix runs RED → GREEN on findings. 100 turns is enough for typical
 	// fix scope (the previous Review already verified the contract).
-	maxTurns: 100,
 	// Per-type concurrency cap: 2 — same as Developer (Fix tasks run in
 	// parallel within a single workflow's fix-loop).
 	maxConcurrent: 2,
@@ -309,8 +302,6 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 			promptMode: "replace",
 			isDefault: true,
 			// Read-only search: 50 turns is the budget for one breadth-bounded lookup.
-			// Caller may still override via Agent({ max_turns: ... }) at spawn time.
-			maxTurns: 50,
 			// Per-type concurrency cap: Explore runs in Stage 1 batches that fan
 			// out for breadth coverage. 4 concurrent is the supported DAG fan-out
 			// (combined with Plan's 2 cap to stay under the global 6 cap).

@@ -54,7 +54,6 @@ export interface NewJobInput {
 	prompt: string;
 	model?: string;
 	thinking?: ThinkingLevel;
-	max_turns?: number;
 	isolated?: boolean;
 	/**
 	 * Accepts the legacy "worktree" literal OR the explicit managed-worktree
@@ -168,7 +167,6 @@ export class SubagentScheduler {
 			prompt: input.prompt,
 			model: input.model,
 			thinking: input.thinking,
-			max_turns: input.max_turns,
 			isolated: input.isolated,
 			isolation: input.isolation,
 			enabled: true,
@@ -342,7 +340,6 @@ export class SubagentScheduler {
 				isBackground: true,
 				bypassQueue: true,
 				model: resolvedModel,
-				maxTurns: job.max_turns,
 				isolated: job.isolated,
 				thinkingLevel: job.thinking,
 				isolation:

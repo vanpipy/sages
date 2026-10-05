@@ -99,7 +99,6 @@ interface SpawnArgs {
 interface SpawnOptions {
 	description: string;
 	model?: Model<any>;
-	maxTurns?: number;
 	isolated?: boolean;
 	inheritContext?: boolean;
 	thinkingLevel?: ThinkingLevel;
@@ -382,7 +381,7 @@ export class AgentManager {
 			options.signal,
 			resolveRunConfig(
 				canonicalType,
-				{ max_turns: options.maxTurns },
+				{},
 				process.env,
 			),
 		);
@@ -626,7 +625,6 @@ export class AgentManager {
 			pi,
 			agentId: id,
 			model: options.model,
-			maxTurns: options.maxTurns,
 			isolated: options.isolated,
 			inheritContext: options.inheritContext,
 			thinkingLevel: options.thinkingLevel,

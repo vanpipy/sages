@@ -142,8 +142,6 @@ export interface AgentActivity {
 	session?: SessionLike;
 	/** Current turn count. */
 	turnCount: number;
-	/** Effective max turns for this agent (undefined = unlimited). */
-	maxTurns?: number;
 	/** Lifetime usage breakdown — see LifetimeUsage docs. */
 	lifetimeUsage: LifetimeUsage;
 }
@@ -175,8 +173,6 @@ export interface AgentDetails {
 	tags?: string[];
 	/** Current turn count. */
 	turnCount?: number;
-	/** Effective max turns (undefined = unlimited). */
-	maxTurns?: number;
 	agentId?: string;
 	error?: string;
 	/**
@@ -241,12 +237,11 @@ export function formatSessionTokens(
 	return `${tokenStr} (${annot.join(" · ")})`;
 }
 
-/** Format turn count with optional max limit: "↻5≤30" or "↻5". */
-export function formatTurns(
-	turnCount: number,
-	maxTurns?: number | null,
-): string {
-	return maxTurns != null ? `↻${turnCount}≤${maxTurns}` : `↻${turnCount}`;
+/** Format turn count. GC-2026-subagent-time-only-limits: the maxTurns
+ *  argument was removed along with the runtime turn-counting limit —
+ *  callers used to render "↻N≤max" but the max is no longer enforced. */
+export function formatTurns(turnCount: number): string {
+	return `↻${turnCount}`;
 }
 
 /** Format milliseconds as human-readable duration. */
@@ -286,8 +281,6 @@ export function buildInvocationTags(invocation: AgentInvocation | undefined): {
 	if (invocation.isolation === "worktree") tags.push("worktree");
 	if (invocation.inheritContext) tags.push("inherit context");
 	if (invocation.runInBackground) tags.push("background");
-	if (invocation.maxTurns != null)
-		tags.push(`max turns: ${invocation.maxTurns}`);
 	return { modelName: invocation.modelName, tags };
 }
 
@@ -552,7 +545,7 @@ export class AgentWidget {
 		const parts: string[] = [];
 		const activity = this.agentActivity.get(a.id);
 		if (activity)
-			parts.push(formatTurns(activity.turnCount, activity.maxTurns));
+			parts.push(formatTurns(activity.turnCount));
 		if (a.toolUses > 0)
 			parts.push(`${a.toolUses} tool use${a.toolUses === 1 ? "" : "s"}`);
 		parts.push(duration);
@@ -631,7 +624,7 @@ export class AgentWidget {
 					: "";
 
 			const parts: string[] = [];
-			if (bg) parts.push(formatTurns(bg.turnCount, bg.maxTurns));
+			if (bg) parts.push(formatTurns(bg.turnCount));
 			if (toolUses > 0)
 				parts.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
 			if (tokenText) parts.push(tokenText);
