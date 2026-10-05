@@ -11,6 +11,11 @@
  *   - File-fallback path (verdictFilePath in opts)
  *   - Strict scope_check / anti_goal_check enforcement
  *   - CLEAN + non-empty findings is malformed → NEEDS_WORK
+ *
+ * GC-2026-verdict-states-and-dynamic-cascade additions:
+ *   - 4 verdict states (CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION)
+ *   - NEEDS_CLARIFICATION carries open_question
+ *   - Unrecognized verdict values default to NEEDS_WORK
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -215,8 +220,6 @@ describe("parseReviewerVerdict", () => {
   describe("GC-2026-prompt-parser-contract-cleanup: file-fallback path", () => {
     let tmpDir: string;
 
-    test.beforeAll?.(() => undefined as never);
-    // Use a manual setup per test to avoid beforeAll/afterAll boilerplate.
     function setupTmp(): { verdictFilePath: string; cleanup: () => void } {
       tmpDir = mkdtempSync(join(tmpdir(), "verdict-parser-"));
       const verdictFilePath = join(tmpDir, "verdict-t1.md");
@@ -260,7 +263,6 @@ describe("parseReviewerVerdict", () => {
     test("no fence + verdictFilePath missing → NEEDS_WORK", () => {
       const { verdictFilePath, cleanup } = setupTmp();
       try {
-        // Don't write the file.
         const result = parseReviewerVerdict(undefined, { verdictFilePath });
         expect(result.verdict).toBe("NEEDS_WORK");
       } finally {
@@ -271,7 +273,6 @@ describe("parseReviewerVerdict", () => {
     test("fence in message + verdictFilePath set → message fence wins", () => {
       const { verdictFilePath, cleanup } = setupTmp();
       try {
-        // File says NEEDS_WORK, but the message has a CLEAN fence — message wins.
         writeFileSync(
           verdictFilePath,
           ["verdict: NEEDS_WORK", "findings: []"].join("\n"),
@@ -289,6 +290,99 @@ describe("parseReviewerVerdict", () => {
       } finally {
         cleanup();
       }
+    });
+  });
+
+  // GC-2026-verdict-states-and-dynamic-cascade additions
+  describe("GC-2026-verdict-states-and-dynamic-cascade: 4-state verdict", () => {
+    test("NEEDS_REDESIGN parses with findings", () => {
+      const message = [
+        "Architecture is fundamentally wrong.",
+        "```yaml",
+        "verdict: NEEDS_REDESIGN",
+        "findings:",
+        "  - severity: critical",
+        "    issue: chosen caching layer doesn't fit workload",
+        "    recommendation: redesign with event-driven invalidation",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_REDESIGN");
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings?.[0].issue).toMatch(/caching layer/);
+    });
+
+    test("NEEDS_CLARIFICATION parses with open_question", () => {
+      const message = [
+        "Goal contract is ambiguous.",
+        "```yaml",
+        "verdict: NEEDS_CLARIFICATION",
+        "open_question: Should the API use snake_case or camelCase for the new endpoint?",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_CLARIFICATION");
+      expect(result.open_question).toMatch(/snake_case or camelCase/);
+    });
+
+    test("NEEDS_CLARIFICATION without open_question still parses (workflow-handler downgrades)", () => {
+      const message = [
+        "```yaml",
+        "verdict: NEEDS_CLARIFICATION",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_CLARIFICATION");
+      expect(result.open_question).toBeUndefined();
+    });
+
+    test("lowercase verdict values are normalized", () => {
+      const message = [
+        "```yaml",
+        "verdict: needs_redesign",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_REDESIGN");
+    });
+
+    test("unrecognized verdict value defaults to NEEDS_WORK", () => {
+      const message = [
+        "```yaml",
+        "verdict: SOMETHING_ELSE",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_WORK");
+    });
+
+    test("NEEDS_REDESIGN with fail dim still NEEDS_WORK (dim check overrides)", () => {
+      const message = [
+        "```yaml",
+        "verdict: NEEDS_REDESIGN",
+        "scope_check: fail",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_WORK");
+      expect(result.scope_check).toBe("fail");
     });
   });
 });
