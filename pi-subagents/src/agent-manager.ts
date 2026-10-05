@@ -1035,11 +1035,11 @@ export class AgentManager {
 		//   `subagents:parent_aborted` and the orchestrator can decide
 		//   retry vs escalate.
 		// - undefined / "user": user-initiated stop → status="stopped".
-		// - "internal": deadline timer fired within RunController →
-		//   status="parent_aborted" too (it's an external interrupt from
-		//   the subagent's perspective even though it's self-fired).
-		record.status =
-			source === "parent" || source === "internal" ? "parent_aborted" : "stopped";
+		// - "internal": deadline timer fired within RunController → still
+		//   status="stopped" (the abort was self-initiated, no parent signal
+		//   was involved; the orchestrator's retry-vs-escalate logic doesn't
+		//   need to discriminate internal timeouts from user stops).
+		record.status = source === "parent" ? "parent_aborted" : "stopped";
 		// GC-2026-subagent-interruption-minimal: persist abort reason so
 		// the host's `subagents:parent_aborted` payload carries context.
 		record.error = formatAbortReason(reason);

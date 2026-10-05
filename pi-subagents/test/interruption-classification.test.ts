@@ -125,23 +125,20 @@ function makeRecord(overrides: Partial<AgentRecord> = {}): AgentRecord {
 // ── Tests ──────────────────────────────────────────────────────────────
 
 describe("abort() — parent_aborted classification (GC-2026-subagent-interruption-minimal)", () => {
+	// Inject records directly into the private map — AgentManager.spawn()
+	// requires pi + ctx (production paths); these tests focus on the abort
+	// status-discrimination logic, not the full spawn lifecycle.
+	const inject = (h: Harness, rec: AgentRecord): void => {
+		(h.manager as unknown as { agents: Map<string, AgentRecord> }).agents.set(
+			rec.id,
+			rec,
+		);
+	};
+
 	it("abort(id, reason, 'parent') sets record.status = 'parent_aborted' and writes reason to record.error", () => {
 		const h = makeHarness();
 		const rec = makeRecord({ id: "ag-1" });
-		h.manager.spawn(
-			// use the manager's internal helper — record is created + subscribed
-			undefined as never, // unused
-			undefined as never,
-			"Developer" as never,
-			"test",
-			{
-				description: "x",
-				isBackground: false,
-				signal: undefined,
-			} as never,
-		);
-		// Inject the record directly since the spawn API needs pi + ctx.
-		(h.manager as unknown as { agents: Map<string, AgentRecord> }).agents.set(rec.id, rec);
+		inject(h, rec);
 
 		const reason = new Error("parent aborted: workflow paused");
 		const ok = (h.manager as unknown as {
@@ -155,7 +152,7 @@ describe("abort() — parent_aborted classification (GC-2026-subagent-interrupti
 	it("abort(id, reason) WITHOUT source keeps status='stopped' (backward compat)", () => {
 		const h = makeHarness();
 		const rec = makeRecord({ id: "ag-2" });
-		(h.manager as unknown as { agents: Map<string, AgentRecord> }).agents.set(rec.id, rec);
+		inject(h, rec);
 
 		const ok = (h.manager as unknown as {
 			abort: (id: string, reason?: unknown, source?: "user" | "parent" | "internal") => boolean;
@@ -165,17 +162,17 @@ describe("abort() — parent_aborted classification (GC-2026-subagent-interrupti
 		expect(rec.error).toBe("user clicked stop");
 	});
 
-	it("abort(id, reason, 'internal') (deadline timer) sets status='parent_aborted' — internal interrupts look the same as parent interrupts from the subagent's perspective", () => {
+	it("abort(id, reason, 'internal') (deadline timer) keeps status='stopped' — internal interrupts don't trigger parent_aborted classification", () => {
 		const h = makeHarness();
 		const rec = makeRecord({ id: "ag-3" });
-		(h.manager as unknown as { agents: Map<string, AgentRecord> }).agents.set(rec.id, rec);
+		inject(h, rec);
 
 		const reason = new Error("RunController deadline exceeded (120000ms)");
 		const ok = (h.manager as unknown as {
 			abort: (id: string, reason?: unknown, source?: "user" | "parent" | "internal") => boolean;
 		}).abort(rec.id, reason, "internal");
 		expect(ok).toBe(true);
-		expect(rec.status).toBe("parent_aborted");
+		expect(rec.status).toBe("stopped");
 		expect(rec.error).toBe("RunController deadline exceeded (120000ms)");
 	});
 });

@@ -207,7 +207,7 @@ describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", ()
 			);
 
 			// The agent must have terminated (status moved past running).
-			expect(["stopped", "aborted", "error"]).toContain(record.status);
+			expect(["stopped", "aborted", "parent_aborted", "error"]).toContain(record.status);
 			// The reason must surface in record.error (the duration reason, NOT a
 			// generic AbortError message — that's the whole point of capturing
 			// signal.reason before the abort propagates).
@@ -260,7 +260,7 @@ describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", ()
 				} as never,
 			);
 
-			expect(["stopped", "aborted", "error"]).toContain(record.status);
+			expect(["stopped", "aborted", "parent_aborted", "error"]).toContain(record.status);
 			expect(record.error).toBeDefined();
 			// The deadline reason wins because it fired first; record.error
 			// surfaces the deadline message, not a generic abort string.

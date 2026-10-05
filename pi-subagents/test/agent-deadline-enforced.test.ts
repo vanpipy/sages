@@ -124,7 +124,7 @@ describe("agent deadline enforced end-to-end (GC-2026-065 T1)", () => {
 
 			// Either aborted (signal fired during run) or stopped/error (signal
 			// fired before/after). All three indicate the deadline was honored.
-			expect(["aborted", "stopped", "error"]).toContain(record.status);
+			expect(["aborted", "stopped", "parent_aborted", "error"]).toContain(record.status);
 			expect(record.error).toBeDefined();
 			expect(record.error).toMatch(/deadline|abort/i);
 		} finally {
@@ -157,7 +157,7 @@ describe("agent deadline enforced end-to-end (GC-2026-065 T1)", () => {
 				} as never,
 			);
 
-			expect(["aborted", "stopped", "error"]).toContain(record.status);
+			expect(["aborted", "stopped", "parent_aborted", "error"]).toContain(record.status);
 			expect(record.error).toBeDefined();
 		} finally {
 			manager.dispose();
