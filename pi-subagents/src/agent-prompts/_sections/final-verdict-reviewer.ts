@@ -3,35 +3,41 @@
  *
  * Extracted from `reviewer.ts:151-180`. Distinct from `final-verdict-developer.ts`
  * because the schemas are different:
- *   - Reviewer emits **verdict** (CLEAN | NEEDS_WORK), not status.
+ *   - Reviewer emits **verdict** (4-state set after GC-2026-verdict-states-and-dynamic-cascade).
  *   - Findings have `severity`, `issue`, `location?`, `recommendation?`.
  *   - Plus dimension checks: `scope_check`, `anti_goal_check`.
  *
  * Parser: `pi-tasks/src/verdict-parser.ts:parseReviewerVerdict` reads the LAST
- * \`\`\`yaml fence and decodes the flat structure. After GC-2026-prompt-parser-contract-cleanup
- * the parser ALSO enforces:
+ * \`\`\`yaml fence and decodes the flat structure.
+ *
+ * After GC-2026-prompt-parser-contract-cleanup the parser enforces:
  *   - `scope_check: pass` + `anti_goal_check: pass` (or a skip-reason in evidence).
  *   - `verdict: CLEAN + findings: non-empty` is malformed → NEEDS_WORK.
  *   - File fallback: when no yaml fence in message, read
  *     \`.pi/orchestrator/verdict-{task_id}.md\`.
  *
+ * After GC-2026-verdict-states-and-dynamic-cascade the verdict is a 4-state set:
+ *   CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION. NEEDS_CLARIFICATION
+ *   requires the `open_question` field.
+ *
  * Reviewer-only. Pinned by `sections-drift.test.ts`.
  */
 
 export const FINAL_VERDICT_REVIEWER_SECTION = `
-## Final Verdict (Pinned Output Shape)
+## Final Verdict (Pinned Output Shape — GC-2026-verdict-states-and-dynamic-cascade 4-state set)
 
 Your final message MUST contain a single YAML fenced block at the end.
 workflow_run parses it mechanically to decide the next pipeline phase.
 A missing or malformed block fails the pipeline (no clear verdict = NEEDS_WORK).
 
 \`\`\`yaml
-verdict: CLEAN | NEEDS_WORK
+verdict: CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION
 findings:
   - severity: minor | major | critical
     issue: "<what's wrong, 1 sentence>"
     location: "<file:line or section>"
     recommendation: "<how to fix, 1 sentence>"
+open_question: "<question>"   # required when verdict: NEEDS_CLARIFICATION; ignored otherwise
 evidence:
   typecheck: "<output line>"
   tests: "<output summary>"
@@ -46,16 +52,28 @@ anti_goal_check: pass | fail | absent
 
 **Default to NEEDS_WORK.** Only emit CLEAN when every dimension below is satisfied AND the evidence trail is complete. A vague or evidence-thin verdict fails the pipeline.
 
-Status meanings:
-- **CLEAN**: implementation is ready for Merge. workflow_run proceeds.
-- **NEEDS_WORK**: at least one finding OR a dimension failed. workflow_run spawns Fix with the findings.
+### Verdict states (4-state set)
+
+The pipeline dispatches differently per verdict state:
+
+- **CLEAN**: every dimension passes; findings list is empty. workflow_run proceeds to Merge.
+- **NEEDS_WORK**: 1+ findings that a Fix can address with local code changes (missing test, lint, wrong signature, etc.). workflow_run spawns Fix → Review loop (capped by max_fix_iterations, default 3).
+- **NEEDS_REDESIGN**: the implementation is fundamentally wrong in a way Fix can't patch (architecture mismatch, wrong abstraction, scope/goal interpretation error). workflow_run spawns a NEW Implement (capped by max_redesigns, default 1). **Findings list MUST be non-empty** with concrete reasons — vague "needs redesign" without specifics fails the parser downgrades.
+- **NEEDS_CLARIFICATION**: the goal contract is ambiguous and you cannot proceed without user input. **open_question is REQUIRED** with a specific, answerable question. workflow_run pauses the workflow and surfaces the question to the orchestrator main agent.
 
 ### Dimension checks
 
-The parser enforces \`scope_check\` and \`anti_goal_check\` after GC-2026-prompt-parser-contract-cleanup:
+The parser enforces \`scope_check\` and \`anti_goal_check\`:
 - \`pass\` → counts as satisfied.
-- \`fail\` → triggers NEEDS_WORK regardless of findings list.
+- \`fail\` → triggers NEEDS_WORK regardless of verdict state.
 - \`absent\` → only counts as satisfied when paired with a non-empty \`<dim>_skipped\` reason in evidence. No skip-reason → NEEDS_WORK.
+
+### Malformed combinations (downgraded to NEEDS_WORK)
+
+- \`verdict: CLEAN\` + non-empty findings list
+- \`verdict: NEEDS_REDESIGN\` + empty findings list (no concrete reason)
+- \`verdict: NEEDS_CLARIFICATION\` without \`open_question\` field
+- Unknown verdict values (case-insensitive match required)
 
 ### Durable backup (atomic rename)
 

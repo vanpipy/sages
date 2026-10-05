@@ -119,6 +119,10 @@ export function subscribeWorkflow(
 	let maxRedesigns = 1;
 	let fixIterationsUsed = 0; // count of Fix dispatches actually created
 	let redesignsUsed = 0;     // count of NEEDS_REDESIGN Implement dispatches
+	// Goal is captured at workflow:start so dispatchFixForReview /
+	// dispatchRedesignForReview can build new task specs without it
+	// being threaded through every Reviewer's metadata.
+	let activeGoal: WorkflowGoal | null = null;
 
 	// ── workflow:start ──────────────────────────────────────────────
 
@@ -129,6 +133,7 @@ export function subscribeWorkflow(
 		}
 		activeWorkflowId = payload.workflow_id;
 		activeGoalId = payload.goal_id;
+		activeGoal = payload.goal;
 		payload_worktree_path = payload.worktree_path;
 		maxFixIterations = payload.max_fix_iterations;
 		maxRedesigns = payload.max_redesigns ?? 1;
@@ -259,11 +264,9 @@ export function subscribeWorkflow(
 			(t) => Number(t.metadata.iteration) === nextIteration + 1,
 		);
 
-		const goal = (reviewTask.metadata as { goal?: WorkflowGoal }).goal;
+		const goal = activeGoal;
 		if (!goal) {
-			// Defensive: every workflow task should have the goal in metadata,
-			// but fall back to a placeholder so the cascade doesn't crash.
-			throw new Error("dispatchFixForReview: review task missing goal metadata");
+			throw new Error("dispatchFixForReview: workflow:start not received");
 		}
 		const spec = buildFixTaskSpec({
 			goal,
@@ -310,9 +313,9 @@ export function subscribeWorkflow(
 		const nextNumber = redesignsUsed + 1;
 		redesignsUsed = nextNumber;
 
-		const goal = (reviewTask.metadata as { goal?: WorkflowGoal }).goal;
+		const goal = activeGoal;
 		if (!goal) {
-			throw new Error("dispatchRedesignForReview: review task missing goal metadata");
+			throw new Error("dispatchRedesignForReview: workflow:start not received");
 		}
 		const spec = buildRedesignImplementTaskSpec({
 			goal,
