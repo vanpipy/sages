@@ -96,6 +96,25 @@ The orchestrator's task prompt supplies:
 
 If any of these are missing or ambiguous, STOP and report BLOCKED to the orchestrator.
 
+## 📥 Reviewer evidence trail (GC-2026-b7)
+
+The orchestrator writes the most recent Reviewer's verdict summary to
+\`.pi/orchestrator/last-review-{goal_id}.md\` before dispatching you.
+**Read this file first** as your sanity check. It contains:
+
+- \`verdict\` — the Reviewer's CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION call.
+- \`scope_check\` + \`anti_goal_check\` — pass / fail / absent + skip-reason. The Reviewer already validated these; you do NOT re-validate.
+- \`findings\` — the Reviewer's evidence-grounded findings list. If \`verdict: NEEDS_WORK\`, the diff should contain \`fix(<scope>): …\` commits addressing each finding; you verify this in Step 4b below.
+- \`open_question\` — surfaced only on NEEDS_CLARIFICATION.
+
+You do NOT re-run typecheck / lint / tests; the Reviewer already did that.
+Your job is plumbing (hunk overlap classification, merge commit
+construction) plus cross-checking that any NEEDS_WORK findings were
+addressed by fix commits in the branch's commit chain. If anything
+looks off (e.g. fix commit missing for a critical finding), call it
+out in \`merge-recommendation.md\` as a concern and downgrade your
+final output from MERGED to ESCALATED.
+
 ## 🌐 Workspace isolation modes — what the merger sees
 
 A workspace you merge may be the result of a developer spawned in either of two isolation modes:
@@ -219,6 +238,18 @@ write target). Use the template below.
 - Branch: \`<merge_target_branch>\`
 - Topology: \`--no-ff\` preserved
 
+## Reviewer evidence satisfied (GC-2026-b7)
+
+Reference the prior Reviewer's verdict from \`.pi/orchestrator/last-review-{goal_id}.md\`:
+
+- Last verdict: \`<CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION>\`
+- scope_check: \`<pass | fail | absent>\` (Reviewer pre-validated; do NOT re-validate)
+- anti_goal_check: \`<pass | fail | absent>\` (Reviewer pre-validated; do NOT re-validate)
+- Findings addressed: \`<count>\` of \`<total>\` findings have a matching \`fix(<scope>): …\` commit in the branch log; the remainder is either \`docs: <finding-id> deferred\` or \`<list the gap>\`.
+- open_question: \`(<none> | <question text>)\`
+
+If the last Reviewer verdict was NEEDS_WORK and any finding is missing a fix commit, downgrade the outcome from MERGED to ESCALATED and list the gap in Concerns.
+
 ## Verification Results
 
 ### typecheck
@@ -279,7 +310,7 @@ Return to the orchestrator:
 
 1. **One-line outcome**: \`MERGED\` / \`ESCALATED\` / \`BLOCKED\`
 2. **Audit file path**: \`.pi/orchestrator/audit-merge-{task_id}.md\`
-3. **Key evidence summary**: classification counts + verification exit codes
+3. **Key evidence summary**: classification counts + Reviewer evidence satisfaction (last verdict + scope/anti_goal check + findings addressed vs deferred)
 4. **Critical concerns** (if any): one-line each
 
 Example:

@@ -308,3 +308,77 @@ describe("merger-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
 		expect(section, "must surface read for diff inspection").toMatch(/`?read`?/);
 	});
 });
+
+// GC-2026-b7: Merger consumes the prior Reviewer's verdict summary via a
+// sidecar file at .pi/orchestrator/last-review-{goal_id}.md. The prompt must
+// instruct the agent to read this file as a sanity check (NOT a re-review) and
+// add an "evidence satisfied" section to merge-recommendation.md.
+describe("merger-prompt: Reviewer evidence trail (GC-2026-b7)", () => {
+	it("declares a 'Reviewer evidence trail' section instructing Merger to read the sidecar file", () => {
+		const re = /^##\s+.*Reviewer evidence trail.*$/m;
+		const m = MERGER_PROMPT.match(re);
+		expect(
+			m?.index ?? -1,
+			"'Reviewer evidence trail' section must exist",
+		).toBeGreaterThanOrEqual(0);
+	});
+
+	it("names the sidecar file path last-review-{goal_id}.md", () => {
+		expect(MERGER_PROMPT).toContain("last-review-{goal_id}.md");
+	});
+
+	it("instructs Merger NOT to re-run typecheck/lint/test (Reviewer already did)", () => {
+		const re = /^##\s+.*Reviewer evidence trail.*$/m;
+		const idx = MERGER_PROMPT.match(re)?.index ?? -1;
+		const after = MERGER_PROMPT.slice(idx);
+		const nextSection = after.slice(2).match(/^##\s/m);
+		const endIdx =
+			nextSection?.index === undefined ? after.length : nextSection.index + 2;
+		const section = after.slice(0, endIdx);
+		// Section must explicitly tell Merger to NOT re-validate.
+		expect(section.toLowerCase()).toMatch(/not.*re[- ]?run|do not re[- ]?run|do not revalidate/);
+	});
+
+	it("mentions the 4 Reviewer verdict states (sanity-check vocabulary)", () => {
+		// The merger is briefed on the 4-state verdict set so it can
+		// recognize "this last review was a NEEDS_REDESIGN — see Redesign
+		// dispatch" etc.
+		expect(MERGER_PROMPT).toContain("CLEAN");
+		expect(MERGER_PROMPT).toContain("NEEDS_WORK");
+		expect(MERGER_PROMPT).toContain("NEEDS_REDESIGN");
+		expect(MERGER_PROMPT).toContain("NEEDS_CLARIFICATION");
+	});
+
+	it("audit template includes 'Reviewer evidence satisfied' section", () => {
+		// The merge-recommendation.md / audit-merge-{task_id}.md template
+		// must carry the Reviewer evidence satisfied table.
+		expect(MERGER_PROMPT).toContain("## Reviewer evidence satisfied");
+		expect(MERGER_PROMPT).toContain("Reviewer evidence satisfied");
+	});
+
+	it("mentions scope_check + anti_goal_check as Reviewer pre-validated fields", () => {
+		// The Merger should NOT re-validate these — Reviewer did.
+		const re = /^##\s+.*Reviewer evidence trail.*$/m;
+		const idx = MERGER_PROMPT.match(re)?.index ?? -1;
+		const after = MERGER_PROMPT.slice(idx);
+		const nextSection = after.slice(2).match(/^##\s/m);
+		const endIdx =
+			nextSection?.index === undefined ? after.length : nextSection.index + 2;
+		const section = after.slice(0, endIdx);
+		expect(section).toContain("scope_check");
+		expect(section).toContain("anti_goal_check");
+	});
+
+	it("prescribes downgrading to ESCALATED if a NEEDS_WORK finding has no matching fix commit", () => {
+		const re = /^##\s+.*Reviewer evidence satisfied.*$/m;
+		const m = MERGER_PROMPT.match(re);
+		expect(m?.index ?? -1, "'Reviewer evidence satisfied' section must exist").toBeGreaterThanOrEqual(0);
+		const idx = m!.index!;
+		const after = MERGER_PROMPT.slice(idx);
+		const nextSection = after.slice(2).match(/^##\s/m);
+		const endIdx =
+			nextSection?.index === undefined ? after.length : nextSection.index + 2;
+		const section = after.slice(0, endIdx);
+		expect(section.toLowerCase()).toMatch(/downgrade.*escalated|escalat.*downgrad/);
+	});
+});

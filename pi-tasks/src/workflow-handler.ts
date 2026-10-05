@@ -29,6 +29,7 @@
  */
 
 import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
 import type { TaskStore } from "./task-store.js";
 import type { Task } from "./types.js";
 import { parseReviewerVerdict, type ReviewerVerdict } from "./verdict-parser.js";
@@ -348,6 +349,60 @@ export function subscribeWorkflow(
 		store.update(newImplement.id, { status: "in_progress", owner: agentId });
 	}
 
+	/**
+	 * GC-2026-b7: write the Reviewer's verdict summary to a sidecar file so
+	 * the Merger agent (which doesn't have TaskGet) can consume the prior
+	 * Review's evidence without re-running the full pipeline. Called after
+	 * every Review phase-complete so the file is always up-to-date with the
+	 * LATEST Review verdict (overwritten on each Review completion).
+	 *
+	 * Path: `<repoCwd>/.pi/orchestrator/last-review-{goal_id}.md`
+	 */
+	function writeReviewerEvidenceFile(task: Task, verdict: ReviewerVerdict): void {
+		if (!activeGoalId) return;
+		const path = join(
+			payload_worktree_path || process.cwd(),
+			".pi",
+			"orchestrator",
+			`last-review-${activeGoalId}.md`,
+		);
+		const lines = [
+			`# Last Reviewer evidence for goal ${activeGoalId}`,
+			``,
+			`## Task`,
+			`- task_id: ${task.id}`,
+			`- iteration: ${task.metadata.iteration}`,
+			`- phase: review`,
+			``,
+			`## Verdict`,
+			`- verdict: ${verdict.verdict}`,
+			`- open_question: ${verdict.open_question ?? "(none)"}`,
+			`- scope_check: ${verdict.scope_check ?? "(absent)"}`,
+			`- scope_check_skipped: ${verdict.scope_check_skipped ?? "(none)"}`,
+			`- anti_goal_check: ${verdict.anti_goal_check ?? "(absent)"}`,
+			`- anti_goal_check_skipped: ${verdict.anti_goal_check_skipped ?? "(none)"}`,
+			`- findings_count: ${verdict.findings?.length ?? 0}`,
+			``,
+			`## Findings`,
+		];
+		if (verdict.findings && verdict.findings.length > 0) {
+			for (const f of verdict.findings) {
+				lines.push(
+					`- [${f.severity}] ${f.issue}${f.location ? ` (${f.location})` : ""}${f.recommendation ? ` — fix: ${f.recommendation}` : ""}`,
+				);
+			}
+		} else {
+			lines.push(`(none)`);
+		}
+		try {
+			mkdirSync(join(path, ".."), { recursive: true });
+			writeFileSync(path, lines.join("\n") + "\n", { mode: 0o644 });
+		} catch {
+			// best-effort — the file is a hint for Merger; failures don't block
+			// the cascade. Tests that need this file exist; production tolerates.
+		}
+	}
+
 	// GC-2026-verdict-states-and-dynamic-cascade: closure capture. The
 	// dispatchFixForReview / dispatchRedesignForReview helpers above need
 	// access to the start-payload's worktree_path, captured here from the
@@ -396,6 +451,12 @@ export function subscribeWorkflow(
 				status: "completed",
 				metadata: { verdict },
 			});
+
+			// GC-2026-b7: write the verdict summary to a sidecar file the
+			// Merger agent (which doesn't have TaskGet) consumes before
+			// writing merge-recommendation.md. The file is overwritten on
+			// each Review completion so it always reflects the latest Review.
+			writeReviewerEvidenceFile(task, verdict);
 
 			// GC-2026-verdict-states-and-dynamic-cascade: branch on the 4 verdict
 			// states. NEEDS_WORK → create Fix on demand. NEEDS_REDESIGN → create

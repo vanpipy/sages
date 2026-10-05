@@ -26,6 +26,9 @@
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { TaskStore } from "../src/task-store.js";
 import type { Task } from "../src/types.js";
 import type { WorkflowStartPayload } from "../src/workflow-handler.js";
@@ -87,15 +90,31 @@ const goal = {
 };
 
 function startPayload(opts: Partial<WorkflowStartPayload> = {}): WorkflowStartPayload {
-  return {
-    workflow_id: "wf-1",
-    goal_id: "GC-TEST-WF",
-    goal,
-    max_fix_iterations: 3,
-    max_redesigns: 1,
-    worktree_path: "/abs/worktree",
-    ...opts,
-  };
+	return {
+		workflow_id: "wf-1",
+		goal_id: "GC-TEST-WF",
+		goal,
+		max_fix_iterations: 3,
+		max_redesigns: 1,
+		worktree_path: "/abs/worktree",
+		...opts,
+	};
+}
+
+function startPayloadInTmp(opts: Partial<WorkflowStartPayload> = {}): {
+	payload: WorkflowStartPayload;
+	cwd: string;
+	cleanup: () => void;
+} {
+	const cwd = mkdtempSync(join(tmpdir(), "wf-handler-b7-"));
+	return {
+		payload: {
+			...startPayload(opts),
+			worktree_path: cwd,
+		},
+		cwd,
+		cleanup: () => rmSync(cwd, { recursive: true, force: true }),
+	};
 }
 
 function setup() {
@@ -587,5 +606,91 @@ describe("subscribeWorkflow — review metadata", () => {
     const after = store.get(review1.id);
     expect(after?.metadata.verdict?.verdict).toBe("NEEDS_CLARIFICATION");
     expect(after?.metadata.verdict?.open_question).toBe("test question");
+  });
+});
+
+// GC-2026-b7: Reviewer evidence trail sidecar file for Merger consumption.
+describe("subscribeWorkflow — last-review evidence file (GC-2026-b7)", () => {
+  test("writes .pi/orchestrator/last-review-{goal_id}.md after every Review completion", async () => {
+    const { payload, cwd, cleanup } = startPayloadInTmp();
+    try {
+      const store = new TaskStore();
+      const events = fakeEvents();
+      const spawnAgent = vi.fn(async (task: Task) => `agent-${task.id}`);
+      subscribeWorkflow(store, { events, spawnAgent });
+      const fire = async (channel: string, data: unknown) => {
+        await events.emit(channel, data);
+        await flush();
+      };
+
+      await fire("workflow:start", payload);
+
+      const implement = store.list().find(t => t.metadata.phase === "implement")!;
+      await fire("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
+
+      const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
+      await fire("subagents:completed", {
+        id: `agent-${review1.id}`,
+        result: "```yaml\nverdict: NEEDS_WORK\nfindings:\n  - severity: major\n    issue: missing test\nscope_check: pass\nanti_goal_check: pass\n```",
+      });
+
+      const evidencePath = join(cwd, ".pi", "orchestrator", `last-review-${payload.goal_id}.md`);
+      expect(existsSync(evidencePath)).toBe(true);
+      const content = readFileSync(evidencePath, "utf-8");
+      expect(content).toContain("# Last Reviewer evidence for goal");
+      expect(content).toContain("- verdict: NEEDS_WORK");
+      expect(content).toContain("- scope_check: pass");
+      expect(content).toContain("- anti_goal_check: pass");
+      expect(content).toContain("- findings_count: 1");
+      expect(content).toContain("[major] missing test");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("overwrites last-review-{goal_id}.md on each Review completion (file reflects latest)", async () => {
+    const { payload, cwd, cleanup } = startPayloadInTmp();
+    try {
+      const store = new TaskStore();
+      const events = fakeEvents();
+      const spawnAgent = vi.fn(async (task: Task) => `agent-${task.id}`);
+      subscribeWorkflow(store, { events, spawnAgent });
+      const fire = async (channel: string, data: unknown) => {
+        await events.emit(channel, data);
+        await flush();
+      };
+
+      await fire("workflow:start", payload);
+
+      const implement = store.list().find(t => t.metadata.phase === "implement")!;
+      await fire("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
+
+      // Review_1: NEEDS_WORK
+      const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
+      await fire("subagents:completed", {
+        id: `agent-${review1.id}`,
+        result: "```yaml\nverdict: NEEDS_WORK\nfindings:\n  - severity: major\n    issue: first finding\nscope_check: pass\nanti_goal_check: pass\n```",
+      });
+
+      // Fix_1
+      const fix1 = store.list().find(t => t.metadata.phase === "fix" && t.metadata.iteration === 1)!;
+      await fire("subagents:completed", { id: `agent-${fix1.id}`, result: "ok" });
+
+      // Review_2: CLEAN
+      const review2 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 2)!;
+      await fire("subagents:completed", {
+        id: `agent-${review2.id}`,
+        result: "```yaml\nverdict: CLEAN\nfindings: []\nscope_check: pass\nanti_goal_check: pass\n```",
+      });
+
+      // File should reflect Review_2's verdict (CLEAN), not Review_1's (NEEDS_WORK).
+      const evidencePath = join(cwd, ".pi", "orchestrator", `last-review-${payload.goal_id}.md`);
+      const content = readFileSync(evidencePath, "utf-8");
+      expect(content).toContain("- verdict: CLEAN");
+      expect(content).toContain("- findings_count: 0");
+      expect(content).not.toContain("first finding");
+    } finally {
+      cleanup();
+    }
   });
 });
