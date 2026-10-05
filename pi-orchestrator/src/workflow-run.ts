@@ -470,6 +470,14 @@ export async function executeWorkflowRun(
 					state.clarification_answer = opts.clarification_answer;
 				}
 				saveWorkflowState(repoCwd, state);
+				// GC-2026-workflow-chat-stream: emit the pause-path progress
+				// update BEFORE the unsub/resolveFn so the host still sees
+				// the partial payload before workflow_run returns.
+				emitProgress(
+					"needs_clarification",
+					ev.iteration ?? lastReviewIteration,
+					`Review ${ev.iteration ?? lastReviewIteration}: NEEDS_CLARIFICATION — ${ev.open_question ?? "(no question)"}`,
+				);
 				unsub();
 				resolveFn(
 					buildClarificationOutput(
@@ -551,6 +559,20 @@ export async function executeWorkflowRun(
 			// the phase transition in the chat thread live. Phases are
 			// reported AFTER state mutations so the payload reflects the
 			// post-transition counters.
+			//
+			// `currentPhase` = the phase that just completed. The summary
+			// label already names what comes next, so the phase field stays
+			// pinned to "what just happened" for the user's mental model.
+			const currentPhase =
+				ev.phase === "implement"
+					? "implement"
+					: ev.phase === "review"
+						? "review"
+						: ev.phase === "fix"
+							? "fix"
+							: ev.phase === "merge"
+								? "merge"
+								: (ev.phase as WorkflowProgressUpdate["current_phase"]);
 			const summaryLabel =
 				ev.phase === "implement"
 					? `Implement complete — Review ${(ev.iteration ?? lastReviewIteration) + 1} starting`
@@ -562,13 +584,7 @@ export async function executeWorkflowRun(
 								? `Merge dispatched`
 								: `${ev.phase} complete`;
 			emitProgress(
-				ev.phase === "review"
-					? "review"
-					: ev.phase === "fix"
-						? "fix"
-						: ev.phase === "merge"
-							? "merge"
-							: "implement",
+				currentPhase as WorkflowProgressUpdate["current_phase"],
 				ev.iteration ?? lastReviewIteration,
 				summaryLabel,
 			);

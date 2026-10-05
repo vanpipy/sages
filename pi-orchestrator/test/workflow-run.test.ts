@@ -459,9 +459,9 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 		await result;
 
 		expect(updates.length).toBe(3);
-		// First update: implement → review transition.
+		// First update: implement phase just completed.
 		expect((updates[0] as { partial: boolean; current_phase: string }).partial).toBe(true);
-		expect((updates[0] as { current_phase: string }).current_phase).toBe("review");
+		expect((updates[0] as { current_phase: string }).current_phase).toBe("implement");
 		expect((updates[0] as { goal_id: string }).goal_id).toBe(GOAL_ID);
 		expect((updates[0] as { tasks_done: number; tasks_total: number }).tasks_done).toBe(1);
 		expect((updates[0] as { tasks_total: number }).tasks_total).toBe(3); // 1 impl + 1 review + 1 merge
@@ -512,13 +512,15 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 
 		// 5 phase transitions: implement → review1 → fix1 → review2 → merge
 		expect(updates.length).toBe(5);
-		// After Review_1 NEEDS_WORK: payload carries findings_count=2 + last_verdict=NEEDS_WORK.
+		// After Review_1 NEEDS_WORK: payload carries findings_count=2 +
+		// last_verdict=NEEDS_WORK + fix_iterations_used=1 (the counter ticks
+		// when the Review phase branches on NEEDS_WORK).
 		const review1Update = updates[1] as {
 			last_verdict: string; findings_count: number; fix_iterations_used: number;
 		};
 		expect(review1Update.last_verdict).toBe("NEEDS_WORK");
 		expect(review1Update.findings_count).toBe(2);
-		expect(review1Update.fix_iterations_used).toBe(0); // tick happens on NEEDS_WORK entry, not on Review
+		expect(review1Update.fix_iterations_used).toBe(1);
 		// Fix_1 phase: payload carries fix_iterations_used=1.
 		const fix1Update = updates[2] as { current_phase: string; fix_iterations_used: number };
 		expect(fix1Update.current_phase).toBe("fix");
@@ -527,14 +529,25 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 
 	it("NEEDS_CLARIFICATION onUpdate payload includes open_question", async () => {
 		const updates: unknown[] = [];
-		const { result, handlers } = harness.run(
+		const { result, emitted, handlers } = harness.run(
 			{ goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`, options: { max_fix_iterations: 1 } },
 			(u) => updates.push(u),
 		);
 
+		const startPayload = emitted.find(e => e.channel === "workflow:start")!
+			.data as WorkflowStartPayload;
 		const phaseComplete = handlers.get("workflow:phase-complete")!;
+
+		// Drive implement → review → needs_clarification. The needs_clarification
+		// event is what pauses the workflow, not anything before it. The handler
+		// emits a partial onUpdate payload for the needs_clarification phase
+		// before resolving the workflow-run Promise.
 		await phaseComplete({
-			workflow_id: `wf-clar-${GOAL_ID}`, goal_id: GOAL_ID,
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "implement", status: "completed", task_id: "t-implement",
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
 			phase: "review", iteration: 1, status: "needs_clarification",
 			verdict: "NEEDS_CLARIFICATION",
 			findings_count: 0,
@@ -543,7 +556,7 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 		});
 		await result;
 
-		const reviewUpdate = updates[0] as {
+		const reviewUpdate = updates[1] as {
 			current_phase: string; last_verdict: string; open_question: string;
 		};
 		expect(reviewUpdate.current_phase).toBe("needs_clarification");
