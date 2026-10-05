@@ -10,6 +10,12 @@
  *     (not be hand-written in each prompt).
  *   - The surrounding prose (anti-patterns, escape hatch) stays
  *     hand-written and remains pinned here.
+ *
+ * GC-2026-prompt-parser-contract-cleanup: Developer + Reviewer now import
+ * the section from `_sections/bash-timeout.ts` (which itself calls
+ * `renderBashTimeoutSection()`). Explore + Plan still inline the section
+ * with their own `renderBashTimeoutSection()` call. The loop below picks
+ * the right check per prompt file.
  */
 
 import { readFileSync } from "node:fs";
@@ -18,20 +24,23 @@ import { describe, expect, it } from "vitest";
 
 const PROMPT_DIR = join(import.meta.dirname, "../src/agent-prompts");
 
-const PROMPT_FILES = [
-	"developer.ts",
-	"reviewer.ts",
-	"explore.ts",
-	"plan.ts",
-] as const;
+// Prompts that still carry the section inline.
+const INLINE_PROMPT_FILES = ["explore.ts", "plan.ts"] as const;
+
+// Prompts that import the section from _sections/.
+const IMPORTED_PROMPT_FILES = ["developer.ts", "reviewer.ts"] as const;
 
 function readPrompt(name: string): string {
 	return readFileSync(join(PROMPT_DIR, name), "utf8");
 }
 
+function readSection(name: string): string {
+	return readFileSync(join(PROMPT_DIR, "_sections", name), "utf8");
+}
+
 describe("subagent bash timeout guard (GC-2026-038 T5, GC-2026-043 Phase 4)", () => {
-	for (const name of PROMPT_FILES) {
-		it(`T-BASH-${name}: ${name} uses renderBashTimeoutSection() (not hand-written)`, async () => {
+	for (const name of INLINE_PROMPT_FILES) {
+		it(`T-BASH-${name}: ${name} (inline) uses renderBashTimeoutSection() (not hand-written)`, async () => {
 			const prompt = readPrompt(name);
 			expect(prompt).toMatch(/renderBashTimeoutSection\s*\(/);
 		});
@@ -40,21 +49,30 @@ describe("subagent bash timeout guard (GC-2026-038 T5, GC-2026-043 Phase 4)", ()
 			const { renderBashTimeoutSection, DEFAULT_BUCKET_TIMEOUTS_MS } =
 				await import("../src/run-controller.js");
 			const rendered = renderBashTimeoutSection();
-			// The rendered output must carry the current values — proves that
-			// each prompt's `BASH_TIMEOUT_SECTION` (which is the function output)
-			// is up to date with the runtime enforcement.
 			expect(rendered).toContain(`${DEFAULT_BUCKET_TIMEOUTS_MS.read / 1000}s`);
 			expect(rendered).toContain(
 				`${DEFAULT_BUCKET_TIMEOUTS_MS.network / 1000}s`,
 			);
-			// And the prompt file must call the function (so the rendered output
-			// is what the prompt actually sees at module-load).
 			const prompt = readPrompt(name);
 			expect(prompt).toContain("renderBashTimeoutSection()");
 		});
 	}
 
-	it("T-BASH-shared: developer.ts pins full per-bucket table (read 5s, search 10s, test 30s, full-suite 90s, network 5s)", async () => {
+	for (const name of IMPORTED_PROMPT_FILES) {
+		it(`T-BASH-${name}: ${name} (imported) source imports _sections/bash-timeout`, () => {
+			const prompt = readPrompt(name);
+			expect(prompt).toMatch(
+				/from\s+["']\.\/_sections\/bash-timeout\.js["']/,
+			);
+		});
+
+		it(`T-BASH-${name}-section: _sections/bash-timeout.ts calls renderBashTimeoutSection()`, () => {
+			const section = readSection("bash-timeout.ts");
+			expect(section).toMatch(/renderBashTimeoutSection\s*\(/);
+		});
+	}
+
+	it("T-BASH-shared: runtime-rendered section pins full per-bucket table (read 5s, search 10s, test 30s, full-suite 90s, network 5s)", async () => {
 		const { renderBashTimeoutSection } = await import(
 			"../src/run-controller.js"
 		);
@@ -66,15 +84,18 @@ describe("subagent bash timeout guard (GC-2026-038 T5, GC-2026-043 Phase 4)", ()
 		expect(rendered).toMatch(/network.*5s/);
 	});
 
-	it("T-BASH-anti-patterns: developer.ts keeps its hand-written anti-patterns prose", () => {
-		const prompt = readPrompt("developer.ts");
+	it("T-BASH-anti-patterns: developer.ts (rendered) keeps its hand-written anti-patterns prose", async () => {
+		const { DEVELOPER_PROMPT } = await import(
+			"../src/agent-prompts/developer.js"
+		);
 		// Anti-patterns stay hand-written — they reference project context the
 		// function output doesn't carry (commands specific to this codebase).
-		// Source uses escaped backticks (`\``) inside the template literal.
-		expect(prompt).toContain(
-			"Do NOT run \\`bun test\\` (full suite) in a loop",
+		// Rendered output uses literal backticks (not escaped) since the
+		// template literal has already been interpolated.
+		expect(DEVELOPER_PROMPT).toContain(
+			"Do NOT run `bun test` (full suite) in a loop",
 		);
-		expect(prompt).toContain("Do NOT run \\`git log -p\\`");
-		expect(prompt).toContain("Do NOT use bash grep/rg/find/cat");
+		expect(DEVELOPER_PROMPT).toContain("Do NOT run `git log -p`");
+		expect(DEVELOPER_PROMPT).toContain("Do NOT use bash grep/rg/find/cat");
 	});
 });

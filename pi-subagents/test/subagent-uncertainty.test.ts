@@ -3,6 +3,11 @@
  *
  * Verifies the uncertainty-threshold prompt text exists in all 4 prompts
  * AND the extractAsk runtime helper extracts <ASK> blocks correctly.
+ *
+ * GC-2026-prompt-parser-contract-cleanup: Developer + Reviewer now import
+ * the section from `_sections/uncertainty-threshold.ts`. We assert against
+ * the rendered prompt for those two; explore.ts and plan.ts keep their
+ * inline section and we read them as files.
  */
 
 import { readFileSync } from "node:fs";
@@ -10,13 +15,15 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { extractAsk } from "../src/agent-runner.js";
+import { DEVELOPER_PROMPT } from "../src/agent-prompts/developer.js";
+import { REVIEWER_PROMPT } from "../src/agent-prompts/reviewer.js";
 
-const PROMPTFiles = [
-	"developer.ts",
-	"reviewer.ts",
-	"explore.ts",
-	"plan.ts",
-] as const;
+const INLINE_PROMPT_FILES = ["explore.ts", "plan.ts"] as const;
+
+const RENDERED_PROMPTS: Record<"developer.ts" | "reviewer.ts", string> = {
+	"developer.ts": DEVELOPER_PROMPT,
+	"reviewer.ts": REVIEWER_PROMPT,
+};
 
 function readPrompt(name: string): string {
 	return readFileSync(
@@ -26,21 +33,34 @@ function readPrompt(name: string): string {
 }
 
 describe("subagent uncertainty threshold (GC-2026-038 T4)", () => {
-	for (const name of PROMPTFiles) {
-		it(`T-UNC-${name}: ${name} contains the uncertainty threshold section`, () => {
+	for (const name of INLINE_PROMPT_FILES) {
+		it(`T-UNC-${name}: ${name} (inline) contains the uncertainty threshold section`, () => {
 			const text = readPrompt(name);
 			expect(text).toContain("Uncertainty Threshold");
 		});
 
-		it(`T-UNC-${name}-ask: ${name} shows the <ASK>question</ASK> markup`, () => {
+		it(`T-UNC-${name}-ask: ${name} (inline) shows the <ASK>question</ASK> markup`, () => {
 			const text = readPrompt(name);
-			// The markup uses angle brackets + <ASK>; check the prompt mentions it.
 			expect(text).toMatch(/<ASK>/);
 		});
 
-		it(`T-UNC-${name}-turns: ${name} mentions the 5-turn threshold`, () => {
+		it(`T-UNC-${name}-turns: ${name} (inline) mentions the 5-turn threshold`, () => {
 			const text = readPrompt(name);
 			expect(text).toMatch(/5 turns/);
+		});
+	}
+
+	for (const name of Object.keys(RENDERED_PROMPTS) as Array<"developer.ts" | "reviewer.ts">) {
+		it(`T-UNC-${name}: ${name} (rendered) contains the uncertainty threshold section`, () => {
+			expect(RENDERED_PROMPTS[name]).toContain("Uncertainty Threshold");
+		});
+
+		it(`T-UNC-${name}-ask: ${name} (rendered) shows the <ASK>question</ASK> markup`, () => {
+			expect(RENDERED_PROMPTS[name]).toMatch(/<ASK>/);
+		});
+
+		it(`T-UNC-${name}-turns: ${name} (rendered) mentions the 5-turn threshold`, () => {
+			expect(RENDERED_PROMPTS[name]).toMatch(/5 turns/);
 		});
 	}
 });

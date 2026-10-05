@@ -5,8 +5,14 @@
  * section. The agent is the enforcer (no runtime check at this layer);
  * the test pins the prompt content so a regression would be caught.
  *
+ * GC-2026-prompt-parser-contract-cleanup: the section body now lives in
+ * `pi-subagents/src/agent-prompts/_sections/commit-discipline.ts` and is
+ * imported + interpolated into the rendered DEVELOPER_PROMPT. We assert
+ * against the rendered prompt (not the developer.ts source file) so
+ * the test stays meaningful after the extraction.
+ *
  * Checks:
- *   - the section is present in developer.ts
+ *   - the section is present in the rendered DEVELOPER_PROMPT
  *   - the rule "every RED test ends with wip: <test> red" is mentioned
  *   - the rule "every GREEN test ends with feat: <test> green" is mentioned
  *   - the rule "5 turns without a commit -> declare BLOCKED" is mentioned
@@ -14,20 +20,20 @@
  *   - the prompt mentions the escape hatch: "commit what you have immediately and declare BLOCKED"
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const DEVELOPER_PROMPT = readFileSync(
-	join(import.meta.dirname, "../src/agent-prompts/developer.ts"),
-	"utf8",
-);
+import { DEVELOPER_PROMPT } from "../src/agent-prompts/developer.js";
+import { COMMIT_DISCIPLINE_SECTION } from "../src/agent-prompts/_sections/commit-discipline.js";
 
 describe("subagent commit-discipline (GC-2026-038 T1)", () => {
-	it("T-CD-01: developer.ts contains the commit discipline section header", () => {
+	it("T-CD-01: rendered DEVELOPER_PROMPT contains the commit discipline section header", () => {
 		expect(DEVELOPER_PROMPT).toContain(
 			"Commit Discipline (commit-as-checkpoint)",
 		);
+	});
+
+	it("T-CD-01b: rendered DEVELOPER_PROMPT contains the section byte-identically (extraction invariant)", () => {
+		expect(DEVELOPER_PROMPT).toContain(COMMIT_DISCIPLINE_SECTION);
 	});
 
 	it("T-CD-02: every RED test ends with wip: <test> red", () => {

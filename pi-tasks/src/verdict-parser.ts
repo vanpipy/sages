@@ -11,17 +11,36 @@
  *       issue: <string>
  *       location: <string>      (optional)
  *       recommendation: <string>(optional)
- *   scope_check: pass | fail    (optional)
- *   anti_goal_check: pass | fail (optional)
+ *   scope_check: pass | fail | absent
+ *     scope_check_skipped: <reason>  (required when scope_check: absent)
+ *   anti_goal_check: pass | fail | absent
+ *     anti_goal_check_skipped: <reason>  (required when anti_goal_check: absent)
+ *   evidence:
+ *     typecheck: <output line>
+ *     tests: <output summary>
+ *     lint: <output summary>
+ *     files_read: [paths]
+ *     commands_run: [cmds]
  *
- * This is a faithful port of path A's parser (`pi-orchestrator/src/workflow-run.ts:228-335`)
- * with the import path changed. Keeping it byte-equivalent means the same
- * Reviewer prompts work in both paths.
+ * GC-2026-prompt-parser-contract-cleanup additions:
+ *   1. **File-fallback path** — when the message has no yaml fence, fall
+ *      back to reading the durable \`.pi/orchestrator/verdict-{task_id}.md\`
+ *      file the Reviewer writes via atomic rename before emitting the
+ *      final message. The caller passes the path via \`opts.verdictFilePath\`.
+ *   2. **Strict dimension enforcement** — \`scope_check: pass\` and
+ *      \`anti_goal_check: pass\` are required. \`fail\` → NEEDS_WORK.
+ *      \`absent\` → only counts as satisfied when paired with a non-empty
+ *      \`<dim>_skipped\` reason in evidence; missing skip-reason → NEEDS_WORK.
+ *   3. **CLEAN + non-empty findings is malformed** — the parser treats
+ *      that combination as NEEDS_WORK (a CLEAN verdict contradicts the
+ *      existence of findings; the Reviewer meant NEEDS_WORK).
  *
  * Default-on-failure: any parsing problem returns NEEDS_WORK with empty
  * findings. The reviewer must explicitly mark CLEAN with evidence; missing
  * evidence should never produce a spurious clean bill of health.
  */
+
+import { existsSync, readFileSync, statSync } from "node:fs";
 
 export type FindingSeverity = "minor" | "major" | "critical";
 
@@ -35,8 +54,21 @@ export interface Finding {
 export interface ReviewerVerdict {
   verdict: "CLEAN" | "NEEDS_WORK";
   findings?: Finding[];
-  scope_check?: string;
-  anti_goal_check?: string;
+  scope_check?: "pass" | "fail" | "absent";
+  scope_check_skipped?: string;
+  anti_goal_check?: "pass" | "fail" | "absent";
+  anti_goal_check_skipped?: string;
+}
+
+export interface ParseVerdictOptions {
+  /**
+   * Absolute path to a durable verdict file (typically
+   * \`.pi/orchestrator/verdict-{task_id}.md\`) the Reviewer writes via atomic
+   * rename before emitting the final message. When the message has no yaml
+   * fence (e.g. max_turns hard-abort truncated the message), the parser
+   * falls back to reading this file. Empty / undefined = no fallback.
+   */
+  verdictFilePath?: string;
 }
 
 const VERDICT_FENCE = "```yaml\n";
@@ -44,29 +76,31 @@ const VERDICT_FENCE = "```yaml\n";
 /**
  * Parse the Reviewer's final message into a structured verdict.
  *
- * Behavior contract (mirrors path A):
- *  - No message → NEEDS_WORK (safe default).
- *  - No ```yaml fence → NEEDS_WORK.
- *  - Malformed YAML → NEEDS_WORK.
+ * Behavior contract (GC-2026-prompt-parser-contract-cleanup):
+ *  - No message AND no verdict file → NEEDS_WORK (safe default).
+ *  - No ```yaml fence in message → fall back to verdictFilePath (if provided).
+ *  - Verdict file also missing/malformed → NEEDS_WORK.
  *  - verdict field present but not CLEAN (case-insensitive) → NEEDS_WORK.
+ *  - `verdict: CLEAN` + `findings: non-empty` → malformed → NEEDS_WORK.
+ *  - `scope_check: fail` → NEEDS_WORK (regardless of verdict).
+ *  - `anti_goal_check: fail` → NEEDS_WORK.
+ *  - `scope_check: absent` without `scope_check_skipped:` → NEEDS_WORK.
+ *  - `anti_goal_check: absent` without `anti_goal_check_skipped:` → NEEDS_WORK.
  *  - `findings: []` (inline empty list) is honored as zero findings.
  *  - `findings:` with `- key: val` items is parsed line-by-line.
  *  - Continuation lines inside a finding (indented key:value) update the
  *    current finding only when the key is a known finding property.
  *  - The LAST fence is used when multiple are present.
  */
-export function parseReviewerVerdict(message: string | undefined): ReviewerVerdict {
-  if (!message) {
+export function parseReviewerVerdict(
+  message: string | undefined,
+  opts?: ParseVerdictOptions,
+): ReviewerVerdict {
+  const yamlText = extractLastYamlFence(message) ?? readVerdictFile(opts?.verdictFilePath);
+  if (!yamlText) {
     return { verdict: "NEEDS_WORK", findings: [] };
   }
 
-  const lastOpen = message.lastIndexOf(VERDICT_FENCE);
-  const closeAfterOpen = lastOpen >= 0 ? message.indexOf("```", lastOpen + VERDICT_FENCE.length) : -1;
-  if (lastOpen < 0 || closeAfterOpen < 0) {
-    return { verdict: "NEEDS_WORK", findings: [] };
-  }
-
-  const yamlText = message.slice(lastOpen + VERDICT_FENCE.length, closeAfterOpen).trim();
   try {
     const obj: Record<string, unknown> = {};
     let currentFindings: Finding[] = [];
@@ -128,15 +162,90 @@ export function parseReviewerVerdict(message: string | undefined): ReviewerVerdi
     if (currentFindings.length > 0) obj.findings = currentFindings;
 
     const verdictRaw = String(obj.verdict ?? "").toUpperCase();
-    const verdict = verdictRaw === "CLEAN" ? "CLEAN" : "NEEDS_WORK";
+    const verdictDeclared = verdictRaw === "CLEAN" ? "CLEAN" : "NEEDS_WORK";
+
+    // GC-2026-prompt-parser-contract-cleanup #3: CLEAN + non-empty findings
+    // is a contradiction. Treat as malformed → NEEDS_WORK.
+    const findings = Array.isArray(obj.findings) ? (obj.findings as Finding[]) : [];
+    if (verdictDeclared === "CLEAN" && findings.length > 0) {
+      return { verdict: "NEEDS_WORK", findings };
+    }
+
+    // GC-2026-prompt-parser-contract-cleanup #2: strict dimension checks.
+    const scope_check = normalizeDim(obj.scope_check);
+    const anti_goal_check = normalizeDim(obj.anti_goal_check);
+    const scope_check_skipped =
+      typeof obj.scope_check_skipped === "string" && obj.scope_check_skipped.trim().length > 0
+        ? obj.scope_check_skipped.trim()
+        : undefined;
+    const anti_goal_check_skipped =
+      typeof obj.anti_goal_check_skipped === "string" &&
+      obj.anti_goal_check_skipped.trim().length > 0
+        ? obj.anti_goal_check_skipped.trim()
+        : undefined;
+
+    const dimensionFails =
+      scope_check === "fail" ||
+      anti_goal_check === "fail" ||
+      (scope_check === "absent" && !scope_check_skipped) ||
+      (anti_goal_check === "absent" && !anti_goal_check_skipped);
+
     return {
-      verdict,
-      findings: Array.isArray(obj.findings) ? (obj.findings as Finding[]) : [],
-      scope_check: typeof obj.scope_check === "string" ? obj.scope_check : undefined,
-      anti_goal_check: typeof obj.anti_goal_check === "string" ? obj.anti_goal_check : undefined,
+      verdict: dimensionFails ? "NEEDS_WORK" : verdictDeclared,
+      findings,
+      scope_check,
+      scope_check_skipped,
+      anti_goal_check,
+      anti_goal_check_skipped,
     };
   } catch {
     return { verdict: "NEEDS_WORK", findings: [] };
+  }
+}
+
+function normalizeDim(raw: unknown): "pass" | "fail" | "absent" | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.toLowerCase().trim();
+  if (v === "pass") return "pass";
+  if (v === "fail") return "fail";
+  if (v === "absent") return "absent";
+  return undefined;
+}
+
+/**
+ * Extract the LAST \`\`\`yaml fence body from a message. Returns null if no
+ * fence is found (or the closing fence is missing).
+ */
+function extractLastYamlFence(message: string | undefined): string | null {
+  if (!message) return null;
+  const lastOpen = message.lastIndexOf(VERDICT_FENCE);
+  if (lastOpen < 0) return null;
+  const closeAfterOpen = message.indexOf("```", lastOpen + VERDICT_FENCE.length);
+  if (closeAfterOpen < 0) return null;
+  return message.slice(lastOpen + VERDICT_FENCE.length, closeAfterOpen).trim();
+}
+
+/**
+ * Read the durable verdict file at `verdictFilePath`. Returns null if the
+ * path is unset, the file is missing, or read/parse fails. The file is the
+ * GC-2026-prompt-parser-contract-cleanup durable backup path — the Reviewer
+ * writes it via atomic rename before emitting the final message, so a
+ * max_turns hard abort that truncates the message still leaves the verdict
+ * recoverable.
+ *
+ * GC-2026-path-B-streaming note: a separate file mtime cache layer belongs in
+ * `verdict-parser-helpers.ts` once we start parsing verdicts at high frequency;
+ * the parser itself stays synchronous and pure.
+ */
+function readVerdictFile(verdictFilePath: string | undefined): string | null {
+  if (!verdictFilePath) return null;
+  try {
+    if (!existsSync(verdictFilePath)) return null;
+    const stat = statSync(verdictFilePath);
+    if (!stat.isFile() || stat.size === 0) return null;
+    return readFileSync(verdictFilePath, "utf-8");
+  } catch {
+    return null;
   }
 }
 

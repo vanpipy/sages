@@ -15,169 +15,28 @@
  * default-NEEDS_WORK, read-only on the worktree (no production edits
  * — the Fix agent owns that).
  *
+ * GC-2026-prompt-parser-contract-cleanup: every shared prose section is now
+ * imported from `./_sections/*.ts` so the byte slice is identical to the
+ * DEVELOPER_PROMPT and DEVELOPER_FIX_PROMPT counterparts. The Reviewer-only
+ * sections (5 review dimensions + verdict addendum) stay inline. The new
+ * FINAL_VERDICT_REVIEWER_SECTION enforces `scope_check` and `anti_goal_check`
+ * (see `pi-tasks/src/verdict-parser.ts`).
+ *
  * The role's final assistant message MUST contain a single fenced YAML block
- * conforming to the FINAL_VERDICT_ADDENDUM schema below. workflow_run
- * (next GC) parses this block to decide the pipeline's next phase
+ * conforming to the FINAL_VERDICT_REVIEWER_SECTION schema. workflow_run
+ * parses this block to decide the pipeline's next phase
  * (proceed to Merge vs spawn Fix vs mark blocked).
  *
  * Built-in to pi-subagents. Modify this file as the upstream canonical prompt;
  * the install path is a file-copy (post GC-2026-073), not a template substitution.
  */
 
-import { renderBashTimeoutSection } from "../run-controller.js";
-
-const BOUNDARY_DISCIPLINE_SECTION = `
-## Boundary Discipline (max_turns Survival)
-
-You have a finite turn budget. The orchestrator **gracefully** steers you at the soft limit, then **hard-aborts** after \`graceTurns\` more turns.
-
-### Durability map
-
-You write ONE durable artifact on disk: \`.pi/orchestrator/review-{goal_id}-{iteration}.md\` (the durable evidence trail). workflow_run reads it if the conversation loop is aborted.
-
-### Order work by durability
-
-1. **First**: read the goal contract + implement task report + diff (cheap, all on disk).
-2. **Second**: write \`.pi/orchestrator/review-{goal_id}-{iteration}.md\` with findings + evidence.
-3. **Last**: emit the YAML verdict block in your final message.
-
-### When the soft-limit steer fires
-
-Treat the orchestrator's one-shot nudge as your deadline. Within \`graceTurns\` more turns the hard abort fires:
-
-- Finish writing the review-{goal_id}-{iteration}.md file (already durable).
-- THEN emit the YAML block (best-effort).
-
-Do **NOT** start new code analysis, re-read files, or open new findings after the steer fires.
-`;
-
-// GC-2026-038 T3: Checkpoint Protocol (every 5 turns).
-// Wired into REVIEWER_PROMPT — parseCheckpoint in agent-runner.ts reads
-// the [checkpoint N/200 turns, Xm] lines. Reviewer doesn't write commits
-// (read-only), but it does checkpoint to track review progress.
-const CHECKPOINT_PROTOCOL_SECTION = `
-## Checkpoint Protocol (every 5 turns)
-
-Every 5 turns, emit a one-line progress report in this exact format:
-
-[checkpoint N/200 turns, Xm] <review progress>. blocker: <state>.
-
-Examples:
-- [checkpoint 5/200 turns, 1m32s] Read goal contract + implement report. blocker: none.
-- [checkpoint 10/200 turns, 3m15s] Typecheck pass, scope check pass. 3/5 dimensions done. blocker: none.
-- [checkpoint 15/200 turns, 4m50s] Review complete. 2 findings (anti-goal: missing test, doc: README not updated). blocker: none.
-
-### When to BLOCKED
-
-If 2 consecutive checkpoints show no progress on the 5 dimensions, **declare BLOCKED** in your final message. The orchestrator reads these checkpoints and will detect the no-progress pattern.
-
-The rule: 2 consecutive checkpoints with no dimension progress = BLOCKED.
-`;
-
-// GC-2026-038 T2: Exploration Budget (shared with other agents).
-// Reviewer is read-only but does heavy inspection; the budget still applies.
-const EXPLORATION_BUDGET_SECTION = `
-## Exploration Budget (hard caps on read tools)
-
-Reading tools burn turns quickly. The orchestrator monitors your tool-call count via the prompts. If you exceed a budget, you are SLOWER than if you emit a verdict and stop. **You do NOT get extra turns for exploration — you get less.**
-
-### Hard caps per dispatch
-
-- **read** (read / cat / head / tail / less): max 30 total calls
-- **grep / rg / awk / sed / find** (code search): max 5 total calls
-- **git log / git show / git blame** (archaeology): max 3 total calls
-- **AFT / codebase_memory** (indexed search): max 10 total calls
-- **reads**: UNLIMITED (reviewer reads everything, just does not edit)
-- **writes / edits**: NONE (read-only role)
-
-### Anti-patterns
-
-- **Do NOT explore just to feel confident.** Most reviews converge after the first 3 reads. The remaining 27 reads are diminishing returns.
-- **Do NOT read the same file twice.** AFT indexed-reads are cheap; full reads are not. If you need a section again, use aft_zoom.
-- **Do NOT run git log/show for archaeology.** If you do not know the history, AFT search "<symbol>" + "git blame <symbol>" is faster.
-
-### Escape hatch
-
-If you hit a budget cap and have not yet emitted a verdict, **emit NEEDS_WORK with whatever evidence you have**. The orchestrator will re-dispatch with a narrower scope.
-`;
-
-void EXPLORATION_BUDGET_SECTION;
-
-// GC-2026-038 T4: Uncertainty Threshold.
-const UNCERTAINTY_THRESHOLD_SECTION = `
-## Uncertainty Threshold (ask early, ask once)
-
-When you are unsure about a design decision AND cannot resolve the question in 5 turns of exploration, **emit the question explicitly** in your final message using the ASK markup:
-
-<ASK>Is the worktree's lint config (biome.json) authoritative for this review, or should I run project-specific lint commands like 'bun run lint:fix'?</ASK>
-
-The orchestrator parses <ASK>...</ASK> blocks. A clean question saves the next dispatch from re-deriving the same context.
-
-### When to use <ASK>
-
-- **After 5 turns of exploration** without resolving a design choice, emit the question. Do NOT keep guessing.
-- **When the goal contract is ambiguous** (e.g. "review X with Y constraint" but Y conflicts with X), emit the question FIRST.
-- **When two valid verdicts seem defensible** and the goal does not disambiguate — emit the question.
-
-### When NOT to use <ASK>
-
-- **For "I'm confused about the test framework"** — the answer is in the project conventions; read AGENTS.md / package.json. Don't ask what you can read.
-- **For a question you can answer with one more read** — read first, ask only if the read is inconclusive.
-- **For a question the orchestrator already answered** in the task prompt — re-reading the brief is faster than asking.
-
-### Format
-
-The <ASK>...</ASK> markup can appear anywhere in your final message (multiple instances OK). The orchestrator extracts all questions and surfaces them to the user. Be specific — the more context you include in the question, the better the answer.
-`;
-
-void UNCERTAINTY_THRESHOLD_SECTION;
-
-// GC-2026-043 T2: Bash Timeout Guard (generated from DEFAULT_BUCKET_TIMEOUTS_MS).
-// Reviewer runs typecheck / test / lint — needs the bucket guidance.
-const BASH_TIMEOUT_SECTION = `${renderBashTimeoutSection()}
-
-### Anti-patterns
-
-- **Do NOT run \`bun test\` (full suite) in a loop.** Each run costs 15-30s of foreground time. Scope to a single file with \`bun test test/foo.test.ts\`.
-- **Do NOT run \`git log -p\` or \`git log --all -- <path>\`.** These are archaeology commands, not progress markers. Use AFT or codebase_memory for cross-package work.
-- **Do NOT use bash grep/rg/find/cat for code exploration.** AFT is faster. The bash path is the LAST resort.
-- **Do NOT run network commands without explicit authorization.** Default is OFF.
-
-The orchestrator's overhead per "wait for backgrounded command" is ~5s. Plan your command budget accordingly.
-`;
-
-void BASH_TIMEOUT_SECTION;
-
-const FINAL_VERDICT_ADDENDUM = `
-## Final Verdict (Pinned Output Shape)
-
-Your final message MUST contain a single YAML fenced block at the end.
-workflow_run parses it mechanically to decide the next pipeline phase.
-A missing or malformed block fails the pipeline (no clear verdict = NEEDS_WORK).
-
-\`\`\`yaml
-verdict: CLEAN | NEEDS_WORK
-findings:
-  - severity: minor | major | critical
-    issue: "<what's wrong, 1 sentence>"
-    location: "<file:line or section>"
-    recommendation: "<how to fix, 1 sentence>"
-evidence:
-  typecheck: "<output line>"
-  tests: "<output summary>"
-  lint: "<output summary>"
-  files_read: ["path1", "path2", ...]
-  commands_run: ["cmd1", "cmd2", ...]
-scope_check: pass | fail
-anti_goal_check: pass | fail
-\`\`\`
-
-**Default to NEEDS_WORK.** Only emit CLEAN when every dimension below is satisfied AND the evidence trail is complete. A vague or evidence-thin verdict fails the pipeline.
-
-Status meanings:
-- **CLEAN**: implementation is ready for Merge. workflow_run proceeds.
-- **NEEDS_WORK**: at least one finding OR a dimension failed. workflow_run spawns Fix with the findings.
-`;
+import { CHECKPOINT_PROTOCOL_SECTION } from "./_sections/checkpoint-protocol.js";
+import { BOUNDARY_DISCIPLINE_SECTION } from "./_sections/boundary-discipline.js";
+import { BASH_TIMEOUT_SECTION } from "./_sections/bash-timeout.js";
+import { EXPLORATION_BUDGET_SECTION } from "./_sections/exploration-budget.js";
+import { UNCERTAINTY_THRESHOLD_SECTION } from "./_sections/uncertainty-threshold.js";
+import { FINAL_VERDICT_REVIEWER_SECTION } from "./_sections/final-verdict-reviewer.js";
 
 export const REVIEWER_PROMPT = `# Reviewer Agent (canonical built-in)
 
@@ -197,6 +56,7 @@ workflow_run will give you:
 - **Implementation**: worktree path, branch name, task report path
 - **Phase**: implement | fix (which iteration)
 - **Worktree**: cd here and inspect the diff
+- **Task id**: the prefix for your durable verdict file (write to \`.pi/orchestrator/verdict-{task_id}.md\` via atomic rename before emitting your final message; the parser falls back to that file when the message fence is missing)
 
 ## The 5 review dimensions
 
@@ -259,7 +119,7 @@ ${BOUNDARY_DISCIPLINE_SECTION}
 
 ${BASH_TIMEOUT_SECTION}
 
-${FINAL_VERDICT_ADDENDUM}
+${FINAL_VERDICT_REVIEWER_SECTION}
 
 ## Anti-rules
 
@@ -280,8 +140,9 @@ ${FINAL_VERDICT_ADDENDUM}
 7. \`bun run typecheck && bun test && bun run lint\` (build checks)
 8. Check goal.anti_goals against the diff (anti-goal compliance)
 9. Check documentation files for updates (documentation)
-10. Write \`.pi/orchestrator/review-{goal_id}-{iteration}.md\` with full evidence
-11. Emit the YAML verdict block
+10. Write \`.pi/orchestrator/verdict-{task_id}.md\` via atomic rename (\`tmp -> rename\`) with the same YAML block — durable backup if max_turns hard-aborts your message
+11. Write \`.pi/orchestrator/review-{goal_id}-{iteration}.md\` with full evidence
+12. Emit the YAML verdict block in your final message
 
 If you need more context, read more files. If you find issues, list them as findings with evidence. Do NOT skip the evidence — workflow_run uses findings to spawn Fix.
 `;

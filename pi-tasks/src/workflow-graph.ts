@@ -86,6 +86,13 @@ function implementDescription(goal: WorkflowGoal, worktreePath: string): string 
 }
 
 function reviewDescription(goal: WorkflowGoal, iteration: number, worktreePath: string, branch: string): string {
+  // The task_id is the literal id pi-tasks assigns this task. The
+  // dispatch brief inlines it so the Reviewer knows where to write the
+  // durable verdict-{task_id}.md backup. The parser in workflow-handler
+  // falls back to this file when the final message fence is missing.
+  // GC-2026-prompt-parser-contract-cleanup #4/#5: tell the Reviewer to
+  // atomic-rename the file BEFORE the final message.
+  const taskIdPlaceholder = "__review_task_id__";
   return [
     `# Review phase (implement iteration ${iteration})`,
     ``,
@@ -111,14 +118,19 @@ function reviewDescription(goal: WorkflowGoal, iteration: number, worktreePath: 
     `Run the 5-dimension review (correctness, completeness, scope adherence, anti-goal compliance, documentation).`,
     `Read .pi/orchestrator/review-${goal.id}-${iteration}.md for the durable evidence trail pattern.`,
     ``,
-    `## Output`,
+    `## Output — pinned YAML schema`,
     `Final message MUST contain a fenced \`\`\`yaml block with:`,
     `verdict: CLEAN | NEEDS_WORK`,
-    `findings: [...]`,
-    `scope_check: pass | fail`,
-    `anti_goal_check: pass | fail`,
+    `findings: [...]   # empty list [] for CLEAN; non-empty + NEEDS_WORK otherwise`,
+    `scope_check: pass | fail | absent   # absent needs scope_check_skipped: <reason>`,
+    `anti_goal_check: pass | fail | absent   # absent needs anti_goal_check_skipped: <reason>`,
+    `evidence: { typecheck, tests, lint, files_read, commands_run }`,
     ``,
-    `Default to NEEDS_WORK. Only CLEAN if every dimension has explicit evidence.`,
+    `Default to NEEDS_WORK. Only CLEAN if every dimension has explicit evidence and findings list is empty.`,
+    `CLEAN with non-empty findings is malformed → parser downgrades to NEEDS_WORK.`,
+    ``,
+    `## Durable backup (atomic rename BEFORE final message)`,
+    `Your task id is \`${taskIdPlaceholder}\` (resolved at dispatch time). Before you emit the final message, write the same YAML block to \`.pi/orchestrator/verdict-${taskIdPlaceholder}.md\` via atomic rename (\`tmpfile -> rename\`). The parser falls back to this file if the message fence is missing.`,
   ].join("\n");
 }
 
@@ -128,7 +140,6 @@ function fixDescription(goal: WorkflowGoal, iteration: number, worktreePath: str
     ``,
     `## Reviewer findings (NEEDS_WORK)`,
     `Read the review task's metadata.verdict — it contains findings[] from the previous Reviewer.`,
-    `If findings are empty or trivial, mark the worktree as completed with no changes (empty commit).`,
     ``,
     `## Workspace`,
     `- Worktree: ${worktreePath}`,
@@ -137,14 +148,24 @@ function fixDescription(goal: WorkflowGoal, iteration: number, worktreePath: str
     `## Process`,
     `1. cd ${worktreePath}`,
     `2. Read the Reviewer's verdict metadata (task metadata.verdict).`,
-    `3. If verdict is NEEDS_WORK: address each finding in findings[].`,
-    `4. If verdict is CLEAN: emit an empty commit (\`git commit --allow-empty -m "fix: review clean, no changes"\`).`,
-    `5. typecheck + test must be green.`,
-    `6. Final message MUST contain a single fenced \`\`\`yaml block with status / deliverables / commits.`,
+    `3. Branch on the verdict:`,
+    `   - \`verdict.verdict === "CLEAN"\` → emit empty commit (\`git commit --allow-empty -m "fix: review clean, no changes (iter ${iteration})"\`); skip to step 6.`,
+    `   - \`verdict.verdict === "NEEDS_WORK"\` → address each finding in \`findings[]\` ordered by severity (critical → major → minor). For each finding: minimum code change + typecheck + test + commit (\`fix(<scope>): <one-line>\`).`,
+    `4. If a finding is genuinely infeasible (contradicts goal.anti_goals): commit \`docs: <finding id> deferred — see anti_goals\`.`,
+    `5. The DEVELOPER_FIX_PROMPT (in \`pi-subagents/src/agent-prompts/_fix.ts\`) is the full contract — the description above is just the dispatch brief; the prompt governs behavior.`,
+    `6. Final message MUST contain a single fenced \`\`\`yaml block with status / deliverables / commits (per DEVELOPER_FIX_PROMPT's Final Verdict section).`,
   ].join("\n");
 }
 
 function mergeDescription(goal: WorkflowGoal, branch: string, worktreePath: string): string {
+  // GC-2026-prompt-parser-contract-cleanup #6: soft-mode safety boundary.
+  // Previously this description instructed the Merger to execute
+  // `git merge --no-ff` into main and `git push origin main` — both
+  // violations of `~/AGENTS.md` "Permission gate required" (merge to a
+  // protected branch + push to remote are side-effects, not local
+  // reversible ops). The Merger is now strictly read+advisory: it
+  // writes the exact merge/push commands a human should run, but does
+  // NOT execute them.
   return [
     `# Merge phase for goal ${goal.title}`,
     ``,
@@ -152,11 +173,31 @@ function mergeDescription(goal: WorkflowGoal, branch: string, worktreePath: stri
     `- Source branch: ${branch}`,
     `- Worktree: ${worktreePath}`,
     ``,
-    `## Process`,
-    `1. From the main checkout, run \`git merge --no-ff ${branch} -m "merge(${goal.id}): ${goal.title}"\`.`,
-    `2. If push is required, run \`git push origin main\`.`,
-    `3. Clean up the worktree at ${worktreePath} (\`git worktree remove --force ${worktreePath}\`).`,
-    `4. Final message MUST contain a fenced \`\`\`yaml block with merge_commit: <sha>.`,
+    `## Process — ADVISORY ONLY, no git merge or push from this agent`,
+    ``,
+    `1. From the main checkout (\`cd <repo_root>\`), verify the source branch:`,
+    `   \`\`\`bash`,
+    `   git log --oneline ${branch} ^main | head -20   # confirm branch exists and is reachable`,
+    `   \`\`\``,
+    `2. Review the audit report (read \`.pi/orchestrator/audit-merge-{task_id}.md\`).`,
+    `3. Write \`.pi/orchestrator/merge-recommendation.md\` with the EXACT commands a human should run:`,
+    `   \`\`\`markdown`,
+    `   # Merge recommendation for ${goal.id}: ${goal.title}`,
+    `   ## Source branch`,
+    `   ${branch}`,
+    `   ## Worktree`,
+    `   ${worktreePath}`,
+    `   ## Recommended commands (run from main checkout, in order)`,
+    `   `,
+    `   git merge --no-ff ${branch} -m "merge(${goal.id}): ${goal.title}"`,
+    `   # Verify after merge:`,
+    `   bun run typecheck && bun test`,
+    `   # Push (only if the user has explicitly authorized a push):`,
+    `   # git push origin main`,
+    `   \`\`\``,
+    `4. DO NOT execute \`git merge\` or \`git push\` from this agent — these are side-effecting ops requiring a permission gate per \`~/AGENTS.md\`. The Merger writes the recommendation and stops.`,
+    `5. Clean up the worktree at ${worktreePath} (\`git worktree remove --force ${worktreePath}\`).`,
+    `6. Final message MUST contain a fenced \`\`\`yaml block with \`recommendation_path: .pi/orchestrator/merge-recommendation.md\` and \`outcome: MERGED | ESCALATED\`.`,
   ].join("\n");
 }
 
