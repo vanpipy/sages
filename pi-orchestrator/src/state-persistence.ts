@@ -186,28 +186,6 @@ export function atomicWriteOrchestratorFile<T>(
   }
 }
 
-/** Atomically write a non-YAML owned report with the same containment/lock rules. */
-export function atomicWriteOrchestratorText(
-  cwd: string,
-  relativePath: string,
-  content: string,
-  owner: OrchestratorNamespaceOwner,
-): string {
-  const target = resolveContainedPath(cwd, relativePath, owner);
-  const lock = acquireLock(target);
-  const temp = join(dirname(target), `.tmp-${basename(target)}-${process.pid}-${crypto.randomUUID()}`);
-  try {
-    const fd = openSync(temp, "wx", 0o600);
-    try { writeFileSync(fd, content, "utf8"); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(temp, target);
-    try { chmodSync(target, 0o600); } catch { /* non-POSIX */ }
-    return target;
-  } finally {
-    if (existsSync(temp)) try { unlinkSync(temp); } catch { /* best effort */ }
-    releaseLock(lock);
-  }
-}
-
 /** Load owned YAML only after containment, symlink, parse, and runtime checks. */
 export function loadYamlOrchestratorFile<T>(
   cwd: string,

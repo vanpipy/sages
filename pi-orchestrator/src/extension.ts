@@ -74,11 +74,13 @@ export const PI_SUBAGENT_TOOLS = [
 ] as const;
 
 /**
- * Tools registered by the orchestrator's own `registerSubagentControlTools`
- * (GC-2026-073). These delegate to the same `AgentManager` singleton
- * via the shared globalThis registry key
- * `Symbol.for("pi-subagents:manager")` — there is exactly one manager,
- * shared end-to-end with the `Agent` tool.
+ * Tools registered by `@sages/pi-subagents` (GC-2026-boundary-subagent-control
+ * moved the registration out of the orchestrator). These delegate to
+ * the same `AgentManager` singleton via the shared globalThis registry
+ * key `Symbol.for("pi-subagents:manager")` — there is exactly one
+ * manager, shared end-to-end with the `Agent` tool. The orchestrator's
+ * constant is purely for `setActiveTools` filtering; it does NOT
+ * register anything.
  */
 export const SUBAGENT_CONTROL_TOOLS = [
 	"subagent_status",
@@ -225,21 +227,16 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 }
 
 /**
- * Register the `/brainstorm` slash command. Called separately from
- * `registerOrchestratorTools` because the brainstorm flow is an
- * interactive state machine, not an LLM-callable tool.
- */
-export function registerBrainstormCommand(pi: ExtensionAPI): void {
-	// The brainstorm slash command is registered via the skill in
-	// `skills/brainstorming/SKILL.md`.
-}
-
-/**
- * Default pi extension entrypoint.
+  * Default pi extension entrypoint.
  *
  * GC-2026-097 M5: synchronously validate the failure-catalog at boot
  * (NOT on first lookup) so a malformed shipped catalog throws at
  * session_start instead of deep in a workflow 4 tool calls later.
+ *
+ * GC-2026-098 L8: the previous `registerBrainstormCommand` stub was
+ * deleted. The `/brainstorm` slash command is registered via the
+ * skill at `skills/brainstorming/SKILL.md` — see that file for the
+ * registration mechanism.
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
 	validateFailureCatalogOnBoot();

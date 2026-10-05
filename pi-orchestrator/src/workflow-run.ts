@@ -29,8 +29,8 @@
  * emits events and waits for completion notifications.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { Type, type Static } from "typebox";
 
@@ -854,12 +854,3 @@ function buildClarificationOutput(
 		summary: `Goal ${goalId} needs clarification: ${openQuestion ?? "(no question provided)"}`,
 	};
 }
-
-// Silence lint for the unused `dirname` / `join` / `existsSync` / `readFileSync` / `executeTool`
-// imports kept for symmetry with the path A state machine — they may be needed by future
-// state-resume support that the slim version intentionally omits.
-void dirname;
-void join;
-void existsSync;
-void readFileSync;
-void Type;
