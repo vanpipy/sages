@@ -57,13 +57,16 @@ export function registerWorkflowRunTool(pi: ExtensionAPI): void {
 			"Returns status (success/blocked), task summaries, paths, and any unresolved findings. " +
 			"GC-2026-pi-tasks-integration: also creates 4 pi-tasks tasks (Implement / Review / " +
 			"Fix / Merge) tagged with metadata.workflow_run_goal_id so the LLM can see live " +
-			"progress via TaskList.",
+			"progress via TaskList. " +
+			"GC-2026-workflow-chat-stream: streams partial progress via the host's " +
+			"`onUpdate` callback so the user sees phases appearing live in the chat thread " +
+			"(host renders each call as a partial tool-result block).",
 		parameters: WorkflowRunParams,
 		execute: async (
 			_toolCallId: string,
 			params: WorkflowRunInput,
 			_signal: AbortSignal | undefined,
-			_onUpdate: ((update: unknown) => void) | undefined,
+			onUpdate: ((update: unknown) => void) | undefined,
 			ctx: ExtensionToolContext,
 		) => {
 			const result = await executeWorkflowRun(params, {
@@ -72,6 +75,12 @@ export function registerWorkflowRunTool(pi: ExtensionAPI): void {
 				repoCwd: ctx.cwd,
 				executeTool: async (name, args) =>
 					unwrapExecuteToolOutcome(await ctx.executeTool(name, args)),
+				// GC-2026-workflow-chat-stream: forward the host's onUpdate so
+				// workflow_run can stream partial progress to the chat. The
+				// typing is loose here (pi-coding-agent exposes it as
+				// `(update: unknown) => void`); workflow-run narrows it to
+				// WorkflowProgressUpdate internally.
+				onUpdate,
 			});
 			return {
 				content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

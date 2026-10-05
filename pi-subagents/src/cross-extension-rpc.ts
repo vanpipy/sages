@@ -24,6 +24,10 @@ const RPC_SPAWN_OPTION_KEYS = new Set([
 	"isolation",
 	"cwd",
 	"managedWorktree",
+	// GC-2026-workflow-chat-stream: pass workflow context from
+	// pi-tasks's subscribeWorkflow so AgentWidget can render a
+	// `(workflow: GC-X · Review 2)` badge alongside the agent label.
+	"workflowContext",
 ]);
 
 /** Minimal event bus interface needed by the RPC handlers. */

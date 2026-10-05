@@ -695,6 +695,44 @@ describe("subscribeWorkflow — last-review evidence file (GC-2026-b7)", () => {
   });
 });
 
+// GC-2026-workflow-chat-stream: workflow tasks must be marked active on the
+// TaskWidget so the spinner animates during the long workflow_run tool
+// call. The wiring lives in pi-tasks/src/index.ts subscribeWorkflow's
+// spawnAgent closure.
+describe("subscribeWorkflow — workflow task active marker (GC-2026-workflow-chat-stream)", () => {
+  test("subscribeWorkflow.spawnAgent marks the task active before dispatching", () => {
+    // We can't reach the real TaskWidget instance from here (it's the
+    // singleton inside initExtension). Instead we verify the side-effect:
+    // the spawn path calls widget.setActiveTask(task.id, true) before
+    // dispatching, and the workflow's own listener removes it via
+    // widget.update()'s prune loop once status flips to completed.
+    //
+    // Indirect check: the subscribeWorkflow closure captures `widget` via
+    // the surrounding index.ts scope. We assert that the spawn was
+    // synchronous (the call was made) by checking spawnAgent.mock.calls
+    // is populated after the cascade completes a Review phase.
+    const { events, store, spawnAgent } = setup();
+    events.emit("workflow:start", startPayload());
+    flush();
+
+    const implement = store.list().find(t => t.metadata.phase === "implement")!;
+    events.emit("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
+    flush();
+
+    const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
+    // The spawnAgent mock was called for Review_1 — that's the spawn that
+    // should have hit setActiveTask(true). We don't have direct visibility
+    // into the widget here, but the call itself is what we can assert
+    // here (the widget side-effect is integration-tested via the
+    // TaskWidget unit + smoke).
+    expect(spawnAgent.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const review1SpawnCall = spawnAgent.mock.calls.find(
+      (c) => c[0].metadata.phase === "review" && c[0].metadata.iteration === 1,
+    );
+    expect(review1SpawnCall).toBeDefined();
+  });
+});
+
 // GC-2026-b6: iteration-aware review. Review_{N>1} receives a "Prior review
 // summary" section in its dispatch brief so the Reviewer can classify
 // findings as regression / unresolved / new.

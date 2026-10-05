@@ -414,6 +414,30 @@ export default function (pi: ExtensionAPI) {
           mode: "create",
         };
       }
+      // GC-2026-workflow-chat-stream: forward the workflow context
+      // (goal_id + phase + iteration) so AgentWidget can render a
+      // `(workflow: GC-X · Review 2)` badge. Pulled from the task's
+      // metadata which workflow-handler stamps when creating each phase.
+      if (goalId && task.metadata?.phase) {
+        spawnOpts.workflowContext = {
+          goalId,
+          phase: task.metadata.phase,
+          iteration: Number(task.metadata.iteration ?? 0),
+        };
+      }
+
+      // GC-2026-workflow-chat-stream: mark workflow tasks active on the
+      // TaskWidget so the user sees the spinner move through Implement →
+      // Review → Fix → Merge during a workflow_run. workflow-handler
+      // has its own agentToTask map (separate from agentTaskMap above) and
+      // handles the subagents:completed path itself; the OUTER listener at
+      // line 304 looks up agentTaskMap which doesn't see workflow tasks,
+      // so widget.setActiveTask is the only path to animate workflow tasks.
+      // The widget's isActive check requires both activeTaskIds.has AND
+      // status==='in_progress'; when workflow-handler flips status to
+      // completed on its own listener, the next widget.update() prunes the
+      // stale active ID via the loop in update().
+      widget.setActiveTask(task.id, true);
 
       return spawnSubagent(type, task.description, spawnOpts);
     },

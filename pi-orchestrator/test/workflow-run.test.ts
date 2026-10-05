@@ -126,12 +126,13 @@ function makeHarness(): Harness {
 	// Promise to read the result. This mirrors production: the LLM's tool
 	// call awaits workflow_run while pi-tasks's cascade fires events from
 	// background agents.
-	const run = (input: WorkflowRunInput) => {
+	const run = (input: WorkflowRunInput, onUpdate?: (u: unknown) => void) => {
 		const result = executeWorkflowRun(input, {
 			pi: pi as unknown as Parameters<typeof executeWorkflowRun>[1]["pi"],
 			ctx: {} as Parameters<typeof executeWorkflowRun>[1]["ctx"],
 			repoCwd,
 			executeTool: undefined,
+			onUpdate,
 		});
 		return { result, emitted, handlers };
 	};
@@ -412,5 +413,168 @@ describe("executeWorkflowRun (path B slim)", () => {
 		await result;
 		// After resolution the workflow_run should have called the unsub fn.
 		expect(handlers.has("workflow:phase-complete")).toBe(false);
+	});
+});
+
+// GC-2026-workflow-chat-stream: onUpdate streaming tests. workflow_run
+// emits partial-progress payloads to the host via the onUpdate callback.
+// Each call carries partial: true so the host's TUI renders it as a
+// streaming tool-result block. Tests pin the shape, ordering, and that
+// NEEDS_CLARIFICATION includes the open_question.
+describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workflow-chat-stream)", () => {
+	let harness: Harness;
+
+	beforeEach(() => {
+		harness = makeHarness();
+	});
+
+	afterEach(() => {
+		rmSync(harness.repoCwd, { recursive: true, force: true });
+	});
+
+	it("emits an onUpdate partial payload for each phase transition (clean path)", async () => {
+		const updates: unknown[] = [];
+		const { result, emitted, handlers } = harness.run(
+			{ goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`, options: { max_fix_iterations: 1 } },
+			(u) => updates.push(u),
+		);
+
+		const startPayload = emitted.find(e => e.channel === "workflow:start")!
+			.data as WorkflowStartPayload;
+		const phaseComplete = handlers.get("workflow:phase-complete")!;
+
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "implement", status: "completed", task_id: "t-implement",
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "review", iteration: 1, status: "completed",
+			verdict: "CLEAN", findings_count: 0, task_id: "t-review-1",
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "merge", status: "completed", task_id: "t-merge",
+		});
+		await result;
+
+		expect(updates.length).toBe(3);
+		// First update: implement → review transition.
+		expect((updates[0] as { partial: boolean; current_phase: string }).partial).toBe(true);
+		expect((updates[0] as { current_phase: string }).current_phase).toBe("review");
+		expect((updates[0] as { goal_id: string }).goal_id).toBe(GOAL_ID);
+		expect((updates[0] as { tasks_done: number; tasks_total: number }).tasks_done).toBe(1);
+		expect((updates[0] as { tasks_total: number }).tasks_total).toBe(3); // 1 impl + 1 review + 1 merge
+		expect((updates[0] as { summary: string }).summary).toMatch(/Implement complete/);
+		// Second update: review (CLEAN) → next review transition (last review → merge).
+		expect((updates[1] as { current_phase: string; last_verdict: string }).current_phase).toBe("review");
+		expect((updates[1] as { last_verdict: string }).last_verdict).toBe("CLEAN");
+		expect((updates[1] as { findings_count: number }).findings_count).toBe(0);
+		// Third update: merge.
+		expect((updates[2] as { current_phase: string }).current_phase).toBe("merge");
+		expect((updates[2] as { tasks_done: number }).tasks_done).toBe(3);
+	});
+
+	it("emits NEEDS_WORK fix iterations + findings_count in onUpdate payload", async () => {
+		const updates: unknown[] = [];
+		const { result, emitted, handlers } = harness.run(
+			{ goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`, options: { max_fix_iterations: 3 } },
+			(u) => updates.push(u),
+		);
+
+		const startPayload = emitted.find(e => e.channel === "workflow:start")!
+			.data as WorkflowStartPayload;
+		const phaseComplete = handlers.get("workflow:phase-complete")!;
+
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "implement", status: "completed", task_id: "t-implement",
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "review", iteration: 1, status: "completed",
+			verdict: "NEEDS_WORK", findings_count: 2, task_id: "t-review-1",
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "fix", iteration: 1, status: "completed", task_id: "t-fix-1",
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "review", iteration: 2, status: "completed",
+			verdict: "CLEAN", findings_count: 0, task_id: "t-review-2",
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "merge", status: "completed", task_id: "t-merge",
+		});
+		await result;
+
+		// 5 phase transitions: implement → review1 → fix1 → review2 → merge
+		expect(updates.length).toBe(5);
+		// After Review_1 NEEDS_WORK: payload carries findings_count=2 + last_verdict=NEEDS_WORK.
+		const review1Update = updates[1] as {
+			last_verdict: string; findings_count: number; fix_iterations_used: number;
+		};
+		expect(review1Update.last_verdict).toBe("NEEDS_WORK");
+		expect(review1Update.findings_count).toBe(2);
+		expect(review1Update.fix_iterations_used).toBe(0); // tick happens on NEEDS_WORK entry, not on Review
+		// Fix_1 phase: payload carries fix_iterations_used=1.
+		const fix1Update = updates[2] as { current_phase: string; fix_iterations_used: number };
+		expect(fix1Update.current_phase).toBe("fix");
+		expect(fix1Update.fix_iterations_used).toBe(1);
+	});
+
+	it("NEEDS_CLARIFICATION onUpdate payload includes open_question", async () => {
+		const updates: unknown[] = [];
+		const { result, handlers } = harness.run(
+			{ goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`, options: { max_fix_iterations: 1 } },
+			(u) => updates.push(u),
+		);
+
+		const phaseComplete = handlers.get("workflow:phase-complete")!;
+		await phaseComplete({
+			workflow_id: `wf-clar-${GOAL_ID}`, goal_id: GOAL_ID,
+			phase: "review", iteration: 1, status: "needs_clarification",
+			verdict: "NEEDS_CLARIFICATION",
+			findings_count: 0,
+			open_question: "snake_case or camelCase?",
+			task_id: "t-review-1",
+		});
+		await result;
+
+		const reviewUpdate = updates[0] as {
+			current_phase: string; last_verdict: string; open_question: string;
+		};
+		expect(reviewUpdate.current_phase).toBe("needs_clarification");
+		expect(reviewUpdate.last_verdict).toBe("NEEDS_CLARIFICATION");
+		expect(reviewUpdate.open_question).toBe("snake_case or camelCase?");
+	});
+
+	it("does NOT call onUpdate when the host omits the callback", async () => {
+		// Caller can pass options without onUpdate — workflow_run should
+		// silently skip the progress emit (defensive, since the type
+		// marks it optional).
+		const { result, handlers } = harness.run({
+			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
+			options: { max_fix_iterations: 1 },
+		});
+
+		const phaseComplete = handlers.get("workflow:phase-complete")!;
+		await phaseComplete({
+			workflow_id: `wf-${GOAL_ID}`, goal_id: GOAL_ID,
+			phase: "implement", status: "completed", task_id: "t-implement",
+		});
+		await phaseComplete({
+			workflow_id: `wf-${GOAL_ID}`, goal_id: GOAL_ID,
+			phase: "review", iteration: 1, status: "completed",
+			verdict: "CLEAN", findings_count: 0, task_id: "t-review-1",
+		});
+		await phaseComplete({
+			workflow_id: `wf-${GOAL_ID}`, goal_id: GOAL_ID,
+			phase: "merge", status: "completed", task_id: "t-merge",
+		});
+		await result;
+		// No throw = success; the onUpdate optional is honored silently.
 	});
 });

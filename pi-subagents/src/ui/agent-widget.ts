@@ -496,12 +496,19 @@ export class AgentWidget {
 			startedAt: number;
 			completedAt?: number;
 			error?: string;
+			workflowContext?: { goalId: string; phase: string; iteration: number };
 		},
 		theme: Theme,
 	): string {
 		const name = getDisplayName(a.type);
 		const modeLabel = getPromptModeLabel(a.type);
 		const duration = formatMs((a.completedAt ?? Date.now()) - a.startedAt);
+		// GC-2026-workflow-chat-stream: workflow context badge for finished
+		// agents too — when an agent finishes, the user should still be able
+		// to identify which workflow goal / phase it served.
+		const workflowTag = a.workflowContext
+			? ` ${theme.fg("dim", `(workflow: ${a.workflowContext.goalId} · ${a.workflowContext.phase}${a.workflowContext.iteration > 0 ? ` ${a.workflowContext.iteration}` : ""})`)}`
+			: "";
 
 		let icon: string;
 		let statusText: string;
@@ -533,7 +540,7 @@ export class AgentWidget {
 		parts.push(duration);
 
 		const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-		return `${icon} ${theme.fg("dim", name)}${modeTag}  ${theme.fg("dim", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}${statusText}`;
+		return `${icon} ${theme.fg("dim", name)}${workflowTag}${modeTag}  ${theme.fg("dim", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}${statusText}`;
 	}
 
 	/**
@@ -581,6 +588,14 @@ export class AgentWidget {
 			const name = getDisplayName(a.type);
 			const modeLabel = getPromptModeLabel(a.type);
 			const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
+			// GC-2026-workflow-chat-stream: when the agent was dispatched by
+			// workflow_run, surface a `(workflow: GC-X · Review 2)` badge so the
+			// user can see which workflow goal this agent belongs to. The badge
+			// is rendered between the agent name and the mode tag.
+			const workflowCtx = a.workflowContext;
+			const workflowTag = workflowCtx
+				? ` ${theme.fg("dim", `(workflow: ${workflowCtx.goalId} · ${workflowCtx.phase}${workflowCtx.iteration > 0 ? ` ${workflowCtx.iteration}` : ""})`)}`
+				: "";
 			const elapsed = formatMs(Date.now() - a.startedAt);
 
 			const bg = this.agentActivity.get(a.id);
@@ -612,7 +627,7 @@ export class AgentWidget {
 			runningLines.push([
 				truncate(
 					theme.fg("dim", "├─") +
-						` ${theme.fg("accent", frame)} ${theme.bold(name)}${modeTag}  ${theme.fg("muted", a.description)} ${theme.fg("dim", "·")} ${fgPreservingNestedStyles(theme, "dim", statsText)}`,
+						` ${theme.fg("accent", frame)} ${theme.bold(name)}${workflowTag}${modeTag}  ${theme.fg("muted", a.description)} ${theme.fg("dim", "·")} ${fgPreservingNestedStyles(theme, "dim", statsText)}`,
 				),
 				truncate(theme.fg("dim", "│  ") + theme.fg("dim", `  ⎿  ${activity}`)),
 			]);
