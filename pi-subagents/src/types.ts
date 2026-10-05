@@ -234,6 +234,18 @@ export interface AgentRecord {
 	 * which only the Agent-tool path populates.
 	 */
 	isBackground?: boolean;
+	/**
+	 * GC-2026-workflow-chat-stream: when this agent was dispatched by a
+	 * workflow_run (pi-tasks/subscribeWorkflow's cascade), carry the goal
+	 * id and current phase so the AgentWidget can render a
+	 * `(workflow: GC-X · Review 2)` badge alongside the agent label.
+	 * Undefined for ad-hoc TaskExecute dispatches and cross-extension RPC.
+	 */
+	workflowContext?: {
+		goalId: string;
+		phase: "implement" | "review" | "fix" | "merge" | "needs_clarification" | "redesign";
+		iteration: number;
+	};
 	/** Resolved spawn params, captured for UI display. Fixed at spawn time. */
 	invocation?: AgentInvocation;
 	/**

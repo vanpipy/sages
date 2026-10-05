@@ -279,6 +279,57 @@ interface RunContext {
 	ctx: unknown;
 	repoCwd: string;
 	executeTool?: (name: string, args: unknown) => Promise<unknown>;
+	/**
+	 * GC-2026-workflow-chat-stream: streaming progress callback. Mirrors
+	 * pi-coding-agent's `ToolDefinition.execute()`'s `onUpdate` parameter —
+	 * the host (TUI interactive mode) renders each call as a partial
+	 * tool-result block in the chat, so the user sees phase progress live
+	 * instead of waiting for the full tool result.
+	 *
+	 * The payload shape is `WorkflowProgressUpdate` (see below). The host
+	 * is expected to render `partial: true` as a streaming indicator.
+	 */
+	onUpdate?: (update: WorkflowProgressUpdate) => void;
+}
+
+/**
+ * GC-2026-workflow-chat-stream: structured payload emitted via
+ * `RunContext.onUpdate` on each `workflow:phase-complete` event.
+ * `partial: true` signals to the host (pi-coding-agent's
+ * `ToolRenderResultOptions.isPartial`) that this is a streaming
+ * intermediate, not the final tool result.
+ */
+export interface WorkflowProgressUpdate {
+	/** Always true for onUpdate calls — distinguishes from final AgentToolResult. */
+	partial: true;
+	/** Goal contract id (e.g. "GC-2026-foo"). */
+	goal_id: string;
+	/** Current phase that just completed (or is active). */
+	current_phase: "implement" | "review" | "fix" | "merge" | "needs_clarification" | "redesign";
+	/** Iteration counter (1-indexed). 0 for Implement/Merge. */
+	iteration: number;
+	/** Last Review verdict (only set when current_phase === "review" or fix/merge follows). */
+	last_verdict?: "CLEAN" | "NEEDS_WORK" | "NEEDS_REDESIGN" | "NEEDS_CLARIFICATION";
+	/** Findings count from the last Reviewer verdict. */
+	findings_count?: number;
+	/** Fix dispatch count so far (max_fix_iterations capped). */
+	fix_iterations_used?: number;
+	/** NEEDS_REDESIGN dispatch count so far (max_redesigns capped). */
+	redesigns_used?: number;
+	/** Total tasks completed so far. */
+	tasks_done: number;
+	/** Total task count in the static graph (Implement + N Reviews + Merge). */
+	tasks_total: number;
+	/** Wall-clock ms since workflow:start. */
+	elapsed_ms: number;
+	/** Open question surfaced by NEEDS_CLARIFICATION (set only on that phase). */
+	open_question?: string;
+	/**
+	 * Short human-readable summary the TUI can render as the partial
+	 * block body (e.g. "Review 1 of 3: CLEAN"). TUI may render this
+	 * directly or compose a richer view from the structured fields.
+	 */
+	summary: string;
 }
 
 const DEFAULT_MAX_FIX_ITERATIONS = 3;
@@ -344,6 +395,50 @@ export async function executeWorkflowRun(
 		let redesignsCount = 0; // GC-2026-verdict-states-and-dynamic-cascade: per-workflow counter
 		let pendingOpenQuestion: string | undefined;
 		const taskSummaries: Record<string, TaskSummary> = {};
+		// GC-2026-workflow-chat-stream: tasks_total = static graph size
+		// (Implement + N Reviews + Merge). workflow-handler creates the static
+		// graph in onWorkflowStart; we don't have direct access here, so
+		// approximate via the static TasksConfig (5 for max=3). For
+		// accurate count, recompute from buildStaticWorkflowGraph — but the
+		// shape is stable (Implement + max_fix_iterations Reviews + Merge)
+		// so the approximate is fine for the streaming UI.
+		const tasksTotalEstimate = 1 + maxFixIterations + 1;
+		let tasksDone = 0;
+		const startedAtMs = Date.parse(state.started_at);
+		// GC-2026-workflow-chat-stream: build a partial-progress payload and
+		// emit it via the host's onUpdate callback. Host renders partial
+		// result blocks; user sees phases appear live.
+		const emitProgress = (
+			currentPhase: WorkflowProgressUpdate["current_phase"],
+			phaseIteration: number,
+			phaseLabel: string,
+		) => {
+			if (!runCtx.onUpdate) return;
+			runCtx.onUpdate({
+				partial: true,
+				goal_id: goalId,
+				current_phase: currentPhase,
+				iteration: phaseIteration,
+				...(lastReviewVerdict !== undefined && {
+					last_verdict: lastReviewVerdict,
+				}),
+				...(ev_findings_count !== undefined && {
+					findings_count: ev_findings_count,
+				}),
+				fix_iterations_used: state.iterations_used,
+				redesigns_used: redesignsCount,
+				tasks_done: tasksDone,
+				tasks_total: tasksTotalEstimate,
+				elapsed_ms: Math.max(0, Date.now() - startedAtMs),
+				...(pendingOpenQuestion !== undefined && {
+					open_question: pendingOpenQuestion,
+				}),
+				summary: phaseLabel,
+			});
+		};
+		// Snapshot of the last findings_count we saw (kept outside the closure
+		// so emitProgress reads the most recent value).
+		let ev_findings_count: number | undefined;
 
 		const unsub = pi.events.on("workflow:phase-complete", (data) => {
 			const ev = data as PhaseCompleteEvent;
@@ -354,6 +449,7 @@ export async function executeWorkflowRun(
 				status: ev.status === "completed" ? "completed" : "failed",
 				...(ev.error && { error: ev.error }),
 			};
+			ev_findings_count = ev.findings_count;
 
 			// GC-2026-verdict-states-and-dynamic-cascade: the pause path.
 			// Review emitted verdict=NEEDS_CLARIFICATION. workflow-run
@@ -419,10 +515,12 @@ export async function executeWorkflowRun(
 
 			if (ev.phase === "implement") {
 				implementDone = true;
+				tasksDone += 1;
 				state.current_phase = "review";
 			} else if (ev.phase === "review") {
 				lastReviewVerdict = ev.verdict;
 				lastReviewIteration = ev.iteration ?? lastReviewIteration + 1;
+				tasksDone += 1;
 				if (ev.verdict === "NEEDS_REDESIGN") {
 					redesignsCount += 1;
 					state.redesigns_used = redesignsCount;
@@ -439,12 +537,41 @@ export async function executeWorkflowRun(
 				}
 			} else if (ev.phase === "fix") {
 				// Cascade: Fix → next Review. Just record.
+				tasksDone += 1;
 				state.current_phase = "review";
 			} else if (ev.phase === "merge") {
 				mergeDone = true;
+				tasksDone += 1;
 				state.current_phase = "completed";
 			}
 			saveWorkflowState(repoCwd, state);
+
+			// GC-2026-workflow-chat-stream: emit a partial progress update to
+			// the host (pi-coding-agent's onUpdate channel) so the user sees
+			// the phase transition in the chat thread live. Phases are
+			// reported AFTER state mutations so the payload reflects the
+			// post-transition counters.
+			const summaryLabel =
+				ev.phase === "implement"
+					? `Implement complete — Review ${(ev.iteration ?? lastReviewIteration) + 1} starting`
+					: ev.phase === "review"
+						? `Review ${ev.iteration ?? lastReviewIteration} (iter ${lastReviewIteration}): ${ev.verdict ?? "?"}`
+						: ev.phase === "fix"
+							? `Fix ${ev.iteration ?? state.iterations_used}: dispatched`
+							: ev.phase === "merge"
+								? `Merge dispatched`
+								: `${ev.phase} complete`;
+			emitProgress(
+				ev.phase === "review"
+					? "review"
+					: ev.phase === "fix"
+						? "fix"
+						: ev.phase === "merge"
+							? "merge"
+							: "implement",
+				ev.iteration ?? lastReviewIteration,
+				summaryLabel,
+			);
 
 			// ── Resolve conditions ──
 			// Success: implement + last review (CLEAN) + merge all done

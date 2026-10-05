@@ -158,6 +158,18 @@ interface SpawnOptions {
 	 */
 	managedWorktree?: ManagedWorktreeRequest;
 	/**
+	 * GC-2026-workflow-chat-stream: when this agent is dispatched as a
+	 * workflow_run phase (Implement / Review / Fix / Merge), carry the
+	 * goal id + phase + iteration so AgentWidget can render a
+	 * `(workflow: GC-X · Review 2)` badge alongside the agent label.
+	 * Undefined for ad-hoc TaskExecute dispatches and cross-extension RPC.
+	 */
+	workflowContext?: {
+		goalId: string;
+		phase: "implement" | "review" | "fix" | "merge" | "needs_clarification" | "redesign";
+		iteration: number;
+	};
+	/**
 	 * GC-2026-037 T3: per-dispatch override for network access. When true,
 	 * `runAgent` wraps `pi.exec()` to allow network commands (git fetch,
 	 * curl, npm install, etc.). When false or undefined, the per-type
@@ -375,6 +387,11 @@ export class AgentManager {
 			// have no inline surface — stay visible instead of vanishing.
 			isBackground: options.isBackground,
 			invocation: options.invocation,
+			// GC-2026-workflow-chat-stream: pass through the workflow context
+			// (set by pi-tasks's subscribeWorkflow when this agent is a
+			// pipeline phase). AgentWidget renders a `(workflow: GC-X · Review 2)`
+			// badge when present.
+			workflowContext: options.workflowContext,
 		};
 		this.agents.set(id, record);
 		// GC-2026-020 instrumentation: every spawn path counts once, even when
