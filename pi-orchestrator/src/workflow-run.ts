@@ -395,14 +395,20 @@ export async function executeWorkflowRun(
 		let redesignsCount = 0; // GC-2026-verdict-states-and-dynamic-cascade: per-workflow counter
 		let pendingOpenQuestion: string | undefined;
 		const taskSummaries: Record<string, TaskSummary> = {};
-		// GC-2026-workflow-chat-stream: tasks_total = static graph size
-		// (Implement + N Reviews + Merge). workflow-handler creates the static
-		// graph in onWorkflowStart; we don't have direct access here, so
-		// approximate via the static TasksConfig (5 for max=3). For
-		// accurate count, recompute from buildStaticWorkflowGraph — but the
-		// shape is stable (Implement + max_fix_iterations Reviews + Merge)
-		// so the approximate is fine for the streaming UI.
-		const tasksTotalEstimate = 1 + maxFixIterations + 1;
+		// GC-2026-097 H1: track real task ids (UUIDs from pi-tasks's
+		// TaskStore.create()) as phases complete, instead of relying on
+		// hardcoded "t-implement" / "t-review-final" / "t-merge" literals
+		// in the output builders.
+		let implementTaskId: string | undefined;
+		let lastReviewTaskId: string | undefined;
+		let mergeTaskId: string | undefined;
+		// GC-2026-workflow-chat-stream: tasks_total upper bound. The static
+		// graph is Implement + max_fix_iterations Reviews + Merge. Fix
+		// dispatches happen on-demand when Review emits NEEDS_WORK, so
+		// they are NOT in the static count but ARE bounded by
+		// max_fix_iterations. The streaming UI shows an upper bound so the
+		// progress bar never hits 100% while Fix tasks are still queued.
+		const tasksTotalEstimate = 1 + 2 * maxFixIterations + 1;
 		let tasksDone = 0;
 		const startedAtMs = Date.parse(state.started_at);
 		// GC-2026-workflow-chat-stream: build a partial-progress payload and
@@ -488,6 +494,8 @@ export async function executeWorkflowRun(
 						worktreePath,
 						branch,
 						taskSummaries,
+						implementTaskId,
+						lastReviewTaskId,
 						pendingOpenQuestion,
 						state.clarification_answer,
 					),
@@ -514,6 +522,9 @@ export async function executeWorkflowRun(
 						worktreePath,
 						branch,
 						taskSummaries,
+						implementTaskId,
+						lastReviewTaskId,
+						lastReviewVerdict,
 						ev.phase,
 						ev.error,
 					),
@@ -523,11 +534,13 @@ export async function executeWorkflowRun(
 
 			if (ev.phase === "implement") {
 				implementDone = true;
+				implementTaskId = ev.task_id;
 				tasksDone += 1;
 				state.current_phase = "review";
 			} else if (ev.phase === "review") {
 				lastReviewVerdict = ev.verdict;
 				lastReviewIteration = ev.iteration ?? lastReviewIteration + 1;
+				lastReviewTaskId = ev.task_id;
 				tasksDone += 1;
 				if (ev.verdict === "NEEDS_REDESIGN") {
 					redesignsCount += 1;
@@ -549,6 +562,7 @@ export async function executeWorkflowRun(
 				state.current_phase = "review";
 			} else if (ev.phase === "merge") {
 				mergeDone = true;
+				mergeTaskId = ev.task_id;
 				tasksDone += 1;
 				state.current_phase = "completed";
 			}
@@ -593,7 +607,21 @@ export async function executeWorkflowRun(
 			// Success: implement + last review (CLEAN) + merge all done
 			if (implementDone && lastReviewVerdict === "CLEAN" && mergeDone) {
 				unsub();
-				resolveFn(buildSuccessOutput(goalId, maxFixIterations, redesignsCount, worktreePath, branch, taskSummaries));
+				resolveFn(
+					buildSuccessOutput(
+						goalId,
+						maxFixIterations,
+						redesignsCount,
+						worktreePath,
+						branch,
+						taskSummaries,
+						implementTaskId,
+						lastReviewTaskId,
+						mergeTaskId,
+						lastReviewIteration,
+						lastReviewVerdict,
+					),
+				);
 				return;
 			}
 			// Blocked: NEEDS_WORK iterations exhausted AND last review was NEEDS_WORK AND no merge.
@@ -613,6 +641,9 @@ export async function executeWorkflowRun(
 						worktreePath,
 						branch,
 						taskSummaries,
+						implementTaskId,
+						lastReviewTaskId,
+						lastReviewVerdict,
 					),
 				);
 				return;
@@ -635,6 +666,9 @@ export async function executeWorkflowRun(
 						worktreePath,
 						branch,
 						taskSummaries,
+						implementTaskId,
+						lastReviewTaskId,
+						lastReviewVerdict,
 						"review",
 						`NEEDS_REDESIGN budget (${maxRedesigns}) exhausted`,
 					),
@@ -652,26 +686,36 @@ function buildSuccessOutput(
 	worktreePath: string,
 	branch: string,
 	tasks: Record<string, TaskSummary>,
+	// GC-2026-097 H1: real task ids captured from phase-complete events,
+	// not the old "t-implement" / "t-review-final" / "t-merge" literals.
+	implementTaskId: string | undefined,
+	lastReviewTaskId: string | undefined,
+	mergeTaskId: string | undefined,
+	lastReviewIteration: number,
+	lastReviewVerdict: "CLEAN" | "NEEDS_WORK" | "NEEDS_REDESIGN" | "NEEDS_CLARIFICATION" | undefined,
 ): WorkflowRunOutput {
+	const reviewId = lastReviewTaskId ?? "t-review-final";
 	const reviewSummary: ReviewSummary = {
-		...tasks["t-review-final"] ?? {},
-		id: "t-review-final",
+		...tasks[reviewId] ?? {},
+		id: reviewId,
 		status: "completed",
-		agent_id: "t-review-final",
-		verdict: "CLEAN",
-		findings_count: 0,
-		iterations: 1,
+		agent_id: reviewId,
+		verdict: lastReviewVerdict ?? "CLEAN",
+		findings_count: tasks[reviewId]?.error ? 0 : 0,
+		iterations: Math.max(1, lastReviewIteration),
 		duration_ms: 0,
 	};
+	const implId = implementTaskId ?? "t-implement";
+	const mrgId = mergeTaskId ?? "t-merge";
 	return {
 		status: "success",
 		goal_id: goalId,
 		iterations_used: 0,
 		redesigns_used: redesignsUsed,
 		tasks: {
-			implement: { ...tasks["t-implement"] ?? { id: "t-implement", status: "completed" }, agent_id: "t-implement" },
+			implement: { ...tasks[implId] ?? { id: implId, status: "completed" }, agent_id: implId },
 			review: reviewSummary,
-			merge: { ...tasks["t-merge"] ?? { id: "t-merge", status: "completed" }, agent_id: "t-merge" },
+			merge: { ...tasks[mrgId] ?? { id: mrgId, status: "completed" }, agent_id: mrgId },
 		},
 		pi_tasks: { implement: "", review: "", fix: "", merge: "" },
 		paths: { worktree: worktreePath, branch, goal_yaml: `.pi/orchestrator/goal-${goalId}.yaml` },
@@ -687,6 +731,10 @@ function buildBlockedOutput(
 	worktreePath: string,
 	branch: string,
 	tasks: Record<string, TaskSummary>,
+	// GC-2026-097 H1: real task ids captured from phase-complete events.
+	implementTaskId: string | undefined,
+	lastReviewTaskId: string | undefined,
+	lastReviewVerdict: "CLEAN" | "NEEDS_WORK" | "NEEDS_REDESIGN" | "NEEDS_CLARIFICATION" | undefined,
 	// GC-2026-pi-tasks-cascade-agentid: when a phase's subagent itself
 	// crashes (status: "failed" on the phase-complete), surface the
 	// failing phase + the error message in the LLM-facing output.
@@ -694,6 +742,8 @@ function buildBlockedOutput(
 	error?: string,
 ): WorkflowRunOutput {
 	const isFailure = failedPhase !== undefined;
+	const implId = implementTaskId ?? "t-implement";
+	const reviewId = lastReviewTaskId ?? "t-review-final";
 	return {
 		status: "blocked",
 		goal_id: goalId,
@@ -702,18 +752,18 @@ function buildBlockedOutput(
 		blocked_at: isFailure ? failedPhase : "review",
 		tasks: {
 			implement: {
-				...(tasks["t-implement"] ?? {}),
-				id: "t-implement",
-				agent_id: "t-implement",
+				...(tasks[implId] ?? {}),
+				id: implId,
+				agent_id: implId,
 				status: failedPhase === "implement" ? "failed" : "completed",
 				...(isFailure && failedPhase === "implement" && error ? { error } : {}),
 			},
 			review: {
-				...tasks["t-review-final"] ?? {},
-				id: "t-review-final",
+				...tasks[reviewId] ?? {},
+				id: reviewId,
 				status: "completed",
-				agent_id: "t-review-final",
-				verdict: isFailure ? "NEEDS_WORK" : "NEEDS_WORK",
+				agent_id: reviewId,
+				verdict: lastReviewVerdict ?? "NEEDS_WORK",
 				findings_count: 0,
 				iterations: iterationsUsed,
 				duration_ms: 0,
@@ -749,6 +799,9 @@ function buildClarificationOutput(
 	worktreePath: string,
 	branch: string,
 	tasks: Record<string, TaskSummary>,
+	// GC-2026-097 H1: real task ids captured from phase-complete events.
+	implementTaskId: string | undefined,
+	lastReviewTaskId: string | undefined,
 	openQuestion: string | undefined,
 	// GC-2026-needs-clarification-resume: when the user re-dispatches with
 	// options.clarification_answer, echo it back so the orchestrator main
@@ -758,6 +811,8 @@ function buildClarificationOutput(
 	// `workflow-{goal_id}.yaml` before re-running.
 	clarificationAnswerRecorded: string | undefined,
 ): WorkflowRunOutput {
+	const implId = implementTaskId ?? "t-implement";
+	const reviewId = lastReviewTaskId ?? "t-review-final";
 	return {
 		status: "blocked",
 		goal_id: goalId,
@@ -768,16 +823,16 @@ function buildClarificationOutput(
 		clarification_answer_recorded: clarificationAnswerRecorded,
 		tasks: {
 			implement: {
-				...(tasks["t-implement"] ?? {}),
-				id: "t-implement",
-				agent_id: "t-implement",
+				...(tasks[implId] ?? {}),
+				id: implId,
+				agent_id: implId,
 				status: "completed",
 			},
 			review: {
-				...tasks["t-review-final"] ?? {},
-				id: "t-review-final",
+				...tasks[reviewId] ?? {},
+				id: reviewId,
 				status: "completed",
-				agent_id: "t-review-final",
+				agent_id: reviewId,
 				verdict: "NEEDS_CLARIFICATION",
 				findings_count: 0,
 				iterations: iterationsUsed,
