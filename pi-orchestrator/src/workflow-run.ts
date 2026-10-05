@@ -48,6 +48,20 @@ export interface WorkflowRunInput {
 		 * NEEDS_REDESIGN dispatches. Default 1.
 		 */
 		max_redesigns?: number;
+		/**
+		 * GC-2026-needs-clarification-resume: when the prior workflow_run
+		 * emitted `needs_clarification` (Reviewer surfaced an
+		 * `open_question`), the orchestrator main agent can pass the
+		 * user's answer here on re-dispatch. workflow-run stamps it into
+		 * `workflow-{goal_id}.yaml` for audit and surfaces it in the
+		 * LLM-facing output as `clarification_answer_recorded`.
+		 *
+		 * The cascade itself is NOT auto-resumed by passing this field —
+		 * the orchestrator main agent decides whether to start a fresh
+		 * pipeline or to manually edit `workflow-{goal_id}.yaml` to set
+		 * the paused Review's verdict to CLEAN before re-running.
+		 */
+		clarification_answer?: string;
 		agent_overrides?: {
 			implement?: string;
 			review?: string;
@@ -110,6 +124,14 @@ export interface WorkflowRunOutput {
 	 * Reviewer attached to the verdict.
 	 */
 	open_question?: string;
+	/**
+	 * GC-2026-needs-clarification-resume: echoed back when
+	 * `options.clarification_answer` was passed to this run. Confirms
+	 * the answer was persisted to `workflow-{goal_id}.yaml`; the
+	 * orchestrator main agent uses this as proof the user's answer
+	 * was recorded before deciding whether to proceed.
+	 */
+	clarification_answer_recorded?: string;
 	// GC-2026-pi-tasks-cascade-agentid: extended with "fix" so a Fix-phase
 	// failure surfaces as blocked_at: "fix" rather than being aliased into
 	// "review" (the previous NEEDS_WORK exhaustion code path).
@@ -174,6 +196,13 @@ interface WorkflowState {
 	 * Implement dispatches. Capped by max_redesigns (default 1).
 	 */
 	redesigns_used: number;
+	/**
+	 * GC-2026-needs-clarification-resume: when set, the user has
+	 * answered the prior NEEDS_CLARIFICATION pause. Read by the
+	 * orchestrator main agent when deciding whether to re-dispatch
+	 * workflow_run after surfacing the question.
+	 */
+	clarification_answer?: string;
 	worktree_path: string;
 	branch: string;
 }
@@ -205,6 +234,14 @@ export const WorkflowRunParams = Type.Object({
 				}),
 			),
 			resume: Type.Optional(Type.Boolean({ description: "Reuse completed phases from the workflow-{goal_id}.yaml state file. Default true." })),
+			/**
+			 * GC-2026-needs-clarification-resume: pass the user's answer
+			 * to a prior NEEDS_CLARIFICATION pause. The orchestrator main
+			 * agent must collect this from the user before re-dispatching
+			 * workflow_run. Persisted to `workflow-{goal_id}.yaml` for
+			 * audit; does NOT auto-resume the cascade.
+			 */
+			clarification_answer: Type.Optional(Type.String({ description: "User's answer to a prior Reviewer's NEEDS_CLARIFICATION open_question." })),
 		}),
 	),
 	verbose: Type.Optional(Type.Boolean()),
@@ -329,6 +366,13 @@ export async function executeWorkflowRun(
 				pendingOpenQuestion = ev.open_question;
 				state.current_phase = "needs_clarification";
 				state.status = "needs_clarification";
+				// GC-2026-needs-clarification-resume: stamp the user's
+				// answer into state if it was passed via options.clarification_answer.
+				// The orchestrator main agent can read this back via
+				// WorkflowRunOutput.clarification_answer_recorded.
+				if (opts.clarification_answer !== undefined) {
+					state.clarification_answer = opts.clarification_answer;
+				}
 				saveWorkflowState(repoCwd, state);
 				unsub();
 				resolveFn(
@@ -341,6 +385,7 @@ export async function executeWorkflowRun(
 						branch,
 						taskSummaries,
 						pendingOpenQuestion,
+						state.clarification_answer,
 					),
 				);
 				return;
@@ -562,6 +607,13 @@ function buildClarificationOutput(
 	branch: string,
 	tasks: Record<string, TaskSummary>,
 	openQuestion: string | undefined,
+	// GC-2026-needs-clarification-resume: when the user re-dispatches with
+	// options.clarification_answer, echo it back so the orchestrator main
+	// agent can confirm the answer was recorded before deciding the next
+	// move. The orchestrator main agent then decides whether to start a
+	// fresh pipeline or to manually flip the paused Review to CLEAN in
+	// `workflow-{goal_id}.yaml` before re-running.
+	clarificationAnswerRecorded: string | undefined,
 ): WorkflowRunOutput {
 	return {
 		status: "blocked",
@@ -570,6 +622,7 @@ function buildClarificationOutput(
 		redesigns_used: redesignsUsed,
 		blocked_at: "review",
 		open_question: openQuestion,
+		clarification_answer_recorded: clarificationAnswerRecorded,
 		tasks: {
 			implement: {
 				...(tasks["t-implement"] ?? {}),
