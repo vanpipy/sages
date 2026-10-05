@@ -31,6 +31,14 @@
 
 import { describe, expect, it } from "vitest";
 import { MERGER_PROMPT } from "../src/agent-prompts/merger.js";
+// GC-2026-merger-advisor-split: workflow_run's Merge phase dispatches a
+// different agent (MergerAdvisor) than the DAG-synthesis Merger. They share
+// the "Merger" family name but have disjoint contracts — Merger is auto
+// (git plumbing), MergerAdvisor is read+advisory (writes merge-recommendation.md
+// only). The prompt must explicitly forbid the auto-merge instructions so a
+// MergerAdvisor cannot accidentally run git merge --no-ff against a protected
+// branch.
+import { MERGER_ADVISOR_PROMPT } from "../src/agent-prompts/merger-advisor.js";
 
 describe("merger-prompt: invariants", () => {
 	it("exports a non-empty string", () => {
@@ -380,5 +388,53 @@ describe("merger-prompt: Reviewer evidence trail (GC-2026-b7)", () => {
 			nextSection?.index === undefined ? after.length : nextSection.index + 2;
 		const section = after.slice(0, endIdx);
 		expect(section.toLowerCase()).toMatch(/downgrade.*escalated|escalat.*downgrad/);
+	});
+});
+
+// GC-2026-merger-advisor-split: workflow_run dispatches MergerAdvisor (not
+// Merger) for the Merge phase. Prompt must (a) describe the advisory
+// contract, (b) point at merge-recommendation.md as the output target,
+// (c) explicitly forbid git merge/push, and (d) NOT contain the
+// DAG-synthesis auto-merge instructions.
+describe("merger-advisor-prompt: invariants (GC-2026-merger-advisor-split)", () => {
+	it("exports a non-empty string", () => {
+		expect(typeof MERGER_ADVISOR_PROMPT).toBe("string");
+		expect(MERGER_ADVISOR_PROMPT.length).toBeGreaterThan(500);
+	});
+
+	it("identifies itself as the workflow_run Merge phase agent (advisory)", () => {
+		expect(MERGER_ADVISOR_PROMPT.toLowerCase()).toContain("advisory");
+	});
+
+	it("names merge-recommendation.md as the single output target", () => {
+		expect(MERGER_ADVISOR_PROMPT).toContain("merge-recommendation.md");
+	});
+
+	it("explicitly forbids executing git merge against protected branches", () => {
+		const lower = MERGER_ADVISOR_PROMPT.toLowerCase();
+		expect(lower).toMatch(/do not.*git merge|never.*git merge/);
+		expect(lower).toMatch(/permission gate|protected branch|agents\.md/);
+	});
+
+	it("explicitly forbids git push", () => {
+		expect(MERGER_ADVISOR_PROMPT.toLowerCase()).toMatch(/do not.*git push|never.*push/);
+	});
+
+	it("does NOT instruct the agent to execute auto-merge (handoff check)", () => {
+		// The prompt MAY contain `git merge --no-ff` as a recommended command for
+		// the human. It must NOT contain imperative instructions like "you merge by
+		// running" or "you produce merge commits" — those are DAG-synthesis Merger
+		// vocabulary leaking into the advisory contract. The prohibition language
+		// ("DO NOT execute", "you never run") IS allowed and expected.
+		const lower = MERGER_ADVISOR_PROMPT.toLowerCase();
+		expect(lower).not.toMatch(/you produce merge commits|you merge by/);
+		expect(lower).not.toMatch(/^run.*git merge|run `?git merge --no-ff`/m);
+		expect(MERGER_ADVISOR_PROMPT).not.toMatch(/hunk[- ]conflict/i);
+		expect(MERGER_ADVISOR_PROMPT).not.toMatch(/disjoint[- ]hunk/i);
+	});
+
+	it("references last-review-GOAL_ID.md (NOT the phantom review-{goal_id}-{iteration}.md)", () => {
+		expect(MERGER_ADVISOR_PROMPT).toContain("last-review-");
+		expect(MERGER_ADVISOR_PROMPT).not.toContain("review-{goal_id}-{iteration}");
 	});
 });

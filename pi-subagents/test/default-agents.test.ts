@@ -280,6 +280,8 @@ describe("default-agents: subagent isolation", () => {
 		"Developer",
 		"Reviewer",
 		"Merger",
+		"MergerAdvisor",
+		"Fix",
 	] as const) {
 		it(`${name} excludes pi-subagents from its extension set`, () => {
 			const config = DEFAULT_AGENTS.get(name);
@@ -306,6 +308,29 @@ describe("default-agents: reviewer (Phase B) — canonical `Reviewer` registered
 		// The Phase B alias was dropped in GC-2026-014 along with the
 		// AgentConfig.aliases field.
 		expect(DEFAULT_AGENTS.has("software-reviewer")).toBe(false);
+	});
+});
+
+// GC-2026-merger-advisor-split: MergerAdvisor is the workflow_run Merge-phase
+// advisor. Distinct from the DAG-synthesis Merger (which is auto-merge).
+describe("default-agents: MergerAdvisor (workflow_run Merge phase advisor)", () => {
+	it("registers the canonical `MergerAdvisor` agent", () => {
+		expect(DEFAULT_AGENTS.has("MergerAdvisor")).toBe(true);
+	});
+
+	it("has displayName 'Merger (Advisor)' and description referencing workflow_run advisory merge", () => {
+		const advisor = DEFAULT_AGENTS.get("MergerAdvisor");
+		expect(advisor?.displayName).toBe("Merger (Advisor)");
+		expect(advisor?.description.toLowerCase()).toContain("advisory");
+		expect(advisor?.description).toContain("merge-recommendation.md");
+	});
+
+	it("uses MERGER_ADVISOR_PROMPT (not the DAG-synthesis MERGER_PROMPT)", () => {
+		const advisor = DEFAULT_AGENTS.get("MergerAdvisor");
+		expect(advisor?.systemPrompt).toContain("Merger (Advisor)");
+		// Distinct from MERGER_PROMPT which starts with "Merger, a
+		// deterministic cross-workspace merge agent".
+		expect(advisor?.systemPrompt).not.toContain("deterministic cross-workspace");
 	});
 });
 

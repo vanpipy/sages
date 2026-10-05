@@ -93,7 +93,7 @@ schema is `done_definition`, not `success_criteria`).
 | Role | May write |
 |---|---|
 | `Developer` | `task-{task_id}-report.md`, `handoff/{workspace_id}/{task_id}-handoff.md` |
-| `Reviewer` | `review-{goal_id}-{iteration}.md` |
+| `Reviewer` | `last-review-{goal_id}.md` |
 | Orchestrator | `goal-{id}.yaml`, `workflow-{goal_id}.yaml`, `audit-state-{id}.yaml` |
 
 Cross-namespace overwrites prohibited. `Explore` and `PlanCompiler` are read-only.

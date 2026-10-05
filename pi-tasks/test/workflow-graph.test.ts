@@ -133,7 +133,7 @@ describe("buildStaticWorkflowGraph", () => {
 		const byPhase: Record<string, string> = {
 			implement: "Developer",
 			review: "Reviewer",
-			merge: "Merger",
+			merge: "MergerAdvisor",
 		};
 		for (const t of tasks) {
 			expect(t.metadata.agentType).toBe(byPhase[t.metadata.phase]);

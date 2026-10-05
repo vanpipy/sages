@@ -182,7 +182,7 @@ Foreground is the default for `Explore` / `PlanCompiler` (short helper tasks). B
 | Role | May write |
 |---|---|
 | Developer | `task-{task_id}-report.md`, `handoff/{workspace_id}/{task_id}-handoff.md` |
-| Reviewer | `review-{goal_id}-{iteration}.md` |
+| Reviewer | `last-review-{goal_id}.md` |
 | Orchestrator | `goal-{id}.yaml`, `workflow-{goal_id}.yaml`, `audit-state-{id}.yaml` |
 
 Cross-namespace overwrites prohibited. `Explore` and `PlanCompiler` are read-only.
