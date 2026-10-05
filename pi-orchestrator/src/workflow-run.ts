@@ -361,8 +361,13 @@ export async function executeWorkflowRun(
 	if (!goal) throw new Error(`Goal contract failed to load: ${goalId}`);
 
 	// ── 2. Derive worktree / branch / workflow_id (all absolute paths) ──
+	// GC-2026-workflow-worktree-namespace: drop the stale `sages/` prefix on
+	// `branch`. The agent creates the actual git branch via `git checkout -b`
+	// from the dispatch brief, and that brief uses `goal_id_lowercase +
+	// "-implement"` (no `sages/` prefix). The prior value pointed at a
+	// non-existent ref in workflow-{id}.yaml.
 	const worktreePath = resolve(repoCwd, ".pi", "worktree", goalId, "implement");
-	const branch = `sages/${goalId.toLowerCase()}-implement`;
+	const branch = `${goalId.toLowerCase()}-implement`;
 	const workflowId = `wf-${goalId}`;
 
 	// ── 3. Initialize workflow-{id}.yaml state file ────────────────────
