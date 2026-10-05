@@ -6,9 +6,19 @@
  * structure (verdict / findings / scope_check / anti_goal_check). Path B
  * reuses the same parser to stamp metadata.verdict onto the Review task
  * when it completes, so the downstream Fix agent can read it.
+ *
+ * GC-2026-prompt-parser-contract-cleanup additions covered below:
+ *   - File-fallback path (verdictFilePath in opts)
+ *   - Strict scope_check / anti_goal_check enforcement
+ *   - CLEAN + non-empty findings is malformed → NEEDS_WORK
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
 import { describe, expect, test } from "vitest";
+
 import { parseReviewerVerdict } from "../src/verdict-parser.js";
 
 describe("parseReviewerVerdict", () => {
@@ -105,5 +115,180 @@ describe("parseReviewerVerdict", () => {
     expect(result.verdict).toBe("NEEDS_WORK");
     expect(result.findings).toHaveLength(1);
     expect(result.findings?.[0].severity).toBe("critical");
+  });
+
+  // GC-2026-prompt-parser-contract-cleanup additions
+  describe("GC-2026-prompt-parser-contract-cleanup: strict dimension checks", () => {
+    test("scope_check: fail triggers NEEDS_WORK regardless of verdict", () => {
+      const message = [
+        "```yaml",
+        "verdict: CLEAN",
+        "findings: []",
+        "scope_check: fail",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_WORK");
+      expect(result.scope_check).toBe("fail");
+    });
+
+    test("anti_goal_check: fail triggers NEEDS_WORK regardless of verdict", () => {
+      const message = [
+        "```yaml",
+        "verdict: CLEAN",
+        "findings: []",
+        "scope_check: pass",
+        "anti_goal_check: fail",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_WORK");
+      expect(result.anti_goal_check).toBe("fail");
+    });
+
+    test("scope_check: absent without skip-reason → NEEDS_WORK", () => {
+      const message = [
+        "```yaml",
+        "verdict: CLEAN",
+        "findings: []",
+        "scope_check: absent",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_WORK");
+    });
+
+    test("scope_check: absent WITH skip-reason → satisfies dim", () => {
+      const message = [
+        "```yaml",
+        "verdict: CLEAN",
+        "findings: []",
+        "scope_check: absent",
+        "scope_check_skipped: diff is empty, no files changed, scope trivially passes",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("CLEAN");
+      expect(result.scope_check).toBe("absent");
+      expect(result.scope_check_skipped).toMatch(/scope trivially passes/);
+    });
+
+    test("anti_goal_check: absent without skip-reason → NEEDS_WORK", () => {
+      const message = [
+        "```yaml",
+        "verdict: CLEAN",
+        "findings: []",
+        "scope_check: pass",
+        "anti_goal_check: absent",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_WORK");
+    });
+
+    test("CLEAN with non-empty findings is malformed → NEEDS_WORK", () => {
+      const message = [
+        "```yaml",
+        "verdict: CLEAN",
+        "findings:",
+        "  - severity: minor",
+        "    issue: typo in comment",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_WORK");
+      expect(result.findings).toHaveLength(1);
+    });
+  });
+
+  describe("GC-2026-prompt-parser-contract-cleanup: file-fallback path", () => {
+    let tmpDir: string;
+
+    test.beforeAll?.(() => undefined as never);
+    // Use a manual setup per test to avoid beforeAll/afterAll boilerplate.
+    function setupTmp(): { verdictFilePath: string; cleanup: () => void } {
+      tmpDir = mkdtempSync(join(tmpdir(), "verdict-parser-"));
+      const verdictFilePath = join(tmpDir, "verdict-t1.md");
+      return {
+        verdictFilePath,
+        cleanup: () => rmSync(tmpDir, { recursive: true, force: true }),
+      };
+    }
+
+    test("no fence + verdictFilePath with CLEAN YAML → reads file and returns CLEAN", () => {
+      const { verdictFilePath, cleanup } = setupTmp();
+      try {
+        writeFileSync(
+          verdictFilePath,
+          [
+            "verdict: CLEAN",
+            "findings: []",
+            "scope_check: pass",
+            "anti_goal_check: pass",
+          ].join("\n"),
+        );
+        const result = parseReviewerVerdict(undefined, { verdictFilePath });
+        expect(result.verdict).toBe("CLEAN");
+        expect(result.findings).toEqual([]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("no fence + verdictFilePath with malformed YAML → NEEDS_WORK", () => {
+      const { verdictFilePath, cleanup } = setupTmp();
+      try {
+        writeFileSync(verdictFilePath, "::: not yaml :::");
+        const result = parseReviewerVerdict(undefined, { verdictFilePath });
+        expect(result.verdict).toBe("NEEDS_WORK");
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("no fence + verdictFilePath missing → NEEDS_WORK", () => {
+      const { verdictFilePath, cleanup } = setupTmp();
+      try {
+        // Don't write the file.
+        const result = parseReviewerVerdict(undefined, { verdictFilePath });
+        expect(result.verdict).toBe("NEEDS_WORK");
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("fence in message + verdictFilePath set → message fence wins", () => {
+      const { verdictFilePath, cleanup } = setupTmp();
+      try {
+        // File says NEEDS_WORK, but the message has a CLEAN fence — message wins.
+        writeFileSync(
+          verdictFilePath,
+          ["verdict: NEEDS_WORK", "findings: []"].join("\n"),
+        );
+        const message = [
+          "```yaml",
+          "verdict: CLEAN",
+          "findings: []",
+          "scope_check: pass",
+          "anti_goal_check: pass",
+          "```",
+        ].join("\n");
+        const result = parseReviewerVerdict(message, { verdictFilePath });
+        expect(result.verdict).toBe("CLEAN");
+      } finally {
+        cleanup();
+      }
+    });
   });
 });
