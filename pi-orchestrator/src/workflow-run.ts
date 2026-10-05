@@ -10,10 +10,18 @@
  *      contract that pi-tasks's `subscribeWorkflow` listens for
  *   4. Subscribes to `pi.events.on("workflow:phase-complete", ...)` to track
  *      each phase (implement / review / fix / merge) and aggregate until all
- *      phase categories complete or `max_fix_iterations` is exhausted on
- *      NEEDS_WORK verdicts
+ *      phase categories complete, the cascade is exhausted on NEEDS_WORK
+ *      after max_fix_iterations, or the workflow pauses on NEEDS_CLARIFICATION
  *   5. Resolves with `WorkflowRunOutput` (LLM-facing shape unchanged) when
  *      the pipeline completes or blocks
+ *
+ * GC-2026-verdict-states-and-dynamic-cascade additions:
+ *   - The phase-complete event can now carry status="needs_clarification"
+ *     (Review emitted verdict=NEEDS_CLARIFICATION). workflow-run pauses
+ *     the workflow and surfaces the open_question via WorkflowRunOutput.
+ *   - The phase-complete event also carries verdict=NEEDS_REDESIGN; the
+ *     workflow tracks redesigns_used (capped by max_redesigns, default 1)
+ *     and resolves as blocked if the redesign budget is exhausted.
  *
  * The 1060 → ~200 line collapse is the whole point of path B: all
  * orchestration logic now lives in pi-tasks (subscribeWorkflow's static
@@ -35,6 +43,11 @@ export interface WorkflowRunInput {
 	goal_path: string;
 	options?: {
 		max_fix_iterations?: number;
+		/**
+		 * GC-2026-verdict-states-and-dynamic-cascade: cap on
+		 * NEEDS_REDESIGN dispatches. Default 1.
+		 */
+		max_redesigns?: number;
 		agent_overrides?: {
 			implement?: string;
 			review?: string;
@@ -56,7 +69,11 @@ export interface TaskSummary {
 }
 
 export interface ReviewSummary extends TaskSummary {
-	verdict: "CLEAN" | "NEEDS_WORK";
+	/**
+	 * GC-2026-verdict-states-and-dynamic-cascade: widened from
+	 * `CLEAN | NEEDS_WORK` to 4-state set.
+	 */
+	verdict: "CLEAN" | "NEEDS_WORK" | "NEEDS_REDESIGN" | "NEEDS_CLARIFICATION";
 	findings_count: number;
 	iterations: number;
 	agent_id: string;
@@ -72,7 +89,27 @@ export interface Finding {
 export interface WorkflowRunOutput {
 	status: "success" | "blocked";
 	goal_id: string;
+	/**
+	 * GC-2026-verdict-states-and-dynamic-cascade: was named
+	 * `iterations_used` and effectively aliased to lastReviewIteration. Now
+	 * the field reflects the actual Fix-dispatch count from the workflow
+	 * layer's `fix_iterations_used` counter. A new sibling
+	 * `redesigns_used` tracks NEEDS_REDESIGN dispatches.
+	 */
 	iterations_used: number;
+	/**
+	 * GC-2026-verdict-states-and-dynamic-cascade: count of NEEDS_REDESIGN
+	 * Implement dispatches. Capped by max_redesigns (default 1). Surfaces
+	 * in the LLM-facing output so the orchestrator can decide whether to
+	 * start a fresh goal or accept the block.
+	 */
+	redesigns_used?: number;
+	/**
+	 * GC-2026-verdict-states-and-dynamic-cascade: surfaced when the last
+	 * Review emitted NEEDS_CLARIFICATION. Free-form question text the
+	 * Reviewer attached to the verdict.
+	 */
+	open_question?: string;
 	// GC-2026-pi-tasks-cascade-agentid: extended with "fix" so a Fix-phase
 	// failure surfaces as blocked_at: "fix" rather than being aliased into
 	// "review" (the previous NEEDS_WORK exhaustion code path).
@@ -107,9 +144,12 @@ interface PhaseCompleteEvent {
 	// listener) emits this when a phase's subagent itself crashes (the
 	// GC-2026-096 implement-failure case). workflow_run must resolve as
 	// blocked in that case instead of hanging forever.
-	status: "completed" | "failed";
-	verdict?: "CLEAN" | "NEEDS_WORK";
+	// GC-2026-verdict-states-and-dynamic-cascade: adds "needs_clarification"
+	// for the Review=NEEDS_CLARIFICATION pause path.
+	status: "completed" | "failed" | "needs_clarification";
+	verdict?: "CLEAN" | "NEEDS_WORK" | "NEEDS_REDESIGN" | "NEEDS_CLARIFICATION";
 	findings_count?: number;
+	open_question?: string;
 	task_id: string;
 	error?: string;
 }
@@ -119,9 +159,21 @@ interface WorkflowState {
 	goal_id: string;
 	workflow_id: string;
 	started_at: string;
-	current_phase: "implement" | "review" | "fix_loop" | "merge" | "completed" | "blocked";
-	status: "pending" | "running" | "success" | "blocked";
+	current_phase: "implement" | "review" | "fix_loop" | "redesign" | "merge" | "completed" | "blocked" | "needs_clarification";
+	status: "pending" | "running" | "success" | "blocked" | "needs_clarification";
+	/**
+	 * GC-2026-verdict-states-and-dynamic-cascade: this field is kept as
+	 * the LLM-facing iteration counter (max_fix_iterations compatible),
+	 * but it now reflects the actual Fix-dispatch count from the
+	 * tracking layer (not lastReviewIteration as before — that semantic
+	 * was misleading, see audit).
+	 */
 	iterations_used: number;
+	/**
+	 * GC-2026-verdict-states-and-dynamic-cascade: count of NEEDS_REDESIGN
+	 * Implement dispatches. Capped by max_redesigns (default 1).
+	 */
+	redesigns_used: number;
 	worktree_path: string;
 	branch: string;
 }
@@ -136,6 +188,13 @@ export const WorkflowRunParams = Type.Object({
 		Type.Object({
 			max_fix_iterations: Type.Optional(
 				Type.Number({ minimum: 0, maximum: 10, description: "Maximum Fix → re-Review cycles. Default 3." }),
+			),
+			/**
+			 * GC-2026-verdict-states-and-dynamic-cascade: cap on
+			 * NEEDS_REDESIGN dispatches. Default 1.
+			 */
+			max_redesigns: Type.Optional(
+				Type.Number({ minimum: 0, maximum: 5, description: "Maximum NEEDS_REDESIGN → new Implement cycles. Default 1." }),
 			),
 			agent_overrides: Type.Optional(
 				Type.Object({
@@ -169,6 +228,7 @@ function saveWorkflowState(cwd: string, state: WorkflowState): void {
 		`current_phase: ${state.current_phase}`,
 		`status: ${state.status}`,
 		`iterations_used: ${state.iterations_used}`,
+		`redesigns_used: ${state.redesigns_used}`,
 		`worktree_path: ${state.worktree_path}`,
 		`branch: ${state.branch}`,
 	];
@@ -217,6 +277,7 @@ export async function executeWorkflowRun(
 		current_phase: "implement",
 		status: "pending",
 		iterations_used: 0,
+		redesigns_used: 0,
 		worktree_path: worktreePath,
 		branch,
 	};
@@ -228,6 +289,7 @@ export async function executeWorkflowRun(
 		goal_id: goalId,
 		goal,
 		max_fix_iterations: maxFixIterations,
+		max_redesigns: opts.max_redesigns,
 		worktree_path: worktreePath,
 	});
 
@@ -235,8 +297,15 @@ export async function executeWorkflowRun(
 	return new Promise<WorkflowRunOutput>((resolveFn) => {
 		let implementDone = false;
 		let mergeDone = false;
-		let lastReviewVerdict: "CLEAN" | "NEEDS_WORK" | undefined;
+		let lastReviewVerdict:
+			| "CLEAN"
+			| "NEEDS_WORK"
+			| "NEEDS_REDESIGN"
+			| "NEEDS_CLARIFICATION"
+			| undefined;
 		let lastReviewIteration = 0;
+		let redesignsCount = 0; // GC-2026-verdict-states-and-dynamic-cascade: per-workflow counter
+		let pendingOpenQuestion: string | undefined;
 		const taskSummaries: Record<string, TaskSummary> = {};
 
 		const unsub = pi.events.on("workflow:phase-complete", (data) => {
@@ -248,6 +317,34 @@ export async function executeWorkflowRun(
 				status: ev.status === "completed" ? "completed" : "failed",
 				...(ev.error && { error: ev.error }),
 			};
+
+			// GC-2026-verdict-states-and-dynamic-cascade: the pause path.
+			// Review emitted verdict=NEEDS_CLARIFICATION. workflow-run
+			// resolves as needs_clarification so the orchestrator main
+			// agent can surface the open_question. We do NOT cascade
+			// further — the tracking layer (workflow-handler) stopped
+			// dispatching after the needs_clarification phase-complete.
+			if (ev.status === "needs_clarification") {
+				lastReviewVerdict = "NEEDS_CLARIFICATION";
+				pendingOpenQuestion = ev.open_question;
+				state.current_phase = "needs_clarification";
+				state.status = "needs_clarification";
+				saveWorkflowState(repoCwd, state);
+				unsub();
+				resolveFn(
+					buildClarificationOutput(
+						goalId,
+						maxFixIterations,
+						state.iterations_used,
+						redesignsCount,
+						worktreePath,
+						branch,
+						taskSummaries,
+						pendingOpenQuestion,
+					),
+				);
+				return;
+			}
 
 			// GC-2026-pi-tasks-cascade-agentid: failure short-circuits the
 			// run. The remaining phases won't spawn — pi-tasks's cascade
@@ -264,6 +361,7 @@ export async function executeWorkflowRun(
 						goalId,
 						maxFixIterations,
 						state.iterations_used,
+						redesignsCount,
 						worktreePath,
 						branch,
 						taskSummaries,
@@ -280,8 +378,20 @@ export async function executeWorkflowRun(
 			} else if (ev.phase === "review") {
 				lastReviewVerdict = ev.verdict;
 				lastReviewIteration = ev.iteration ?? lastReviewIteration + 1;
-				state.iterations_used = Math.max(state.iterations_used, lastReviewIteration);
-				state.current_phase = lastReviewVerdict === "NEEDS_WORK" ? "fix_loop" : "review";
+				if (ev.verdict === "NEEDS_REDESIGN") {
+					redesignsCount += 1;
+					state.redesigns_used = redesignsCount;
+					state.current_phase = "redesign";
+				} else if (ev.verdict === "NEEDS_WORK") {
+					// GC-2026-verdict-states-and-dynamic-cascade: this counter now
+					// reflects actual Fix dispatches (which only happen on
+					// NEEDS_WORK). The semantic shift from "lastReviewIteration"
+					// is the postmortem-documented rationale.
+					state.iterations_used += 1;
+					state.current_phase = "fix_loop";
+				} else {
+					state.current_phase = "review";
+				}
 			} else if (ev.phase === "fix") {
 				// Cascade: Fix → next Review. Just record.
 				state.current_phase = "review";
@@ -295,10 +405,10 @@ export async function executeWorkflowRun(
 			// Success: implement + last review (CLEAN) + merge all done
 			if (implementDone && lastReviewVerdict === "CLEAN" && mergeDone) {
 				unsub();
-				resolveFn(buildSuccessOutput(goalId, maxFixIterations, worktreePath, branch, taskSummaries));
+				resolveFn(buildSuccessOutput(goalId, maxFixIterations, redesignsCount, worktreePath, branch, taskSummaries));
 				return;
 			}
-			// Blocked: iterations_used >= max AND last review was NEEDS_WORK AND no merge
+			// Blocked: NEEDS_WORK iterations exhausted AND last review was NEEDS_WORK AND no merge.
 			if (
 				implementDone &&
 				state.iterations_used >= maxFixIterations &&
@@ -306,7 +416,41 @@ export async function executeWorkflowRun(
 				!mergeDone
 			) {
 				unsub();
-				resolveFn(buildBlockedOutput(goalId, maxFixIterations, state.iterations_used, worktreePath, branch, taskSummaries));
+				resolveFn(
+					buildBlockedOutput(
+						goalId,
+						maxFixIterations,
+						state.iterations_used,
+						redesignsCount,
+						worktreePath,
+						branch,
+						taskSummaries,
+					),
+				);
+				return;
+			}
+			// Blocked: NEEDS_REDESIGN redesigns exhausted.
+			const maxRedesigns = opts.max_redesigns ?? 1;
+			if (
+				implementDone &&
+				lastReviewVerdict === "NEEDS_REDESIGN" &&
+				redesignsCount >= maxRedesigns &&
+				!mergeDone
+			) {
+				unsub();
+				resolveFn(
+					buildBlockedOutput(
+						goalId,
+						maxFixIterations,
+						state.iterations_used,
+						redesignsCount,
+						worktreePath,
+						branch,
+						taskSummaries,
+						"review",
+						`NEEDS_REDESIGN budget (${maxRedesigns}) exhausted`,
+					),
+				);
 				return;
 			}
 		});
@@ -316,6 +460,7 @@ export async function executeWorkflowRun(
 function buildSuccessOutput(
 	goalId: string,
 	maxFixIterations: number,
+	redesignsUsed: number,
 	worktreePath: string,
 	branch: string,
 	tasks: Record<string, TaskSummary>,
@@ -334,6 +479,7 @@ function buildSuccessOutput(
 		status: "success",
 		goal_id: goalId,
 		iterations_used: 0,
+		redesigns_used: redesignsUsed,
 		tasks: {
 			implement: { ...tasks["t-implement"] ?? { id: "t-implement", status: "completed" }, agent_id: "t-implement" },
 			review: reviewSummary,
@@ -349,6 +495,7 @@ function buildBlockedOutput(
 	goalId: string,
 	maxFixIterations: number,
 	iterationsUsed: number,
+	redesignsUsed: number,
 	worktreePath: string,
 	branch: string,
 	tasks: Record<string, TaskSummary>,
@@ -363,6 +510,7 @@ function buildBlockedOutput(
 		status: "blocked",
 		goal_id: goalId,
 		iterations_used: iterationsUsed,
+		redesigns_used: redesignsUsed,
 		blocked_at: isFailure ? failedPhase : "review",
 		tasks: {
 			implement: {
@@ -377,7 +525,7 @@ function buildBlockedOutput(
 				id: "t-review-final",
 				status: "completed",
 				agent_id: "t-review-final",
-				verdict: "NEEDS_WORK",
+				verdict: isFailure ? "NEEDS_WORK" : "NEEDS_WORK",
 				findings_count: 0,
 				iterations: iterationsUsed,
 				duration_ms: 0,
@@ -390,6 +538,60 @@ function buildBlockedOutput(
 		summary: isFailure
 			? `Goal ${goalId} blocked: ${failedPhase} phase failed (${error ?? "no error"}).`
 			: `Max fix iterations (${maxFixIterations}) exhausted with NEEDS_WORK.`,
+	};
+}
+
+/**
+ * GC-2026-verdict-states-and-dynamic-cascade: the Review emitted
+ * verdict=NEEDS_CLARIFICATION with an `open_question`. workflow-run
+ * resolves as status="blocked" with blocked_at="review" (the failing
+ * phase) and surfaces the open_question so the orchestrator main agent
+ * can relay it to the user.
+ *
+ * Note: the workflow-run status enum stays {success, blocked}. The
+ * NEEDS_CLARIFICATION pause is signalled via `blocked_at: "review"`
+ * + `open_question` rather than a new top-level status — keeping the
+ * LLM-facing output shape additive.
+ */
+function buildClarificationOutput(
+	goalId: string,
+	maxFixIterations: number,
+	iterationsUsed: number,
+	redesignsUsed: number,
+	worktreePath: string,
+	branch: string,
+	tasks: Record<string, TaskSummary>,
+	openQuestion: string | undefined,
+): WorkflowRunOutput {
+	return {
+		status: "blocked",
+		goal_id: goalId,
+		iterations_used: iterationsUsed,
+		redesigns_used: redesignsUsed,
+		blocked_at: "review",
+		open_question: openQuestion,
+		tasks: {
+			implement: {
+				...(tasks["t-implement"] ?? {}),
+				id: "t-implement",
+				agent_id: "t-implement",
+				status: "completed",
+			},
+			review: {
+				...tasks["t-review-final"] ?? {},
+				id: "t-review-final",
+				status: "completed",
+				agent_id: "t-review-final",
+				verdict: "NEEDS_CLARIFICATION",
+				findings_count: 0,
+				iterations: iterationsUsed,
+				duration_ms: 0,
+			},
+		},
+		pi_tasks: { implement: "", review: "", fix: "", merge: "" },
+		unresolved_findings: [],
+		paths: { worktree: worktreePath, branch, goal_yaml: `.pi/orchestrator/goal-${goalId}.yaml` },
+		summary: `Goal ${goalId} needs clarification: ${openQuestion ?? "(no question provided)"}`,
 	};
 }
 
