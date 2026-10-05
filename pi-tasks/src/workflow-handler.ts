@@ -34,6 +34,8 @@ import type { Task } from "./types.js";
 import { parseReviewerVerdict, type ReviewerVerdict } from "./verdict-parser.js";
 import {
 	buildStaticWorkflowGraph,
+	buildFixTaskSpec,
+	buildRedesignImplementTaskSpec,
 	PLACEHOLDER_IMPLEMENT,
 	PLACEHOLDER_MERGE,
 	placeholderFix,
@@ -48,8 +50,17 @@ export interface WorkflowStartPayload {
 	workflow_id: string;
 	goal_id: string;
 	goal: WorkflowGoal;
-	/** Default 3 — produces 7 tasks (Implement + 3 Review + 2 Fix + Merge). */
+	/**
+	 * Default 3. Produces 4-5 tasks in the static graph (Implement + N
+	 * Reviews + Merge; Fix tasks are created dynamically on NEEDS_WORK).
+	 * Bumped from 3 in the prior 7-task design.
+	 */
 	max_fix_iterations: number;
+	/**
+	 * GC-2026-verdict-states-and-dynamic-cascade: caps NEEDS_REDESIGN
+	 * dispatches so the workflow can't loop forever on a redesign. Default 1.
+	 */
+	max_redesigns?: number;
 	/** Absolute path to the managed worktree for Implement/Fix/Merge agents. */
 	worktree_path: string;
 }
@@ -101,6 +112,13 @@ export function subscribeWorkflow(
 	// filter only walks tasks belonging to the active workflow.
 	let activeWorkflowId: string | null = null;
 	let activeGoalId: string | null = null;
+	// GC-2026-verdict-states-and-dynamic-cascade: track iteration + redesign
+	// counters so the cascade can cap Fix/Redesign dispatches. The values
+	// here mirror what workflow-run.ts reads from `workflow-{id}.yaml`.
+	let maxFixIterations = 3;
+	let maxRedesigns = 1;
+	let fixIterationsUsed = 0; // count of Fix dispatches actually created
+	let redesignsUsed = 0;     // count of NEEDS_REDESIGN Implement dispatches
 
 	// ── workflow:start ──────────────────────────────────────────────
 
@@ -111,6 +129,9 @@ export function subscribeWorkflow(
 		}
 		activeWorkflowId = payload.workflow_id;
 		activeGoalId = payload.goal_id;
+		payload_worktree_path = payload.worktree_path;
+		maxFixIterations = payload.max_fix_iterations;
+		maxRedesigns = payload.max_redesigns ?? 1;
 
 		// 1. Build the static graph (pure function — no store side-effects).
 		const specs = buildStaticWorkflowGraph({
@@ -202,6 +223,135 @@ export function subscribeWorkflow(
 		store.update(implement.id, { status: "in_progress", owner: agentId });
 	};
 
+	// GC-2026-verdict-states-and-dynamic-cascade: dynamic task creation.
+	// Helpers below are called from onSubagentCompleted when a Review verdict
+	// requires spawning a new task that wasn't in the static graph. Each helper
+	// stamps metadata, registers the agent id, and adds a blockedBy edge
+	// from the next Review (Fix case) or Review_1 (Redesign case) so the
+	// cascade respects the new task.
+
+	/**
+	 * NEEDS_WORK dispatch: create Fix_i (where i = fixIterationsUsed + 1).
+	 * The new Fix is blockedBy the originating Review and adds itself to
+	 * Review_{i+1}'s blockedBy list so the chain pauses for the fix.
+	 * Returns silently if max_fix_iterations is reached.
+	 */
+	async function dispatchFixForReview(
+		reviewTask: Task,
+		_verdict: ReviewerVerdict,
+	): Promise<void> {
+		if (fixIterationsUsed >= maxFixIterations) {
+			// Cap reached. The Review must have been NEEDS_WORK on the
+			// last allowed Review iteration. workflow-run.ts will resolve
+			// as blocked via the iterations_used check.
+			return;
+		}
+		const nextIteration = fixIterationsUsed + 1;
+		fixIterationsUsed = nextIteration;
+
+		// Look up the next Review (if any) so we can wire Fix → Review_{i+1}.
+		const allReviews = store.list().filter(
+			(t) =>
+				t.metadata.phase === "review" &&
+				t.metadata.workflow_run_goal_id === activeGoalId,
+		);
+		const nextReview = allReviews.find(
+			(t) => Number(t.metadata.iteration) === nextIteration + 1,
+		);
+
+		const goal = (reviewTask.metadata as { goal?: WorkflowGoal }).goal;
+		if (!goal) {
+			// Defensive: every workflow task should have the goal in metadata,
+			// but fall back to a placeholder so the cascade doesn't crash.
+			throw new Error("dispatchFixForReview: review task missing goal metadata");
+		}
+		const spec = buildFixTaskSpec({
+			goal,
+			iteration: nextIteration,
+			worktreePath: payload_worktree_path,
+			branch: `${goal.id.toLowerCase()}-implement`,
+			reviewTaskId: reviewTask.id,
+			nextReviewId: nextReview?.id,
+			workflow_run_goal_id: activeGoalId ?? "",
+		});
+		const fixTask = store.create(
+			spec.subject,
+			spec.description,
+			spec.subject,
+			{ ...spec.metadata, workflow_id: activeWorkflowId ?? "" },
+		);
+		// Wire blockedBy edges. spec.blockedBy uses placeholder ids only when
+		// Review_{i+1} doesn't exist yet — for the dynamic case we always have
+		// a real review id.
+		for (const blockerId of spec.blockedBy) {
+			store.update(fixTask.id, { addBlockedBy: [blockerId] });
+		}
+		// Add Fix → Review_{i+1} edge if applicable.
+		if (nextReview) {
+			store.update(nextReview.id, { addBlockedBy: [fixTask.id] });
+		}
+		// Spawn immediately (Fix has all its blockers done by definition).
+		const agentId = await spawnAgent(fixTask, { worktreePath: payload_worktree_path });
+		agentToTask.set(agentId, fixTask.id);
+		store.update(fixTask.id, { status: "in_progress", owner: agentId });
+	}
+
+	/**
+	 * NEEDS_REDESIGN dispatch: create a new Implement task. Wired to
+	 * Review_1 so the chain restarts from the top. Returns silently if
+	 * max_redesigns is reached.
+	 */
+	async function dispatchRedesignForReview(reviewTask: Task): Promise<void> {
+		if (redesignsUsed >= maxRedesigns) {
+			// Cap reached. workflow-run.ts resolves as blocked via the
+			// redesigns_used check.
+			return;
+		}
+		const nextNumber = redesignsUsed + 1;
+		redesignsUsed = nextNumber;
+
+		const goal = (reviewTask.metadata as { goal?: WorkflowGoal }).goal;
+		if (!goal) {
+			throw new Error("dispatchRedesignForReview: review task missing goal metadata");
+		}
+		const spec = buildRedesignImplementTaskSpec({
+			goal,
+			redesignNumber: nextNumber,
+			worktreePath: payload_worktree_path,
+			branch: `${goal.id.toLowerCase()}-implement`,
+			reviewTaskId: reviewTask.id,
+			workflow_run_goal_id: activeGoalId ?? "",
+		});
+		const newImplement = store.create(
+			spec.subject,
+			spec.description,
+			spec.subject,
+			{ ...spec.metadata, workflow_id: activeWorkflowId ?? "" },
+		);
+		// Wire blockedBy: new Implement blockedBy the requesting Review.
+		store.update(newImplement.id, { addBlockedBy: [reviewTask.id] });
+		// Wire Review_1 to also wait on the new Implement (so the chain resets).
+		const review1 = store.list().find(
+			(t) =>
+				t.metadata.phase === "review" &&
+				Number(t.metadata.iteration) === 1 &&
+				t.metadata.workflow_run_goal_id === activeGoalId,
+		);
+		if (review1) {
+			store.update(review1.id, { addBlockedBy: [newImplement.id] });
+		}
+		const agentId = await spawnAgent(newImplement, { worktreePath: payload_worktree_path });
+		agentToTask.set(agentId, newImplement.id);
+		store.update(newImplement.id, { status: "in_progress", owner: agentId });
+	}
+
+	// GC-2026-verdict-states-and-dynamic-cascade: closure capture. The
+	// dispatchFixForReview / dispatchRedesignForReview helpers above need
+	// access to the start-payload's worktree_path, captured here from the
+	// onWorkflowStart closure. We update it on each workflow:start call so
+	// multiple sequential workflows (tests) don't share stale paths.
+	let payload_worktree_path = "";
+
 	// ── subagents:completed ─────────────────────────────────────────
 
 	const onSubagentCompleted = async (raw: unknown): Promise<void> => {
@@ -243,6 +393,35 @@ export function subscribeWorkflow(
 				status: "completed",
 				metadata: { verdict },
 			});
+
+			// GC-2026-verdict-states-and-dynamic-cascade: branch on the 4 verdict
+			// states. NEEDS_WORK → create Fix on demand. NEEDS_REDESIGN → create
+			// a new Implement. NEEDS_CLARIFICATION → emit a needs_clarification
+			// phase-complete and let the orchestrator main agent surface the
+			// question; do NOT cascade further.
+			if (verdict.verdict === "NEEDS_WORK") {
+				await dispatchFixForReview(task, verdict);
+			} else if (verdict.verdict === "NEEDS_REDESIGN") {
+				await dispatchRedesignForReview(task);
+			} else if (verdict.verdict === "NEEDS_CLARIFICATION") {
+				// Pause workflow: emit phase-complete with status marker; do
+				// not cascade. workflow-run.ts reads status and resolves as
+				// blocked. open_question propagates so the orchestrator can
+				// surface it to the user.
+				await events.emit("workflow:phase-complete", {
+					workflow_id: task.metadata.workflow_id ?? activeWorkflowId,
+					goal_id: task.metadata.workflow_run_goal_id ?? activeGoalId,
+					phase: "review",
+					iteration: task.metadata.iteration,
+					status: "needs_clarification",
+					verdict: verdict.verdict,
+					findings_count: 0,
+					open_question: verdict.open_question,
+					task_id: taskId,
+				});
+				return; // skip cascade
+			}
+
 			await events.emit("workflow:phase-complete", {
 				workflow_id: task.metadata.workflow_id ?? activeWorkflowId,
 				goal_id: task.metadata.workflow_run_goal_id ?? activeGoalId,

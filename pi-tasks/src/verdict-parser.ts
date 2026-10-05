@@ -5,7 +5,7 @@
  * of its final message. The parser scans for the LAST ```yaml fence,
  * extracts the YAML body, and decodes a flat structure:
  *
- *   verdict: CLEAN | NEEDS_WORK
+ *   verdict: CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION
  *   findings:
  *     - severity: minor | major | critical
  *       issue: <string>
@@ -35,6 +35,16 @@
  *      that combination as NEEDS_WORK (a CLEAN verdict contradicts the
  *      existence of findings; the Reviewer meant NEEDS_WORK).
  *
+ * GC-2026-verdict-states-and-dynamic-cascade additions:
+ *   4. **Four verdict states** — the parser accepts
+ *      \`CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION\`.
+ *      Default for unrecognized values remains NEEDS_WORK (safe default).
+ *      Workflow-handler dispatches:
+ *        - CLEAN → proceed to next phase (or Merge)
+ *        - NEEDS_WORK → spawn Fix
+ *        - NEEDS_REDESIGN → spawn new Implement (skip remaining Fix chain)
+ *        - NEEDS_CLARIFICATION → pause workflow, emit system-reminder
+ *
  * Default-on-failure: any parsing problem returns NEEDS_WORK with empty
  * findings. The reviewer must explicitly mark CLEAN with evidence; missing
  * evidence should never produce a spurious clean bill of health.
@@ -51,9 +61,25 @@ export interface Finding {
   recommendation?: string;
 }
 
+/**
+ * GC-2026-verdict-states-and-dynamic-cascade: the four verdict states.
+ * See the parser docstring above for the dispatch contract per state.
+ */
+export type ReviewerVerdictValue =
+  | "CLEAN"
+  | "NEEDS_WORK"
+  | "NEEDS_REDESIGN"
+  | "NEEDS_CLARIFICATION";
+
 export interface ReviewerVerdict {
-  verdict: "CLEAN" | "NEEDS_WORK";
+  verdict: ReviewerVerdictValue;
   findings?: Finding[];
+  /**
+   * GC-2026-verdict-states-and-dynamic-cascade: NEEDS_CLARIFICATION verdicts
+   * MUST carry an open_question so the orchestrator main agent can surface
+   * it to the user. Free-form string — the parser doesn't validate content.
+   */
+  open_question?: string;
   scope_check?: "pass" | "fail" | "absent";
   scope_check_skipped?: string;
   anti_goal_check?: "pass" | "fail" | "absent";
@@ -73,19 +99,31 @@ export interface ParseVerdictOptions {
 
 const VERDICT_FENCE = "```yaml\n";
 
+const KNOWN_VERDICTS: ReadonlySet<ReviewerVerdictValue> = new Set([
+  "CLEAN",
+  "NEEDS_WORK",
+  "NEEDS_REDESIGN",
+  "NEEDS_CLARIFICATION",
+]);
+
 /**
  * Parse the Reviewer's final message into a structured verdict.
  *
- * Behavior contract (GC-2026-prompt-parser-contract-cleanup):
+ * Behavior contract:
  *  - No message AND no verdict file → NEEDS_WORK (safe default).
  *  - No ```yaml fence in message → fall back to verdictFilePath (if provided).
  *  - Verdict file also missing/malformed → NEEDS_WORK.
- *  - verdict field present but not CLEAN (case-insensitive) → NEEDS_WORK.
+ *  - verdict field present but not one of CLEAN/NEEDS_WORK/NEEDS_REDESIGN/NEEDS_CLARIFICATION
+ *    (case-insensitive) → NEEDS_WORK (safe default; unrecognized verdict
+ *    means we can't proceed).
  *  - `verdict: CLEAN` + `findings: non-empty` → malformed → NEEDS_WORK.
  *  - `scope_check: fail` → NEEDS_WORK (regardless of verdict).
  *  - `anti_goal_check: fail` → NEEDS_WORK.
  *  - `scope_check: absent` without `scope_check_skipped:` → NEEDS_WORK.
  *  - `anti_goal_check: absent` without `anti_goal_check_skipped:` → NEEDS_WORK.
+ *  - `verdict: NEEDS_CLARIFICATION` without `open_question:` → still parsed as
+ *    NEEDS_CLARIFICATION, but the workflow-handler downgrades to NEEDS_WORK
+ *    when open_question is missing (see GC-3 postmortem).
  *  - `findings: []` (inline empty list) is honored as zero findings.
  *  - `findings:` with `- key: val` items is parsed line-by-line.
  *  - Continuation lines inside a finding (indented key:value) update the
@@ -161,17 +199,20 @@ export function parseReviewerVerdict(
     if (inFindings && currentFinding) currentFindings.push(currentFinding);
     if (currentFindings.length > 0) obj.findings = currentFindings;
 
+    // GC-2026-verdict-states-and-dynamic-cascade: 4-state verdict.
     const verdictRaw = String(obj.verdict ?? "").toUpperCase();
-    const verdictDeclared = verdictRaw === "CLEAN" ? "CLEAN" : "NEEDS_WORK";
+    const verdict: ReviewerVerdictValue = (KNOWN_VERDICTS as Set<string>).has(verdictRaw)
+      ? (verdictRaw as ReviewerVerdictValue)
+      : "NEEDS_WORK";
 
-    // GC-2026-prompt-parser-contract-cleanup #3: CLEAN + non-empty findings
+    // GC-2026-prompt-parser-contract-cleanup: CLEAN + non-empty findings
     // is a contradiction. Treat as malformed → NEEDS_WORK.
     const findings = Array.isArray(obj.findings) ? (obj.findings as Finding[]) : [];
-    if (verdictDeclared === "CLEAN" && findings.length > 0) {
+    if (verdict === "CLEAN" && findings.length > 0) {
       return { verdict: "NEEDS_WORK", findings };
     }
 
-    // GC-2026-prompt-parser-contract-cleanup #2: strict dimension checks.
+    // GC-2026-prompt-parser-contract-cleanup: strict dimension checks.
     const scope_check = normalizeDim(obj.scope_check);
     const anti_goal_check = normalizeDim(obj.anti_goal_check);
     const scope_check_skipped =
@@ -190,9 +231,17 @@ export function parseReviewerVerdict(
       (scope_check === "absent" && !scope_check_skipped) ||
       (anti_goal_check === "absent" && !anti_goal_check_skipped);
 
+    // GC-2026-verdict-states-and-dynamic-cascade: extract open_question
+    // for NEEDS_CLARIFICATION.
+    const open_question =
+      typeof obj.open_question === "string" && obj.open_question.trim().length > 0
+        ? obj.open_question.trim()
+        : undefined;
+
     return {
-      verdict: dimensionFails ? "NEEDS_WORK" : verdictDeclared,
+      verdict: dimensionFails ? "NEEDS_WORK" : verdict,
       findings,
+      open_question,
       scope_check,
       scope_check_skipped,
       anti_goal_check,
@@ -232,10 +281,6 @@ function extractLastYamlFence(message: string | undefined): string | null {
  * writes it via atomic rename before emitting the final message, so a
  * max_turns hard abort that truncates the message still leaves the verdict
  * recoverable.
- *
- * GC-2026-path-B-streaming note: a separate file mtime cache layer belongs in
- * `verdict-parser-helpers.ts` once we start parsing verdicts at high frequency;
- * the parser itself stays synchronous and pure.
  */
 function readVerdictFile(verdictFilePath: string | undefined): string | null {
   if (!verdictFilePath) return null;
