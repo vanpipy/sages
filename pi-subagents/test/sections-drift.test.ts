@@ -35,6 +35,9 @@ import {
 import {
 	FINAL_VERDICT_REVIEWER_SECTION,
 } from "../src/agent-prompts/_sections/final-verdict-reviewer.js";
+import {
+	COMMIT_CONVENTIONS_SECTION,
+} from "../src/agent-prompts/_sections/commit-conventions.js";
 
 function extract(prompt: string, header: string, tailMarker?: string): number {
 	const idx = prompt.indexOf(header);
@@ -112,6 +115,28 @@ describe("shared sections: shape", () => {
 		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("scope_check: pass | fail");
 		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("anti_goal_check: pass | fail");
 		expect(REVIEWER_PROMPT).toContain(FINAL_VERDICT_REVIEWER_SECTION);
+	});
+
+	// GC-2026-prompt-consistency: COMMIT_CONVENTIONS_SECTION is the canonical
+	// Conventional Commits + author + .pi/ rules block. Previously inlined in
+	// developer.ts (3 copies + 1 brief across SYSTEM.md/AGENTS.md/DEVELOPER_PROMPT).
+	// After this GC: developer.ts and reviewer.ts both interpolate the imported
+	// section byte-identically. byte-identity pin ensures any future drift is
+	// caught here, not at audit time. (Merger / Explore / PlanCompiler do not
+	// commit and intentionally do not import this section — see _sections/index.)
+	it("COMMIT_CONVENTIONS_SECTION is exported, non-empty, and shared byte-identically by Developer + Reviewer", () => {
+		expect(typeof COMMIT_CONVENTIONS_SECTION).toBe("string");
+		expect(COMMIT_CONVENTIONS_SECTION.length).toBeGreaterThan(500);
+		expect(COMMIT_CONVENTIONS_SECTION).toContain("## 📤 Commit Conventions");
+		// Spot-check anchor strings — keep them identical to the inline text that
+		// previously lived at developer.ts:302-394.
+		expect(COMMIT_CONVENTIONS_SECTION).toContain("Conventional Commits 1.0.0");
+		expect(COMMIT_CONVENTIONS_SECTION).toContain("Author — derive from git, never invent");
+		expect(COMMIT_CONVENTIONS_SECTION).toContain("git config user.name");
+		expect(COMMIT_CONVENTIONS_SECTION).toContain("GIT_AUTHOR_NAME");
+		expect(DEVELOPER_PROMPT).toContain(COMMIT_CONVENTIONS_SECTION);
+		// Reviewer uses the same section as a spot-check reminder; same byte slice.
+		expect(REVIEWER_PROMPT).toContain(COMMIT_CONVENTIONS_SECTION);
 	});
 });
 
