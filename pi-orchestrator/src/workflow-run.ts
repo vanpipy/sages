@@ -68,6 +68,15 @@ export interface WorkflowRunInput {
 			fix?: string;
 			merge?: string;
 		};
+		/**
+		 * GC-2026-097 M1: previously advertised as "Reuse completed
+		 * phases from the workflow-{goal_id}.yaml state file. Default true."
+		 * but never wired through executeWorkflowRun — the slim path B
+		 * implementation always re-creates the static graph from
+		 * scratch. Reserved as an opaque pass-through for forward
+		 * compatibility; orchestrator-side resume support is deferred
+		 * to a future GC.
+		 */
 		resume?: boolean;
 	};
 	verbose?: boolean;
@@ -233,7 +242,7 @@ export const WorkflowRunParams = Type.Object({
 					merge: Type.Optional(Type.String()),
 				}),
 			),
-			resume: Type.Optional(Type.Boolean({ description: "Reuse completed phases from the workflow-{goal_id}.yaml state file. Default true." })),
+			resume: Type.Optional(Type.Boolean({ description: "GC-2026-097 M1: reserved for future state-resume support; currently ignored by executeWorkflowRun." })),
 			/**
 			 * GC-2026-needs-clarification-resume: pass the user's answer
 			 * to a prior NEEDS_CLARIFICATION pause. The orchestrator main
