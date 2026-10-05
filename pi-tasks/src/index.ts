@@ -182,6 +182,30 @@ export default function (pi: ExtensionAPI) {
   checkSubagentsVersion();
   pi.events.on("subagents:ready", () => checkSubagentsVersion());
 
+  // GC-2026-phase-widget: cross-extension task query.
+  // pi-orchestrator phase widget reads workflow tasks via this RPC.
+  // Channel: tasks:rpc:list-by-metadata -> reply:
+  // tasks:rpc:list-by-metadata:reply:REQUEST_ID. Envelope mirrors the
+  // pi-subagents RPC pattern: [success, data].
+  pi.events.on("tasks:rpc:list-by-metadata", (raw: unknown) => {
+    const payload = raw as {
+      requestId?: unknown;
+      key?: unknown;
+      value?: unknown;
+    };
+    if (typeof payload.requestId !== "string" || typeof payload.key !== "string") {
+      return;
+    }
+    const requestId = payload.requestId;
+    const key = payload.key;
+    const value = payload.value;
+    const tasks = store.list().filter((t) => t.metadata?.[key] === value);
+    pi.events.emit("tasks:rpc:list-by-metadata:reply:" + requestId, {
+      success: true,
+      data: tasks,
+    });
+  });
+
   /** Build a prompt for a task being executed by a subagent.
    *  Injects completed dependency results so cascaded agents have context from prerequisites.
    */
