@@ -357,6 +357,7 @@ export type ToolFamily =
 	| "baseline"
 	| "subagent_control"
 	| "orchestrator"
+	| "tasks"
 	| "other";
 
 export function familyOfTool(toolName: string): ToolFamily {
@@ -391,11 +392,26 @@ export function familyOfTool(toolName: string): ToolFamily {
 	) {
 		return "subagent_control";
 	}
-	// After GC-2026-orchestrator-simplify the orchestrator family is just
-	// `goal_contract_create` — the four DAG/audit/dispatch/reminder tools
-	// were removed.
-	if (toolName === "goal_contract_create") {
+	// GC-2026-097 M3a: workflow_run is also an orchestrator tool (added
+	// in GC-2026-workflow-run). The four DAG/audit/dispatch/reminder
+	// tools were already removed by GC-2026-orchestrator-simplify.
+	if (toolName === "goal_contract_create" || toolName === "workflow_run") {
 		return "orchestrator";
+	}
+	// GC-2026-097 M3b: the 7 pi-tasks tools form their own family so
+	// the family-mix reminder doesn't dilute baseline ratio when an LLM
+	// is driving a workflow via TaskCreate / TaskExecute (both are
+	// frequent in workflow_run usage).
+	if (
+		toolName === "TaskCreate" ||
+		toolName === "TaskList" ||
+		toolName === "TaskGet" ||
+		toolName === "TaskUpdate" ||
+		toolName === "TaskOutput" ||
+		toolName === "TaskStop" ||
+		toolName === "TaskExecute"
+	) {
+		return "tasks";
 	}
 	return "other";
 }
@@ -409,6 +425,7 @@ export function emptyFamilyCounts(): Record<ToolFamily, number> {
 		baseline: 0,
 		subagent_control: 0,
 		orchestrator: 0,
+		tasks: 0,
 		other: 0,
 	};
 }
@@ -426,6 +443,7 @@ export function familyMixReminderText(
 		familyCounts.baseline +
 		familyCounts.subagent_control +
 		familyCounts.orchestrator +
+		familyCounts.tasks +
 		familyCounts.other;
 	if (sumAll < 10) return null;
 	if (sumAll === 0) return null;
@@ -582,6 +600,28 @@ export function installOrchestratorAdvisoryHandlers(
 			return deps.loadGoalScope(goalId, cwd);
 		},
 	};
+
+	// GC-2026-097 L4: reset all closure-scoped advisory state on each
+	// session_start. The orchestrator extension is loaded once per pi
+	// process (not per session); without this reset, alreadyAdvisedRules
+	// accumulates across sessions in long-lived processes and permanently
+	// silences nudges after the first session fires them. Tests pin this
+	// behavior at orchestrator-advisory.test.ts#L4-1.
+	const resetAdvisoryState = () => {
+		orchestratorHistory.length = 0;
+		errorHistory.length = 0;
+		lastAssistantMessage = null;
+		l1Ctx.alreadyAdvisedRules.clear();
+		l1Ctx.advisoriesBySeverity.critical = 0;
+		l1Ctx.advisoriesBySeverity.major = 0;
+		l1Ctx.advisoriesBySeverity.minor = 0;
+		for (const key of Object.keys(familyCounts)) {
+			(familyCounts as Record<string, number>)[key] = 0;
+		}
+	};
+	pi.on("session_start", () => {
+		resetAdvisoryState();
+	});
 
 	// Pre-tool blocker (no-op after orchestrator-simplify — no critical
 	// orchestrator rules remain; subagent advisory still owns the

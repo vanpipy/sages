@@ -12,8 +12,8 @@
 	// with `_sages_template_marker: Unrecognized key`.
 	//
 	// Per-session fields (harness, project_root) are set by the AFT
-	// bridge at session start (see pi-orchestrator/src/services/aft/project.ts), so
-	// this template only carries persistent defaults + feature flags.
+	// bridge at session start, so this template only carries persistent
+	// defaults + feature flags.
 	// ════════════════════════════════════════════════════════════════════════
 	"$schema": "https://raw.githubusercontent.com/cortexkit/aft/main/assets/aft.schema.json",
 

@@ -13,7 +13,7 @@
  *   import { registerOrchestratorTools } from "@sages/pi-orchestrator";
  */
 
-export { registerOrchestratorTools, registerBrainstormCommand } from "./extension.js";
+export { registerOrchestratorTools } from "./extension.js";
 
 // Individual tool registrars
 export { registerGoalContractTool } from "./goal-contract.js";
@@ -51,7 +51,6 @@ export * from "./template-loader.js";
 export * from "./goal-lock.js";
 export * from "./chain-key.js";
 export * from "./namespace-ownership.js";
-export * from "./planes.js";
 export * from "./bash-guard.js";
 
 export * as Observability from "./observability/index.js";

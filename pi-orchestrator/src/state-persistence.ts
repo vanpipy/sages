@@ -31,8 +31,19 @@ function sleepSync(ms: number): void {
 }
 
 function assertDirectoryNotSymlink(path: string): void {
-  if (!existsSync(path)) return;
-  const stat = lstatSync(path);
+  // GC-2026-097 P3: lstatSync unconditionally — a dangling symlink
+  // would pass the existsSync(path) gate (existsSync returns false when
+  // the symlink target does not exist), letting mkdirSync below fail
+  // with EEXIST. The pre-lock walk in resolveContainedPath then
+  // bubbled up an unhelpful error rather than the
+  // symlink-rejected-by-design error the caller wants.
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(path);
+  } catch (e: any) {
+    if (e?.code === "ENOENT") return;
+    throw e;
+  }
   if (stat.isSymbolicLink()) throw new Error(`Symlink rejected in orchestrator state path: ${path}`);
   if (!stat.isDirectory()) throw new Error(`Expected directory in orchestrator state path: ${path}`);
 }
@@ -126,10 +137,40 @@ export function atomicWriteOrchestratorFile<T>(
 ): string {
   validateSerializedYaml(content, options, relativePath);
   const target = resolveContainedPath(cwd, relativePath, options.owner);
+  const stateDir = ensureStateDirectory(cwd);
+  const parentRelative = relative(stateDir, dirname(target));
   const lock = acquireLock(target);
-  const temp = join(dirname(target), `.tmp-${basename(target)}-${process.pid}-${crypto.randomUUID()}`);
   try {
-    if (existsSync(target) && !lstatSync(target).isFile()) throw new Error(`State target is not a regular file: ${relativePath}`);
+    // GC-2026-097 P3: re-verify the parent directory chain inside the lock.
+    // resolveContainedPath already checked pre-lock; this closes the
+    // narrow TOCTOU window between mkdir and lock acquisition where an
+    // attacker could swap a parent directory component for a symlink.
+    let cursor = stateDir;
+    for (const component of parentRelative === "" ? [] : parentRelative.split(sep)) {
+      cursor = join(cursor, component);
+      assertDirectoryNotSymlink(cursor);
+    }
+    // GC-2026-097 P3: re-check inside the lock that `target` is not a
+    // symlink. The previous existsSync + isFile() check returned early
+    // for dangling symlinks (existsSync returns false when the symlink
+    // target does not yet exist), letting renameSync write through the
+    // symlink to a location of the planter's choice. We now lstatSync
+    // the target and reject if it is a symlink. lstatSync throws
+    // ENOENT for a path that genuinely does not exist; that's the
+    // legitimate new-write case.
+    try {
+      const targetStat = lstatSync(target);
+      if (targetStat.isSymbolicLink()) {
+        throw new Error(`Symlink state target rejected: ${relativePath}`);
+      }
+      if (!targetStat.isFile()) {
+        throw new Error(`State target is not a regular file: ${relativePath}`);
+      }
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") throw e;
+      // ENOENT: target does not exist — legitimate new write.
+    }
+    const temp = join(dirname(target), `.tmp-${basename(target)}-${process.pid}-${crypto.randomUUID()}`);
     const fd = openSync(temp, "wx", 0o600);
     try {
       writeFileSync(fd, content, "utf8");
@@ -141,29 +182,6 @@ export function atomicWriteOrchestratorFile<T>(
     try { chmodSync(target, 0o600); } catch { /* non-POSIX */ }
     return target;
   } finally {
-    if (existsSync(temp)) try { unlinkSync(temp); } catch { /* best effort */ }
-    releaseLock(lock);
-  }
-}
-
-/** Atomically write a non-YAML owned report with the same containment/lock rules. */
-export function atomicWriteOrchestratorText(
-  cwd: string,
-  relativePath: string,
-  content: string,
-  owner: OrchestratorNamespaceOwner,
-): string {
-  const target = resolveContainedPath(cwd, relativePath, owner);
-  const lock = acquireLock(target);
-  const temp = join(dirname(target), `.tmp-${basename(target)}-${process.pid}-${crypto.randomUUID()}`);
-  try {
-    const fd = openSync(temp, "wx", 0o600);
-    try { writeFileSync(fd, content, "utf8"); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(temp, target);
-    try { chmodSync(target, 0o600); } catch { /* non-POSIX */ }
-    return target;
-  } finally {
-    if (existsSync(temp)) try { unlinkSync(temp); } catch { /* best effort */ }
     releaseLock(lock);
   }
 }

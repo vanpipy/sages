@@ -1,12 +1,17 @@
 /**
- * extension-active-tools.test.ts — adapted for GC-2026-orchestrator-simplify
+ * extension-active-tools.test.ts — GC-2026-orchestrator-simplify +
+ * GC-2026-workflow-run + GC-2026-boundary-subagent-control.
  *
  * Asserts the session_start `setActiveTools` allowlist:
- *   - ORCHESTRATOR_TOOLS contains exactly 1 tool (`goal_contract_create`)
+ *   - ORCHESTRATOR_TOOLS contains exactly 2 tools
+ *     (`goal_contract_create`, `workflow_run` — GC-2026-workflow-run added
+ *     the latter as a one-shot 5-phase pipeline runner)
  *   - PI_SUBAGENT_TOOLS contains 3 tools (Agent / get_subagent_result /
  *     steer_subagent — registered by `@sages/pi-subagents`)
  *   - SUBAGENT_CONTROL_TOOLS contains 4 tools (subagent_status / steer /
- *     abort / resume — registered by the orchestrator)
+ *     abort / resume — registered by `@sages/pi-subagents` since
+ *     GC-2026-boundary-subagent-control; orchestrator's constant
+ *     is wiring-only)
  *   - SUBAGENT_TOOLS is the concatenation of the above two
  *   - BASELINE_TOOLS contains 7 file-system tools
  *   - PI_TASKS_TOOLS contains 7 workflow tools
@@ -17,8 +22,8 @@
  * TODOWRITE_TOOLS and CTX_TOOLS allowlists were already removed in
  * the GC-2026-remove-magic-context GC.
  *
- * Total active toolset: 1 (ORCHESTRATOR) + 7 (SUBAGENT) + 7 (PI_TASKS) +
- * 11 (AFT) + 7 (BASELINE) = 33.
+ * Total active toolset: 2 (ORCHESTRATOR) + 7 (SUBAGENT) + 7 (PI_TASKS) +
+ * 11 (AFT) + 7 (BASELINE) = 34.
  *
  * Run: cd pi-orchestrator && bun test ./test/extension-active-tools.test.ts
  */

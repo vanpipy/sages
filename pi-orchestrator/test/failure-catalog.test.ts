@@ -24,8 +24,10 @@ import {
 	KNOWN_TEMPLATE_VARS,
 	parseCatalogYaml,
 	renderFeedbackTemplate,
+	resetFailureCatalogCache,
 	SHIPPED_CATALOG_PATH,
 	templateVariables,
+	validateFailureCatalogOnBoot,
 } from "../src/failure-catalog.js";
 
 let dir: string;
@@ -74,6 +76,14 @@ describe("FailureCatalog boot validation (design §5.4, SC3)", () => {
 		expect(
 			FailureCatalog.load({ shippedPath: SHIPPED_CATALOG_PATH }).allIds(),
 		).toEqual(FailureCatalog.load().allIds());
+	});
+
+	it("GC-2026-097 M5: validateFailureCatalogOnBoot() succeeds for the shipped catalog", () => {
+		// Regression: the extension entrypoint calls this synchronously
+		// at boot so a malformed shipped catalog throws at session_start,
+		// not deep in a workflow 4 tool calls later.
+		resetFailureCatalogCache();
+		expect(() => validateFailureCatalogOnBoot()).not.toThrow();
 	});
 
 	it("T-CAT-01: a mode missing the required `detection` field fails boot", () => {

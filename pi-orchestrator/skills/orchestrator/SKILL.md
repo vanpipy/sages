@@ -115,21 +115,23 @@ For non-standard work (multi-package coordination, conditional branches, paralle
 
 This is what workflow_run does internally — emitting `workflow:start` is equivalent to `TaskCreate × K + TaskExecute([implement])`. The escape hatch exists for shapes that don't fit the 5-phase pipeline.
 
-## Pipeline pattern (the static graph)
+## Pipeline pattern (static graph + Fix-on-demand cascade)
 
-Default `max_fix_iterations=3` produces **7 tasks** for the canonical pipeline:
+Default `max_fix_iterations=3` produces a **5-task static graph** for the canonical pipeline:
 
 ```
-Implement ─→ Review_1 ─→ Fix_1 ─→ Review_2 ─→ Fix_2 ─→ Review_3 ─→ Merge
+Implement ─→ Review_1 ─→ Review_2 ─→ Review_3 ─→ Merge
 ```
 
-For `max_fix_iterations=N`: `Implement + N Reviews + (N-1) Fixes + Merge` = `2N + 2` tasks. For `max_fix_iterations=1`: just `Implement + Review_1 + Merge` (3 tasks).
+For `max_fix_iterations=N`: the static graph is `Implement + N Reviews + Merge` = `N + 2` tasks. For `max_fix_iterations=1`: `Implement + Review_1 + Merge` (3 tasks).
+
+**Fix tasks are created on demand**, not in the static graph. The cascade handler in `pi-tasks`'s `subscribeWorkflow` emits a `workflow:phase-complete` event with `phase: "fix"` whenever a Review verdict of `NEEDS_WORK` triggers a Fix dispatch (one Fix per NEEDS_WORK cycle, capped by `max_fix_iterations`). The orchestrator's `WorkflowRunOutput.tasks_total` in the streaming progress payload reports an **upper bound** (`1 + 2*max_fix_iterations + 1`) so the progress bar never hits 100% while Fix tasks are still queued.
 
 Every Fix task reads its `blockedBy` Review task's `metadata.verdict` via `TaskGet`:
-- `verdict === "CLEAN"` → emit `git commit --allow-empty -m "fix: review clean, no changes"` and report done
-- `verdict === "NEEDS_WORK"` → address findings[] in severity order
+- `verdict === "CLEAN"` → no Fix needed; cascade moves on to the next Review (or Merge if last)
+- `verdict === "NEEDS_WORK"` → address findings[] in severity order, then the next Review re-checks
 
-Every Review_2+ reads the prior Fix task's commit to see what changed before re-reviewing. The empty-commit CLEAN path is what keeps the static graph flowing without dynamic task creation.
+Every Review_2+ reads the prior Fix task's commit to see what changed before re-reviewing. The empty-commit CLEAN path is gone — Fix dispatches happen on-demand via `pi-tasks`'s cascade, not via pre-allocated static graph slots.
 
 ## Subagent dispatch contract
 

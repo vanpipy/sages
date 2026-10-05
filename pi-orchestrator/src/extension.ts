@@ -45,6 +45,7 @@ import {
 	installOrchestratorAdvisoryHandlers,
 	type OrchestratorAdvisoryRuntimeDeps,
 } from "./orchestrator-advisory.js";
+import { validateFailureCatalogOnBoot } from "./failure-catalog.js";
 
 /**
  * Tools always exposed to the main agent when the orchestrator
@@ -73,11 +74,13 @@ export const PI_SUBAGENT_TOOLS = [
 ] as const;
 
 /**
- * Tools registered by the orchestrator's own `registerSubagentControlTools`
- * (GC-2026-073). These delegate to the same `AgentManager` singleton
- * via the shared globalThis registry key
- * `Symbol.for("pi-subagents:manager")` — there is exactly one manager,
- * shared end-to-end with the `Agent` tool.
+ * Tools registered by `@sages/pi-subagents` (GC-2026-boundary-subagent-control
+ * moved the registration out of the orchestrator). These delegate to
+ * the same `AgentManager` singleton via the shared globalThis registry
+ * key `Symbol.for("pi-subagents:manager")` — there is exactly one
+ * manager, shared end-to-end with the `Agent` tool. The orchestrator's
+ * constant is purely for `setActiveTools` filtering; it does NOT
+ * register anything.
  */
 export const SUBAGENT_CONTROL_TOOLS = [
 	"subagent_status",
@@ -203,20 +206,30 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 	});
 
 	// 2. before_agent_start — prepend templates/SYSTEM.md.
-	pi.on("before_agent_start", (event: any) => {
+	pi.on("before_agent_start", (event: unknown) => {
 		if (!existsSync(SYSTEM_PROMPT_TEMPLATE)) return undefined;
 		const overlay = readFileSync(SYSTEM_PROMPT_TEMPLATE, "utf-8");
+		const systemPrompt =
+			typeof event === "object" && event !== null && "systemPrompt" in event
+				? (event as { systemPrompt?: string }).systemPrompt
+				: undefined;
 		return {
-			systemPrompt: overlay + "\n\n---\n\n" + (event.systemPrompt ?? ""),
+			systemPrompt: overlay + "\n\n---\n\n" + (systemPrompt ?? ""),
 		};
 	});
 
 	// 3. tool_call — fire the soft-mode reminder once per session on the
-	// first bash call.
+	// first side-effecting tool call (bash / edit / write). GC-2026-098
+	// L3: previously gated on bash only; if the LLM began a workflow
+	// with edit/write directly (no bash), the nudge was missed.
 	let reminderFired = false;
-	pi.on("tool_call", (event: any) => {
+	pi.on("tool_call", (event: unknown) => {
 		if (reminderFired) return undefined;
-		if (event?.toolName !== "bash") return undefined;
+		const toolName =
+			typeof event === "object" && event !== null && "toolName" in event
+				? (event as { toolName?: string }).toolName
+				: undefined;
+		if (toolName !== "bash" && toolName !== "edit" && toolName !== "write") return undefined;
 		reminderFired = true;
 		pi.appendEntry("system", SOFT_MODE_REMINDER);
 		return undefined;
@@ -224,19 +237,19 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 }
 
 /**
- * Register the `/brainstorm` slash command. Called separately from
- * `registerOrchestratorTools` because the brainstorm flow is an
- * interactive state machine, not an LLM-callable tool.
- */
-export function registerBrainstormCommand(pi: ExtensionAPI): void {
-	// The brainstorm slash command is registered via the skill in
-	// `skills/brainstorming/SKILL.md`.
-}
-
-/**
- * Default pi extension entrypoint.
+  * Default pi extension entrypoint.
+ *
+ * GC-2026-097 M5: synchronously validate the failure-catalog at boot
+ * (NOT on first lookup) so a malformed shipped catalog throws at
+ * session_start instead of deep in a workflow 4 tool calls later.
+ *
+ * GC-2026-098 L8: the previous `registerBrainstormCommand` stub was
+ * deleted. The `/brainstorm` slash command is registered via the
+ * skill at `skills/brainstorming/SKILL.md` — see that file for the
+ * registration mechanism.
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
+	validateFailureCatalogOnBoot();
 	registerOrchestratorTools(pi);
 	installSessionHooks(pi);
 }

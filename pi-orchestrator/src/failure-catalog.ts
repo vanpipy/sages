@@ -25,6 +25,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as yaml from "js-yaml";
 import { Type, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 
@@ -123,322 +124,29 @@ export const SHIPPED_CATALOG_PATH = join(HERE, "data", "failure-modes.v1.yaml");
 export const PROJECT_OVERRIDE_RELPATH = join(".pi", "failure-modes.yaml");
 
 // =============================================================================
-// YAML subset parser
+// YAML parser
 // =============================================================================
 
-interface Line {
-	indent: number;
-	text: string;
-	/** 1-based source line, for error messages that a human can act on. */
-	no: number;
-}
-
 /**
- * Strip a trailing `#` comment, honouring double- and single-quoted scalars so
- * a `#` inside a regex survives.
- */
-function stripComment(raw: string): string {
-	let inDouble = false;
-	let inSingle = false;
-	for (let i = 0; i < raw.length; i++) {
-		const c = raw[i];
-		if (inDouble) {
-			if (c === "\\") i++;
-			else if (c === '"') inDouble = false;
-			continue;
-		}
-		if (inSingle) {
-			if (c === "'") inSingle = false;
-			continue;
-		}
-		if (c === '"') inDouble = true;
-		else if (c === "'") inSingle = true;
-		else if (c === "#" && (i === 0 || /\s/.test(raw[i - 1] ?? ""))) {
-			return raw.slice(0, i);
-		}
-	}
-	return raw;
-}
-
-function parseScalar(raw: string, lineNo: number): unknown {
-	const s = raw.trim();
-	if (s === "") return null;
-	if (s.startsWith('"')) {
-		try {
-			return JSON.parse(s) as string;
-		} catch {
-			throw new FailureCatalogInvalid(
-				`line ${lineNo}: malformed double-quoted scalar ${s}`,
-			);
-		}
-	}
-	if (s.startsWith("'")) {
-		if (!s.endsWith("'") || s.length < 2) {
-			throw new FailureCatalogInvalid(
-				`line ${lineNo}: unterminated single-quoted scalar ${s}`,
-			);
-		}
-		return s.slice(1, -1).replace(/''/g, "'");
-	}
-	// Inline flow sequence: `[a, b]`.
-	if (s.startsWith("[")) {
-		if (!s.endsWith("]")) {
-			throw new FailureCatalogInvalid(
-				`line ${lineNo}: unterminated inline sequence ${s}`,
-			);
-		}
-		const inner = s.slice(1, -1).trim();
-		if (inner === "") return [];
-		return splitFlow(inner, lineNo).map((part) => parseScalar(part, lineNo));
-	}
-	if (s === "true") return true;
-	if (s === "false") return false;
-	if (s === "null" || s === "~") return null;
-	if (/^-?\d+$/.test(s)) return Number.parseInt(s, 10);
-	if (/^-?\d*\.\d+$/.test(s)) return Number.parseFloat(s);
-	return s;
-}
-
-/** Split `a, "b, c", d` on top-level commas only. */
-function splitFlow(inner: string, lineNo: number): string[] {
-	const out: string[] = [];
-	let depth = 0;
-	let inDouble = false;
-	let inSingle = false;
-	let start = 0;
-	for (let i = 0; i < inner.length; i++) {
-		const c = inner[i];
-		if (inDouble) {
-			if (c === "\\") i++;
-			else if (c === '"') inDouble = false;
-			continue;
-		}
-		if (inSingle) {
-			if (c === "'") inSingle = false;
-			continue;
-		}
-		if (c === '"') inDouble = true;
-		else if (c === "'") inSingle = true;
-		else if (c === "[") depth++;
-		else if (c === "]") depth--;
-		else if (c === "," && depth === 0) {
-			out.push(inner.slice(start, i));
-			start = i + 1;
-		}
-	}
-	if (inDouble || inSingle) {
-		throw new FailureCatalogInvalid(`line ${lineNo}: unterminated quote`);
-	}
-	out.push(inner.slice(start));
-	return out.map((p) => p.trim()).filter((p) => p !== "");
-}
-
-/**
- * Parse the YAML subset the catalog uses: nested mappings, `- ` sequences,
- * inline `[...]` sequences, quoted / plain scalars, `#` comments, and `|` /
- * `|-` block scalars. Anything outside the subset throws rather than being
- * silently reinterpreted.
+ * Parse the failure-catalog YAML. Delegates to js-yaml's load()
+ * (js-yaml is already a runtime dep of this package — see
+ * package.json). The previous homegrown subset parser was deleted
+ * in GC-2026-098 L9; the only reason it existed was an outdated
+ * claim that js-yaml wasn't available here. js-yaml supports the
+ * full YAML 1.2 spec including the block scalars (|, |-) and
+ * inline sequences ([...]) the catalog uses.
+ *
+ * Throws FailureCatalogInvalid (wrapped from a YAMLException) on
+ * malformed input.
  */
 export function parseCatalogYaml(input: string): unknown {
-	const lines: Line[] = [];
-	const rawLines = input.replace(/\r\n?/g, "\n").split("\n");
-
-	for (let i = 0; i < rawLines.length; i++) {
-		const raw = rawLines[i] ?? "";
-		if (/^\s*\t/.test(raw)) {
-			throw new FailureCatalogInvalid(
-				`line ${i + 1}: tab indentation is not supported; use spaces`,
-			);
-		}
-		const withoutComment = stripComment(raw);
-		if (withoutComment.trim() === "") continue;
-		lines.push({
-			indent: withoutComment.length - withoutComment.trimStart().length,
-			text: withoutComment.trim(),
-			no: i + 1,
-		});
-	}
-
-	if (lines.length === 0) return {};
-
-	// Block scalars need the ORIGINAL lines (comments and blanks inside a block
-	// are literal content), so they are resolved against `rawLines` by index.
-	const ctx = { lines, pos: 0, rawLines };
-	const value = parseBlock(ctx, lines[0]?.indent ?? 0);
-	if (ctx.pos < ctx.lines.length) {
-		const stray = ctx.lines[ctx.pos];
+	try {
+		return yaml.load(input);
+	} catch (e) {
 		throw new FailureCatalogInvalid(
-			`line ${stray?.no}: unexpected indentation at "${stray?.text}"`,
+			e instanceof Error ? e.message : String(e),
 		);
 	}
-	return value;
-}
-
-interface Ctx {
-	lines: Line[];
-	pos: number;
-	rawLines: string[];
-}
-
-function parseBlock(ctx: Ctx, indent: number): unknown {
-	const first = ctx.lines[ctx.pos];
-	if (!first) return null;
-	return first.text.startsWith("- ") || first.text === "-"
-		? parseSequence(ctx, indent)
-		: parseMapping(ctx, indent);
-}
-
-function parseMapping(ctx: Ctx, indent: number): Record<string, unknown> {
-	const out: Record<string, unknown> = {};
-	while (ctx.pos < ctx.lines.length) {
-		const line = ctx.lines[ctx.pos];
-		if (!line || line.indent < indent) break;
-		if (line.indent > indent) {
-			throw new FailureCatalogInvalid(
-				`line ${line.no}: unexpected indentation at "${line.text}"`,
-			);
-		}
-		const m = line.text.match(/^([A-Za-z0-9_.-]+):(?:\s+(.*))?$/);
-		if (!m || m[1] === undefined) {
-			throw new FailureCatalogInvalid(
-				`line ${line.no}: expected "key: value", got "${line.text}"`,
-			);
-		}
-		const key = m[1];
-		const rest = (m[2] ?? "").trim();
-		ctx.pos++;
-		out[key] = parseValueAfterKey(ctx, indent, rest, line);
-	}
-	return out;
-}
-
-function parseValueAfterKey(
-	ctx: Ctx,
-	indent: number,
-	rest: string,
-	line: Line,
-): unknown {
-	if (rest === "|" || rest === "|-" || rest === ">" || rest === ">-") {
-		return parseBlockScalar(ctx, indent, rest, line);
-	}
-	if (rest !== "") return parseScalar(rest, line.no);
-
-	const next = ctx.lines[ctx.pos];
-	if (!next || next.indent <= indent) return null;
-	return parseBlock(ctx, next.indent);
-}
-
-/**
- * Block scalars are read from the raw source, not the comment-stripped line
- * list: inside a `|` block a `#` is content and a blank line is a blank line.
- */
-function parseBlockScalar(
-	ctx: Ctx,
-	indent: number,
-	marker: string,
-	header: Line,
-): string {
-	const folded = marker.startsWith(">");
-	const strip = marker.endsWith("-");
-
-	// Content indentation is set by the first non-blank line after the header.
-	let cursor = header.no; // 0-based index of the line AFTER the header
-	let contentIndent = -1;
-	const body: string[] = [];
-
-	while (cursor < ctx.rawLines.length) {
-		const raw = ctx.rawLines[cursor] ?? "";
-		const isBlank = raw.trim() === "";
-		const thisIndent = raw.length - raw.trimStart().length;
-
-		if (!isBlank) {
-			if (contentIndent === -1) {
-				if (thisIndent <= indent) break;
-				contentIndent = thisIndent;
-			} else if (thisIndent < contentIndent) {
-				break;
-			}
-		}
-		body.push(isBlank ? "" : raw.slice(contentIndent));
-		cursor++;
-	}
-
-	// Drop trailing blanks, then advance the token cursor past the block.
-	while (body.length > 0 && body[body.length - 1] === "") body.pop();
-	while (
-		ctx.pos < ctx.lines.length &&
-		(ctx.lines[ctx.pos]?.no ?? 0) <= cursor
-	) {
-		ctx.pos++;
-	}
-
-	const joined = folded
-		? body.join(" ").replace(/\s+/g, " ").trim()
-		: body.join("\n");
-	return strip ? joined : `${joined}\n`;
-}
-
-function parseSequence(ctx: Ctx, indent: number): unknown[] {
-	const out: unknown[] = [];
-	while (ctx.pos < ctx.lines.length) {
-		const line = ctx.lines[ctx.pos];
-		if (!line || line.indent < indent) break;
-		if (line.indent > indent) {
-			throw new FailureCatalogInvalid(
-				`line ${line.no}: unexpected indentation at "${line.text}"`,
-			);
-		}
-		if (!line.text.startsWith("- ") && line.text !== "-") break;
-
-		const after = line.text === "-" ? "" : line.text.slice(2).trim();
-		ctx.pos++;
-
-		if (after === "") {
-			const next = ctx.lines[ctx.pos];
-			if (!next || next.indent <= indent) {
-				out.push(null);
-				continue;
-			}
-			out.push(parseBlock(ctx, next.indent));
-			continue;
-		}
-
-		// `- key: value` opens a mapping whose keys align at the item's column.
-		const kv = after.match(/^([A-Za-z0-9_.-]+):(?:\s+(.*))?$/);
-		if (!kv || kv[1] === undefined) {
-			out.push(parseScalar(after, line.no));
-			continue;
-		}
-		const itemIndent = indent + 2;
-		const obj: Record<string, unknown> = {};
-		obj[kv[1]] = parseValueAfterKey(
-			ctx,
-			itemIndent,
-			(kv[2] ?? "").trim(),
-			line,
-		);
-		// Remaining keys of this item sit at `itemIndent`.
-		while (ctx.pos < ctx.lines.length) {
-			const cont = ctx.lines[ctx.pos];
-			if (!cont || cont.indent !== itemIndent) break;
-			if (cont.text.startsWith("- ")) break;
-			const cm = cont.text.match(/^([A-Za-z0-9_.-]+):(?:\s+(.*))?$/);
-			if (!cm || cm[1] === undefined) {
-				throw new FailureCatalogInvalid(
-					`line ${cont.no}: expected "key: value", got "${cont.text}"`,
-				);
-			}
-			ctx.pos++;
-			obj[cm[1]] = parseValueAfterKey(
-				ctx,
-				itemIndent,
-				(cm[2] ?? "").trim(),
-				cont,
-			);
-		}
-		out.push(obj);
-	}
-	return out;
 }
 
 // =============================================================================
@@ -826,4 +534,18 @@ export function getFailureCatalog(cwd?: string): FailureCatalog {
 /** Test seam: drop the cached catalog. */
 export function resetFailureCatalogCache(): void {
 	cached = undefined;
+}
+
+/**
+ * GC-2026-097 M5: synchronous boot-time validation. Throws
+ * `FailureCatalogInvalid` at session_start (when the extension is
+ * loaded) if the shipped catalog is missing or schema-invalid, so the
+ * user sees "catalog broken" immediately instead of 4 tool calls
+ * later when the first failure lookup happens deep in a workflow.
+ *
+ * Side effect: warms the singleton cache. Subsequent
+ * `getFailureCatalog()` calls are no-ops.
+ */
+export function validateFailureCatalogOnBoot(): void {
+	getFailureCatalog();
 }

@@ -242,6 +242,81 @@ describe("executeWorkflowRun (path B slim)", () => {
 		expect(output.tasks.merge).toBeTruthy();
 	});
 
+	it("GC-2026-097 H1: output.tasks.{implement,review,merge}.id reflect the real task_id from phase-complete events", async () => {
+		// Regression for the audit finding that buildSuccessOutput /
+		// buildBlockedOutput hardcoded "t-implement" / "t-review-final" /
+		// "t-merge" as the output id, so production UUIDs from
+		// pi-tasks's TaskStore.create() were masked. Pin the new
+		// behavior: each phase's id in the output is the exact
+		// task_id pi-tasks emitted on workflow:phase-complete.
+		const IMPL_UUID = "uuid-implement-7f3a";
+		const REVIEW_UUID = "uuid-review-c0c0";
+		const MERGE_UUID = "uuid-merge-d3ad";
+
+		const { result, emitted, handlers } = harness.run({
+			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
+			options: { max_fix_iterations: 1 },
+		});
+		const phaseComplete = handlers.get("workflow:phase-complete")!;
+		const startPayload = emitted.find(e => e.channel === "workflow:start")!
+			.data as WorkflowStartPayload;
+
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "implement", status: "completed", task_id: IMPL_UUID,
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "review", iteration: 1, status: "completed",
+			verdict: "CLEAN", findings_count: 0, task_id: REVIEW_UUID,
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "merge", status: "completed", task_id: MERGE_UUID,
+		});
+
+		const output = await result;
+		expect(output.status).toBe("success");
+		expect(output.tasks.implement.id).toBe(IMPL_UUID);
+		expect(output.tasks.review.id).toBe(REVIEW_UUID);
+		expect(output.tasks.merge?.id).toBe(MERGE_UUID);
+		// Sanity: must not be the old placeholder literals.
+		expect(output.tasks.implement.id).not.toBe("t-implement");
+		expect(output.tasks.review.id).not.toBe("t-review-final");
+		expect(output.tasks.merge?.id).not.toBe("t-merge");
+	});
+
+	it("GC-2026-097 H1: blocked output also reflects real task_id from phase-complete events", async () => {
+		// Same regression for the blocked path: blocked_at + per-phase ids
+		// come from the phase-complete event stream, not hardcoded.
+		const IMPL_UUID = "uuid-implement-1111";
+		const REVIEW_UUID = "uuid-review-2222";
+		const { result, emitted, handlers } = harness.run({
+			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
+			options: { max_fix_iterations: 1 },
+		});
+		const phaseComplete = handlers.get("workflow:phase-complete")!;
+		const startPayload = emitted.find(e => e.channel === "workflow:start")!
+			.data as WorkflowStartPayload;
+
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "implement", status: "completed", task_id: IMPL_UUID,
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "review", iteration: 1, status: "completed",
+			verdict: "NEEDS_WORK", findings_count: 1, task_id: REVIEW_UUID,
+		});
+
+		const output = await result;
+		expect(output.status).toBe("blocked");
+		expect(output.tasks.implement.id).toBe(IMPL_UUID);
+		expect(output.tasks.implement.id).not.toBe("t-implement");
+		expect(output.tasks.review.id).toBe(REVIEW_UUID);
+		expect(output.tasks.review.id).not.toBe("t-review-final");
+	});
+
 	it("returns status: blocked after max_fix_iterations NEEDS_WORK", async () => {
 		const { result, emitted, handlers } = harness.run({
 			goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
@@ -464,7 +539,10 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 		expect((updates[0] as { current_phase: string }).current_phase).toBe("implement");
 		expect((updates[0] as { goal_id: string }).goal_id).toBe(GOAL_ID);
 		expect((updates[0] as { tasks_done: number; tasks_total: number }).tasks_done).toBe(1);
-		expect((updates[0] as { tasks_total: number }).tasks_total).toBe(3); // 1 impl + 1 review + 1 merge
+		// GC-2026-097 H2: tasks_total is an upper bound (Implement +
+		// max_fix_iterations Reviews + max_fix_iterations Fixes + Merge).
+		// For max=1: 1 impl + 1 review + 1 fix + 1 merge = 4.
+		expect((updates[0] as { tasks_total: number }).tasks_total).toBe(4); // upper bound for max_fix_iterations=1
 		expect((updates[0] as { summary: string }).summary).toMatch(/Implement complete/);
 		// Second update: review (CLEAN) → next review transition (last review → merge).
 		expect((updates[1] as { current_phase: string; last_verdict: string }).current_phase).toBe("review");
@@ -512,6 +590,10 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 
 		// 5 phase transitions: implement → review1 → fix1 → review2 → merge
 		expect(updates.length).toBe(5);
+		// GC-2026-097 H2: max=3 upper bound is 1 + 2*3 + 1 = 8.
+		for (const u of updates) {
+			expect((u as { tasks_total: number }).tasks_total).toBe(8);
+		}
 		// After Review_1 NEEDS_WORK: payload carries findings_count=2 +
 		// last_verdict=NEEDS_WORK + fix_iterations_used=1 (the counter ticks
 		// when the Review phase branches on NEEDS_WORK).
