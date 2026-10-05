@@ -694,3 +694,88 @@ describe("subscribeWorkflow — last-review evidence file (GC-2026-b7)", () => {
     }
   });
 });
+
+// GC-2026-b6: iteration-aware review. Review_{N>1} receives a "Prior review
+// summary" section in its dispatch brief so the Reviewer can classify
+// findings as regression / unresolved / new.
+describe("subscribeWorkflow — prior review summary (GC-2026-b6)", () => {
+  test("Review_1 dispatch brief has NO prior summary section", async () => {
+    const { events, store, spawnAgent } = setup();
+    await events.emit("workflow:start", startPayload());
+    await flush();
+
+    const implement = store.list().find(t => t.metadata.phase === "implement")!;
+    await events.emit("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
+    await flush();
+
+    const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
+    // The actual injection marker is the "## Prior review summary (iteration N)"
+    // section header. Review_1 (iteration=1) has no prior, so the section must
+    // NOT be present. The phrase "Prior review summary" appears elsewhere in
+    // the prompt body (in the "Finding category" guidance) so we anchor on
+    // the section header.
+    expect(review1.description).not.toContain("## Prior review summary (iteration");
+  });
+
+  test("Review_2 dispatch brief contains Prior review summary when Review_1 was NEEDS_WORK", async () => {
+    const { events, store } = setup();
+    await events.emit("workflow:start", startPayload());
+    await flush();
+
+    const implement = store.list().find(t => t.metadata.phase === "implement")!;
+    await events.emit("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
+    await flush();
+
+    // Review_1: NEEDS_WORK with one finding
+    const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
+    await events.emit("subagents:completed", {
+      id: `agent-${review1.id}`,
+      result: [
+        "```yaml",
+        "verdict: NEEDS_WORK",
+        "findings:",
+        "  - severity: major",
+        "    issue: missing test for retry path",
+        "    location: src/auth/retry.ts:42",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n"),
+    });
+    await flush();
+
+    // Fix_1 (dispatched after NEEDS_WORK).
+    const fix1 = store.list().find(t => t.metadata.phase === "fix" && t.metadata.iteration === 1)!;
+    await events.emit("subagents:completed", { id: `agent-${fix1.id}`, result: "ok" });
+    await flush();
+
+    // Review_2 spawn should now have the prior summary injected.
+    const review2 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 2)!;
+    expect(review2.description).toContain("## Prior review summary (iteration 1)");
+    expect(review2.description).toContain("- **Verdict**: NEEDS_WORK");
+    expect(review2.description).toContain("- **Findings count**: 1");
+    expect(review2.description).toContain("missing test for retry path");
+  });
+
+  test("Review_2 prior summary reflects CLEAN prior Review (no findings to regress)", async () => {
+    const { events, store } = setup();
+    await events.emit("workflow:start", startPayload());
+    await flush();
+
+    const implement = store.list().find(t => t.metadata.phase === "implement")!;
+    await events.emit("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
+    await flush();
+
+    // Review_1: CLEAN
+    const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
+    await events.emit("subagents:completed", {
+      id: `agent-${review1.id}`,
+      result: "```yaml\nverdict: CLEAN\nfindings: []\nscope_check: pass\nanti_goal_check: pass\n```",
+    });
+    await flush();
+
+    const review2 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 2)!;
+    expect(review2.description).toContain("- **Verdict**: CLEAN");
+    expect(review2.description).toContain("- **Findings count**: 0");
+  });
+});

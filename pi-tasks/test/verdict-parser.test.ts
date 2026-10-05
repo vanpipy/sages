@@ -358,6 +358,68 @@ describe("parseReviewerVerdict", () => {
       expect(result.verdict).toBe("NEEDS_REDESIGN");
     });
 
+    test("GC-2026-b6: parses `category` field on findings (regression / unresolved / new)", () => {
+      const message = [
+        "```yaml",
+        "verdict: NEEDS_WORK",
+        "findings:",
+        "  - severity: major",
+        "    issue: regression in retry path",
+        "    location: src/auth/retry.ts:42",
+        "    recommendation: re-test the retry",
+        "    category: regression",
+        "  - severity: minor",
+        "    issue: still present from prior review",
+        "    category: unresolved",
+        "  - severity: minor",
+        "    issue: new typo",
+        "    category: new",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.verdict).toBe("NEEDS_WORK");
+      expect(result.findings).toHaveLength(3);
+      expect(result.findings?.[0].category).toBe("regression");
+      expect(result.findings?.[1].category).toBe("unresolved");
+      expect(result.findings?.[2].category).toBe("new");
+    });
+
+    test("GC-2026-b6: unknown `category` value is dropped (parsed as undefined)", () => {
+      const message = [
+        "```yaml",
+        "verdict: NEEDS_WORK",
+        "findings:",
+        "  - severity: major",
+        "    issue: something",
+        "    category: not_a_real_category",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.findings?.[0].category).toBeUndefined();
+    });
+
+    test("GC-2026-b6: missing `category` field defaults to undefined (consumer picks 'new')", () => {
+      const message = [
+        "```yaml",
+        "verdict: NEEDS_WORK",
+        "findings:",
+        "  - severity: major",
+        "    issue: no category field",
+        "scope_check: pass",
+        "anti_goal_check: pass",
+        "```",
+      ].join("\n");
+
+      const result = parseReviewerVerdict(message);
+      expect(result.findings?.[0].category).toBeUndefined();
+    });
+
     test("unrecognized verdict value defaults to NEEDS_WORK", () => {
       const message = [
         "```yaml",

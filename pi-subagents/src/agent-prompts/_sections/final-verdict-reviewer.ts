@@ -20,6 +20,11 @@
  *   CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION. NEEDS_CLARIFICATION
  *   requires the `open_question` field.
  *
+ * GC-2026-b6: finding schema gained an optional `category` field
+ * (`regression | unresolved | new`). Parser preserves it verbatim; unknown
+ * values are dropped. Reviewer prompt pins the three categories and
+ * the "default to new" rule.
+ *
  * Reviewer-only. Pinned by `sections-drift.test.ts`.
  */
 
@@ -37,6 +42,7 @@ findings:
     issue: "<what's wrong, 1 sentence>"
     location: "<file:line or section>"
     recommendation: "<how to fix, 1 sentence>"
+    category: regression | unresolved | new   # GC-2026-b6, optional; default new
 open_question: "<question>"   # required when verdict: NEEDS_CLARIFICATION; ignored otherwise
 evidence:
   typecheck: "<output line>"
@@ -51,6 +57,16 @@ anti_goal_check: pass | fail | absent
 \`\`\`
 
 **Default to NEEDS_WORK.** Only emit CLEAN when every dimension below is satisfied AND the evidence trail is complete. A vague or evidence-thin verdict fails the pipeline.
+
+### Finding category (GC-2026-b6)
+
+When iteration > 1, the dispatch brief contains a "Prior review summary" section listing what the previous Reviewer reported. Tag each finding with \`category:\`:
+
+- **regression** — the issue existed in a prior Review that was CLEAN (or the prior Fix commit broke something). The fix made things worse.
+- **unresolved** — the issue was reported in the prior Review with NEEDS_WORK but is STILL present after the Fix (Fix didn't address it).
+- **new** — the issue wasn't reported previously; first observation this round.
+
+If you can't classify (e.g. first iteration, or no Prior review summary was injected), omit \`category:\` and the parser treats it as \`new\`. The orchestrator uses these tags to spot quality regressions across the fix-loop.
 
 ### Verdict states (4-state set)
 

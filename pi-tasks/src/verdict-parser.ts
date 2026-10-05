@@ -54,11 +54,24 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 
 export type FindingSeverity = "minor" | "major" | "critical";
 
+/**
+ * GC-2026-b6: finding category — how the Reviewer classifies each finding
+ * relative to the prior Review (when one exists). The parser only sets
+ * `category` if the Reviewer emitted it; otherwise it stays undefined and
+ * the consumer can default to "new".
+ */
+export type FindingCategory = "regression" | "unresolved" | "new";
+
 export interface Finding {
   severity: FindingSeverity;
   issue: string;
   location?: string;
   recommendation?: string;
+  /**
+   * GC-2026-b6: optional. undefined when the Reviewer didn't emit it
+   * (e.g. first iteration, or Reviewer is unaware of the category scheme).
+   */
+  category?: FindingCategory;
 }
 
 /**
@@ -299,10 +312,26 @@ function applyFindingKey(finding: Finding, key: string, val: string): void {
   else if (key === "issue") finding.issue = val;
   else if (key === "location") finding.location = val;
   else if (key === "recommendation") finding.recommendation = val;
+  else if (key === "category") {
+    // GC-2026-b6: only accept the 3 known categories; otherwise leave
+    // undefined so the consumer can default to "new".
+    if (val === "regression" || val === "unresolved" || val === "new") {
+      finding.category = val;
+    }
+  }
 }
 
 function tryApplyFindingKey(finding: Finding, key: string, val: string): boolean {
-  if (key === "severity" || key === "issue" || key === "location" || key === "recommendation") {
+  if (
+    key === "severity" ||
+    key === "issue" ||
+    key === "location" ||
+    key === "recommendation" ||
+    // GC-2026-b6: category is part of the finding schema; allow it in the
+    // continuation branch so a stray `category: regression` line doesn't
+    // trigger the unknown-key flush-and-end-findings path.
+    key === "category"
+  ) {
     applyFindingKey(finding, key, val);
     return true;
   }

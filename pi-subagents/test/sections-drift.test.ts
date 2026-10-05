@@ -138,4 +138,21 @@ describe("shared sections: removed unused-void suppression", () => {
 	it("DEVELOPER_PROMPT contains the PREVIOUS_FAILURE_SECTION header", () => {
 		extract(DEVELOPER_PROMPT, "## Previous failure");
 	});
+
+	it("FINAL_VERDICT_REVIEWER_SECTION documents the finding `category` field (GC-2026-b6)", () => {
+		// The Reviewer prompt must pin the 3-category vocabulary so the
+		// schema is consumed consistently across iterations.
+		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("Finding category");
+		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("regression");
+		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("unresolved");
+		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("    category: regression | unresolved | new");
+	});
+
+	it("FINAL_VERDICT_REVIEWER_SECTION explains the 3-category semantics", () => {
+		// Each category must have a one-line semantic so the Reviewer
+		// knows when to use each.
+		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("made things worse");
+		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("STILL present after the Fix");
+		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("first observation this round");
+	});
 });

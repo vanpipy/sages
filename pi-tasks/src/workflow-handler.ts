@@ -120,6 +120,14 @@ export function subscribeWorkflow(
 	let maxRedesigns = 1;
 	let fixIterationsUsed = 0; // count of Fix dispatches actually created
 	let redesignsUsed = 0;     // count of NEEDS_REDESIGN Implement dispatches
+	// GC-2026-b6: per-workflow history of Review verdicts. Each entry is the
+	// verdict (with findings[]) from one Review phase. workflow-handler
+	// appends on Review completion; the cascade loop reads the previous
+	// entry to build a "Prior review summary" section for Review_{N+1}'s
+	// dispatch brief. Empty on first Review — the static description has
+	// no prior section then.
+	type ReviewHistoryEntry = { iteration: number; verdict: ReviewerVerdict };
+	const findingsHistory: ReviewHistoryEntry[] = [];
 	// Goal is captured at workflow:start so dispatchFixForReview /
 	// dispatchRedesignForReview can build new task specs without it
 	// being threaded through every Reviewer's metadata.
@@ -403,6 +411,32 @@ export function subscribeWorkflow(
 		}
 	}
 
+	/**
+	 * GC-2026-b6: render the prior Review's verdict as a markdown block the
+	 * new Reviewer can read directly from its dispatch brief. Includes
+	 * verdict + dim checks + findings list (without recommendations — the
+	 * new Reviewer is re-evaluating recommendations). Empty string when
+	 * there's nothing useful to convey.
+	 */
+	function formatPriorReviewSummary(entry: ReviewHistoryEntry): string {
+		const v = entry.verdict;
+		const lines: string[] = [];
+		lines.push(`- **Verdict**: ${v.verdict}`);
+		if (v.scope_check) lines.push(`- **scope_check**: ${v.scope_check}`);
+		if (v.anti_goal_check) lines.push(`- **anti_goal_check**: ${v.anti_goal_check}`);
+		if (v.open_question) lines.push(`- **open_question**: ${v.open_question}`);
+		lines.push(`- **Findings count**: ${v.findings?.length ?? 0}`);
+		if (v.findings && v.findings.length > 0) {
+			lines.push(`- **Findings**:`);
+			for (const f of v.findings) {
+				lines.push(
+					`    - [${f.severity}] ${f.issue}${f.location ? ` (${f.location})` : ""}`,
+				);
+			}
+		}
+		return lines.join("\n");
+	}
+
 	// GC-2026-verdict-states-and-dynamic-cascade: closure capture. The
 	// dispatchFixForReview / dispatchRedesignForReview helpers above need
 	// access to the start-payload's worktree_path, captured here from the
@@ -457,6 +491,16 @@ export function subscribeWorkflow(
 			// writing merge-recommendation.md. The file is overwritten on
 			// each Review completion so it always reflects the latest Review.
 			writeReviewerEvidenceFile(task, verdict);
+
+			// GC-2026-b6: append this Review's verdict to the per-workflow
+			// findingsHistory so Review_{N+1} can see what was reported
+			// previously (and classify findings as regression / unresolved / new).
+			// We always append (including NEEDS_REDESIGN / NEEDS_CLARIFICATION)
+			// so the next Review knows the design was rejected or paused.
+			const iter = Number(task.metadata.iteration ?? 0);
+			if (iter > 0) {
+				findingsHistory.push({ iteration: iter, verdict });
+			}
 
 			// GC-2026-verdict-states-and-dynamic-cascade: branch on the 4 verdict
 			// states. NEEDS_WORK → create Fix on demand. NEEDS_REDESIGN → create
@@ -517,11 +561,37 @@ export function subscribeWorkflow(
 		// on the task as owner. The handler relies on agentToTask to map
 		// subagents:completed → taskId, so the entry must reflect the real
 		// id the subagent runtime (pi-subagents/agent-manager.ts:346) emits.
+		//
+		// GC-2026-b6: before spawning a Review task whose iteration > 1,
+		// prepend the prior Review's verdict summary into its description.
+		// This lets the new Reviewer classify findings as
+		// regression / unresolved / new without needing TaskGet.
 		const all = store.list();
 		for (const t of all) {
 			if (t.status !== "pending") continue;
 			if (activeGoalId && t.metadata.workflow_run_goal_id !== activeGoalId) continue;
 			if (!t.blockedBy.every(id => completedIds.has(id))) continue;
+
+			// GC-2026-b6: inject prior Review summary for Review_{N>1}.
+			if (
+				t.metadata.phase === "review" &&
+				Number(t.metadata.iteration ?? 0) > 1 &&
+				findingsHistory.length > 0
+			) {
+				const prior = findingsHistory[findingsHistory.length - 1];
+				const summary = formatPriorReviewSummary(prior);
+				if (summary) {
+					const injected =
+						`## Prior review summary (iteration ${prior.iteration})\n\n` +
+						summary +
+						"\n\n";
+					const updatedDesc = injected + t.description;
+					if (updatedDesc !== t.description) {
+						store.update(t.id, { description: updatedDesc });
+						t.description = updatedDesc;
+					}
+				}
+			}
 
 			const agentId = await spawnAgent(t);
 			agentToTask.set(agentId, t.id);

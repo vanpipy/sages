@@ -92,7 +92,13 @@ function implementDescription(goal: WorkflowGoal, worktreePath: string): string 
   ].join("\n");
 }
 
-function reviewDescription(goal: WorkflowGoal, iteration: number, worktreePath: string, branch: string): string {
+function reviewDescription(
+  goal: WorkflowGoal,
+  iteration: number,
+  worktreePath: string,
+  branch: string,
+  priorReviewSummary?: string,
+): string {
   // The task_id is the literal id pi-tasks assigns this task. The
   // dispatch brief inlines it so the Reviewer knows where to write the
   // durable verdict-{task_id}.md backup. The parser in workflow-handler
@@ -102,10 +108,14 @@ function reviewDescription(goal: WorkflowGoal, iteration: number, worktreePath: 
   // GC-2026-verdict-states-and-dynamic-cascade: the verdict schema now has
   // 4 states (CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION)
   // and `open_question` is required for NEEDS_CLARIFICATION.
+  // GC-2026-b6: when iteration > 1, prepend a "Prior review summary" section
+  // listing the previous Review's verdict + findings so the new Reviewer
+  // can classify each finding as regression / unresolved / new.
   const taskIdPlaceholder = "__review_task_id__";
   return [
     `# Review phase (implement iteration ${iteration})`,
     ``,
+    priorReviewSummary ?? "",
     `## Goal`,
     `- Title: ${goal.title}`,
     goal.rationale ? `- Rationale: ${goal.rationale}` : "",
@@ -131,7 +141,12 @@ function reviewDescription(goal: WorkflowGoal, iteration: number, worktreePath: 
     `## Output — pinned YAML schema (4-state verdict, GC-2026-verdict-states-and-dynamic-cascade)`,
     `Final message MUST contain a fenced \`\`\`yaml block with:`,
     `verdict: CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION`,
-    `findings: [...]   # empty list [] for CLEAN; non-empty for NEEDS_WORK / NEEDS_REDESIGN; ignored for NEEDS_CLARIFICATION`,
+    `findings:`,
+    `  - severity: minor | major | critical`,
+    `    issue: "<what's wrong, 1 sentence>"`,
+    `    location: "<file:line or section>"`,
+    `    recommendation: "<how to fix, 1 sentence>"`,
+    `    category: regression | unresolved | new   # GC-2026-b6, optional; default new`,
     `open_question: "<question>"   # required when verdict: NEEDS_CLARIFICATION`,
     `scope_check: pass | fail | absent   # absent needs scope_check_skipped: <reason>`,
     `anti_goal_check: pass | fail | absent   # absent needs anti_goal_check_skipped: <reason>`,
@@ -147,6 +162,15 @@ function reviewDescription(goal: WorkflowGoal, iteration: number, worktreePath: 
     `Default to NEEDS_WORK. Only emit CLEAN if every dimension has explicit evidence and findings list is empty.`,
     `CLEAN with non-empty findings is malformed → parser downgrades to NEEDS_WORK.`,
     `Unknown verdict values default to NEEDS_WORK.`,
+    ``,
+    `### Finding category (GC-2026-b6)`,
+    ``,
+    `When iteration > 1 and a Prior review summary is in this brief, classify each finding:`,
+    `- **regression**: the issue existed in a previous Review that was CLEAN (or the previous fix commit broke something). The fix made things worse.`,
+    `- **unresolved**: the issue was reported in the previous Review with NEEDS_WORK but is STILL present after the Fix (Fix didn't address it).`,
+    `- **new**: the issue wasn't reported previously; first observation this round.`,
+    ``,
+    `If you cannot classify (e.g. first iteration), default to \`new\`. The orchestrator uses these tags to spot quality regressions across the fix-loop.`,
     ``,
     `## Durable backup (atomic rename BEFORE final message)`,
     `Your task id is \`${taskIdPlaceholder}\` (resolved at dispatch time). Before you emit the final message, write the same YAML block to \`.pi/orchestrator/verdict-${taskIdPlaceholder}.md\` via atomic rename (\`tmpfile -> rename\`). The parser falls back to this file if the message fence is missing.`,
