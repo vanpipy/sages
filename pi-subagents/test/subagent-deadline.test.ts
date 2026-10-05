@@ -169,7 +169,7 @@ describe("subagent wall-clock deadline: settings resolution (GC-2026-037 T1)", (
 		expect(getSubagentDurationDefault("Explore")).toBe(5 * 60 * 1000);
 	});
 
-	it("T-DEADLINE-03d: resolveDeadlineMs priority — caller override > per-type default > 20min floor", () => {
+	it("T-DEADLINE-03d: resolveDeadlineMs priority — caller override > per-type default > 30min floor", () => {
 		// No override → per-type default
 		expect(resolveDeadlineMs("developer", undefined)).toBe(20 * 60 * 1000);
 		expect(resolveDeadlineMs("Explore", undefined)).toBe(5 * 60 * 1000);
