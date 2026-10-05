@@ -144,7 +144,7 @@ function reviewDescription(
     ``,
     `## What to evaluate`,
     `Run the 5-dimension review (correctness, completeness, scope adherence, anti-goal compliance, documentation).`,
-    `Read .pi/orchestrator/review-${goal.id}-${iteration}.md for the durable evidence trail pattern.`,
+    `Read .pi/orchestrator/last-review-${goal.id}.md for the durable evidence trail (this file is overwritten on each Review; the previous reference to a per-iteration file was a phantom — see GC-2026-merger-advisor-split).`,
     ``,
     `## Output — pinned YAML schema (4-state verdict, GC-2026-verdict-states-and-dynamic-cascade)`,
     `Final message MUST contain a fenced \`\`\`yaml block with:`,
@@ -340,10 +340,15 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
   const merge: TaskSpec = {
     subject: `Merge: ${goal.title}`,
     description: mergeDescription(goal, branch, worktreePath),
-    agentType: "Merger",
+    // GC-2026-merger-advisor-split: workflow_run's Merge phase is an
+    // advisory single-workspace job — write merge-recommendation.md, do NOT
+    // execute `git merge` / `git push` against protected branches. The
+    // DAG-synthesis Merger (different prompt) is for cross-workspace auto-
+    // merge only. See pi-subagents/src/agent-prompts/merger-advisor.ts.
+    agentType: "MergerAdvisor",
     blockedBy: mergeBlockedBy,
     blocks: [],
-    metadata: { ...meta, phase: "merge", agentType: "Merger" },
+    metadata: { ...meta, phase: "merge", agentType: "MergerAdvisor" },
   };
   tasks.push(merge);
 

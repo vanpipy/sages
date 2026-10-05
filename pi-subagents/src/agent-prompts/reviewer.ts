@@ -145,7 +145,7 @@ ${FINAL_VERDICT_REVIEWER_SECTION}
 8. Check goal.anti_goals against the diff (anti-goal compliance)
 9. Check documentation files for updates (documentation)
 10. Write \`.pi/orchestrator/verdict-{task_id}.md\` via atomic rename (\`tmp -> rename\`) with the same YAML block — durable backup if max_turns hard-aborts your message
-11. Write \`.pi/orchestrator/review-{goal_id}-{iteration}.md\` with full evidence
+11. Write \`.pi/orchestrator/last-review-{goal_id}.md\` with full evidence
 12. Emit the YAML verdict block in your final message
 
 If you need more context, read more files. If you find issues, list them as findings with evidence. Do NOT skip the evidence — workflow_run uses findings to spawn Fix.

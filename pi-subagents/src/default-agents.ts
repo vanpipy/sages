@@ -6,6 +6,7 @@
 
 import { REVIEWER_PROMPT } from "./agent-prompts/reviewer.js";
 import { DEVELOPER_PROMPT } from "./agent-prompts/developer.js";
+import { MERGER_ADVISOR_PROMPT } from "./agent-prompts/merger-advisor.js";
 import { DEVELOPER_FIX_PROMPT } from "./agent-prompts/_fix.js";
 import { EXPLORE_PROMPT } from "./agent-prompts/explore.js";
 import { MERGER_PROMPT } from "./agent-prompts/merger.js";
@@ -205,6 +206,40 @@ const MERGER_AGENT: AgentConfig = {
 	inheritContext: false,
 };
 
+// GC-2026-merger-advisor-split: MergerAdvisor is the workflow_run Merge-phase
+// agent. Distinct from the DAG-synthesis Merger above — MergerAdvisor is
+// strictly advisory: reads the Reviewer evidence trail, verifies the source
+// branch exists, writes `.pi/orchestrator/merge-recommendation.md`. NEVER
+// executes `git merge` or `git push` against protected branches (per
+// `~/AGENTS.md` "Permission gate required"). Same tool set as the cross-
+// workspace Merger (read + bash only), but a single-workspace advisory
+// contract instead of a multi-workspace auto-merge.
+const MERGER_ADVISOR_AGENT: AgentConfig = {
+	name: "MergerAdvisor",
+	displayName: "Merger (Advisor)",
+	description:
+		"workflow_run Merge-phase advisor — reads the Reviewer evidence trail at " +
+		"`.pi/orchestrator/last-review-{goal_id}.md`, verifies the source branch " +
+		"exists, and writes `.pi/orchestrator/merge-recommendation.md` with the " +
+		"exact commands a human should run. Advisory only: NEVER executes `git merge` " +
+		"or `git push` against protected branches.",
+	builtinToolNames: READ_ONLY_TOOLS,
+	extensions: ["aft-pi", "pi-mcp-adapter"],
+	excludeExtensions: ["pi-subagents"],
+	skills: false,
+	systemPrompt: MERGER_ADVISOR_PROMPT,
+	promptMode: "replace",
+	isDefault: true,
+	runInBackground: true,
+	// Advisory merge is fast (read evidence file + write recommendation file).
+	// Per-type concurrency cap: 1 — single-workspace advisory; concurrent
+	// advisors on the same goal would race on merge-recommendation.md.
+	maxConcurrent: 1,
+	// Deterministic tool: must not fork parent's chat history. The brief
+	// carries the goal_id + worktree_path + branch.
+	inheritContext: false,
+};
+
 /**
  * GC-2026-093: Plan was renamed to PlanCompiler. The Plan alias is
  * preserved for backward compat (legacy DAG YAML files / scripts that
@@ -316,5 +351,6 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	["Developer", DEVELOPER_AGENT],
 	["Reviewer", REVIEWER_AGENT],
 	["Merger", MERGER_AGENT],
+	["MergerAdvisor", MERGER_ADVISOR_AGENT],
 	["Fix", FIX_AGENT],
 ]);

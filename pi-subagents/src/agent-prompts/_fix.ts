@@ -75,7 +75,7 @@ ${WORKSPACE_PROTOCOL_SECTION}
 
 If metadata.verdict is missing (cascade parser failure), treat as NEEDS_WORK
 with empty findings. Read the Reviewer's evidence file directly:
-\`\${worktreePath}/.pi/orchestrator/review-{goal_id}-{iteration}.md\`.
+\`\${worktreePath}/.pi/orchestrator/last-review-{goal_id}.md\`.
 
 ## 🚦 Fix phase branches
 
