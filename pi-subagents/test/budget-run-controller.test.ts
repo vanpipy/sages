@@ -224,7 +224,7 @@ describe("budget + RunController: pctMs from runController.elapsedMs (SC1)", () 
 			snapshotEveryTurns: 0,
 			partialTriggerPct: 0.8,
 		};
-		// rc has deadlineMs = 20min (1.2M ms)
+		// rc has deadlineMs = 30min (1.2M ms)
 		const rc = makeRunController({ max_duration_minutes: 20 });
 		const tracker = new BudgetTracker(legacyBudget, undefined, {
 			runController: rc,
@@ -268,7 +268,7 @@ describe("budget: legacy backward compat (no runController)", () => {
 	it("loadBudgetFromEnv still works as fallback (SC2)", () => {
 		const b = loadBudgetFromEnv("developer");
 		expect(b.maxTurns).toBe(60);
-		expect(b.maxMs).toBe(20 * 60_000);
+		expect(b.maxMs).toBe(30 * 60_000);
 	});
 });
 
@@ -279,11 +279,11 @@ describe("budget: legacy backward compat (no runController)", () => {
 describe("settings.resolveDeadlineMs: delegates to resolveRunConfig (SC3)", () => {
 	it("canonical type 'developer' → 20min default (resolveRunConfig path)", () => {
 		// Default: 20 min from DEFAULT_PER_TYPE.developer.
-		expect(resolveDeadlineMs("developer", undefined)).toBe(20 * 60_000);
+		expect(resolveDeadlineMs("developer", undefined)).toBe(30 * 60_000);
 	});
 
 	it("canonical type 'auditor' → 20min default", () => {
-		expect(resolveDeadlineMs("auditor", undefined)).toBe(20 * 60_000);
+		expect(resolveDeadlineMs("auditor", undefined)).toBe(30 * 60_000);
 	});
 
 	it("legacy type 'Explore' → 5min (kept via getSubagentDurationDefault)", () => {
@@ -301,8 +301,8 @@ describe("settings.resolveDeadlineMs: delegates to resolveRunConfig (SC3)", () =
 		expect(resolveDeadlineMs("PlanCompiler", undefined)).toBe(5 * 60_000);
 	});
 
-	it("unknown type falls back to 20min (developer default)", () => {
-		expect(resolveDeadlineMs("not-a-real-type", undefined)).toBe(20 * 60_000);
+	it("unknown type falls back to 30min (developer default)", () => {
+		expect(resolveDeadlineMs("not-a-real-type", undefined)).toBe(30 * 60_000);
 	});
 
 	it("caller-supplied override wins (positive only)", () => {
@@ -312,8 +312,8 @@ describe("settings.resolveDeadlineMs: delegates to resolveRunConfig (SC3)", () =
 	});
 
 	it("zero / negative override falls through to default", () => {
-		expect(resolveDeadlineMs("developer", 0)).toBe(20 * 60_000);
-		expect(resolveDeadlineMs("developer", -5)).toBe(20 * 60_000);
+		expect(resolveDeadlineMs("developer", 0)).toBe(30 * 60_000);
+		expect(resolveDeadlineMs("developer", -5)).toBe(30 * 60_000);
 	});
 
 	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS flows through (resolveRunConfig delegation)", () => {

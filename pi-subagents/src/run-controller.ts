@@ -38,11 +38,17 @@ export type BucketKey =
 
 export type BucketTimeouts = Record<BucketKey, number>;
 
+// GC-2026-task-widget-link: relaxed defaults — the prior values (test:30s,
+// fullTest:90s, Developer:20min/200turns) caused frequent mid-task
+// bucket kills on long workflows. A 60s test bucket absorbs typical
+// integration tests in this repo; fullTest 180s covers a clean run;
+// Developer/Reviewer deadlines bumped to 30min / 300 turns so a
+// max_fix_iterations=3 workflow_run doesn't bottom out the budget.
 export const DEFAULT_BUCKET_TIMEOUTS_MS: BucketTimeouts = {
 	read: 5_000,
 	search: 10_000,
-	test: 30_000,
-	fullTest: 90_000,
+	test: 60_000,
+	fullTest: 180_000,
 	network: 5_000,
 	other: 60_000,
 };
@@ -134,9 +140,9 @@ export interface PerTypeDefaults {
  * capitalized-name path); it is now a first-class member.
  */
 export const DEFAULT_PER_TYPE: Record<AgentType, PerTypeDefaults> = {
-	Developer: { deadlineMs: 20 * 60_000, maxTurns: 200 },
-	Reviewer: { deadlineMs: 20 * 60_000, maxTurns: 200 },
-	Explore: { deadlineMs: 5 * 60_000, maxTurns: 50 },
+	Developer: { deadlineMs: 30 * 60_000, maxTurns: 300 },
+	Reviewer: { deadlineMs: 30 * 60_000, maxTurns: 300 },
+	Explore: { deadlineMs: 10 * 60_000, maxTurns: 50 },
 	Plan: { deadlineMs: 5 * 60_000, maxTurns: 12 },
 	PlanCompiler: { deadlineMs: 5 * 60_000, maxTurns: 12 },
 	Merger: { deadlineMs: 5 * 60_000, maxTurns: 80 },

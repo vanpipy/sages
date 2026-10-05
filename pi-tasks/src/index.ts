@@ -20,14 +20,6 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { Type } from "typebox";
 import { AutoClearManager } from "./auto-clear.js";
 import { ProcessTracker } from "./process-tracker.js";
-import {
-  type CadenceConfig,
-  createCadenceState,
-  drainReminderForContext,
-  evaluateToolResult,
-  onTurnStart,
-  resetCadenceState,
-} from "./reminder-cadence.js";
 import { resolveTaskGlyphs } from "./task-glyphs.js";
 import { reclaimGlobalSessionTasksDir, sessionTaskFile } from "./task-paths.js";
 import { TaskStore } from "./task-store.js";
@@ -54,82 +46,8 @@ function textResult<T = unknown>(msg: string, details?: T) {
   return { content: [{ type: "text" as const, text: msg }], details: details as any };
 }
 
-/** Task tool names — used to detect task tool usage for reminder suppression. */
-const TASK_TOOL_NAMES = new Set(["TaskCreate", "TaskList", "TaskGet", "TaskUpdate", "TaskOutput", "TaskStop", "TaskExecute"]);
-
-/** How many turns without task tool usage before injecting a reminder. */
-const REMINDER_INTERVAL = 4;
-
-/** Shorter interval used while any task is in_progress, so stale work is caught faster. */
-const ACTIVE_REMINDER_INTERVAL = 2;
-
-/** Cap on how many tasks the reminder echoes, to bound its size on large lists. */
-const REMINDER_MAX_TASKS = 10;
-
-/** Effective reminder interval for a given task list (pure — no disk I/O). */
-function intervalFor(tasks: Task[]): number {
-  return tasks.some(t => t.status === "in_progress") ? ACTIVE_REMINDER_INTERVAL : REMINDER_INTERVAL;
-}
-
 /** How many turns completed tasks linger before auto-clearing. */
 const AUTO_CLEAR_DELAY = 4;
-
-/** Neutralize a task field for the echo: collapse newlines and strip reminder tags. */
-function sanitizeField(value: string): string {
-  return value.replace(/[\r\n]+/g, " ").replace(/<\/?system-reminder>/gi, "").trim();
-}
-
-/**
- * Build the system reminder, shaped after Claude Code's todo reminders: an
- * empty-list nudge, or a state echo that dumps the current list as JSON. The
- * wording mirrors Claude Code (adapted to this extension's task tool names).
- */
-function buildSystemReminder(tasks: Task[]): string {
-  if (tasks.length === 0) {
-    return [
-      "<system-reminder>",
-      "This is a reminder that your task list is currently empty. DO NOT mention this to the user explicitly because they are already aware. If you are working on tasks that would benefit from a task list please use the TaskCreate tool to create one. If not, please feel free to ignore. Again do not mention this message to the user.",
-      "</system-reminder>",
-    ].join("\n");
-  }
-
-  // Bound the echo on large lists. When over the cap, drop completed tasks
-  // first (the reminder exists to surface unfinished work); ties keep task
-  // order since Array.sort is stable.
-  let shown = tasks;
-  if (tasks.length > REMINDER_MAX_TASKS) {
-    const rank = (t: Task) => (t.status === "in_progress" ? 0 : t.status === "pending" ? 1 : 2);
-    shown = [...tasks].sort((a, b) => rank(a) - rank(b)).slice(0, REMINDER_MAX_TASKS);
-  }
-  const hidden = tasks.length - shown.length;
-  const overflow = hidden > 0
-    ? ` (${hidden} more task${hidden === 1 ? "" : "s"} not shown — use TaskList for the full list.)`
-    : "";
-
-  const items = shown.map(t => {
-    const item: Record<string, string> = {
-      id: t.id,
-      content: sanitizeField(t.subject),
-      status: t.status,
-    };
-    if (t.activeForm) item.activeForm = sanitizeField(t.activeForm);
-    return item;
-  });
-
-  // When truncated, don't claim these are the full contents.
-  const prefix = "The task tools haven't been used recently. DO NOT mention this explicitly to the user.";
-  const header = hidden > 0
-    ? `${prefix} Here are your most relevant tasks (list truncated):`
-    : `${prefix} Here are the latest contents of your task list:`;
-
-  return [
-    "<system-reminder>",
-    header,
-    "",
-    `${JSON.stringify(items)}.${overflow} Continue on with the tasks at hand if applicable.`,
-    "</system-reminder>",
-  ].join("\n");
-}
 
 export default function (pi: ExtensionAPI) {
   // Project overrides require ExtensionContext.cwd, which is unavailable while
@@ -338,7 +256,7 @@ export default function (pi: ExtensionAPI) {
         }
       }
     }
-    autoClear.trackCompletion(task.id, cadence.currentTurn);
+    autoClear.trackCompletion(task.id, currentTurn);
     widget.update();
   });
 
@@ -355,7 +273,7 @@ export default function (pi: ExtensionAPI) {
     if (status === "stopped") {
       // Intentional stop — mark completed, preserve partial result
       store.update(task.id, { status: "completed", metadata: { ...task.metadata, result: result || task.metadata?.result } });
-      autoClear.trackCompletion(task.id, cadence.currentTurn);
+      autoClear.trackCompletion(task.id, currentTurn);
     } else {
       // Actual error — revert to pending. `result: null` drops it (the store deletes
       // a key set to null): a task back to pending has no current result, and an
@@ -426,20 +344,32 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // GC-2026-workflow-chat-stream: mark workflow tasks active on the
-      // TaskWidget so the user sees the spinner move through Implement →
-      // Review → Fix → Merge during a workflow_run. workflow-handler
-      // has its own agentToTask map (separate from agentTaskMap above) and
-      // handles the subagents:completed path itself; the OUTER listener at
-      // line 304 looks up agentTaskMap which doesn't see workflow tasks,
-      // so widget.setActiveTask is the only path to animate workflow tasks.
-      // The widget's isActive check requires both activeTaskIds.has AND
-      // status==='in_progress'; when workflow-handler flips status to
-      // completed on its own listener, the next widget.update() prunes the
-      // stale active ID via the loop in update().
+      // GC-2026-task-widget-link: only mark the workflow task ACTIVE on the
+      // TaskWidget AFTER spawnSubagent resolves successfully. Marking it
+      // active BEFORE the spawn means the spinner shows for tasks that
+      // never actually start (e.g. deadline-fail-fast path), and the user
+      // sees a flash-then-vanish on every spawn. After-resolve is the
+      // correct gate: only successful spawns animate the widget.
+      let agentId: string;
+      try {
+        agentId = await spawnSubagent(type, task.description, spawnOpts);
+      } catch (err) {
+        // Spawn failed — surface as "failed" so the widget's active marker
+        // never gets set in the first place (we didn't even try).
+        return "" as string;
+      }
       widget.setActiveTask(task.id, true);
-
-      return spawnSubagent(type, task.description, spawnOpts);
+      return agentId;
+    },
+    // GC-2026-task-widget-link: workflow-handler fires these for the "finished"
+    // and "failed" paths; the wrapper translates to widget calls.
+    onTaskChange: (taskId, status) => {
+      if (status === "finished" || status === "failed" || status === "interrupted") {
+        widget.setActiveTask(taskId, false);
+        widget.update();
+      }
+      // "spawned" is fired from spawnAgent itself (above) AFTER spawnSubagent
+      // resolves — not from this callback.
     },
   });
   // Track the unsub so future reloads can detach cleanly (not currently used
@@ -532,21 +462,19 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // ── Turn tracking for system-reminder injection ──
-  // Cadence decisions live in `reminder-cadence.ts` so they're
-  // unit-testable without spinning up a fake ExtensionAPI.
-  const cadence = createCadenceState();
-  const cadenceConfig: CadenceConfig = {
-    reminderInterval: REMINDER_INTERVAL,
-    taskToolNames: TASK_TOOL_NAMES,
-  };
+  // ── Turn tracking (for autoClear's "completed N turns ago" math) ──
+  // GC-2026-system-reminder-remove: the cadence module used to track
+  // currentTurn too, but with the reminder mechanism removed we only need
+  // a counter for autoClear's per-task linger window. Keep it local here
+  // so autoClear doesn't have to import reminder-cadence.
+  let currentTurn = 0;
 
   pi.on("turn_start", async (_event, ctx) => {
-    onTurnStart(cadence);
+    currentTurn += 1;
     latestCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
     initializeStoreForContext(ctx);
-    if (autoClear.onTurnStart(cadence.currentTurn)) {
+    if (autoClear.onTurnStart(currentTurn)) {
       if (isSessionScope()) deleteSessionFileIfEmpty();
       widget.update();
     }
@@ -559,80 +487,13 @@ export default function (pi: ExtensionAPI) {
     autoClear.onRunEnded();
   });
 
-  // ── Token usage tracking + stale-task detection ──
+  // ── Token usage tracking ──
   // Feed per-turn token counts from assistant messages into the widget.
-  // Also detect when the agent has stopped referencing tasks but left
-  // them in_progress — schedule a reminder for the next LLM call.
   pi.on("turn_end", async (event) => {
     const msg = event.message as any;
     if (msg?.role === "assistant" && msg.usage) {
       widget.addTokenUsage(msg.usage.input ?? 0, msg.usage.output ?? 0);
     }
-
-    // Stale-task detection: catch the case where the agent finishes work in a
-    // text-only turn (no tool calls, so tool_result never fires) but left tasks
-    // in_progress. Cheap-first: only read the store once the turn gap could
-    // matter — the in_progress interval is the smallest a reminder can need.
-    if (!cadence.reminderInjectedThisCycle && !cadence.reminderDue) {
-      const gap = cadence.currentTurn - cadence.lastTaskToolUseTurn;
-      if (gap >= ACTIVE_REMINDER_INTERVAL && store.list().some(t => t.status === "in_progress")) {
-        cadence.reminderDue = true;
-      }
-    }
-  });
-
-  // ── System-reminder injection ──
-  //
-  // tool_result is used ONLY to track cadence. We DO NOT mutate non-task
-  // tool result content — appending a <system-reminder> there would
-  // corrupt model-visible transcript semantics for unrelated tools (read,
-  // bash, grep, …) and make tool-output debugging miserable.
-  //
-  // The actual injection happens in the `context` hook below, which fires
-  // before each LLM call and returns a modified copy of the messages
-  // without persisting or polluting any tool output.
-  pi.on("tool_result", async (event) => {
-    // Task tool usage resets cadence (interval is irrelevant on this path — the
-    // helper resets and returns before reading it).
-    if (TASK_TOOL_NAMES.has(event.toolName)) {
-      evaluateToolResult(cadence, event.toolName, false, cadenceConfig);
-      return {};
-    }
-
-    if (cadence.reminderInjectedThisCycle) return {};
-    // Cheap-first: avoid store.list() disk I/O until the turn gap could matter.
-    // ACTIVE_REMINDER_INTERVAL is the smallest interval any reminder can need.
-    if (cadence.currentTurn - cadence.lastTaskToolUseTurn < ACTIVE_REMINDER_INTERVAL) return {};
-
-    const tasks = store.list();
-    // Shorter interval while in_progress; passed per-call so the shared config
-    // is never mutated.
-    evaluateToolResult(cadence, event.toolName, tasks.length > 0, {
-      ...cadenceConfig,
-      reminderInterval: intervalFor(tasks),
-    });
-    return {};
-  });
-
-  // Inject the transient system-reminder into the upcoming LLM call's
-  // messages, never into a tool result. The reminder is appended as a
-  // user message so models that don't support custom message types still
-  // receive it. It is not persisted in the session store — `context`
-  // returns a transformed messages array used only for this one request.
-  pi.on("context", async (event) => {
-    if (!drainReminderForContext(cadence)) return {};
-    const tasks = store.list();
-
-    return {
-      messages: [
-        ...event.messages,
-        {
-          role: "user" as const,
-          content: [{ type: "text" as const, text: buildSystemReminder(tasks) }],
-          timestamp: Date.now(),
-        },
-      ],
-    };
   });
 
   // session_start replaces the never-emitted session_switch event. Rehydrating
@@ -656,7 +517,6 @@ export default function (pi: ExtensionAPI) {
       // previous one points at an unrelated task here — the agent's completion would
       // close a task it never ran. reattachAgents() rebuilds what this session owns.
       agentTaskMap.clear();
-      resetCadenceState(cadence);
       autoClear.reset();
       // Memory mode has no file to switch — clear tasks explicitly on /new.
       if (reason === "new" && taskScope === "memory") {
@@ -1036,7 +896,7 @@ Set up task dependencies:
         autoClear.resetBatchCountdown();
       } else if (fields.status === "completed" || fields.status === "deleted") {
         widget.setActiveTask(taskId, false);
-        if (fields.status === "completed") autoClear.trackCompletion(taskId, cadence.currentTurn);
+        if (fields.status === "completed") autoClear.trackCompletion(taskId, currentTurn);
       }
 
       widget.update();
@@ -1176,7 +1036,7 @@ Set up task dependencies:
         const task = store.get(resolvedId);
         if (task?.metadata?.agentId && task.status === "in_progress") {
           store.update(resolvedId, { status: "completed" });
-          autoClear.trackCompletion(resolvedId, cadence.currentTurn);
+          autoClear.trackCompletion(resolvedId, currentTurn);
           await stopSubagent(task.metadata.agentId);
           widget.setActiveTask(resolvedId, false);
           widget.update();
@@ -1186,7 +1046,7 @@ Set up task dependencies:
       }
 
       store.update(taskId, { status: "completed" });
-      autoClear.trackCompletion(taskId, cadence.currentTurn);
+      autoClear.trackCompletion(taskId, currentTurn);
       widget.setActiveTask(taskId, false);
       widget.update();
       return textResult(`Task #${taskId} stopped successfully`);
@@ -1408,7 +1268,7 @@ Set up task dependencies:
           return viewTasks();
         } else if (action === "✓ Complete") {
           store.update(taskId, { status: "completed" });
-          autoClear.trackCompletion(taskId, cadence.currentTurn);
+          autoClear.trackCompletion(taskId, currentTurn);
           widget.setActiveTask(taskId, false);
           widget.update();
           return viewTasks();

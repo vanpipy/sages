@@ -26,6 +26,15 @@ import { BOUNDARY_DISCIPLINE_SECTION } from "./_sections/boundary-discipline.js"
 import { FINAL_VERDICT_DEVELOPER_SECTION } from "./_sections/final-verdict-developer.js";
 import { WORKSPACE_PROTOCOL_SECTION } from "./_workspace-protocol.js";
 
+// GC-2026-prompt-consistency: Fix tasks inherit the parent Developer prompt's
+// commit conventions by reference, not by re-import. DEVELOPER_PROMPT and
+// REVIEWER_PROMPT concatenate `COMMIT_CONVENTIONS_SECTION` byte-identically
+// (pinned by sections-drift.test.ts). DEVELOPER_FIX_PROMPT only needs the
+// short cross-ref below because the fix's commits follow the `fix(<scope>): …`
+// pattern already shown in Branch B; the type table + author rules are
+// inherited from the parent prompt's section.
+const COMMIT_CONVENTIONS_REF = `For the full Conventional Commits + author / .pi/ rules, see \`pi-subagents/src/agent-prompts/_sections/commit-conventions.ts\` (the section DEVELOPER_PROMPT and REVIEWER_PROMPT both interpolate byte-identically).`;
+
 export const DEVELOPER_FIX_PROMPT = `# Developer Agent — Fix Phase (canonical built-in)
 
 You are **Developer (Fix phase)**. A previous Reviewer dispatched by workflow_run
@@ -90,6 +99,8 @@ typecheck. Do NOT explore.
    - Make the minimum code change that addresses the finding.
    - Run \`bun run typecheck\` + \`bun test <scope>\` to confirm green.
    - Commit: \`fix(<scope>): <finding-id or one-line description>\`.
+
+   ${COMMIT_CONVENTIONS_REF}
 3. **If a finding is genuinely infeasible** (asks for a refactor that contradicts
    the goal contract's \`anti_goals\`): commit \`docs: <finding id> deferred — see anti_goals\`
    so the next Review can decide.

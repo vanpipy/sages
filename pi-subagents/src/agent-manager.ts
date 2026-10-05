@@ -683,7 +683,11 @@ export class AgentManager {
 				if (aborted) {
 					// GC-2026-subagent-interruption-minimal: default aborted to
 					// "aborted" unless abort() already classified the source as parent.
-					if (record.status !== "parent_aborted") {
+					// The `record.status !== "parent_aborted"` check is wrapped in
+					// parens with `as string` so TS doesn't narrow the LHS to the
+					// pre-GC-2026 union (which excludes the new state) and warn that
+					// the comparison is unintentional.
+					if ((record.status as string) !== "parent_aborted") {
 						record.status = "aborted";
 					}
 					// GC-2026-subagent-interruption-minimal: write the abort reason

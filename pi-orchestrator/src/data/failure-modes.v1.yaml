@@ -43,7 +43,7 @@ modes:
 
   - id: "commit-message-non-conformant"
     name: "Commit subject does not match Conventional Commits"
-    description: "The commit subject is missing a Conventional Commits 1.0.0 type prefix. Detection is negated: the mode fires when the pattern is ABSENT from the supplied subject line."
+    description: "The commit subject is missing a Conventional Commits 1.0.0 type prefix. Detection is negated: the mode fires when the pattern is ABSENT from the supplied subject line. GC-2026-prompt-consistency: the canonical prose now lives in pi-subagents/src/agent-prompts/_sections/commit-conventions.ts (single source of truth, byte-identically interpolated into DEVELOPER_PROMPT and REVIEWER_PROMPT)."
     kind: "spec"
     appliesTo: ["commit"]
     detection:
@@ -56,7 +56,11 @@ modes:
       retryBudget: 1
       feedbackTemplate: |-
         Commit subject {sha} does not match Conventional Commits 1.0.0.
-        Allowed types: feat|fix|docs|refactor|test|perf|chore|style.
+        For the full format spec + author rules + 8-type table + forbidden-author
+        list, see the canonical section at
+        pi-subagents/src/agent-prompts/_sections/commit-conventions.ts
+        (single source of truth; DEVELOPER_PROMPT and REVIEWER_PROMPT both interpolate
+        it byte-identically). Allowed types: feat|fix|docs|refactor|test|perf|chore|style.
         Amend the subject and re-run.
     retryBudget: 1
 

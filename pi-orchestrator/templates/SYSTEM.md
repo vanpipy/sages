@@ -59,6 +59,10 @@ Conventional Commits: `<type>(<scope>): <description>` (lowercase, imperative, n
 - **Never `git add` paths under `.pi/`.** Subagents must not include any `.pi/` file in commits. Main agent verifies `git diff origin/main..HEAD --name-only` excludes `.pi/` before merge.
 - Author is `git config user.{name,email}`. Never `--author`, never `GIT_AUTHOR_*` env overrides.
 
+> Full rules (format spec, 8 types table, author derivation script, examples, forbidden-author list, why-it-matters) live in
+> `pi-subagents/src/agent-prompts/_sections/commit-conventions.ts` —
+> single source of truth, byte-identically interpolated into DEVELOPER_PROMPT and REVIEWER_PROMPT (pinned by `test/sections-drift.test.ts`).
+
 ## `.pi/orchestrator/` Namespace Ownership
 
 | Role | May write |

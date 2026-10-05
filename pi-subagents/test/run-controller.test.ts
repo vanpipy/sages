@@ -73,8 +73,8 @@ describe("run-controller: DEFAULT_BUCKET_TIMEOUTS_MS", () => {
 		);
 		expect(DEFAULT_BUCKET_TIMEOUTS_MS.read).toBe(5_000);
 		expect(DEFAULT_BUCKET_TIMEOUTS_MS.search).toBe(10_000);
-		expect(DEFAULT_BUCKET_TIMEOUTS_MS.test).toBe(30_000);
-		expect(DEFAULT_BUCKET_TIMEOUTS_MS.fullTest).toBe(90_000);
+		expect(DEFAULT_BUCKET_TIMEOUTS_MS.test).toBe(60_000);
+		expect(DEFAULT_BUCKET_TIMEOUTS_MS.fullTest).toBe(180_000);
 		expect(DEFAULT_BUCKET_TIMEOUTS_MS.network).toBe(5_000);
 		expect(DEFAULT_BUCKET_TIMEOUTS_MS.other).toBe(60_000);
 	});
@@ -99,15 +99,15 @@ describe("run-controller: DEFAULT_PER_TYPE", () => {
 	it("exports the five built-in PascalCase types with the specified defaults", async () => {
 		const { DEFAULT_PER_TYPE } = await import("../src/run-controller.js");
 		expect(DEFAULT_PER_TYPE.Developer).toEqual({
-			deadlineMs: 20 * 60_000,
-			maxTurns: 200,
+			deadlineMs: 30 * 60_000,
+			maxTurns: 300,
 		});
 		expect(DEFAULT_PER_TYPE.Reviewer).toEqual({
-			deadlineMs: 20 * 60_000,
-			maxTurns: 200,
+			deadlineMs: 30 * 60_000,
+			maxTurns: 300,
 		});
 		expect(DEFAULT_PER_TYPE.Explore).toEqual({
-			deadlineMs: 5 * 60_000,
+			deadlineMs: 10 * 60_000,
 			maxTurns: 50,
 		});
 		expect(DEFAULT_PER_TYPE.Plan).toEqual({
@@ -126,8 +126,8 @@ describe("run-controller: resolveRunConfig", () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
 		const cfg = resolveRunConfig("Developer", {}, {});
 		expect(cfg.type).toBe("Developer");
-		expect(cfg.deadlineMs).toBe(20 * 60_000);
-		expect(cfg.maxTurns).toBe(200);
+		expect(cfg.deadlineMs).toBe(30 * 60_000);
+		expect(cfg.maxTurns).toBe(300);
 		expect(cfg.bucketTimeoutsMs).toBeDefined();
 	});
 
@@ -138,11 +138,11 @@ describe("run-controller: resolveRunConfig", () => {
 
 		// Negative values fall through to default
 		const neg = resolveRunConfig("Developer", { max_duration_minutes: -5 }, {});
-		expect(neg.deadlineMs).toBe(20 * 60_000);
+		expect(neg.deadlineMs).toBe(30 * 60_000);
 
 		// Zero falls through to default
 		const zero = resolveRunConfig("Developer", { max_duration_minutes: 0 }, {});
-		expect(zero.deadlineMs).toBe(20 * 60_000);
+		expect(zero.deadlineMs).toBe(30 * 60_000);
 	});
 
 	it("params.max_turns overrides maxTurns", async () => {
@@ -152,14 +152,14 @@ describe("run-controller: resolveRunConfig", () => {
 
 		// Zero / negative falls through
 		const zero = resolveRunConfig("Developer", { max_turns: 0 }, {});
-		expect(zero.maxTurns).toBe(200);
+		expect(zero.maxTurns).toBe(300);
 	});
 
 	it("falls back to default when params is undefined-equivalent", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
 		const cfg = resolveRunConfig("Reviewer", {}, {});
-		expect(cfg.deadlineMs).toBe(20 * 60_000);
-		expect(cfg.maxTurns).toBe(200);
+		expect(cfg.deadlineMs).toBe(30 * 60_000);
+		expect(cfg.maxTurns).toBe(300);
 	});
 
 	it("env.SAGES_PI_AGENT_BUDGET_TURNS as fallback (when params has nothing)", async () => {
@@ -207,8 +207,8 @@ describe("run-controller: resolveRunConfig", () => {
 	it("unknown type falls back to Developer defaults (20min / 200turns)", async () => {
 		const { resolveRunConfig } = await import("../src/run-controller.js");
 		const cfg = resolveRunConfig("somerandomtype", {}, {});
-		expect(cfg.deadlineMs).toBe(20 * 60_000);
-		expect(cfg.maxTurns).toBe(200);
+		expect(cfg.deadlineMs).toBe(30 * 60_000);
+		expect(cfg.maxTurns).toBe(300);
 	});
 
 	it("params take precedence over env", async () => {
