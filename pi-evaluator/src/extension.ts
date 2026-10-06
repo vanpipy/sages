@@ -50,8 +50,15 @@ interface OrchestratorToolCallEventLike {
 /**
  * Pull the workflow id out of a tool_call's input. Each of the 4 orchestrator
  * tools uses a different field name (goal_contract_create.id,
- * dag_synthesize.goal_id, task_dispatch.dag_id, orchestrator_audit.dag_id),
+ * dag_synthesize.goal_id, task_dispatch.goal_id, orchestrator_audit.goal_id),
  * so we probe all four candidates and return the first match.
+ *
+ * GC-2026-evaluator-drift-sweep: task_dispatch + orchestrator_audit
+ * now also use `goal_id` (post GC-2026-path-B-field-renames). `dag_id`
+ * remains a back-compat alias — we try it AFTER `goal_id` so newly
+ * emitted events (which carry `goal_id`) are handled correctly while
+ * test fixtures pre-dating the rename (which carry `dag_id`) still
+ * work.
  */
 function extractWorkflowId(toolName: string, input: Record<string, unknown>): string | undefined {
 	if (toolName === "goal_contract_create") {
@@ -60,7 +67,9 @@ function extractWorkflowId(toolName: string, input: Record<string, unknown>): st
 	if (toolName === "dag_synthesize") {
 		return typeof input.goal_id === "string" ? input.goal_id : undefined;
 	}
-	// task_dispatch + orchestrator_audit both use dag_id.
+	// task_dispatch + orchestrator_audit: prefer goal_id (post-rename),
+	// fall back to dag_id (deprecated alias for pre-rename fixtures).
+	if (typeof input.goal_id === "string") return input.goal_id;
 	if (typeof input.dag_id === "string") return input.dag_id;
 	return undefined;
 }

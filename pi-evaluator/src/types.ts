@@ -411,9 +411,18 @@ export type IsolationMode =
 	| ManagedWorktreeIsolation;
 
 /** Canonical managed-worktree isolation: developer tasks declare the explicit
- *  worktree object instead of the legacy `worktree` string literal. */
+ *  worktree object instead of the legacy `worktree` string literal.
+ *
+ * GC-2026-evaluator-drift-sweep: `dag_id` renamed to `goal_id` (post
+ * GC-2026-path-B-field-renames). This is a local pi-evaluator type
+ * with no external readers; the orchestrator emits `goal_id` in its
+ * tool calls (see pi-orchestrator/src/orchestrator-advisory.ts:289),
+ * so the type now matches the wire format. The pre-rename name
+ * `dag_id` is preserved in the listener (extension.ts) as a
+ * back-compat alias for test fixtures pre-dating the rename.
+ */
 export interface ManagedWorktreeIsolation {
-	dag_id: string;
+	goal_id: string;
 	task_id: string;
 	mode: "create" | "reuse";
 	base_ref?: string;
