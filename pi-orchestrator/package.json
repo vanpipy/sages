@@ -10,6 +10,7 @@
     "verify:isolation-modes": "bun run scripts/verify-isolation-modes.ts",
     "verify:namespace-ownership": "bun run scripts/verify-namespace-ownership.ts",
     "verify:soft-mode-mental-model": "bun run scripts/verify-soft-mode-mental-model.ts",
+    "verify:pi-tasks-tools": "bun run scripts/verify-pi-tasks-tools.ts",
     "verify:gcdb": "bun run scripts/verify-gcdb.ts",
     "verify:pi-universe": "bun run scripts/verify-pi-universe.ts",
     "verify:all": "bun run scripts/verify-all.ts",

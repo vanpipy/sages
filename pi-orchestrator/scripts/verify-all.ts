@@ -79,6 +79,11 @@ const VERIFIERS: { id: string; script: string; label: string }[] = [
 		script: "verify-soft-mode-mental-model.ts",
 		label: "SOFT_MODE_REMINDER runtime wiring",
 	},
+	{
+		id: "pi-tasks-tools",
+		script: "verify-pi-tasks-tools.ts",
+		label: "PI_TASKS_TOOLS allowlist vs pi-tasks registerTool",
+	},
 ];
 
 interface Result {

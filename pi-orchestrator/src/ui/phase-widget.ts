@@ -125,20 +125,13 @@ export function groupTasksByPhase(tasks: TaskSummary[]): PhaseGroup[] {
   return order;
 }
 
-interface WorkflowStartPayload {
-  workflow_id: string;
-  goal_id: string;
-  goal: {
-    id: string;
-    title: string;
-    scope: { include: string[]; exclude: string[] };
-    anti_goals: string[];
-    done_definition: string;
-  };
-  max_fix_iterations: number;
-  max_redesigns?: number;
-  worktree_path: string;
-}
+// GC-2026-099 R1: import the canonical WorkflowStartPayload from
+// pi-tasks rather than redeclaring it. The prior local copy could
+// drift from pi-tasks/src/workflow-handler.ts:50 silently — neither
+// typecheck nor tests would catch a contract change. Importing the
+// source-of-truth type means the widget rebuild fails loudly when
+// pi-tasks adds / removes / renames a field.
+import type { WorkflowStartPayload } from "@sages/pi-tasks/workflow-handler";
 
 interface PhaseWidgetState {
   goalId: string | undefined;
