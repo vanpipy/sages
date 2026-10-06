@@ -63,6 +63,7 @@ coverage (postmortem or carve-out).
 <<<<<<< HEAD
 =======
 | [GC-2026-102](./postmortem/GC-2026-102.md) | workflow_run finalize: 3-case end-to-end integration test (real subscribeWorkflow + real-format spawn ids + real workflow:phase-complete events — would have caught the cascade-agentid bug pre-shipping) + NEEDS_CLARIFICATION resume pathway (reads `options.clarification_answer` against existing `workflow-{id}.yaml` with `status: needs_clarification`, records the answer, returns `status: success` with the answer echoed). V4 (agent_overrides.fix → DEVELOPER_FIX_PROMPT) was already done in workflow-graph.ts:400; the orchestrator's dead `agent_overrides` parameter deferred to a future GC. | [.pi/orchestrator/goal-GC-2026-102.yaml](../../.pi/orchestrator/goal-GC-2026-102.yaml) | [GC-2026-102.md](./postmortem/GC-2026-102.md) |
+| [GC-2026-103](./postmortem/GC-2026-103.md) | Reviewer/Merger uplift — verify B6 (iteration-aware review: formatPriorReviewSummary injection) + B7 (Merger consumes Reviewer evidence via `.pi/orchestrator/last-review-{goal_id}.md`). 3 orchestrator-side integration tests extracted into shared harness; pi-tasks had unit tests but no orchestrator boundary coverage. | [.pi/orchestrator/goal-GC-2026-103.yaml](../../.pi/orchestrator/goal-GC-2026-103.yaml) | [GC-2026-103.md](./postmortem/GC-2026-103.md) |
 <<<<<<< HEAD
 =======
 >>>>>>> gc-2026-102-implement
