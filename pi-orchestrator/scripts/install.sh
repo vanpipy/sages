@@ -47,6 +47,12 @@
 # Selective install options:
 #   --orchestrator-only only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)
 #   --system-only       only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)
+#   --sync-only         fast path: force-copy pi-orchestrator + pi-tasks source files
+#                        into $PKG_DIR without re-running bun install, npm peer
+#                        setup, SYSTEM.md, or pi CLI. Requires a prior full
+#                        install on this prefix (peer chain must already be
+#                        intact at $PI_DIR/packages/). GC-2026-pi-tasks-cascade-
+#                        agentid + GC-2026-boundary-subagent-control follow-up.
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -209,9 +215,10 @@ usage() {
   echo "  --uninstall        Remove installed files"
   echo "  --orchestrator-only Only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
   echo "  --system-only      Only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)"
+  echo "  --sync-only        Force-copy pi-orchestrator + pi-tasks source files only (no bun install / no peer setup / no SYSTEM.md / no pi CLI). Requires a prior full install on the same prefix."
   echo "  --help, -h         Show this help message"
   echo ""
-  echo "Modes are mutually exclusive: pick one of (default | --uninstall | --orchestrator-only | --system-only)."
+  echo "Modes are mutually exclusive: pick one of (default | --uninstall | --orchestrator-only | --system-only | --sync-only)."
 }
 
 
@@ -2186,6 +2193,92 @@ install_system_only() {
 }
 
 # ────────────────────────────────────────────────────────────
+# Mode 4: sync-only — file-copy pi-orchestrator + pi-tasks sources
+# into $PKG_DIR without re-running bun install / npm peer setup /
+# SYSTEM.md / pi CLI / pi-codebase-memory. The fast path for
+# testing a local commit on a fully-installed runtime.
+#
+# GC-2026-pi-tasks-cascade-agentid postmortem flagged this follow-up;
+# GC-2026-boundary-subagent-control reiterated it. Before this GC, the
+# only way to ship a one-commit source fix to the runtime pi session
+# was `--force` (full reinstall, including 90s+ bun install + AFT
+# binary download). --sync-only skips all of that and force-overwrites
+# just the source files, since the dependencies have not changed in
+# a fix-only commit.
+#
+# What it does:
+#   - copies pi-orchestrator/{src,skills,templates}/ + package.json
+#   - copies pi-tasks/{src,test,skills}/  (no node_modules — assumes
+#     the runtime already has pi-tasks's deps installed)
+#   - does NOT touch: pi CLI, AFT binary / npm peer, SYSTEM.md,
+#     pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator,
+#     subagent templates, settings.json registration
+#
+# What it does NOT do (must already be installed):
+#   - peer chain must be intact (pi-subagents, pi-tasks, pi-evaluator
+#     already present at $PI_DIR/packages/ from a prior full install)
+#   - bun / node_modules for each package must be populated
+#
+# Failure modes:
+#   - If a peer package is missing, sync-only prints a clear recovery
+#     path ("run the full install first") and exits 1 instead of
+#     silently shipping a broken runtime.
+# ────────────────────────────────────────────────────────────
+install_sync_only() {
+  echo "==> Syncing pi-orchestrator + pi-tasks source files only (no bun install, no peer setup)..."
+
+  # Pre-flight: the runtime must already be installed. sync-only is
+  # the fast path on top of a complete install, not a fresh installer.
+  if [[ ! -d "$PKG_DIR" ]]; then
+    echo "  Error: $PKG_DIR does not exist; sync-only needs a prior full install"
+    echo "  Run: bash $0  (full install) first, then re-run with --sync-only"
+    exit 1
+  fi
+  if [[ ! -d "$PI_TASKS_DEST_DIR" ]]; then
+    echo "  Error: $PI_TASKS_DEST_DIR does not exist; sync-only needs pi-tasks installed"
+    echo "  Run: bash $0  (full install) first, then re-run with --sync-only"
+    exit 1
+  fi
+
+  # Force-copy orchestrator source directories (no SKIP-if-exists
+  # check; sync-only is intentionally force-overwriting).
+  local orch_src="$LOCAL_REPO_ROOT/pi-orchestrator"
+  if [[ ! -d "$orch_src" ]]; then
+    echo "  Error: pi-orchestrator source tree not found at $orch_src"
+    exit 1
+  fi
+  for dir in skills src templates; do
+    local src_dir="$orch_src/$dir"
+    [[ ! -d "$src_dir" ]] && continue
+    rm -rf "$PKG_DIR/$dir"
+    cp -r "$src_dir" "$PKG_DIR/$dir"
+    echo "  Synced $dir/"
+  done
+  if [[ -f "$orch_src/package.json" ]]; then
+    cp "$orch_src/package.json" "$PKG_DIR/package.json"
+    echo "  Synced package.json (deps preserved; bun install NOT re-run)"
+  fi
+
+  # Force-copy pi-tasks source directories (no node_modules — the
+  # runtime's existing pi-tasks installation has the deps; if a
+  # commit adds a new dep, full reinstall is required).
+  local tasks_src="$LOCAL_REPO_ROOT/$PI_TASKS_SRC_REL"
+  if [[ ! -d "$tasks_src" ]]; then
+    echo "  Warning: $tasks_src not found, skipping pi-tasks sync"
+  else
+    rm -rf "$PI_TASKS_DEST_DIR/src" "$PI_TASKS_DEST_DIR/test" "$PI_TASKS_DEST_DIR/skills"
+    cp -r "$tasks_src/src" "$PI_TASKS_DEST_DIR/src"
+    cp -r "$tasks_src/test" "$PI_TASKS_DEST_DIR/test"
+    [[ -d "$tasks_src/skills" ]] && cp -r "$tasks_src/skills" "$PI_TASKS_DEST_DIR/skills"
+    echo "  Synced pi-tasks src/ + test/ + skills/ (deps preserved)"
+  fi
+
+  echo "  (skipped: pi CLI, AFT peer + binary, SYSTEM.md, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, settings.json registration, bun install)"
+  echo ""
+  echo "Done! Restart pi: exit && pi"
+}
+
+# ────────────────────────────────────────────────────────────
 # Uninstall (removes both orchestrator and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
@@ -2239,7 +2332,7 @@ uninstall() {
 }
 
 main() {
-  local FORCE=false UNINSTALL=false ORCHESTRATOR_ONLY=false SYSTEM_ONLY=false
+  local FORCE=false UNINSTALL=false ORCHESTRATOR_ONLY=false SYSTEM_ONLY=false SYNC_ONLY=false
   local MODE_COUNT=0
 
   while [[ $# -gt 0 ]]; do
@@ -2247,12 +2340,18 @@ main() {
       --prefix)
         PI_DIR="$2"
         PKG_DIR="$PI_DIR/packages/$PKG_NAME"
+        # PI_TASKS_DEST_DIR is computed at script entry from the initial
+        # PI_DIR; --prefix has to keep both in lockstep so --sync-only
+        # writes to the same prefix the rest of the script targets.
+        PI_TASKS_DEST_DIR="$PI_DIR/packages/pi-tasks"
+        PI_TASKS_PKG="$PI_TASKS_DEST_DIR"
         shift 2
         ;;
       --force) FORCE=true; shift ;;
       --uninstall) UNINSTALL=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --orchestrator-only) ORCHESTRATOR_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --system-only) SYSTEM_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
+      --sync-only) SYNC_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --help|-h) usage; exit 0 ;;
       *) echo "Error: Unknown option: $1"; usage; exit 1 ;;
     esac
@@ -2260,7 +2359,7 @@ main() {
 
   # Mutual-exclusion check: only one mode may be selected at a time
   if [[ "$MODE_COUNT" -gt 1 ]]; then
-    echo "Error: --uninstall, --orchestrator-only, --system-only are mutually exclusive"
+    echo "Error: --uninstall, --orchestrator-only, --system-only, --sync-only are mutually exclusive"
     echo "Pick at most one of them (or none for full install)."
     usage
     exit 1
@@ -2272,6 +2371,8 @@ main() {
     install_orchestrator_only
   elif $SYSTEM_ONLY; then
     install_system_only
+  elif $SYNC_ONLY; then
+    install_sync_only
   else
     install
   fi
