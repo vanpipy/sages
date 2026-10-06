@@ -446,6 +446,51 @@ describe("subscribeWorkflow — NEEDS_WORK cascade (dynamic Fix)", () => {
   });
 });
 
+// GC-2026-advisor-pairs: paired advisor dispatch (post-primary)
+describe("subscribeWorkflow — advisor pair dispatch (GC-2026-advisor-pairs)", () => {
+  test("completed task with metadata.advisorAgentType spawns a paired advisor sibling", async () => {
+    const { events, store, spawnAgent } = setup();
+    await events.emit("workflow:start", startPayload());
+    await flush();
+
+    // Inject advisorAgentType on the Implement task (the spec
+    // builder doesn't set it yet — that lands in a follow-up; the
+    // dispatch is already wired).
+    const implement = store.list().find(t => t.metadata.phase === "implement")!;
+    store.update(implement.id, {
+      metadata: { ...implement.metadata, advisorAgentType: "DeveloperAdvisor" },
+    });
+
+    await completeTask(events, implement);
+
+    // An advisor task should have been created, blockedBy the Implement task.
+    const advisor = store.list().find(
+      (t) => t.metadata?.advisorOf === implement.id,
+    );
+    expect(advisor).toBeDefined();
+    expect(advisor?.metadata?.agentType).toBe("DeveloperAdvisor");
+    expect(advisor?.metadata?.advisorOf).toBe(implement.id);
+    expect(advisor?.blockedBy).toEqual([implement.id]);
+    expect(advisor?.subject).toContain("Advisor");
+    expect(advisor?.subject).toContain("Implement");
+  });
+
+  test("completed task WITHOUT metadata.advisorAgentType does NOT spawn an advisor", async () => {
+    const { events, store } = setup();
+    await events.emit("workflow:start", startPayload());
+    await flush();
+
+    const implement = store.list().find(t => t.metadata.phase === "implement")!;
+    await completeTask(events, implement);
+
+    // No advisor task for the Implement task.
+    const advisor = store.list().find(
+      (t) => t.metadata?.advisorOf === implement.id,
+    );
+    expect(advisor).toBeUndefined();
+  });
+});
+
 describe("subscribeWorkflow — NEEDS_REDESIGN cascade (dynamic new Implement)", () => {
   test("NEEDS_REDESIGN spawns a new Implement with redesignNumber metadata", async () => {
     const { events, store, spawnAgent } = setup();

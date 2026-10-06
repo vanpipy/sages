@@ -284,16 +284,97 @@ describe("PhaseWidget", () => {
     expect(text).toContain("Implement: foo");
   });
 
-  it("ignores events when no workflow is active (no crash, goal_id stays undefined)", () => {
-    const w = makeWidget();
-    w.attach();
-    bus.emit("workflow:phase-complete", {
-      workflow_id: "wf-x",
-      goal_id: "GC-X",
-      phase: "implement",
-      status: "completed",
-      task_id: "1",
-    });
-    expect(w.getState().goalId).toBeUndefined();
-  });
+ 	it("ignores events when no workflow is active (no crash, goal_id stays undefined)", () => {
+		const w = makeWidget();
+		w.attach();
+		bus.emit("workflow:phase-complete", {
+			workflow_id: "wf-x",
+			goal_id: "GC-X",
+			phase: "implement",
+			status: "completed",
+			task_id: "1",
+		});
+		expect(w.getState().goalId).toBeUndefined();
+	});
+
+	// GC-2026-advisor-pairs: when a phase group contains both a primary
+	// task and an advisor task (metadata.advisorOf set), render the
+	// advisor row indented + with "advisor:" prefix so the pair is
+	// visually grouped.
+	it("renders advisor task as a paired sub-row under its primary", async () => {
+		bus.on("tasks:rpc:list-by-metadata", (raw: unknown) => {
+			const { requestId, key, value } = raw as {
+				requestId: string;
+				key: string;
+				value: unknown;
+			};
+			if (key === "workflow_run_goal_id" && value === "GC-TEST") {
+				bus.emit(
+					"tasks:rpc:list-by-metadata:reply:" + requestId,
+					{
+						success: true,
+						data: [
+							makeTask({
+								id: "1",
+								subject: "Implement: foo",
+								status: "completed",
+								metadata: { workflow_run_goal_id: "GC-TEST", phase: "implement" },
+							}),
+							makeTask({
+								id: "2",
+								subject: "Advisor: Implement: foo",
+								status: "in_progress",
+								metadata: {
+									workflow_run_goal_id: "GC-TEST",
+									phase: "implement",
+									advisorOf: "1",
+								},
+							}),
+						],
+					},
+				);
+			}
+		});
+
+		const w = makeWidget();
+		w.attach();
+
+		bus.emit("workflow:start", {
+			workflow_id: "wf-1",
+			goal_id: "GC-TEST",
+			goal: { id: "GC-TEST", title: "T", scope: { include: [], exclude: [] }, anti_goals: [], done_definition: "" },
+			max_fix_iterations: 1,
+			max_redesigns: 1,
+			worktree_path: "/x",
+		});
+		bus.emit("workflow:phase-complete", {
+			workflow_id: "wf-1",
+			goal_id: "GC-TEST",
+			phase: "implement",
+			iteration: 0,
+			status: "completed",
+			task_id: "1",
+		});
+
+		await new Promise((r) => setImmediate(r));
+		await new Promise((r) => setImmediate(r));
+
+		const lines = w.render();
+		const text = lines.join("\n");
+		// Both tasks should be visible (advisor subject gets reformatted
+		// from "Advisor: Implement: foo" -> "advisor: Implement: foo" by the
+		// renderer so the prefix isn't duplicated in the display).
+		expect(text).toContain("Implement: foo");
+		expect(text).toContain("advisor: Implement: foo");
+		// Advisor row should be indented one more level (6 spaces) than
+		// the primary row (4 spaces)
+		const primaryRow = lines.find((l) => l.includes("Implement: foo") && !l.includes("advisor:"));
+		const advisorRow = lines.find((l) => l.includes("advisor: Implement: foo"));
+		expect(primaryRow).toBeDefined();
+		expect(advisorRow).toBeDefined();
+		expect(primaryRow!.indexOf("Implement: foo")).toBeGreaterThanOrEqual(0);
+		expect(advisorRow!.indexOf("advisor:")).toBeGreaterThanOrEqual(0);
+		// Advisor is rendered after primary in the group (sort works)
+		expect(lines.indexOf(advisorRow!)).toBeGreaterThan(lines.indexOf(primaryRow!));
+	});
 });
