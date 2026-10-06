@@ -126,6 +126,12 @@ git commit -m "feat(scope): description"
 
 The \`--author\` flag is a deliberate footgun in this project. A passing audit cannot include a commit whose author was set with \`--author\`, set via \`git -c user.*=...\`, or set via \`GIT_AUTHOR_*\` env vars. If you find yourself reaching for any of these, **stop** and resolve the real author first.
 
+### Forbidden paths — never commit \`.pi/\` files
+
+**Never \`git add\` paths under \`.pi/\`.** The orchestrator's state files (\`.pi/orchestrator/goal-{id}.yaml\`, \`.pi/orchestrator/workflow-{id}.yaml\`, \`.pi/orchestrator/audit-state-{id}.yaml\`) are orchestrator-owned. The subagent layer's per-task files (\`.pi/orchestrator/handoff/<workspace_id>/<task_id>-handoff.md\`, \`.pi/orchestrator/verdict-{task_id}.md\`, \`.pi/orchestrator/last-review-{goal_id}.md\`, \`.pi/orchestrator/merge-recommendation.md\`) are also off-limits to other agents.
+
+The main agent verifies \`git diff origin/main..HEAD --name-only\` excludes \`.pi/\` before merge. A passing audit cannot include a \`.pi/\`-path change from a developer/fix/merger task. The Sages orchestrator's failure-mode catalog (entry \`pi-orchestrator-leak\`) catches this at audit time — but the rule is here so the agent knows the constraint upfront, not after committing.
+
 ### Why this matters
 
 - **Downstream tooling** parses the \`<type>\` prefix. A free-form commit breaks the pipeline and silently loses the change from changelogs.

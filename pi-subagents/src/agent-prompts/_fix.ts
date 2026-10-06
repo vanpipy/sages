@@ -61,10 +61,12 @@ ${WORKSPACE_PROTOCOL_SECTION}
 ## 📥 Input contract (read these FIRST)
 
 1. \`TaskGet\` on each \`blockedBy\` task id.
-2. Read \`task.metadata.verdict\`. Shape:
+2. Read \`task.metadata.verdict\`. Shape (4-state set; cascade only
+   dispatches Fix on CLEAN or NEEDS_WORK per workflow-handler
+   branch logic, but the schema is wider for defensive parsing):
    \`\`\`
    {
-     verdict: "CLEAN" | "NEEDS_WORK",
+     verdict: "CLEAN" | "NEEDS_WORK" | "NEEDS_REDESIGN" | "NEEDS_CLARIFICATION",
      findings: [{ severity, issue, location?, recommendation? }, ...],
      scope_check?: "pass" | "fail" | "absent",
      anti_goal_check?: "pass" | "fail" | "absent"
@@ -72,6 +74,10 @@ ${WORKSPACE_PROTOCOL_SECTION}
    \`\`\`
 3. If \`verdict.verdict === "CLEAN"\` → empty-commit path (below).
 4. If \`verdict.verdict === "NEEDS_WORK"\` → address-findings path (below).
+5. If \`verdict.verdict === "NEEDS_REDESIGN"\` or \`"NEEDS_CLARIFICATION"\` →
+   defensive: emit empty commit (so the cascade can advance) and report
+   \`outcome: blocked\` — the orchestrator will restart Implement or
+   surface the clarification question, not call Fix again.
 
 If metadata.verdict is missing (cascade parser failure), treat as NEEDS_WORK
 with empty findings. Read the Reviewer's evidence file directly:

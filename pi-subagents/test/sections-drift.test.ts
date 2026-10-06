@@ -110,7 +110,14 @@ describe("shared sections: shape", () => {
 	it("FINAL_VERDICT_REVIEWER_SECTION has the reviewer schema (verdict / findings / scope_check / anti_goal_check)", () => {
 		expect(typeof FINAL_VERDICT_REVIEWER_SECTION).toBe("string");
 		expect(FINAL_VERDICT_REVIEWER_SECTION.length).toBeGreaterThan(500);
-		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("verdict: CLEAN | NEEDS_WORK");
+		// GC-2026-prompt-4-state-accuracy: pin the FULL 4-state verdict schema
+		// (post GC-2026-verdict-states-and-dynamic-cascade). The prior
+		// substring check "verdict: CLEAN | NEEDS_WORK" passed for both 2-state
+		// and 4-state, so it was a fake pin. The regex now requires the full
+		// enumeration in order.
+		expect(FINAL_VERDICT_REVIEWER_SECTION).toMatch(
+			/verdict:\s*CLEAN\s*\|\s*NEEDS_WORK\s*\|\s*NEEDS_REDESIGN\s*\|\s*NEEDS_CLARIFICATION/,
+		);
 		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("findings:");
 		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("scope_check: pass | fail");
 		expect(FINAL_VERDICT_REVIEWER_SECTION).toContain("anti_goal_check: pass | fail");

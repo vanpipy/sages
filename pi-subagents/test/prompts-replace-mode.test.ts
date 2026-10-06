@@ -426,7 +426,13 @@ describe("prompts.ts — module-level invariants (sanity)", () => {
 	});
 
 	it("REVIEWER_PROMPT declares sub-agent identity (Phase B)", () => {
+		// GC-2026-prompt-4-state-accuracy: assert the FULL 4-state verdict set
+		// is named explicitly in the Reviewer prompt (not just NEEDS_WORK).
+		// The prior /NEEDS_WORK/ regex was a fake pin — any prose mentioning
+		// the word NEEDS_WORK passed (e.g. "Default to NEEDS_WORK").
 		expect(REVIEWER_PROMPT).toMatch(/NEEDS_WORK/);
+		expect(REVIEWER_PROMPT).toMatch(/NEEDS_REDESIGN/);
+		expect(REVIEWER_PROMPT).toMatch(/NEEDS_CLARIFICATION/);
 		expect(REVIEWER_PROMPT).toMatch(/verify/i);
 	});
 });
