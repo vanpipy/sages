@@ -29,7 +29,7 @@
  * emits events and waits for completion notifications.
  */
 
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { Type, type Static } from "typebox";
@@ -192,7 +192,11 @@ interface WorkflowState {
 	workflow_id: string;
 	started_at: string;
 	current_phase: "implement" | "review" | "fix_loop" | "redesign" | "merge" | "completed" | "blocked" | "needs_clarification";
-	status: "pending" | "running" | "success" | "blocked" | "needs_clarification";
+	// GC-2026-102 V5: "needs_clarification_answered" is the post-resume
+	// state. The orchestrator main agent can detect this status and
+	// decide whether to re-dispatch a fresh workflow_run with the
+	// clarified goal in scope.
+	status: "pending" | "running" | "success" | "blocked" | "needs_clarification" | "needs_clarification_answered";
 	/**
 	 * GC-2026-verdict-states-and-dynamic-cascade: this field is kept as
 	 * the LLM-facing iteration counter (max_fix_iterations compatible),
@@ -276,10 +280,55 @@ function saveWorkflowState(cwd: string, state: WorkflowState): void {
 		`status: ${state.status}`,
 		`iterations_used: ${state.iterations_used}`,
 		`redesigns_used: ${state.redesigns_used}`,
+	];
+	if (state.clarification_answer !== undefined) {
+		lines.push(`clarification_answer: ${state.clarification_answer}`);
+	}
+	lines.push(
 		`worktree_path: ${state.worktree_path}`,
 		`branch: ${state.branch}`,
-	];
+	);
 	writeFileSync(path, lines.join("\n") + "\n", { mode: 0o644 });
+}
+
+/**
+ * GC-2026-102 V5 (NEEDS_CLARIFICATION resume): load the workflow state
+ * file to detect a paused run. Returns undefined if the file doesn't
+ * exist (fresh workflow) or can't be parsed (corrupted / legacy format).
+ *
+ * The parser is intentionally narrow: it reads only the key/value pairs
+ * the resume pathway needs (status, clarification_answer). Anything else
+ * falls through to undefined and the caller treats it as "no prior run".
+ */
+export function loadWorkflowState(cwd: string, goalId: string): WorkflowState | undefined {
+	const path = workflowPath(cwd, goalId);
+	if (!existsSync(path)) return undefined;
+	try {
+		const raw = readFileSync(path, "utf-8");
+		const out: Partial<WorkflowState> = {};
+		for (const line of raw.split("\n")) {
+			const m = line.match(/^([a-z_]+):\s*(.*)$/);
+			if (!m || !m[1] || m[2] === undefined) continue;
+			const key = m[1];
+			const value = m[2];
+			switch (key) {
+				case "schema_version": out.schema_version = value as "v1"; break;
+				case "goal_id": out.goal_id = value; break;
+				case "workflow_id": out.workflow_id = value; break;
+				case "current_phase": out.current_phase = value as WorkflowState["current_phase"]; break;
+				case "status": out.status = value as WorkflowState["status"]; break;
+				case "iterations_used": out.iterations_used = Number(value); break;
+				case "redesigns_used": out.redesigns_used = Number(value); break;
+				case "clarification_answer": out.clarification_answer = value; break;
+				case "worktree_path": out.worktree_path = value; break;
+				case "branch": out.branch = value; break;
+				default: break;
+			}
+		}
+		return out as WorkflowState;
+	} catch {
+		return undefined;
+	}
 }
 
 // ── Entry point ────────────────────────────────────────────────────────
@@ -368,7 +417,43 @@ export async function executeWorkflowRun(
 	const goal = loadGoalContract(repoCwd, goalId);
 	if (!goal) throw new Error(`Goal contract failed to load: ${goalId}`);
 
-	// ── 2. Derive worktree / branch / workflow_id (all absolute paths) ──
+	// ── 2. NEEDS_CLARIFICATION resume (GC-2026-102 V5) ───────────────
+	// If the previous run paused on NEEDS_CLARIFICATION AND the caller
+	// is providing the user's answer, record the answer and resolve
+	// the Promise with status=success so the orchestrator main agent
+	// can re-dispatch a fresh workflow_run with the clarified goal in
+	// scope. This is the minimal viable resume that doesn't require
+	// pi-tasks changes: the cascade in pi-tasks's subscribeWorkflow
+	// pauses on NEEDS_CLARIFICATION and has no internal "pick up"
+	// pathway, so the resume is a record-and-stall operation. The
+	// orchestrator main agent reads the recorded answer and decides
+	// whether to re-dispatch.
+	//
+	// What the resume does NOT do:
+	//   - It does NOT re-trigger pi-tasks's cascade (pi-tasks has no
+	//     resume pathway; adding one is a separate GC).
+	//   - It does NOT continue past the cleared review; it only
+	//     records the answer and surfaces status=success so the
+	//     orchestrator can act on it.
+	//
+	// Status when resume is NOT applicable (status !== needs_clarification,
+	// or no clarification_answer provided): behavior unchanged.
+	const previousState = loadWorkflowState(repoCwd, goalId);
+	if (
+		previousState?.status === "needs_clarification" &&
+		opts.clarification_answer !== undefined
+	) {
+		// Record the answer in workflow-{id}.yaml. The orchestrator
+		// can read this back to learn the user's response. We keep
+		// status=needs_clarification_answered to distinguish a
+		// answered run from a never-answered one.
+		previousState.clarification_answer = opts.clarification_answer;
+		previousState.status = "needs_clarification_answered";
+		saveWorkflowState(repoCwd, previousState);
+		return buildResumeOutput(goalId, previousState, opts.clarification_answer, maxFixIterations);
+	}
+
+	// ── 3. Derive worktree / branch / workflow_id (all absolute paths) ──
 	// GC-2026-workflow-worktree-namespace: drop the stale `sages/` prefix on
 	// `branch`. The agent creates the actual git branch via `git checkout -b`
 	// from the dispatch brief, and that brief uses `goal_id_lowercase +
@@ -383,11 +468,11 @@ export async function executeWorkflowRun(
 		schema_version: "v1",
 		goal_id: goalId,
 		workflow_id: workflowId,
-		started_at: new Date().toISOString(),
+		started_at: previousState?.started_at ?? new Date().toISOString(),
 		current_phase: "implement",
 		status: "pending",
-		iterations_used: 0,
-		redesigns_used: 0,
+		iterations_used: previousState?.iterations_used ?? 0,
+		redesigns_used: previousState?.redesigns_used ?? 0,
 		worktree_path: worktreePath,
 		branch,
 	};
@@ -869,5 +954,57 @@ function buildClarificationOutput(
 		unresolved_findings: [],
 		paths: { worktree: worktreePath, branch, goal_yaml: `.pi/orchestrator/goal-${goalId}.yaml` },
 		summary: `Goal ${goalId} needs clarification: ${openQuestion ?? "(no question provided)"}`,
+	};
+}
+
+/**
+ * GC-2026-102 V5: build the resume output when a paused run's
+ * clarification_answer is provided. status=success (the user's
+ * answer was recorded; the orchestrator main agent can now act).
+ *
+ * The "tasks" block is intentionally minimal: we don't have real
+ * task ids from the paused run's phase-complete events (pi-tasks's
+ * cascade paused before they fired for the next phase). The orchestrator
+ * can read the recorded answer from workflow-{goal_id}.yaml.
+ */
+function buildResumeOutput(
+	goalId: string,
+	state: WorkflowState,
+	clarificationAnswer: string,
+	_maxFixIterations: number,
+): WorkflowRunOutput {
+	return {
+		status: "success",
+		goal_id: goalId,
+		iterations_used: state.iterations_used,
+		redesigns_used: state.redesigns_used,
+		// GC-2026-needs-clarification-resume: echo the answer back so the
+		// orchestrator main agent can confirm the recording succeeded.
+		clarification_answer_recorded: clarificationAnswer,
+		tasks: {
+			implement: {
+				id: "t-implement",
+				agent_id: "t-implement",
+				status: "completed",
+			},
+			review: {
+				id: "t-review-paused",
+				agent_id: "t-review-paused",
+				status: "completed",
+				verdict: "NEEDS_CLARIFICATION",
+				findings_count: 0,
+				iterations: state.iterations_used,
+				duration_ms: 0,
+			},
+		},
+		pi_tasks: { implement: "", review: "", fix: "", merge: "" },
+		unresolved_findings: [],
+		paths: {
+			worktree: state.worktree_path,
+			branch: state.branch,
+			goal_yaml: `.pi/orchestrator/goal-${goalId}.yaml`,
+		},
+		summary:
+			`Goal ${goalId} resume: clarification recorded. Re-dispatch workflow_run with a clarified goal in scope, or flip the paused Review's verdict to CLEAN in workflow-${goalId}.yaml and re-run.`,
 	};
 }
