@@ -133,6 +133,9 @@ Every Fix task reads its `blockedBy` Review task's `metadata.verdict` via `TaskG
 
 Every Review_2+ reads the prior Fix task's commit to see what changed before re-reviewing. The empty-commit CLEAN path is gone — Fix dispatches happen on-demand via `pi-tasks`'s cascade, not via pre-allocated static graph slots.
 
+- `verdict === "NEEDS_REDESIGN"` → the orchestrator dispatches a NEW Implement task wired to Review_1 (chain reset). Capped by `max_redesigns` (default 1).
+- `verdict === "NEEDS_CLARIFICATION"` → the orchestrator PAUSES the workflow. The Reviewer's `open_question` is surfaced to the user via the LLM-facing `WorkflowRunOutput.open_question`. The cascade stops; the user re-dispatches `workflow_run` with `options.clarification_answer` after answering.
+
 ## Subagent dispatch contract
 
 | Task shape | Subagent | `isolation` |

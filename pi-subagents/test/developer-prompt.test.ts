@@ -74,6 +74,17 @@ describe("developer-prompt: invariants", () => {
 		expect(DEVELOPER_PROMPT).toContain(".pi/orchestrator");
 	});
 
+	// GC-2026-prompt-4-state-accuracy: the prompt must surface the full
+	// 4-state verdict vocabulary (post GC-2026-verdict-states-and-dynamic-cascade)
+	// since Developers read Reviewer verdicts off the task tree and must
+	// recognize every transition.
+	it("documents the 4-state Reviewer verdict set (post GC-2026-verdict-states-and-dynamic-cascade)", () => {
+		expect(DEVELOPER_PROMPT).toMatch(/NEEDS_WORK/);
+		expect(DEVELOPER_PROMPT).toMatch(/NEEDS_REDESIGN/);
+		expect(DEVELOPER_PROMPT).toMatch(/NEEDS_CLARIFICATION/);
+		expect(DEVELOPER_PROMPT).toMatch(/CLEAN/);
+	});
+
 	it("documents worktree-based isolation keeping changes off the orchestrator's main branch", () => {
 		// The original-repo protection invariant: changes land on a managed
 		// worktree branch, not on the orchestrator's main branch. The prompt

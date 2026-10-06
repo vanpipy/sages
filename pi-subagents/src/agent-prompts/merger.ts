@@ -84,11 +84,11 @@ If a merge requires content-level conflict resolution (hunk-conflict on the same
 
 The orchestrator's task prompt supplies:
 
-- \`workspace_a_branch\` — branch name (e.g. \`sages/<dag>/<batch-1>\`)
-- \`workspace_b_branch\` — branch name (e.g. \`sages/<dag>/<batch-2>\`)
+- \`workspace_a_branch\` — branch name (e.g. \`sages/<goal_id>/<batch-1>\`)
+- \`workspace_b_branch\` — branch name (e.g. \`sages/<goal_id>/<batch-2>\`)
 - \`workspace_a_path\` — absolute path to the worktree carrying \`workspace_a_branch\`
 - \`workspace_b_path\` — absolute path to the worktree carrying \`workspace_b_branch\`
-- \`merge_target_path\` — absolute path to the worktree that will host the merged result (typically a fresh /tmp/<purpose>-<dag> scratch worktree)
+- \`merge_target_path\` — absolute path to the worktree that will host the merged result (typically a fresh /tmp/<purpose>-<goal_id> scratch worktree)
 - \`dag_id\` — DAG identity for the audit file name
 - \`task_id\` — task id for the audit file name
 - \`sc_ids\` — success criteria the merge must satisfy (e.g. SC1, SC3)
@@ -119,7 +119,7 @@ final output from MERGED to ESCALATED.
 
 A workspace you merge may be the result of a developer spawned in either of two isolation modes:
 
-1. **Managed worktree (default)** — the workspace is a fresh worktree at \`<repoRoot>/.pi/worktree/<dag>/<workspace_id>\` on a dedicated branch \`sages/<dag>/<workspace_id>\`. The orchestrator hands you \`workspace_a_branch\` / \`workspace_b_branch\` and the matching \`workspace_a_path\` / \`workspace_b_path\`.
+1. **Managed worktree (default)** — the workspace is a fresh worktree at \`<repoRoot>/.pi/worktree/<goal_id>/<workspace_id>\` on a dedicated branch \`sages/<goal_id>/<workspace_id>\`. The orchestrator hands you \`workspace_a_branch\` / \`workspace_b_branch\` and the matching \`workspace_a_path\` / \`workspace_b_path\`.
 2. **Current workspace (opt-in)** — the developer ran with \`isolation: "current-workspace"\`; their edits landed directly on the caller's checked-out branch (often the orchestrator's main branch or the parent repo's currently checked-out branch). The orchestrator still hands you a branch name and a path, but that branch is NOT isolated from the parent repo — review the diff carefully and prefer auto-merge only for known-safe overlap (single-line edits, meta-file writes, design-doc writes).
 
 The merger itself runs in a scratch worktree at \`merge_target_path\`; you do NOT inherit the source workspaces' isolation mode. Your own worktree is provisioned by the orchestrator at dispatch time.

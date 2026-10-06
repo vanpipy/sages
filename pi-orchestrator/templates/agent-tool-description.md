@@ -63,14 +63,14 @@ If the target is already known, use a direct tool — `read` for a known path, `
 
 ### Foreground vs background — sages override
 
-The upstream default frames background as "parallelism". **Sages inverts this for `Developer` and `Auditor`** — they must ALWAYS be background, even when you would otherwise wait synchronously, because the goal is to free the parent context (not just to parallelize):
+The upstream default frames background as "parallelism". **Sages inverts this for `Developer` and `Reviewer`** — they must ALWAYS be background, even when you would otherwise wait synchronously, because the goal is to free the parent context (not just to parallelize):
 
 | Subagent type | `run_in_background` | Why |
 |---|---|---|
 | `Explore` | `false` (foreground) | Short, read-only, result feeds next stage |
 | `PlanCompiler` | `false` (foreground) | Planning Brief compilation is short and reviewed by the main agent |
 | `Developer`          | **`true` (background)** | TDD RED→GREEN→REFACTOR is 1–10 min, can be steered |
-| `Reviewer` | **`true` (background)** | 5-dim review (correctness / completeness / scope / anti-goal / documentation), parses `verdict: CLEAN | NEEDS_WORK` from the final YAML fence, 30s–3 min, can be steered |
+| `Reviewer` | **`true` (background)** | 5-dim review (correctness / completeness / scope / anti-goal / documentation), parses `verdict: CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION` from the final YAML fence, 30s–3 min, can be steered |
 
 Use `get_subagent_result(agent_id)` to collect when needed, or `steer_subagent(agent_id, "...")` to redirect mid-run. Don't wait synchronously for `Developer`/`Auditor` even if "the next step depends on it" — the notification arrives when the agent completes; the parent context stays free in the meantime. See `pi-orchestrator/skills/orchestrator/SKILL.md` for the full rationale and dispatch examples.
 
@@ -92,7 +92,7 @@ Mark each todo's `content` with `[serial]` or `[parallel]` based on dependencies
 - Use model to specify a different model (as "provider/modelId", or any substring of a registered id). Omit to inherit the parent session's model.
 - Use thinking to control extended thinking level.
 - Use inherit_context if the agent needs the parent conversation history.
-- For Sages code dispatch, pass `isolation: { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }`. The pi-subagents host provisions `<repo>/.pi/worktree/<dag>/<worktree>` from `origin/main` on `sages/<dag>/<worktree>` before child startup and leases the slot; concurrent reuse is rejected. The main agent coordinates only and MUST NOT run Git worktree provisioning. Result details include path, branch, baseSha, baseRef, head, dirty, and leaseToken. The host never auto-merges or appends a merge command. Reuse and release are explicit; after validation and any requested integration, call the host `AgentManager.releaseManagedWorktree(...)`, with `deleteBranch: true` only when branch deletion is intended. Managed Sages dispatch never falls back to `/tmp`. Subagents must not write `.pi/orchestrator/`.{{scheduleGuideline}}
+- For Sages code dispatch, pass `isolation: { goal_id, task_id, worktree_id?, mode: "create" | "reuse" }`. The pi-subagents host provisions `<repo>/.pi/worktree/<goal_id>/<worktree>` from `origin/main` on `sages/<goal_id>/<worktree>` before child startup and leases the slot; concurrent reuse is rejected. (Post GC-2026-path-B-field-renames the field is `goal_id`; the historical alias `dag_id` is also accepted.) The main agent coordinates only and MUST NOT run Git worktree provisioning. Result details include path, branch, baseSha, baseRef, head, dirty, and leaseToken. The host never auto-merges or appends a merge command. Reuse and release are explicit; after validation and any requested integration, call the host `AgentManager.releaseManagedWorktree(...)`, with `deleteBranch: true` only when branch deletion is intended. Managed Sages dispatch never falls back to `/tmp`. Subagents must not write `.pi/orchestrator/`.{{scheduleGuideline}}
 
 ## Writing the prompt
 

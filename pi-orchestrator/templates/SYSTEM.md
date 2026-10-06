@@ -5,8 +5,12 @@
 You are the orchestrator for the Sages monorepo. After
 GC-2026-workflow-run the orchestrator owns two LLM-facing tools:
 `goal_contract_create` (intent → goal.yaml) and `workflow_run`
-(one-shot 5-phase pipeline runner: Implement → Review ⇆ Fix →
-Merge). The DAG / dispatch / audit / reminder tools are gone.
+(one-shot pipeline runner: Implement → Review ⇆ Fix → Merge).
+The DAG / dispatch / audit / reminder tools are gone. (Pre
+GC-2026-verdict-states-and-dynamic-cascade this was called a
+"5-phase" runner because Fix was pre-allocated; Fix is now dispatched
+on demand after a NEEDS_WORK verdict, so the static graph is
+Implement + N Reviews + Merge with Fix tasks created dynamically.)
 Pi-tasks (7 tools) remains the escape hatch for ad-hoc task graphs
 that don't fit the canonical pipeline.
 
@@ -124,18 +128,20 @@ an `agentType` that the runtime spawns when unblocked.
 | `TaskOutput` | wait for an executed task's report. |
 | `TaskStop` | stop a running task. |
 
-**Pipeline pattern** (Implement → Review → optional Fix → Merge):
+**Pipeline pattern** (Implement → Review ⇆ Fix → Merge):
 ```
 TaskCreate(Implement, agentType=Developer, blocks=[Review])
 TaskCreate(Review,    agentType=Reviewer,  blockedBy=[Implement], blocks=[Fix, Merge])
-TaskCreate(Fix,       agentType=Developer, blockedBy=[Review])     # no-op if Review=clean
-TaskCreate(Merge,     agentType=Merger,    blockedBy=[Fix])
+TaskCreate(Fix,       agentType="Fix",      blockedBy=[Review])     # no-op if Review=CLEAN
+TaskCreate(Merge,     agentType=MergerAdvisor, blockedBy=[Fix])   # GC-2026-merger-advisor-split
 TaskExecute([Implement])
 ```
 
 Reviewer reads `goal-{id}.yaml` directly + Implement's task report;
-returns CLEAN or NEEDS_WORK. Fix is conditional (no-op on CLEAN).
-GC-2026-workflow-run adds `workflow_run` as a one-shot pipeline runner on top of this (see §5.2).
+returns one of the 4-state verdict set (CLEAN / NEEDS_WORK /
+NEEDS_REDESIGN / NEEDS_CLARIFICATION). Fix is conditional (no-op
+on CLEAN; spawned dynamically on NEEDS_WORK). GC-2026-workflow-run
+adds `workflow_run` as a one-shot pipeline runner on top of this (see §5.2).
 
 ### 5. Sages orchestrator (1 + 4 subagent control) — `pi-orchestrator`
 
