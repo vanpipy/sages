@@ -4,30 +4,18 @@
  *
  * The tool wraps executeWorkflowRun from ./workflow-run.js. Unlike the
  * other Sages tools (which use the narrow ExecuteContext wrapper), this
- * tool needs access to ctx.executeTool so it can drive pi-tasks'
- * TaskCreate / TaskUpdate from inside the workflow_run state machine.
+ * tool uses the full ExtensionToolContext signature so it can pass
+ * through the host's `onUpdate` for live progress streaming.
  *
- * We bypass wrapRegisteredTool here and define execute() directly with
- * the full ExtensionToolContext signature.
+ * GC-2026-100 R3: dropped the dead `executeTool` wiring that was
+ * declared on `RunContext` but never read inside executeWorkflowRun.
+ * After path B (GC-2026-path-B-swap) workflow_run drives pi-tasks
+ * purely via the `workflow:start` / `workflow:phase-complete` event
+ * contract; the `ctx.executeTool` round-trip was a path-A leftover.
  */
 
 import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { executeWorkflowRun, WorkflowRunParams, type WorkflowRunInput } from "./workflow-run.js";
-
-/**
- * Unwrap an `AgentToolCallOutcome` (`{ toolCall, result, isError }`) into the
- * payload a programmatic caller can read directly. Programmatic callers in
- * workflow_run (piTasksCreate / piTasksUpdate) need the structured `details`,
- * not the AgentToolCallOutcome envelope, so the LLM-facing tool extracts
- * `result.details` here. Falls back to the whole outcome when the envelope
- * shape is unexpected (defensive — the real pi runtime always provides it).
- *
- * Exported so the extraction logic has a unit-testable surface.
- */
-export function unwrapExecuteToolOutcome(outcome: unknown): unknown {
-	const result = (outcome as { result?: { details?: unknown } } | undefined)?.result;
-	return result?.details ?? outcome;
-}
 
 export function registerWorkflowRunTool(pi: ExtensionAPI): void {
 	// Same `pi: any` workaround as goal_contract_create: pi-coding-agent's
@@ -73,8 +61,6 @@ export function registerWorkflowRunTool(pi: ExtensionAPI): void {
 				pi,
 				ctx,
 				repoCwd: ctx.cwd,
-				executeTool: async (name, args) =>
-					unwrapExecuteToolOutcome(await ctx.executeTool(name, args)),
 				// GC-2026-workflow-chat-stream: forward the host's onUpdate so
 				// workflow_run can stream partial progress to the chat. The
 				// typing is loose here (pi-coding-agent exposes it as

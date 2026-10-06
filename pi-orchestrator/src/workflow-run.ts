@@ -288,7 +288,6 @@ interface RunContext {
 	pi: { events: { emit: (channel: string, data: unknown) => void; on: (channel: string, handler: (data: unknown) => void | Promise<void>) => () => void } };
 	ctx: unknown;
 	repoCwd: string;
-	executeTool?: (name: string, args: unknown) => Promise<unknown>;
 	/**
 	 * GC-2026-chat-stream-render: streaming progress callback. Aligned
 	 * with pi-coding-agent's `AgentToolUpdateCallback<TDetails>` shape —
