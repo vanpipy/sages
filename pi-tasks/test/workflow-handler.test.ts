@@ -475,19 +475,38 @@ describe("subscribeWorkflow — advisor pair dispatch (GC-2026-advisor-pairs)", 
     expect(advisor?.subject).toContain("Implement");
   });
 
-  test("completed task WITHOUT metadata.advisorAgentType does NOT spawn an advisor", async () => {
+  // GC-2026-advisor-spec-integration: the pre-existing "without
+  // advisorAgentType" negative test is no longer meaningful — the spec
+  // builder now sets advisorAgentType on all 3 phase tasks (Implement /
+  // Review / Fix), so there is no "natural" path where the field is
+  // absent. The negative case is now tested at the dispatch level: the
+  // dispatchAdvisorForTask helper itself skips when metadata.advisorAgentType
+  // is missing — covered by branch logic, not by an integration test.
+
+  // GC-2026-advisor-spec-integration: verify the spec builder's
+  // advisorAgentType field actually triggers the dispatch end-to-end
+  // (no manual metadata injection). The Implement spec carries
+  // advisorAgentType: "DeveloperAdvisor" from buildStaticWorkflowGraph
+  // (this GC); when the Implement task completes, dispatchAdvisorForTask
+  // fires automatically.
+  test("spec builder's advisorAgentType triggers dispatch end-to-end", async () => {
     const { events, store } = setup();
     await events.emit("workflow:start", startPayload());
     await flush();
 
     const implement = store.list().find(t => t.metadata.phase === "implement")!;
+    // Confirm the spec builder set the field (no manual injection).
+    expect(implement.metadata.advisorAgentType).toBe("DeveloperAdvisor");
+
     await completeTask(events, implement);
 
-    // No advisor task for the Implement task.
     const advisor = store.list().find(
       (t) => t.metadata?.advisorOf === implement.id,
     );
-    expect(advisor).toBeUndefined();
+    expect(advisor).toBeDefined();
+    expect(advisor?.metadata?.agentType).toBe("DeveloperAdvisor");
+    expect(advisor?.metadata?.phase).toBe("implement");
+    expect(advisor?.blockedBy).toEqual([implement.id]);
   });
 });
 
@@ -509,8 +528,12 @@ describe("subscribeWorkflow — NEEDS_REDESIGN cascade (dynamic new Implement)",
     await flush();
 
     // The new Implement task has isRedesign=true and redesignNumber=1.
+    // GC-2026-advisor-spec-integration: the original Implement also has
+    // advisorAgentType (set by the spec builder), so when it completes
+    // dispatchAdvisorForTask creates a paired DeveloperAdvisor Implement
+    // sibling. Total: original + advisor + redesign = 3 Implement tasks.
     const allImplements = store.list().filter(t => t.metadata.phase === "implement");
-    expect(allImplements).toHaveLength(2);
+    expect(allImplements).toHaveLength(3);
     const newImpl = allImplements.find(t => t.metadata.isRedesign === true);
     expect(newImpl).toBeDefined();
     expect(newImpl?.metadata.iteration).toBe(1);

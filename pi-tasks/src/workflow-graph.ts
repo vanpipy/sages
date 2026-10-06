@@ -304,7 +304,10 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
     agentType: "Developer",
     blockedBy: [],
     blocks: [placeholderReview(1)],
-    metadata: { ...meta, phase: "implement", agentType: "Developer" },
+    // GC-2026-advisor-spec-integration: tag the Implement spec with
+    // advisorAgentType so workflow-handler's dispatchAdvisorForTask hook
+    // creates a paired DeveloperAdvisor sibling after the primary finishes.
+    metadata: { ...meta, phase: "implement", agentType: "Developer", advisorAgentType: "DeveloperAdvisor" },
   };
 
   // Collect every non-Merge task id so Merge can wait for all of them.
@@ -331,7 +334,8 @@ export function buildStaticWorkflowGraph(input: WorkflowGraphInput): TaskSpec[] 
       agentType: "Reviewer",
       blockedBy: reviewBlockedBy,
       blocks: reviewBlocks,
-      metadata: { ...meta, phase: "review", iteration: i, agentType: "Reviewer" },
+      // GC-2026-advisor-spec-integration: Review gets a paired ReviewAdvisor.
+      metadata: { ...meta, phase: "review", iteration: i, agentType: "Reviewer", advisorAgentType: "ReviewerAdvisor" },
     };
     tasks.push(review);
     mergeBlockedBy.push(reviewId);
@@ -401,6 +405,8 @@ export function buildFixTaskSpec(args: {
       phase: "fix",
       iteration,
       agentType: "Fix",
+      // GC-2026-advisor-spec-integration: Fix gets a paired FixAdvisor.
+      advisorAgentType: "FixAdvisor",
     },
   };
 }
