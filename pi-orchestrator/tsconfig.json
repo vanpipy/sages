@@ -14,9 +14,11 @@
     "paths": {
       "@/*": ["./src/*"],
       "@sages/pi-subagents": ["../pi-subagents/src/index.ts"],
-      "@sages/pi-subagents/*": ["../pi-subagents/src/*"]
+      "@sages/pi-subagents/*": ["../pi-subagents/src/*"],
+      "@sages/pi-tasks": ["../pi-tasks/src/index.ts"],
+      "@sages/pi-tasks/*": ["../pi-tasks/src/*"]
     }
   },
-  "include": ["src/**/*", "test/tools/**/*", "test/bash-guard.test.ts", "test/file-service.test.ts"],
-  "exclude": ["node_modules", "dist", "../pi-subagents", "../pi", "../pi-codebase-memory", "../pi-evaluator", "test/rounds/**/*", "test/agents/**/*", "test/fixtures/**/*"]
+  "include": ["src/**/*", "test/tools/**/*", "test/bash-guard.test.ts", "test/file-service.test.ts", "test/workflow-run.test.ts"],
+  "exclude": ["node_modules", "dist", "../pi-subagents", "../pi", "../pi-tasks", "../pi-codebase-memory", "../pi-evaluator", "test/rounds/**/*", "test/agents/**/*", "test/fixtures/**/*"]
 }
