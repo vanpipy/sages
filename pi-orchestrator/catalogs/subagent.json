@@ -1,12 +1,17 @@
 {
-  "_source_hash": "2552f2cab97e1726b1d264c9b050e68d0ce5d635306e4658b2a1d024b5a46ed0",
-  "_generated_at": "2026-10-05T13:06:53.029Z",
+  "_source_hash": "81451ab00d96bb43345f5a729a212a50538b59c7f669311d0d562b0301669a7f",
+  "_generated_at": "2026-10-06T02:53:08.199Z",
   "_source_files": [
     "../pi-subagents/src/default-agents.ts"
   ],
   "entries": [
     {
       "id": "Developer",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
+      "id": "DeveloperAdvisor",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": true
     },
@@ -21,7 +26,17 @@
       "run_in_background_default": true
     },
     {
+      "id": "FixAdvisor",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
       "id": "Merger",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
+      "id": "MergerAdvisor",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": true
     },
@@ -37,6 +52,11 @@
     },
     {
       "id": "Reviewer",
+      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
+      "run_in_background_default": true
+    },
+    {
+      "id": "ReviewerAdvisor",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": true
     }
