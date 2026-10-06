@@ -287,12 +287,19 @@ export function verifyCookbookPostmortemConsistency(
 
 	const raw = readFileSync(gcIndexPath, "utf-8");
 	const indexIds = new Set<string>();
-	for (const m of raw.matchAll(/GC-\d{4}-\d{3,}/g)) indexIds.add(m[0]);
+	// GC-2026-institutional-coverage follow-up: broaden the id regex from
+	// `GC-\d{4}-\d{3,}` to `GC-\d{4}-[\w-]+` so textual-suffix GCs
+	// (GC-2026-chat-stream-render, GC-2026-precommit-fixes,
+	// GC-2026-subagent-time-only-limits, etc.) match too. The original
+	// regex only caught numeric-suffix ids; textual-suffix ids like
+	// `GC-2026-orchestrator-simplify` or `GC-2026-pi-tasks-fork` slipped
+	// through both `indexIds` and `orphanPostmortems` collection.
+	for (const m of raw.matchAll(/GC-\d{4}-[\w-]+/g)) indexIds.add(m[0]);
 
 	// 1. Postmortem ↔ index alignment.
 	const orphanPostmortems: string[] = [];
 	for (const file of readdirSync(postmortemDir)) {
-		const m = file.match(/^(GC-\d{4}-\d{3,})\.md$/);
+		const m = file.match(/^(GC-\d{4}-[\w-]+)\.md$/);
 		if (!m || !m[1]) continue;
 		if (!indexIds.has(m[1])) orphanPostmortems.push(m[1]);
 	}

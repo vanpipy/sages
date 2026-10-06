@@ -73,7 +73,12 @@ export function carveOutIds(gcIndexPath: string = GC_INDEX): Set<string> {
   const raw = readFileSync(gcIndexPath, "utf-8");
   const m = raw.match(/## Open \/ no postmortem\s*\n([\s\S]*?)(?=\n## |\n# |$)/);
   if (!m) return ids;
-  for (const hit of m[1].matchAll(/GC-\d{4}-\d{3,}/g)) {
+  // GC-2026-institutional-coverage follow-up: broaden the id regex from
+  // `GC-\d{4}-\d{3,}` to `GC-\d{4}-[\w-]+` so textual-suffix GCs (e.g.
+  // GC-2026-chat-stream-render, GC-2026-precommit-fixes) match too.
+  // Without this, those GCs are silently uncovered by the carve-out
+  // path — verify-gcdb exits 1 even when the GC has a postmortem.
+  for (const hit of m[1].matchAll(/GC-\d{4}-[\w-]+/g)) {
     ids.add(hit[0]);
   }
   return ids;

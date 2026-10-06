@@ -27,10 +27,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { executeWorkflowRun, type WorkflowRunInput, type WorkflowRunOutput } from "../src/workflow-run.js";
+import { executeWorkflowRun, type WorkflowRunInput, type WorkflowRunOutput } from "../../../src/workflow-run.js";
 // GC-2026-path-B-swap: WorkflowStartPayload is the contract that pi-tasks
 // subscribes to. We import the type so the test pins the shape end-to-end.
-import type { WorkflowStartPayload } from "../../pi-tasks/src/workflow-handler.js";
+import type { WorkflowStartPayload } from "@sages/pi-tasks/workflow-handler";
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -85,9 +85,19 @@ interface Harness {
 	emitted: CapturedChannel[];
 	subscribed: CapturedChannel[];
 	unsubscribed: number;
+	// GC-2026-099 R4 (test moved into typecheck scope): `run` returns
+	// the result Promise plus the live event-bus maps *synchronously*,
+	// so the test can drive handlers mid-flight. The prior signature
+	// claimed `Promise<{...}>` (matching the `result` field's Promise
+	// type) — a real type mismatch that the `as Harness` cast hid.
 	run: (
 		input: WorkflowRunInput,
-	) => Promise<{ result: WorkflowRunOutput; emitted: CapturedChannel[]; handlers: Map<string, (data: unknown) => void | Promise<void>> }>;
+		onUpdate?: (u: unknown) => void,
+	) => {
+		result: Promise<WorkflowRunOutput>;
+		emitted: CapturedChannel[];
+		handlers: Map<string, (data: unknown) => void | Promise<void>>;
+	};
 }
 
 function makeHarness(): Harness {
@@ -137,7 +147,7 @@ function makeHarness(): Harness {
 		return { result, emitted, handlers };
 	};
 
-	return { repoCwd, goalPath, pi, emitted, subscribed, get unsubscribed() { return unsubscribed; }, run } as Harness;
+	return { repoCwd, goalPath, pi, emitted, subscribed, get unsubscribed() { return unsubscribed; }, run };
 }
 
 afterEach(() => {
