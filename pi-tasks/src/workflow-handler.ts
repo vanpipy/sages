@@ -474,6 +474,59 @@ export function subscribeWorkflow(
 		return lines.join("\n");
 	}
 
+	/**
+	 * GC-2026-advisor-pairs: dispatch the paired advisor sibling task after
+	 * a primary task completes. The advisor runs as a separate task in
+	 * the same phase / iteration as the primary, blockedBy the primary.
+	 *
+	 * Activation: only when the completed task has
+	 * `metadata.advisorAgentType` set. Workflow-graph.ts is responsible for
+	 * setting that field on phase tasks (Implement/Review/Fix). The
+	 * advisor type comes from the same default-agents.ts registry.
+	 *
+	 * The advisor task is a regular Task (not a side-channel) so the
+	 * existing cascade scan + phase widget + subagent lifecycle all
+	 * handle it uniformly. The advisor's only difference from a
+	 * normal task is `metadata.advisorOf: <primary_id>` (for the phase
+	 * widget to render it as a paired row).
+	 */
+	function dispatchAdvisorForTask(
+		completedTask: Task,
+		store: TaskStore,
+	): void {
+		const advisorAgentType = completedTask.metadata?.advisorAgentType;
+		if (typeof advisorAgentType !== "string" || !advisorAgentType) return;
+
+		const phase = String(completedTask.metadata?.phase ?? "");
+		const iteration = Number(completedTask.metadata?.iteration ?? 0);
+		if (!phase) return; // can't dispatch without a phase anchor
+
+		const goalId = String(completedTask.metadata?.workflow_run_goal_id ?? "");
+		const subject = `Advisor: ${completedTask.subject}`;
+		const description = [
+			`You are the **${advisorAgentType}** paired with the completed primary task #${completedTask.id} ("${completedTask.subject}").`,
+			``,
+			`Read the primary's report + evidence trail + commit log, then write your advisor verdict file as your single output target.`,
+			`Do NOT re-implement, do NOT re-run tests, do NOT spawn another agent. Read-only on the worktree.`,
+			``,
+			`See \`pi-subagents/src/agent-prompts/${advisorAgentType.toLowerCase().replace(/advisor$/, "-advisor")}.ts\` for your full contract.`,
+		].join("\n");
+
+		const advisorTask = store.create(subject, description, subject, {
+			...completedTask.metadata,
+			phase,
+			iteration,
+			agentType: advisorAgentType,
+			advisorOf: completedTask.id,
+			workflow_id: activeWorkflowId ?? "",
+			workflow_run_goal_id: goalId,
+		});
+		// Wire blockedBy: advisor must wait for primary.
+		store.update(advisorTask.id, { addBlockedBy: [completedTask.id] });
+		// The next cascade scan tick picks this up automatically (it iterates
+		// over pending tasks whose blockedBy is fully completed).
+	}
+
 	// GC-2026-verdict-states-and-dynamic-cascade: closure capture. The
 	// dispatchFixForReview / dispatchRedesignForReview helpers above need
 	// access to the start-payload's worktree_path, captured here from the
@@ -512,6 +565,14 @@ export function subscribeWorkflow(
 		// so the planning layer can track each phase. GC-2026-path-B-swap extended
 		// path B's event contract — only reviews have a `verdict` field; non-review
 		// phases emit `phase: "implement" | "fix" | "merge"` with no verdict.
+		// GC-2026-advisor-pairs: dispatch the paired advisor sibling task
+		// (if task.metadata.advisorAgentType is set). Runs for ALL phase
+		// tasks (Implement / Review / Fix) — not just review. Read-only on
+		// the worktree, doesn't re-run tests, writes implement-/review-/
+		// fix-advisor-{task_id}.md with VALIDATED/CONTESTED or
+		// VERIFIED/INCOMPLETE verdict.
+		dispatchAdvisorForTask(task, store);
+
 		if (isReview && resultStr !== undefined) {
 			// GC-2026-prompt-parser-contract-cleanup: pass the durable
 			// verdict-{task_id}.md path so the parser falls back to the

@@ -10,6 +10,9 @@ import { MERGER_ADVISOR_PROMPT } from "./agent-prompts/merger-advisor.js";
 import { DEVELOPER_FIX_PROMPT } from "./agent-prompts/_fix.js";
 import { EXPLORE_PROMPT } from "./agent-prompts/explore.js";
 import { MERGER_PROMPT } from "./agent-prompts/merger.js";
+import { DEVELOPER_ADVISOR_PROMPT } from "./agent-prompts/developer-advisor.js";
+import { REVIEWER_ADVISOR_PROMPT } from "./agent-prompts/reviewer-advisor.js";
+import { FIX_ADVISOR_PROMPT } from "./agent-prompts/fix-advisor.js";
 import { PLAN_PROMPT } from "./agent-prompts/plan.js";
 import type { AgentConfig } from "./types.js";
 
@@ -240,6 +243,75 @@ const MERGER_ADVISOR_AGENT: AgentConfig = {
 	inheritContext: false,
 };
 
+// GC-2026-advisor-pairs: 3 new advisor agents paired with the canonical
+// Implement / Audit / Verify phases. Each advisor is read-only on the
+// worktree (no edit / write), doesn't redo the primary's work, and
+// writes a single advisor-{kind}-{task_id}.md file with a binary
+// VALIDATED / CONTESTED (or VERIFIED / INCOMPLETE) verdict.
+const DEVELOPER_ADVISOR_AGENT: AgentConfig = {
+	name: "DeveloperAdvisor",
+	displayName: "Developer (Advisor)",
+	description:
+		"Implement-phase audit pair for the canonical Developer. " +
+		"Reads the primary Developer's task-{task_id}-report.md + commit log + " +
+		"test output and writes implement-advisor-{task_id}.md with a " +
+		"VALIDATED or CONTESTED verdict. Read-only on the worktree; never " +
+		"re-implements, never runs TDD on behalf of the primary.",
+	builtinToolNames: READ_ONLY_TOOLS,
+	extensions: ["aft-pi", "pi-mcp-adapter"],
+	excludeExtensions: ["pi-subagents"],
+	skills: false,
+	systemPrompt: DEVELOPER_ADVISOR_PROMPT,
+	promptMode: "replace",
+	isDefault: true,
+	runInBackground: true,
+	maxConcurrent: 1, // single advisor per task — output file is per-task
+	inheritContext: false,
+};
+
+const REVIEWER_ADVISOR_AGENT: AgentConfig = {
+	name: "ReviewerAdvisor",
+	displayName: "Reviewer (Advisor)",
+	description:
+		"Audit-phase peer-review pair for the canonical Reviewer. " +
+		"Reads the primary Reviewer's verdict file (.pi/orchestrator/verdict-{task_id}.md) " +
+		"+ evidence trail (last-review-{goal_id}.md) and writes " +
+		"review-advisor-{task_id}.md with a VALIDATED or CONTESTED verdict on the " +
+		"primary's 4-state verdict + scope_check + anti_goal_check. Read-only; " +
+		"never re-runs typecheck / lint / tests, never re-reads source.",
+	builtinToolNames: READ_ONLY_TOOLS,
+	extensions: ["aft-pi", "pi-mcp-adapter"],
+	excludeExtensions: ["pi-subagents"],
+	skills: false,
+	systemPrompt: REVIEWER_ADVISOR_PROMPT,
+	promptMode: "replace",
+	isDefault: true,
+	runInBackground: true,
+	maxConcurrent: 1,
+	inheritContext: false,
+};
+
+const FIX_ADVISOR_AGENT: AgentConfig = {
+	name: "FixAdvisor",
+	displayName: "Fix (Advisor)",
+	description:
+		"Verify-phase audit pair for the canonical Fix. Reads the primary " +
+		"Fix's commit chain + the originating Reviewer's findings[] and writes " +
+		"fix-advisor-{task_id}.md with a VERIFIED or INCOMPLETE verdict — " +
+		"every finding has a matching fix(...) commit or valid deferral? " +
+		"Read-only; never re-runs tests, never applies more changes.",
+	builtinToolNames: READ_ONLY_TOOLS,
+	extensions: ["aft-pi", "pi-mcp-adapter"],
+	excludeExtensions: ["pi-subagents"],
+	skills: false,
+	systemPrompt: FIX_ADVISOR_PROMPT,
+	promptMode: "replace",
+	isDefault: true,
+	runInBackground: true,
+	maxConcurrent: 1,
+	inheritContext: false,
+};
+
 /**
  * GC-2026-093: Plan was renamed to PlanCompiler. The Plan alias is
  * preserved for backward compat (legacy DAG YAML files / scripts that
@@ -352,5 +424,8 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	["Reviewer", REVIEWER_AGENT],
 	["Merger", MERGER_AGENT],
 	["MergerAdvisor", MERGER_ADVISOR_AGENT],
+	["DeveloperAdvisor", DEVELOPER_ADVISOR_AGENT],
+	["ReviewerAdvisor", REVIEWER_ADVISOR_AGENT],
+	["FixAdvisor", FIX_ADVISOR_AGENT],
 	["Fix", FIX_AGENT],
 ]);

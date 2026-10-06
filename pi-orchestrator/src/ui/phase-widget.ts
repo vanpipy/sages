@@ -308,7 +308,12 @@ export class PhaseWidget {
 
     for (const g of [...staticGroups, ...dynamicGroups]) {
       lines.push(this.renderGroupHeader(g));
-      for (const t of g.tasks) {
+      // GC-2026-advisor-pairs: when a phase group contains both a primary
+      // task and an advisor task, render the advisor as a paired sub-row
+      // (indented one more level + "advisor:" prefix) so the user can see
+      // the pair structure at a glance.
+      const sorted = this.sortPrimaryAdvisor(g.tasks);
+      for (const t of sorted) {
         lines.push(this.renderTaskRow(t));
       }
     }
@@ -337,6 +342,27 @@ export class PhaseWidget {
           ? GLYPHS.inProgress
           : GLYPHS.pending;
     const owner = t.owner ? ` (agent ${t.owner.slice(0, 8)})` : "";
-    return `    ${glyph} ${t.subject}${owner}`;
+    // GC-2026-advisor-pairs: advisor tasks get an indent + "advisor" prefix
+    // so the user can see they're the second half of a pair.
+    const isAdvisor = typeof t.metadata?.advisorOf === "string";
+    const prefix = isAdvisor ? "      " : "    ";
+    const subject = isAdvisor ? t.subject.replace(/^Advisor:\s*/, "advisor: ") : t.subject;
+    return `${prefix}${glyph} ${subject}${owner}`;
+  }
+
+  /**
+   * GC-2026-advisor-pairs: order tasks within a phase group so the
+   * primary task appears before its advisor. The pair is rendered
+   * contiguously (primary immediately above advisor) so the user
+   * sees the pair visually grouped.
+   */
+  private sortPrimaryAdvisor(tasks: TaskSummary[]): TaskSummary[] {
+    return [...tasks].sort((a, b) => {
+      const aIsAdvisor = typeof a.metadata?.advisorOf === "string";
+      const bIsAdvisor = typeof b.metadata?.advisorOf === "string";
+      if (aIsAdvisor === bIsAdvisor) return 0;
+      // Non-advisor (primary) comes first.
+      return aIsAdvisor ? 1 : -1;
+    });
   }
 }
