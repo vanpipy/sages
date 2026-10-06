@@ -127,6 +127,40 @@ describe("buildStaticWorkflowGraph", () => {
 		expect(review?.metadata.iteration).toBe(1);
 	});
 
+	// GC-2026-advisor-spec-integration: each phase spec carries the
+	// advisorAgentType that workflow-handler's dispatchAdvisorForTask
+	// hook reads to spawn the paired advisor sibling after the primary
+	// finishes. The Merge spec is excluded because MergerAdvisor is the
+	// primary itself, not paired with another advisor.
+	test("every task spec carries advisorAgentType (except Merge)", () => {
+		const tasks = buildStaticWorkflowGraph(input(3));
+		for (const t of tasks) {
+			if (t.metadata.phase === "merge") {
+				expect(t.metadata.advisorAgentType).toBeUndefined();
+				continue;
+			}
+			const expected: Record<string, string> = {
+				implement: "DeveloperAdvisor",
+				review: "ReviewerAdvisor",
+			};
+			const expectedAdvisor = expected[t.metadata.phase as string];
+			expect(t.metadata.advisorAgentType).toBe(expectedAdvisor);
+		}
+	});
+
+	test("Fix spec carries advisorAgentType: FixAdvisor (dynamic, in buildFixTaskSpec)", () => {
+		const spec = buildFixTaskSpec({
+			goal: baseGoal,
+			iteration: 1,
+			worktreePath: "/abs/worktree",
+			branch: "gc-test-001-implement",
+			reviewTaskId: "review-1",
+			nextReviewId: "review-2",
+			workflow_run_goal_id: "GC-TEST-001",
+		});
+		expect(spec.metadata.advisorAgentType).toBe("FixAdvisor");
+	});
+
 	test("every task has an agentType matching its phase", () => {
 		const tasks = buildStaticWorkflowGraph(input(3));
 
