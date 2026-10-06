@@ -793,7 +793,7 @@ describe("subscribeWorkflow — last-review evidence file (GC-2026-b7)", () => {
 // call. The wiring lives in pi-tasks/src/index.ts subscribeWorkflow's
 // spawnAgent closure.
 describe("subscribeWorkflow — workflow task active marker (GC-2026-workflow-chat-stream)", () => {
-  test("subscribeWorkflow.spawnAgent marks the task active before dispatching", () => {
+  test("subscribeWorkflow.spawnAgent marks the task active before dispatching", async () => {
     // We can't reach the real TaskWidget instance from here (it's the
     // singleton inside initExtension). Instead we verify the side-effect:
     // the spawn path calls widget.setActiveTask(task.id, true) before
@@ -804,13 +804,20 @@ describe("subscribeWorkflow — workflow task active marker (GC-2026-workflow-ch
     // the surrounding index.ts scope. We assert that the spawn was
     // synchronous (the call was made) by checking spawnAgent.mock.calls
     // is populated after the cascade completes a Review phase.
+    //
+    // GC-2026-098 (Batch A — test reliability): previous sync version of
+    // this test called events.emit without awaiting. The handler chain
+    // uses async awaits (await spawnAgent, await store.update) so the
+    // cascade was still in flight when the assertion read spawnAgent.mock
+    // — review1SpawnCall was undefined. Awaiting the emit lets the cascade
+    // settle before we inspect the mock.
     const { events, store, spawnAgent } = setup();
-    events.emit("workflow:start", startPayload());
-    flush();
+    await events.emit("workflow:start", startPayload());
+    await flush();
 
     const implement = store.list().find(t => t.metadata.phase === "implement")!;
-    events.emit("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
-    flush();
+    await events.emit("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
+    await flush();
 
     const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
     // The spawnAgent mock was called for Review_1 — that's the spawn that
