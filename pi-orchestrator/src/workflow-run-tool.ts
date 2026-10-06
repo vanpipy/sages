@@ -52,7 +52,7 @@ export function registerWorkflowRunTool(pi: ExtensionAPI): void {
 		name: "workflow_run",
 		label: "Workflow Run",
 		description:
-			"GC-2026-workflow-run: run the 5-phase pipeline (Implement → Review ⇆ Fix → Merge) " +
+			"GC-2026-workflow-run: run the 4-phase pipeline (Implement → Review ⇆ Fix → Merge) " +
 			"for a goal contract. Blocks until all phases complete or the pipeline is blocked. " +
 			"Returns status (success/blocked), task summaries, paths, and any unresolved findings. " +
 			"GC-2026-pi-tasks-integration: also creates 4 pi-tasks tasks (Implement / Review / " +

@@ -273,7 +273,7 @@ export async function executeGoalContractCreate(
 		goal_contract_path: path,
 		next_step:
 			`TaskCreate({ subject: "Implement ${contract.id}", agentType: "Developer", description: "<goal content + implementation brief>", blocks: ["review"] }); ` +
-			`TaskCreate({ subject: "Review ${contract.id}", agentType: "Auditor", blockedBy: ["implement"], description: "<read goal.yaml + implement output, return CLEAN or NEEDS_WORK>" }); ` +
+			`TaskCreate({ subject: "Review ${contract.id}", agentType: "Reviewer", blockedBy: ["implement"], description: "<read goal.yaml + implement output, return CLEAN or NEEDS_WORK>" }); ` +
 			`TaskCreate({ subject: "Fix ${contract.id}", agentType: "Developer", blockedBy: ["review"], description: "<apply Reviewer findings; no-op if CLEAN>" }); ` +
 			`TaskCreate({ subject: "Merge ${contract.id}", agentType: "Merger", blockedBy: ["fix"] }); ` +
 			`TaskExecute(["implement"])`,

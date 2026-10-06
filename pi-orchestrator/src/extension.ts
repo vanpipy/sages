@@ -52,7 +52,7 @@ import { PhaseWidget } from "./ui/phase-widget.js";
  * Tools always exposed to the main agent when the orchestrator
  * extension is loaded. After GC-2026-workflow-run this is two entries:
  * `goal_contract_create` (intent → goal.yaml) and `workflow_run`
- * (one-shot 5-phase pipeline runner). The workflow inside
+ * (one-shot 4-phase pipeline runner: Implement → Review ⇆ Fix → Merge; Fix is dispatched dynamically on NEEDS_WORK per GC-2026-verdict-states-and-dynamic-cascade). The workflow inside
  * `workflow_run` uses pi-tasks (TaskCreate / TaskExecute / etc.)
  * for live progress visibility — the pi-tasks tools are registered
  * by `@sages/pi-tasks` and exposed via the active toolset.
@@ -181,7 +181,7 @@ export function registerOrchestratorTools(
 	runtime?: OrchestratorAdvisoryRuntimeDeps,
 ): void {
 	registerGoalContractTool(pi);
-	// GC-2026-workflow-run: one-shot 5-phase pipeline runner.
+	// GC-2026-workflow-run: one-shot 4-phase pipeline runner.
 	registerWorkflowRunTool(pi);
 	// GC-2026-053: orchestrator tool_call audit wiring.
 	installOrchestratorAdvisoryHandlers(pi, runtime);

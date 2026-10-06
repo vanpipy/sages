@@ -154,7 +154,7 @@ PI_EVALUATOR_PKG="$PI_EVALUATOR_DEST_DIR"
 # pi-tasks package info (sage peer, deployed by file-copy)
 # pi-tasks is the workflow engine: TaskCreate / TaskList / TaskUpdate /
 # TaskExecute (Claude Code-compatible task tracking). workflow_run
-# (the orchestrator's 5-phase pipeline runner, GC-2026-workflow-run)
+# (the orchestrator's 4-phase pipeline runner, GC-2026-workflow-run; Fix dispatched dynamically)
 # creates 4 pi-tasks tasks for live progress visibility
 # (GC-2026-pi-tasks-integration). Without pi-tasks installed,
 # workflow_run still works — just without the live progress UI
