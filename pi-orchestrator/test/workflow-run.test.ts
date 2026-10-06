@@ -561,23 +561,28 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 		await result;
 
 		expect(updates.length).toBe(3);
-		// First update: implement phase just completed.
-		expect((updates[0] as { partial: boolean; current_phase: string }).partial).toBe(true);
-		expect((updates[0] as { current_phase: string }).current_phase).toBe("implement");
-		expect((updates[0] as { goal_id: string }).goal_id).toBe(GOAL_ID);
-		expect((updates[0] as { tasks_done: number; tasks_total: number }).tasks_done).toBe(1);
+		// GC-2026-chat-stream-render: payload is now wrapped in
+		// AgentToolResult envelope (content + details). Tests inspect
+		// `update.details.X` rather than `update.X`.
+		const first = (updates[0] as { content: unknown[]; details: Record<string, unknown> });
+		expect(first.content).toEqual([]);
+		expect((first.details as { current_phase: string }).current_phase).toBe("implement");
+		expect((first.details as { goal_id: string }).goal_id).toBe(GOAL_ID);
+		expect((first.details as { tasks_done: number; tasks_total: number }).tasks_done).toBe(1);
 		// GC-2026-097 H2: tasks_total is an upper bound (Implement +
 		// max_fix_iterations Reviews + max_fix_iterations Fixes + Merge).
 		// For max=1: 1 impl + 1 review + 1 fix + 1 merge = 4.
-		expect((updates[0] as { tasks_total: number }).tasks_total).toBe(4); // upper bound for max_fix_iterations=1
-		expect((updates[0] as { summary: string }).summary).toMatch(/Implement complete/);
+		expect((first.details as { tasks_total: number }).tasks_total).toBe(4);
+		expect((first.details as { summary: string }).summary).toMatch(/Implement complete/);
 		// Second update: review (CLEAN) → next review transition (last review → merge).
-		expect((updates[1] as { current_phase: string; last_verdict: string }).current_phase).toBe("review");
-		expect((updates[1] as { last_verdict: string }).last_verdict).toBe("CLEAN");
-		expect((updates[1] as { findings_count: number }).findings_count).toBe(0);
+		const second = (updates[1] as { details: Record<string, unknown> }).details;
+		expect((second as { current_phase: string }).current_phase).toBe("review");
+		expect((second as { last_verdict: string }).last_verdict).toBe("CLEAN");
+		expect((second as { findings_count: number }).findings_count).toBe(0);
 		// Third update: merge.
-		expect((updates[2] as { current_phase: string }).current_phase).toBe("merge");
-		expect((updates[2] as { tasks_done: number }).tasks_done).toBe(3);
+		const third = (updates[2] as { details: Record<string, unknown> }).details;
+		expect((third as { current_phase: string }).current_phase).toBe("merge");
+		expect((third as { tasks_done: number }).tasks_done).toBe(3);
 	});
 
 	it("emits NEEDS_WORK fix iterations + findings_count in onUpdate payload", async () => {
@@ -619,21 +624,19 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 		expect(updates.length).toBe(5);
 		// GC-2026-097 H2: max=3 upper bound is 1 + 2*3 + 1 = 8.
 		for (const u of updates) {
-			expect((u as { tasks_total: number }).tasks_total).toBe(8);
+			expect(((u as { details: { tasks_total: number } }).details).tasks_total).toBe(8);
 		}
 		// After Review_1 NEEDS_WORK: payload carries findings_count=2 +
 		// last_verdict=NEEDS_WORK + fix_iterations_used=1 (the counter ticks
 		// when the Review phase branches on NEEDS_WORK).
-		const review1Update = updates[1] as {
-			last_verdict: string; findings_count: number; fix_iterations_used: number;
-		};
-		expect(review1Update.last_verdict).toBe("NEEDS_WORK");
-		expect(review1Update.findings_count).toBe(2);
-		expect(review1Update.fix_iterations_used).toBe(1);
+		const review1Details = (updates[1] as { details: Record<string, unknown> }).details;
+		expect((review1Details as { last_verdict: string }).last_verdict).toBe("NEEDS_WORK");
+		expect((review1Details as { findings_count: number }).findings_count).toBe(2);
+		expect((review1Details as { fix_iterations_used: number }).fix_iterations_used).toBe(1);
 		// Fix_1 phase: payload carries fix_iterations_used=1.
-		const fix1Update = updates[2] as { current_phase: string; fix_iterations_used: number };
-		expect(fix1Update.current_phase).toBe("fix");
-		expect(fix1Update.fix_iterations_used).toBe(1);
+		const fix1Details = (updates[2] as { details: Record<string, unknown> }).details;
+		expect((fix1Details as { current_phase: string }).current_phase).toBe("fix");
+		expect((fix1Details as { fix_iterations_used: number }).fix_iterations_used).toBe(1);
 	});
 
 	it("NEEDS_CLARIFICATION onUpdate payload includes open_question", async () => {
@@ -665,12 +668,10 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 		});
 		await result;
 
-		const reviewUpdate = updates[1] as {
-			current_phase: string; last_verdict: string; open_question: string;
-		};
-		expect(reviewUpdate.current_phase).toBe("needs_clarification");
-		expect(reviewUpdate.last_verdict).toBe("NEEDS_CLARIFICATION");
-		expect(reviewUpdate.open_question).toBe("snake_case or camelCase?");
+		const reviewDetails = (updates[1] as { details: Record<string, unknown> }).details;
+		expect((reviewDetails as { current_phase: string }).current_phase).toBe("needs_clarification");
+		expect((reviewDetails as { last_verdict: string }).last_verdict).toBe("NEEDS_CLARIFICATION");
+		expect((reviewDetails as { open_question: string }).open_question).toBe("snake_case or camelCase?");
 	});
 
 	it("does NOT call onUpdate when the host omits the callback", async () => {
@@ -698,5 +699,52 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 		});
 		await result;
 		// No throw = success; the onUpdate optional is honored silently.
+	});
+
+	// GC-2026-chat-stream-render: the onUpdate payload MUST conform to
+	// the host's AgentToolResult<WorkflowProgressDetails> envelope. The
+	// first audit (GC-2026-workflow-chat-stream) assumed a flat shape
+	// with `partial: true`, which the host didn't read; this test pins
+	// the corrected shape so a regression lands in CI.
+	it("onUpdate payload matches AgentToolResult<WorkflowProgressDetails> envelope", async () => {
+		const updates: unknown[] = [];
+		const { result, emitted, handlers } = harness.run(
+			{ goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`, options: { max_fix_iterations: 1 } },
+			(u) => updates.push(u),
+		);
+
+		const startPayload = emitted.find(e => e.channel === "workflow:start")!
+			.data as WorkflowStartPayload;
+		const phaseComplete = handlers.get("workflow:phase-complete")!;
+
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "implement", status: "completed", task_id: "t-implement",
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "review", iteration: 1, status: "completed",
+			verdict: "CLEAN", findings_count: 0, task_id: "t-review-1",
+		});
+		await phaseComplete({
+			workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+			phase: "merge", status: "completed", task_id: "t-merge",
+		});
+		await result;
+
+		expect(updates.length).toBe(3);
+		// Pick the first update (Implement) to assert the envelope shape.
+		const u = updates[0] as { content: unknown[]; details: Record<string, unknown> };
+		// Envelope: { content, details } — AgentToolResult<TDetails> shape
+		expect(u).toHaveProperty("content");
+		expect(u).toHaveProperty("details");
+		expect(u.content).toEqual([]);
+		// No literal `partial: true` field anywhere (would be a regression
+		// to the GC-2026-workflow-chat-stream shape the first audit flagged)
+		expect(u).not.toHaveProperty("partial");
+		expect(u.details).not.toHaveProperty("partial");
+		// Details carry the progress data
+		expect((u.details as { goal_id: string }).goal_id).toBe(GOAL_ID);
+		expect((u.details as { current_phase: string }).current_phase).toBe("implement");
 	});
 });

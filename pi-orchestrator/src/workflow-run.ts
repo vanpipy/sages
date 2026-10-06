@@ -33,6 +33,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { Type, type Static } from "typebox";
+import type { AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 
 import { loadGoalContract } from "./goal-contract.js";
 import type { GoalContract } from "./types.js";
@@ -289,28 +290,36 @@ interface RunContext {
 	repoCwd: string;
 	executeTool?: (name: string, args: unknown) => Promise<unknown>;
 	/**
-	 * GC-2026-workflow-chat-stream: streaming progress callback. Mirrors
-	 * pi-coding-agent's `ToolDefinition.execute()`'s `onUpdate` parameter —
+	 * GC-2026-chat-stream-render: streaming progress callback. Aligned
+	 * with pi-coding-agent's `AgentToolUpdateCallback<TDetails>` shape —
 	 * the host (TUI interactive mode) renders each call as a partial
 	 * tool-result block in the chat, so the user sees phase progress live
 	 * instead of waiting for the full tool result.
 	 *
-	 * The payload shape is `WorkflowProgressUpdate` (see below). The host
-	 * is expected to render `partial: true` as a streaming indicator.
+	 * The payload is `AgentToolResult<WorkflowProgressDetails>` — the
+	 * `details` field carries the progress data; the `content` field is
+	 * empty (the TUI renders from `details` + the final tool result).
 	 */
-	onUpdate?: (update: WorkflowProgressUpdate) => void;
+	onUpdate?: AgentToolUpdateCallback<WorkflowProgressDetails>;
 }
 
 /**
- * GC-2026-workflow-chat-stream: structured payload emitted via
- * `RunContext.onUpdate` on each `workflow:phase-complete` event.
- * `partial: true` signals to the host (pi-coding-agent's
- * `ToolRenderResultOptions.isPartial`) that this is a streaming
- * intermediate, not the final tool result.
+ * GC-2026-chat-stream-render: structured details emitted via
+ * `RunContext.onUpdate.details` on each `workflow:phase-complete` event.
+ * The TDetails type for the host's `AgentToolResult<WorkflowProgressDetails>`
+ * — partial progress data the host renders as a live streaming block.
+ *
+ * Previously named WorkflowProgressUpdate; renamed to WorkflowProgressDetails in GC-2026-chat-stream-render and had a
+ * leading `partial: true` literal boolean field. The first audit
+ * (GC-2026-workflow-chat-stream postmortem) assumed the host would
+ * render that field as a streaming indicator; the actual host
+ * (`AgentToolUpdateCallback<TDetails>`) treats its argument as an
+ * `AgentToolResult<TDetails>` envelope, not a freeform partial. The
+ * `partial: true` field landed in `details.partial`, which the host
+ * did not read, and the rest of the fields landed in `details.*` where
+ * they were ignored. Live streaming was effectively broken.
  */
-export interface WorkflowProgressUpdate {
-	/** Always true for onUpdate calls — distinguishes from final AgentToolResult. */
-	partial: true;
+export interface WorkflowProgressDetails {
 	/** Goal contract id (e.g. "GC-2026-foo"). */
 	goal_id: string;
 	/** Current phase that just completed (or is active). */
@@ -429,13 +438,16 @@ export async function executeWorkflowRun(
 		// emit it via the host's onUpdate callback. Host renders partial
 		// result blocks; user sees phases appear live.
 		const emitProgress = (
-			currentPhase: WorkflowProgressUpdate["current_phase"],
+			currentPhase: WorkflowProgressDetails["current_phase"],
 			phaseIteration: number,
 			phaseLabel: string,
 		) => {
 			if (!runCtx.onUpdate) return;
-			runCtx.onUpdate({
-				partial: true,
+			// GC-2026-chat-stream-render: wrap in AgentToolResult envelope.
+			// The host's AgentToolUpdateCallback<TDetails> expects the full
+			// result shape, not a freeform partial. The `content: []` is
+			// the standard convention for "TUI renders from details".
+			const details: WorkflowProgressDetails = {
 				goal_id: goalId,
 				current_phase: currentPhase,
 				iteration: phaseIteration,
@@ -454,7 +466,8 @@ export async function executeWorkflowRun(
 					open_question: pendingOpenQuestion,
 				}),
 				summary: phaseLabel,
-			});
+			};
+			runCtx.onUpdate({ content: [], details });
 		};
 		// Snapshot of the last findings_count we saw (kept outside the closure
 		// so emitProgress reads the most recent value).
@@ -600,7 +613,7 @@ export async function executeWorkflowRun(
 							? "fix"
 							: ev.phase === "merge"
 								? "merge"
-								: (ev.phase as WorkflowProgressUpdate["current_phase"]);
+								: (ev.phase as WorkflowProgressDetails["current_phase"]);
 			const summaryLabel =
 				ev.phase === "implement"
 					? `Implement complete — Review ${(ev.iteration ?? lastReviewIteration) + 1} starting`
@@ -612,7 +625,7 @@ export async function executeWorkflowRun(
 								? `Merge dispatched`
 								: `${ev.phase} complete`;
 			emitProgress(
-				currentPhase as WorkflowProgressUpdate["current_phase"],
+				currentPhase as WorkflowProgressDetails["current_phase"],
 				ev.iteration ?? lastReviewIteration,
 				summaryLabel,
 			);
