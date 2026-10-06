@@ -17,6 +17,7 @@
  * 2 additional Fix spawns fire (7 total) before Merge.
  */
 
+import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { TaskStore } from "../src/task-store.js";
 import type { Task } from "../src/types.js";
@@ -357,19 +358,23 @@ describe("path B end-to-end (GC-2026-verdict-states-and-dynamic-cascade)", () =>
 // ─────────────────────────────────────────────────────────────────────
 
 describe("subscribeWorkflow — real-id spawn path (production wiring)", () => {
-	let idCounter = 0;
-	const realIds = new Map<string, string>(); // taskId → real-format id
-
 	function setupWithRealIds() {
 		const store = new TaskStore();
 		const events = fakeEvents();
 		const spawnCalls: Task[] = [];
+		// Per-test isolation: each test gets its own realIds map and
+		// idCounter so spawnAgent ids never collide across tests (the prior
+		// describe-scoped realIds / idCounter let `cf9f...4c${++counter}`
+		// collide once the counter hit two digits — `.slice(0, 17)` truncated
+		// the trailing digit so all subsequent spawns shared one agent id and
+		// the agentToTask map kept overwriting itself).
+		const realIds = new Map<string, string>(); // taskId → real-format id
 
 		const spawnAgent = vi.fn(async (task: Task) => {
 			spawnCalls.push(task);
 			// Mirror pi-subagents/agent-manager.ts:346: 17-char UUID prefix.
 			// Distinct from "agent-${task.id}" — this is the production shape.
-			const realId = `cf9f3e74-835c-4c${++idCounter}`.slice(0, 17);
+			const realId = randomUUID().slice(0, 17);
 			realIds.set(task.id, realId);
 			return realId;
 		});

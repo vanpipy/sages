@@ -48,7 +48,18 @@ handoff_for_next_task:
 \`\`\`
 `;
 
-describe("soft-limit steer message (GC-2026-094 P3)", () => {
+describe.skip("soft-limit steer message (GC-2026-094 P3) — REMOVED", () => {
+	// GC-2026-subagent-time-only-limits removed the SOFT_LIMIT_STEER_MESSAGE
+	// runtime nudge and its maxTurns enforcement in favor of:
+	//   - a wall-clock deadline envelope (30–120 min) as the only lifecycle limit
+	//   - the `verdict-{task_id}.md` file-fallback pattern, which agents
+	//     invoke explicitly in their prompt when they want a wrap-up
+	//     reminder (see `pi-orchestrator/src/workflow-run.ts:PhaseCompleteEvent`
+	//     verdictFilePath plumbing).
+	// These tests pin the removed runtime contract; the source comment at
+	// `pi-subagents/src/agent-runner.ts:177` documents the removal. Skipped
+	// to keep `bun x vitest run` green on main. Restore if a future GC
+	// reintroduces the runtime nudge.
 	it("references the durable verdict file path so the agent knows to write there", () => {
 		// The literal `.pi/orchestrator/verdict-{task_id}.md` MUST appear
 		// verbatim so the agent's prompt template interpolation produces a
