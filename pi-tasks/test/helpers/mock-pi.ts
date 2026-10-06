@@ -1,6 +1,33 @@
 /**
  * Shared test harness: a minimal fake ExtensionAPI plus a fake @tintinweb/pi-subagents
  * extension, so tests can drive src/index.ts without a real pi session.
+ *
+ * ## Fixture aliasing contract (GC-2026-098, GC-2026-pi-tasks-cascade-agentid follow-up)
+ *
+ * Two distinct fixture shapes exist for subagent ids, each owning a specific
+ * test surface. Mixing them up was the cascade-agentid bug — `installSubagentsMock`
+ * below returns `agent-${++idCounter}` (synthetic), while
+ * `path-b-e2e.test.ts#setupWithRealIds` returns `randomUUID().slice(0, 17)`
+ * (production shape). The split is deliberate:
+ *
+ *   - `installSubagentsMock` (THIS file, synthetic ids): for TaskExecute
+ *     unit tests and RPC tests where the agent-id shape does not matter.
+ *     Tests just need a stable id to round-trip through the spawn/stop/
+ *     consume RPC plumbing. Synthetic ids make the fixtures deterministic
+ *     and easy to assert against.
+ *
+ *   - `setupWithRealIds` (path-b-e2e.test.ts, real-format ids): for
+ *     `subscribeWorkflow` cascade tests where the spawn id is opaque to
+ *     the handler and the cascade must still advance when the handler
+ *     sees the same id back from `subagents:completed`. Production
+ *     spawn (`pi-subagents/agent-manager.ts:346`) uses `randomUUID()
+ *     .slice(0, 17)`; the test fixture mirrors that.
+ *
+ * DO NOT reuse `installSubagentsMock` in `path-b-e2e.test.ts` — the
+ * synthetic id shape made the cascade-green-by-accident under the
+ * pre-cascade-agentid bug, which is exactly the regression we test for.
+ * DO NOT reuse `setupWithRealIds` in TaskExecute unit tests — the
+ * randomUUID shape makes RPC assertion harder without benefit.
  */
 
 import { vi } from "vitest";
