@@ -141,7 +141,6 @@ function makeHarness(): Harness {
 			pi: pi as unknown as Parameters<typeof executeWorkflowRun>[1]["pi"],
 			ctx: {} as Parameters<typeof executeWorkflowRun>[1]["ctx"],
 			repoCwd,
-			executeTool: undefined,
 			onUpdate,
 		});
 		return { result, emitted, handlers };
