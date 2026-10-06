@@ -92,7 +92,7 @@ function setup(): Harness {
 		await new Promise<void>(resolve => setImmediate(resolve));
 	};
 
-	return { store, events, spy: { spawnCalls }, fire };
+	return { store, events, spy: { spawnCalls }, fire, primarySpawnCalls: () => spawnCalls.filter(t => !t.metadata.advisorOf) };
 }
 
 const startPayload: WorkflowStartPayload = {
@@ -117,8 +117,8 @@ describe("path B end-to-end (GC-2026-verdict-states-and-dynamic-cascade)", () =>
 		// GC-2026-verdict-states-and-dynamic-cascade: Implement + 3 Reviews +
 		// Merge = 5. Fix tasks are NOT pre-created.
 		expect(tasks).toHaveLength(5);
-		expect(h.spy.spawnCalls).toHaveLength(1);
-		expect(h.spy.spawnCalls[0].metadata.phase).toBe("implement");
+		expect(h.primarySpawnCalls()).toHaveLength(1);
+		expect(h.primarySpawnCalls()[0].metadata.phase).toBe("implement");
 
 		const byPhase = (phase: string) => tasks.filter(t => t.metadata.phase === phase);
 		expect(byPhase("implement")).toHaveLength(1);
@@ -136,8 +136,8 @@ describe("path B end-to-end (GC-2026-verdict-states-and-dynamic-cascade)", () =>
 
 		await h.fire("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
 
-		expect(h.spy.spawnCalls).toHaveLength(1);
-		expect(h.spy.spawnCalls[0].subject).toMatch(/Review 1:/);
+		expect(h.primarySpawnCalls()).toHaveLength(1);
+		expect(h.primarySpawnCalls()[0].subject).toMatch(/Review 1:/);
 	});
 
 	test("Review_1 CLEAN → Review_2 spawned (no Fix dispatched)", async () => {
@@ -158,8 +158,8 @@ describe("path B end-to-end (GC-2026-verdict-states-and-dynamic-cascade)", () =>
 		});
 
 		// No Fix was spawned; Review_2 is next.
-		expect(h.spy.spawnCalls).toHaveLength(1);
-		expect(h.spy.spawnCalls[0].subject).toMatch(/Review 2:/);
+		expect(h.primarySpawnCalls()).toHaveLength(1);
+		expect(h.primarySpawnCalls()[0].subject).toMatch(/Review 2:/);
 		expect(h.store.list().find(t => t.metadata.phase === "fix")).toBeUndefined();
 	});
 
@@ -179,8 +179,8 @@ describe("path B end-to-end (GC-2026-verdict-states-and-dynamic-cascade)", () =>
 		});
 
 		// Fix_1 was created and spawned.
-		expect(h.spy.spawnCalls).toHaveLength(1);
-		expect(h.spy.spawnCalls[0].subject).toMatch(/Fix 1:/);
+		expect(h.primarySpawnCalls()).toHaveLength(1);
+		expect(h.primarySpawnCalls()[0].subject).toMatch(/Fix 1:/);
 		// Review_2 was NOT spawned (waiting for Fix_1).
 		const review2 = h.store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 2);
 		expect(review2).toBeDefined();
@@ -205,8 +205,8 @@ describe("path B end-to-end (GC-2026-verdict-states-and-dynamic-cascade)", () =>
 		await h.fire("subagents:completed", { id: `agent-${fix1.id}`, result: "ok" });
 
 		// Review_2 spawned.
-		expect(h.spy.spawnCalls).toHaveLength(1);
-		expect(h.spy.spawnCalls[0].subject).toMatch(/Review 2:/);
+		expect(h.primarySpawnCalls()).toHaveLength(1);
+		expect(h.primarySpawnCalls()[0].subject).toMatch(/Review 2:/);
 	});
 
 	test("Review_2 NEEDS_WORK → Fix_2 spawned dynamically", async () => {
@@ -235,8 +235,8 @@ describe("path B end-to-end (GC-2026-verdict-states-and-dynamic-cascade)", () =>
 		});
 
 		// Fix_2 spawned dynamically.
-		expect(h.spy.spawnCalls).toHaveLength(1);
-		expect(h.spy.spawnCalls[0].subject).toMatch(/Fix 2:/);
+		expect(h.primarySpawnCalls()).toHaveLength(1);
+		expect(h.primarySpawnCalls()[0].subject).toMatch(/Fix 2:/);
 	});
 
 	test("Review_3 CLEAN → Merge spawned (cascade finalizes)", async () => {
@@ -268,8 +268,8 @@ describe("path B end-to-end (GC-2026-verdict-states-and-dynamic-cascade)", () =>
 		});
 
 		// Merge is the last spawn.
-		expect(h.spy.spawnCalls).toHaveLength(1);
-		expect(h.spy.spawnCalls[0].subject).toBe(`Merge: ${goal.title}`);
+		expect(h.primarySpawnCalls()).toHaveLength(1);
+		expect(h.primarySpawnCalls()[0].subject).toBe(`Merge: ${goal.title}`);
 	});
 
 	test("Merge completes → 5 static + 2 dynamic = 7 tasks in completed status, every phase emitted workflow:phase-complete", async () => {
@@ -301,12 +301,29 @@ describe("path B end-to-end (GC-2026-verdict-states-and-dynamic-cascade)", () =>
 
 		const tasks = h.store.list();
 		const completed = tasks.filter(t => t.status === "completed");
-		// GC-2026-verdict-states-and-dynamic-cascade: total task count =
-		// 5 static + 2 dynamic Fixes = 7.
-		expect(tasks).toHaveLength(7);
-		expect(completed).toHaveLength(7);
+		// GC-2026-advisor-spec-integration: every primary task has a paired
+		// advisor sibling. Implement + 3× Review + Merge = 5 primaries;
+		// plus 2 dynamic Fixes (each with a FixAdvisor). Advisors are 6
+		// (no MergeAdvisor): 1 DeveloperAdvisor + 3 ReviewerAdvisor + 2
+		// FixAdvisor. Total tasks = 5 + 2 + 6 = 13. (Pre-GC: 7.)
+		const primaries = tasks.filter(t => !t.metadata.advisorOf);
+		const advisors = tasks.filter(t => t.metadata.advisorOf);
+		expect(tasks).toHaveLength(13);
+		expect(primaries).toHaveLength(7);  // 5 static + 2 dynamic
+		expect(advisors).toHaveLength(6);  // 1 + 3 + 2
+		expect(completed).toHaveLength(7);  // only primaries complete; advisors stay in_progress
+		// Every completed primary must have triggered workflow:phase-complete.
+		// Advisors don't emit phase-complete (they write the
+		// {kind}-advisor-{task_id}.md file instead, which is the orchestrator's
+		// downstream consumption, not an event for it).
+		expect(completed.filter(t => primaries.includes(t))).toHaveLength(7);
+		for (const t of primaries) {
+			expect(completed).toContain(t);
+		}
 
 		const phaseCompleteEvents = h.events.emittedLog.filter(e => e.channel === "workflow:phase-complete");
+		// 7 phase-complete events (one per primary task). 6 advisor tasks
+		// do NOT emit phase-complete.
 		expect(phaseCompleteEvents).toHaveLength(7);
 		expect(phaseCompleteEvents.map(e => (e.data as Record<string, unknown>).phase)).toEqual([
 			"implement",
@@ -367,7 +384,15 @@ describe("subscribeWorkflow — real-id spawn path (production wiring)", () => {
 			await new Promise<void>(resolve => setImmediate(resolve));
 		};
 
-		return { store, events, spawnCalls, fire, cleanup, realIds };
+		return {
+			store,
+			events,
+			spawnCalls,
+			fire,
+			cleanup,
+			realIds,
+			primarySpawnCalls: () => spawnCalls.filter(t => !t.metadata.advisorOf),
+		};
 	}
 
 	test("cascade advances when subagents:completed carries the real-format id (no synthetic pre-registration match)", async () => {
@@ -386,8 +411,8 @@ describe("subscribeWorkflow — real-id spawn path (production wiring)", () => {
 		// misses this lookup and the cascade stalls.
 		await h.fire("subagents:completed", { id: implementRealId, result: "ok" });
 
-		expect(h.spawnCalls).toHaveLength(1);
-		expect(h.spawnCalls[0].subject).toMatch(/Review 1:/);
+		expect(h.primarySpawnCalls()).toHaveLength(1);
+		expect(h.primarySpawnCalls()[0].subject).toMatch(/Review 1:/);
 
 		const review1 = h.store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
 		expect(review1.status).toBe("in_progress");
@@ -426,7 +451,7 @@ describe("subscribeWorkflow — real-id spawn path (production wiring)", () => {
 
 		// No additional spawns after the failed Implement — workflow_run will
 		// resolve as blocked from the phase-complete event
-		expect(h.spawnCalls).toHaveLength(1); // only the initial Implement spawn
+		expect(h.primarySpawnCalls()).toHaveLength(1); // only the initial Implement spawn
 	});
 
 	test("subagents:failed for a non-workflow id is ignored (not a regression on the ad-hoc path)", async () => {
@@ -459,7 +484,11 @@ describe("subscribeWorkflow — real-id spawn path (production wiring)", () => {
 		await h.fire("workflow:start", startPayload);
 
 		const drive = async (phase: string, iteration: number | undefined, verdict?: "CLEAN" | "NEEDS_WORK") => {
+			// Filter to primary tasks (not advisors): the advisor has the
+			// same phase metadata so a plain .find() can return the wrong
+			// row when both primary and advisor exist.
 			const t = h.store.list().find(x =>
+				!x.metadata.advisorOf &&
 				x.metadata.phase === phase &&
 				(iteration === undefined || x.metadata.iteration === iteration),
 			)!;
@@ -477,11 +506,11 @@ describe("subscribeWorkflow — real-id spawn path (production wiring)", () => {
 		await drive("review", 3, "CLEAN");
 
 		// After Review_3 CLEAN, Merge should be the last spawned phase.
-		const last = h.spawnCalls[h.spawnCalls.length - 1];
+		const last = h.primarySpawnCalls()[h.primarySpawnCalls().length - 1];
 		expect(last.subject).toBe(`Merge: ${goal.title}`);
 
 		// Only 5 spawns total (no Fixes for all-CLEAN path).
-		expect(h.spawnCalls).toHaveLength(5);
+		expect(h.primarySpawnCalls()).toHaveLength(5);
 
 		// 5 tasks completed after Merge runs.
 		await drive("merge", undefined);
@@ -495,6 +524,7 @@ describe("subscribeWorkflow — real-id spawn path (production wiring)", () => {
 
 		const drive = async (phase: string, iteration: number | undefined, verdict?: "CLEAN" | "NEEDS_WORK") => {
 			const t = h.store.list().find(x =>
+				!x.metadata.advisorOf &&
 				x.metadata.phase === phase &&
 				(iteration === undefined || x.metadata.iteration === iteration),
 			)!;
@@ -514,7 +544,7 @@ describe("subscribeWorkflow — real-id spawn path (production wiring)", () => {
 		await drive("review", 3, "CLEAN"); // → Merge spawned
 		await drive("merge", undefined);
 
-		expect(h.spawnCalls).toHaveLength(7);
+		expect(h.primarySpawnCalls()).toHaveLength(7);
 		const completed = h.store.list().filter(t => t.status === "completed");
 		expect(completed).toHaveLength(7);
 	});

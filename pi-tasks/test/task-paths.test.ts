@@ -17,9 +17,31 @@ function workspace(): string {
   return dir;
 }
 
+// GC-2026-pi-tasks-test-compat: the runner is bun:test, which does not
+// expose vi.unstubAllEnvs (vitest API). Provide a compat shim that
+// captures the original env values on vi.stubEnv and restores them on
+// vi.unstubAllEnvs. Tests that don't call vi.stubEnv no-op the shim.
+interface StubbedEnv {
+	[key: string]: string | undefined;
+}
+const _stubbedEnvs: StubbedEnv = {};
+const _originalStubEnv = vi.stubEnv;
+(vi as unknown as { stubEnv: (k: string, v: string) => void }).stubEnv = (k, v) => {
+	if (!(k in _stubbedEnvs)) _stubbedEnvs[k] = process.env[k];
+	process.env[k] = v;
+};
+(vi as unknown as { unstubAllEnvs: () => void }).unstubAllEnvs = () => {
+	for (const [k, original] of Object.entries(_stubbedEnvs)) {
+		if (original === undefined) delete process.env[k];
+		else process.env[k] = original;
+	}
+	for (const k of Object.keys(_stubbedEnvs)) delete _stubbedEnvs[k];
+};
+void _originalStubEnv; // keep the original reference in the closure for tooling
+
 afterEach(() => {
-  vi.unstubAllEnvs();
-  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
+	vi.unstubAllEnvs();
+	for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe("projectKey", () => {
