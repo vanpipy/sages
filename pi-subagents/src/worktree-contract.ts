@@ -1,14 +1,14 @@
 /**
- * worktree-contract.ts — GC-2026-008 P2 / GC-2026-017 / GC-2026-path-B-field-renames.
+ * worktree-contract.ts — GC-2026-008 P2 / GC-2026-017 / GC-2026-path-B-field-renames / GC-2026-104.
  *
  * The Agent-boundary contract for the managed-worktree domain. Three jobs:
  *
  *   1. Parse the explicit worktree request that the Agent tool now accepts.
- *      `{ goal_id (preferred) | dag_id (deprecated), task_id, worktree_id?, mode: "create" | "reuse" }`.
- *      Pass `goal_id`; `dag_id` is accepted for one release as a backward-
- *      compat shim. Pass exactly one of them — both-or-neither is rejected.
+ *      `{ goal_id, task_id, worktree_id?, mode: "create" | "reuse" }`.
  *      The legacy `"worktree"` string literal is refused at the type boundary
  *      — without an explicit object, dispatch MUST reject before child execution.
+ *      GC-2026-104: `dag_id` compat shim removed. The parser now requires
+ *      exactly one of `goal_id` — both-or-neither is rejected.
  *
  *   2. Re-export the runtime schema (`MANAGED_WORKTREE_REQUEST_TYPE`) so the
  *      Agent tool's JSON schema and the parser agree on field names. Single
@@ -25,11 +25,6 @@
  * `undefined` to signal "no managed worktree") — the object-form parser
  * `parseManagedWorktreeRequest` is unchanged and still refuses strings,
  * and the legacy `"worktree"` literal is still rejected at both surfaces.
- *
- * GC-2026-path-B-field-renames: `dag_id` is renamed to `goal_id` for path-B
- * semantic clarity (the orchestrator has no DAG concept). Both names are
- * accepted by the parser; the canonical output uses `goal_id`. After one
- * release the compat shim is removed (follow-up GC).
  */
 
 import type { TSchema } from "typebox";
@@ -60,8 +55,6 @@ export type ManagedWorktreeMode = "create" | "reuse";
  */
 export interface ManagedWorktreeRequest {
 	goal_id: string;
-	/** @deprecated Prefer `goal_id`. Accepted as a compat shim for one release. */
-	dag_id?: string;
 	task_id: string;
 	worktree_id?: string;
 	mode: ManagedWorktreeMode;
@@ -86,14 +79,6 @@ export const MANAGED_WORKTREE_REQUEST_TYPE: TSchema = Type.Object(
 				description:
 					'Goal id (e.g. "GC-2026-008"). Combined with task_id into a managed ' +
 					"worktree at <repoRoot>/.pi/worktree/<goal_id>/<task_id>.",
-				pattern: "^[A-Za-z0-9_-]+$",
-			}),
-		),
-		dag_id: Type.Optional(
-			Type.String({
-				description:
-					'[DEPRECATED — prefer goal_id] DAG / goal id (e.g. "GC-2026-008"). ' +
-					"Accepted as a backward-compat alias for goal_id; removed in the next release.",
 				pattern: "^[A-Za-z0-9_-]+$",
 			}),
 		),
@@ -130,9 +115,9 @@ export const MANAGED_WORKTREE_REQUEST_TYPE: TSchema = Type.Object(
 	},
 	{
 		description:
-			"Managed worktree request. Pass exactly one of goal_id (preferred) " +
-			"or dag_id (deprecated alias). Pass neither → parse error. Pass both → " +
-			"parse error (ambiguous).",
+			"Managed worktree request. Required: goal_id + task_id + mode. " +
+			"Optional: worktree_id (defaults to task_id), base_ref (defaults to " +
+			"the current working directory's upstream branch).",
 	},
 );
 
@@ -169,29 +154,20 @@ export function parseManagedWorktreeRequest(
 	}
 	const obj = input as Record<string, unknown>;
 	const goal_id_raw = obj.goal_id;
-	const dag_id_raw = obj.dag_id;
 	const task_id = obj.task_id;
 	const worktree_id = obj.worktree_id;
 	const mode = obj.mode;
 
-	// GC-2026-path-B-field-renames: accept goal_id OR dag_id, but not both.
-	// Both-or-neither is a hard error.
-	const has_goal_id = typeof goal_id_raw === "string" && goal_id_raw.length > 0;
-	const has_dag_id = typeof dag_id_raw === "string" && dag_id_raw.length > 0;
-	let goal_id: string | undefined;
-	if (has_goal_id && has_dag_id) {
+	// GC-2026-104: dag_id compat shim removed. goal_id is now the only
+	// accepted identity field. Empty / missing / extra keys are hard errors.
+	const goal_id =
+		typeof goal_id_raw === "string" && goal_id_raw.length > 0
+			? goal_id_raw
+			: undefined;
+	if (goal_id === undefined) {
 		throw new Error(
-			"Agent isolation: pass exactly one of goal_id (preferred) or dag_id " +
-				"(deprecated alias). Both were provided — ambiguous.",
-		);
-	} else if (has_goal_id) {
-		goal_id = goal_id_raw;
-	} else if (has_dag_id) {
-		goal_id = dag_id_raw;
-	} else {
-		throw new Error(
-			"Agent isolation: pass exactly one of goal_id (preferred) or dag_id " +
-				'(deprecated alias). Neither was provided.',
+			"Agent isolation: 'goal_id' must be a non-empty string (got " +
+				`${JSON.stringify(goal_id_raw)}).`,
 		);
 	}
 

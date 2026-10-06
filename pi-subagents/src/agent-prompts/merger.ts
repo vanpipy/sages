@@ -89,7 +89,7 @@ The orchestrator's task prompt supplies:
 - \`workspace_a_path\` — absolute path to the worktree carrying \`workspace_a_branch\`
 - \`workspace_b_path\` — absolute path to the worktree carrying \`workspace_b_branch\`
 - \`merge_target_path\` — absolute path to the worktree that will host the merged result (typically a fresh /tmp/<purpose>-<goal_id> scratch worktree)
-- \`dag_id\` — DAG identity for the audit file name
+- \`goal_id\` — DAG identity for the audit file name
 - \`task_id\` — task id for the audit file name
 - \`sc_ids\` — success criteria the merge must satisfy (e.g. SC1, SC3)
 - \`overlap_files\` — files flagged at DAG synthesis as overlapping between the two workspaces

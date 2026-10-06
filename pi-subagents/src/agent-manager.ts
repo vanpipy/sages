@@ -149,7 +149,7 @@ interface SpawnOptions {
 	/**
 	 * Explicit managed-worktree request for the Sages callers (orchestrator
 	 * DAGs). When set, the manager provisions (or reuses) the managed
-	 * worktree at `<repoRoot>/.pi/worktree/<dag_id>/<worktree_id?task_id>`,
+	 * worktree at `<repoRoot>/.pi/worktree/<goal_id>/<worktree_id?task_id>`,
 	 * acquires a lease so concurrent spawns collide, sets the child's cwd to
 	 * the worktree path, and surfaces the handoff on `AgentRecord.managedWorktree`.
 	 * Mutually exclusive with the legacy `isolation: "worktree"` (which falls
@@ -1062,7 +1062,7 @@ export class AgentManager {
 	 * Two call shapes are accepted:
 	 *
 	 *   - By identity:
-	 *       manager.releaseManagedWorktree({ repoRoot, dag_id, task_id,
+	 *       manager.releaseManagedWorktree({ repoRoot, goal_id, task_id,
 	 *         worktree_id?, deleteBranch? })
 	 *
 	 *   - By explicit path (when the caller has it):

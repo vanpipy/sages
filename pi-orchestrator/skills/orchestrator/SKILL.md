@@ -142,8 +142,8 @@ Every Review_2+ reads the prior Fix task's commit to see what changed before re-
 |---|---|---|
 | Meta-file edits / design-doc writes | `Developer` (`tdd: "none"`) | `"current-workspace"` (no worktree) |
 | Production-code TDD work | `Developer` | `{ goal_id, task_id, mode: "create" }` (managed worktree) |
-| Serial follow-up in same workspace | `Developer` | `{ dag_id, task_id, mode: "reuse" }` |
-| 5-dim code review | `Reviewer` | `{ dag_id, task_id, mode: "create" }` (read-only on worktree) |
+| Serial follow-up in same workspace | `Developer` | `{ goal_id, task_id, mode: "reuse" }` |
+| 5-dim code review | `Reviewer` | `{ goal_id, task_id, mode: "create" }` (read-only on worktree) |
 | Cross-workspace merge | `Merger` | none (operates on the orchestrator's cwd) |
 | Quick read-only search | `Explore` | none (built-in) |
 | Planning Brief compilation | `PlanCompiler` | none (built-in) |

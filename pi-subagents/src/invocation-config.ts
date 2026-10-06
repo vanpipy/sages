@@ -180,7 +180,7 @@ export function resolveJoinMode(
  * worktree provisioned) can pass `isolation: "current-workspace"`. The
  * canonical surface remains the explicit worktree object:
  *
- *     { dag_id, task_id, worktree_id?, mode: "create" | "reuse" }
+ *     { goal_id, task_id, worktree_id?, mode: "create" | "reuse" }
  *
  * The policy is enforced at the dispatcher boundary so callers see a
  * clean diagnostic BEFORE child execution. It only applies to the
@@ -235,7 +235,7 @@ export function enforceDeveloperManagedIsolationPolicy(
 		return (
 			'developer agent: the legacy `isolation: "worktree"` string literal is no longer accepted. ' +
 			"Pass an explicit managed-worktree object instead: " +
-			'{ dag_id, task_id, worktree_id?, mode: "create" | "reuse" }, ' +
+			'{ goal_id, task_id, worktree_id?, mode: "create" | "reuse" }, ' +
 			'or pass the literal "current-workspace" to run in the caller\'s cwd.'
 		);
 	}
@@ -248,7 +248,7 @@ export function enforceDeveloperManagedIsolationPolicy(
 		return (
 			"developer agent: an explicit isolation choice is required " +
 			"(isolation was undefined). " +
-			'Pass { dag_id, task_id, worktree_id?, mode: "create" | "reuse" } ' +
+			'Pass { goal_id, task_id, worktree_id?, mode: "create" | "reuse" } ' +
 			'or the literal "current-workspace".'
 		);
 	}
@@ -256,7 +256,7 @@ export function enforceDeveloperManagedIsolationPolicy(
 		return (
 			"developer agent: an explicit isolation choice is required " +
 			"(isolation was null). " +
-			'Pass { dag_id, task_id, worktree_id?, mode: "create" | "reuse" } ' +
+			'Pass { goal_id, task_id, worktree_id?, mode: "create" | "reuse" } ' +
 			'or the literal "current-workspace".'
 		);
 	}
@@ -267,7 +267,7 @@ export function enforceDeveloperManagedIsolationPolicy(
 		return (
 			`developer agent: isolation must be an explicit managed-worktree ` +
 			`object or the literal "current-workspace" (got ${JSON.stringify(isolation)}). ` +
-			`Pass { dag_id, task_id, worktree_id?, mode: "create" | "reuse" } ` +
+			`Pass { goal_id, task_id, worktree_id?, mode: "create" | "reuse" } ` +
 			`or "current-workspace".`
 		);
 	}
