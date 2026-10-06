@@ -822,8 +822,3 @@ export function getFailureCatalog(cwd?: string): FailureCatalog {
 	cached = FailureCatalog.load({ overridePath });
 	return cached;
 }
-
-/** Test seam: drop the cached catalog. */
-export function resetFailureCatalogCache(): void {
-	cached = undefined;
-}

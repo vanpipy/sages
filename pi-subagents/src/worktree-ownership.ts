@@ -162,27 +162,3 @@ export function verifyWorktreeOwnership(
 
 	return { gitdir, commondir };
 }
-
-/** Read and verify the pointer's canonical paths without ownership context. */
-export function readWorktreeGitdir(worktreePath: string): {
-	gitdir: string;
-	commondir: string;
-} {
-	const canonicalWorktreePath = canonicalPath(worktreePath);
-	const pointer = parsePointer(canonicalWorktreePath);
-	const gitdir = resolvePointerPath(pointer.gitdir, canonicalWorktreePath);
-	let commondir: string;
-	if (pointer.commondir !== undefined) {
-		commondir = resolvePointerPath(pointer.commondir, canonicalWorktreePath);
-	} else {
-		const commondirFile = join(gitdir, "commondir");
-		try {
-			const value = readFileSync(commondirFile, "utf8").trim();
-			commondir = resolvePointerPath(value, gitdir);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-			commondir = canonicalPath(dirname(gitdir));
-		}
-	}
-	return { gitdir, commondir };
-}

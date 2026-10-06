@@ -498,10 +498,6 @@ export function setNetworkAllowedDefault(type: string, allowed: boolean): void {
 	networkAllowedByType = { ...networkAllowedByType, [type]: allowed };
 }
 
-export function setNetworkAllowedDefaults(d: Record<string, boolean>): void {
-	networkAllowedByType = { ...networkAllowedByType, ...d };
-}
-
 // =============================================================================
 // GC-2026-092: Per-type model override map (`subagents.json#defaultModelsByType`).
 //
