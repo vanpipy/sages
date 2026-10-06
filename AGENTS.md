@@ -264,7 +264,7 @@ fallback.
 2. **Read the agent's partial output** (transcript at
    `/tmp/pi-subagents-*/.../tasks/<agent_id>.output`) before continuing.
 3. **Commit on the worker's worktree branch** if the dispatch used
-   a managed-worktree object (`{ dag_id, task_id, mode: "create" }`)
+    a managed-worktree object (`{ goal_id, task_id, mode: "create" }`)
    — orchestrator-side commits land directly on the worker's branch.
    If the dispatch used `"current-workspace"`, commits land on the
    orchestrator's branch.

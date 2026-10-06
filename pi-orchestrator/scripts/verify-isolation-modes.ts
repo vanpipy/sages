@@ -12,9 +12,9 @@
  *
  *   1. `isolation: "current-workspace"` — opt out of a worktree
  *      entirely (meta-file edits, design-doc writes).
- *   2. `isolation: { dag_id, task_id, mode: "create" }` — fresh
+ *   2. `isolation: { goal_id, task_id, mode: "create" }` — fresh
  *      managed worktree for production code TDD work.
- *   3. `isolation: { dag_id, task_id, mode: "reuse" }` — re-enter
+ *   3. `isolation: { goal_id, task_id, mode: "reuse" }` — re-enter
  *      an existing worktree slot for serial follow-up.
  *
  * Any re-introduction of the bare string literal

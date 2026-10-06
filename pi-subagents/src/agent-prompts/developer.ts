@@ -173,7 +173,7 @@ Only after the above is done. **Do not start coding from the raw task prompt alo
 
 You may be spawned in one of two modes:
 
-1. **Managed worktree (default)** — \`isolation: { goal_id, task_id, mode: "create" | "reuse" } (the historical alias dag_id is also accepted for back-compat)\`. A worktree
+1. **Managed worktree (default)** — \`isolation: { goal_id, task_id, mode: "create" | "reuse" }\`. A worktree
    is a **workspace**, not just an isolation boundary. One workspace hosts a sequence of related
    developer tasks that build on each other's commits. The canonical workflow description below is
    shared verbatim with the merger sub-agent's prompt so both halves of the workspace lifecycle stay
@@ -363,13 +363,13 @@ You are spawned with an explicit \`isolation\` value. Two shapes are accepted:
 
 \`\`\`
 isolation: {
-  dag_id: "<dag>",
+  goal_id: "<goal_id>",
   task_id: "<task_id>",
   mode: "create" | "reuse"
 }
 \`\`\`
 
-... is the **managed-worktree** mode (default). It places your cwd at \`<repoRoot>/.pi/worktree/<dag>/<task_id>\`, with a checked-out branch \`sages/<dag>/<task_id>\` provisioned from the resolved base ref at first provision. The default base is the orchestrator's current branch's upstream tracking ref (e.g. \`origin/main\`); callers can override with an explicit \`base_ref\` (e.g. \`base_ref: "feature/x"\` to branch off a local feature branch, or \`base_ref: "origin/feature/x"\` for the remote-tracking version). Every commit you make lands on \`sages/<dag>/<task_id>\`, never on the orchestrator's main branch. \`mode: "create"\` provisions a fresh worktree; \`mode: "reuse"\` joins an existing workspace slot for a serial follow-up.
+... is the **managed-worktree** mode (default). It places your cwd at \`<repoRoot>/.pi/worktree/<goal_id>/<task_id>\`, with a checked-out branch \`sages/<goal_id>/<task_id>\` provisioned from the resolved base ref at first provision. The default base is the orchestrator's current branch's upstream tracking ref (e.g. \`origin/main\`); callers can override with an explicit \`base_ref\` (e.g. \`base_ref: "feature/x"\` to branch off a local feature branch, or \`base_ref: "origin/feature/x"\` for the remote-tracking version). Every commit you make lands on \`sages/<goal_id>/<task_id>\`, never on the orchestrator's main branch. \`mode: "create"\` provisions a fresh worktree; \`mode: "reuse"\` joins an existing workspace slot for a serial follow-up.
 
 \`\`\`
 isolation: "current-workspace"
