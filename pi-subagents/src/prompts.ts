@@ -62,7 +62,7 @@ Platform: ${env.platform}`;
 		// Append mode was historically paired with a "genericBase" fallback
 		// when the parent system prompt was unavailable — that fallback
 		// belonged to the removed `general-purpose` agent. Append mode is
-		// now only used for the `developer` and `auditor` built-ins, both
+		// now only used for the `developer` and `Reviewer` built-ins, both
 		// of which always provide a `parentSystemPrompt`; the fallback
 		// path is unreachable. If you hit a caller that does NOT provide
 		// a parent, `parentSystemPrompt` will be undefined and `identity`

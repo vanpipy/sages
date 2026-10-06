@@ -92,5 +92,5 @@ orchestrator dispatches the dedicated \`merger\` sub-agent:
 - verifies the merged result with typecheck + lint + the merged test suite
   (not per-workspace tests).
 
-The \`auditor\` continues to verify **per-task** commits; the \`merger\` verifies
+The \`Reviewer\` continues to verify **per-task** commits; the \`Merger\` verifies
 the **cross-workspace** merge result.`;
