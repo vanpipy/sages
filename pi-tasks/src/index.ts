@@ -269,7 +269,7 @@ export default function (pi: ExtensionAPI) {
           const agentId = await spawnSubagent(next.metadata.agentType, prompt, {
             description: next.subject,
             isBackground: true,
-            maxTurns: cascadeConfig.maxTurns,
+            max_turns: cascadeConfig.maxTurns,
             ...(cascadeConfig.model ? { model: cascadeConfig.model } : {}),
           });
           agentTaskMap.set(agentId, next.id);
@@ -1152,7 +1152,7 @@ Set up task dependencies:
           const agentId = await spawnSubagent(task.metadata.agentType, prompt, {
             description: task.subject,
             isBackground: true,
-            maxTurns: params.max_turns,
+            max_turns: params.max_turns,
             ...(params.model ? { model: params.model } : {}),
           });
           agentTaskMap.set(agentId, taskId);

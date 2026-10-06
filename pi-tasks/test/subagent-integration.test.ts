@@ -406,7 +406,7 @@ describe("TaskExecute", () => {
     });
 
     expect(rpc.spawned[0].prompt).toContain("Focus on REST endpoints only");
-    expect(rpc.spawned[0].options.maxTurns).toBe(10);
+    expect(rpc.spawned[0].options.max_turns).toBe(10);
   });
 
   it("allows executing tasks whose blockers are all completed", async () => {

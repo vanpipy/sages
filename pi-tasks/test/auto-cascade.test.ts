@@ -79,7 +79,7 @@ describe("Auto-cascade (enabled)", () => {
     await flush();
 
     expect(rpc.spawned[1].options.model).toBe("haiku");
-    expect(rpc.spawned[1].options.maxTurns).toBe(7);
+    expect(rpc.spawned[1].options.max_turns).toBe(7);
   });
 
   it("waits for every blocker, not just the one that completed", async () => {
