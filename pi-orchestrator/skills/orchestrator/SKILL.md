@@ -37,7 +37,7 @@ For single trivial tasks (one-line edit, single function), handle directly. No s
 - Main agent has full tool access (edit / write / aft_edit / apply_patch, unrestricted bash). Nothing is blocked.
 - ≥2 items in active task list: drive via workflow_run (canonical) OR TaskCreate × N (escape hatch). ≤2 items: direct edit / write / bash.
 - workflow_run emits workflow:start → pi-tasks drives cascade → workflow_run waits for workflow:phase-complete → returns WorkflowRunOutput.
-- Reviewer verdict (CLEAN / NEEDS_WORK) drives Fix loop; budget = max_fix_iterations.
+- Reviewer verdict (4-state set: CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION) drives the Fix / Redesign / Clarification branches; budget = max_fix_iterations.
 - GC-2026-path-B-swap deleted the 1060-line state machine; orchestration is now event-driven.
 ```
 
@@ -48,7 +48,7 @@ For single trivial tasks (one-line edit, single function), handle directly. No s
 | `Explore` | foreground (short) | Bounded read-only search |
 | `PlanCompiler` | foreground (short) | Compile a self-contained Planning Brief into an ordered plan |
 | `Developer` | background | TDD implementation: RED → GREEN → REFACTOR + commit discipline |
-| `Reviewer` | background | 5-dim review (correctness / completeness / scope / anti-goal / documentation); emits `verdict: CLEAN | NEEDS_WORK` |
+| `Reviewer` | background | 5-dim review (correctness / completeness / scope / anti-goal / documentation); emits `verdict: CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION` |
 | `Merger` | background | Cross-workspace merge commit + branch push |
 
 `git-expert` was retired (GC-2026-091). `Auditor` was renamed to `Reviewer` (GC-2026-rename-auditor). `general-purpose` was removed (DAG-2026-011 Phase C).
@@ -57,7 +57,7 @@ For single trivial tasks (one-line edit, single function), handle directly. No s
 
 ## Workflow: canonical pipeline (`workflow_run`)
 
-When the work fits the 5-phase pipeline (Implement → Review ⇆ Fix → Merge), use `workflow_run`:
+When the work fits the 4-phase pipeline (Implement → Review ⇆ Fix → Merge) (Implement → Review ⇆ Fix → Merge), use `workflow_run`:
 
 ```
 1. goal_contract_create → .pi/orchestrator/goal-{id}.yaml (intent + SHA-256 lock)
@@ -141,7 +141,7 @@ Every Review_2+ reads the prior Fix task's commit to see what changed before re-
 | Task shape | Subagent | `isolation` |
 |---|---|---|
 | Meta-file edits / design-doc writes | `Developer` (`tdd: "none"`) | `"current-workspace"` (no worktree) |
-| Production-code TDD work | `Developer` | `{ dag_id, task_id, mode: "create" }` (managed worktree) |
+| Production-code TDD work | `Developer` | `{ goal_id, task_id, mode: "create" }` (managed worktree) |
 | Serial follow-up in same workspace | `Developer` | `{ dag_id, task_id, mode: "reuse" }` |
 | 5-dim code review | `Reviewer` | `{ dag_id, task_id, mode: "create" }` (read-only on worktree) |
 | Cross-workspace merge | `Merger` | none (operates on the orchestrator's cwd) |

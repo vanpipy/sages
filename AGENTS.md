@@ -20,7 +20,7 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
    `src/`, `test/`, `lib/`, every `pi-*/` subpackage
    (pi-orchestrator, pi-subagents, pi-codebase-memory, pi-evaluator),
    or any root source file: dispatch `Developer` with
-   `isolation: { dag_id, task_id, mode: "create" }` and use TDD. For ≤2-item
+   `isolation: { goal_id, task_id, mode: "create" }` and use TDD. For ≤2-item
    workflows direct editing is also acceptable.
 3. **Root meta-files use current-workspace dispatch (lightweight).** For
    root-level docs and config (`.pi/orchestrator/*`, `.pi/agents/*`,
