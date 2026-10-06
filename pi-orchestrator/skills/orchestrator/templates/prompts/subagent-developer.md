@@ -28,5 +28,6 @@ For reference, the rendered prompt includes:
 
 For Fix tasks, the developer prompt's "Fix Phase Behavior" section
 (developer.ts) takes over: empty commit on verdict=CLEAN, address
-findings[] on verdict=NEEDS_WORK.
+findings[] on verdict=NEEDS_WORK (or 4-state defensive handling for
+NEEDS_REDESIGN / NEEDS_CLARIFICATION).
 -->

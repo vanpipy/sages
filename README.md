@@ -64,7 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi-orchestrator/
 ```
 
 The agent guides the work through `goal_contract_create` then either
-`workflow_run(goal_path)` (canonical 5-phase pipeline) or
+`workflow_run(goal_path)` (canonical 4-phase pipeline: Implement → Review ⇆ Fix → Merge) or
 `TaskCreate × N` + `TaskExecute([first_id])` (escape hatch for
 non-standard shapes). Example goal contracts live in
 `pi-orchestrator/skills/orchestrator/templates/goals/` (note: legacy
