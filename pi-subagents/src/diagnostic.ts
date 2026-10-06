@@ -304,23 +304,6 @@ export function readDiagnostic(filePath: string): DiagnosticJsonV1 | null {
 		: null;
 }
 
-/** Every readable diagnostic in a directory, newest first. */
-export function readAllDiagnostics(dirPath: string): DiagnosticJsonV1[] {
-	let names: string[];
-	try {
-		names = readdirSync(dirPath);
-	} catch {
-		return [];
-	}
-	const out: DiagnosticJsonV1[] = [];
-	for (const name of names) {
-		if (!name.endsWith(".json")) continue;
-		const parsed = readDiagnostic(join(dirPath, name));
-		if (parsed) out.push(parsed);
-	}
-	return out.sort((a, b) => b.emittedAt.localeCompare(a.emittedAt));
-}
-
 /**
  * Drop diagnostics older than `retentionMs` (design §6.3). Called on sub-agent
  * startup so the directory cannot grow without bound. Never throws.

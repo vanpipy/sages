@@ -307,9 +307,4 @@ export async function releaseLease(lease: WorktreeLease): Promise<void> {
 	await removeLease(path);
 }
 
-/** Test/process hook: clear warning de-duplication state. */
-export function resetLeaseWarnings(): void {
-	bypassWarnings.clear();
-}
-
 void existsSync;
