@@ -261,9 +261,14 @@ export async function executeGoalContractCreate(
 	// and the session digest has no in-flight goals to surface.
 	emitRunEvent(contract.id, RunEvent.GoalCreated, { goal_id: contract.id });
 
+	// LLM-facing guidance: drive the work via workflow_run (canonical) —
+	// it builds the static graph, cascades phase events, and resolves with
+	// status: success | blocked. Raw TaskCreate × N + TaskExecute is an
+	// escape hatch for shapes that don't fit the 4-phase pipeline; see
+	// `pi-orchestrator/skills/orchestrator/SKILL.md` for the full contract.
 	const response: Record<string, unknown> = {
 		status: "in_progress",
-		intent: "Goal contract saved. Use pi-tasks directly: create 4 tasks (Implement / Review / optional Fix / Merge) with TaskCreate, then TaskExecute([Implement.id]) to start the pipeline. GC-2 will add a one-shot workflow_run tool.",
+		intent: "Goal contract saved. Drive via workflow_run (canonical 4-phase pipeline) or, for non-standard DAGs, raw pi-tasks TaskCreate × N + TaskExecute (escape hatch).",
 		validation: {
 			errors: [],
 			warnings: result.warnings,
@@ -271,12 +276,7 @@ export async function executeGoalContractCreate(
 		},
 		summary: summaryForGoal(contract),
 		goal_contract_path: path,
-		next_step:
-			`TaskCreate({ subject: "Implement ${contract.id}", agentType: "Developer", description: "<goal content + implementation brief>", blocks: ["review"] }); ` +
-			`TaskCreate({ subject: "Review ${contract.id}", agentType: "Reviewer", blockedBy: ["implement"], description: "<read goal.yaml + implement output, return CLEAN or NEEDS_WORK>" }); ` +
-			`TaskCreate({ subject: "Fix ${contract.id}", agentType: "Developer", blockedBy: ["review"], description: "<apply Reviewer findings; no-op if CLEAN>" }); ` +
-			`TaskCreate({ subject: "Merge ${contract.id}", agentType: "Merger", blockedBy: ["fix"] }); ` +
-			`TaskExecute(["implement"])`,
+		next_step: `workflow_run({ goal_path: "${path}" })`,
 	};
 	if (params.verbose === true) {
 		response.goal_contract = contract;

@@ -7,7 +7,7 @@ Modifying this file re-syncs on next install.sh run.
 Forked from @tintinweb/pi-subagents/examples/agent-tool-description.md
 (reproduces the default "full" description exactly, then overrides the
 two bullets that push the orchestrator toward foreground-default for
-`Developer` / `Auditor` — see pi-subagents PR #91 / `toolDescriptionMode` (legacy lowercase `developer` is a Phase A alias kept by `resolveKey`'s case-insensitive fallback)
+`Developer` / `Reviewer` — see pi-subagents PR #91 / `toolDescriptionMode` (legacy lowercase `developer` is a Phase A alias kept by `resolveKey`'s case-insensitive fallback)
 in dist/settings.js).
 
 Template variables (rendered by pi-subagents/dist/index.js#renderToolDescriptionTemplate):
@@ -72,7 +72,7 @@ The upstream default frames background as "parallelism". **Sages inverts this fo
 | `Developer`          | **`true` (background)** | TDD RED→GREEN→REFACTOR is 1–10 min, can be steered |
 | `Reviewer` | **`true` (background)** | 5-dim review (correctness / completeness / scope / anti-goal / documentation), parses `verdict: CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION` from the final YAML fence, 30s–3 min, can be steered |
 
-Use `get_subagent_result(agent_id)` to collect when needed, or `steer_subagent(agent_id, "...")` to redirect mid-run. Don't wait synchronously for `Developer`/`Auditor` even if "the next step depends on it" — the notification arrives when the agent completes; the parent context stays free in the meantime. See `pi-orchestrator/skills/orchestrator/SKILL.md` for the full rationale and dispatch examples.
+Use `get_subagent_result(agent_id)` to collect when needed, or `steer_subagent(agent_id, "...")` to redirect mid-run. Don't wait synchronously for `Developer`/`Reviewer` even if "the next step depends on it" — the notification arrives when the agent completes; the parent context stays free in the meantime. See `pi-orchestrator/skills/orchestrator/SKILL.md` for the full rationale and dispatch examples.
 
 ### Orchestration dashboard — use `todowrite`
 
@@ -83,7 +83,7 @@ For any multi-step task (≥ 3 sub-tasks), **the main agent maintains its own `t
 - `pending` = next dispatch, blocked on a dependency
 - `completed` = subagent returned; orchestrator verified the result
 
-Mark each todo's `content` with `[serial]` or `[parallel]` based on dependencies. Dispatch a batch of independent `[parallel]` todos in **one message with multiple `Agent` calls**, each with `run_in_background: true`. Update statuses as results arrive. The todowrite is the dashboard the user (and you) read to see orchestration state. Subagents should also maintain their own todowrite — see `pi-subagents/src/agent-prompts/developer.ts` / `auditor.md` for sub-task planning guidance.
+Mark each todo's `content` with `[serial]` or `[parallel]` based on dependencies. Dispatch a batch of independent `[parallel]` todos in **one message with multiple `Agent` calls**, each with `run_in_background: true`. Update statuses as results arrive. The todowrite is the dashboard the user (and you) read to see orchestration state. Subagents should also maintain their own todowrite — see `pi-subagents/src/agent-prompts/developer.ts` / `reviewer.ts` for sub-task planning guidance.
 
 - Use resume with an agent ID to continue a previous agent's work. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use steer_subagent to send mid-run messages to a running background agent.
@@ -92,7 +92,7 @@ Mark each todo's `content` with `[serial]` or `[parallel]` based on dependencies
 - Use model to specify a different model (as "provider/modelId", or any substring of a registered id). Omit to inherit the parent session's model.
 - Use thinking to control extended thinking level.
 - Use inherit_context if the agent needs the parent conversation history.
-- For Sages code dispatch, pass `isolation: { goal_id, task_id, worktree_id?, mode: "create" | "reuse" }`. The pi-subagents host provisions `<repo>/.pi/worktree/<goal_id>/<worktree>` from `origin/main` on `sages/<goal_id>/<worktree>` before child startup and leases the slot; concurrent reuse is rejected. (Post GC-2026-path-B-field-renames the field is `goal_id`; the historical alias `dag_id` is also accepted.) The main agent coordinates only and MUST NOT run Git worktree provisioning. Result details include path, branch, baseSha, baseRef, head, dirty, and leaseToken. The host never auto-merges or appends a merge command. Reuse and release are explicit; after validation and any requested integration, call the host `AgentManager.releaseManagedWorktree(...)`, with `deleteBranch: true` only when branch deletion is intended. Managed Sages dispatch never falls back to `/tmp`. Subagents must not write `.pi/orchestrator/`.{{scheduleGuideline}}
+- For Sages code dispatch, pass `isolation: { goal_id, task_id, worktree_id?, mode: "create" | "reuse" }`. The pi-subagents host provisions `<repo>/.pi/worktree/<goal_id>/<worktree>` from `origin/main` before child startup and leases the slot; concurrent reuse is rejected. The main agent coordinates only and MUST NOT run Git worktree provisioning. Result details include path, branch, baseSha, baseRef, head, dirty, and leaseToken. The host never auto-merges or appends a merge command. Reuse and release are explicit; after validation and any requested integration, call the host `AgentManager.releaseManagedWorktree(...)`, with `deleteBranch: true` only when branch deletion is intended. Managed Sages dispatch never falls back to `/tmp`. Subagents must not write `.pi/orchestrator/`.{{scheduleGuideline}}
 
 ## Writing the prompt
 

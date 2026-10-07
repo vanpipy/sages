@@ -116,8 +116,9 @@ export const BASELINE_TOOLS: readonly string[] = [
 /**
  * Pi-tasks tools (registered by `@sages/pi-tasks`). Exposed so the LLM
  * can drive the Implement → Review → optional Fix → Merge pipeline
- * directly via TaskCreate / TaskList / TaskExecute / etc. GC-2 will
- * add `workflow_run` as a one-shot pipeline runner on top of this.
+ * directly via TaskCreate / TaskList / TaskExecute / etc. (escape hatch
+ * for non-standard DAG shapes). `workflow_run` is the canonical one-shot
+ * pipeline runner; use it whenever the work fits the 4-phase shape.
  */
 export const PI_TASKS_TOOLS: readonly string[] = [
 	"TaskCreate",

@@ -14,7 +14,7 @@
  *   8. Validation: empty scope.include emits a soft warning
  *   9. executeGoalContractCreate writes a valid yaml file + emits run/goal_created
  *  10. executeGoalContractCreate returns compact summary (no goal_contract unless verbose)
- *  11. next_step directs the LLM to pi-tasks (not dag_synthesize)
+ * 11. next_step directs the LLM to workflow_run (canonical), not dag_synthesize or raw TaskCreate
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -247,12 +247,14 @@ describe("executeGoalContractCreate (GC-2026-orchestrator-simplify)", () => {
 		expect(text.goal_contract).toBeUndefined();
 	});
 
-	it("T-20: next_step directs the LLM to pi-tasks (NOT dag_synthesize)", async () => {
+	it("T-20: next_step directs the LLM to workflow_run (canonical), NOT raw TaskCreate", async () => {
 		const result = await executeGoalContractCreate(BASE_INPUT as any, { cwd });
 		const text = JSON.parse(result.content[0]!.text);
-		expect(text.next_step).toContain("TaskCreate");
-		expect(text.next_step).toContain("TaskExecute");
+		expect(text.next_step).toContain("workflow_run");
+		expect(text.next_step).toContain("goal_path");
 		expect(text.next_step).not.toContain("dag_synthesize");
+		expect(text.next_step).not.toContain("TaskCreate");
+		expect(text.next_step).not.toContain("TaskExecute");
 	});
 
 	it("T-21: verbose=true returns the full goal contract", async () => {

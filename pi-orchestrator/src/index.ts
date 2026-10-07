@@ -47,7 +47,6 @@ export {
 // Helper modules (used by tests + downstream callers)
 export * from "./types.js";
 export * from "./state-persistence.js";
-export * from "./template-loader.js";
 export * from "./goal-lock.js";
 export * from "./chain-key.js";
 export * from "./namespace-ownership.js";
