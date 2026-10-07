@@ -98,16 +98,14 @@ describe("run-controller: DEFAULT_PER_TYPE", () => {
 		expect(DEFAULT_PER_TYPE.Explore).toEqual({ deadlineMs: 30 * 60_000 });
 		expect(DEFAULT_PER_TYPE.Plan).toEqual({ deadlineMs: 30 * 60_000 });
 		expect(DEFAULT_PER_TYPE.PlanCompiler).toEqual({ deadlineMs: 30 * 60_000 });
-		expect(DEFAULT_PER_TYPE.Merger).toEqual({ deadlineMs: 30 * 60_000 });
 	});
 
-	it("has exactly the six expected type keys (PascalCase)", async () => {
+	it("has exactly the five expected type keys (PascalCase)", async () => {
 		const { DEFAULT_PER_TYPE } = await import("../src/run-controller.js");
 		const keys = Object.keys(DEFAULT_PER_TYPE).sort();
 		expect(keys).toEqual([
 			"Developer",
 			"Explore",
-			"Merger",
 			"Plan",
 			"PlanCompiler",
 			"Reviewer",

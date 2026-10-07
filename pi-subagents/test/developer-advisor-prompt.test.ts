@@ -9,7 +9,10 @@
  * (primary missed something / made a wrong call).
  *
  * Hard prohibitions mirror merger-advisor.ts: never edit production
- * code, never run TDD on behalf of primary, never spawn Agent.
+ * code, never run TDD on behalf of primary, never spawn Agent. The
+ * shared advisory contract (read-only posture, single allowed write
+ * target per agent kind) is the architectural pattern DeveloperAdvisor
+ * inherits.
  */
 
 import { describe, expect, it } from "vitest";

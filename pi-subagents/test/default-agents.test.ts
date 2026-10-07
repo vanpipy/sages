@@ -37,13 +37,6 @@ describe("default-agents: roster", () => {
 		expect(DEFAULT_AGENTS.has("Developer")).toBe(true);
 	});
 
-	it("registers the canonical `Merger` agent (GC-2026-prompt-workspace: cross-workspace merge)", () => {
-		// Q4=b: a dedicated `Merger` sub-agent handles cross-workspace
-		// file overlap. The merger is read-only on production code —
-		// it produces merge commits via git plumbing only.
-		expect(DEFAULT_AGENTS.has("Merger")).toBe(true);
-	});
-
 	it("does NOT register `software-developer` (GC-2026-014: legacy alias removed)", () => {
 		// The Phase A alias was dropped in GC-2026-014 along with the
 		// AgentConfig.aliases field. Callers passing the legacy spelling
@@ -104,7 +97,7 @@ describe("default-agents: developer config", () => {
 		// `@cortexkit/aft-pi`'s package manifest). The previous `"aft"` value
 		// never matched `extensionCanonicalNames(extPath)`, which returns
 		// `["dist", "aft-pi"]` for the extension's entry path — so AFT was
-		// silently never loaded into Developer/Reviewer/Merger, and the
+		// silently never loaded into Developer/Reviewer/MergerAdvisor, and the
 		// "FORBIDDEN bash grep" rule had no tool to back it up.
 		const extensions = dev?.extensions;
 		expect(extensions).not.toBe(false);
@@ -141,133 +134,6 @@ describe("default-agents: developer config", () => {
 	});
 });
 
-/**
- * Subagent isolation + per-agent turn-limit invariants.
- *
- * Pinned here so the policy "subagents cannot dispatch further subagents" and
- * the role-specific `maxTurns` budgets are visible in code, not just inferred
- * from prose. The runtime already enforces the Agent-tool ban via
- * `EXCLUDED_TOOL_NAMES` in agent-runner.ts, but the proactive
- * `excludeExtensions: ["pi-subagents"]` is the cleanest expression of the
- * policy and the only one user-defined agents can read at a glance.
- */
-describe("default-agents: merger config (GC-2026-prompt-workspace)", () => {
-	// Q4=b: the merger is a dedicated sub-agent that handles cross-
-	// workspace file overlap. It is read-only on production code —
-	// producing merge commits via `git -C <worktree> merge --no-ff`
-	// (bash + git plumbing) rather than edit/write. The runtime knobs
-	// below pin this contract; the prose in `merger.ts` is the
-	// matching half.
-	const merger = DEFAULT_AGENTS.get("Merger");
-
-	it("is registered with isDefault: true", () => {
-		expect(merger?.isDefault).toBe(true);
-	});
-
-	it("has displayName 'Merger' and description referencing cross-workspace merge", () => {
-		expect(merger?.displayName).toBe("Merger");
-		const desc = merger?.description.toLowerCase() ?? "";
-		expect(desc, "must mention merge").toContain("merge");
-		expect(desc, "must mention cross-workspace").toMatch(/cross[- ]?workspace/);
-	});
-
-	it("uses promptMode: 'replace' (matches all other defaults)", () => {
-		expect(merger?.promptMode).toBe("replace");
-	});
-
-	it("carries the canonical system prompt (non-empty, references the three classifications)", () => {
-		expect(typeof merger?.systemPrompt).toBe("string");
-		expect(merger?.systemPrompt.length).toBeGreaterThan(0);
-		// The three classifications are the load-bearing taxonomy.
-		expect(merger?.systemPrompt).toContain("clean");
-		expect(merger?.systemPrompt).toContain("disjoint-hunk");
-		expect(merger?.systemPrompt).toContain("hunk-conflict");
-		// And the canonical §Cross-workspace merging header is the
-		// cross-file consistency anchor (see merger-prompt.test.ts).
-		expect(merger?.systemPrompt).toMatch(/^##\s+.*Cross-workspace merging.*$/m);
-	});
-
-	it("builtinToolNames does NOT include `edit` or `write` (read-only on production code)", () => {
-		// The merger produces commits via git plumbing only. edit/write
-		// are stripped from the tool list at the registry layer so
-		// even a prompt drift cannot let the merger modify production
-		// code directly.
-		const tools = new Set(merger?.builtinToolNames ?? []);
-		expect(
-			tools.has("edit"),
-			"merger must NOT have the edit tool (read-only on production code)",
-		).toBe(false);
-		expect(
-			tools.has("write"),
-			"merger must NOT have the write tool (read-only on production code)",
-		).toBe(false);
-		// Read-only surface: read, bash, grep, find, ls.
-		for (const t of ["read", "bash", "grep", "find", "ls"]) {
-			expect(tools.has(t), `merger must include tool ${t}`).toBe(true);
-		}
-	});
-
-	it("carries the required extensions: aft-pi, pi-mcp-adapter", () => {
-		// Symmetric with developer / reviewer: the merger reaches for
-		// the same indexed semantic tools so it can read both diffs
-		// and classify overlap without shell grep.
-		//
-		// GC-2026-prompt-parser-contract-cleanup: use the canonical
-		// `aft-pi` name (see the matching Developer-config test).
-		const extensions = merger?.extensions;
-		expect(extensions).not.toBe(false);
-		const list =
-			extensions === true || extensions === undefined ? null : extensions;
-		expect(list, "merger must pin extensions to a list").not.toBeNull();
-		expect(list).toContain("aft-pi");
-		expect(list).toContain("pi-mcp-adapter");
-		expect(list).not.toContain("aft");
-		expect(list).not.toContain("pi-magic-context");
-	});
-
-	it("disables skills (false) — merger is a deterministic tool, no project conventions", () => {
-		expect(merger?.skills).toBe(false);
-	});
-
-	it("runInBackground = true (merger is dispatched as background)", () => {
-		// Merge classification + git plumbing + typecheck + lint + test
-		// run for 30s–3min. Symmetric with developer / auditor.
-		expect(merger?.runInBackground).toBe(true);
-	});
-
-	it("inheritContext = false — main agent must send a self-contained merge brief", () => {
-		// The merger is a deterministic tool. It must NOT fork the
-		// parent's chat history; the brief carries the workspace-A +
-		// workspace-B branches, SC ids, and worktree paths explicitly.
-		expect(merger?.inheritContext).toBe(false);
-	});
-
-	it("GC-2026-subagent-time-only-limits: merger no longer sets maxTurns (lifecycle limit removed)", () => {
-		// GC-2026-subagent-time-only-limits removed the maxTurns field
-		// from AgentConfig. The merger (and every other default agent)
-		// has no per-agent turn budget — the wall-clock deadline is the
-		// only lifecycle limit (30–120 min envelope, applied via the
-		// run controller + DEFAULT_PER_TYPE.Developer fallback).
-		expect(merger?.maxTurns).toBeUndefined();
-	});
-
-	it("does NOT carry an isolation policy — merger uses no worktree, operates against supplied worktree paths", () => {
-		// The merger is dispatched from inside the orchestrator's
-		// context; the brief carries the worktree paths. No
-		// managed-worktree object on the merger config itself.
-		expect(merger?.isolation).toBeUndefined();
-	});
-
-	it("excludes pi-subagents from its extension set (no recursive Agent dispatch)", () => {
-		// Symmetric with the other defaults: the merger must not load
-		// the Agent tool and recursively spawn subagents.
-		const excludes = merger?.excludeExtensions ?? [];
-		expect(
-			excludes.map((s) => s.toLowerCase()),
-			`merger.excludeExtensions must include "pi-subagents"`,
-		).toContain("pi-subagents");
-	});
-});
 describe("default-agents: subagent isolation", () => {
 	// Every default agent must carry `excludeExtensions: ["pi-subagents"]` so
 	// the Agent tool / get_subagent_result / steer_subagent never load. The
@@ -279,7 +145,6 @@ describe("default-agents: subagent isolation", () => {
 		"Plan",
 		"Developer",
 		"Reviewer",
-		"Merger",
 		"MergerAdvisor",
 		"Fix",
 	] as const) {
@@ -325,11 +190,13 @@ describe("default-agents: MergerAdvisor (workflow_run Merge phase advisor)", () 
 		expect(advisor?.description).toContain("merge-recommendation.md");
 	});
 
-	it("uses MERGER_ADVISOR_PROMPT (not the DAG-synthesis MERGER_PROMPT)", () => {
+	it("uses MERGER_ADVISOR_PROMPT (the workflow_run advisory merge prompt)", () => {
 		const advisor = DEFAULT_AGENTS.get("MergerAdvisor");
 		expect(advisor?.systemPrompt).toContain("Merger (Advisor)");
-		// Distinct from MERGER_PROMPT which starts with "Merger, a
-		// deterministic cross-workspace merge agent".
+		// Distinct from the legacy DAG-synthesis MERGER_PROMPT which
+		// started with "Merger, a deterministic cross-workspace merge
+		// agent". After GC-2026-merger-retirement, only MergerAdvisor
+		// exists — the legacy prompt is gone.
 		expect(advisor?.systemPrompt).not.toContain("deterministic cross-workspace");
 	});
 });

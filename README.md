@@ -6,7 +6,7 @@ Three-layer multi-agent workflow system for [pi](https://pi.dev):
 |---|---|---|
 | **Planning** | `pi-orchestrator` | Declare intent (`goal_contract_create`); run pipeline (`workflow_run`); control subagents in-flight |
 | **Tracking** | `pi-tasks` | Hold the task graph; spawn agents per cascade; emit `workflow:phase-complete` events |
-| **Executing** | `pi-subagents` | One agent = one task. 5 default types: `Explore`, `PlanCompiler`, `Developer`, `Reviewer`, `Merger` |
+| **Executing** | `pi-subagents` | One agent = one task. 11 default types covering search, plan, code, review, fix, merge, advisors |
 
 After GC-2026-orchestrator-simplify the orchestrator lost the four
 `dag_synthesize` / `task_dispatch` / `orchestrator_audit` /
@@ -27,9 +27,9 @@ pi-tasks (subscribeWorkflow):
         ├─ wire blockedBy edges with real IDs
         └─ taskExecute([implement_id])             (cascade begins)
                 ↓
-pi-subagents (5 default agents, one per task):
-        Implement (Developer) → Review_1 (Reviewer) → Fix_1 (Developer) →
-        Review_2 (Reviewer) → Fix_2 (Developer) → Review_3 (Reviewer) → Merge (Merger)
+pi-subagents (one agent per task):
+        Implement (Developer) → Review_1 (Reviewer) → Fix_1 (Fix) →
+        Review_2 (Reviewer) → Fix_2 (Fix) → Review_3 (Reviewer) → Merge (MergerAdvisor)
                 ↓
 pi-tasks subscribes to subagents:completed:
         ├─ mark task completed + parseReviewerVerdict (review tasks only)
@@ -66,10 +66,8 @@ curl -fsSL https://raw.githubusercontent.com/vanpipy/sages/main/pi-orchestrator/
 The agent guides the work through `goal_contract_create` then either
 `workflow_run(goal_path)` (canonical 4-phase pipeline: Implement → Review ⇆ Fix → Merge) or
 `TaskCreate × N` + `TaskExecute([first_id])` (escape hatch for
-non-standard shapes). Example goal contracts live in
-`pi-orchestrator/skills/orchestrator/templates/goals/` (note: legacy
-templates referencing the deleted DAG tools still exist there; the
-schema is `done_definition`, not `success_criteria`).
+non-standard shapes). The goal contract schema is `done_definition`
+(not the deleted `success_criteria`).
 
 ## Repository layout
 
@@ -77,7 +75,7 @@ schema is `done_definition`, not `success_criteria`).
 |---|---|
 | `pi-orchestrator/` | Planning layer: `goal_contract_create` + `workflow_run` + 4 subagent-control tools; orchestrator advisory; session hooks (`session_start` `setActiveTools`, `before_agent_start` prompt overlay, `tool_call` soft-mode reminder) |
 | `pi-tasks/` | Tracking layer: TaskStore + TaskCreate/List/Get/Update/Output/Stop/Execute; static workflow graph + cascade + `subscribeWorkflow` |
-| `pi-subagents/` | Executing layer: agent lifecycle (5 default types), managed worktrees, background execution, result collection, `AgentManager` singleton |
+| `pi-subagents/` | Executing layer: agent lifecycle (11 default types), managed worktrees, background execution, result collection, `AgentManager` singleton |
 | `pi-codebase-memory/` | Code knowledge graph MCP server |
 | `pi-evaluator/` | Evaluation metrics for cost, security, and text quality (currently path-A-shaped — see GC-2026-evaluator-path-B follow-up) |
 
@@ -92,8 +90,10 @@ schema is `done_definition`, not `success_criteria`).
 
 | Role | May write |
 |---|---|
-| `Developer` | `task-{task_id}-report.md`, `handoff/{workspace_id}/{task_id}-handoff.md` |
-| `Reviewer` | `last-review-{goal_id}.md` |
+| `Developer` / `Fix` | `task-{task_id}-report.md`, `handoff/{workspace_id}/{task_id}-handoff.md` |
+| `Reviewer` | `last-review-{goal_id}.md`, `verdict-{task_id}.md` |
+| `MergerAdvisor` | `merge-recommendation.md` |
+| `*Advisor` | `<phase>-advisor-{task_id}.md` |
 | Orchestrator | `goal-{id}.yaml`, `workflow-{goal_id}.yaml`, `audit-state-{id}.yaml` |
 
 Cross-namespace overwrites prohibited. `Explore` and `PlanCompiler` are read-only.

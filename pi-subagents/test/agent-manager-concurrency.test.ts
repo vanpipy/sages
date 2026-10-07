@@ -2,8 +2,10 @@
  * Per-type background concurrency — AgentManager.
  *
  * The Sages-wide policy (set in default-agents.ts and propagated here):
- *   - Developer: 2, Reviewer: 2, Explore: 4, Plan: 2, Merger: 1
+ *   - Developer: 2, Reviewer: 2, Explore: 4, Plan: 2
  *   - Global ceiling: 6 (max_concurrent in settings).
+ *   - After GC-2026-merger-retirement, the Merger policy is gone — the
+ *     cross-workspace DAG-synthesis merger no longer exists.
  *
  * These tests pin the resolution order at spawn time:
  *   AgentConfig.maxConcurrent → settings.maxConcurrentByType[type] → global

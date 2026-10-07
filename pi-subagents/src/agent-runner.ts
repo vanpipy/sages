@@ -1062,16 +1062,15 @@ export async function runAgent(
 	let turnCount = 0;
 	let aborted = false;
 
-	// GC-2026-022: per-run budget tracker. The four built-in types each
+	// GC-2026-022: per-run budget tracker. The three built-in types each
 	// have a tuned default; custom (user-defined) types fall back to the
 	// developer budget. The tracker writes its own handoff on snapshot
 	// / partial / final events; the rich handoff overwrite is the
 	// orchestrator's job (it knows the gc_id, task_id, and any SC state).
-	const agentTypeForBudget: "developer" | "reviewer" | "explorer" | "merger" =
+	const agentTypeForBudget: "developer" | "reviewer" | "explorer" =
 		type === "developer" ||
 		type === "reviewer" ||
-		type === "explorer" ||
-		type === "merger"
+		type === "explorer"
 			? type
 			: "developer";
 	const budgetTracker = new BudgetTracker(

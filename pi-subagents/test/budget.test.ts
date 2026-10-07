@@ -3,7 +3,8 @@
  *
  * Pinned invariants (goal-GC-2026-022.yaml SC2 + SC4):
  *   - `defaultBudgets` has the expected entries: developer=60t/20m/15,
- *     auditor=30t/10m/10, explorer=20t/5m/7, merger=20t/5m/7.
+ *     reviewer=30t/10m/10, explorer=20t/5m/7. (After GC-2026-merger-retirement
+ *     the cross-workspace merger budget entry is gone.)
  *   - `loadBudgetFromEnv('developer')` honors `SAGES_PI_AGENT_DEVELOPER_BUDGET_TURNS`
  *     over the generic `SAGES_PI_AGENT_BUDGET_TURNS`, and falls back to
  *     `defaultBudgets.developer` when neither is set.
@@ -69,9 +70,6 @@ describe("budget: defaults + env override", () => {
 		expect(defaultBudgets.explorer.maxTurns).toBe(20);
 		expect(defaultBudgets.explorer.maxMs).toBe(5 * 60_000);
 		expect(defaultBudgets.explorer.snapshotEveryTurns).toBe(7);
-		expect(defaultBudgets.merger.maxTurns).toBe(20);
-		expect(defaultBudgets.merger.maxMs).toBe(5 * 60_000);
-		expect(defaultBudgets.merger.snapshotEveryTurns).toBe(7);
 	});
 
 	it("loadBudgetFromEnv('developer') honors per-type env override over generic", () => {
@@ -90,22 +88,20 @@ describe("budget: defaults + env override", () => {
 
 describe("budget: canonical agent type -> budget type bridge (GC-2026-091)", () => {
 	// The registry canonical names are PascalCase (`Developer`, `Reviewer`,
-	// `Explore`, `Merger`); the budget table keys stay lowercase and use
-	// `explorer` for the exploration agent. The bridge maps between them so
-	// a PascalCase dispatch does not silently fall back to the developer
+	// `Explore`); the budget table keys stay lowercase and use `explorer`
+	// for the exploration agent. The bridge maps between them so a
+	// PascalCase dispatch does not silently fall back to the developer
 	// budget.
 	it("maps PascalCase canonical names onto the lowercase budget keys", () => {
 		expect(budgetTypeFor("Developer")).toBe("developer");
 		expect(budgetTypeFor("Reviewer")).toBe("reviewer");
 		expect(budgetTypeFor("Explore")).toBe("explorer");
-		expect(budgetTypeFor("Merger")).toBe("merger");
 	});
 
 	it("still accepts the legacy lowercase spellings", () => {
 		expect(budgetTypeFor("developer")).toBe("developer");
 		expect(budgetTypeFor("auditor")).toBe("reviewer");
 		expect(budgetTypeFor("explorer")).toBe("explorer");
-		expect(budgetTypeFor("merger")).toBe("merger");
 	});
 
 	it("falls back to the developer budget for unknown / custom types", () => {

@@ -1,6 +1,6 @@
 {
-  "_source_hash": "81451ab00d96bb43345f5a729a212a50538b59c7f669311d0d562b0301669a7f",
-  "_generated_at": "2026-10-06T02:53:08.199Z",
+  "_source_hash": "18612518db40ba9486e711b301a4f8bfd5daaa644d40a156622429c293a35eaa",
+  "_generated_at": "2026-10-07T17:07:09.044Z",
   "_source_files": [
     "../pi-subagents/src/default-agents.ts"
   ],
@@ -27,11 +27,6 @@
     },
     {
       "id": "FixAdvisor",
-      "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
-      "run_in_background_default": true
-    },
-    {
-      "id": "Merger",
       "source": "@sages/pi-subagents#KNOWN_SUBAGENT_IDS",
       "run_in_background_default": true
     },

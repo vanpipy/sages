@@ -140,18 +140,22 @@ After GC-2026-orchestrator-simplify the workflow is:
 
 1. **Goal:** call `goal_contract_create` to declare intent (title /
    rationale / scope / anti_goals / done_definition + `_lock_hash`).
-2. **Pipeline:** use pi-tasks to build the 4-node task graph:
+2. **Pipeline:** prefer `workflow_run(goal_path)` (canonical 4-phase
+   pipeline: Implement → Review ⇆ Fix → Merge). For non-standard
+   DAG shapes, build the task graph directly:
    - `TaskCreate({ subject: "Implement", agentType: "Developer", blocks: ["Review"] })`
    - `TaskCreate({ subject: "Review", agentType: "Reviewer", blockedBy: ["Implement"], blocks: ["Fix", "Merge"] })`
-   - `TaskCreate({ subject: "Fix", agentType: "Developer", blockedBy: ["Review"] })`
-   - `TaskCreate({ subject: "Merge", agentType: "Merger", blockedBy: ["Fix"] })`
-3. **Execute:** call `TaskExecute(["implement"])` — pi-tasks
+   - `TaskCreate({ subject: "Fix", agentType: "Fix", blockedBy: ["Review"] })`
+   - `TaskCreate({ subject: "Merge", agentType: "MergerAdvisor", blockedBy: ["Fix"] })`
+3. **Execute:** `workflow_run` auto-cascades through every phase.
+   For raw DAG, call `TaskExecute(["implement"])` — pi-tasks
    auto-cascade handles Implement → Review → optional Fix → Merge.
 4. **Review:** the Reviewer agent reads `goal-{id}.yaml` directly +
-   Implement's task report and emits CLEAN / NEEDS_WORK. Fix is a
-   no-op when CLEAN. The Fix → Review loop is bounded by
-   `max_fix_iterations` (the now-implemented `workflow_run` tool,
-   GC-2026-workflow-run).
+   Implement's task report and emits CLEAN / NEEDS_WORK / NEEDS_REDESIGN
+   / NEEDS_CLARIFICATION. The Fix → Review loop is bounded by
+   `max_fix_iterations`; the cascade dispatches Fix on NEEDS_WORK,
+   a new Implement on NEEDS_REDESIGN, and pauses on
+   NEEDS_CLARIFICATION.
 
 State persists in `.pi/orchestrator/audit-state-{goal_id}.yaml` so work
 can resume after context compaction.

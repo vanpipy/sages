@@ -246,8 +246,8 @@ describe("developer-prompt: workspace + HANDOFF invariants (GC-2026-prompt-works
 	// on exit — must be encoded in the developer prompt with MUST
 	// language; skipping the read is an automatic audit failure.
 	//
-	// The canonical text is shared verbatim with `merger.ts` so the two
-	// prompts cannot drift apart. The prose is allowed to evolve; the
+	// The canonical text is shared verbatim with `_fix.ts` via
+	// WORKSPACE_PROTOCOL_SECTION. The prose is allowed to evolve; the
 	// invariants below are not.
 
 	it("declares a 'Workspace Context' section header", () => {
@@ -364,8 +364,9 @@ describe("developer-prompt: 3-template HANDOFF + minimal-change discipline (GC-2
 	//      rule #4 ("no drive-by refactoring") concrete instruments.
 	//
 	// The canonical Handoff-protocol block is shared verbatim with
-	// `merger.ts`; these invariants are the drift guard for the developer
-	// half. The prose may evolve; the template names may not.
+	// `_fix.ts` via WORKSPACE_PROTOCOL_SECTION; these invariants are
+	// the drift guard for the developer half. The prose may evolve; the
+	// template names may not.
 
 	function handoffProtocolIndex(): number {
 		return DEVELOPER_PROMPT.match(/^##\s+Handoff protocol.*$/m)?.index ?? -1;
@@ -380,7 +381,7 @@ describe("developer-prompt: 3-template HANDOFF + minimal-change discipline (GC-2
 	it("places the three templates inside the Handoff protocol section", () => {
 		// Anti-drift: the templates are the *body* of the handoff protocol,
 		// not a free-floating appendix. They must appear after the section
-		// heading so the merger's byte-identical copy stays coherent.
+		// heading so the Fix prompt's byte-identical copy stays coherent.
 		const protoIdx = handoffProtocolIndex();
 		expect(
 			protoIdx,

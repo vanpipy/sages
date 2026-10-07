@@ -73,26 +73,30 @@ describe("shared orchestrator state persistence", () => {
 });
 
 describe(".pi/orchestrator namespace ownership", () => {
-  it("classifies orchestrator, developer, and auditor namespaces", () => {
+  it("classifies orchestrator, developer, and reviewer namespaces", () => {
     expect(classifyOrchestratorNamespace("goal-GC-test.yaml")).toBe("orchestrator");
     expect(classifyOrchestratorNamespace("audit-state-test.yaml")).toBe("orchestrator");
     expect(classifyOrchestratorNamespace("task-P1-report.md")).toBe("developer");
     expect(classifyOrchestratorNamespace("handoff/W1/P1-handoff.md")).toBe("developer");
-    expect(classifyOrchestratorNamespace("audit-GC-1-P1.md")).toBe("auditor");
+    expect(classifyOrchestratorNamespace("verdict-P1.md")).toBe("reviewer");
+    expect(classifyOrchestratorNamespace("last-review-GC-test.md")).toBe("reviewer");
   });
 
   it("rejects cross-namespace overwrite attempts and unowned names", () => {
     expect(() => assertOrchestratorNamespaceOwner("task-P1-report.md", "orchestrator")).toThrow(/owned by developer/i);
-    expect(() => assertOrchestratorNamespaceOwner("audit-GC-1-P1.md", "developer")).toThrow(/owned by auditor/i);
-    expect(() => assertOrchestratorNamespaceOwner("goal-GC-test.yaml", "auditor")).toThrow(/owned by orchestrator/i);
+    expect(() => assertOrchestratorNamespaceOwner("verdict-P1.md", "developer")).toThrow(/owned by reviewer/i);
+    expect(() => assertOrchestratorNamespaceOwner("goal-GC-test.yaml", "reviewer")).toThrow(/owned by orchestrator/i);
     expect(() => assertOrchestratorNamespaceOwner("misc.txt", "developer")).toThrow(/unowned/i);
   });
 
-  it("dag-*.yaml and todo-*.yaml are no longer owned (deleted tool surface)", () => {
+  it("dag-*.yaml, todo-*.yaml, audit-*.md are no longer owned (deleted tool surface)", () => {
     // After GC-2026-orchestrator-simplify neither DAG yaml nor todowrite
     // yaml is part of the orchestrator namespace — they were owned by
     // DAG / todowrite tools that no longer exist.
+    // After Merger retirement, audit-{id}-{task_id}.md is no longer
+    // written by any agent (the cross-workspace Merger prompt is gone).
     expect(classifyOrchestratorNamespace("dag-DAG-test.yaml")).toBeNull();
     expect(classifyOrchestratorNamespace("todo-DAG-test.yaml")).toBeNull();
+    expect(classifyOrchestratorNamespace("audit-GC-1-P1.md")).toBeNull();
   });
 });

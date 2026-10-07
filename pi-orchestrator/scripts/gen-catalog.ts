@@ -163,9 +163,9 @@ function extractSubagent(): {
 //
 // GC-2026-orchestrator-simplify: orchestrator_audit.ts (and the
 // GaoYao 5-phase vocabulary — ink / nose / foot / castration / death)
-// is gone. Reviewer agent (Auditor) emits a CLEAN / NEEDS_WORK verdict
-// directly without a 5-phase taxonomy. The gate.json catalog is gone
-// with it.
+// is gone. Reviewer emits a 4-state verdict (CLEAN / NEEDS_WORK /
+// NEEDS_REDESIGN / NEEDS_CLARIFICATION) directly without a 5-phase
+// taxonomy. The gate.json catalog is gone with it.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // GC-2026-050 T4.2: the event taxonomy now lives in
@@ -232,14 +232,14 @@ function extractEvent(): {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface NamespaceEntry {
-	id: "orchestrator" | "developer" | "auditor";
+	id: "orchestrator" | "developer" | "reviewer";
 	patterns: string[];
 }
 
 function extractNamespace(): { entries: NamespaceEntry[]; sources: SourceFile[] } {
 	const ns = loadSource("src/namespace-ownership.ts");
 
-	// Parse the three pattern constants: ORCHESTRATOR_PATTERNS, DEVELOPER_PATTERNS, AUDITOR_PATTERNS.
+	// Parse the three pattern constants: ORCHESTRATOR_PATTERNS, DEVELOPER_PATTERNS, REVIEWER_PATTERNS.
 	function parsePatterns(constName: string): string[] {
 		// Match the array body between `[` and the first `]`. We capture
 		// everything between them (non-greedy). The trailing `;` is required
@@ -268,12 +268,12 @@ function extractNamespace(): { entries: NamespaceEntry[]; sources: SourceFile[] 
 
 	const orchestrator = parsePatterns("ORCHESTRATOR_PATTERNS");
 	const dev = parsePatterns("DEVELOPER_PATTERNS");
-	const aud = parsePatterns("AUDITOR_PATTERNS");
+	const reviewer = parsePatterns("REVIEWER_PATTERNS");
 
 	const entries: NamespaceEntry[] = [
 		{ id: "orchestrator", patterns: orchestrator },
 		{ id: "developer", patterns: dev },
-		{ id: "auditor", patterns: aud },
+		{ id: "reviewer", patterns: reviewer },
 	];
 
 	return { entries, sources: [ns] };

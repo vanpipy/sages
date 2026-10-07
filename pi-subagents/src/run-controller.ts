@@ -106,16 +106,20 @@ export function renderBashTimeoutSection(): string {
 
 /**
  * Agent type — open for custom types, but we only ship defaults for the
- * five built-ins. The `(string & {})` tail lets the registry accept
+ * four built-ins. The `(string & {})` tail lets the registry accept
  * case-insensitive lookups (see `agent-types.resolveType`) while still
  * giving callers autocomplete on the canonical PascalCase names.
  *
  * GC-2026-091: canonical names are PascalCase to match the
  * `default-agents.ts` registry. The previous lowercase names
- * (`developer`/`reviewer`/`explorer`/`merger`) were never consistent
+ * (`developer`/`reviewer`/`explorer`) were never consistent
  * with the registry keys (which were always `Explore`/`Plan` plus
- * `developer`/`reviewer`/`merger`); the rename fixes the
+ * `developer`/`reviewer`); the rename fixes the
  * `explorer` ≠ `Explore` mismatch and adds the missing `Plan` entry.
+ *
+ * GC-2026-merger-retirement: `Merger` removed — the legacy cross-workspace
+ * DAG-synthesis merge agent is gone. MergerAdvisor handles workflow_run's
+ * single-workspace advisory merge.
  */
 export type AgentType =
 	| "Developer"
@@ -123,7 +127,6 @@ export type AgentType =
 	| "Explore"
 	| "Plan"
 	| "PlanCompiler"
-	| "Merger"
 	| (string & {});
 
 export interface PerTypeDefaults {
@@ -142,6 +145,8 @@ export interface PerTypeDefaults {
  * and the registry. `Plan` was missing before (its 5min budget was
  * inherited via the `settings.resolveDeadlineMs` legacy
  * capitalized-name path); it is now a first-class member.
+ *
+ * GC-2026-merger-retirement: `Merger` removed.
  */
 export const DEFAULT_PER_TYPE: Record<AgentType, PerTypeDefaults> = {
 	Developer: { deadlineMs: 30 * 60_000 },
@@ -149,7 +154,6 @@ export const DEFAULT_PER_TYPE: Record<AgentType, PerTypeDefaults> = {
 	Explore: { deadlineMs: 30 * 60_000 },
 	Plan: { deadlineMs: 30 * 60_000 },
 	PlanCompiler: { deadlineMs: 30 * 60_000 },
-	Merger: { deadlineMs: 30 * 60_000 },
 };
 // Note: the Developer defaults also serve as the floor for unknown types.
 

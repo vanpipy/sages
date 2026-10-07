@@ -9,7 +9,6 @@ import { DEVELOPER_PROMPT } from "./agent-prompts/developer.js";
 import { MERGER_ADVISOR_PROMPT } from "./agent-prompts/merger-advisor.js";
 import { DEVELOPER_FIX_PROMPT } from "./agent-prompts/_fix.js";
 import { EXPLORE_PROMPT } from "./agent-prompts/explore.js";
-import { MERGER_PROMPT } from "./agent-prompts/merger.js";
 import { DEVELOPER_ADVISOR_PROMPT } from "./agent-prompts/developer-advisor.js";
 import { REVIEWER_ADVISOR_PROMPT } from "./agent-prompts/reviewer-advisor.js";
 import { FIX_ADVISOR_PROMPT } from "./agent-prompts/fix-advisor.js";
@@ -21,11 +20,12 @@ import type { AgentConfig } from "./types.js";
  * Mirrors the seven built-ins `pi-coding-agent` exposes
  * (`createCodingTools` ∪ `createReadOnlyTools`).
  *
- * The canonical `auditor` agent shares this set: \`edit\` / \`write\` are
- * available for the auditor's single allowed write target
- * (\`.pi/orchestrator/audit-{task_id}.md\`), and \`read\` / \`bash\` /
+ * The canonical `reviewer` agent shares this set: \`edit\` / \`write\` are
+ * available for the reviewer's durable verdict file writes
+ * (\`.pi/orchestrator/verdict-{task_id}.md\`,
+ * \`.pi/orchestrator/last-review-{goal_id}.md\`), and \`read\` / \`bash\` /
  * \`grep\` / \`find\` / \`ls\` carry the verify-only re-run loop. The
- * auditor prompt itself enforces "no production edits" — the tools are
+ * reviewer prompt itself enforces "no production edits" — the tools are
  * present, the policy is the prompt's job.
  */
 const DEVELOPER_BUILTIN_TOOLS: readonly string[] = [
@@ -43,8 +43,8 @@ const DEVELOPER_BUILTIN_TOOLS: readonly string[] = [
  *
  * Built-in to pi-subagents as of DAG-2026-011. The legacy Sages name
  * `software-developer` (and the alias-resolution machinery that
- * accepted it) was removed in GC-2026-014 — callers must use the
- * canonical `developer` spelling now.
+ * accepted it) was removed in GC-2026-014; canonical names are
+ * PascalCase (Developer / Reviewer / Fix / Merger / MergerAdvisor).
  */
 const DEVELOPER_AGENT: AgentConfig = {
 	name: "Developer",
@@ -76,34 +76,36 @@ const DEVELOPER_AGENT: AgentConfig = {
 };
 
 /**
- * Canonical `auditor` agent.
+ * Canonical `reviewer` agent.
  *
- * Built-in to pi-subagents as of DAG-2026-011 (Phase B). The legacy
- * Sages name `software-auditor` (and the alias-resolution machinery
- * that accepted it) was removed in GC-2026-014 — callers must use the
- * canonical `auditor` spelling now.
+ * GC-2026-rename-auditor: the role was renamed from `auditor` to
+ * `reviewer` after GC-2026-orchestrator-simplify deleted the DAG
+ * workflow (the old "SC verification" semantic no longer applied). The
+ * 5-dim review (correctness / completeness / scope / anti-goal /
+ * documentation) replaces the deleted `verification_cmd` mechanism.
  *
  * Symmetry with `developer`:
  *   - same built-in tool set (7 tools, including \`edit\`/\`write\` for
- *     the auditor's single allowed write target)
+ *     the reviewer's durable verdict file writes)
  *   - same \`extensions: [aft, pi-mcp-adapter]\` so the
- *     auditor reaches for the same indexed semantic tools as the
+ *     reviewer reaches for the same indexed semantic tools as the
  *     developer
  *   - same \`excludeExtensions: ["pi-subagents"]\` belt-and-suspenders
  *     guard against recursive Agent dispatch
  *
- * Audit-specific:
- *   - \`runInBackground: true\` — full audits re-run every verification
+ * Reviewer-specific:
+ *   - \`runInBackground: true\` — reviews re-run every verification
  *     command (30s–3 min) and must not block the orchestrator
  *   - Wall-clock deadline (30 min default, 120 min max) is the only
  *     lifecycle limit; GC-2026-subagent-time-only-limits removed the
  *     previous maxTurns budget
- *   - \`skills: false\` — no project conventions; the auditor re-derives
- *     them at audit time per the First Action Protocol
+ *   - \`skills: false\` — no project conventions; the reviewer re-derives
+ *     them at review time per the First Action Protocol
  *
  * No managed-worktree policy: \`enforceDeveloperManagedIsolationPolicy\`
- * is `developer`-only. The auditor is read-only on the developer's
- * worktree and writes only to \`.pi/orchestrator/audit-{task_id}.md\`.
+ * is `developer`-only. The reviewer is read-only on the developer's
+ * worktree and writes only to \`.pi/orchestrator/verdict-{task_id}.md\`
+ * and \`.pi/orchestrator/last-review-{goal_id}.md\`.
  */
 const REVIEWER_AGENT: AgentConfig = {
 	name: "Reviewer",
@@ -115,7 +117,7 @@ const REVIEWER_AGENT: AgentConfig = {
 		"proof is provided.",
 	builtinToolNames: [...DEVELOPER_BUILTIN_TOOLS],
 	extensions: ["aft-pi", "pi-mcp-adapter"],
-	// Symmetric with `developer`: the auditor is read-only on production
+	// Symmetric with `developer`: the reviewer is read-only on production
 	// code by policy, but the Agent tool cannot load here regardless.
 	excludeExtensions: ["pi-subagents"],
 	skills: false,
@@ -136,78 +138,6 @@ const REVIEWER_AGENT: AgentConfig = {
 };
 
 const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
-
-/**
- * Canonical `merger` agent.
- *
- * Built-in to pi-subagents as the cross-workspace merge helper. The
- * merger sub-agent handles cross-workspace file overlap detected at
- * DAG synthesis: it reads both workspaces' HANDOFF.md + diffs,
- * classifies the overlap (clean / disjoint-hunk / hunk-conflict),
- * produces a merge commit via git plumbing when feasible, and
- * verifies the merged result with typecheck + lint + the merged
- * test suite. Hunk-conflicts escalate; they are NOT auto-resolved.
- *
- * (Originally authored under the goal-id `GC-2026-prompt-workspace`
- * — on the merger prompt + Workspace/HANDOFF refactor; see commit
- * `386bdb3 feat(default-agents): register merger sub-agent`.)
- *
- * Read-only on production code: `builtinToolNames` is `READ_ONLY_TOOLS`
- * (no `edit`, no `write`). Merges happen via `git -C <worktree> merge
- * --no-ff` from inside bash; the merger never edits a file directly.
- *
- * Symmetry with `developer` / `auditor`:
- *   - same extensions (`aft`, `pi-mcp-adapter`, `pi-magic-context`) so
- *     the merger reaches for the same indexed semantic tools to read
- *     both diffs and classify overlap
- *   - same `excludeExtensions: ["pi-subagents"]` belt-and-suspenders
- *     guard against recursive Agent dispatch
- *
- * Merger-specific:
- *   - `runInBackground: true` — cross-workspace verification runs
- *     typecheck + lint + test (30s–3min); must not block the
- *     orchestrator
- *   - Wall-clock deadline (30 min default, 120 min max) is the only
- *     lifecycle limit; GC-2026-subagent-time-only-limits removed the
- *     previous maxTurns: 80 budget
- *   - `inheritContext: false` — the merger is a deterministic tool; it
- *     must NOT fork the parent's chat history. The brief carries the
- *     workspace-A + workspace-B branches, SC ids, and worktree paths
- *     explicitly.
- *   - `skills: false` — no project conventions; the merger is dispatched
- *     with full input from the orchestrator's brief.
- *   - No `isolation` policy — the merger is dispatched from inside the
- *     orchestrator's context; the brief carries the worktree paths.
- */
-const MERGER_AGENT: AgentConfig = {
-	name: "merger",
-	displayName: "Merger",
-	description:
-		"Cross-workspace merge agent — reads both workspaces' HANDOFF.md + diffs, " +
-		"classifies file overlap as clean / disjoint-hunk / hunk-conflict, " +
-		"produces a merge commit via git plumbing when feasible, and verifies the " +
-		"merged result with typecheck + lint + the merged test suite. Read-only on " +
-		"production code (no edit / write tools); hunk-conflicts escalate.",
-	builtinToolNames: READ_ONLY_TOOLS,
-	extensions: ["aft-pi", "pi-mcp-adapter"],
-	excludeExtensions: ["pi-subagents"],
-	skills: false,
-	systemPrompt: MERGER_PROMPT,
-	promptMode: "replace",
-	isDefault: true,
-	runInBackground: true,
-	// Narrower than developer/auditor: read diffs, classify, produce one
-	// merge commit or escalate. Going over 80 turns means the brief was
-	// wrong, not that the merger needs more budget.
-	// Per-type concurrency cap: 1 — the merger is stateful (HANDOFF.md +
-	// worktree pairing) and concurrent merge attempts on overlapping
-	// workspaces would race. Single-flight.
-	maxConcurrent: 1,
-	// Deterministic tool: must not fork parent's chat history. The brief
-	// carries the workspace-A + workspace-B branches, SC ids, and worktree
-	// paths explicitly.
-	inheritContext: false,
-};
 
 // GC-2026-merger-advisor-split: MergerAdvisor is the workflow_run Merge-phase
 // agent. Distinct from the DAG-synthesis Merger above — MergerAdvisor is
@@ -422,7 +352,6 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	["PlanCompiler", PLAN_AGENT],
 	["Developer", DEVELOPER_AGENT],
 	["Reviewer", REVIEWER_AGENT],
-	["Merger", MERGER_AGENT],
 	["MergerAdvisor", MERGER_ADVISOR_AGENT],
 	["DeveloperAdvisor", DEVELOPER_ADVISOR_AGENT],
 	["ReviewerAdvisor", REVIEWER_ADVISOR_AGENT],

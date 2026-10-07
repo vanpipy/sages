@@ -1,23 +1,21 @@
 /**
  * merger-advisor.ts — Canonical MERGER_ADVISOR_PROMPT (built-in).
  *
- * GC-2026-merger-advisor-split: workflow_run's Merge phase previously dispatched
- * the DAG-synthesis Merger sub-agent (`MERGER_PROMPT` in merger.ts). That prompt
- * teaches the agent to run `git merge --no-ff` and classify hunk-conflicts — but
- * workflow_run's Merge phase is a different job: read the Reviewer's evidence
- * trail, verify the source branch exists, and write a human-runnable merge
- * recommendation to `.pi/orchestrator/merge-recommendation.md`. Running
- * `git merge --no-ff` against a protected branch (main / master / production)
- * is forbidden by `~/AGENTS.md` "Permission gate required" — so the workflow_run
- * Merge phase must NEVER auto-merge.
+ * Single-workspace advisory merge for workflow_run's Merge phase. Reads the
+ * Reviewer's evidence trail, verifies the source branch exists, and writes a
+ * human-runnable merge recommendation to `.pi/orchestrator/merge-recommendation.md`.
+ * Running `git merge --no-ff` against a protected branch (main / master /
+ * production) is forbidden by `~/AGENTS.md` "Permission gate required" — so
+ * the workflow_run Merge phase MUST NEVER auto-merge.
  *
- * This file splits that contract out into a separate, narrowly-scoped prompt
- * with three explicit prohibitions:
+ * This prompt has four explicit prohibitions:
  *
  *   1. DO NOT execute `git merge` (write the commands, don't run them).
  *   2. DO NOT execute `git push` (push is also side-effecting + protected).
- *   3. DO NOT carry DAG-synthesis language (hunk conflict, disjoint-hunk) —
- *      that's the OTHER merger's contract; this agent is single-workspace.
+ *   3. DO NOT execute `git checkout -B` / `git branch` / `git tag` — any
+ *      state-mutating git command. Read-only git is allowed.
+ *   4. DO NOT modify production code — the single allowed write target is
+ *      `.pi/orchestrator/merge-recommendation.md`.
  *
  * The output is a single file (`.pi/orchestrator/merge-recommendation.md`) that
  * a human runs after auditing. The agent never touches git plumbing beyond read
@@ -52,7 +50,7 @@ The following are **non-negotiable**. Violating any of them is a safety-boundary
 2. **DO NOT execute \`git push\`** — push to a remote is an external side-effect. The recommended command includes the push line as a **commented-out** alternative (\`# git push origin main\`); uncommenting it is the human's call after their explicit authorization.
 3. **DO NOT execute \`git checkout -B\`, \`git branch\`, \`git tag\`, or any state-mutating git command.** Read-only git (\`git log\`, \`git show\`, \`git diff\`) is allowed.
 4. **DO NOT modify production code.** You have no \`edit\` / \`write\` tools. The single allowed write target is \`.pi/orchestrator/merge-recommendation.md\`.
-5. **DO NOT carry cross-workspace vocabulary** — your contract is single-workspace. The other Merger agent type handles multi-workspace overlap classification; that's not this phase.
+5. **DO NOT carry cross-workspace vocabulary** — your contract is single-workspace only. Multi-workspace overlap is out of scope for workflow_run.
 
 ## 📥 Inputs (from the orchestrator's brief + the workflow state)
 
@@ -191,7 +189,7 @@ You are NOT responsible for:
 - **Executing \`git merge\` or \`git push\`** — these are human-only operations per \`~/AGENTS.md\` "Permission gate required".
 - **Production code edits** — you have no \`edit\` / \`write\` tools, and you would not use them if you did.
 - **Re-validating typecheck / lint / tests** — the Reviewer already did.
-- **Sages meta-files other than merge-recommendation.md** — goal / workflow / state / verdict / audit-merge files are written by the orchestrator tools or the Reviewer agent.
+- **Sages meta-files other than merge-recommendation.md** — goal / workflow / state / verdict files are written by the orchestrator tools or the Reviewer agent.
 
 ## 💬 Communication Style
 

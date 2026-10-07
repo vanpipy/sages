@@ -3,11 +3,10 @@
  *
  * Design (GC-2026-022 SC2/SC4):
  *
- *   - `defaultBudgets` ships the four built-in agent types:
+ *   - `defaultBudgets` ships the three built-in agent types:
  *       developer  : 60 turns / 20 min / snapshot every 15 turns
- *       auditor    : 30 turns / 10 min / snapshot every 10 turns
+ *       reviewer   : 30 turns / 10 min / snapshot every 10 turns
  *       explorer   : 20 turns /  5 min / snapshot every  7 turns
- *       merger     : 20 turns /  5 min / snapshot every  7 turns
  *
  *   - `loadBudgetFromEnv(type)` resolves the budget for a type, honoring
  *     the per-type env var `SAGES_PI_AGENT_<TYPE>_BUDGET_TURNS` (or
@@ -48,7 +47,7 @@ import {
 } from "./handoff.js";
 import type { RunController } from "./run-controller.js";
 
-export type AgentType = "developer" | "reviewer" | "explorer" | "merger";
+export type AgentType = "developer" | "reviewer" | "explorer";
 
 /** A typed budget. `maxMs` is in milliseconds; `snapshotEveryTurns = 0`
  *  disables periodic snapshots. `partialTriggerPct` is a 0..1 ratio. */
@@ -73,12 +72,6 @@ export const defaultBudgets: Record<AgentType, Budget> = {
 		partialTriggerPct: 0.8,
 	},
 	explorer: {
-		maxTurns: 20,
-		maxMs: 5 * 60_000,
-		snapshotEveryTurns: 7,
-		partialTriggerPct: 0.8,
-	},
-	merger: {
 		maxTurns: 20,
 		maxMs: 5 * 60_000,
 		snapshotEveryTurns: 7,
@@ -124,8 +117,8 @@ export function loadBudgetFromEnv(type: AgentType): Budget {
 
 /**
  * Bridge the registry's canonical agent type names (PascalCase: `Developer`,
- * `Auditor`, `Explore`, `Merger`) onto the lowercase budget table keys
- * (`developer`, `auditor`, `explorer`, `merger`). Legacy lowercase
+ * `Reviewer`, `Explore`, `Merger`) onto the lowercase budget table keys
+ * (`developer`, `reviewer`, `explorer`, `merger`). Legacy lowercase
  * spellings pass through unchanged. Unknown / custom types fall back to
  * the `developer` budget — the same fallback the AgentManager uses for
  * the worktree-create isolation policy.
@@ -141,7 +134,6 @@ export function budgetTypeFor(input: string): AgentType {
 		case "developer":
 		case "reviewer":
 		case "explorer":
-		case "merger":
 			return lower;
 		case "auditor":
 			// GC-2026-rename-auditor: legacy alias — pre-rename code references

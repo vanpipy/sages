@@ -1,4 +1,4 @@
-export type OrchestratorNamespaceOwner = "orchestrator" | "developer" | "auditor";
+export type OrchestratorNamespaceOwner = "orchestrator" | "developer" | "reviewer";
 
 const SAFE_SEGMENT = "[A-Za-z0-9][A-Za-z0-9._-]*";
 const ORCHESTRATOR_PATTERNS = [
@@ -10,13 +10,13 @@ const DEVELOPER_PATTERNS = [
   new RegExp(`^handoff/${SAFE_SEGMENT}/${SAFE_SEGMENT}-handoff\\.md$`),
 ];
 /**
- * GC-2026-coupon-nonhit-block follow-up: audit-{id}-{task_id}.md.
- * After GC-2026-orchestrator-simplify the goal id replaces the DAG id
- * segment (DAGs no longer exist), but the collision-prevention shape
- * is preserved.
+ * Reviewer writes its durable verdict file (task-scoped) and the
+ * evidence trail (goal-scoped) under `.pi/orchestrator/`. Both are
+ * recognized as Reviewer-owned.
  */
-const AUDITOR_PATTERNS = [
-	new RegExp(`^audit-${SAFE_SEGMENT}-${SAFE_SEGMENT}\\.md$`),
+const REVIEWER_PATTERNS = [
+	new RegExp(`^verdict-${SAFE_SEGMENT}\\.md$`),
+	new RegExp(`^last-review-${SAFE_SEGMENT}\\.md$`),
 ];
 
 function normalizeOwnedPath(path: string): string {
@@ -35,7 +35,7 @@ export function classifyOrchestratorNamespace(path: string): OrchestratorNamespa
   const normalized = normalizeOwnedPath(path);
   if (ORCHESTRATOR_PATTERNS.some((pattern) => pattern.test(normalized))) return "orchestrator";
   if (DEVELOPER_PATTERNS.some((pattern) => pattern.test(normalized))) return "developer";
-  if (AUDITOR_PATTERNS.some((pattern) => pattern.test(normalized))) return "auditor";
+  if (REVIEWER_PATTERNS.some((pattern) => pattern.test(normalized))) return "reviewer";
   return null;
 }
 
