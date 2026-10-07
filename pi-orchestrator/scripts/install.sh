@@ -93,17 +93,17 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 
 # Subagent template install info (GC-2026-066 reversal).
 #
-# Every default subagent (Explore, Plan, developer, auditor) is a
-# canonical built-in in pi-subagents — see
-# `pi-subagents/src/default-agents.ts`. No user-level template is
-# shipped, and there is no install / uninstall path for subagent
-# templates anymore. Pre-existing user-level developer.md /
-# auditor.md (if installed by older install.sh / install.ps1 /
-# install.bat versions) are LEFT IN PLACE for the user to remove
-# manually. New user customizations go in `~/.pi/agent/agents/`
-# (global) or `.pi/agents/` (project) and override the built-in via
-# direct registry-hit precedence in `registerAgents` (see
-# agent-types.ts).
+# Every default subagent (Explore, PlanCompiler, Developer, Reviewer,
+# Fix, Merger, MergerAdvisor, +3 advisor agents) is a canonical
+# built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
+# No user-level template is shipped, and there is no install /
+# uninstall path for subagent templates anymore. Pre-existing
+# user-level developer.md / reviewer.md / auditor.md (if installed by
+# older install.sh / install.ps1 / install.bat versions) are LEFT IN
+# PLACE for the user to remove manually. New user customizations go
+# in `~/.pi/agent/agents/` (global) or `.pi/agents/` (project) and
+# override the built-in via direct registry-hit precedence in
+# `registerAgents` (see agent-types.ts).
 #
 # The `SUBAGENT_SENTINEL_TEXT` constant below stays — it's stamped into
 # `templates/agent-tool-description.md` (one of the files this
@@ -116,7 +116,7 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # pi-subagents/dist/index.js#loadCustomToolDescription, ~line 791). This pair
 # lets sages replace the upstream default Agent tool description with a
 # sage-tuned one — specifically, inverting the foreground default for
-# developer/auditor and adding a todowrite-driven orchestration hint.
+# developer/reviewer and adding a todowrite-driven orchestration hint.
 # SAGES_TEMPLATE_V1 sentinel in the description template lets uninstall_agent_tool_description
 # distinguish "our template" from a user's hand-edited version.
 AGENT_TOOL_DESCRIPTION_TEMPLATE="$SCRIPT_DIR/../templates/agent-tool-description.md"
@@ -148,6 +148,15 @@ PI_SUBAGENTS_PKG="$PI_SUBAGENTS_DEST_DIR"
 # tool_call hooks. There is no separate "sages" or "conductor"
 # install target.
 PI_ORCHESTRATOR_DEST_DIR="$PI_DIR/packages/pi-orchestrator"
+# Package identifier used in settings.json#packages. Mirrors the
+# other four peers (PI_CODEBASE_MEMORY_PKG, PI_SUBAGENTS_PKG,
+# PI_EVALUATOR_PKG, PI_TASKS_PKG). Required by GC-2026-main-agent-tool-surface:
+# the is_pi_orchestrator_installed helper + verify_package_existence
+# gate read this. Without it, the orchestrator is the only peer
+# without an is_*_installed guard, so a dest-dir deletion passes the
+# "already installed" early-return and silently strips the
+# orchestrator from the LLM-facing tool surface.
+PI_ORCHESTRATOR_PKG="$PI_ORCHESTRATOR_DEST_DIR"
 
 # pi-evaluator package info (sage peer, deployed by file-copy)
 # pi-evaluator is the reward-mode extension (eval_score + eval_trend tools).
@@ -499,8 +508,9 @@ SUBAGENT_SENTINEL_TEXT='SAGES_TEMPLATE_V1'
 
 
 # Phase A + Phase B (DAG-2026-011) — done. The canonical `developer`
-# and `auditor` agents are both built-in to pi-subagents. Pre-existing
-# user-level `developer.md` and `auditor.md` files
+# and `reviewer` agents are both built-in to pi-subagents (GC-2026-091
+# renamed `auditor` → `reviewer`). Pre-existing user-level
+# `developer.md` and `auditor.md` files
 # (if installed by older install.sh / install.ps1 / install.bat
 # versions) are left in place for the user to remove manually. The
 # user-level file shadows the built-in alias via direct registry hit
@@ -914,6 +924,38 @@ verify_critical_tasks_deps() {
 #
 # The function prints a clear recovery command per missing peer and
 # returns non-zero so the caller exits non-zero.
+# Returns non-zero so the caller exits non-zero.
+verify_package_existence() {
+  # GC-2026-main-agent-tool-surface: every path registered in
+  # settings.json#packages must point at an existing directory.
+  # The host extension loader
+  #   (pi-coding-agent's loader.js:541-555, fail-soft path)
+  # silently skips a missing path with zero logging, so the LLM
+  # has no way to know a peer is gone. This gate catches the
+  # "registered but missing" class at install time so the user
+  # sees a clear recovery path (`bash install.sh --force`).
+  #
+  # npm: peers (e.g. `npm:pi-mcp-adapter`) are skipped — npm owns
+  # their existence; install.sh only validates local-path peers.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 0  # nothing to verify
+  local missing=()
+  while IFS= read -r pkg; do
+    [[ "$pkg" == npm:* ]] && continue
+    if [[ ! -d "$pkg" ]]; then
+      missing+=("$pkg")
+    fi
+  done < <(python3 -c "import json; print('\n'.join(json.load(open('$settings')).get('packages', [])))" 2>/dev/null)
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "  ERROR: registered package(s) missing on disk:"
+    for p in "${missing[@]}"; do
+      echo "    - $p"
+    done
+    return 1
+  fi
+  return 0
+}
+
 verify_all_critical_install_deps() {
   local missing_total=0
   echo "==> Verifying critical deps for all installed packages..."
@@ -950,6 +992,33 @@ verify_all_critical_install_deps() {
   fi
   echo "  All critical deps present."
   return 0
+}
+
+is_pi_orchestrator_installed() {
+  # Auto-recovery invariant: return true ONLY when both conditions hold —
+  # settings.json registers the package AND the dest dir exists on disk.
+  # Mirrors is_pi_codebase_memory_installed (line 237) + is_pi_subagents_installed
+  # (line ~1127) + is_pi_evaluator_installed + is_pi_tasks_installed.
+  # GC-2026-main-agent-tool-surface: this was the only missing guard.
+  # Without it, a deleted $PI_DIR/packages/pi-orchestrator/ passed the
+  # early-return at line ~2093 below, and the orchestrator's tools
+  # (goal_contract_create + workflow_run) silently vanished from the
+  # LLM-facing tool surface — the host's extension loader at
+  # pi-coding-agent's loader.js:541-555 fail-softs with zero logging.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+
+  python3 -c "
+import json, os, sys
+try:
+    d = json.load(open('$settings'))
+    pkg = '$PI_ORCHESTRATOR_PKG'
+    if pkg in d.get('packages', []) and os.path.isdir(pkg):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
 }
 
 install_orchestrator_files() {
@@ -2133,6 +2202,20 @@ install() {
   verify_all_critical_install_deps || {
     echo ""
     echo "Install completed but critical deps verification failed."
+    echo "Re-run with --force to repair: bash $0 --force"
+    exit 1
+  }
+
+  # Final gate (GC-2026-main-agent-tool-surface): verify every sage-peer
+  # package registered in settings.json#packages has its dest dir on disk.
+  # The is_*_installed guards prevent silent breakage, but only for the
+  # 5 sage peers (pi-orchestrator + pi-tasks + pi-subagents + pi-evaluator
+  # + pi-codebase-memory). This gate also catches npm: / absolute-path
+  # peers whose dest vanished (e.g. an npm peer uninstalled but the path
+  # stayed registered).
+  verify_package_existence || {
+    echo ""
+    echo "Install completed but registered-package-existence verification failed."
     echo "Re-run with --force to repair: bash $0 --force"
     exit 1
   }
