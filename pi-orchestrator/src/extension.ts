@@ -47,7 +47,7 @@ import {
 	type OrchestratorAdvisoryRuntimeDeps,
 } from "./orchestrator-advisory.js";
 import { validateFailureCatalogOnBoot } from "./failure-catalog.js";
-import { PhaseWidget } from "./ui/phase-widget.js";
+
 
 /**
  * Tools always exposed to the main agent when the orchestrator
@@ -211,54 +211,6 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 			setStatus?: (key: string, text: string) => void;
 		}).setStatus?.("sages-orchestrator", "📜 orchestrator active");
 	});
-
-	// GC-2026-phase-widget: install the phase plan widget. Subscribes to
-	// workflow:start / workflow:phase-complete / subagents:completed /
-	// subagents:failed events and queries pi-tasks's TaskStore via RPC
-	// to render a phase-grouped plan view. Widget is read-only; pi-tasks
-	// is the single source of truth for task state.
-	//
-	// GC-2026-precommit-fixes: only the widget install is gated on
-	// `pi.events`. Test mocks (e.g. SMOKE-073) don't expose events but
-	// DO expose `pi.on` / `pi.appendEntry`; an early return here used
-	// to skip the rest of installSessionHooks, which meant the
-	// soft-mode reminder at the bottom of the function was never
-	// registered in test environments. The `if (eventsBus)` block
-	// keeps the widget install opt-in without affecting the reminder.
-	const eventsBus = (pi as { events?: unknown }).events;
-	if (eventsBus) {
-		const phaseWidget = new PhaseWidget({ bus: eventsBus as ConstructorParameters<typeof PhaseWidget>[0]["bus"] });
-		phaseWidget.attach();
-		// pi-coding-agent's session_start hook doesn't surface ctx.ui, so we
-		// capture ctx on tool_execution_start (same pattern pi-tasks uses at
-		// pi-tasks/src/index.ts:557). setWidget is idempotent on the host;
-		// re-registering on every tool call would be wasteful, so we guard
-		// with `widgetRegistered`.
-		let widgetRegistered = false;
-		pi.on("tool_execution_start", (_event, ctx) => {
-			if (widgetRegistered) return;
-			const ui = (ctx as { ui?: unknown }).ui as
-				| {
-						setWidget?: (
-							key: string,
-							content: unknown,
-							opts?: { placement?: "aboveEditor" | "belowEditor" },
-						) => void;
-					requestRender?: () => void;
-				}
-				| undefined;
-			if (!ui || typeof ui.setWidget !== "function") return;
-			ui.setWidget(
-				"workflow-plan",
-				(_tui: unknown, _theme: unknown) => ({
-					render: () => phaseWidget.render(),
-					invalidate: () => {},
-				}),
-				{ placement: "aboveEditor" },
-			);
-			widgetRegistered = true;
-		});
-	}
 
 	// 2. before_agent_start — prepend templates/SYSTEM.md.
 	pi.on("before_agent_start", (event: unknown) => {
