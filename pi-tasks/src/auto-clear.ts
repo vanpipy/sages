@@ -24,6 +24,12 @@ import type { TaskStore } from "./task-store.js";
 
 export type AutoClearMode = "never" | "on_list_complete" | "on_task_complete";
 
+export interface AutoClearOptions {
+  /** GC-2026-120 AC7: how many hours an `intent` task can sit
+   *  pending before being auto-deleted. 0 (default) disables. */
+  abandonedIntentHours?: number;
+}
+
 export class AutoClearManager {
   /** Per-task: turn when task was marked completed ("on_task_complete" mode). */
   private completedAtTurn = new Map<string, number>();
@@ -37,6 +43,8 @@ export class AutoClearManager {
     private getMode: () => AutoClearMode,
     /** How many turns completed tasks linger before auto-clearing. */
     private clearDelayTurns = 4,
+    /** GC-2026-120 AC7: optional configuration for the abandoned-intent sweep. */
+    private options: AutoClearOptions = {},
   ) {}
 
   /** Record a task completion. Call AFTER cascade logic. */
@@ -126,6 +134,26 @@ export class AutoClearManager {
         this.getStore().clearCompleted();
         this.allCompletedAtTurn = null;
         cleared = true;
+      }
+    }
+
+    // GC-2026-120 AC7: reaped abandoned intent tasks. Independent of
+    // `mode` so it runs in "never" too — the user opts in by setting
+    // `abandonedIntentHours > 0`.
+    const ttlHours = this.options.abandonedIntentHours ?? 0;
+    if (ttlHours > 0) {
+      const cutoff = Date.now() - ttlHours * 60 * 60 * 1000;
+      const store = this.getStore();
+      for (const t of store.list()) {
+        if (
+          t.status === "pending" &&
+          t.metadata?.kind === "intent" &&
+          typeof t.createdAt === "number" &&
+          t.createdAt < cutoff
+        ) {
+          store.delete(t.id);
+          cleared = true;
+        }
       }
     }
 
