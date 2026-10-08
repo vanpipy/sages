@@ -218,11 +218,12 @@ export default function (pi: ExtensionAPI) {
 
   const autoClear = new AutoClearManager(() => store, () => cfg.autoClearCompleted ?? "on_list_complete", AUTO_CLEAR_DELAY);
 
-  // ── Unified task feeder (GC-2026-113 FU0 Phase 2b) ──
+  // ── Unified task feeder (GC-2026-113 FU0 Phase 2b + GC-2026-117) ──
   // Replaces the three previous cascade listeners (workflow-handler
-  // direct spawn, decompose-cascade cascade, TaskExecute ad-hoc
-  // cascade). ONE feeder owns spawn + completion for ALL task types
-  // (workflow / decompose / user / TaskExecute).
+  // direct spawn, decompose-cascade cascade [GC-2026-117: module
+  // deleted; the cascade logic is here, not in a dedicated module],
+  // TaskExecute ad-hoc cascade). ONE feeder owns spawn + completion
+  // for ALL task types (workflow / decompose / user / TaskExecute).
   //
   // GC-2026-114 FU3: the `cfg.autoCascade` config key + the related
   // settings-menu toggle are removed entirely (cascade is unconditional).

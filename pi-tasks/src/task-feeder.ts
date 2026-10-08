@@ -1,9 +1,12 @@
 /**
- * task-feeder.ts — Unified task feeder (GC-2026-108).
+ * task-feeder.ts — Unified task feeder (GC-2026-108 + GC-2026-113 + GC-2026-117).
  *
  * Replaces the three parallel cascade listeners that previously split
- * dispatch responsibility across `workflow-handler.ts`, `decompose-cascade.ts`,
- * and `pi-tasks/src/index.ts:227` (TaskExecute). Every task dispatch path
+ * dispatch responsibility across `workflow-handler.ts`, the now-deleted
+ * `decompose-cascade.ts` (deleted in GC-2026-117 — its listeners were
+ * already unified into this module by GC-2026-113 FU0 Phase 2b; the
+ * file itself remained as dead code until 117 cleaned it up), and
+ * `pi-tasks/src/index.ts:227` (TaskExecute). Every task dispatch path
  * now flows through this single module:
  *
  *   - Every producer (workflow_run, decompose_task, /tasks create,
@@ -12,6 +15,8 @@
  *   - A single `agentTaskMap` covers every dispatch path.
  *   - A single `subagents:completed` / `subagents:failed` listener pair
  *     handles completion + cascade.
+ *   - Workflow tasks are skipped in `cascadeSpawn` (handled by
+ *     workflow-handler.ts's own cascade loop — GC-2026-115 split).
  *
  * Design doc: `.pi/orchestrator/designs/2026-10-08-user-task-feeder.md`
  * Postmortem: `pi/docs/postmortem/GC-2026-task-feeding-and-decomposition.md`

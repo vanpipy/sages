@@ -204,8 +204,10 @@ A serial task chain from a user intent (or a user-created task):
    → pi-tasks creates T1 + R1 (via createOrchestratorTaskWithReview),
      T2/T3/... (via createOrchestratorTask)
    → pi-tasks spawns T1 (the chain head)
-   → decompose-cascade listener picks up subagents:completed
-     events and spawns the next task
+   → unified task-feeder's `cascadeSpawn` walks pending tasks
+     with satisfied blockers and spawns the next task
+     (GC-2026-113; the dedicated decompose-cascade module was
+     removed in GC-2026-117)
    → R1 audits the cumulative state at completion
    → returns { status: "success", tasks, reviewer_id, audit_path, ... }
 

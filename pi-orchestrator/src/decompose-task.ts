@@ -198,7 +198,7 @@ export function registerDecomposeTaskTool(pi: unknown): void {
     name: "decompose_task",
     label: "Decompose Task",
     description:
-      "GC-2026-task-feeding-and-decomposition (D5, R3): break a high-level intent into N orchestrator-tracked sub-tasks. Linear chain T1 -> T2 -> ... -> TN. T1 is top-level -> auto-attaches one Reviewer sibling. Subsequent T_i are blockedBy the previous spec, so they're not top-level -> no additional Reviewer. No recursion, no folded sub-tasks. The whole chain shares one R1 at the head. The first task spawns immediately; the cascade proceeds serially via pi-tasks's decompose-cascade listener.",
+      "GC-2026-task-feeding-and-decomposition (D5, R3): break a high-level intent into N orchestrator-tracked sub-tasks. Linear chain T1 -> T2 -> ... -> TN. T1 is top-level -> auto-attaches one Reviewer sibling. Subsequent T_i are blockedBy the previous spec, so they're not top-level -> no additional Reviewer. No recursion, no folded sub-tasks. The whole chain shares one R1 at the head. The first task spawns immediately; the cascade proceeds serially via pi-tasks's unified task-feeder (cascadeSpawn walks pending feedable tasks with satisfied blockers — GC-2026-113; the dedicated decompose-cascade module was removed in GC-2026-117).",
     parameters: DecomposeTaskParams,
     execute: async (
       _toolCallId: string,
