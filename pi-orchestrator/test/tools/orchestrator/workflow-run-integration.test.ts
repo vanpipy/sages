@@ -213,15 +213,15 @@ function makeWorkflowRunHarness(repoCwd: string) {
 	const store = new TaskStore();
 	const subagents = installRealIdSubagentsMock(pi.events);
 
-	// Wire pi-tasks's REAL subscribeWorkflow to our fake events. The
-	// spawnAgent closure mirrors what pi-tasks/src/index.ts does: call
-	// subagents:rpc:spawn via the rpcCall pattern, get back an id, then
-	// pi-tasks's handler assigns agentToTask and stamps owner/in_progress
-	// on the task. We don't reach into that handler — we provide the
-	// spawnAgent callback and pi-tasks does the bookkeeping.
-	const cleanup = subscribeWorkflow(store, {
-		events: { on: pi.events.on, emit: pi.events.emit },
-		spawnAgent: async (task: Task) => {
+	// Wire pi-tasks's REAL subscribeWorkflow to our fake events. GC-2026-114
+	// FU3: subscribeWorkflow no longer takes a `spawnAgent` callback. It
+	// now takes a `feed: { maybeAutoSpawn }` + a shared `agentTaskMap`.
+	// The feed's maybeAutoSpawn calls subagents:rpc:spawn via the rpcCall
+	// pattern, gets back an id, and populates agentTaskMap (mirroring
+	// the production feeder's behavior).
+	const agentTaskMap = new Map<string, string>();
+	const feed = {
+		maybeAutoSpawn: async (task: Task) => {
 			const requestId = randomUUID();
 			const resultP = new Promise<{ id: string }>((resolve, reject) => {
 				const replyChannel = `subagents:rpc:spawn:reply:${requestId}`;
@@ -245,8 +245,15 @@ function makeWorkflowRunHarness(repoCwd: string) {
 				prompt: task.description,
 				options: {},
 			});
-			return resultP.then((d) => d.id);
+			const agentId = await resultP.then((d) => d.id);
+			agentTaskMap.set(agentId, task.id);
+			store.update(task.id, { status: "in_progress", owner: agentId });
 		},
+	};
+	const cleanup = subscribeWorkflow(store, {
+		events: { on: pi.events.on, emit: pi.events.emit },
+		feed,
+		agentTaskMap,
 	});
 
 	return { pi, store, subagents, cleanup };

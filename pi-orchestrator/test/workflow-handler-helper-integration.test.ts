@@ -106,17 +106,27 @@ function setup(maxFixIterations = 2): Harness {
   const events = fakeEvents();
   const spawnCalls: Array<{ task: Task; ctx: { worktreePath?: string } }> = [];
   const agentIds = new Map<string, string>();
+  const agentTaskMap = new Map<string, string>();
   let counter = 0;
 
+  // GC-2026-114 FU3: subscribeWorkflow no longer takes a `spawnAgent`
+  // callback. It now takes a `feed: { maybeAutoSpawn }` + a shared
+  // `agentTaskMap`. The mock `feed.maybeAutoSpawn` simulates a spawn
+  // RPC, populates `agentTaskMap` (so the workflow-handler's listeners
+  // can find the task on completion), and stamps `owner` on the task.
   const unsubscribe = subscribeWorkflow(store, {
     events,
-    spawnAgent: async (task, ctx) => {
-      counter += 1;
-      const agentId = `agent-stub-${counter}`;
-      spawnCalls.push({ task, ctx });
-      agentIds.set(task.id, agentId);
-      return agentId;
+    feed: {
+      maybeAutoSpawn: async (task, ctx) => {
+        counter += 1;
+        const agentId = `agent-stub-${counter}`;
+        spawnCalls.push({ task, ctx });
+        agentIds.set(task.id, agentId);
+        agentTaskMap.set(agentId, task.id);
+        store.update(task.id, { status: "in_progress", owner: agentId });
+      },
     },
+    agentTaskMap,
   });
 
   return { store, events, spawnCalls, agentIds, unsubscribe };

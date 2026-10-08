@@ -207,9 +207,14 @@ export function makeWorkflowRunHarness() {
 	const store = new TaskStore();
 	const subagents = installRealIdSubagentsMock(pi.events);
 
-	const cleanup = subscribeWorkflow(store, {
-		events: { on: pi.events.on, emit: pi.events.emit },
-		spawnAgent: async (task: Task) => {
+	// GC-2026-114 FU3: subscribeWorkflow no longer takes a `spawnAgent`
+	// callback. It now takes a `feed: { maybeAutoSpawn }` + a shared
+	// `agentTaskMap`. The mock `feed.maybeAutoSpawn` performs the actual
+	// subagents:rpc:spawn RPC and populates agentTaskMap (mirroring the
+	// production feeder's behavior).
+	const agentTaskMap = new Map<string, string>();
+	const feed = {
+		maybeAutoSpawn: async (task: Task) => {
 			const requestId = randomUUID();
 			const replyChannel = `subagents:rpc:spawn:reply:${requestId}`;
 			const resultP = new Promise<{ id: string }>((resolve, reject) => {
@@ -233,8 +238,15 @@ export function makeWorkflowRunHarness() {
 				prompt: task.description,
 				options: {},
 			});
-			return resultP.then((d) => d.id);
+			const agentId = await resultP.then((d) => d.id);
+			agentTaskMap.set(agentId, task.id);
+			store.update(task.id, { status: "in_progress", owner: agentId });
 		},
+	};
+	const cleanup = subscribeWorkflow(store, {
+		events: { on: pi.events.on, emit: pi.events.emit },
+		feed,
+		agentTaskMap,
 	});
 
 	return { pi, store, subagents, cleanup, repoCwd };
