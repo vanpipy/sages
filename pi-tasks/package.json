@@ -54,5 +54,15 @@
     ],
     "video": "https://github.com/tintinweb/pi-tasks/raw/master/media/demo.mp4",
     "image": "https://github.com/tintinweb/pi-tasks/raw/master/media/screenshot.png"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
   }
 }
