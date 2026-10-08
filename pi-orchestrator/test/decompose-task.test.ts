@@ -191,4 +191,79 @@ describe("decompose_task tool (AC3)", () => {
     ).rejects.toThrow(/timeout/);
     void origEmit;
   });
+
+  // Regression: 2026-10-08T14:17:24Z host crash.
+  // Pre-fix, when `api.on` threw synchronously, the executor rejected
+  // with that error but the orphan setTimeout (referencing an
+  // uninitialized `const unsub` in TDZ) was never cleared. The timer
+  // fired ~6s later and raised a ReferenceError that crashed the
+  // host. Post-fix, the catch wraps the setup, cleanup() clears the
+  // timer, and no orphan fires.
+  it("does not leak timer / hit TDZ when api.on throws synchronously", async () => {
+    const uncaught: unknown[] = [];
+    const handler = (err: Error) => uncaught.push(err);
+    process.on("uncaughtException", handler);
+    try {
+      const bus = {
+        on: () => {
+          throw new Error("bus.on exploded");
+        },
+        emit: async () => {},
+      };
+      const ctx = { cwd: "/tmp", events: bus, rpcTimeoutMs: 50 };
+      await expect(
+        executeDecomposeTask(
+          {
+            specs: [
+              { subject: "X", description: "Regression coverage here ok" },
+            ],
+          },
+          ctx,
+        ),
+      ).rejects.toThrow("bus.on exploded");
+      // Wait past timeoutMs so any orphan timer would have fired.
+      await new Promise((r) => setTimeout(r, 120));
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off("uncaughtException", handler);
+    }
+  });
+
+  // Regression: same crash chain, different trigger. If `api.emit`
+  // throws after `api.on` registered the listener, the pre-fix code
+  // never reached `clearTimeout(timer)` and the listener leaked on the
+  // bus. Post-fix, the catch runs cleanup() which removes both.
+  it("cleans up listener + timer when api.emit throws synchronously", async () => {
+    let removed = false;
+    let emitted = false;
+    const bus = {
+      on: (_ch: string, _h: (data: unknown) => void) => {
+        return () => {
+          removed = true;
+        };
+      },
+      // Sync-throw, NOT async-throw: `void api.emit(...)` swallows a
+      // rejected Promise, so the production try/catch only fires for
+      // synchronous throws.
+      emit: () => {
+        emitted = true;
+        throw new Error("bus.emit exploded");
+      },
+    };
+    const ctx = { cwd: "/tmp", events: bus, rpcTimeoutMs: 50 };
+    await expect(
+      executeDecomposeTask(
+        {
+          specs: [
+            { subject: "Y", description: "Emit-throw regression coverage" },
+          ],
+        },
+        ctx,
+      ),
+    ).rejects.toThrow("bus.emit exploded");
+    expect(emitted).toBe(true);
+    expect(removed).toBe(true);
+    // Also wait past timeout to confirm no orphan timer raises TDZ.
+    await new Promise((r) => setTimeout(r, 120));
+  });
 });

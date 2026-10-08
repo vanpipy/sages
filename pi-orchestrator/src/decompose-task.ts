@@ -85,22 +85,54 @@ function rpcCall<T>(
 ): Promise<T> {
   const requestId = randomUUID();
   const replyChannel = `${channel}:reply:${requestId}`;
+  // Two pre-fix crashes captured in ~/.pi/agent/crashes.json
+  // (2026-10-08T14:17:24Z) trace here:
+  //   1. The `setTimeout` callback referenced `unsub` BEFORE the
+  //      `const unsub = api.on(...)` declaration ran. If the executor
+  //      threw before line 93 (e.g. ctx.events undefined → "Cannot
+  //      read properties of undefined (reading 'on')"), the Promise
+  //      rejected with that error, but the orphan timer was never
+  //      cleared. When it fired, the still-uninitialized `unsub`
+  //      binding raised a TDZ ReferenceError and crashed the host.
+  //   2. Same root cause, surfaced as a host-wide uncaught exception
+  //      rather than a per-call rejection.
+  //
+  // Fix: hoist `unsub` to a `let` declared BEFORE setTimeout (so the
+  // binding exists by the time the timer callback can run), wrap the
+  // setup in try/catch, and route all teardown through one `cleanup`
+  // helper that clears the timer and removes the listener.
   return new Promise<T>((resolveFn, rejectFn) => {
-    const timer = setTimeout(() => {
-      unsub();
-      rejectFn(new Error(`${channel} timeout after ${timeoutMs}ms`));
-    }, timeoutMs);
-    const unsub = api.on(replyChannel, (raw: unknown) => {
-      clearTimeout(timer);
-      unsub();
-      const reply = raw as RpcEnvelope<T>;
-      if (reply.success && reply.data !== undefined) {
-        resolveFn(reply.data);
-      } else {
-        rejectFn(new Error(reply.error ?? `${channel} failed (no data)`));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unsub: (() => void) | undefined;
+    const cleanup = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
       }
-    });
-    void api.emit(channel, { requestId, ...params });
+      if (unsub !== undefined) {
+        unsub();
+        unsub = undefined;
+      }
+    };
+    try {
+      timer = setTimeout(() => {
+        cleanup();
+        rejectFn(new Error(`${channel} timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+      unsub = api.on(replyChannel, (raw: unknown) => {
+        cleanup();
+        const reply = raw as RpcEnvelope<T>;
+        if (reply.success && reply.data !== undefined) {
+          resolveFn(reply.data);
+        } else {
+          rejectFn(new Error(reply.error ?? `${channel} failed (no data)`));
+        }
+      });
+      void api.emit(channel, { requestId, ...params });
+    } catch (err) {
+      cleanup();
+      rejectFn(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 }
 
