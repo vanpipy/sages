@@ -270,7 +270,20 @@ export default function (pi: ExtensionAPI) {
           iteration: Number(task.metadata.iteration ?? 0),
         };
       }
-      return spawnSubagent(type, task.description, spawnOpts);
+      // GC-2026-121 AC3: for the Planner agent, the spawn prompt must
+      // include the originating user task's id so Planner can pass it
+      // to `decompose_task` without an extra lookup. Format:
+      //   <description>
+      //   Task ID: <id>
+      //   Call decompose_task(user_task_id="<id>", specs=[...]) to materialize the chain.
+      let prompt = task.description;
+      if (type === "Planner") {
+        prompt =
+          `${task.description}\n\n` +
+          `Task ID: ${task.id}\n` +
+          `Call \`decompose_task(user_task_id="${task.id}", specs=[...])\` to materialize the chain.`;
+      }
+      return spawnSubagent(type, prompt, spawnOpts);
     },
     agentTaskMap,
     onTaskChange: (taskId, status) => {
