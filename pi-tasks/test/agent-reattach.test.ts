@@ -16,27 +16,27 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import initExtension from "../src/index.js";
 import { flush, installSubagentsMock, mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
+import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
 
-// Pinned so the developer's own <agentDir>/tasks-config.json cannot change what
-// these tests exercise.
-const config = (({ current: {} as Record<string, unknown> }));
-vi.mock("../src/tasks-config.js", () => ({
-  loadGlobalTasksConfig: () => ({ ...config.current }),
-  loadTasksConfig: () => ({ ...config.current }),
-  saveTasksConfig: () => {},
-}));
+// GC-2026-116: replaced the `vi.mock("../src/tasks-config.js", ...)`
+// pattern with a real-file fixture. The mock leaked across test files
+// under bun:test and broke `tasks-config.test.ts` when run in the same
+// invocation. `installTasksConfig({})` pins an empty config (so the
+// developer's own <agentDir>/tasks-config.json cannot change what these
+// tests exercise) via a per-test temp dir + PI_CODING_AGENT_DIR.
 
 let dir: string;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pi-tasks-reattach-"));
   process.env.PI_TASKS = join(dir, "tasks.json");
-  config.current = {};
+  installTasksConfig({});
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.PI_TASKS;
+  uninstallTasksConfig();
   rmSync(dir, { recursive: true, force: true });
 });
 

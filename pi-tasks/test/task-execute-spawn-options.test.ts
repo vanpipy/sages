@@ -28,13 +28,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import initExtension from "../src/index.js";
 import { flush, installSubagentsMock, mockCtx, mockPi } from "./helpers/mock-pi.js";
+import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
 
-const config = (({ current: {} as Record<string, unknown> }));
-vi.mock("../src/tasks-config.js", () => ({
-  loadGlobalTasksConfig: () => ({ ...config.current }),
-  loadTasksConfig: () => ({ ...config.current }),
-  saveTasksConfig: () => {},
-}));
+// GC-2026-116: real-file config fixture replaces the leaking
+// `vi.mock("../src/tasks-config.js", ...)`.
 
 describe("TaskExecute spawn options — snake_case boundary", () => {
   let mock: ReturnType<typeof mockPi>;
@@ -42,7 +39,7 @@ describe("TaskExecute spawn options — snake_case boundary", () => {
 
   beforeEach(async () => {
     delete process.env.PI_TASKS;
-    config.current = { autoCascade: true, taskScope: "memory" };
+    installTasksConfig({ taskScope: "memory" });
     mock = mockPi();
     rpc = installSubagentsMock(mock.pi);
     initExtension(mock.pi as any);
@@ -51,7 +48,10 @@ describe("TaskExecute spawn options — snake_case boundary", () => {
     await mock.fireLifecycle("turn_start", {}, mockCtx());
   });
 
-  afterEach(() => { rpc.unsub(); });
+  afterEach(() => {
+    rpc.unsub();
+    uninstallTasksConfig();
+  });
 
   async function createAgentTask(subject: string) {
     const res = await mock.executeTool("TaskCreate", {

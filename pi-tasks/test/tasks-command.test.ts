@@ -11,13 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import initExtension from "../src/index.js";
 import { TaskStore } from "../src/task-store.js";
 import { mockPi } from "./helpers/mock-pi.js";
+import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
 
-const config = (({ current: {} as Record<string, unknown> }));
-vi.mock("../src/tasks-config.js", () => ({
-  loadGlobalTasksConfig: () => ({ ...config.current }),
-  loadTasksConfig: () => ({ ...config.current }),
-  saveTasksConfig: () => {},
-}));
+// GC-2026-116: real-file config fixture replaces the leaking
+// `vi.mock("../src/tasks-config.js", ...)`.
 
 /** A script entry is either the literal answer or an index into the offered choices. */
 type Answer = string | number | undefined;
@@ -59,11 +56,12 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pi-tasks-cmd-"));
   taskFile = join(dir, "tasks.json");
   process.env.PI_TASKS = taskFile;
-  config.current = {};
+  installTasksConfig({});
 });
 
 afterEach(() => {
   delete process.env.PI_TASKS;
+  uninstallTasksConfig();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -142,7 +140,7 @@ describe("/tasks task detail", () => {
 
   it("acts on the picked row even when the status glyph contains an ID", async () => {
     // Nothing stops a hand-written glyph from looking like a task marker.
-    config.current = { glyphs: { pending: "#12" } };
+    installTasksConfig({ glyphs: { pending: "#12" } });
 
     const { mock } = await runTasks([0, 0, "✗ Delete"], create("Work"));
 
@@ -155,7 +153,7 @@ describe("/tasks task detail", () => {
   });
 
   it("lists tasks with the configured status glyphs", async () => {
-    config.current = { glyphs: { pending: "[ ]" } };
+    installTasksConfig({ glyphs: { pending: "[ ]" } });
 
     const { selects } = await runTasks([0, undefined], create("Work"));
 

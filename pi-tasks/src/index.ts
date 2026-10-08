@@ -1204,7 +1204,7 @@ Set up task dependencies:
         const subagentId: string | undefined =
           (typeof task?.owner === "string" && task.owner) ||
           (typeof task?.metadata?.agentId === "string" ? task.metadata.agentId : undefined);
-        if (subagentId && task.status === "in_progress") {
+        if (subagentId && task?.status === "in_progress") {
           store.update(resolvedId, { status: "completed" });
           autoClear.trackCompletion(resolvedId, currentTurn);
           await stopSubagent(subagentId);

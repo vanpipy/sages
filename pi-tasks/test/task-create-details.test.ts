@@ -12,26 +12,26 @@
  * regression can't break the workflow_run pi-tasks integration again.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mockCtx, mockPi } from "./helpers/mock-pi.js";
-
-const cfg = (({ current: {} as Record<string, unknown> }));
-vi.mock("../src/tasks-config.js", () => ({
-  loadGlobalTasksConfig: () => ({ ...cfg.current }),
-  loadTasksConfig: () => ({ ...cfg.current }),
-  saveTasksConfig: () => {},
-}));
+import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
 
 describe("TaskCreate structured details (programmatic-ID contract)", () => {
   let mock: ReturnType<typeof mockPi>;
 
   beforeEach(async () => {
     delete process.env.PI_TASKS;
-    cfg.current = { taskScope: "memory" };
+    // GC-2026-116: real-file config fixture replaces the leaking
+    // `vi.mock("../src/tasks-config.js", ...)`.
+    installTasksConfig({ taskScope: "memory" });
     mock = mockPi();
     const initExtension = (await import("../src/index.js")).default;
     initExtension(mock.pi as any);
     await mock.fireLifecycle("turn_start", {}, mockCtx());
+  });
+
+  afterEach(() => {
+    uninstallTasksConfig();
   });
 
   it("returns { id, task } on the structured details field", async () => {

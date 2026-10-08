@@ -13,23 +13,23 @@ import { TaskStore } from "../src/task-store.js";
 import { TaskWidget, type Theme, type UICtx } from "../src/ui/task-widget.js";
 import { installSubagentsMock, type MockEventBus, mockCtx, mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
 
-// Config is mocked rather than written to <cwd>/.pi/tasks-config.json: writing the
-// real file would clobber the user's project settings, and reading it would let the
-// developer's global <agentDir>/tasks-config.json leak into the results.
-const config = (({ current: {} as Record<string, unknown> }));
-vi.mock("../src/tasks-config.js", () => ({
-  loadGlobalTasksConfig: () => ({ ...config.current }),
-  loadTasksConfig: () => ({ ...config.current }),
-  saveTasksConfig: () => {},
-}));
+// GC-2026-116: real-file config fixture replaces the leaking
+// `vi.mock("../src/tasks-config.js", ...)`. The fixture pins an empty
+// config via a per-test temp agent dir + PI_CODING_AGENT_DIR, so the
+// developer's global <agentDir>/tasks-config.json cannot leak into the
+// results, and the mock no longer pollutes sibling test files.
+import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
 
 // Force in-memory task store for all integration tests — prevents file-backed
 // store from loading stale tasks across test instances.
 beforeEach(() => {
   process.env.PI_TASKS = "off";
-  config.current = {};
+  installTasksConfig({});
 });
-afterEach(() => { delete process.env.PI_TASKS; });
+afterEach(() => {
+  delete process.env.PI_TASKS;
+  uninstallTasksConfig();
+});
 
 describe("Session task rehydration", () => {
   // Task paths resolve against the session workspace (ctx.cwd), so every test gets
@@ -225,7 +225,7 @@ describe("Workspace-scoped store resolution", () => {
 
   it("loads project scope from ctx.cwd and stores the shared task list there", async () => {
     const cwd = workspace("project-scope");
-    config.current = { taskScope: "project" };
+    installTasksConfig({ taskScope: "project" });
     delete process.env.PI_TASKS;
     const mock = mockPi();
     initExtension(mock.pi as any);
@@ -1184,7 +1184,7 @@ describe("Cascade data injection (buildTaskPrompt)", () => {
   let rpc: ReturnType<typeof installSubagentsMock>;
 
   beforeEach(async () => {
-    config.current = { autoCascade: true };
+    installTasksConfig({});
 
     mock = mockPi();
     rpc = installSubagentsMock(mock.pi);
@@ -1286,7 +1286,7 @@ describe("TaskUpdate + TaskOutput race (GC-2026-115)", () => {
   let rpc: ReturnType<typeof installSubagentsMock>;
 
   beforeEach(async () => {
-    config.current = {};
+    installTasksConfig({});
     mock = mockPi();
     rpc = installSubagentsMock(mock.pi);
     initExtension(mock.pi as any);

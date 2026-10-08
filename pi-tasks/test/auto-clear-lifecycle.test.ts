@@ -12,25 +12,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import initExtension from "../src/index.js";
 import { sessionTaskFile } from "../src/task-paths.js";
 import { mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
+import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
 
-const config = (({ current: {} as Record<string, unknown> }));
-vi.mock("../src/tasks-config.js", () => ({
-  loadGlobalTasksConfig: () => ({ ...config.current }),
-  loadTasksConfig: () => ({ ...config.current }),
-  saveTasksConfig: () => {},
-}));
+// GC-2026-116: real-file config fixture replaces the leaking
+// `vi.mock("../src/tasks-config.js", ...)`.
 
 let cwd: string;
 
 beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), "pi-tasks-autoclear-"));
-  config.current = {};
+  installTasksConfig({});
   delete process.env.PI_TASKS;
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.PI_TASKS;
+  uninstallTasksConfig();
   rmSync(cwd, { recursive: true, force: true });
 });
 
@@ -148,7 +146,7 @@ describe("auto-clear across batches", () => {
   });
 
   it("keeps the list when auto-clear is off", async () => {
-    config.current = { autoClearCompleted: "never" };
+    installTasksConfig({ autoClearCompleted: "never" });
     const { mock, ctx } = await start();
     await runAndFinish(mock, ctx, 1);
 

@@ -14,19 +14,16 @@ import initExtension from "../src/index.js";
 import { globalSessionTasksDir, sessionTaskFile, workspaceSessionTaskFile } from "../src/task-paths.js";
 import { TaskStore } from "../src/task-store.js";
 import { mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
+import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
 
-const config = (({ current: {} as Record<string, unknown> }));
-vi.mock("../src/tasks-config.js", () => ({
-  loadGlobalTasksConfig: () => ({ ...config.current }),
-  loadTasksConfig: () => ({ ...config.current }),
-  saveTasksConfig: () => {},
-}));
+// GC-2026-116: real-file config fixture replaces the leaking
+// `vi.mock("../src/tasks-config.js", ...)`.
 
 let cwd: string;
 
 beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), "pi-tasks-scope-"));
-  config.current = {};
+  installTasksConfig({});
   delete process.env.PI_TASKS;
 });
 
@@ -43,7 +40,7 @@ const projectFile = () => join(cwd, ".pi", "tasks", "tasks.json");
 const sessionFile = (id: string) => workspaceSessionTaskFile(cwd, id);
 
 describe("taskScope: project", () => {
-  beforeEach(() => { config.current = { taskScope: "project" }; });
+  beforeEach(() => { installTasksConfig({ taskScope: "project" }); });
 
   it("persists to a single shared file", async () => {
     const mock = mockPi();
@@ -71,7 +68,7 @@ describe("taskScope: project", () => {
 });
 
 describe("taskScope: memory", () => {
-  beforeEach(() => { config.current = { taskScope: "memory" }; });
+  beforeEach(() => { installTasksConfig({ taskScope: "memory" }); });
 
   it("never touches the filesystem", async () => {
     const mock = mockPi();
@@ -144,7 +141,7 @@ describe("taskScope: session, without a persisted session", () => {
 describe("PI_TASKS override", () => {
   it("resolves a relative path against the session workspace", async () => {
     process.env.PI_TASKS = "./custom/list.json";
-    config.current = { taskScope: "memory" }; // overridden by the env var
+    installTasksConfig({ taskScope: "memory" }); // overridden by the env var
 
     const mock = mockPi();
     initExtension(mock.pi as any);
@@ -158,7 +155,7 @@ describe("PI_TASKS override", () => {
 
   it("keeps everything in memory when set to off, even in project scope", async () => {
     process.env.PI_TASKS = "off";
-    config.current = { taskScope: "project" };
+    installTasksConfig({ taskScope: "project" });
 
     const mock = mockPi();
     initExtension(mock.pi as any);
@@ -237,7 +234,7 @@ describe("session-global scope", () => {
   const globalFile = (id: string) => sessionTaskFile(cwd, id, "session-global");
 
   beforeEach(() => {
-    config.current = { taskScope: "session-global" };
+    installTasksConfig({ taskScope: "session-global" });
   });
 
   afterEach(() => {
