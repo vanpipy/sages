@@ -1273,3 +1273,58 @@ describe("Cascade data injection (buildTaskPrompt)", () => {
     expect(bPrompt).not.toContain("Prerequisite task results");
   });
 });
+
+// GC-2026-115 FU0 Phase 2a: TaskUpdate awaits `feeder.maybeAutoSpawn`
+// when the user adds an agentType. Without the `await`, a followup
+// TaskOutput (which reads `task.owner` synchronously) would race the
+// spawn RPC and error with "No background process". This test pins
+// the awaited behavior — the spawn completes before the TaskUpdate
+// tool returns, so a subsequent TaskOutput finds the agent ID via
+// the shared agentTaskMap.
+describe("TaskUpdate + TaskOutput race (GC-2026-115)", () => {
+  let mock: ReturnType<typeof mockPi>;
+  let rpc: ReturnType<typeof installSubagentsMock>;
+
+  beforeEach(async () => {
+    config.current = {};
+    mock = mockPi();
+    rpc = installSubagentsMock(mock.pi);
+    initExtension(mock.pi as any);
+    // Set latestCtx via turn_start lifecycle event
+    await mock.fireLifecycle("turn_start", {}, mockCtx());
+  });
+
+  afterEach(() => {
+    rpc.unsub();
+  });
+
+  it("TaskUpdate with new agentType awaits the spawn (no race with followup TaskOutput)", async () => {
+    // 1. Create a task WITHOUT agentType → no auto-spawn (no race possible).
+    await mock.executeTool("TaskCreate", {
+      subject: "Manual task",
+      description: "Add agentType later",
+    });
+    expect(rpc.spawned).toHaveLength(0);
+
+    // 2. Update the task to add agentType. This MUST await the spawn so
+    //    a followup TaskOutput can read task.owner.
+    const updateResult = await mock.executeTool("TaskUpdate", {
+      taskId: "1",
+      metadata: { agentType: "general-purpose" },
+    });
+    expect(updateResult.content[0].text).toContain("Updated task #1");
+    expect(rpc.spawned).toHaveLength(1);
+
+    // 3. TaskOutput immediately after TaskUpdate should see the spawned
+    //    agent. Before GC-2026-115, the `void` made this race-prone and
+    //    sometimes errored with "No background process for task 1" when
+    //    the spawn hadn't completed yet.
+    const out = await mock.executeTool("TaskOutput", {
+      task_id: "1",
+      block: false,
+      timeout: 5000,
+    });
+    expect(out.content[0].text).toContain("Task #1 [in_progress]");
+    expect(out.content[0].text).toContain("subagent agent-1");
+  });
+});
