@@ -392,6 +392,11 @@ export default function (pi: ExtensionAPI) {
         ...(userTask ? { user_task_ref: userTask.id } : {}),
       };
       if (i === 0) {
+        // GC-2026-120 AC3: T1 is the chain head — no `blockedBy` on the
+        // user task. The user task is auto-completed below, so T1's only
+        // dependency is the feeder noticing `blockedBy === []` and
+        // spawning. The old code's `blockedBy: userTask ? [userTask.id] : []`
+        // created a deadlock: userTask had no agent to complete it.
         const out = createOrchestratorTaskWithReview(
           store,
           {
@@ -399,7 +404,7 @@ export default function (pi: ExtensionAPI) {
             description: spec.description,
             activeForm: spec.activeForm,
             agentType: "Developer",
-            blockedBy: userTask ? [userTask.id] : [],
+            blockedBy: [],
             metadata: baseMeta,
           },
           {
@@ -429,9 +434,25 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
+    // GC-2026-120 AC3: auto-complete the user task on successful chain
+    // materialization. The user task was a record of intent; once it is
+    // decomposed into actionable sub-tasks, it has served its purpose.
+    // This eliminates the pre-GC deadlock where T1.blockedBy contained
+    // userTask.id but no agent ever completed userTask.
+    if (userTask) {
+      store.update(userTask.id, {
+        status: "completed",
+        metadata: {
+          ...userTask.metadata,
+          completed_via: "decomposition",
+          completed_at: new Date().toISOString(),
+        },
+      });
+    }
+
     let firstSpawned: { task_id: string; agent_id: string } | undefined;
     const t1 = created[0];
-    if (t1 && (!userTask || userTask.status === "completed")) {
+    if (t1) {
       // GC-2026-113 FU0 Phase 2b: delegate T1's first spawn to the
       // unified feeder. The feeder populates agentTaskMap + emits the
       // events the unified listener watches.
@@ -439,6 +460,8 @@ export default function (pi: ExtensionAPI) {
       // the unified feeder's `subagents:completed` listener now handles
       // decompose-chain cascade via its generic `cascadeSpawn` walk (any
       // pending feedable task with satisfied blockers).
+      // GC-2026-120 AC3: the prior `(!userTask || userTask.status === "completed")`
+      // gate simplified — userTask is auto-completed above iff it existed.
       await feeder.maybeAutoSpawn(t1);
       const afterT1 = store.get(t1.id);
       if (afterT1?.owner) {
