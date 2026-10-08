@@ -13,6 +13,7 @@
     "verify:pi-tasks-tools": "bun run scripts/verify-pi-tasks-tools.ts",
     "verify:gcdb": "bun run scripts/verify-gcdb.ts",
     "verify:created-by-invariant": "bun run scripts/verify-created-by-invariant.ts",
+    "verify:extension-load": "bun run scripts/verify-extension-load.ts",
     "verify:pi-universe": "bun run scripts/verify-pi-universe.ts",
     "verify:all": "bun run scripts/verify-all.ts",
     "gen:catalog": "bun run scripts/gen-catalog.ts"
@@ -48,6 +49,7 @@
   "devDependencies": {
     "@types/node": "^20.19.43",
     "bun-types": "^1.3.14",
+    "jiti": "^2.7.0",
     "simple-git": "^4.0.2",
     "typescript": "^6.0.3"
   }

@@ -2220,6 +2220,27 @@ install() {
     exit 1
   }
 
+  # GC-2026-extension-load-verify: surface the host loader's silent
+  # fail-soft path. pi-coding-agent/dist/core/extensions/loader.js:363-381
+  # catches extension-load errors and returns {extension: null, error}
+  # without logging. If the path exists but the import throws (typo in
+  # package.json#pi.extensions, missing transitive dep, etc.), the user
+  # only learns when a future session's tool fails to appear.
+  #
+  # We re-run the loader's logic via jiti (the same runtime pi uses) so
+  # the install verifies what the loader will see at next session start.
+  if command -v bun &>/dev/null; then
+    echo "==> Verifying extension load via jiti (catches silent fail-soft)..."
+    if ! bun run scripts/verify-extension-load.ts; then
+      echo ""
+      echo "Extension load verification failed (see errors above)."
+      echo "Re-run with --force to repair: bash $0 --force"
+      exit 1
+    fi
+  else
+    echo "  (skipped verify:extension-load — bun not on PATH)"
+  fi
+
   echo ""
   echo "Done! Restart pi: exit && pi"
 }

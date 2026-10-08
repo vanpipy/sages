@@ -18,6 +18,10 @@
  *   - verify-namespace-ownership: no orchestrator path leaks in subagent templates
  *   - verify-pi-universe: cross-package consistency
  *   - verify-soft-mode-mental-model: SOFT_MODE_REMINDER runtime wiring present
+ *   - verify-pi-tasks-tools: PI_TASKS_TOOLS allowlist vs pi-tasks registerTool
+ *   - verify-created-by-invariant: every store.create carries created_by
+ *   - verify-extension-load (GC-2026-extension-load-verify): jiti-import each
+ *     registered package to surface the host loader's silent fail-soft
  *
  * Why a wrapper script (vs just `bun run verify:catalog && bun run verify:gcdb ...`):
  *   - One command for humans/CI to run.
@@ -88,6 +92,11 @@ const VERIFIERS: { id: string; script: string; label: string }[] = [
 		id: "created-by-invariant",
 		script: "verify-created-by-invariant.ts",
 		label: "every store.create carries created_by stamp",
+	},
+	{
+		id: "extension-load",
+		script: "verify-extension-load.ts",
+		label: "every registered package extension loads via jiti",
 	},
 ];
 
