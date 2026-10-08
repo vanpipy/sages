@@ -47,6 +47,10 @@ import {
 	placeholderReview,
 	type WorkflowGoal,
 } from "./workflow-graph.js";
+import {
+	WORKFLOW_START,
+	WORKFLOW_PHASE_COMPLETE,
+} from "./event-channels.js";
 
 // ── Public surface ──────────────────────────────────────────────────────
 
@@ -136,16 +140,13 @@ export interface SubscribeWorkflowOptions {
  * Subscribe to the workflow events. Returns an unsubscribe function that
  * detaches both listeners.
  *
- * The handler keeps two pieces of internal state:
- *   - `agentToTask` — reverse index from agent id → task id, populated at
- *     spawn time (workflow:start + each cascade spawn) using the real id
- *     returned by spawnAgent. The previous design pre-populated this map
- *     with synthetic `agent-${task.id}` keys at workflow:start, which only
- *     matched the same synthetic shape tests used. Production spawn (pi-subagents
- *     returns real UUID prefixes) never matched, so the cascade stalled on
- *     the first phase (GC-2026-pi-tasks-cascade-agentid).
- *   - `completedIds` — set of task ids that have completed, used to drive
- *     the cascade without scanning the store on every event.
+ * GC-2026-114 FU3: the local `agentToTask` map was removed (the unified
+ * task-feeder populates the shared `agentTaskMap` that this handler reads).
+ * GC-2026-118 F6: the local `completedIds: Set<string>` cache was also
+ * removed — its only consumer was the cascade loop's `blockedBy.every`
+ * check, which is equivalent to `store.get(id)?.status === "completed"`
+ * (O(1) Map lookup; the cache's marginal speedup didn't justify the
+ * bookkeeping).
  */
 export function subscribeWorkflow(
 	store: TaskStore,
@@ -156,7 +157,9 @@ export function subscribeWorkflow(
 	// workflow handler reads the SAME shared `agentTaskMap` that the
 	// unified task-feeder populates on spawn. No local reverse-index
 	// cache is needed.
-	const completedIds = new Set<string>();
+	// GC-2026-118 F6: the local `completedIds` Set cache was also removed.
+	// The cascade loop now reads `store.get(id)?.status === "completed"`
+	// directly.
 	// workflow_id is stamped onto every task's metadata so the cascade
 	// filter only walks tasks belonging to the active workflow.
 	let activeWorkflowId: string | null = null;
@@ -613,11 +616,6 @@ export function subscribeWorkflow(
 		const task = store.get(taskId);
 		if (!task) return;
 
-		// Track completion BEFORE the cascade scan, so the just-completed task
-		// counts as unblocking its dependents.
-		// (Was: agentToTask.delete — the feeder's listener handles this.)
-		completedIds.add(taskId);
-
 		// GC-2026-task-widget-link: notify the host UI that the workflow task
 		// finished. The wrapper in pi-tasks/src/index.ts translates this into
 		// `widget.setActiveTask(taskId, false)` + `widget.update()`. Without
@@ -691,7 +689,7 @@ export function subscribeWorkflow(
 				// not cascade. workflow-run.ts reads status and resolves as
 				// blocked. open_question propagates so the orchestrator can
 				// surface it to the user.
-				await events.emit("workflow:phase-complete", {
+				await events.emit(WORKFLOW_PHASE_COMPLETE, {
 					workflow_id: task.metadata.workflow_id ?? activeWorkflowId,
 					goal_id: task.metadata.workflow_run_goal_id ?? activeGoalId,
 					phase: "review",
@@ -705,7 +703,7 @@ export function subscribeWorkflow(
 				return; // skip cascade
 			}
 
-			await events.emit("workflow:phase-complete", {
+			await events.emit(WORKFLOW_PHASE_COMPLETE, {
 				workflow_id: task.metadata.workflow_id ?? activeWorkflowId,
 				goal_id: task.metadata.workflow_run_goal_id ?? activeGoalId,
 				phase: "review",
@@ -717,7 +715,7 @@ export function subscribeWorkflow(
 			});
 		} else {
 			store.update(taskId, { status: "completed" });
-			await events.emit("workflow:phase-complete", {
+			await events.emit(WORKFLOW_PHASE_COMPLETE, {
 				workflow_id: task.metadata.workflow_id ?? activeWorkflowId,
 				goal_id: task.metadata.workflow_run_goal_id ?? activeGoalId,
 				phase: task.metadata.phase,
@@ -745,7 +743,13 @@ export function subscribeWorkflow(
 		for (const t of all) {
 			if (t.status !== "pending") continue;
 			if (activeGoalId && t.metadata.workflow_run_goal_id !== activeGoalId) continue;
-			if (!t.blockedBy.every(id => completedIds.has(id))) continue;
+			// GC-2026-118 F6: replace completedIds cache with a direct
+			// store.get status check. O(1) Map lookup; no cache needed.
+			if (
+				!t.blockedBy.every(
+					(id) => store.get(id)?.status === "completed",
+				)
+			) continue;
 
 			// GC-2026-b6: inject prior Review summary for Review_{N>1}.
 			if (
@@ -809,7 +813,7 @@ export function subscribeWorkflow(
 			},
 		});
 
-		await events.emit("workflow:phase-complete", {
+		await events.emit(WORKFLOW_PHASE_COMPLETE, {
 			workflow_id: task.metadata.workflow_id ?? activeWorkflowId,
 			goal_id: task.metadata.workflow_run_goal_id ?? activeGoalId,
 			phase: task.metadata.phase,
@@ -820,7 +824,7 @@ export function subscribeWorkflow(
 		});
 	};
 
-	const unsubStart = events.on("workflow:start", onWorkflowStart);
+	const unsubStart = events.on(WORKFLOW_START, onWorkflowStart);
 	const unsubComplete = events.on("subagents:completed", onSubagentCompleted);
 	const unsubFailed = events.on("subagents:failed", onSubagentFailed);
 
