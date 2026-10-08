@@ -167,10 +167,12 @@ the workflow is:
    dispatches Fix on NEEDS_WORK, a new Implement on NEEDS_REDESIGN,
    and pauses on NEEDS_CLARIFICATION.
 5. **User tasks (no goal contract):** `/tasks create "<subject>"`
-   arg-style slash command (no agentType by default → sits pending
-   in the store; with `--agent-type` → task feeding dispatches
-   atomically). Chat-driven decomposition pulls a user task into the
-   decompose_task path.
+   arg-style slash command. Tasks with `agentType` auto-spawn via
+   the unified `task-feeder` (GC-2026-108 + GC-2026-113); tasks
+   without `agentType` sit in the store as planning data. Cascade
+   across blocked tasks is unconditional (no `cfg.autoCascade` gate).
+   Chat-driven decomposition pulls a user task into the
+   `decompose_task` path.
 
 State persists in `.pi/orchestrator/audit-state-{goal_id}.yaml` so work
 can resume after context compaction. Decompose state is on the
