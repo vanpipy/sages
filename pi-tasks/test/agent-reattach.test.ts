@@ -45,6 +45,14 @@ async function sessionWithRunningAgent() {
   const mock = mockPi();
   const rpc = installSubagentsMock(mock.pi);
   initExtension(mock.pi as any);
+  // GC-2026-112 FU0 Phase 2a: GC-2026-113 (not yet landed) will make
+  // TaskCreate auto-spawn any task that has agentType set. Until 113
+  // lands, the production code only spawns on explicit TaskExecute —
+  // and TaskExecute is the ONLY way to populate `agentTaskMap` in
+  // session 1 (which the legacy subagents:failed listener needs to
+  // revert the task on a failure event). After 113, the feeder
+  // populates `agentTaskMap` directly and this helper can collapse
+  // to a single TaskCreate call.
   await mock.executeTool("TaskCreate", { subject: "Long job", description: "d", agentType: "general-purpose" });
   await mock.executeTool("TaskExecute", { task_ids: ["1"] });
   rpc.unsub();

@@ -98,14 +98,14 @@ describe("/tasks create store integration (AC6)", () => {
     store = new TaskStore();
   });
 
-  it("creates a user task with created_by='user' (default atomic path)", () => {
+  it("creates a user task with created_by='user' (the default user-source stamp; dispatch is owned by the unified task feeder)", () => {
     const task = store.create("fix README", "Fix the typo.", undefined, {
       created_by: "user",
     });
     expect(task.metadata.created_by).toBe("user");
   });
 
-  it("user task with agentType is dispatched-able by task feeding (has agentType)", () => {
+  it("user task with agentType carries the dispatch key the unified task feeder reads", () => {
     const task = store.create("fix README", "Fix.", undefined, {
       created_by: "user",
       agentType: "Developer",
