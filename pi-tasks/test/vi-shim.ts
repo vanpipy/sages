@@ -79,10 +79,16 @@ if (typeof vi.waitFor !== "function") {
     const interval = options?.interval ?? 20;
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
-      const r = await predicate();
-      // vitest treats truthy as "passed" — but a Promise<boolean> resolves
-      // to its actual value. Match that.
-      if (r) return r as T;
+      // vitest's vi.waitFor catches any throw from the predicate
+      // (assertions throw on failure) and retries. Without try/catch
+      // the first failed expect bubbles up and the test reports a
+      // fail-without-retry. Match vitest's contract here.
+      try {
+        const r = await predicate();
+        if (r) return r as T;
+      } catch {
+        // predicate threw (assertion failed) → retry
+      }
       await new Promise((resolve) => setTimeout(resolve, interval));
     }
     throw new Error(`vi.waitFor timed out after ${timeout}ms`);
