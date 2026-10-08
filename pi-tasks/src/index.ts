@@ -32,7 +32,6 @@ import {
   createOrchestratorTask,
   createOrchestratorTaskWithReview,
 } from "./orchestrator-task.js";
-import { registerDecomposeCascade } from "./decompose-cascade.js";
 import { registerTaskFeeder } from "./task-feeder.js";
 
 // ---- Debug ----
@@ -433,14 +432,14 @@ export default function (pi: ExtensionAPI) {
     if (t1 && (!userTask || userTask.status === "completed")) {
       // GC-2026-113 FU0 Phase 2b: delegate T1's first spawn to the
       // unified feeder. The feeder populates agentTaskMap + emits the
-      // events the unified listener watches. The `decompose:spawn`
-      // event channel is kept for backward compatibility with
-      // pi-orchestrator consumers (it was emitted by the old
-      // materializeDecomposeChain and is documented in the design doc).
+      // events the unified listener watches.
+      // GC-2026-117: the legacy `decompose:spawn` event channel was removed;
+      // the unified feeder's `subagents:completed` listener now handles
+      // decompose-chain cascade via its generic `cascadeSpawn` walk (any
+      // pending feedable task with satisfied blockers).
       await feeder.maybeAutoSpawn(t1);
       const afterT1 = store.get(t1.id);
       if (afterT1?.owner) {
-        pi.events.emit("decompose:spawn", { agentId: afterT1.owner, taskId: t1.id });
         widget.setActiveTask(t1.id, true);
         firstSpawned = { task_id: t1.id, agent_id: afterT1.owner };
       }
@@ -465,19 +464,19 @@ export default function (pi: ExtensionAPI) {
     };
   }
 
-  // ── Decompose-cascade listener (GC-2026-task-feeding-and-decomposition AC14) ──
-  // Dedicated cascade for decomposed chains. Workflow tasks continue to flow
-  // through subscribeWorkflow's listener; decomposed tasks (phase:
-  // "decomposition_chain") flow through this listener. The two never collide
-  // because they have disjoint phase filters.
+  // ── Decompose-chain cascade ──
+  // Decompose-chain tasks (phase: "decomposition_chain") are cascaded by the
+  // unified task-feeder registered above. The feeder's generic cascadeSpawn
+  // walks all pending feedable tasks with satisfied blockers, which includes
+  // decompose-chain tasks (their `blockedBy` edges are serial: T_i depends on
+  // T_{i-1}; the chain head has no orchestrator-created predecessors so it
+  // spawns immediately when materializeDecomposeChain calls
+  // `feeder.maybeAutoSpawn(t1)`).
   //
-  // spawnDecomposeTask issues the subagents:rpc:spawn call and emits
-  // The decompose-cascade.ts listener was removed in GC-2026-114 FU3.
-  // The unified task-feeder (registered above as `feeder`) now handles
-  // decompose-task cascade via its generic cascadeSpawn — the feeder's
-  // listener walks all pending tasks with satisfied blockers, which
-  // includes decompose-chain tasks. The `decompose:spawn` event
-  // channel is no longer emitted.
+  // Pre-GC-2026-114 FU3, a dedicated `registerDecomposeCascade` module owned
+  // this responsibility. After FU3 the module was retired and the cascade
+  // moved entirely into the feeder. The module itself is deleted as of
+  // GC-2026-117 — the listener no longer exists in the source tree.
 
   // ── Context-scoped store initialization ──
   // Project paths cannot be resolved until an ExtensionContext is available.
