@@ -20,8 +20,12 @@ afterEach(() => { delete process.env.PI_TASKS; });
 
 /** Create an agent-backed task and launch it, returning the harness. */
 async function launchAgentTask(mock: ReturnType<typeof mockPi>, subject = "Agent task") {
+  // GC-2026-113 FU0 Phase 2b: TaskCreate auto-spawns any task that
+  // has agentType. The followup TaskExecute would error with "not
+  // pending" because the task is already in_progress. The first
+  // auto-spawn produces "agent-1" (the mock increments the id
+  // counter), which is what the tests below expect.
   await mock.executeTool("TaskCreate", { subject, description: "d", agentType: "general-purpose" });
-  await mock.executeTool("TaskExecute", { task_ids: ["1"] });
 }
 
 describe("TaskOutput", () => {
