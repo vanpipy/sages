@@ -79,6 +79,16 @@ export interface WorkflowRunInput {
 		 * to a future GC.
 		 */
 		resume?: boolean;
+		/**
+		 * GC-2026-109 FU1a: watchdog timeout in milliseconds. If no
+		 * `workflow:phase-complete` event with the matching `workflow_id`
+		 * arrives within this window, workflow_run rejects with a
+		 * `WorkflowRunStartTimeoutError` instead of hanging until
+		 * harness timeout. Default 10000. Set to 0 to disable the
+		 * watchdog (escape hatch for tests that drive the cascade out
+		 * of band, and for callers that want the old behavior).
+		 */
+		timeout_ms?: number;
 	};
 	verbose?: boolean;
 }
@@ -108,6 +118,31 @@ export interface Finding {
 	issue: string;
 	location?: string;
 	recommendation?: string;
+}
+
+// ── Error classes ─────────────────────────────────────────────────────
+
+/**
+ * GC-2026-109 FU1a: thrown when `workflow_run` does not receive any
+ * `workflow:phase-complete` event for its `workflow_id` within
+ * `options.timeout_ms` (default 10000). The error message names the
+ * goal_id, workflow_id, and the actionable fix
+ * (run `pi-orchestrator/scripts/install.sh` and restart pi).
+ *
+ * The class is exported so callers (and the harness) can match on
+ * it via `instanceof` or `error.name === "WorkflowRunStartTimeoutError"`.
+ */
+export class WorkflowRunStartTimeoutError extends Error {
+	override readonly name = "WorkflowRunStartTimeoutError";
+	readonly code = "WORKFLOW_START_TIMEOUT";
+	constructor(
+		readonly goalId: string,
+		readonly workflowId: string,
+		readonly timeoutMs: number,
+		message: string,
+	) {
+		super(message);
+	}
 }
 
 export interface WorkflowRunOutput {
@@ -489,7 +524,7 @@ export async function executeWorkflowRun(
 	});
 
 	// ── 5. Subscribe to workflow:phase-complete, aggregate, resolve ────
-	return new Promise<WorkflowRunOutput>((resolveFn) => {
+	return new Promise<WorkflowRunOutput>((resolveFn, rejectFn) => {
 		let implementDone = false;
 		let mergeDone = false;
 		let lastReviewVerdict:
@@ -557,9 +592,53 @@ export async function executeWorkflowRun(
 		// so emitProgress reads the most recent value).
 		let ev_findings_count: number | undefined;
 
+		// GC-2026-109 FU1a: watchdog. If the cascade never fires (e.g.
+		// pi-tasks / pi-subagents are not registered in the active session),
+		// `workflow:phase-complete` never arrives. Without this guard the
+		// Promise stays pending until the harness timeout ("No result
+		// provided"). The watchdog rejects with a clear, actionable error
+		// within `options.timeout_ms` (default 10000).
+		const watchdogMs = opts.timeout_ms ?? 10000;
+		let watchdog: ReturnType<typeof setTimeout> | undefined;
+		const clearWatchdog = () => {
+			if (watchdog !== undefined) {
+				clearTimeout(watchdog);
+				watchdog = undefined;
+			}
+		};
+		if (watchdogMs > 0) {
+			watchdog = setTimeout(() => {
+				// Tear down the phase-complete subscription so a late
+				// event arriving after the watchdog fires doesn't double-
+				// resolve / double-clean.
+				clearWatchdog();
+				try {
+					unsub();
+				} catch {
+					// unsub is idempotent; ignore any error.
+				}
+				rejectFn(
+					new WorkflowRunStartTimeoutError(
+						goalId,
+						workflowId,
+						watchdogMs,
+						`workflow_run for goal ${goalId} (workflow_id: ${workflowId}) ` +
+							`did not receive any workflow:phase-complete event within ` +
+							`${watchdogMs}ms. This usually means the pi-tasks and/or ` +
+							`pi-subagents extensions are not registered in the active ` +
+							`session. Fix: run pi-orchestrator/scripts/install.sh and ` +
+							`restart pi.`,
+					),
+				);
+			}, watchdogMs);
+		}
+
 		const unsub = pi.events.on("workflow:phase-complete", (data) => {
 			const ev = data as PhaseCompleteEvent;
 			if (ev.workflow_id !== workflowId) return;
+
+			// GC-2026-109 FU1a: any progress cancels the watchdog.
+			clearWatchdog();
 
 			taskSummaries[ev.task_id] = {
 				id: ev.task_id,

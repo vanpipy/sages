@@ -756,4 +756,82 @@ describe("executeWorkflowRun (path B slim) — onUpdate streaming (GC-2026-workf
 		expect((u.details as { goal_id: string }).goal_id).toBe(GOAL_ID);
 		expect((u.details as { current_phase: string }).current_phase).toBe("implement");
 	});
+
+	// GC-2026-109 FU1a: workflow_run watchdog. When the active session has
+	// no listener for workflow:start (e.g. pi-tasks / pi-subagents not
+	// registered), the Promise previously hung until harness timeout. The
+	// watchdog detects "no progress" within options.timeout_ms and rejects
+	// with a clear, actionable error.
+	describe("watchdog (GC-2026-109 FU1a)", () => {
+		it("rejects with WorkflowRunStartTimeoutError when no workflow:phase-complete arrives within timeout_ms", async () => {
+			const { result } = harness.run({
+				goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
+				options: { max_fix_iterations: 1, timeout_ms: 50 },
+			});
+			// No event fires; the watchdog should reject the Promise.
+			await expect(result).rejects.toThrow(/workflow_run for goal/);
+			await expect(result).rejects.toThrow(/pi-tasks/);
+			await expect(result).rejects.toThrow(/install\.sh/);
+		});
+
+		it("does NOT fire the watchdog when a workflow:phase-complete arrives within the window", async () => {
+			const { result, emitted, handlers } = harness.run({
+				goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
+				options: { max_fix_iterations: 1, timeout_ms: 200 },
+			});
+			// Drive the cascade normally: implement -> review -> merge.
+			const startPayload = emitted.find(e => e.channel === "workflow:start")!
+				.data as WorkflowStartPayload;
+			const phaseComplete = handlers.get("workflow:phase-complete")!;
+			await phaseComplete({
+				workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+				phase: "implement", status: "completed", task_id: "t-impl",
+			});
+			await phaseComplete({
+				workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+				phase: "review", iteration: 1, status: "completed",
+				verdict: "CLEAN", findings_count: 0, task_id: "t-review-1",
+			});
+			await phaseComplete({
+				workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+				phase: "merge", status: "completed", task_id: "t-merge",
+			});
+			const out = await result;
+			expect(out.status).toBe("success");
+		});
+
+		it("timeout_ms: 0 disables the watchdog — late events still resolve", async () => {
+			// With watchdog disabled, the Promise should NOT reject even if
+			// no events fire within any "normal" window. We verify by
+			// firing events well after a 50ms delay and confirming the
+			// Promise resolves as success (not as the watchdog error).
+			const { result, emitted, handlers } = harness.run({
+				goal_path: `.pi/orchestrator/goal-${GOAL_ID}.yaml`,
+				options: { max_fix_iterations: 1, timeout_ms: 0 },
+			});
+			// Wait 50ms (longer than the default 10s would-be-window's
+			// early-detection — proves the watchdog is genuinely off).
+			await new Promise((r) => setTimeout(r, 50));
+			// Now fire all phases. With the watchdog disabled, the Promise
+			// should resolve as success.
+			const startPayload = emitted.find(e => e.channel === "workflow:start")!
+				.data as WorkflowStartPayload;
+			const phaseComplete = handlers.get("workflow:phase-complete")!;
+			await phaseComplete({
+				workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+				phase: "implement", status: "completed", task_id: "t-impl",
+			});
+			await phaseComplete({
+				workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+				phase: "review", iteration: 1, status: "completed",
+				verdict: "CLEAN", findings_count: 0, task_id: "t-review-1",
+			});
+			await phaseComplete({
+				workflow_id: startPayload.workflow_id, goal_id: GOAL_ID,
+				phase: "merge", status: "completed", task_id: "t-merge",
+			});
+			const out = await result;
+			expect(out.status).toBe("success");
+		});
+	});
 });
