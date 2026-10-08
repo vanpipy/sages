@@ -13,6 +13,7 @@ import { DEVELOPER_ADVISOR_PROMPT } from "./agent-prompts/developer-advisor.js";
 import { REVIEWER_ADVISOR_PROMPT } from "./agent-prompts/reviewer-advisor.js";
 import { FIX_ADVISOR_PROMPT } from "./agent-prompts/fix-advisor.js";
 import { PLAN_PROMPT } from "./agent-prompts/plan.js";
+import { PLANNER_PROMPT } from "./agent-prompts/planner.js";
 import type { AgentConfig } from "./types.js";
 
 /**
@@ -317,6 +318,47 @@ const FIX_AGENT: AgentConfig = {
 	runInBackground: true,
 };
 
+/**
+ * GC-2026-121: Planner — chain compiler for user intent tasks.
+ *
+ * Spawned automatically by the unified task-feeder when a user task is created
+ * with `kind: "intent"` (no explicit agentType). Planner's job: read the user
+ * task intent from the spawn prompt and call `decompose_task(user_task_id,
+ * specs=[...])` exactly once. The orchestrator then materializes the chain
+ * and runs it serially via the unified feeder.
+ *
+ * Narrow surface: read + LLM-failing planner (no exploration, no architecture
+ * decisions, no recursive decomposition). If the intent is ambiguous, return
+ * `PLANNER_STATUS: BLOCKED` and let the main LLM refine.
+ *
+ * Extensions: only `pi-orchestrator` is needed (it owns `decompose_task`).
+ * `pi-subagents` is excluded — Planner must not recursively dispatch more
+ * agents. No codebase-memory / AFT / ctx-search — Planner reads intent from
+ * the spawn prompt, not from repo exploration.
+ */
+const PLANNER_AGENT: AgentConfig = {
+	name: "Planner",
+	displayName: "Planner",
+	description:
+		"Chain compiler for user intent tasks (GC-2026-121). Auto-spawned when a user task with kind=intent is created. Reads the intent from the spawn prompt and calls decompose_task(user_task_id, specs=[...]) exactly once to materialize the chain. Returns PLANNER_STATUS: BLOCKED when the intent is too vague.",
+	builtinToolNames: ["read"],
+	// Only pi-orchestrator (for decompose_task). No AFT / ctx-search / codebase-memory
+	// — Planner must read intent from the spawn prompt, not explore the repo.
+	extensions: ["pi-orchestrator"],
+	excludeExtensions: ["pi-subagents"],
+	skills: false,
+	systemPrompt: PLANNER_PROMPT,
+	promptMode: "replace",
+	isDefault: true,
+	// Planner is cheap: one read of intent, one tool call. 50 turns is plenty.
+	runInBackground: true,
+	// Planner doesn't need parent's chat context — the spawn prompt is self-contained.
+	inheritContext: false,
+	// Multiple user tasks can spawn Planners in parallel (one per intent task).
+	// Concurrency cap: 4 (matches Explore — both are short-lived intent resolvers).
+	maxConcurrent: 4,
+};
+
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	[
 		"Explore",
@@ -350,6 +392,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
 	],
 	["Plan", PLAN_AGENT],
 	["PlanCompiler", PLAN_AGENT],
+	["Planner", PLANNER_AGENT],
 	["Developer", DEVELOPER_AGENT],
 	["Reviewer", REVIEWER_AGENT],
 	["MergerAdvisor", MERGER_ADVISOR_AGENT],
