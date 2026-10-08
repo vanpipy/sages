@@ -98,6 +98,11 @@ const VERIFIERS: { id: string; script: string; label: string }[] = [
 		script: "verify-extension-load.ts",
 		label: "every registered package extension loads via jiti",
 	},
+	{
+		id: "workflow-meta-invariant",
+		script: "verify-workflow-meta-invariant.ts",
+		label: "workflow spec builders stamp workflow_run_goal_id (GC-2026-118 F3)",
+	},
 ];
 
 interface Result {

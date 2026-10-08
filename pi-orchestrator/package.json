@@ -14,6 +14,7 @@
     "verify:gcdb": "bun run scripts/verify-gcdb.ts",
     "verify:created-by-invariant": "bun run scripts/verify-created-by-invariant.ts",
     "verify:extension-load": "bun run scripts/verify-extension-load.ts",
+    "verify:workflow-meta-invariant": "bun run scripts/verify-workflow-meta-invariant.ts",
     "verify:pi-universe": "bun run scripts/verify-pi-universe.ts",
     "verify:all": "bun run scripts/verify-all.ts",
     "gen:catalog": "bun run scripts/gen-catalog.ts"
