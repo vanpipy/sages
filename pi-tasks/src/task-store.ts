@@ -94,6 +94,49 @@ function normalizeTask(t: Task): Task {
   };
 }
 
+/**
+ * GC-2026-120 AC1: stamp `kind` based on `created_by` + `agentType`:
+ *   - created_by === "user"   && agentType set  → "actionable"
+ *   - created_by === "user"   && !agentType     → "intent" + requires_decomposition=true
+ *   - created_by === "orchestrator"            → "step"
+ *
+ * An explicit `kind` from the caller wins (orchestrator-task helpers always
+ * stamp "step"). If `kind` resolves to "intent" and the caller did NOT pass
+ * `requires_decomposition`, default it to `true`.
+ */
+function inferKind(metadata?: Record<string, any>): Record<string, any> {
+  const base = metadata ? { ...metadata } : {};
+  const explicitKind = base.kind;
+  if (
+    explicitKind === "intent" ||
+    explicitKind === "actionable" ||
+    explicitKind === "step"
+  ) {
+    if (explicitKind === "intent" && base.requires_decomposition === undefined) {
+      base.requires_decomposition = true;
+    }
+    return base;
+  }
+  // Default: a task with no `created_by` is treated as user-authored
+  // (TaskCreate tool's schema default is "user" — see
+  // pi-tasks/src/index.ts:739-744). orchestrator callers always stamp
+  // `created_by: "orchestrator"` explicitly via the helper.
+  const createdBy = base.created_by ?? "user";
+  if (createdBy === "user") {
+    if (typeof base.agentType === "string" && base.agentType.length > 0) {
+      base.kind = "actionable";
+    } else {
+      base.kind = "intent";
+      if (base.requires_decomposition === undefined) {
+        base.requires_decomposition = true;
+      }
+    }
+  } else {
+    base.kind = "step";
+  }
+  return base;
+}
+
 export class TaskStore {
   private filePath: string | undefined;
   private lockPath: string | undefined;
@@ -179,6 +222,7 @@ export class TaskStore {
   create(subject: string, description: string, activeForm?: string, metadata?: Record<string, any>): Task {
     return this.withLock(() => {
       const now = Date.now();
+      const meta = inferKind(metadata);
       const task: Task = {
         id: String(this.nextId++),
         subject,
@@ -186,7 +230,7 @@ export class TaskStore {
         status: "pending",
         activeForm,
         owner: undefined,
-        metadata: metadata ?? {},
+        metadata: meta,
         blocks: [],
         blockedBy: [],
         createdAt: now,

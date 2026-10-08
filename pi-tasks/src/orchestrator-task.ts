@@ -107,6 +107,7 @@ export function createOrchestratorTask(
   const meta: Record<string, unknown> = {
     ...(spec.metadata ?? {}),
     created_by: "orchestrator" as const,
+    kind: "step" as const,
     agentType: spec.agentType,
   };
 
@@ -196,6 +197,7 @@ export function createMergeTask(
   return store.create(spec.subject, spec.description, spec.activeForm, {
     ...(spec.metadata ?? {}),
     created_by: "orchestrator" as const,
+    kind: "step" as const,
     agentType: "MergerAdvisor",
     phase: "merge" as const,
   });
