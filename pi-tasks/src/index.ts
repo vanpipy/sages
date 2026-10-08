@@ -638,25 +638,27 @@ export default function (pi: ExtensionAPI) {
   // so autoClear doesn't have to import reminder-cadence.
   let currentTurn = 0;
 
-  // GC-2026-120 AC5: once-per-session decomposition reminder. Reset on
-  // session_start below; fired from before_agent_start.
-  let decompositionReminderFired = false;
-  let pendingIntentsSnapshot: Task[] = [];
+  // GC-2026-120 AC5 + follow-up: per-intent decomposition reminder.
+// Fires for every NEW intent task (id not in remindedIntentIds),
+// not just the first batch in a session. Reset on session_start
+// below; fired from before_agent_start.
+let remindedIntentIds = new Set<string>();
 
   function maybeFireDecompositionReminder(ctx: ExtensionContext): void {
-    if (decompositionReminderFired) return;
     const intents = store.list().filter(
       (t) =>
         t.status === "pending" &&
         t.metadata?.kind === "intent",
     );
-    if (intents.length === 0) return;
-    decompositionReminderFired = true;
-    pendingIntentsSnapshot = intents;
+    const newIntents = intents.filter((t) => !remindedIntentIds.has(t.id));
+    if (newIntents.length === 0) return;
+    // Update the snapshot to include every current intent (so a later
+    // arrival only fires for the genuinely-new ones).
+    remindedIntentIds = new Set(intents.map((t) => t.id));
     const lines: string[] = [
-      `[GC-2026-120] You have ${intents.length} pending intent task(s) awaiting decomposition:`,
+      `[GC-2026-120] ${newIntents.length} new intent task(s) awaiting decomposition:`,
     ];
-    for (const t of intents) {
+    for (const t of newIntents) {
       const descPreview = t.description.length > 80
         ? `${t.description.slice(0, 77)}...`
         : t.description;
@@ -712,10 +714,9 @@ export default function (pi: ExtensionAPI) {
     if (isSwitch) {
       persistedTasksShown = false;
       agentsReattached = false;
-      // GC-2026-120 AC5: reset the once-per-session decomposition
-      // reminder so the new session gets a fresh nudge.
-      decompositionReminderFired = false;
-      pendingIntentsSnapshot = [];
+      // GC-2026-120 AC5 + follow-up: reset the per-intent reminder
+      // snapshot so the new session sees every pending intent as new.
+      remindedIntentIds.clear();
       // Task IDs restart at 1 in every session, so a mapping held over from the
       // previous one points at an unrelated task here — the agent's completion would
       // close a task it never ran. reattachAgents() rebuilds what this session owns.
