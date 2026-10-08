@@ -165,19 +165,30 @@ describe("install.sh: package-existence gate functions (GC-2026-main-agent-tool-
 describe("install.sh: package-existence gate wiring (GC-2026-main-agent-tool-surface)", () => {
 	const src = readFileSync(INSTALL_SH, "utf-8");
 
-	it("install() calls verify_package_existence with failure recovery", () => {
-		expect(src).toMatch(/verify_package_existence\s*\|\|\s*\{/);
+	// GC-2026-110 FU1b: post-install gates are consolidated into
+	// run_post_install_gates(). The wiring test now pins the new
+	// function name + ordering inside the helper, not in install().
+	it("install() calls run_post_install_gates with failure recovery", () => {
+		// The FU1b refactor changed the wiring from
+		//   `verify_package_existence || { ...; exit 1; }`
+		// to
+		//   `if ! run_post_install_gates; then ...; exit 1; fi`
+		// (consolidating all 3 post-install gates into one helper).
+		expect(src).toMatch(/if\s+!\s+run_post_install_gates\s*;\s*then/);
 	});
 
-	it("verify_package_existence gate appears AFTER verify_all_critical_install_deps in install()", () => {
-		// Ordering invariant: verify_all_critical_install_deps checks
-		// node_modules content; verify_package_existence checks dir existence.
-		// Run deps first, then existence — surfaces structural errors
-		// before the simpler existence check.
-		const idxDeps = src.indexOf("verify_all_critical_install_deps || {");
-		const idxExist = src.indexOf("verify_package_existence || {");
-		expect(idxDeps).toBeGreaterThan(0);
-		expect(idxExist).toBeGreaterThan(idxDeps);
+	it("run_post_install_gates calls verify_all_critical_install_deps BEFORE verify_package_existence", () => {
+		// Ordering invariant (preserved by the FU1b refactor): deps first,
+		// then existence — surfaces structural errors before the simpler
+		// existence check.
+		const idxDeps = src.indexOf("verify_all_critical_install_deps");
+		// Find the SECOND occurrence (the first is the function
+		// definition, the second is the call inside
+		// run_post_install_gates).
+		const idxDepsCall = src.indexOf("verify_all_critical_install_deps", idxDeps + 1);
+		const idxExistCall = src.indexOf("verify_package_existence", idxDepsCall);
+		expect(idxDepsCall).toBeGreaterThan(0);
+		expect(idxExistCall).toBeGreaterThan(idxDepsCall);
 	});
 });
 
