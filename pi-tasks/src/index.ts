@@ -638,6 +638,36 @@ export default function (pi: ExtensionAPI) {
   // so autoClear doesn't have to import reminder-cadence.
   let currentTurn = 0;
 
+  // GC-2026-120 AC5: once-per-session decomposition reminder. Reset on
+  // session_start below; fired from before_agent_start.
+  let decompositionReminderFired = false;
+  let pendingIntentsSnapshot: Task[] = [];
+
+  function maybeFireDecompositionReminder(ctx: ExtensionContext): void {
+    if (decompositionReminderFired) return;
+    const intents = store.list().filter(
+      (t) =>
+        t.status === "pending" &&
+        t.metadata?.kind === "intent",
+    );
+    if (intents.length === 0) return;
+    decompositionReminderFired = true;
+    pendingIntentsSnapshot = intents;
+    const lines: string[] = [
+      `[GC-2026-120] You have ${intents.length} pending intent task(s) awaiting decomposition:`,
+    ];
+    for (const t of intents) {
+      const descPreview = t.description.length > 80
+        ? `${t.description.slice(0, 77)}...`
+        : t.description;
+      lines.push(`- #${t.id}: ${t.subject} — ${descPreview}`);
+    }
+    lines.push(
+      `Call \`decompose_task(user_task_id="<id>", specs=[...])\` for each, or use \`/tasks create --decompose-spec "T1:s|T1 d;..." --user-task-id <id>\` for inline decomposition.`,
+    );
+    ctx.ui.notify(lines.join("\n"), "info");
+  }
+
   pi.on("turn_start", async (_event, ctx) => {
     currentTurn += 1;
     latestCtx = ctx;
@@ -682,6 +712,10 @@ export default function (pi: ExtensionAPI) {
     if (isSwitch) {
       persistedTasksShown = false;
       agentsReattached = false;
+      // GC-2026-120 AC5: reset the once-per-session decomposition
+      // reminder so the new session gets a fresh nudge.
+      decompositionReminderFired = false;
+      pendingIntentsSnapshot = [];
       // Task IDs restart at 1 in every session, so a mapping held over from the
       // previous one points at an unrelated task here — the agent's completion would
       // close a task it never ran. reattachAgents() rebuilds what this session owns.
@@ -717,6 +751,9 @@ export default function (pi: ExtensionAPI) {
     initializeStoreForContext(ctx);
     reattachAgents();
     showPersistedTasks();
+    // GC-2026-120 AC5: nudge the LLM about pending intent tasks so it
+    // knows to follow up with decompose_task. Once-per-session.
+    maybeFireDecompositionReminder(ctx);
     if (pendingWarning) {
       ctx.ui.notify(pendingWarning, "warning");
       pendingWarning = undefined;
