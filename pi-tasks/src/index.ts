@@ -247,7 +247,17 @@ export default function (pi: ExtensionAPI) {
       if (!subagentsAvailable) {
         throw new Error("subagents extension unavailable; Planner fallback engages");
       }
-      const type = String(task.metadata.agentType ?? task.subject);
+      // GC-2026-121 follow-up: tasks created BEFORE the Planner
+      // agentType stamp shipped (or loaded from a pre-fix store file)
+      // have kind=intent but no agentType. Default the spawn type to
+      // Planner in that case so the unified feeder still consumes them.
+      const explicitType = task.metadata.agentType;
+      const type =
+        typeof explicitType === "string" && explicitType.length > 0
+          ? explicitType
+          : task.metadata.kind === "intent"
+            ? "Planner"
+            : String(task.subject);
       const goalId = typeof task.metadata.workflow_run_goal_id === "string"
         ? task.metadata.workflow_run_goal_id
         : undefined;

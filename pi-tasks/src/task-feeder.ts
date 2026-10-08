@@ -51,8 +51,16 @@ function debugLog(...args: unknown[]): void {
  * previous split architecture are no longer needed).
  */
 export function isFeedableTask(t: Task): boolean {
+  // Explicit agentType wins (actionable + step + orchestrator tasks).
   const at = t.metadata?.agentType;
-  return typeof at === "string" && at.length > 0;
+  if (typeof at === "string" && at.length > 0) return true;
+  // GC-2026-121 follow-up: kind=intent is feedable even without an
+  // explicit agentType stamp. Handles tasks persisted to disk BEFORE
+  // inferKind started stamping agentType=Planner (the Planner path is
+  // the default consumer for intent tasks). The spawn callback
+  // defaults the spawn type to "Planner" when no agentType is set.
+  if (t.metadata?.kind === "intent") return true;
+  return false;
 }
 
 // ── Public handle returned by registerTaskFeeder ──────────────────────
