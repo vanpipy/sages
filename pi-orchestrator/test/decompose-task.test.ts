@@ -194,6 +194,121 @@ describe("decompose_task tool (AC3)", () => {
     void origEmit;
   });
 
+  // GC-2026-decompose-task-retry: a fake bus that fails the first N
+  // request-channel emits (no reply) then succeeds on the (N+1)th.
+  // Counts request-channel emits so the test can assert retry count.
+  function createRetryBus(failFirstNAttempts: number) {
+    const listeners = new Map<string, Array<(data: unknown) => void | Promise<void>>>();
+    const emitted: Array<{ channel: string; data: unknown }> = [];
+    let requestEmits = 0;
+    return {
+      emitted,
+      on(channel: string, handler: (data: unknown) => void | Promise<void>): () => void {
+        const arr = listeners.get(channel) ?? [];
+        arr.push(handler);
+        listeners.set(channel, arr);
+        return () => {
+          const a = listeners.get(channel) ?? [];
+          const idx = a.indexOf(handler);
+          if (idx >= 0) a.splice(idx, 1);
+        };
+      },
+      async emit(channel: string, data: unknown): Promise<void> {
+        emitted.push({ channel, data });
+        if (channel === "tasks:rpc:decompose-materialize") {
+          requestEmits += 1;
+          if (requestEmits <= failFirstNAttempts) return; // no reply
+          const payload = data as { requestId?: string; params?: any };
+          if (payload?.requestId && payload.params) {
+            const result = simulateMaterialize(payload.params);
+            const replyChannel = `tasks:rpc:decompose-materialize:reply:${payload.requestId}`;
+            for (const h of listeners.get(replyChannel) ?? []) {
+              await h({ success: true, data: result });
+            }
+          }
+        }
+        for (const h of listeners.get(channel) ?? []) await h(data);
+      },
+      get requestEmits() {
+        return requestEmits;
+      },
+    };
+  }
+
+  it("retries on timeout and succeeds on a later attempt", async () => {
+    // First attempt times out (no reply), second attempt gets a reply.
+    const bus = createRetryBus(1);
+    const ctx = { cwd: "/tmp", events: bus, rpcTimeoutMs: 50, maxRetries: 3 };
+    const result = await executeDecomposeTask(
+      { specs: [{ subject: "T1", description: "First retry then succeed." }] },
+      ctx,
+    );
+    expect(result.status).toBe("success");
+    expect(bus.requestEmits).toBe(2); // first attempt + 1 retry
+  });
+
+  it("exhausts maxRetries and rejects with the last timeout error", async () => {
+    // All attempts time out — caller sees a single timeout error after
+    // maxRetries tries, no silent drop, no infinite loop.
+    const bus = createRetryBus(Infinity);
+    const ctx = { cwd: "/tmp", events: bus, rpcTimeoutMs: 50, maxRetries: 3 };
+    await expect(
+      executeDecomposeTask(
+        { specs: [{ subject: "T1", description: "All retries exhausted." }] },
+        ctx,
+      ),
+    ).rejects.toThrow(/timeout/);
+    expect(bus.requestEmits).toBe(3);
+  });
+
+  it("does not retry on non-timeout errors (listener-side failures propagate immediately)", async () => {
+    // Bus that replies on the request channel with success:false.
+    // The error from rpcCall is NOT a timeout — retry must NOT fire.
+    const replyHandlers: Array<(d: unknown) => void | Promise<void>> = [];
+    const requestEmits: number[] = [];
+    const events = {
+      on: (channel: string, handler: (data: unknown) => void | Promise<void>) => {
+        if (channel.startsWith("tasks:rpc:decompose-materialize:reply:")) {
+          replyHandlers.push(handler);
+        }
+        return () => {};
+      },
+      emit: async (channel: string, data: unknown) => {
+        if (channel === "tasks:rpc:decompose-materialize") {
+          requestEmits.push(1);
+          // Immediately fire all registered reply handlers with a
+          // failure envelope. Each retry uses a new requestId → new
+          // reply channel → a new handler in replyHandlers.
+          for (const h of replyHandlers.splice(0)) {
+            await h({ success: false, error: "listener rejected" });
+          }
+        }
+      },
+    };
+    const ctx = { cwd: "/tmp", events, rpcTimeoutMs: 100, maxRetries: 3 };
+    await expect(
+      executeDecomposeTask(
+        { specs: [{ subject: "T1", description: "Non-timeout error." }] },
+        ctx,
+      ),
+    ).rejects.toThrow("listener rejected");
+    // Exactly one emit — the retry must not have fired because the
+    // error was a listener-side failure, not a timeout.
+    expect(requestEmits.length).toBe(1);
+  });
+
+  it("respects maxRetries=1 (no retry)", async () => {
+    const bus = createRetryBus(Infinity);
+    const ctx = { cwd: "/tmp", events: bus, rpcTimeoutMs: 50, maxRetries: 1 };
+    await expect(
+      executeDecomposeTask(
+        { specs: [{ subject: "T1", description: "Single attempt only." }] },
+        ctx,
+      ),
+    ).rejects.toThrow(/timeout/);
+    expect(bus.requestEmits).toBe(1);
+  });
+
   // Regression: 2026-10-08T14:17:24Z host crash.
   // Pre-fix, when `api.on` threw synchronously, the executor rejected
   // with that error but the orphan setTimeout (referencing an

@@ -71,6 +71,25 @@ interface RpcEnvelope<T> {
   error?: string;
 }
 
+/**
+ * GC-2026-decompose-task-retry: thrown when an RPC exceeds its
+ * per-attempt timeout. Distinct from generic `Error` so the retry
+ * loop in `executeDecomposeTask` can tell timeout (retryable) apart
+ * from listener-side errors (not retryable — they carry
+ * domain-meaningful failure information).
+ *
+ * Exported so callers + tests can `instanceof` check.
+ */
+export class RpcTimeoutError extends Error {
+  override readonly name = "RpcTimeoutError";
+  constructor(
+    readonly channel: string,
+    readonly timeoutMs: number,
+  ) {
+    super(`${channel} timeout after ${timeoutMs}ms`);
+  }
+}
+
 function rpcCall<T>(
   api: {
     emit: (channel: string, data: unknown) => void | Promise<void>;
@@ -117,7 +136,7 @@ function rpcCall<T>(
     try {
       timer = setTimeout(() => {
         cleanup();
-        rejectFn(new Error(`${channel} timeout after ${timeoutMs}ms`));
+        rejectFn(new RpcTimeoutError(channel, timeoutMs));
       }, timeoutMs);
       unsub = api.on(replyChannel, (raw: unknown) => {
         cleanup();
@@ -138,6 +157,27 @@ function rpcCall<T>(
 
 // ── Entry point (pure, testable without pi runtime) ────────────────────
 
+/**
+ * GC-2026-decompose-task-retry: default per-call retry budget for
+ * the decompose RPC. The pre-fix behavior was no retry — a single
+ * timeout error surfaced immediately to the LLM. The retry loop
+ * here covers transient failure modes (slow listener attach,
+ * intermittent event-bus hiccup) at the cost of taking up to
+ * `maxRetries * rpcTimeoutMs` of wall-clock in the worst case.
+ *
+ * The user's explicit ask: 最多重试三次 → default 3.
+ */
+const DEFAULT_MAX_RETRIES = 3;
+
+/**
+ * Optional delay between retry attempts. Default 0 (immediate
+ * retry). The per-attempt `rpcTimeoutMs` already provides natural
+ * spacing — adding a delay here would only help if the listener
+ * needs recovery time after a slow first response. Tests can
+ * override to 0 to keep runtime small.
+ */
+const DEFAULT_RETRY_DELAY_MS = 0;
+
 export async function executeDecomposeTask(
   params: DecomposeTaskInput,
   ctx: {
@@ -151,27 +191,76 @@ export async function executeDecomposeTask(
     };
     /** Override the RPC timeout (default 30s). Useful for tests. */
     rpcTimeoutMs?: number;
+    /** GC-2026-decompose-task-retry: max attempts (default 3, total tries incl. first). */
+    maxRetries?: number;
+    /** GC-2026-decompose-task-retry: delay between attempts in ms (default 0). */
+    retryDelayMs?: number;
   },
 ): Promise<DecomposeTaskResult> {
-  const inner = await rpcCall<{
-    status: "success";
-    summary: string;
-    tasks: DecomposeTaskResult["tasks"];
-    user_task_chain?: string[];
-    first_task_spawned?: { task_id: string; agent_id: string };
-  }>(ctx.events, DECOMPOSE_REQUEST_CHANNEL, { params }, ctx.rpcTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS);
+  const maxRetries = ctx.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const retryDelayMs = ctx.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  const rpcTimeoutMs = ctx.rpcTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS;
 
-  const auditPath = writeAuditFile(ctx.cwd, params, inner);
-  return {
-    status: "success",
-    summary: inner.summary,
-    tasks: inner.tasks,
-    ...(inner.user_task_chain ? { user_task_chain: inner.user_task_chain } : {}),
-    ...(inner.first_task_spawned
-      ? { first_task_spawned: inner.first_task_spawned }
-      : {}),
-    audit_path: auditPath,
-  };
+  // GC-2026-decompose-task-retry: retry on timeout only. Listener-side
+  // failures (success: false envelopes) carry domain-meaningful
+  // information; retrying would re-emit the same call and either get
+  // the same failure or — worse — succeed on a transient side-effect
+  // the listener would normally reject (e.g. duplicate-task policy).
+  //
+  // KNOWN LIMITATION (idempotency): retries are NOT idempotent at the
+  // listener level. If the first attempt's request reached the
+  // pi-tasks listener and was processed (chain materialized in
+  // store.create calls) but the reply did not make it back within
+  // the timeout, the retry will issue a new requestId, the listener
+  // will re-process, and a duplicate chain will be created in the
+  // store. Full idempotency requires the listener to dedupe by
+  // requestId (or by `user_task_id`); that's a follow-up GC against
+  // pi-tasks. See `pi/docs/postmortem/GC-2026-decompose-task-retry.md`
+  // for the full analysis.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      const inner = await rpcCall<{
+        status: "success";
+        summary: string;
+        tasks: DecomposeTaskResult["tasks"];
+        user_task_chain?: string[];
+        first_task_spawned?: { task_id: string; agent_id: string };
+      }>(
+        ctx.events,
+        DECOMPOSE_REQUEST_CHANNEL,
+        { params },
+        rpcTimeoutMs,
+      );
+
+      // Success: write audit and return. Audit only happens on
+      // success — a failed RPC has no materialize result to record.
+      const auditPath = writeAuditFile(ctx.cwd, params, inner);
+      return {
+        status: "success",
+        summary: inner.summary,
+        tasks: inner.tasks,
+        ...(inner.user_task_chain ? { user_task_chain: inner.user_task_chain } : {}),
+        ...(inner.first_task_spawned
+          ? { first_task_spawned: inner.first_task_spawned }
+          : {}),
+        audit_path: auditPath,
+      };
+    } catch (err) {
+      lastErr = err;
+      // Non-timeout errors propagate immediately (no retry).
+      if (!(err instanceof RpcTimeoutError)) {
+        throw err;
+      }
+      // Last attempt: don't sleep, just exit the loop and throw.
+      if (attempt < maxRetries - 1 && retryDelayMs > 0) {
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+      }
+    }
+  }
+  // All attempts timed out. Throw the most recent error so the
+  // caller sees the channel name + timeout duration in the message.
+  throw lastErr;
 }
 
 function writeAuditFile(
