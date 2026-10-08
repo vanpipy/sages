@@ -35,6 +35,11 @@ import { resolve } from "node:path";
 import { Type, type Static } from "typebox";
 import type { AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 
+import {
+  WORKFLOW_START,
+  WORKFLOW_PHASE_COMPLETE,
+} from "@sages/pi-tasks/event-channels";
+
 import { loadGoalContract } from "./goal-contract.js";
 import type { GoalContract } from "./types.js";
 
@@ -514,7 +519,7 @@ export async function executeWorkflowRun(
 	saveWorkflowState(repoCwd, state);
 
 	// ── 4. Emit workflow:start ─────────────────────────────────────────
-	pi.events.emit("workflow:start", {
+	pi.events.emit(WORKFLOW_START, {
 		workflow_id: workflowId,
 		goal_id: goalId,
 		goal,
@@ -633,7 +638,7 @@ export async function executeWorkflowRun(
 			}, watchdogMs);
 		}
 
-		const unsub = pi.events.on("workflow:phase-complete", (data) => {
+		const unsub = pi.events.on(WORKFLOW_PHASE_COMPLETE, (data) => {
 			const ev = data as PhaseCompleteEvent;
 			if (ev.workflow_id !== workflowId) return;
 

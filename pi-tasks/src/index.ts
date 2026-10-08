@@ -33,6 +33,7 @@ import {
   createOrchestratorTaskWithReview,
 } from "./orchestrator-task.js";
 import { registerTaskFeeder } from "./task-feeder.js";
+import { TASKS_RPC_DECOMPOSE_MATERIALIZE } from "./event-channels.js";
 
 // ---- Debug ----
 
@@ -322,7 +323,7 @@ export default function (pi: ExtensionAPI) {
   //
   // Channel constants are duplicated across packages (string literals) —
   // see pi-orchestrator/src/decompose-task.ts.
-  pi.events.on("tasks:rpc:decompose-materialize", async (raw: unknown) => {
+  pi.events.on(TASKS_RPC_DECOMPOSE_MATERIALIZE, async (raw: unknown) => {
     const payload = raw as { requestId?: unknown; params?: unknown };
     if (typeof payload.requestId !== "string" || !payload.params) return;
     const requestId = payload.requestId;

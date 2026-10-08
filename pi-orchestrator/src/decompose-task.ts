@@ -20,8 +20,10 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { writeFileSync, mkdirSync } from "node:fs";
 
-const DECOMPOSE_REQUEST_CHANNEL = "tasks:rpc:decompose-materialize";
-const DECOMPOSE_REPLY_PREFIX = "tasks:rpc:decompose-materialize:reply:";
+import { TASKS_RPC_DECOMPOSE_MATERIALIZE } from "@sages/pi-tasks/event-channels";
+
+const DECOMPOSE_REQUEST_CHANNEL = TASKS_RPC_DECOMPOSE_MATERIALIZE;
+const DECOMPOSE_REPLY_PREFIX = `${TASKS_RPC_DECOMPOSE_MATERIALIZE}:reply:`;
 const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 
 // ── LLM-facing schema (AC3: narrow specs, no agentType/blockedBy/metadata) ──
