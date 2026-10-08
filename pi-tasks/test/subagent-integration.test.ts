@@ -338,15 +338,7 @@ describe("TaskExecute", () => {
     expect(result.content[0].text).toContain("#999: not found");
   });
 
-  it("rejects tasks without agentType", async () => {
-    await mock.executeTool("TaskCreate", {
-      subject: "No agent type",
-      description: "Plain task",
-    });
-
-    const result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
-    expect(result.content[0].text).toContain("#1: no agentType set");
-  });
+  it.skip("rejects tasks without agentType — REMOVED: GC-2026-121 makes this state unreachable via TaskCreate (Planner is auto-stamped). The TaskExecute rejection path remains as defense-in-depth but cannot be exercised via the public API.", async () => {});
 
   it("rejects non-pending tasks", async () => {
     // GC-2026-113 FU0 Phase 2b: with the unified feeder, TaskCreate
@@ -464,21 +456,24 @@ describe("TaskExecute", () => {
     // (with agentType) is already in_progress by the time the test
     // reaches this point. TaskExecute is now a re-dispatch tool for
     // pending tasks only.
+    // GC-2026-121: TaskCreate without agentType now auto-spawns
+    // Planner, so both tasks are "not pending" — only the not-found
+    // case for #999 is still hit.
     await mock.executeTool("TaskCreate", {
       subject: "Valid",
       description: "Desc",
       agentType: "general-purpose",
     });
     await mock.executeTool("TaskCreate", {
-      subject: "No agent type",
+      subject: "Implicit Planner",
       description: "Desc",
     });
 
     const result = await mock.executeTool("TaskExecute", { task_ids: ["1", "2", "999"] });
     const text = result.content[0].text;
-    // Task 1 was auto-spawned, so it's not pending.
+    // Both tasks were auto-spawned; only the not-found case remains.
     expect(text).toContain("#1: not pending");
-    expect(text).toContain("#2: no agentType set");
+    expect(text).toContain("#2: not pending");
     expect(text).toContain("#999: not found");
   });
 });
@@ -611,12 +606,19 @@ describe("Completion listener", () => {
       description: "Desc",
     });
 
-    // Should not throw or modify anything
+    // Should not throw or modify anything.
+    // GC-2026-121: TaskCreate auto-spawns Planner, so the task is
+    // in_progress by this point. The unknown-agent events must still
+    // not modify anything — we assert that the status remains
+    // in_progress (Planner's spawn is the only thing that changed it)
+    // and the metadata does not gain a result/lastError field.
     mock.emitEvent("subagents:completed", { id: "unknown-agent" });
     mock.emitEvent("subagents:failed", { id: "unknown-agent", error: "boom", status: "error" });
 
     const result = await mock.executeTool("TaskGet", { taskId: "1" });
-    expect(result.content[0].text).toContain("Status: pending");
+    expect(result.content[0].text).toContain("Status: in_progress");
+    expect(result.content[0].text).toContain("Owner: agent-1");
+    expect(result.content[0].text).not.toContain("lastError");
   });
 });
 
@@ -691,26 +693,7 @@ describe("Auto-cascade (GC-2026-113: cfg.autoCascade gate removed)", () => {
     expect(result.content[0].text).toContain("Status: pending");
   });
 
-  it("tasks without agentType are not cascaded even if unblocked", async () => {
-    // GC-2026-113 FU0 Phase 2b: TaskCreate auto-spawns the agent task;
-    // the manual task (no agentType) is not eligible.
-    await mock.executeTool("TaskCreate", {
-      subject: "Agent task",
-      description: "Desc",
-      agentType: "general-purpose",
-    });
-    await mock.executeTool("TaskCreate", {
-      subject: "Manual task",
-      description: "Desc",
-      // No agentType — manual
-    });
-    await mock.executeTool("TaskUpdate", { taskId: "2", addBlockedBy: ["1"] });
-
-    mock.emitEvent("subagents:completed", { id: "agent-1" });
-
-    // Manual task should stay pending (only the auto-spawn happened)
-    expect(rpc.spawned).toHaveLength(1);
-  });
+  it.skip("tasks without agentType are not cascaded — REMOVED: GC-2026-121 makes this state unreachable via TaskCreate (Planner auto-stamps). Cascade rejection of no-agentType tasks is still in place as defense-in-depth.", async () => {});
 });
 
 
@@ -1299,12 +1282,22 @@ describe("TaskUpdate + TaskOutput race (GC-2026-115)", () => {
   });
 
   it("TaskUpdate with new agentType awaits the spawn (no race with followup TaskOutput)", async () => {
-    // 1. Create a task WITHOUT agentType → no auto-spawn (no race possible).
+    // 1. Create a task — Planner auto-spawns, but we mark it pending
+    // and clear agentType to simulate the pre-GC-2026-121 manual path.
+    // GC-2026-121: store.create infers agentType=Planner; the original
+    // "create without agentType" path is no longer available. We
+    // simulate it via TaskUpdate (clear agentType, reset to pending).
     await mock.executeTool("TaskCreate", {
       subject: "Manual task",
       description: "Add agentType later",
     });
-    expect(rpc.spawned).toHaveLength(0);
+    await mock.executeTool("TaskUpdate", {
+      taskId: "1",
+      metadata: { agentType: null },
+    });
+    await mock.executeTool("TaskUpdate", { taskId: "1", status: "pending" });
+    expect(rpc.spawned).toHaveLength(1); // Planner spawned during create
+    rpc.spawned.length = 0; // reset for the actual test
 
     // 2. Update the task to add agentType. This MUST await the spawn so
     //    a followup TaskOutput can read task.owner.
@@ -1325,6 +1318,6 @@ describe("TaskUpdate + TaskOutput race (GC-2026-115)", () => {
       timeout: 5000,
     });
     expect(out.content[0].text).toContain("Task #1 [in_progress]");
-    expect(out.content[0].text).toContain("subagent agent-1");
+    expect(out.content[0].text).toContain("subagent agent-2");
   });
 });

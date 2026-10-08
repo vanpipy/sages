@@ -207,11 +207,25 @@ describe("task-feeder: maybeAutoSpawn direct call", () => {
     expect(updated?.owner).toBe("agent-1");
   });
 
-  it("skips spawn when agentType is missing", async () => {
-    const t = mkTask(h.store, { subject: "no-type" });
-    await h.feeder.maybeAutoSpawn(t);
+  it("skips spawn when agentType is missing (raw predicate)", async () => {
+    // GC-2026-121: store.create now always stamps agentType=Planner on
+    // intent tasks, so this state is unreachable via the store. The pure
+    // predicate `isFeedableTask` still rejects raw Task objects with no
+    // agentType, so we exercise that path here.
+    const rawTask: Task = {
+      id: "raw-1",
+      subject: "no-type",
+      description: "D",
+      status: "pending",
+      metadata: { created_by: "user" }, // no agentType
+      blocks: [],
+      blockedBy: [],
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    expect(isFeedableTask(rawTask)).toBe(false);
+    await h.feeder.maybeAutoSpawn(rawTask);
     expect(h.spawnCalls.length).toBe(0);
-    expect(h.store.get(t.id)?.status).toBe("pending");
   });
 
   it("skips spawn when blockers are not all completed", async () => {

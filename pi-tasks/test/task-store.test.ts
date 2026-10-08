@@ -26,9 +26,14 @@ describe("TaskStore (in-memory)", () => {
     const t = store.create("Task", "Desc", "Running task", { key: "value" });
 
     expect(t.activeForm).toBe("Running task");
-    // GC-2026-120: store infers kind + requires_decomposition for a
-    // user-authored task (no created_by + no agentType → intent).
-    expect(t.metadata).toEqual({ key: "value", kind: "intent", requires_decomposition: true });
+    // GC-2026-120 + GC-2026-121: store infers kind=intent + requires_decomposition=true
+    // + agentType=Planner (for self-consumption via the unified feeder).
+    expect(t.metadata).toEqual({
+      key: "value",
+      kind: "intent",
+      requires_decomposition: true,
+      agentType: "Planner",
+    });
   });
 
   it("gets a task by ID", () => {
@@ -147,8 +152,11 @@ describe("TaskStore (in-memory)", () => {
     store.update("1", { metadata: { b: null, d: 4 } });
 
     const task = store.get("1")!;
-    // GC-2026-120: kind + requires_decomposition were inferred at create time.
-    expect(task.metadata).toEqual({ a: 1, c: 3, d: 4, kind: "intent", requires_decomposition: true });
+    // GC-2026-120 + GC-2026-121: kind=intent, requires_decomposition=true,
+    // agentType=Planner were inferred at create time.
+    expect(task.metadata).toEqual({
+      a: 1, c: 3, d: 4, kind: "intent", requires_decomposition: true, agentType: "Planner",
+    });
   });
 
   it("sets up bidirectional blocks via addBlocks", () => {
@@ -224,11 +232,18 @@ describe("TaskStore (in-memory)", () => {
 
   it("creates tasks with metadata via TaskCreate", () => {
     const t = store.create("With meta", "Desc", undefined, { pr: "123", reviewer: "alice" });
-    // GC-2026-120: kind + requires_decomposition were inferred.
-    expect(t.metadata).toEqual({ pr: "123", reviewer: "alice", kind: "intent", requires_decomposition: true });
+    // GC-2026-120 + GC-2026-121: kind=intent, requires_decomposition=true,
+    // agentType=Planner were inferred.
+    expect(t.metadata).toEqual({
+      pr: "123", reviewer: "alice",
+      kind: "intent", requires_decomposition: true, agentType: "Planner",
+    });
 
     const retrieved = store.get("1")!;
-    expect(retrieved.metadata).toEqual({ pr: "123", reviewer: "alice", kind: "intent", requires_decomposition: true });
+    expect(retrieved.metadata).toEqual({
+      pr: "123", reviewer: "alice",
+      kind: "intent", requires_decomposition: true, agentType: "Planner",
+    });
   });
 
   it("allows circular dependencies with warning", () => {

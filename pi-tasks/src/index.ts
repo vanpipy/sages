@@ -239,6 +239,14 @@ export default function (pi: ExtensionAPI) {
     store,
     events: pi.events,
     spawn: async (task: Task) => {
+      // GC-2026-121: if pi-subagents is not available, refuse the spawn
+      // gracefully — the task stays in pending state and the existing
+      // before_agent_start reminder fires for the LLM as the fallback.
+      // Without this guard, a missing subagents extension hangs the
+      // feeder forever waiting for an RPC reply that never comes.
+      if (!subagentsAvailable) {
+        throw new Error("subagents extension unavailable; Planner fallback engages");
+      }
       const type = String(task.metadata.agentType ?? task.subject);
       const goalId = typeof task.metadata.workflow_run_goal_id === "string"
         ? task.metadata.workflow_run_goal_id

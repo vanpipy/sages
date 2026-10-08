@@ -95,10 +95,18 @@ function normalizeTask(t: Task): Task {
 }
 
 /**
- * GC-2026-120 AC1: stamp `kind` based on `created_by` + `agentType`:
+ * GC-2026-120 AC1 + GC-2026-121 AC1: stamp `kind` based on `created_by` + `agentType`:
  *   - created_by === "user"   && agentType set  → "actionable"
- *   - created_by === "user"   && !agentType     → "intent" + requires_decomposition=true
+ *   - created_by === "user"   && !agentType     → "intent" + agentType="Planner" + requires_decomposition=true
  *   - created_by === "orchestrator"            → "step"
+ *
+ * GC-2026-121: an intent task now also carries `agentType: "Planner"` so the
+ * unified feeder auto-spawns a Planner subagent that handles decomposition
+ * autonomously (agent self-consumption). The Planner's system prompt tells
+ * it to call `decompose_task(user_task_id, specs=[...])` exactly once, then
+ * exit. If the Planner fails to spawn (subagents extension unavailable, RPC
+ * timeout, etc.), the task stays in pending state and the existing
+ * before_agent_start reminder fires for the LLM as the fallback.
  *
  * An explicit `kind` from the caller wins (orchestrator-task helpers always
  * stamp "step"). If `kind` resolves to "intent" and the caller did NOT pass
@@ -112,8 +120,16 @@ function inferKind(metadata?: Record<string, any>): Record<string, any> {
     explicitKind === "actionable" ||
     explicitKind === "step"
   ) {
-    if (explicitKind === "intent" && base.requires_decomposition === undefined) {
-      base.requires_decomposition = true;
+    if (explicitKind === "intent") {
+      if (base.requires_decomposition === undefined) {
+        base.requires_decomposition = true;
+      }
+      // GC-2026-121 AC1: even when the caller explicitly stamps kind=intent,
+      // also stamp the Planner agentType UNLESS the caller already supplied
+      // one (caller wins — they may want Explore, general-purpose, etc.).
+      if (typeof base.agentType !== "string" || base.agentType.length === 0) {
+        base.agentType = "Planner";
+      }
     }
     return base;
   }
@@ -130,6 +146,8 @@ function inferKind(metadata?: Record<string, any>): Record<string, any> {
       if (base.requires_decomposition === undefined) {
         base.requires_decomposition = true;
       }
+      // GC-2026-121 AC1: intent tasks auto-default to Planner for self-consumption.
+      base.agentType = "Planner";
     }
   } else {
     base.kind = "step";
