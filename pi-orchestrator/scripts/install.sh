@@ -53,6 +53,10 @@
 #                        install on this prefix (peer chain must already be
 #                        intact at $PI_DIR/packages/). GC-2026-pi-tasks-cascade-
 #                        agentid + GC-2026-boundary-subagent-control follow-up.
+#   --no-smoke          skip the post-install extension-load smoke test (gate 3 of
+#                        run_post_install_gates). Gates 1 (critical_deps) and
+#                        2 (package_existence) still run. Useful for fast
+#                        iteration when the install is known sound. GC-2026-110.
 #
 # These flags are mutually exclusive with --uninstall and each other.
 #
@@ -225,6 +229,7 @@ usage() {
   echo "  --orchestrator-only Only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
   echo "  --system-only      Only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)"
   echo "  --sync-only        Force-copy pi-orchestrator + pi-tasks source files only (no bun install / no peer setup / no SYSTEM.md / no pi CLI). Requires a prior full install on the same prefix."
+  echo "  --no-smoke         Skip the post-install extension-load smoke test (gate 3 of run_post_install_gates). Gates 1 (critical_deps) and 2 (package_existence) still run. Useful for fast iteration when you know the install is sound."
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --orchestrator-only | --system-only | --sync-only)."
@@ -992,6 +997,59 @@ verify_all_critical_install_deps() {
   fi
   echo "  All critical deps present."
   return 0
+}
+
+# GC-2026-110 FU1b: consolidated post-install gates. Returns 0 iff every
+# gate passes. The three gates (in order):
+#   1. critical_deps — every installed package has its critical
+#      runtime deps in node_modules (catches silent bun install failures)
+#   2. package_existence — every package registered in
+#      settings.json#packages has its dest dir on disk (catches npm
+#      peers uninstalled but path still registered)
+#   3. extension_load — jiti-imports every registered package's entry
+#      and verifies the default export is a function (catches typo in
+#      package.json#pi.extensions, missing transitive deps, etc.)
+# `--no-smoke` (read from $SMOKE) skips gate (3); gates (1) and (2)
+# always run because they're cheap and catch real partial-failure bugs.
+run_post_install_gates() {
+  local failed=0
+
+  # Gate 1: critical deps
+  if ! verify_all_critical_install_deps; then
+    failed=$((failed + 1))
+  fi
+
+  # Gate 2: registered-package existence
+  if ! verify_package_existence; then
+    failed=$((failed + 1))
+  fi
+
+  # Gate 3: extension-load smoke test (skippable via --no-smoke)
+  if [[ "${SMOKE:-true}" == "true" ]]; then
+    echo ""
+    echo "==> POST-INSTALL SMOKE TEST: extension load via jiti"
+    echo "    (catches silent fail-soft in pi-coding-agent's loader: typo in"
+    echo "    package.json#pi.extensions, missing transitive deps, etc.)"
+    if command -v bun &>/dev/null; then
+      # Use $SCRIPT_DIR absolute path so the call works regardless of
+      # cwd (the script is sometimes invoked as
+      # `bash pi-orchestrator/scripts/install.sh` from the repo root,
+      # where `bun run scripts/...` would fail with "Module not found").
+      if bun run "$SCRIPT_DIR/verify-extension-load.ts"; then
+        echo "==> POST-INSTALL SMOKE TEST: PASS"
+      else
+        echo "==> POST-INSTALL SMOKE TEST: FAIL"
+        failed=$((failed + 1))
+      fi
+    else
+      echo "  (skipped verify:extension-load — bun not on PATH)"
+    fi
+  else
+    echo ""
+    echo "==> POST-INSTALL SMOKE TEST: skipped (--no-smoke)"
+  fi
+
+  return $failed
 }
 
 is_pi_orchestrator_installed() {
@@ -2190,59 +2248,16 @@ install() {
   install_agent_tool_description
   install_subagents_config
 
-  # Final gate: verify every installed package has its critical runtime
-  # deps in node_modules. Per-peer install steps can silently succeed
-  # (their `bun install --silent || true` swallows errors), and a peer
-  # dir deleted out-of-band but still in settings.json would be skipped
-  # by the is_*_installed guards. This catch-all re-verifies everything
-  # at end of install and exits 1 with a clear recovery path if any
-  # package is missing its critical modules. Without this gate, the
-  # user only learns about missing deps when pi fails to load the
-  # extension at next session start.
-  verify_all_critical_install_deps || {
+  # GC-2026-110 FU1b: consolidated post-install gates. Three gates catch
+  # partial-failure states: (1) critical deps, (2) registered-package
+  # existence, (3) extension load smoke test. Any one failing exits 1
+  # with a clear recovery command. --no-smoke skips gate (3) only;
+  # gates (1) and (2) still run (they're cheap and catch real bugs).
+  if ! run_post_install_gates; then
     echo ""
-    echo "Install completed but critical deps verification failed."
+    echo "Install completed but post-install verification failed."
     echo "Re-run with --force to repair: bash $0 --force"
     exit 1
-  }
-
-  # Final gate (GC-2026-main-agent-tool-surface): verify every sage-peer
-  # package registered in settings.json#packages has its dest dir on disk.
-  # The is_*_installed guards prevent silent breakage, but only for the
-  # 5 sage peers (pi-orchestrator + pi-tasks + pi-subagents + pi-evaluator
-  # + pi-codebase-memory). This gate also catches npm: / absolute-path
-  # peers whose dest vanished (e.g. an npm peer uninstalled but the path
-  # stayed registered).
-  verify_package_existence || {
-    echo ""
-    echo "Install completed but registered-package-existence verification failed."
-    echo "Re-run with --force to repair: bash $0 --force"
-    exit 1
-  }
-
-  # GC-2026-extension-load-verify: surface the host loader's silent
-  # fail-soft path. pi-coding-agent/dist/core/extensions/loader.js:363-381
-  # catches extension-load errors and returns {extension: null, error}
-  # without logging. If the path exists but the import throws (typo in
-  # package.json#pi.extensions, missing transitive dep, etc.), the user
-  # only learns when a future session's tool fails to appear.
-  #
-  # We re-run the loader's logic via jiti (the same runtime pi uses) so
-  # the install verifies what the loader will see at next session start.
-  if command -v bun &>/dev/null; then
-    echo "==> Verifying extension load via jiti (catches silent fail-soft)..."
-    # Use $SCRIPT_DIR absolute path so the call works regardless of cwd
-    # (the script is sometimes invoked as `bash pi-orchestrator/scripts/install.sh`
-    # from the repo root, where `bun run scripts/...` would fail with
-    # "Module not found").
-    if ! bun run "$SCRIPT_DIR/verify-extension-load.ts"; then
-      echo ""
-      echo "Extension load verification failed (see errors above)."
-      echo "Re-run with --force to repair: bash $0 --force"
-      exit 1
-    fi
-  else
-    echo "  (skipped verify:extension-load — bun not on PATH)"
   fi
 
   echo ""
@@ -2441,6 +2456,7 @@ uninstall() {
 
 main() {
   local FORCE=false UNINSTALL=false ORCHESTRATOR_ONLY=false SYSTEM_ONLY=false SYNC_ONLY=false
+  local SMOKE=true
   local MODE_COUNT=0
 
   while [[ $# -gt 0 ]]; do
@@ -2460,6 +2476,7 @@ main() {
       --orchestrator-only) ORCHESTRATOR_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --system-only) SYSTEM_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --sync-only) SYNC_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
+      --no-smoke) SMOKE=false; shift ;;
       --help|-h) usage; exit 0 ;;
       *) echo "Error: Unknown option: $1"; usage; exit 1 ;;
     esac
