@@ -9,8 +9,10 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+  buildSafeCtx,
   DecomposeTaskParams,
   executeDecomposeTask,
+  executeDecomposeTaskTool,
 } from "../src/decompose-task.js";
 
 function createFakeBus() {
@@ -265,5 +267,94 @@ describe("decompose_task tool (AC3)", () => {
     expect(removed).toBe(true);
     // Also wait past timeout to confirm no orphan timer raises TDZ.
     await new Promise((r) => setTimeout(r, 120));
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// GC-2026-fix-decompose-task-ctx-events: tool-wrapper safeCtx fallback.
+// The pre-fix wrapper used `(ctx as { events: ... }) ?? { ... }` which
+// only fell back when `ctx` itself was null/undefined. If the host
+// passed a `ctx` whose `events` field was undefined, the cast silenced
+// TypeScript but at runtime `safeCtx.events.on(...)` threw
+// `Cannot read properties of undefined (reading 'on')` — the
+// 6×-hit runtime bug from the GC incident. The fix extracts the
+// narrowing into `buildSafeCtx` which defaults BOTH fields
+// independently. Coverage below asserts the no-op-events path
+// (the bug-trigger shape) does not surface the TypeError.
+// ──────────────────────────────────────────────────────────────────────
+
+describe("decompose_task tool wrapper: buildSafeCtx fallback (GC-2026-fix-decompose-task-ctx-events)", () => {
+  it("defaults cwd and events when ctx is undefined", () => {
+    const safe = buildSafeCtx(undefined);
+    expect(safe.cwd).toBe(process.cwd());
+    expect(typeof safe.events.emit).toBe("function");
+    expect(typeof safe.events.on).toBe("function");
+  });
+
+  it("defaults cwd and events when ctx is null", () => {
+    const safe = buildSafeCtx(null);
+    expect(safe.cwd).toBe(process.cwd());
+    expect(typeof safe.events.emit).toBe("function");
+    expect(typeof safe.events.on).toBe("function");
+  });
+
+  it("defaults events when ctx.events is undefined (THE BUG TRIGGER)", () => {
+    // The exact shape that crashed 6× in the GC incident: ctx has
+    // cwd but its `events` field is undefined. Pre-fix this would
+    // surface as `safeCtx.events.on(...)` throwing "Cannot read
+    // properties of undefined (reading 'on')". Post-fix the helper
+    // returns a no-op events object so the wrapper can fall through
+    // to the RPC layer.
+    const safe = buildSafeCtx({ cwd: "/tmp" });
+    expect(safe.cwd).toBe("/tmp");
+    expect(typeof safe.events.emit).toBe("function");
+    expect(typeof safe.events.on).toBe("function");
+    // The no-op on() must return an unsub fn (the rpcCall cleanup path
+    // calls it unconditionally on every path — success, reply, timeout).
+    const unsub = safe.events.on("x", () => {});
+    expect(typeof unsub).toBe("function");
+    unsub();
+  });
+
+  it("preserves ctx.events when present (pass-through)", () => {
+    const bus = {
+      on: () => () => {},
+      emit: () => {},
+    };
+    const safe = buildSafeCtx({ cwd: "/tmp", events: bus });
+    expect(safe.cwd).toBe("/tmp");
+    expect(safe.events).toBe(bus);
+  });
+
+  it("tool wrapper: ctx without events does not surface the runtime TypeError", async () => {
+    // The bug-trigger shape — wrapped in the full tool entry point
+    // (executeDecomposeTaskTool) that the LLM calls. With the bug
+    // this throws "Cannot read properties of undefined (reading 'on')"
+    // synchronously. With the fix, the no-op events bus means the
+    // RPC never receives a reply and the call rejects with the
+    // RPC timeout error (clean) rather than the TypeError.
+    //
+    // Pass rpcTimeoutMs: 50 so the test doesn't wait the default 30s.
+    let err: Error | undefined;
+    try {
+      await executeDecomposeTaskTool(
+        {
+          specs: [
+            {
+              subject: "T1",
+              description: "Regression coverage for ctx.events undefined",
+            },
+          ],
+        },
+        { cwd: "/tmp", rpcTimeoutMs: 50 }, // <-- no events field (the bug-trigger shape)
+      );
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).toBeDefined();
+    expect(String(err)).not.toMatch(
+      /Cannot read properties of undefined.*reading 'on'/,
+    );
+    expect(String(err)).toMatch(/timeout/i);
   });
 });
