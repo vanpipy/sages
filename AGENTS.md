@@ -34,16 +34,19 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
 ## The orchestrator tool surface
 
 After GC-2026-orchestrator-simplify the orchestrator owns exactly
-two tools. DAG / dispatch / audit / reminder tools were removed;
-GC-2026-workflow-run added `workflow_run`, and GC-2026-path-B-swap
-replaced path A's 1060-line in-process state machine with a thin
-event-driven shim that emits `workflow:start` and waits for
-`workflow:phase-complete` from pi-tasks.
+two LLM-facing tools for the workflow_run path. GC-2026-task-feeding-and-decomposition
+(D1) added a third for user-task decomposition. DAG / dispatch /
+audit / reminder tools were removed; GC-2026-workflow-run added
+`workflow_run`, and GC-2026-path-B-swap replaced path A's 1060-line
+in-process state machine with a thin event-driven shim that emits
+`workflow:start` and waits for `workflow:phase-complete` from
+pi-tasks.
 
-| Tool | Output |
-|---|---|
-| `goal_contract_create` | `.pi/orchestrator/goal-{id}.yaml` (intent + SHA-256 lock) |
-| `workflow_run` | `.pi/orchestrator/workflow-{id}.yaml` + cascade task graph in pi-tasks |
+| Tool | Output | Use for |
+|---|---|---|
+| `goal_contract_create` | `.pi/orchestrator/goal-{id}.yaml` (intent + SHA-256 lock) | Declare intent; the workflow_run / decompose_task tools both consume this contract |
+| `workflow_run` | `.pi/orchestrator/workflow-{id}.yaml` + cascade task graph in pi-tasks | Standard 4-phase pipeline (Implement → Review ⇆ Fix → Merge) for a single goal |
+| `decompose_task` | linear chain `T1 → T2 → ... → TN` in pi-tasks, with a single `R1` Reviewer sibling on T1 | Break a user intent (or a user-created task) into a serial chain; chat-driven alternative to `workflow_run` |
 
 Load `pi-orchestrator/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 
@@ -136,44 +139,69 @@ flagging any id that has neither postmortem nor carve-out.
 
 ## Workflow at a glance
 
-After GC-2026-orchestrator-simplify the workflow is:
+After GC-2026-orchestrator-simplify + GC-2026-task-feeding-and-decomposition
+the workflow is:
 
 1. **Goal:** call `goal_contract_create` to declare intent (title /
    rationale / scope / anti_goals / done_definition + `_lock_hash`).
-2. **Pipeline:** prefer `workflow_run(goal_path)` (canonical 4-phase
-   pipeline: Implement → Review ⇆ Fix → Merge). For non-standard
-   DAG shapes, build the task graph directly:
+2. **Pick a pipeline:**
+   - **`workflow_run(goal_path)`** for a single goal that maps to
+     the canonical 4-phase pipeline (Implement → Review ⇆ Fix → Merge).
+   - **`decompose_task({ user_task_id?, specs: [...] })`** for a
+     user intent that needs breaking into a serial chain. The chain
+     runs in the host cwd on the active branch (no managed worktree);
+     one `R1` Reviewer sibling audits the cumulative state.
+   - **raw `TaskCreate` × N + `TaskExecute`** for non-standard DAG
+     shapes (escape hatch). The cascade in pi-tasks picks up
+     ready tasks automatically.
+3. **For raw DAG**, the shape is:
    - `TaskCreate({ subject: "Implement", agentType: "Developer", blocks: ["Review"] })`
    - `TaskCreate({ subject: "Review", agentType: "Reviewer", blockedBy: ["Implement"], blocks: ["Fix", "Merge"] })`
    - `TaskCreate({ subject: "Fix", agentType: "Fix", blockedBy: ["Review"] })`
    - `TaskCreate({ subject: "Merge", agentType: "MergerAdvisor", blockedBy: ["Fix"] })`
-3. **Execute:** `workflow_run` auto-cascades through every phase.
-   For raw DAG, call `TaskExecute(["implement"])` — pi-tasks
-   auto-cascade handles Implement → Review → optional Fix → Merge.
-4. **Review:** the Reviewer agent reads `goal-{id}.yaml` directly +
-   Implement's task report and emits CLEAN / NEEDS_WORK / NEEDS_REDESIGN
-   / NEEDS_CLARIFICATION. The Fix → Review loop is bounded by
-   `max_fix_iterations`; the cascade dispatches Fix on NEEDS_WORK,
-   a new Implement on NEEDS_REDESIGN, and pauses on
-   NEEDS_CLARIFICATION.
+4. **Execute:** `workflow_run` / `decompose_task` / `TaskExecute`
+   auto-cascades through every phase. The Reviewer agent reads
+   `goal-{id}.yaml` (or the chain's `R1` description) and emits
+   CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION. The
+   Fix → Review loop is bounded by `max_fix_iterations`; the cascade
+   dispatches Fix on NEEDS_WORK, a new Implement on NEEDS_REDESIGN,
+   and pauses on NEEDS_CLARIFICATION.
+5. **User tasks (no goal contract):** `/tasks create "<subject>"`
+   arg-style slash command (no agentType by default → sits pending
+   in the store; with `--agent-type` → task feeding dispatches
+   atomically). Chat-driven decomposition pulls a user task into the
+   decompose_task path.
 
 State persists in `.pi/orchestrator/audit-state-{goal_id}.yaml` so work
-can resume after context compaction.
+can resume after context compaction. Decompose state is on the
+chain's parent task in pi-tasks + an audit file at
+`.pi/orchestrator/decompose-<id>.yaml`.
 
 ## Key paths
 
-- `.pi/orchestrator/goal-*.yaml`, `audit-state-*.yaml` — workflow state
-- pi-tasks store (per-session / project) — task graph
+- `.pi/orchestrator/goal-*.yaml`, `audit-state-*.yaml`,
+  `decompose-*.yaml` — workflow / decompose state
+- pi-tasks store (per-session / project) — task graph; source of
+  truth for every task in flight
 - `pi-orchestrator/src/extension.ts` — orchestrator entrypoint
   (default export wires `registerOrchestratorTools` + the three
   session hooks: `session_start` `setActiveTools`, `before_agent_start`
   prompt overlay, `tool_call` once-per-session soft-mode reminder)
-- `pi-orchestrator/src/orchestrator-advisory.ts` — orchestrator advisory
-  pipeline (pre-tool blocker + history tracker + error tracker +
-  assistant-text tracker)
-- `pi-orchestrator/src/goal-contract.ts`, `dag-synthesizer.ts`,
-  `task-dispatcher.ts`, `orchestrator-audit.ts`, `sages-reminder.ts`
-  — the 5 LLM-callable tools
+- `pi-orchestrator/src/goal-contract.ts` — `goal_contract_create` tool
+- `pi-orchestrator/src/workflow-run-tool.ts` — `workflow_run` tool
+  (event-driven shim: emits `workflow:start`, subscribes to
+  `workflow:phase-complete`)
+- `pi-orchestrator/src/decompose-task.ts` — `decompose_task` tool
+  (linear chain materialization, single shared `R1` Reviewer)
+- `pi-orchestrator/src/orchestrator-task.ts` — `createOrchestratorTask`
+  (low-level) + `createOrchestratorTaskWithReview` (high-level, with
+  top-level Reviewer attachment); used by all three tools above
+- `pi-orchestrator/src/reviewer-prompt.ts` — single Reviewer template
+  shared by workflow Reviewers and decompose `R1` (discriminated
+  union: `kind: "workflow" | "decompose"`)
+- `pi-orchestrator/src/orchestrator-advisory.ts` — orchestrator
+  advisory pipeline (pre-tool blocker + history tracker + error
+  tracker + assistant-text tracker)
 - `pi-orchestrator/src/bash-guard.ts` — shell command classifier
   (`shouldBlockBashCommand` is advisory under soft mode; never blocks)
 - `pi-orchestrator/skills/orchestrator/SKILL.md` — full workflow reference
@@ -193,7 +221,10 @@ Do not commit ephemeral `.pi/` state.
 ## Verify gates
 
 Sages exposes a layered set of verifiers that run via `bun run <gate>`.
-A `check:all` aggregator wires them into one entry point for CI.
+A `verify:all` aggregator wires them into one entry point for CI.
+After GC-2026-task-feeding-and-decomposition the gate list grew to
+cover the new helpers and after GC-2026-extension-load-verify it
+gained a load-time jiti smoke test.
 
 | Gate | Command | Catches |
 |---|---|---|
@@ -203,7 +234,10 @@ A `check:all` aggregator wires them into one entry point for CI.
 | Isolation modes | `bun run verify:isolation-modes` | Literal `isolation: "worktree"` (forbidden) |
 | Namespace ownership | `bun run verify:namespace-ownership` | Subagent templates declaring `.pi/orchestrator/...` in files[] |
 | Soft-mode mental model | `bun run verify:soft-mode-mental-model` | Docs "soft mode" mentions vs `src/extension.ts` reminder wiring |
-| **All** | `bun run check:all` | Runs every gate above; CI single entry point |
+| PI_TASKS_TOOLS allowlist | `bun run verify:pi-tasks-tools` | Drift between orchestrator's PI_TASKS_TOOLS and pi-tasks's registerTool |
+| `created_by` invariant | `bun run verify:created-by-invariant` | Any `store.create(` in `pi-tasks/src` missing the `created_by` stamp (every task must be either orchestrator- or user-tracked) |
+| Extension load (jiti) | `bun run verify:extension-load` | Catches the host loader's silent fail-soft at install time — jiti-imports each registered package, asserts default export is a function |
+| **All** | `bun run verify:all` | Runs every gate above; CI single entry point |
 
 GC-2026-069 retired `verify:subagent-roster` alongside `pi/templates/SUBAGENTS.md` — the roster table it parsed is no longer installed to user machines and the LLM-facing roster comes from `pi/templates/agent-tool-description.md`'s `{{typeList}}` template rendering (sourced from `pi-subagents/src/default-agents.ts`).
 
@@ -215,6 +249,9 @@ The pre-commit hook (`orchestrator:typecheck` + `orchestrator:test`) still runs 
 - `bun run verify:isolation-modes` — fails when any subagent template or worker dispatch uses the literal `isolation: "worktree"` token. Use the explicit managed-worktree object or `"current-workspace"`.
 - `bun run verify:namespace-ownership` — fails when a subagent template declares a `.pi/orchestrator/...` path inside its `files[]` allow-list (cross-namespace overwrites).
 - `bun run verify:soft-mode-mental-model` — fails when docs references to "soft mode" drift from the `SOFT_MODE_REMINDER` constant + `pi.on("tool_call")` wiring in `pi-orchestrator/src/extension.ts`.
+- `bun run verify:pi-tasks-tools` — fails when orchestrator's PI_TASKS_TOOLS allowlist (extension.ts) drifts from what pi-tasks actually registers.
+- `bun run verify:created-by-invariant` — fails when any `store.create(` in `pi-tasks/src` lacks the `created_by` stamp.
+- `bun run verify:extension-load` — jiti-imports each registered package, asserts default export is a function. Catches the host's silent fail-soft path that swallowed `loader.js:363-381` errors during the GC-2026-task-feeding-and-decomposition session.
 
 If you change any source file listed in a catalog's `_source_files`, re-run `bun run gen:catalog` and commit the regenerated `pi-orchestrator/catalogs/*.json` along with the source change.
 
@@ -307,8 +344,14 @@ subagent dispatch.
 5. **Avoid destructive git operations** such as path checkout, hard reset,
    clean, or force push. Under soft mode these are no longer hard-blocked;
    dispatch `Developer` for an audit trail on complex workflows.
-6. **Never use an unregistered subagent type.** Valid types are `Explore`,
-   `PlanCompiler`, `Developer`, `Reviewer`, and `Merger`.
+6. **Never use an unregistered subagent type.** Valid types are listed in
+   `pi-subagents/src/default-agents.ts` (canonical registry; the LLM
+   sees a 5-type headline in `templates/agent-tool-description.md`:
+   `Explore`, `PlanCompiler`, `Developer`, `Reviewer`, `Merger`).
+   Subtypes like `Fix`, `MergerAdvisor`, `DeveloperAdvisor`,
+   `ReviewerAdvisor`, `FixAdvisor` are paired to primaries via the
+   `advisorAgentType` workflow-graph metadata; pair-programming for
+   audit, not independent top-level dispatch.
 7. **Never self-declare workflow `PASS`.** The Reviewer agent
    certifies the Implementer's output against the goal contract.
 8. **Never commit with `--no-verify`.** Repository hooks must run.

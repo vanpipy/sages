@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Orchestrate multi-task workflows via workflow_run (canonical pipeline) or pi-tasks TaskCreate × N (escape hatch). Coordinates Developer / Reviewer / Fix / MergerAdvisor subagents; pi-tasks drives the cascade. Owns goal_contract_create + workflow_run + 4 subagent-control tools.
+description: Orchestrate multi-task workflows via workflow_run (canonical pipeline), decompose_task (linear chain from a user intent), or pi-tasks TaskCreate × N (escape hatch). Coordinates Developer / Reviewer / Fix / MergerAdvisor subagents; pi-tasks drives the cascade. Owns goal_contract_create + workflow_run + decompose_task + 4 subagent-control tools.
 ---
 
 # Orchestrator — Workflow Coordinator
@@ -11,8 +11,8 @@ Sages is built on one architectural claim: **complex work deserves a typed revie
 
 | Layer | Package | Job |
 |---|---|---|
-| **Planning** | `pi-orchestrator` | Declare intent (`goal_contract_create`); run pipeline (`workflow_run`); control subagents in-flight |
-| **Tracking** | `pi-tasks` | Hold the task graph; spawn agents per cascade; emit `workflow:phase-complete` events |
+| **Planning** | `pi-orchestrator` | Declare intent (`goal_contract_create`); run pipeline (`workflow_run`); break a user intent into a serial chain (`decompose_task`); control subagents in-flight |
+| **Tracking** | `pi-tasks` | Hold the task graph; spawn agents per cascade; route both `workflow_run`'s static graph and `decompose_task`'s linear chain through the same dependency-driven dispatch; emit `workflow:phase-complete` events for `workflow_run` |
 | **Executing** | `pi-subagents` | One agent = one task. 11 default types covering search, plan, code, review, fix, merge, advisors |
 
 You (the orchestrator) own layer 1. Layers 2 and 3 are reactive.
@@ -24,6 +24,15 @@ You (the orchestrator) own layer 1. Layers 2 and 3 are reactive.
 ```text
 Is the work a single trivial task (one-line edit, one function)?
   → YES: handle directly. No skill, no task graph, no tool calls.
+  → NO: continue.
+
+Is the work a USER-LEVEL intent (a chat message like "implement X" or
+  "fix the README typo") that needs breaking into a serial chain of
+  orchestrator tasks?
+  → YES: decompose_task (GC-2026-task-feeding-and-decomposition).
+          Linear chain T1 → T2 → … → TN. One R1 Reviewer audits the
+          cumulative state. Runs in the host cwd on the active branch
+          (no managed worktree per task).
   → NO: continue.
 
 Does it fit Implement → Review ⇆ Fix → Merge?
@@ -42,9 +51,13 @@ Is the work a one-off Explore / Plan / dispatch?
   → YES: Agent tool directly. No task graph needed.
 ```
 
-When unsure, prefer `workflow_run`. The escape hatch is for shapes the
-canonical pipeline cannot represent — not for skipping the review gate
-on code that should have one.
+When unsure between `workflow_run` and `decompose_task`: the user
+expressed it as a single goal → `workflow_run`. The user expressed it
+as an open-ended intent (no goal_id yet) → `decompose_task` (or
+first `goal_contract_create` + then `decompose_task` with
+`user_task_id` linking). The escape hatch is for shapes neither
+pipeline can represent — not for skipping the review gate on code
+that should have one.
 
 ## Mode Indicator
 
@@ -138,6 +151,81 @@ Fix tasks are NOT in the static graph. They are dispatched on demand by
 | NEEDS_REDESIGN dispatches exhausted | `blocked` | `review` |
 | Last Review NEEDS_CLARIFICATION | `blocked` | `review` (with `open_question`) |
 | Implement / Fix / Review / Merge phase fails | `blocked` | matching phase |
+
+---
+
+## Path C: `decompose_task` (linear chain)
+
+### What you get
+
+A serial task chain from a user intent (or a user-created task):
+
+- ✅ Linear chain `T1 → T2 → ... → TN` (one blockedBy edge per step)
+- ✅ One `R1` Reviewer sibling on T1 (top-level per R3) that audits the
+  cumulative state after all chain tasks complete
+- ✅ `R1`'s prompt contains every chain subject + description
+- ✅ Optional `user_task_id` linkage: pass a user task (created via
+  `/tasks create "<subject>"`) and every chain task carries
+  `metadata.user_task_ref = <user_task_id>` for postmortem audit
+- ✅ Audit file at `.pi/orchestrator/decompose-<id>.yaml`
+
+### What you give up
+
+- ❌ No managed worktree per chain task (runs in cwd on the active
+  branch; `R1` audits via `git log`)
+- ❌ No NEEDS_REDESIGN / multiple `Implement` rerolls (one-shot chain
+  only — if `R1` finds structural issues, you re-call `decompose_task`
+  with a revised spec list)
+- ❌ No auto-cascade from `cfg.autoCascade` (decompose chains use their
+  own dedicated listener, not the ad-hoc auto-cascade path)
+
+### When to use
+
+- The user expressed a multi-step intent that doesn't fit the 4-phase
+  pipeline (e.g. "investigate → write tests → fix → verify")
+- The chain is naturally serial (no parallel branches)
+- You want a single Reviewer to look at the cumulative diff at the end
+
+### How
+
+```text
+1. (optional) goal_contract_create → writes the intent + SHA-256 lock
+   (the chain's audit file references it for context)
+
+2. decompose_task({
+     user_task_id?: "<id of a /tasks create'd user task>",
+     specs: [
+       { subject: "T1 investigate", description: "..." },
+       { subject: "T2 write tests",  description: "..." },
+       { subject: "T3 verify",       description: "..." },
+     ],
+   })
+   → RPC to pi-tasks's `tasks:rpc:decompose-materialize`
+   → pi-tasks creates T1 + R1 (via createOrchestratorTaskWithReview),
+     T2/T3/... (via createOrchestratorTask)
+   → pi-tasks spawns T1 (the chain head)
+   → decompose-cascade listener picks up subagents:completed
+     events and spawns the next task
+   → R1 audits the cumulative state at completion
+   → returns { status: "success", tasks, reviewer_id, audit_path, ... }
+
+3. Read the returned audit_path + the chain's task IDs. If R1
+   emitted NEEDS_WORK, you can re-call decompose_task with a
+   revised spec list (a new chain) — or use TaskUpdate to add a
+   Fix task to the existing chain.
+```
+
+Schema (LLM-facing):
+
+```ts
+decompose_task({
+  user_task_id?: string,    // optional link to a /tasks create'd task
+  specs: [
+    { subject: "<≤120 chars>", description: "<≥10 chars>", activeForm?: string },
+    // 1 ≤ specs.length ≤ 20
+  ],
+})
+```
 
 ---
 
