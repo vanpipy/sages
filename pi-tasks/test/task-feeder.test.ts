@@ -262,13 +262,43 @@ describe("task-feeder: maybeAutoSpawn direct call", () => {
     expect(String(updated?.metadata.lastError)).toContain("string-error-not-an-error-object");
   });
 
-  it("idempotent contract: producer must gate on status; second call WILL spawn", async () => {
+  it("idempotent contract: self-gates on status; second call does NOT spawn (GC-2026-fix-decompose-task-ctx-events)", async () => {
+    // Pre-fix the contract was "producers must gate on status; second
+    // call WILL spawn". The re-dispatch loop captured in the GC
+    // postmortem showed the contract was unenforced in practice, so
+    // the feeder now self-gates. After the first call, status is
+    // in_progress and the second call must NOT spawn.
     const t = mkTask(h.store, { agentType: "Explore" });
     await h.feeder.maybeAutoSpawn(t);
-    // After first call, status is in_progress. Second call still spawns
-    // (producer is responsible for only calling on pending).
+    expect(h.spawnCalls.length).toBe(1);
     await h.feeder.maybeAutoSpawn(t);
-    expect(h.spawnCalls.length).toBe(2);
+    expect(h.spawnCalls.length).toBe(1);
+  });
+
+  // GC-2026-fix-decompose-task-ctx-events: defense-in-depth against
+  // the re-dispatch loop observed in the incident. Pre-fix,
+  // `maybeAutoSpawn` did not check the task's own status; combined
+  // with `subagents:failed` reverting status to `pending` (line 218-225),
+  // the same intent task could be re-spawned repeatedly. Post-fix,
+  // `maybeAutoSpawn` self-gates on `status === "pending"` so the
+  // contract is enforced at the feeder rather than at every caller.
+  it("does NOT spawn when status is in_progress (self-gating defense)", async () => {
+    const t = mkTask(h.store, { agentType: "Explore" });
+    // First call: status is pending → spawn.
+    await h.feeder.maybeAutoSpawn(t);
+    expect(h.spawnCalls.length).toBe(1);
+    // Second call: status is in_progress now → MUST NOT spawn.
+    await h.feeder.maybeAutoSpawn(t);
+    expect(h.spawnCalls.length).toBe(1);
+  });
+
+  it("does NOT spawn when status is completed (defense against re-dispatch)", async () => {
+    const t = mkTask(h.store, {
+      agentType: "Explore",
+      status: "completed",
+    });
+    await h.feeder.maybeAutoSpawn(t);
+    expect(h.spawnCalls.length).toBe(0);
   });
 
   it("fires for workflow task (phase=implement, created_by=orchestrator)", async () => {

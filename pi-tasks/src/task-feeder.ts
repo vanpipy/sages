@@ -70,15 +70,19 @@ export interface TaskFeederHandle {
   unsubscribe: () => void;
   /**
    * Direct-call entry point used by every producer. If the task is
-   * feedable and its blockers (if any) are all `completed`, spawn a
-   * subagent via the configured `spawn` callback. On spawn failure,
-   * revert the task to `pending` with `lastError` so it remains visible
-   * and retryable.
+   * feedable, its own status is `pending`, and its blockers (if any) are
+   * all `completed`, spawn a subagent via the configured `spawn` callback.
+   * On spawn failure, revert the task to `pending` with `lastError` so
+   * it remains visible and retryable.
    *
    * Caller contract: invoke after `store.create` (or `store.update` that
-   * changes a task back to `pending`). Calling on a task already
-   * `in_progress` will spawn again — producers are responsible for
-   * gating on `status === "pending"`.
+   * changes a task back to `pending`). The function self-gates on
+   * `status === "pending"` as defense-in-depth — GC-2026-fix-decompose-task-ctx-events
+   * captured the re-dispatch loop where a previous version of the
+   * contract pushed status-gating onto producers and a missed gate
+   * caused the same intent task to be re-spawned repeatedly when
+   * `subagents:failed` reverted status to `pending`. The self-gate here
+   * prevents that class of bug regardless of caller behavior.
    */
   maybeAutoSpawn: (task: Task) => Promise<void>;
 }
@@ -130,6 +134,23 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
   async function maybeAutoSpawn(task: Task): Promise<void> {
     if (!isFeedableTask(task)) return;
 
+    // GC-2026-fix-decompose-task-ctx-events: self-gate on status. The
+    // pre-fix contract pushed status-gating onto every caller, which
+    // created a re-dispatch loop when `subagents:failed` reverted
+    // status to `pending` — the same task would be re-spawned on the
+    // next event that walked the store. The self-gate here prevents
+    // that class of bug regardless of caller behavior.
+    //
+    // Read the LATEST status from the store, not the in-memory
+    // `task` object. Direct callers (TaskCreate, TaskUpdate,
+    // TaskExecute, decompose materialize) pass the object they just
+    // got from `store.create` / `store.update` — that snapshot can be
+    // stale after a subsequent spawn flips status to `in_progress`.
+    // The store is the source of truth; the O(1) `store.get` keeps
+    // the gate correct.
+    const fresh = store.get(task.id) ?? task;
+    if (fresh.status !== "pending") return;
+
     // Cascade gate: only spawn if all blockers are completed.
     const blockers = task.blockedBy ?? [];
     if (blockers.length > 0) {
@@ -140,7 +161,7 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
       if (!allCompleted) return;
     }
 
-    await spawnAndTrack(task, store, wrappedSpawn);
+    await spawnAndTrack(fresh, store, wrappedSpawn);
   }
 
   async function cascadeSpawn(completedTaskId: string): Promise<void> {
