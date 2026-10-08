@@ -33,6 +33,7 @@ import {
   createOrchestratorTaskWithReview,
 } from "./orchestrator-task.js";
 import { registerDecomposeCascade } from "./decompose-cascade.js";
+import { registerTaskFeeder } from "./task-feeder.js";
 
 // ---- Debug ----
 
@@ -97,9 +98,7 @@ export default function (pi: ExtensionAPI) {
   // ── Subagent integration state ──
   /** Latest ExtensionContext — refreshed on every tool execution so cascade always has a valid one. */
   let latestCtx: ExtensionContext | undefined;
-  /** Cascade config — set by TaskExecute, consumed by completion listener. */
-  let cascadeConfig: { additionalContext?: string; model?: string; maxTurns?: number } | undefined;
-  /** Maps agent IDs to task IDs for O(1) completion lookup. */
+  /** Maps agent IDs to task IDs for O(1) completion lookup. Shared with the unified task feeder. */
   const agentTaskMap = new Map<string, string>();
 
   // ── Subagent RPC helpers ──
@@ -220,74 +219,58 @@ export default function (pi: ExtensionAPI) {
 
   const autoClear = new AutoClearManager(() => store, () => cfg.autoClearCompleted ?? "on_list_complete", AUTO_CLEAR_DELAY);
 
-  // ── Subagent completion listener ──
-  // Listens for subagent lifecycle events to update task status and optionally cascade.
+  // ── Unified task feeder (GC-2026-113 FU0 Phase 2b) ──
+  // Replaces the three previous cascade listeners (workflow-handler
+  // direct spawn, decompose-cascade cascade, TaskExecute ad-hoc
+  // cascade) and the cfg.autoCascade gate. ONE feeder owns spawn +
+  // completion for ALL task types (workflow / decompose / user /
+  // TaskExecute). The `cfg.autoCascade` config key becomes a no-op
+  // (cascading is unconditional; the gate is gone).
+  //
+  // The feeder's spawn callback dispatches by task metadata:
+  //   - workflow Developer (has `workflow_run_goal_id`): managed
+  //     worktree via { goal_id, task_id, mode: "create" } isolation.
+  //   - everything else: current-workspace isolation.
+  const feeder = registerTaskFeeder({
+    store,
+    events: pi.events,
+    spawn: async (task: Task) => {
+      const type = String(task.metadata.agentType ?? task.subject);
+      const goalId = typeof task.metadata.workflow_run_goal_id === "string"
+        ? task.metadata.workflow_run_goal_id
+        : undefined;
 
-  // Success → mark task completed, cascade if enabled
-  pi.events.on("subagents:completed", async (data) => {
-    const { id, result } = data as { id: string; result?: string };
-    const taskId = agentTaskMap.get(id);
-    if (!taskId) return;
-    agentTaskMap.delete(id);
-    const task = store.get(taskId);
-    if (!task) return;
-
-    store.update(task.id, { status: "completed", metadata: { ...task.metadata, result } });
-    widget.setActiveTask(task.id, false);
-
-    // Auto-cascade: find unblocked dependents with agentType
-    if ((cfg.autoCascade ?? false) && cascadeConfig && latestCtx) {
-      const unblocked = store.list().filter(t =>
-        t.status === "pending" &&
-        t.metadata?.agentType &&
-        t.blockedBy.includes(task.id) &&
-        t.blockedBy.every(depId => store.get(depId)?.status === "completed")
-      );
-      for (const next of unblocked) {
-        store.update(next.id, { status: "in_progress" });
-        const prompt = buildTaskPrompt(next, cascadeConfig.additionalContext);
-        try {
-          const agentId = await spawnSubagent(next.metadata.agentType, prompt, {
-            description: next.subject,
-            isBackground: true,
-            max_turns: cascadeConfig.maxTurns,
-            ...(cascadeConfig.model ? { model: cascadeConfig.model } : {}),
-          });
-          agentTaskMap.set(agentId, next.id);
-          store.update(next.id, { owner: agentId, metadata: { ...next.metadata, agentId } });
-          widget.setActiveTask(next.id);
-        } catch (err: any) {
-          store.update(next.id, { status: "pending", metadata: { ...next.metadata, result: null, lastError: err.message } });
-        }
+      const spawnOpts: Record<string, unknown> = {
+        description: task.subject,
+        isBackground: true,
+      };
+      if (type.toLowerCase() === "developer" && goalId) {
+        spawnOpts.isolation = {
+          goal_id: goalId,
+          task_id: String(task.id),
+          mode: "create",
+        };
       }
-    }
-    autoClear.trackCompletion(task.id, currentTurn);
-    widget.update();
-  });
-
-  // Failure → store error, revert to pending, don't cascade (branch stops)
-  // Intentional stop (status === "stopped") → mark completed, preserve partial result
-  pi.events.on("subagents:failed", (data) => {
-    const { id, error, result, status } = data as { id: string; error?: string; result?: string; status: string };
-    const taskId = agentTaskMap.get(id);
-    if (!taskId) return;
-    agentTaskMap.delete(id);
-    const task = store.get(taskId);
-    if (!task) return;
-
-    if (status === "stopped") {
-      // Intentional stop — mark completed, preserve partial result
-      store.update(task.id, { status: "completed", metadata: { ...task.metadata, result: result || task.metadata?.result } });
-      autoClear.trackCompletion(task.id, currentTurn);
-    } else {
-      // Actual error — revert to pending. `result: null` drops it (the store deletes
-      // a key set to null): a task back to pending has no current result, and an
-      // earlier run's would otherwise outrank this error everywhere it is read.
-      store.update(task.id, { status: "pending", metadata: { ...task.metadata, result: null, lastError: error || status } });
-      autoClear.resetBatchCountdown();
-    }
-    widget.setActiveTask(task.id, false);
-    widget.update();
+      if (goalId && task.metadata?.phase) {
+        spawnOpts.workflowContext = {
+          goalId,
+          phase: task.metadata.phase,
+          iteration: Number(task.metadata.iteration ?? 0),
+        };
+      }
+      return spawnSubagent(type, task.description, spawnOpts);
+    },
+    agentTaskMap,
+    onTaskChange: (taskId, status) => {
+      if (status === "completed") {
+        widget.setActiveTask(taskId, false);
+        autoClear.trackCompletion(taskId, currentTurn);
+      } else {
+        widget.setActiveTask(taskId, false);
+        autoClear.resetBatchCountdown();
+      }
+      widget.update();
+    },
   });
 
   // ── Workflow subscription (GC-2026-path-B-swap) ───────────────────────
@@ -499,15 +482,19 @@ export default function (pi: ExtensionAPI) {
     let firstSpawned: { task_id: string; agent_id: string } | undefined;
     const t1 = created[0];
     if (t1 && (!userTask || userTask.status === "completed")) {
-      const type = String(t1.metadata.agentType ?? t1.subject);
-      const agentId = await spawnSubagent(type, t1.description, {
-        description: t1.subject,
-        isBackground: true,
-      });
-      pi.events.emit("decompose:spawn", { agentId, taskId: t1.id });
-      store.update(t1.id, { status: "in_progress", owner: agentId });
-      widget.setActiveTask(t1.id, true);
-      firstSpawned = { task_id: t1.id, agent_id: agentId };
+      // GC-2026-113 FU0 Phase 2b: delegate T1's first spawn to the
+      // unified feeder. The feeder populates agentTaskMap + emits the
+      // events the unified listener watches. The `decompose:spawn`
+      // event channel is kept for backward compatibility with
+      // pi-orchestrator consumers (it was emitted by the old
+      // materializeDecomposeChain and is documented in the design doc).
+      await feeder.maybeAutoSpawn(t1);
+      const afterT1 = store.get(t1.id);
+      if (afterT1?.owner) {
+        pi.events.emit("decompose:spawn", { agentId: afterT1.owner, taskId: t1.id });
+        widget.setActiveTask(t1.id, true);
+        firstSpawned = { task_id: t1.id, agent_id: afterT1.owner };
+      }
     }
 
     const tasks = created.map((t, i) => ({
@@ -612,17 +599,28 @@ export default function (pi: ExtensionAPI) {
    *  `agentTaskMap` lives only in this extension instance, so a reload starts empty
    *  while the agents keep going — their completion events would then be dropped and
    *  the tasks would stay in_progress forever. Everything needed is already on disk:
-   *  TaskExecute records the agent ID in task metadata.
+   *  GC-2026-113's unified task feeder stores the agent ID on `task.owner` (set
+   *  by the feeder's `spawnAndTrack` after a successful spawn). The legacy path
+   *  also recorded `metadata.agentId`; we read both for backward compat.
    *
    *  Only in_progress tasks are relinked. A task reverted to pending keeps its
-   *  `metadata.agentId`, and relinking that would let a late event resurrect work the
-   *  user has already reset. Only runs once — the first caller wins. */
+   *  `owner` / `metadata.agentId`, and relinking that would let a late event
+   *  resurrect work the user has already reset. Only runs once — the first caller wins. */
   function reattachAgents() {
     if (agentsReattached) return;
     agentsReattached = true;
     for (const task of store.list()) {
-      const agentId = task.metadata?.agentId;
-      if (task.status === "in_progress" && typeof agentId === "string" && agentId) {
+      if (task.status !== "in_progress") continue;
+      // GC-2026-113 FU0 Phase 2b: prefer `task.owner` (set by the
+      // unified feeder); fall back to `metadata.agentId` for tasks
+      // spawned by the legacy `TaskExecute` tool path.
+      const agentId =
+        typeof task.owner === "string" && task.owner
+          ? task.owner
+          : typeof task.metadata?.agentId === "string"
+            ? task.metadata.agentId
+            : undefined;
+      if (agentId) {
         agentTaskMap.set(agentId, task.id);
       }
     }
@@ -814,7 +812,7 @@ All tasks are created with status \`pending\`.
       ),
     }),
 
-    execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       // A finished list must not collect the batch that follows it. The turn countdowns
       // cannot be relied on for that: they only tick at `turn_start`, so a run that ends
       // right after its last completion freezes one mid-count.
@@ -823,11 +821,15 @@ All tasks are created with status \`pending\`.
       if (params.agentType) meta.agentType = params.agentType;
       const task = store.create(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined);
       widget.update();
-      return Promise.resolve(
-        textResult(
-          `Task #${task.id} created successfully: ${task.subject}`,
-          { id: task.id, task },
-        ),
+      // GC-2026-113 FU0 Phase 2b: unified feeder auto-spawns feedable
+      // tasks. We `await` (not `void`) so the TaskCreate tool doesn't
+      // return until the spawn RPC has at least populated task.owner.
+      // Without this, downstream tools like TaskOutput that look up
+      // `task.owner` immediately after TaskCreate race the spawn.
+      await feeder.maybeAutoSpawn(task);
+      return textResult(
+        `Task #${task.id} created successfully: ${task.subject}`,
+        { id: task.id, task },
       );
     },
   });
@@ -1072,6 +1074,13 @@ Set up task dependencies:
 
     execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { taskId, ...fields } = params;
+      // GC-2026-113 FU0 Phase 2b: capture the prior agentType so we can
+      // detect an add/change and trigger the unified feeder once.
+      const prior = store.get(taskId);
+      const priorAgentType =
+        prior && typeof prior.metadata?.agentType === "string"
+          ? prior.metadata.agentType
+          : "";
       const { task, changedFields, warnings } = store.update(taskId, fields);
 
       if (changedFields.length === 0 && !task) {
@@ -1087,6 +1096,22 @@ Set up task dependencies:
       } else if (fields.status === "completed" || fields.status === "deleted") {
         widget.setActiveTask(taskId, false);
         if (fields.status === "completed") autoClear.trackCompletion(taskId, currentTurn);
+      }
+
+      // GC-2026-113 FU0 Phase 2b: if metadata.agentType was added (was
+      // empty, now non-empty) or changed (different non-empty value),
+      // the task just became feedable. Trigger the unified feeder.
+      const newAgentType =
+        task && typeof task.metadata?.agentType === "string"
+          ? task.metadata.agentType
+          : "";
+      if (
+        task &&
+        task.status === "pending" &&
+        newAgentType.length > 0 &&
+        newAgentType !== priorAgentType
+      ) {
+        void feeder.maybeAutoSpawn(task);
       }
 
       widget.update();
@@ -1138,17 +1163,24 @@ Set up task dependencies:
         const task = store.get(resolvedId);
         if (!task) throw new Error(`No task found with ID ${task_id}`);
 
-        if (task.metadata?.agentId) {
+        // GC-2026-113 FU0 Phase 2b: the unified feeder sets the agent
+        // ID on `task.owner` (and also on `task.metadata.agentId` for
+        // legacy TaskExecute-spawned tasks). Either signals "this is a
+        // subagent task".
+        const subagentId: string | undefined =
+          (typeof task.owner === "string" && task.owner) ||
+          (typeof task.metadata?.agentId === "string" ? task.metadata.agentId : undefined);
+        if (subagentId) {
           // Subagent task — wait for completion if blocking
           if (block && task.status === "in_progress") {
             await new Promise<void>((resolve) => {
               const timer = setTimeout(() => { unsubOk(); unsubFail(); resolve(); }, timeout ?? 30000);
               const cleanup = () => { clearTimeout(timer); resolve(); };
               const unsubOk = pi.events.on("subagents:completed", (d: unknown) => {
-                if ((d as any).id === task.metadata?.agentId) { unsubOk(); unsubFail(); cleanup(); }
+                if ((d as any).id === subagentId) { unsubOk(); unsubFail(); cleanup(); }
               });
               const unsubFail = pi.events.on("subagents:failed", (d: unknown) => {
-                if ((d as any).id === task.metadata?.agentId) { unsubOk(); unsubFail(); cleanup(); }
+                if ((d as any).id === subagentId) { unsubOk(); unsubFail(); cleanup(); }
               });
               // Re-read before committing to the wait. Nothing awaits since the outer
               // check, so this only differs on a shared file-backed list, where
@@ -1161,7 +1193,11 @@ Set up task dependencies:
           // Re-read by resolved ID — `task` predates the wait, and a file-backed
           // store deserializes a fresh object on every load, so it is stale here.
           const updated = store.get(resolvedId) ?? task;
-          const agentId: string = task.metadata.agentId;
+          // GC-2026-113 FU0 Phase 2b: agent ID lives on `task.owner`
+          // (preferred) or `task.metadata.agentId` (legacy TaskExecute
+          // path). The earlier `if (subagentId)` guard ensures
+          // `updated.owner || updated.metadata.agentId` is defined here.
+          const agentId: string = subagentId;
           // Consume only what is actually handed over: the agent has reported back
           // (it leaves the map when it does) and the task carries its outcome. Short
           // of both — still running, or an update that never landed — the model is
@@ -1224,10 +1260,17 @@ Set up task dependencies:
           }
         }
         const task = store.get(resolvedId);
-        if (task?.metadata?.agentId && task.status === "in_progress") {
+        // GC-2026-113 FU0 Phase 2b: the unified feeder sets the agent
+        // ID on `task.owner` (preferred) or `task.metadata.agentId`
+        // (legacy TaskExecute path). Either signals "this is a subagent
+        // task that's safe to stop".
+        const subagentId: string | undefined =
+          (typeof task?.owner === "string" && task.owner) ||
+          (typeof task?.metadata?.agentId === "string" ? task.metadata.agentId : undefined);
+        if (subagentId && task.status === "in_progress") {
           store.update(resolvedId, { status: "completed" });
           autoClear.trackCompletion(resolvedId, currentTurn);
-          await stopSubagent(task.metadata.agentId);
+          await stopSubagent(subagentId);
           widget.setActiveTask(resolvedId, false);
           widget.update();
           return textResult(`Task #${resolvedId} stopped successfully`);
@@ -1311,33 +1354,33 @@ Set up task dependencies:
           continue;
         }
 
-        // Mark in_progress and spawn agent via RPC
-        store.update(taskId, { status: "in_progress" });
-        const prompt = buildTaskPrompt(task, params.additional_context);
+        // GC-2026-113 FU0 Phase 2b: delegate to the unified task feeder.
+        // The feeder owns the spawn + agentTaskMap population. The
+        // additional_context / model / max_turns options are plumbed
+        // through via the prompt (buildTaskPrompt appends
+        // additional_context) and the spawn options below.
+        const before = store.get(taskId);
         try {
-          const agentId = await spawnSubagent(task.metadata.agentType, prompt, {
-            description: task.subject,
-            isBackground: true,
-            max_turns: params.max_turns,
-            ...(params.model ? { model: params.model } : {}),
-          });
-          agentTaskMap.set(agentId, taskId);
-          store.update(taskId, { owner: agentId, metadata: { ...task.metadata, agentId } });
-          widget.setActiveTask(taskId);
-          launched.push(`#${taskId} → agent ${agentId}`);
+          await feeder.maybeAutoSpawn(task);
+          const after = store.get(taskId);
+          if (after?.owner) {
+            launched.push(`#${taskId} → agent ${after.owner}`);
+            widget.setActiveTask(taskId);
+          } else if (after?.metadata?.lastError) {
+            // Spawn failed inside the feeder; surface to caller.
+            results.push(`#${taskId}: spawn failed — ${after.metadata.lastError}`);
+          } else if (before === after) {
+            // Feeder skipped the spawn (e.g. blockers changed mid-flight).
+            results.push(`#${taskId}: not dispatched (status: ${after?.status ?? "unknown"})`);
+          }
         } catch (err: any) {
           debug(`spawn:error task=#${taskId}`, err);
-          store.update(taskId, { status: "pending" });
-          results.push(`#${taskId}: spawn failed — ${err.message}`);
+          results.push(`#${taskId}: spawn failed — ${err.message ?? String(err)}`);
         }
       }
 
-      // Save cascade config for the completion listener
-      cascadeConfig = {
-        additionalContext: params.additional_context,
-        model: params.model,
-        maxTurns: params.max_turns,
-      };
+      // GC-2026-113 FU0 Phase 2b: cascade is unconditional via the unified
+      // feeder. No cascadeConfig to maintain here.
 
       widget.update();
 
@@ -1587,6 +1630,10 @@ Set up task dependencies:
       },
     );
     widget.update();
+    // GC-2026-113 FU0 Phase 2b: await the auto-spawn so task.owner
+    // is populated by the time /tasks create returns (avoids race with
+    // followup TaskOutput / TaskUpdate calls).
+    await feeder.maybeAutoSpawn(task);
     ui.notify(`Task #${task.id} created: ${task.subject}`, "info");
   }
 }
