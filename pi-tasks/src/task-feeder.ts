@@ -135,7 +135,7 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
     await spawnAndTrack(task, store, wrappedSpawn);
   }
 
-  async function cascadeSpawn(): Promise<void> {
+  async function cascadeSpawn(completedTaskId: string): Promise<void> {
     const all = store.list();
     for (const t of all) {
       if (t.status !== "pending") continue;
@@ -149,6 +149,14 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
       // user / decompose tasks; workflow-handler cascades workflow
       // tasks.
       if (typeof t.metadata?.workflow_run_goal_id === "string") continue;
+      // GC-2026-118 F5: only walk children of the just-completed task.
+      // Top-level pending tasks (no blockers) are spawned directly by
+      // TaskCreate / TaskUpdate / materializeDecomposeChain via
+      // feeder.maybeAutoSpawn; the cascade path is for tasks that were
+      // unblocked by a completion. Skipping non-children at the filter
+      // (rather than at the maybeAutoSpawn blocker check) cuts the
+      // per-cascade iteration from O(N) tasks-checked to O(children).
+      if (!t.blockedBy.includes(completedTaskId)) continue;
       await maybeAutoSpawn(t);
     }
   }
@@ -167,7 +175,7 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
       metadata: { ...task.metadata, result: data.result },
     });
     onTaskChange?.(taskId, "completed");
-    await cascadeSpawn();
+    await cascadeSpawn(taskId);
   });
 
   const unsubFailed = events.on("subagents:failed", async (raw: unknown) => {
@@ -190,7 +198,7 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
         },
       });
       onTaskChange?.(taskId, "completed");
-      await cascadeSpawn();
+      await cascadeSpawn(taskId);
     } else {
       // Actual error — revert to pending, drop prior result.
       const errMsg =

@@ -341,6 +341,56 @@ describe("task-feeder: subagents:completed listener", () => {
     // No cascade triggered (none of t1, t2 should have spawned)
     expect(h.spawnCalls.length).toBe(0);
   });
+
+  it("F5: cascade only spawns children of the just-completed task (not siblings)", async () => {
+    // Topology: T1 → { T2, T3 }, T4 (blockedBy [X] — unrelated to T1)
+    // After T1 completes, cascade should spawn T2 + T3 (children of T1)
+    // and explicitly NOT consider T4 (T1 is not in T4.blockedBy).
+    const x = mkTask(h.store, { agentType: "Explore" });
+    const t1 = mkTask(h.store, { agentType: "Explore" });
+    const t2 = mkTask(h.store, { agentType: "Developer", blockedBy: [t1.id] });
+    const t3 = mkTask(h.store, { agentType: "Developer", blockedBy: [t1.id] });
+    const t4 = mkTask(h.store, { agentType: "Developer", blockedBy: [x.id] });
+
+    await h.feeder.maybeAutoSpawn(t1);
+    await h.feeder.maybeAutoSpawn(t2); // blocked by T1 (pending)
+    await h.feeder.maybeAutoSpawn(t3); // blocked by T1 (pending)
+    await h.feeder.maybeAutoSpawn(t4); // blocked by X (pending)
+    expect(h.spawnCalls.length).toBe(1); // only T1
+
+    // Complete T1 → cascade should spawn T2 + T3 (children), NOT T4 (not a child)
+    await h.events.emit("subagents:completed", { id: "agent-1", result: "ok" });
+
+    const spawnedIds = h.spawnCalls.map((c) => c.task.id).sort();
+    expect(spawnedIds).toContain(t2.id);
+    expect(spawnedIds).toContain(t3.id);
+    expect(spawnedIds).not.toContain(t4.id); // F5: T4 skipped at the children filter
+    expect(h.store.get(t4.id)?.status).toBe("pending");
+  });
+
+  it("F5: cascade respects multi-parent blockers (only spawns when ALL parents completed)", async () => {
+    // T1 + T2 are blockers for T3. Only T1 completes; T3 should NOT spawn
+    // because T2 is still pending. The F5 filter on completedTaskId doesn't
+    // break the maybeAutoSpawn blocker check.
+    const t1 = mkTask(h.store, { agentType: "Explore" });
+    const t2 = mkTask(h.store, { agentType: "Explore" });
+    const t3 = mkTask(h.store, { agentType: "Developer", blockedBy: [t1.id, t2.id] });
+
+    await h.feeder.maybeAutoSpawn(t1);
+    await h.feeder.maybeAutoSpawn(t2);
+    await h.feeder.maybeAutoSpawn(t3); // blocked by T1 + T2 (both pending)
+    expect(h.spawnCalls.length).toBe(2); // T1 + T2
+
+    // Complete T1 → cascade walks; T3 is in T1's children but blocked by T2 too
+    await h.events.emit("subagents:completed", { id: "agent-1", result: "ok" });
+    expect(h.spawnCalls.length).toBe(2); // no new spawn
+    expect(h.store.get(t3.id)?.status).toBe("pending");
+
+    // Complete T2 → cascade walks; T3 is in T2's children + all blockers met
+    await h.events.emit("subagents:completed", { id: "agent-2", result: "ok" });
+    expect(h.spawnCalls.length).toBe(3);
+    expect(h.spawnCalls[2].task.id).toBe(t3.id);
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────
