@@ -22,6 +22,8 @@
  *   - verify-created-by-invariant: every store.create carries created_by
  *   - verify-extension-load (GC-2026-extension-load-verify): jiti-import each
  *     registered package to surface the host loader's silent fail-soft
+ *   - verify-workflow-meta-invariant (GC-2026-118 F3): workflow spec builders stamp workflow_run_goal_id
+ *   - verify-task-source-invariant (GC-2026-120 AC8): chain-task create sites carry user_task_ref
  *
  * Why a wrapper script (vs just `bun run verify:catalog && bun run verify:gcdb ...`):
  *   - One command for humans/CI to run.
@@ -102,6 +104,11 @@ const VERIFIERS: { id: string; script: string; label: string }[] = [
 		id: "workflow-meta-invariant",
 		script: "verify-workflow-meta-invariant.ts",
 		label: "workflow spec builders stamp workflow_run_goal_id (GC-2026-118 F3)",
+	},
+	{
+		id: "task-source-invariant",
+		script: "verify-task-source-invariant.ts",
+		label: "chain-task create sites in materializeDecomposeChain carry user_task_ref (GC-2026-120 AC8)",
 	},
 ];
 
