@@ -74,7 +74,10 @@ describe("orchestrator-task helpers (GC-2026-task-feeding-and-decomposition)", (
       },
     );
     expect(out.reviewer).toBeDefined();
-    expect(out.reviewer?.metadata.phase).toBe("review");
+    // decompose-context R1 carries phase="decomposition_chain" so the
+    // cascade filter picks it up. workflow-context R1 (not exercised in
+    // this test) would be "review".
+    expect(out.reviewer?.metadata.phase).toBe("decomposition_chain");
     expect(out.reviewer?.metadata.agentType).toBe("Reviewer");
     expect(out.reviewer?.metadata.created_by).toBe("orchestrator");
     expect(out.reviewer?.blockedBy).toEqual([out.task.id]);

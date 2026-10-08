@@ -146,6 +146,14 @@ export function createOrchestratorTaskWithReview(
   }
 
   const reviewerDesc = buildReviewerDescription(reviewerContext);
+  // R1 of a decompose chain shares `phase` with the chain so
+  // `decompose-cascade.ts`'s `isDecomposeTask` filter picks it up for
+  // cascade. Otherwise R1 would sit pending forever (no other listener
+  // would spawn it). For workflow-context R1 callers, `phase` stays
+  // "review" so workflow-handler and downstream consumers continue to
+  // treat it as a workflow Reviewer.
+  const reviewerPhase: "review" | "decomposition_chain" =
+    reviewerContext.kind === "decompose" ? "decomposition_chain" : "review";
   const reviewer = store.create(
     `Review ${task.id} (${spec.subject})`,
     reviewerDesc,
@@ -153,7 +161,7 @@ export function createOrchestratorTaskWithReview(
     {
       created_by: "orchestrator" as const,
       agentType: "Reviewer",
-      phase: "review" as const,
+      phase: reviewerPhase,
       iteration: Number(spec.metadata?.iteration ?? 1),
       ...(reviewerContext.kind === "decompose" && reviewerContext.userTaskRef
         ? { user_task_ref: reviewerContext.userTaskRef }
