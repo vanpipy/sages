@@ -16,6 +16,11 @@
  * `blockedBy` so the graph is fully described before any task is created.
  * The workflow handler resolves them to real task IDs after each TaskCreate
  * returns. This keeps the pure function free of store side-effects.
+ *
+ * GC-2026-task-feeding-and-decomposition (AC2): the per-iteration Reviewer
+ * description template is extracted to `reviewer-prompt.ts` and shared with
+ * the decompose-chain R1 prompt. `reviewDescription` below is a thin
+ * wrapper around `buildReviewerDescription({ kind: "workflow", ... })`.
  */
 
 export interface WorkflowGoal {
@@ -69,6 +74,8 @@ export const PLACEHOLDER_MERGE = "__merge__";
 
 // ── Phase description builders ──────────────────────────────────────────
 
+import { buildReviewerDescription } from "./reviewer-prompt.js";
+
 function implementDescription(goal: WorkflowGoal, worktreePath: string): string {
   return [
     `# Goal: ${goal.title}`,
@@ -107,82 +114,18 @@ function reviewDescription(
   branch: string,
   priorReviewSummary?: string,
 ): string {
-  // The task_id is the literal id pi-tasks assigns this task. The
-  // dispatch brief inlines it so the Reviewer knows where to write the
-  // durable verdict-{task_id}.md backup. The parser in workflow-handler
-  // falls back to this file when the final message fence is missing.
-  // GC-2026-prompt-parser-contract-cleanup #4/#5: tell the Reviewer to
-  // atomic-rename the file BEFORE the final message.
-  // GC-2026-verdict-states-and-dynamic-cascade: the verdict schema now has
-  // 4 states (CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION)
-  // and `open_question` is required for NEEDS_CLARIFICATION.
-  // GC-2026-b6: when iteration > 1, prepend a "Prior review summary" section
-  // listing the previous Review's verdict + findings so the new Reviewer
-  // can classify each finding as regression / unresolved / new.
-  const taskIdPlaceholder = "__review_task_id__";
-  return [
-    `# Review phase (implement iteration ${iteration})`,
-    ``,
-    priorReviewSummary ?? "",
-    `## Goal`,
-    `- Title: ${goal.title}`,
-    goal.rationale ? `- Rationale: ${goal.rationale}` : "",
-    ``,
-    `## Scope`,
-    `Include: ${goal.scope.include.join(", ")}`,
-    `Exclude: ${goal.scope.exclude.join(", ")}`,
-    ``,
-    `## Anti-goals`,
-    ...goal.anti_goals.map(a => `- ${a}`),
-    ``,
-    `## Done definition`,
-    goal.done_definition,
-    ``,
-    `## Workspace`,
-    `- Worktree: ${worktreePath}`,
-    `- Branch: ${branch}`,
-    ``,
-    `## What to evaluate`,
-    `Run the 5-dimension review (correctness, completeness, scope adherence, anti-goal compliance, documentation).`,
-    `Read .pi/orchestrator/last-review-${goal.id}.md for the durable evidence trail (this file is overwritten on each Review; the previous reference to a per-iteration file was a phantom — see GC-2026-merger-advisor-split).`,
-    ``,
-    `## Output — pinned YAML schema (4-state verdict, GC-2026-verdict-states-and-dynamic-cascade)`,
-    `Final message MUST contain a fenced \`\`\`yaml block with:`,
-    `verdict: CLEAN | NEEDS_WORK | NEEDS_REDESIGN | NEEDS_CLARIFICATION`,
-    `findings:`,
-    `  - severity: minor | major | critical`,
-    `    issue: "<what's wrong, 1 sentence>"`,
-    `    location: "<file:line or section>"`,
-    `    recommendation: "<how to fix, 1 sentence>"`,
-    `    category: regression | unresolved | new   # GC-2026-b6, optional; default new`,
-    `open_question: "<question>"   # required when verdict: NEEDS_CLARIFICATION`,
-    `scope_check: pass | fail | absent   # absent needs scope_check_skipped: <reason>`,
-    `anti_goal_check: pass | fail | absent   # absent needs anti_goal_check_skipped: <reason>`,
-    `evidence: { typecheck, tests, lint, files_read, commands_run }`,
-    ``,
-    `### When to choose each verdict`,
-    ``,
-    `- **CLEAN**: every dimension passes; findings list is empty. The implementation matches the goal contract.`,
-    `- **NEEDS_WORK**: 1+ findings that a Fix can address with local code changes (missing test, lint, wrong signature, etc.). The findings list is non-empty. The orchestrator spawns Fix → Review loop.`,
-    `- **NEEDS_REDESIGN**: the implementation is fundamentally wrong in a way Fix can't patch (architecture mismatch, wrong abstraction layer, scope/goal interpretation error). The orchestrator spawns a NEW Implement (skipping remaining Fix iterations). Use this when re-running Fix with the same goal would still fail.`,
-    `- **NEEDS_CLARIFICATION**: the goal contract itself is ambiguous and you cannot proceed without user input. Provide \`open_question:\` with a specific, answerable question. The orchestrator pauses the workflow and surfaces the question to the user.`,
-    ``,
-    `Default to NEEDS_WORK. Only emit CLEAN if every dimension has explicit evidence and findings list is empty.`,
-    `CLEAN with non-empty findings is malformed → parser downgrades to NEEDS_WORK.`,
-    `Unknown verdict values default to NEEDS_WORK.`,
-    ``,
-    `### Finding category (GC-2026-b6)`,
-    ``,
-    `When iteration > 1 and a Prior review summary is in this brief, classify each finding:`,
-    `- **regression**: the issue existed in a previous Review that was CLEAN (or the previous fix commit broke something). The fix made things worse.`,
-    `- **unresolved**: the issue was reported in the previous Review with NEEDS_WORK but is STILL present after the Fix (Fix didn't address it).`,
-    `- **new**: the issue wasn't reported previously; first observation this round.`,
-    ``,
-    `If you cannot classify (e.g. first iteration), default to \`new\`. The orchestrator uses these tags to spot quality regressions across the fix-loop.`,
-    ``,
-    `## Durable backup (atomic rename BEFORE final message)`,
-    `Your task id is \`${taskIdPlaceholder}\` (resolved at dispatch time). Before you emit the final message, write the same YAML block to \`.pi/orchestrator/verdict-${taskIdPlaceholder}.md\` via atomic rename (\`tmpfile -> rename\`). The parser falls back to this file if the message fence is missing.`,
-  ].join("\n");
+  // GC-2026-task-feeding-and-decomposition (AC2): delegate to the unified
+  // template in reviewer-prompt.ts. Kept as a thin wrapper so existing
+  // call sites in this file don't need to know about the discriminated
+  // union context shape.
+  return buildReviewerDescription({
+    kind: "workflow",
+    goal,
+    iteration,
+    worktreePath,
+    branch,
+    ...(priorReviewSummary !== undefined ? { priorReviewSummary } : {}),
+  });
 }
 
 function fixDescription(goal: WorkflowGoal, iteration: number, worktreePath: string, branch: string): string {

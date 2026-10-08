@@ -107,9 +107,13 @@ describe("AFT_TOOLS constant (GC-2026-086)", () => {
 });
 
 describe("existing tool allowlist constants — regression (GC-2026-orchestrator-simplify)", () => {
-	it("ORCHESTRATOR_TOOLS contains exactly 2 tools: goal_contract_create + workflow_run", () => {
-		expect(ORCHESTRATOR_TOOLS).toEqual(["goal_contract_create", "workflow_run"]);
-		expect(ORCHESTRATOR_TOOLS.length).toBe(2);
+	it("ORCHESTRATOR_TOOLS contains exactly 3 tools: goal_contract_create + workflow_run + decompose_task (GC-2026-task-feeding-and-decomposition)", () => {
+		expect(ORCHESTRATOR_TOOLS).toEqual([
+			"goal_contract_create",
+			"workflow_run",
+			"decompose_task",
+		]);
+		expect(ORCHESTRATOR_TOOLS.length).toBe(3);
 	});
 
 	it("ORCHESTRATOR_TOOLS does NOT include any of the removed 4 tools", () => {
@@ -206,7 +210,7 @@ describe("session_start hook text scan (GC-2026-orchestrator-simplify)", () => {
 });
 
 describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", () => {
-	it("fires setActiveTools with 34 entries: 2 orchestrator + 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline", async () => {
+	it("fires setActiveTools with 35 entries: 3 orchestrator + 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline (GC-2026-task-feeding-and-decomposition adds decompose_task)", async () => {
 		const activeToolsCalls: string[][] = [];
 		const pi = {
 			setActiveTools(tools: string[]) {
@@ -239,8 +243,10 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 
 		expect(activeToolsCalls.length).toBe(1);
 		const tools = activeToolsCalls[0];
-		// ORCHESTRATOR family — just goal_contract_create
+		// ORCHESTRATOR family — goal_contract_create + workflow_run + decompose_task
 		expect(tools).toContain("goal_contract_create");
+		expect(tools).toContain("workflow_run");
+		expect(tools).toContain("decompose_task");
 		expect(tools).not.toContain("dag_synthesize");
 		expect(tools).not.toContain("task_dispatch");
 		expect(tools).not.toContain("orchestrator_audit");
@@ -253,9 +259,9 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 		for (const t of SUBAGENT_TOOLS) expect(tools).toContain(t);
 		// BASELINE family
 		for (const t of BASELINE_TOOLS) expect(tools).toContain(t);
-		// Total: 1 + 7 + 7 + 11 + 7 = 33, no duplicates
-		expect(tools.length).toBe(34);
-		expect(new Set(tools).size).toBe(34);
+		// Total: 3 + 7 + 7 + 11 + 7 = 35, no duplicates
+		expect(tools.length).toBe(35);
+		expect(new Set(tools).size).toBe(35);
 	});
 });
 
@@ -328,8 +334,8 @@ describe("setActiveTools order — pi-tasks/AFT before BASELINE", () => {
 		expect(lastPiTasksIdx).toBeLessThan(firstBaselineIdx);
 	});
 
-	it("keeps the 33-entry total after reorder (no silent additions / removals)", async () => {
+	it("keeps the 34-entry total after reorder (no silent additions / removals — was 33 before GC-2026-task-feeding-and-decomposition)", async () => {
 		const tools = await captureTools();
-		expect(tools.length).toBe(34);
+		expect(tools.length).toBe(35);
 	});
 });

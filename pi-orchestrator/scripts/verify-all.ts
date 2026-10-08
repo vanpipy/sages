@@ -84,6 +84,11 @@ const VERIFIERS: { id: string; script: string; label: string }[] = [
 		script: "verify-pi-tasks-tools.ts",
 		label: "PI_TASKS_TOOLS allowlist vs pi-tasks registerTool",
 	},
+	{
+		id: "created-by-invariant",
+		script: "verify-created-by-invariant.ts",
+		label: "every store.create carries created_by stamp",
+	},
 ];
 
 interface Result {

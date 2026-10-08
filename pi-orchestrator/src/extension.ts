@@ -41,6 +41,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registerGoalContractTool } from "./goal-contract.js";
 import { registerWorkflowRunTool } from "./workflow-run-tool.js";
+import { registerDecomposeTaskTool } from "./decompose-task.js";
 import {
 	installOrchestratorAdvisoryHandlers,
 	type OrchestratorAdvisoryRuntimeDeps,
@@ -60,6 +61,7 @@ import { PhaseWidget } from "./ui/phase-widget.js";
 export const ORCHESTRATOR_TOOLS: readonly string[] = [
 	"goal_contract_create",
 	"workflow_run",
+	"decompose_task",
 ];
 
 /**
@@ -184,6 +186,9 @@ export function registerOrchestratorTools(
 	registerGoalContractTool(pi);
 	// GC-2026-workflow-run: one-shot 4-phase pipeline runner.
 	registerWorkflowRunTool(pi);
+	// GC-2026-task-feeding-and-decomposition (AC3): user-task decomposition
+	// into a linear orchestrator chain.
+	registerDecomposeTaskTool(pi);
 	// GC-2026-053: orchestrator tool_call audit wiring.
 	installOrchestratorAdvisoryHandlers(pi, runtime);
 }

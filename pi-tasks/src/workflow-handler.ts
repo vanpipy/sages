@@ -34,6 +34,10 @@ import type { TaskStore } from "./task-store.js";
 import type { Task } from "./types.js";
 import { parseReviewerVerdict, type ReviewerVerdict } from "./verdict-parser.js";
 import {
+  createOrchestratorTask,
+  createMergeTask,
+} from "./orchestrator-task.js";
+import {
 	buildStaticWorkflowGraph,
 	buildFixTaskSpec,
 	buildRedesignImplementTaskSpec,
@@ -185,12 +189,30 @@ export function subscribeWorkflow(
 		// `onSubagentCompleted` uses the same path for the file-fallback.
 		const created: Task[] = [];
 		for (const spec of specs) {
-			const t = store.create(
-				spec.subject,
-				spec.description,
-				spec.subject,
-				{ ...spec.metadata, workflow_id: payload.workflow_id },
-			);
+			// GC-2026-task-feeding-and-decomposition (AC4): route via helper
+			// or createMergeTask. Static-graph specs have placeholder
+			// blockedBy at this point — the helper wires them after we know
+			// the real ids in step 3 below. To avoid double-passing, we
+			// defer blockedBy wiring by passing it empty here; the placeholder
+			// resolution in step 3 attaches the real edges.
+			let t: Task;
+			if (spec.metadata.phase === "merge") {
+				t = createMergeTask(store, {
+					subject: spec.subject,
+					description: spec.description,
+					activeForm: spec.subject,
+					metadata: { ...spec.metadata, workflow_id: payload.workflow_id },
+				});
+			} else {
+				t = createOrchestratorTask(store, {
+					subject: spec.subject,
+					description: spec.description,
+					activeForm: spec.subject,
+					agentType: spec.agentType,
+					blockedBy: [],
+					metadata: { ...spec.metadata, workflow_id: payload.workflow_id },
+				});
+			}
 			if (spec.metadata.phase === "review") {
 				const replaced = t.description.replace(/__review_task_id__/g, t.id);
 				if (replaced !== t.description) {
@@ -322,12 +344,17 @@ export function subscribeWorkflow(
 			nextReviewId: nextReview?.id,
 			workflow_run_goal_id: activeGoalId ?? "",
 		});
-		const fixTask = store.create(
-			spec.subject,
-			spec.description,
-			spec.subject,
-			{ ...spec.metadata, workflow_id: activeWorkflowId ?? "" },
-		);
+		// GC-2026-task-feeding-and-decomposition (AC4): route via helper.
+		// Fix is blockedBy a Review (orchestrator-created) — so it's not
+		// top-level per R3 and no Reviewer sibling is auto-attached.
+		const fixTask = createOrchestratorTask(store, {
+			subject: spec.subject,
+			description: spec.description,
+			activeForm: spec.subject,
+			agentType: spec.agentType,
+			blockedBy: [],
+			metadata: { ...spec.metadata, workflow_id: activeWorkflowId ?? "" },
+		});
 		// Wire blockedBy edges. spec.blockedBy uses placeholder ids only when
 		// Review_{i+1} doesn't exist yet — for the dynamic case we always have
 		// a real review id.
@@ -371,12 +398,19 @@ export function subscribeWorkflow(
 			reviewTaskId: reviewTask.id,
 			workflow_run_goal_id: activeGoalId ?? "",
 		});
-		const newImplement = store.create(
-			spec.subject,
-			spec.description,
-			spec.subject,
-			{ ...spec.metadata, workflow_id: activeWorkflowId ?? "" },
-		);
+		// GC-2026-task-feeding-and-decomposition (AC4): route via helper.
+		// Redesign's new Implement is blockedBy the originating Review
+		// (orchestrator-created) — so it's not top-level per R3 and no
+		// fresh Reviewer sibling is auto-attached. The existing Review
+		// chain picks up the new Implement via its blockedBy wiring below.
+		const newImplement = createOrchestratorTask(store, {
+			subject: spec.subject,
+			description: spec.description,
+			activeForm: spec.subject,
+			agentType: spec.agentType,
+			blockedBy: [],
+			metadata: { ...spec.metadata, workflow_id: activeWorkflowId ?? "" },
+		});
 		// Wire blockedBy: new Implement blockedBy the requesting Review.
 		store.update(newImplement.id, { addBlockedBy: [reviewTask.id] });
 		// Wire Review_1 to also wait on the new Implement (so the chain resets).
@@ -512,6 +546,11 @@ export function subscribeWorkflow(
 			`See \`pi-subagents/src/agent-prompts/${advisorAgentType.toLowerCase().replace(/advisor$/, "-advisor")}.ts\` for your full contract.`,
 		].join("\n");
 
+		// GC-2026-task-feeding-and-decomposition (AC4): advisor tasks are
+		// orchestrator-created (the orchestrator spawned the primary; the
+		// advisor sibling is also orchestrator work). They do NOT get a
+		// Reviewer sibling (advisor's role IS the review) and do not need
+		// the helper — direct store.create with the explicit stamp suffices.
 		const advisorTask = store.create(subject, description, subject, {
 			...completedTask.metadata,
 			phase,
@@ -520,6 +559,7 @@ export function subscribeWorkflow(
 			advisorOf: completedTask.id,
 			workflow_id: activeWorkflowId ?? "",
 			workflow_run_goal_id: goalId,
+			created_by: "orchestrator" as const,
 		});
 		// Wire blockedBy: advisor must wait for primary.
 		store.update(advisorTask.id, { addBlockedBy: [completedTask.id] });

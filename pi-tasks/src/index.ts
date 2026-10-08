@@ -28,6 +28,11 @@ import type { Task } from "./types.js";
 import { subscribeWorkflow } from "./workflow-handler.js";
 import { openSettingsMenu } from "./ui/settings-menu.js";
 import { TaskWidget, type UICtx } from "./ui/task-widget.js";
+import {
+  createOrchestratorTask,
+  createOrchestratorTaskWithReview,
+} from "./orchestrator-task.js";
+import { registerDecomposeCascade } from "./decompose-cascade.js";
 
 // ---- Debug ----
 
@@ -401,6 +406,185 @@ export default function (pi: ExtensionAPI) {
   // other listener registrations).
   void workflowHandlerUnsub;
 
+  // ── Decompose-materialize RPC (GC-2026-task-feeding-and-decomposition AC3) ──
+  // decompose_task (in pi-orchestrator) emits a request on this channel
+  // with chain specs; this handler materializes the chain in the TaskStore,
+  // spawns T1 (so the cascade can pick up the rest), and replies with chain
+  // metadata on the reply channel.
+  //
+  // Channel constants are duplicated across packages (string literals) —
+  // see pi-orchestrator/src/decompose-task.ts.
+  pi.events.on("tasks:rpc:decompose-materialize", async (raw: unknown) => {
+    const payload = raw as { requestId?: unknown; params?: unknown };
+    if (typeof payload.requestId !== "string" || !payload.params) return;
+    const requestId = payload.requestId;
+    const replyChannel = `tasks:rpc:decompose-materialize:reply:${requestId}`;
+    try {
+      const params = payload.params as {
+        user_task_id?: string;
+        specs: Array<{ subject: string; description: string; activeForm?: string }>;
+      };
+      const result = await materializeDecomposeChain(params);
+      pi.events.emit(replyChannel, { success: true, data: result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      pi.events.emit(replyChannel, { success: false, error: message });
+    }
+  });
+
+  async function materializeDecomposeChain(params: {
+    user_task_id?: string;
+    specs: Array<{ subject: string; description: string; activeForm?: string }>;
+  }): Promise<{
+    status: "success";
+    summary: string;
+    tasks: Array<{
+      task_id: string;
+      subject: string;
+      reviewer_id: string | undefined;
+      is_top_level: boolean;
+    }>;
+    user_task_chain?: string[];
+    first_task_spawned?: { task_id: string; agent_id: string };
+  }> {
+    if (!Array.isArray(params.specs) || params.specs.length < 1 || params.specs.length > 20) {
+      throw new Error(`specs.length must be in [1, 20], got ${params.specs?.length}`);
+    }
+    for (let i = 0; i < params.specs.length; i++) {
+      const spec = params.specs[i];
+      if (!spec || typeof spec.subject !== "string" || spec.subject.length === 0) {
+        throw new Error(`specs[${i}].subject is required`);
+      }
+      if (typeof spec.description !== "string" || spec.description.length < 10) {
+        throw new Error(`specs[${i}].description must be ≥ 10 chars`);
+      }
+    }
+    let userTask: Task | undefined;
+    if (params.user_task_id !== undefined) {
+      userTask = store.get(params.user_task_id);
+      if (!userTask) throw new Error(`user_task_id ${params.user_task_id} not found`);
+      if (userTask.metadata.created_by !== "user") {
+        throw new Error(
+          `user_task_id ${params.user_task_id} is not user-created (created_by=${userTask.metadata.created_by})`,
+        );
+      }
+    }
+
+    const created: Task[] = [];
+    let reviewer: Task | undefined;
+    const chainSubjects = params.specs.map((s) => s.subject);
+    const chainDescriptions = params.specs.map((s) => s.description);
+    for (let i = 0; i < params.specs.length; i++) {
+      const spec = params.specs[i];
+      const baseMeta: Record<string, unknown> = {
+        phase: "decomposition_chain",
+        agentType: "Developer",
+        created_by: "orchestrator",
+        ...(userTask ? { user_task_ref: userTask.id } : {}),
+      };
+      if (i === 0) {
+        const out = createOrchestratorTaskWithReview(
+          store,
+          {
+            subject: spec.subject,
+            description: spec.description,
+            activeForm: spec.activeForm,
+            agentType: "Developer",
+            blockedBy: userTask ? [userTask.id] : [],
+            metadata: baseMeta,
+          },
+          {
+            kind: "decompose",
+            parentSubject: spec.subject,
+            parentDescription: spec.description,
+            parentAgentType: "Developer",
+            parentIteration: 1,
+            chainSubjects,
+            chainDescriptions,
+            branch: "",
+            ...(userTask ? { userTaskRef: userTask.id } : {}),
+          },
+        );
+        created.push(out.task);
+        reviewer = out.reviewer;
+      } else {
+        const task = createOrchestratorTask(store, {
+          subject: spec.subject,
+          description: spec.description,
+          activeForm: spec.activeForm,
+          agentType: "Developer",
+          blockedBy: [created[i - 1].id],
+          metadata: baseMeta,
+        });
+        created.push(task);
+      }
+    }
+
+    let firstSpawned: { task_id: string; agent_id: string } | undefined;
+    const t1 = created[0];
+    if (t1 && (!userTask || userTask.status === "completed")) {
+      const type = String(t1.metadata.agentType ?? t1.subject);
+      const agentId = await spawnSubagent(type, t1.description, {
+        description: t1.subject,
+        isBackground: true,
+      });
+      pi.events.emit("decompose:spawn", { agentId, taskId: t1.id });
+      store.update(t1.id, { status: "in_progress", owner: agentId });
+      widget.setActiveTask(t1.id, true);
+      firstSpawned = { task_id: t1.id, agent_id: agentId };
+    }
+
+    const tasks = created.map((t, i) => ({
+      task_id: t.id,
+      subject: t.subject,
+      reviewer_id: i === 0 ? reviewer?.id : undefined,
+      is_top_level: i === 0,
+    }));
+    const user_task_chain = userTask
+      ? [userTask.id, ...created.map((t) => t.id)]
+      : undefined;
+
+    return {
+      status: "success",
+      summary: `Decomposed into ${created.length} task(s); 1 Reviewer on T1. Chain will execute serially.`,
+      tasks,
+      ...(user_task_chain ? { user_task_chain } : {}),
+      ...(firstSpawned ? { first_task_spawned: firstSpawned } : {}),
+    };
+  }
+
+  // ── Decompose-cascade listener (GC-2026-task-feeding-and-decomposition AC14) ──
+  // Dedicated cascade for decomposed chains. Workflow tasks continue to flow
+  // through subscribeWorkflow's listener; decomposed tasks (phase:
+  // "decomposition_chain") flow through this listener. The two never collide
+  // because they have disjoint phase filters.
+  //
+  // spawnDecomposeTask issues the subagents:rpc:spawn call and emits
+  // `decompose:spawn` so the listener registers the agentId for cascade
+  // tracking. decompose_task (in pi-orchestrator) also calls this exact
+  // pattern for its first T1 spawn; the listener doesn't care which side
+  // emits the event.
+  registerDecomposeCascade({
+    events: pi.events,
+    store,
+    spawn: async (task: Task): Promise<string> => {
+      const type = String(task.metadata.agentType ?? task.subject);
+      const agentId = await spawnSubagent(type, task.description, {
+        description: task.subject,
+        isBackground: true,
+      });
+      pi.events.emit("decompose:spawn", { agentId, taskId: task.id });
+      widget.setActiveTask(task.id, true);
+      return agentId;
+    },
+    onTaskChange: (taskId, status) => {
+      if (status === "completed" || status === "failed") {
+        widget.setActiveTask(taskId, false);
+        widget.update();
+      }
+    },
+  });
+
   // ── Context-scoped store initialization ──
   // Project paths cannot be resolved until an ExtensionContext is available.
   // Initialize on the first context-bearing event and reinitialize when a host
@@ -646,6 +830,12 @@ All tasks are created with status \`pending\`.
       activeForm: Type.Optional(Type.String({ description: "Present continuous form shown in spinner when in_progress (e.g., 'Running tests')" })),
       agentType: Type.Optional(Type.String({ description: "Agent type for subagent execution (e.g., 'general-purpose', 'Explore'). Tasks with agentType can be started via TaskExecute." })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
+      created_by: Type.Optional(
+        Type.Unsafe<"orchestrator" | "user">({
+          description: 'GC-2026-task-feeding-and-decomposition (D1): task source provenance. "orchestrator" routes through the helper (no auto-Reviewer); "user" (default) creates the task directly.',
+          default: "user",
+        }),
+      ),
     }),
 
     execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -1194,12 +1384,21 @@ Set up task dependencies:
   // ──────────────────────────────────────────────────
 
   pi.registerCommand("tasks", {
-    description: "Manage tasks — view, create, clear completed",
-    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+    description: "Manage tasks — view, create, clear completed. Subcommand: /tasks create \"<subject>\" [--description \"...\"] [--agent-type T]",
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
       latestCtx = ctx;
       widget.setUICtx(ctx.ui as UICtx);
       initializeStoreForContext(ctx);
       const ui = ctx.ui;
+
+      // GC-2026-task-feeding-and-decomposition (AC6): route the `create`
+      // subcommand to a no-UI arg parser. Empty args fall through to the
+      // existing interactive menu (back-compat).
+      const trimmed = args.trim();
+      if (trimmed.startsWith("create")) {
+        await handleCreateCommand(trimmed.slice("create".length).trim(), ui);
+        return;
+      }
 
       const mainMenu = async (): Promise<void> => {
         const tasks = store.list();
@@ -1322,4 +1521,96 @@ Set up task dependencies:
       await mainMenu();
     },
   });
+
+  // ──────────────────────────────────────────────────
+  // /tasks create (arg-style subcommand)
+  // ──────────────────────────────────────────────────
+
+  /**
+   * Minimal shell-style parser: captures the first quoted token as `subject`,
+   * then walks remaining `--flag "value"` (or `--flag value`) pairs.
+   *
+   * The parser is intentionally narrow — complex shell syntax (nested quotes,
+   * escaped characters, env expansion) is out of scope. Users with complex
+   * inputs should call the LLM-facing TaskCreate tool via chat.
+   */
+  function parseCreateArgs(
+    raw: string,
+  ): {
+    subject?: string;
+    description?: string;
+    agentType?: string;
+    flags: Set<string>;
+  } {
+    const out: {
+      subject?: string;
+      description?: string;
+      agentType?: string;
+      flags: Set<string>;
+    } = { flags: new Set() };
+    let rest = raw.trim();
+    // First quoted token → subject.
+    const subjectMatch = rest.match(/^"([^"]*)"/);
+    if (subjectMatch) {
+      out.subject = subjectMatch[1];
+      rest = rest.slice(subjectMatch[0].length).trim();
+    } else {
+      const untilSpace = rest.match(/^(\S+)/);
+      if (untilSpace) {
+        out.subject = untilSpace[1];
+        rest = rest.slice(untilSpace[0].length).trim();
+      }
+    }
+    // Walk --flag [value] pairs.
+    while (rest.length > 0) {
+      const flagMatch = rest.match(/^--([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+(?:"([^"]*)"|(\S+)))?/);
+      if (!flagMatch) {
+        // Unknown token — skip silently (lenient).
+        rest = rest.replace(/^\S+/, "").trim();
+        continue;
+      }
+      const flag = flagMatch[1];
+      const value = flagMatch[2] ?? flagMatch[3];
+      out.flags.add(flag);
+      if (flag === "description" && value !== undefined) out.description = value;
+      if (flag === "agent-type" && value !== undefined) out.agentType = value;
+      rest = rest.slice(flagMatch[0].length).trim();
+    }
+    return out;
+  }
+
+  async function handleCreateCommand(
+    rawArgs: string,
+    ui: { notify: (msg: string, kind?: "info" | "warning" | "error") => void },
+  ): Promise<void> {
+    if (rawArgs.length === 0) {
+      ui.notify('Usage: /tasks create "<subject>" [--description "..."] [--agent-type T]', "warning");
+      return;
+    }
+    const parsed = parseCreateArgs(rawArgs);
+    // Reject --decompose explicitly (AC6). The flag is parsed as a known
+    // unknown; we surface a clear warning rather than silently ignore.
+    if (parsed.flags.has("decompose")) {
+      ui.notify(
+        "--decompose is not exposed. Decomposition is chat-driven (LLM calls the decompose_task tool).",
+        "warning",
+      );
+      return;
+    }
+    if (!parsed.subject || parsed.subject.length === 0) {
+      ui.notify("Task subject is required.", "warning");
+      return;
+    }
+    const task = store.create(
+      parsed.subject,
+      parsed.description ?? "",
+      undefined,
+      {
+        created_by: "user",
+        ...(parsed.agentType ? { agentType: parsed.agentType } : {}),
+      },
+    );
+    widget.update();
+    ui.notify(`Task #${task.id} created: ${task.subject}`, "info");
+  }
 }

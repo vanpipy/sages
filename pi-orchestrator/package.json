@@ -12,6 +12,7 @@
     "verify:soft-mode-mental-model": "bun run scripts/verify-soft-mode-mental-model.ts",
     "verify:pi-tasks-tools": "bun run scripts/verify-pi-tasks-tools.ts",
     "verify:gcdb": "bun run scripts/verify-gcdb.ts",
+    "verify:created-by-invariant": "bun run scripts/verify-created-by-invariant.ts",
     "verify:pi-universe": "bun run scripts/verify-pi-universe.ts",
     "verify:all": "bun run scripts/verify-all.ts",
     "gen:catalog": "bun run scripts/gen-catalog.ts"
