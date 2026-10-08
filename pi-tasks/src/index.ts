@@ -383,71 +383,92 @@ export default function (pi: ExtensionAPI) {
     let reviewer: Task | undefined;
     const chainSubjects = params.specs.map((s) => s.subject);
     const chainDescriptions = params.specs.map((s) => s.description);
-    for (let i = 0; i < params.specs.length; i++) {
-      const spec = params.specs[i];
-      const baseMeta: Record<string, unknown> = {
-        phase: "decomposition_chain",
-        agentType: "Developer",
-        created_by: "orchestrator",
-        ...(userTask ? { user_task_ref: userTask.id } : {}),
-      };
-      if (i === 0) {
-        // GC-2026-120 AC3: T1 is the chain head — no `blockedBy` on the
-        // user task. The user task is auto-completed below, so T1's only
-        // dependency is the feeder noticing `blockedBy === []` and
-        // spawning. The old code's `blockedBy: userTask ? [userTask.id] : []`
-        // created a deadlock: userTask had no agent to complete it.
-        const out = createOrchestratorTaskWithReview(
-          store,
-          {
+    // GC-2026-120 AC6: capture the user task's pre-state so we can roll it
+    // back if the chain materialization throws after AC3's auto-complete
+    // fires.
+    let userTaskAutoCompleted = false;
+    const priorUserTaskMetadata = userTask ? { ...userTask.metadata } : undefined;
+    try {
+      for (let i = 0; i < params.specs.length; i++) {
+        const spec = params.specs[i];
+        const baseMeta: Record<string, unknown> = {
+          phase: "decomposition_chain",
+          agentType: "Developer",
+          created_by: "orchestrator",
+          ...(userTask ? { user_task_ref: userTask.id } : {}),
+        };
+        if (i === 0) {
+          // GC-2026-120 AC3: T1 is the chain head — no `blockedBy` on the
+          // user task. The user task is auto-completed below, so T1's only
+          // dependency is the feeder noticing `blockedBy === []` and
+          // spawning. The old code's `blockedBy: userTask ? [userTask.id] : []`
+          // created a deadlock: userTask had no agent to complete it.
+          const out = createOrchestratorTaskWithReview(
+            store,
+            {
+              subject: spec.subject,
+              description: spec.description,
+              activeForm: spec.activeForm,
+              agentType: "Developer",
+              blockedBy: [],
+              metadata: baseMeta,
+            },
+            {
+              kind: "decompose",
+              parentSubject: spec.subject,
+              parentDescription: spec.description,
+              parentAgentType: "Developer",
+              parentIteration: 1,
+              chainSubjects,
+              chainDescriptions,
+              branch: "",
+              ...(userTask ? { userTaskRef: userTask.id } : {}),
+            },
+          );
+          created.push(out.task);
+          reviewer = out.reviewer;
+        } else {
+          const task = createOrchestratorTask(store, {
             subject: spec.subject,
             description: spec.description,
             activeForm: spec.activeForm,
             agentType: "Developer",
-            blockedBy: [],
+            blockedBy: [created[i - 1].id],
             metadata: baseMeta,
-          },
-          {
-            kind: "decompose",
-            parentSubject: spec.subject,
-            parentDescription: spec.description,
-            parentAgentType: "Developer",
-            parentIteration: 1,
-            chainSubjects,
-            chainDescriptions,
-            branch: "",
-            ...(userTask ? { userTaskRef: userTask.id } : {}),
-          },
-        );
-        created.push(out.task);
-        reviewer = out.reviewer;
-      } else {
-        const task = createOrchestratorTask(store, {
-          subject: spec.subject,
-          description: spec.description,
-          activeForm: spec.activeForm,
-          agentType: "Developer",
-          blockedBy: [created[i - 1].id],
-          metadata: baseMeta,
-        });
-        created.push(task);
+          });
+          created.push(task);
+        }
       }
-    }
 
-    // GC-2026-120 AC3: auto-complete the user task on successful chain
-    // materialization. The user task was a record of intent; once it is
-    // decomposed into actionable sub-tasks, it has served its purpose.
-    // This eliminates the pre-GC deadlock where T1.blockedBy contained
-    // userTask.id but no agent ever completed userTask.
-    if (userTask) {
-      store.update(userTask.id, {
-        status: "completed",
-        metadata: {
-          ...userTask.metadata,
-          completed_via: "decomposition",
-          completed_at: new Date().toISOString(),
-        },
-      });
+      // GC-2026-120 AC3: auto-complete the user task on successful chain
+      // materialization. The user task was a record of intent; once it is
+      // decomposed into actionable sub-tasks, it has served its purpose.
+      // This eliminates the pre-GC deadlock where T1.blockedBy contained
+      // userTask.id but no agent ever completed userTask.
+      if (userTask) {
+        store.update(userTask.id, {
+          status: "completed",
+          metadata: {
+            ...userTask.metadata,
+            completed_via: "decomposition",
+            completed_at: new Date().toISOString(),
+          },
+        });
+        userTaskAutoCompleted = true;
+      }
+    } catch (err) {
+      // GC-2026-120 AC6: transactional rollback. Delete every chain task
+      // (and the reviewer) created before the throw, and revert userTask
+      // auto-completion if it already fired.
+      for (const t of created) store.delete(t.id);
+      if (reviewer) store.delete(reviewer.id);
+      if (userTaskAutoCompleted && userTask && priorUserTaskMetadata) {
+        store.update(userTask.id, {
+          status: "pending",
+          metadata: priorUserTaskMetadata,
+        });
+      }
+      throw err;
     }
 
     let firstSpawned: { task_id: string; agent_id: string } | undefined;
@@ -462,7 +483,18 @@ export default function (pi: ExtensionAPI) {
       // pending feedable task with satisfied blockers).
       // GC-2026-120 AC3: the prior `(!userTask || userTask.status === "completed")`
       // gate simplified — userTask is auto-completed above iff it existed.
-      await feeder.maybeAutoSpawn(t1);
+      try {
+        await feeder.maybeAutoSpawn(t1);
+      } catch (spawnErr) {
+        // AC6 extension: if the spawn RPC fails (e.g., subagents extension
+        // not registered), the chain is still materialised — tasks are
+        // persisted, just unowned. The caller can retry the spawn later
+        // (e.g., via TaskExecute). Do NOT roll back the chain on a spawn
+        // failure — that would discard work the user asked for.
+        const message = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+        // eslint-disable-next-line no-console
+        console.error("[materializeDecomposeChain] T1 spawn failed:", message);
+      }
       const afterT1 = store.get(t1.id);
       if (afterT1?.owner) {
         widget.setActiveTask(t1.id, true);
