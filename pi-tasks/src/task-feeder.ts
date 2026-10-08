@@ -135,6 +135,15 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
     for (const t of all) {
       if (t.status !== "pending") continue;
       if (!isFeedableTask(t)) continue;
+      // GC-2026-115: workflow tasks are owned by workflow-handler.ts's
+      // cascade loop, which injects the prior-Review summary BEFORE
+      // spawning. If the feeder spawned workflow tasks too, the
+      // workflow-handler's loop would skip them (status !== "pending")
+      // and the summary would never be injected. The cleanest fix is
+      // to keep the responsibilities separate: feeder cascades
+      // user / decompose tasks; workflow-handler cascades workflow
+      // tasks.
+      if (typeof t.metadata?.workflow_run_goal_id === "string") continue;
       await maybeAutoSpawn(t);
     }
   }

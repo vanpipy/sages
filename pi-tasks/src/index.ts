@@ -1003,7 +1003,7 @@ Set up task dependencies:
       addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: "Task IDs that block this task" })),
     }),
 
-    execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { taskId, ...fields } = params;
       // GC-2026-113 FU0 Phase 2b: capture the prior agentType so we can
       // detect an add/change and trigger the unified feeder once.
@@ -1015,7 +1015,7 @@ Set up task dependencies:
       const { task, changedFields, warnings } = store.update(taskId, fields);
 
       if (changedFields.length === 0 && !task) {
-        return Promise.resolve(textResult(`Task #${taskId} not found`));
+        return textResult(`Task #${taskId} not found`);
       }
 
       // Update widget active task tracking
@@ -1032,6 +1032,12 @@ Set up task dependencies:
       // GC-2026-113 FU0 Phase 2b: if metadata.agentType was added (was
       // empty, now non-empty) or changed (different non-empty value),
       // the task just became feedable. Trigger the unified feeder.
+      //
+      // GC-2026-115: `await` (not `void`) so the spawn RPC completes
+      // before the tool returns. Without this, a followup TaskOutput
+      // call from the LLM races the spawn: task.owner is still
+      // undefined when TaskOutput reads it, and TaskOutput errors
+      // with "No background process".
       const newAgentType =
         task && typeof task.metadata?.agentType === "string"
           ? task.metadata.agentType
@@ -1042,7 +1048,7 @@ Set up task dependencies:
         newAgentType.length > 0 &&
         newAgentType !== priorAgentType
       ) {
-        void feeder.maybeAutoSpawn(task);
+        await feeder.maybeAutoSpawn(task);
       }
 
       widget.update();
@@ -1050,7 +1056,7 @@ Set up task dependencies:
       if (warnings.length > 0) {
         msg += ` (warning: ${warnings.join("; ")})`;
       }
-      return Promise.resolve(textResult(msg));
+      return textResult(msg);
     },
   });
 
