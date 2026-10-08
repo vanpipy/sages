@@ -23,6 +23,7 @@ import { Cron } from "croner";
 import { nanoid } from "nanoid";
 import type { AgentManager } from "./agent-manager.js";
 import { resolveType } from "./agent-types.js";
+import { SUBAGENTS_SCHEDULED } from "./event-channels.js";
 import { enforceDeveloperManagedIsolationPolicy } from "./invocation-config.js";
 import { resolveModel } from "./model-resolver.js";
 import type { ScheduleStore } from "./schedule-store.js";
@@ -394,7 +395,7 @@ export class SubagentScheduler {
 	}
 
 	private emit(event: ScheduleChangeEvent): void {
-		if (this.pi) this.pi.events.emit("subagents:scheduled", event);
+		if (this.pi) this.pi.events.emit(SUBAGENTS_SCHEDULED, event);
 	}
 
 	private requireStore(): ScheduleStore {

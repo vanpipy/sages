@@ -50,6 +50,17 @@ import { registerSubagentControlTools } from "./subagent-control-tools.js";
 import { type RpcHandle, registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import {
+	SUBAGENTS_COMPLETED,
+	SUBAGENTS_COMPACTED,
+	SUBAGENTS_CREATED,
+	SUBAGENTS_FAILED,
+	SUBAGENTS_PARENT_ABORTED,
+	SUBAGENTS_READY,
+	SUBAGENTS_SCHEDULER_READY,
+	SUBAGENTS_STARTED,
+	SUBAGENTS_STEERED,
+} from "./event-channels.js";
+import {
 	isModelInScope,
 	readEnabledModels,
 	resolveEnabledModels,
@@ -606,11 +617,11 @@ export default function (pi: ExtensionAPI) {
 				record.status === "aborted";
 			const eventData = buildEventData(record);
 			if (isParentAborted) {
-				pi.events.emit("subagents:parent_aborted", eventData);
+				pi.events.emit(SUBAGENTS_PARENT_ABORTED, eventData);
 			} else if (isError) {
-				pi.events.emit("subagents:failed", eventData);
+				pi.events.emit(SUBAGENTS_FAILED, eventData);
 			} else {
-				pi.events.emit("subagents:completed", eventData);
+				pi.events.emit(SUBAGENTS_COMPLETED, eventData);
 			}
 
 			// Persist final record for cross-extension history reconstruction
@@ -652,7 +663,7 @@ export default function (pi: ExtensionAPI) {
 		undefined,
 		(record) => {
 			// Emit started event when agent transitions to running (including from queue)
-			pi.events.emit("subagents:started", {
+			pi.events.emit(SUBAGENTS_STARTED, {
 				id: record.id,
 				type: record.type,
 				description: record.description,
@@ -660,7 +671,7 @@ export default function (pi: ExtensionAPI) {
 		},
 		(record, info) => {
 			// Emit compacted event when agent's session compacts (preserves count on record).
-			pi.events.emit("subagents:compacted", {
+			pi.events.emit(SUBAGENTS_COMPACTED, {
 				id: record.id,
 				type: record.type,
 				description: record.description,
@@ -728,7 +739,7 @@ export default function (pi: ExtensionAPI) {
 			const path = resolveStorePath(ctx.cwd, sessionId);
 			const store = new ScheduleStore(path);
 			scheduler.start(pi, ctx, manager, store);
-			pi.events.emit("subagents:scheduler_ready", {
+			pi.events.emit(SUBAGENTS_SCHEDULER_READY, {
 				sessionId,
 				jobCount: store.list().length,
 			});
@@ -757,7 +768,7 @@ export default function (pi: ExtensionAPI) {
 			// Broadcast readiness so extensions loaded alongside us can discover us.
 			// Emitting after all factories have run (rather than at factory time)
 			// also avoids the race where a consumer loaded after us misses the event.
-			pi.events.emit("subagents:ready", {});
+			pi.events.emit(SUBAGENTS_READY, {});
 		}
 		if (isSchedulingEnabled() && !scheduler.isActive()) startScheduler(ctx);
 	});
@@ -1850,7 +1861,7 @@ Terse command-style prompts produce shallow, generic work.
 					fleet.update();
 
 					// Emit created event
-					pi.events.emit("subagents:created", {
+					pi.events.emit(SUBAGENTS_CREATED, {
 						id,
 						type: subagentType,
 						description: params.description,
@@ -2156,7 +2167,7 @@ Terse command-style prompts produce shallow, generic work.
 					// Session not ready yet — queue the steer for delivery once initialized
 					if (!record.pendingSteers) record.pendingSteers = [];
 					record.pendingSteers.push(params.message);
-					pi.events.emit("subagents:steered", {
+					pi.events.emit(SUBAGENTS_STEERED, {
 						id: record.id,
 						message: params.message,
 					});
@@ -2167,7 +2178,7 @@ Terse command-style prompts produce shallow, generic work.
 
 				try {
 					await steerAgent(record.session, params.message);
-					pi.events.emit("subagents:steered", {
+					pi.events.emit(SUBAGENTS_STEERED, {
 						id: record.id,
 						message: params.message,
 					});

@@ -10,6 +10,11 @@
  */
 
 import { getAvailableTypes, resolveType } from "./agent-types.js";
+import {
+	SUBAGENTS_RPC_PING,
+	SUBAGENTS_RPC_SPAWN,
+	SUBAGENTS_RPC_STOP,
+} from "./event-channels.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
 
 const MAX_PROMPT_BYTES = 256 * 1024;
@@ -100,7 +105,7 @@ function handleRpc<P extends { requestId: string }>(
 export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
 	const { events, pi, getCtx, manager } = deps;
 
-	const unsubPing = handleRpc(events, "subagents:rpc:ping", () => {
+	const unsubPing = handleRpc(events, SUBAGENTS_RPC_PING, () => {
 		return { version: PROTOCOL_VERSION };
 	});
 
@@ -109,7 +114,7 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
 		type: string;
 		prompt: string;
 		options?: any;
-	}>(events, "subagents:rpc:spawn", ({ type, prompt, options }) => {
+	}>(events, SUBAGENTS_RPC_SPAWN, ({ type, prompt, options }) => {
 		const availableTypes = getAvailableTypes();
 		// GC-2026-091: canonical registry keys are PascalCase. Resolve the
 		// caller-supplied spelling through the case-insensitive registry so
@@ -177,7 +182,7 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
 
 	const unsubStop = handleRpc<{ requestId: string; agentId: string }>(
 		events,
-		"subagents:rpc:stop",
+		SUBAGENTS_RPC_STOP,
 		({ agentId }) => {
 			if (!manager.abort(agentId)) throw new Error("Agent not found");
 		},
