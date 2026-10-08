@@ -32,7 +32,7 @@ import {
   createOrchestratorTask,
   createOrchestratorTaskWithReview,
 } from "./orchestrator-task.js";
-import { registerTaskFeeder } from "./task-feeder.js";
+import { isFeedableTask, registerTaskFeeder } from "./task-feeder.js";
 import { TASKS_RPC_DECOMPOSE_MATERIALIZE } from "./event-channels.js";
 
 // ---- Debug ----
@@ -158,33 +158,96 @@ export default function (pi: ExtensionAPI) {
   let subagentsAvailable = false;
   let pendingWarning: string | undefined;
 
-  /** Ping subagents and check protocol version. Works with any handler version. */
-  function checkSubagentsVersion() {
-    const requestId = randomUUID();
-    const timer = setTimeout(() => { unsub(); }, 5_000);
-    const unsub = pi.events.on(`subagents:rpc:ping:reply:${requestId}`, (raw: unknown) => {
-      unsub(); clearTimeout(timer);
-      const remoteVersion = (raw as any)?.data?.version as number | undefined;
-      if (remoteVersion === undefined) {
-        pendingWarning =
-          "@tintinweb/pi-subagents is outdated — please update for task execution support.";
-      } else if (remoteVersion > PROTOCOL_VERSION) {
-        pendingWarning =
-          `@tintinweb/pi-tasks is outdated (protocol v${PROTOCOL_VERSION}, ` +
-          `pi-subagents has v${remoteVersion}) — please update for task execution support.`;
-      } else if (remoteVersion < PROTOCOL_VERSION) {
-        pendingWarning =
-          `@tintinweb/pi-subagents is outdated (protocol v${remoteVersion}, ` +
-          `pi-tasks has v${PROTOCOL_VERSION}) — please update for task execution support.`;
-      } else {
-        subagentsAvailable = true;
-      }
+  /** GC-2026-fix-pending-spawn-after-ready: the message we attach to a
+   *  spawn failure when subagents is not yet available. Used both as the
+   *  thrown error and as a marker for the `subagents:ready` retry sweep
+   *  to identify which pending tasks should be re-spawned when
+   *  subagents finally comes online. */
+  const SUBAGENTS_UNAVAILABLE_MESSAGE =
+    "subagents extension unavailable; Planner fallback engages";
+
+  /** Ping subagents and check protocol version. Returns a Promise that
+   *  resolves when the ping settles (success OR timeout). Works with any
+   *  handler version. */
+  function checkSubagentsVersion(): Promise<void> {
+    if (subagentsAvailable) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const requestId = randomUUID();
+      let settled = false;
+      const finalize = () => {
+        if (settled) return;
+        settled = true;
+        unsub();
+        clearTimeout(timer);
+        resolve();
+      };
+      const unsub = pi.events.on(`subagents:rpc:ping:reply:${requestId}`, (raw: unknown) => {
+        const remoteVersion = (raw as any)?.data?.version as number | undefined;
+        if (remoteVersion === undefined) {
+          pendingWarning =
+            "@tintinweb/pi-subagents is outdated — please update for task execution support.";
+        } else if (remoteVersion > PROTOCOL_VERSION) {
+          pendingWarning =
+            `@tintinweb/pi-tasks is outdated (protocol v${PROTOCOL_VERSION}, ` +
+            `pi-subagents has v${remoteVersion}) — please update for task execution support.`;
+        } else if (remoteVersion < PROTOCOL_VERSION) {
+          pendingWarning =
+            `@tintinweb/pi-subagents is outdated (protocol v${remoteVersion}, ` +
+            `pi-tasks has v${PROTOCOL_VERSION}) — please update for task execution support.`;
+        } else {
+          subagentsAvailable = true;
+        }
+        finalize();
+      });
+      const timer = setTimeout(finalize, 5_000);
+      pi.events.emit("subagents:rpc:ping", { requestId });
     });
-    pi.events.emit("subagents:rpc:ping", { requestId });
+  }
+
+  /** GC-2026-fix-pending-spawn-after-ready: when subagents comes online,
+   *  retry every pending task that previously failed because subagents
+   *  wasn't yet ready. Without this sweep, a TaskCreate fired before
+   *  `subagents:ready` would leave the task in pending with
+   *  `lastError = SUBAGENTS_UNAVAILABLE_MESSAGE` — never consumed.
+   *
+   *  Implementation note: we do NOT block the spawn callback waiting for
+   *  subagents to come online — that would slow TaskCreate by up to 10s
+   *  in the genuine "subagents absent" case and break tests that depend
+   *  on fast spawn failures. Instead, the spawn callback throws
+   *  immediately (pre-fix behavior) and this sweep re-spawns the
+   *  failed task once `subagents:ready` fires. Tradeoff: a TaskCreate
+   *  that hits the race window sees its task briefly as "pending with
+   *  lastError" before the sweep fires the retry — typically within a
+   *  few hundred ms of subagents:ready. */
+  async function retryPendingSpawnsAfterReady(): Promise<void> {
+    for (const t of store.list()) {
+      if (t.status !== "pending") continue;
+      if (!isFeedableTask(t)) continue;
+      const lastError = t.metadata?.lastError;
+      if (typeof lastError !== "string" || !lastError.includes(SUBAGENTS_UNAVAILABLE_MESSAGE)) continue;
+      // Clear the lastError marker so the feeder has a clean slate and
+      // we don't loop forever if the retry also fails.
+      store.update(t.id, {
+        metadata: { ...t.metadata, lastError: null },
+      });
+      const fresh = store.get(t.id);
+      if (fresh) await feeder.maybeAutoSpawn(fresh);
+    }
   }
 
   checkSubagentsVersion();
-  pi.events.on("subagents:ready", () => checkSubagentsVersion());
+  pi.events.on("subagents:ready", () => {
+    // Re-ping to set subagentsAvailable, then sweep pending tasks that
+    // previously failed because subagents wasn't ready. The sweep is
+    // gated on the ping reply — `checkSubagentsVersion` resolves when
+    // the ping settles, by which point subagentsAvailable reflects the
+    // handshake outcome.
+    void checkSubagentsVersion().then(() => {
+      if (subagentsAvailable) {
+        void retryPendingSpawnsAfterReady();
+      }
+    });
+  });
 
   /** Build a prompt for a task being executed by a subagent.
    *  Injects completed dependency results so cascaded agents have context from prerequisites.
@@ -244,8 +307,24 @@ export default function (pi: ExtensionAPI) {
       // before_agent_start reminder fires for the LLM as the fallback.
       // Without this guard, a missing subagents extension hangs the
       // feeder forever waiting for an RPC reply that never comes.
+      //
+      // GC-2026-fix-pending-spawn-after-ready: throw synchronously when
+      // subagents is unavailable (preserves pre-fix behavior — the spawn
+      // callback is a fast path and never blocks). The task is reverted
+      // to pending with `lastError = SUBAGENTS_UNAVAILABLE_MESSAGE`,
+      // and the `subagents:ready` listener below sweeps that marker
+      // and re-spawns every pending failed task once subagents
+      // broadcasts ready.
+      //
+      // The race we close: pre-fix, pi-subagents registers its RPC
+      // handlers in session_start, AFTER pi-tasks's extension factory
+      // emits the boot ping. A TaskCreate that runs in that gap threw
+      // "subagents extension unavailable" and the task was stuck in
+      // pending forever. Post-fix, the listener walks pending tasks on
+      // subagents:ready and re-spawns each one whose lastError matches
+      // the marker.
       if (!subagentsAvailable) {
-        throw new Error("subagents extension unavailable; Planner fallback engages");
+        throw new Error(SUBAGENTS_UNAVAILABLE_MESSAGE);
       }
       // GC-2026-121 follow-up: tasks created BEFORE the Planner
       // agentType stamp shipped (or loaded from a pre-fix store file)
