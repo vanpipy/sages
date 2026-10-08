@@ -75,25 +75,34 @@ function fakeEvents() {
 }
 
 function setup(): Harness {
-	const store = new TaskStore();
-	const events = fakeEvents();
-	const spawnCalls: Task[] = [];
-	const spawnAgent = vi.fn(async (task: Task) => {
-		spawnCalls.push(task);
-		return `agent-${task.id}`;
-	});
+  const store = new TaskStore();
+  const events = fakeEvents();
+  const spawnCalls: Task[] = [];
+  // GC-2026-114 FU3: workflow-handler no longer takes a `spawnAgent`
+  // callback. It now takes a `feed` with `maybeAutoSpawn`. We mock
+  // `maybeAutoSpawn` to record the spawn and populate `agentTaskMap`.
+  const agentTaskMap = new Map<string, string>();
+  const feed = {
+    maybeAutoSpawn: async (task: Task) => {
+      spawnCalls.push(task);
+      const agentId = `agent-${task.id}`;
+      agentTaskMap.set(agentId, task.id);
+      store.update(task.id, { status: "in_progress", owner: agentId });
+    },
+  };
 
-	subscribeWorkflow(store, {
-		events: { on: events.on, emit: events.emit },
-		spawnAgent,
-	});
+  subscribeWorkflow(store, {
+    events: { on: events.on, emit: events.emit },
+    feed,
+    agentTaskMap,
+  });
 
-	const fire = async (channel: string, data: unknown) => {
-		await events.emit(channel, data);
-		await new Promise<void>(resolve => setImmediate(resolve));
-	};
+  const fire = async (channel: string, data: unknown) => {
+    await events.emit(channel, data);
+    await new Promise<void>(resolve => setImmediate(resolve));
+  };
 
-	return { store, events, spy: { spawnCalls }, fire, primarySpawnCalls: () => spawnCalls.filter(t => !t.metadata.advisorOf) };
+  return { store, events, spy: { spawnCalls }, fire, primarySpawnCalls: () => spawnCalls.filter(t => !t.metadata.advisorOf) };
 }
 
 const startPayload: WorkflowStartPayload = {
@@ -369,19 +378,24 @@ describe("subscribeWorkflow — real-id spawn path (production wiring)", () => {
 		// the trailing digit so all subsequent spawns shared one agent id and
 		// the agentToTask map kept overwriting itself).
 		const realIds = new Map<string, string>(); // taskId → real-format id
+		const agentTaskMap = new Map<string, string>(); // shared with feeder
 
-		const spawnAgent = vi.fn(async (task: Task) => {
-			spawnCalls.push(task);
-			// Mirror pi-subagents/agent-manager.ts:346: 17-char UUID prefix.
-			// Distinct from "agent-${task.id}" — this is the production shape.
-			const realId = randomUUID().slice(0, 17);
-			realIds.set(task.id, realId);
-			return realId;
-		});
+		const feed = {
+			maybeAutoSpawn: async (task: Task) => {
+				spawnCalls.push(task);
+				// Mirror pi-subagents/agent-manager.ts:346: 17-char UUID prefix.
+				// Distinct from "agent-${task.id}" — this is the production shape.
+				const realId = randomUUID().slice(0, 17);
+				realIds.set(task.id, realId);
+				agentTaskMap.set(realId, task.id);
+				store.update(task.id, { status: "in_progress", owner: realId });
+			},
+		};
 
 		const cleanup = subscribeWorkflow(store, {
 			events: { on: events.on, emit: events.emit },
-			spawnAgent,
+			feed,
+			agentTaskMap,
 		});
 
 		const fire = async (channel: string, data: unknown) => {

@@ -120,14 +120,24 @@ function startPayloadInTmp(opts: Partial<WorkflowStartPayload> = {}): {
 function setup() {
   const store = new TaskStore(); // in-memory
   const events = fakeEvents();
+  const agentTaskMap = new Map<string, string>();
   const spy = { calls: [] as Array<{ task: Task }> };
-  const spawnAgent = vi.fn(async (task: Task) => {
-    spy.calls.push({ task });
-    return `agent-${task.id}`;
-  });
-  const unsub = subscribeWorkflow(store, { events, spawnAgent });
+  // GC-2026-114 FU3: the workflow-handler no longer takes a
+  // `spawnAgent` callback. It now takes a `feed` with
+  // `maybeAutoSpawn`. We mock `maybeAutoSpawn` to record the spawn
+  // and populate `agentTaskMap` (mirroring the production feeder's
+  // behavior).
+  const feed = {
+    maybeAutoSpawn: async (task: Task) => {
+      spy.calls.push({ task });
+      const agentId = `agent-${task.id}`;
+      agentTaskMap.set(agentId, task.id);
+      store.update(task.id, { status: "in_progress", owner: agentId });
+    },
+  };
+  const unsub = subscribeWorkflow(store, { events, feed, agentTaskMap });
 
-  return { store, events, spawnAgent, spy, unsub };
+  return { store, events, feed, agentTaskMap, spy, unsub };
 }
 
 function flush() {
@@ -223,13 +233,13 @@ describe("subscribeWorkflow — workflow:start (GC-2026-verdict-states-and-dynam
   });
 
   test("on workflow:start, handler spawns only the Implement task", async () => {
-    const { events, spawnAgent } = setup();
+    const { events, spy } = setup();
 
     await events.emit("workflow:start", startPayload());
     await flush();
 
-    expect(spawnAgent).toHaveBeenCalledTimes(1);
-    const spawned = spawnAgent.mock.calls[0][0];
+    expect(spy.calls).toHaveLength(1);
+    const spawned = spy.calls[0].task;
     expect(spawned.metadata.phase).toBe("implement");
   });
 
@@ -238,7 +248,7 @@ describe("subscribeWorkflow — workflow:start (GC-2026-verdict-states-and-dynam
   // Previously the brief hardcoded process.cwd() and a goal-id-derived
   // branch, drifting from what workflow-run.ts recorded.
   test("Implement dispatch brief embeds the payload worktree_path + canonical branch", async () => {
-    const { events, spawnAgent } = setup();
+    const { events, spy } = setup();
 
     const customPath = "/abs/custom-worktree-from-payload";
     await events.emit(
@@ -247,8 +257,8 @@ describe("subscribeWorkflow — workflow:start (GC-2026-verdict-states-and-dynam
     );
     await flush();
 
-    expect(spawnAgent).toHaveBeenCalledTimes(1);
-    const implementTask = spawnAgent.mock.calls[0][0];
+    expect(spy.calls).toHaveLength(1);
+    const implementTask = spy.calls[0].task;
     expect(implementTask.description).toContain(customPath);
     // Branch: lowercase goal_id + "-implement" (no `sages/` prefix, no
     // `/implement/` subpath). This matches workflow-run.ts's recorded
@@ -283,7 +293,7 @@ describe("subscribeWorkflow — workflow:start (GC-2026-verdict-states-and-dynam
 
 describe("subscribeWorkflow — cascade (clean path)", () => {
   test("clean reviews cascade Review→Review without spawning Fix", async () => {
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
 
     await events.emit("workflow:start", startPayload());
     await flush();
@@ -299,19 +309,19 @@ describe("subscribeWorkflow — cascade (clean path)", () => {
     await flush();
 
     // No Fix should have been spawned.
-    const spawnedSubjects = spawnAgent.mock.calls.map(c => c[0].subject);
+    const spawnedSubjects = spy.calls.map(c => c.task.subject);
     expect(spawnedSubjects).not.toContain("Fix 1: Test workflow");
 
     // Review_2 should have been spawned.
     const review2 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 2);
     expect(review2).toBeDefined();
-    expect(spawnAgent.mock.calls.map(c => c[0].subject)).toContain(
+    expect(spy.calls.map(c => c.task.subject)).toContain(
       "Review 2: Test workflow",
     );
   });
 
   test("completing the last review (Review_3 CLEAN) spawns Merge", async () => {
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
 
     await events.emit("workflow:start", startPayload());
     await flush();
@@ -337,14 +347,14 @@ describe("subscribeWorkflow — cascade (clean path)", () => {
     });
     await flush();
 
-    const subjects = spawnAgent.mock.calls.map(c => c[0].subject);
+    const subjects = spy.calls.map(c => c.task.subject);
     expect(subjects).toContain("Merge: Test workflow");
   });
 });
 
 describe("subscribeWorkflow — NEEDS_WORK cascade (dynamic Fix)", () => {
   test("NEEDS_WORK on Review_1 dispatches Fix_1 and pauses Review_2", async () => {
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
 
     await events.emit("workflow:start", startPayload());
     await flush();
@@ -363,19 +373,19 @@ describe("subscribeWorkflow — NEEDS_WORK cascade (dynamic Fix)", () => {
     const fix1 = store.list().find(t => t.metadata.phase === "fix" && t.metadata.iteration === 1);
     expect(fix1).toBeDefined();
     expect(fix1?.blockedBy).toEqual([review1.id]);
-    expect(spawnAgent.mock.calls.map(c => c[0].subject)).toContain(
+    expect(spy.calls.map(c => c.task.subject)).toContain(
       "Fix 1: Test workflow",
     );
 
     // Review_2 was NOT spawned yet (waiting for Fix_1).
-    const review2Spawned = spawnAgent.mock.calls.some(
-      c => c[0].subject === "Review 2: Test workflow",
+    const review2Spawned = spy.calls.some(
+      c => c.task.subject === "Review 2: Test workflow",
     );
     expect(review2Spawned).toBe(false);
   });
 
   test("Fix_1 completion unblocks Review_2 (NEEDS_WORK → Fix → Review loop)", async () => {
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
 
     await events.emit("workflow:start", startPayload());
     await flush();
@@ -394,7 +404,7 @@ describe("subscribeWorkflow — NEEDS_WORK cascade (dynamic Fix)", () => {
     await completeTask(events, fix1);
 
     // Review_2 now spawned.
-    expect(spawnAgent.mock.calls.map(c => c[0].subject)).toContain(
+    expect(spy.calls.map(c => c.task.subject)).toContain(
       "Review 2: Test workflow",
     );
   });
@@ -402,7 +412,7 @@ describe("subscribeWorkflow — NEEDS_WORK cascade (dynamic Fix)", () => {
   test("Fix dispatched at max_fix_iterations is silently skipped (not spawned)", async () => {
     // max_fix_iterations=1 means: Review_1 → NEEDS_WORK triggers Fix_1, but
     // there is no Review_2 to follow. workflow-run.ts will resolve as blocked.
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
 
     await events.emit("workflow:start", startPayload({ max_fix_iterations: 1 }));
     await flush();
@@ -423,7 +433,7 @@ describe("subscribeWorkflow — NEEDS_WORK cascade (dynamic Fix)", () => {
   });
 
   test("Fix is NOT dispatched when verdict is CLEAN (verified counter only ticks on NEEDS_WORK)", async () => {
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
 
     await events.emit("workflow:start", startPayload());
     await flush();
@@ -440,7 +450,7 @@ describe("subscribeWorkflow — NEEDS_WORK cascade (dynamic Fix)", () => {
     await flush();
 
     expect(store.list().find(t => t.metadata.phase === "fix")).toBeUndefined();
-    expect(spawnAgent.mock.calls.map(c => c[0].subject)).not.toContain(
+    expect(spy.calls.map(c => c.task.subject)).not.toContain(
       expect.stringContaining("Fix"),
     );
   });
@@ -449,7 +459,7 @@ describe("subscribeWorkflow — NEEDS_WORK cascade (dynamic Fix)", () => {
 // GC-2026-advisor-pairs: paired advisor dispatch (post-primary)
 describe("subscribeWorkflow — advisor pair dispatch (GC-2026-advisor-pairs)", () => {
   test("completed task with metadata.advisorAgentType spawns a paired advisor sibling", async () => {
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
     await events.emit("workflow:start", startPayload());
     await flush();
 
@@ -512,7 +522,7 @@ describe("subscribeWorkflow — advisor pair dispatch (GC-2026-advisor-pairs)", 
 
 describe("subscribeWorkflow — NEEDS_REDESIGN cascade (dynamic new Implement)", () => {
   test("NEEDS_REDESIGN spawns a new Implement with redesignNumber metadata", async () => {
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
 
     await events.emit("workflow:start", startPayload());
     await flush();
@@ -540,7 +550,7 @@ describe("subscribeWorkflow — NEEDS_REDESIGN cascade (dynamic new Implement)",
     expect(newImpl?.blockedBy).toEqual([review1.id]);
 
     // Subject was generated as "Implement (redesign N): ..."
-    expect(spawnAgent.mock.calls.map(c => c[0].subject)).toContain(
+    expect(spy.calls.map(c => c.task.subject)).toContain(
       "Implement (redesign 1): Test workflow",
     );
   });
@@ -633,7 +643,7 @@ describe("subscribeWorkflow — NEEDS_CLARIFICATION pause", () => {
   });
 
   test("NEEDS_CLARIFICATION does not cascade (Review_2 NOT spawned)", async () => {
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
 
     await events.emit("workflow:start", startPayload());
     await flush();
@@ -648,10 +658,10 @@ describe("subscribeWorkflow — NEEDS_CLARIFICATION pause", () => {
     });
     await flush();
 
-    expect(spawnAgent.mock.calls.map(c => c[0].subject)).not.toContain(
+    expect(spy.calls.map(c => c.task.subject)).not.toContain(
       "Review 2: Test workflow",
     );
-    expect(spawnAgent.mock.calls.map(c => c[0].subject)).not.toContain(
+    expect(spy.calls.map(c => c.task.subject)).not.toContain(
       "Merge: Test workflow",
     );
   });
@@ -709,8 +719,17 @@ describe("subscribeWorkflow — last-review evidence file (GC-2026-b7)", () => {
     try {
       const store = new TaskStore();
       const events = fakeEvents();
-      const spawnAgent = vi.fn(async (task: Task) => `agent-${task.id}`);
-      subscribeWorkflow(store, { events, spawnAgent });
+      const agentTaskMap = new Map<string, string>();
+      // GC-2026-114 FU3: workflow-handler no longer takes a `spawnAgent`
+      // callback. It now takes a `feed` with `maybeAutoSpawn`.
+      const feed = {
+        maybeAutoSpawn: async (task: Task) => {
+          const agentId = `agent-${task.id}`;
+          agentTaskMap.set(agentId, task.id);
+          store.update(task.id, { status: "in_progress", owner: agentId });
+        },
+      };
+      subscribeWorkflow(store, { events, feed, agentTaskMap });
       const fire = async (channel: string, data: unknown) => {
         await events.emit(channel, data);
         await flush();
@@ -746,8 +765,17 @@ describe("subscribeWorkflow — last-review evidence file (GC-2026-b7)", () => {
     try {
       const store = new TaskStore();
       const events = fakeEvents();
-      const spawnAgent = vi.fn(async (task: Task) => `agent-${task.id}`);
-      subscribeWorkflow(store, { events, spawnAgent });
+      const agentTaskMap = new Map<string, string>();
+      // GC-2026-114 FU3: workflow-handler no longer takes a `spawnAgent`
+      // callback. It now takes a `feed` with `maybeAutoSpawn`.
+      const feed = {
+        maybeAutoSpawn: async (task: Task) => {
+          const agentId = `agent-${task.id}`;
+          agentTaskMap.set(agentId, task.id);
+          store.update(task.id, { status: "in_progress", owner: agentId });
+        },
+      };
+      subscribeWorkflow(store, { events, feed, agentTaskMap });
       const fire = async (channel: string, data: unknown) => {
         await events.emit(channel, data);
         await flush();
@@ -793,25 +821,15 @@ describe("subscribeWorkflow — last-review evidence file (GC-2026-b7)", () => {
 // call. The wiring lives in pi-tasks/src/index.ts subscribeWorkflow's
 // spawnAgent closure.
 describe("subscribeWorkflow — workflow task active marker (GC-2026-workflow-chat-stream)", () => {
-  test("subscribeWorkflow.spawnAgent marks the task active before dispatching", async () => {
-    // We can't reach the real TaskWidget instance from here (it's the
-    // singleton inside initExtension). Instead we verify the side-effect:
-    // the spawn path calls widget.setActiveTask(task.id, true) before
-    // dispatching, and the workflow's own listener removes it via
-    // widget.update()'s prune loop once status flips to completed.
-    //
-    // Indirect check: the subscribeWorkflow closure captures `widget` via
-    // the surrounding index.ts scope. We assert that the spawn was
-    // synchronous (the call was made) by checking spawnAgent.mock.calls
-    // is populated after the cascade completes a Review phase.
-    //
-    // GC-2026-098 (Batch A — test reliability): previous sync version of
-    // this test called events.emit without awaiting. The handler chain
-    // uses async awaits (await spawnAgent, await store.update) so the
-    // cascade was still in flight when the assertion read spawnAgent.mock
-    // — review1SpawnCall was undefined. Awaiting the emit lets the cascade
-    // settle before we inspect the mock.
-    const { events, store, spawnAgent } = setup();
+  // GC-2026-114 FU3: the test name refers to the removed `spawnAgent`
+  // callback. The active-marker wiring moved to the unified task-feeder
+  // (via its `onTaskChange` callback in extension factory). This test
+  // is re-pinned to the new model: the feeder's `maybeAutoSpawn` is
+  // called for every workflow task, and the active-marker side-effect
+  // lives in the extension factory's `onTaskChange`. The widget
+  // integration is covered by the TaskWidget unit + smoke.
+  test("subscribeWorkflow.feed.maybeAutoSpawn is called for every workflow task", async () => {
+    const { events, store, spy } = setup();
     await events.emit("workflow:start", startPayload());
     await flush();
 
@@ -819,15 +837,10 @@ describe("subscribeWorkflow — workflow task active marker (GC-2026-workflow-ch
     await events.emit("subagents:completed", { id: `agent-${implement.id}`, result: "ok" });
     await flush();
 
-    const review1 = store.list().find(t => t.metadata.phase === "review" && t.metadata.iteration === 1)!;
-    // The spawnAgent mock was called for Review_1 — that's the spawn that
-    // should have hit setActiveTask(true). We don't have direct visibility
-    // into the widget here, but the call itself is what we can assert
-    // here (the widget side-effect is integration-tested via the
-    // TaskWidget unit + smoke).
-    expect(spawnAgent.mock.calls.length).toBeGreaterThanOrEqual(1);
-    const review1SpawnCall = spawnAgent.mock.calls.find(
-      (c) => c[0].metadata.phase === "review" && c[0].metadata.iteration === 1,
+    // The feed's maybeAutoSpawn was called for every workflow task.
+    expect(spy.calls.length).toBeGreaterThanOrEqual(1);
+    const review1SpawnCall = spy.calls.find(
+      (c) => c.task.metadata.phase === "review" && c.task.metadata.iteration === 1,
     );
     expect(review1SpawnCall).toBeDefined();
   });
@@ -838,7 +851,7 @@ describe("subscribeWorkflow — workflow task active marker (GC-2026-workflow-ch
 // findings as regression / unresolved / new.
 describe("subscribeWorkflow — prior review summary (GC-2026-b6)", () => {
   test("Review_1 dispatch brief has NO prior summary section", async () => {
-    const { events, store, spawnAgent } = setup();
+    const { events, store, spy } = setup();
     await events.emit("workflow:start", startPayload());
     await flush();
 

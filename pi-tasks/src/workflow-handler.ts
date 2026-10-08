@@ -80,15 +80,27 @@ export interface WorkflowEventBus {
 	emit(channel: string, data: unknown): Promise<void> | void;
 }
 
-/** Spawns the given task as a subagent. Returns the agent id the executor will use. */
-export type WorkflowSpawnAgent = (
-	task: Task,
-	ctx?: { worktreePath?: string },
-) => Promise<string>;
+/**
+ * GC-2026-114 FU3: removed the `spawnAgent` callback. The workflow handler
+ * now goes through the unified `task-feeder` (GC-2026-108 + GC-2026-113)
+ * for spawn + agentTaskMap management. The extension factory passes the
+ * same `feed` (the feeder's `maybeAutoSpawn` entry point) and the same
+ * `agentTaskMap` (the shared reverse index the feeder populates) here.
+ *
+ * The handler still owns the workflow-specific surface: building the
+ * static graph on `workflow:start`, parsing Reviewer verdicts, and
+ * emitting `workflow:phase-complete` events. The actual subagent
+ * spawn and completion tracking is owned by the feeder.
+ */
+
+export interface WorkflowFeed {
+	maybeAutoSpawn: (task: Task) => Promise<void>;
+}
 
 export interface SubscribeWorkflowOptions {
 	events: WorkflowEventBus;
-	spawnAgent: WorkflowSpawnAgent;
+	feed: WorkflowFeed;
+	agentTaskMap: Map<string, string>;
 	/**
 	 * GC-2026-task-widget-link: optional callback the workflow handler
 	 * fires whenever a workflow task's lifecycle state should be reflected
@@ -127,8 +139,11 @@ export function subscribeWorkflow(
 	store: TaskStore,
 	options: SubscribeWorkflowOptions,
 ): () => void {
-	const { events, spawnAgent, onTaskChange } = options;
-	const agentToTask = new Map<string, string>();
+	const { events, feed, agentTaskMap, onTaskChange } = options;
+	// GC-2026-114 FU3: the local `agentToTask` map is removed. The
+	// workflow handler reads the SAME shared `agentTaskMap` that the
+	// unified task-feeder populates on spawn. No local reverse-index
+	// cache is needed.
 	const completedIds = new Set<string>();
 	// workflow_id is stamped onto every task's metadata so the cascade
 	// filter only walks tasks belonging to the active workflow.
@@ -277,9 +292,10 @@ export function subscribeWorkflow(
 //    real id, stalling the cascade after the first phase.
 		const implement = created.find(x => x.metadata.phase === "implement");
 		if (!implement) throw new Error("Implement task missing from created graph");
-		const agentId = await spawnAgent(implement, { worktreePath: payload.worktree_path });
-		agentToTask.set(agentId, implement.id);
-		store.update(implement.id, { status: "in_progress", owner: agentId });
+		// GC-2026-114 FU3: delegate spawn to the unified task-feeder.
+		// The feeder populates `task.owner` + `agentTaskMap` and emits
+		// the events the unified listener watches.
+		await feed.maybeAutoSpawn(implement);
 	};
 
 	// GC-2026-verdict-states-and-dynamic-cascade: dynamic task creation.
@@ -366,9 +382,8 @@ export function subscribeWorkflow(
 			store.update(nextReview.id, { addBlockedBy: [fixTask.id] });
 		}
 		// Spawn immediately (Fix has all its blockers done by definition).
-		const agentId = await spawnAgent(fixTask, { worktreePath: payload_worktree_path });
-		agentToTask.set(agentId, fixTask.id);
-		store.update(fixTask.id, { status: "in_progress", owner: agentId });
+		// GC-2026-114 FU3: delegate to the unified task-feeder.
+		await feed.maybeAutoSpawn(fixTask);
 	}
 
 	/**
@@ -423,9 +438,8 @@ export function subscribeWorkflow(
 		if (review1) {
 			store.update(review1.id, { addBlockedBy: [newImplement.id] });
 		}
-		const agentId = await spawnAgent(newImplement, { worktreePath: payload_worktree_path });
-		agentToTask.set(agentId, newImplement.id);
-		store.update(newImplement.id, { status: "in_progress", owner: agentId });
+		// GC-2026-114 FU3: delegate to the unified task-feeder.
+		await feed.maybeAutoSpawn(newImplement);
 	}
 
 	/**
@@ -579,14 +593,17 @@ export function subscribeWorkflow(
 	const onSubagentCompleted = async (raw: unknown): Promise<void> => {
 		const data = raw as { id?: string; result?: string; error?: string };
 		if (!data || typeof data.id !== "string") return;
-		const taskId = agentToTask.get(data.id);
+		// GC-2026-114 FU3: same shared agentTaskMap as the feeder. The
+		// feeder populates on spawn + removes on completion (we never
+		// mutate the map here).
+		const taskId = agentTaskMap.get(data.id);
 		if (!taskId) return; // not a workflow task — let the existing handler process it
 		const task = store.get(taskId);
 		if (!task) return;
 
 		// Track completion BEFORE the cascade scan, so the just-completed task
 		// counts as unblocking its dependents.
-		agentToTask.delete(data.id);
+		// (Was: agentToTask.delete — the feeder's listener handles this.)
 		completedIds.add(taskId);
 
 		// GC-2026-task-widget-link: notify the host UI that the workflow task
@@ -739,9 +756,13 @@ export function subscribeWorkflow(
 				}
 			}
 
-			const agentId = await spawnAgent(t);
-			agentToTask.set(agentId, t.id);
-			store.update(t.id, { status: "in_progress", owner: agentId });
+			// GC-2026-114 FU3: the feeder's `subagents:completed` listener
+			// walks the store for newly-unblocked feedable tasks and
+			// auto-spawns them. The workflow handler no longer needs
+			// its own cascade loop. The prior-Review-summary injection
+			// stays in the workflow handler because it requires the
+			// `findingsHistory` context.
+			await feed.maybeAutoSpawn(t);
 		}
 	};
 
@@ -754,12 +775,13 @@ export function subscribeWorkflow(
 	const onSubagentFailed = async (raw: unknown): Promise<void> => {
 		const data = raw as { id?: string; error?: string; status?: string };
 		if (!data || typeof data.id !== "string") return;
-		const taskId = agentToTask.get(data.id);
+		// GC-2026-114 FU3: same shared agentTaskMap as the feeder.
+		const taskId = agentTaskMap.get(data.id);
 		if (!taskId) return; // not a workflow task; let the existing handler process it
 		const task = store.get(taskId);
 		if (!task) return;
 
-		agentToTask.delete(data.id);
+		// (Was: agentToTask.delete — the feeder's listener handles this.)
 
 		// GC-2026-task-widget-link: see onSubagentCompleted above — the host
 		// UI needs to know the task failed so it can clear the active marker.
