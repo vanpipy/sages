@@ -94,7 +94,19 @@ export interface WorkflowEventBus {
  */
 
 export interface WorkflowFeed {
-	maybeAutoSpawn: (task: Task) => Promise<void>;
+	/**
+	 * GC-2026-114 FU3: the feed's `maybeAutoSpawn` is called by the
+	 * workflow-handler on every dispatch (initial Implement, Fix,
+	 * Redesign, cascade). The handler passes the workflow context
+	 * (currently the `worktreePath` from the workflow:start payload
+	 * via `payload_worktree_path`) as the second argument, so the
+	 * feed's spawn callback can read it (e.g. for managed-worktree
+	 * isolation metadata).
+	 */
+	maybeAutoSpawn: (
+		task: Task,
+		ctx?: { worktreePath?: string },
+	) => Promise<void>;
 }
 
 export interface SubscribeWorkflowOptions {
@@ -295,7 +307,7 @@ export function subscribeWorkflow(
 		// GC-2026-114 FU3: delegate spawn to the unified task-feeder.
 		// The feeder populates `task.owner` + `agentTaskMap` and emits
 		// the events the unified listener watches.
-		await feed.maybeAutoSpawn(implement);
+		await feed.maybeAutoSpawn(implement, { worktreePath: payload.worktree_path });
 	};
 
 	// GC-2026-verdict-states-and-dynamic-cascade: dynamic task creation.
@@ -383,7 +395,7 @@ export function subscribeWorkflow(
 		}
 		// Spawn immediately (Fix has all its blockers done by definition).
 		// GC-2026-114 FU3: delegate to the unified task-feeder.
-		await feed.maybeAutoSpawn(fixTask);
+		await feed.maybeAutoSpawn(fixTask, { worktreePath: payload_worktree_path });
 	}
 
 	/**
@@ -439,7 +451,7 @@ export function subscribeWorkflow(
 			store.update(review1.id, { addBlockedBy: [newImplement.id] });
 		}
 		// GC-2026-114 FU3: delegate to the unified task-feeder.
-		await feed.maybeAutoSpawn(newImplement);
+		await feed.maybeAutoSpawn(newImplement, { worktreePath: payload_worktree_path });
 	}
 
 	/**
@@ -762,7 +774,7 @@ export function subscribeWorkflow(
 			// its own cascade loop. The prior-Review-summary injection
 			// stays in the workflow handler because it requires the
 			// `findingsHistory` context.
-			await feed.maybeAutoSpawn(t);
+			await feed.maybeAutoSpawn(t, { worktreePath: payload_worktree_path });
 		}
 	};
 
