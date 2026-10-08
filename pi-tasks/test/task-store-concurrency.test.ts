@@ -9,6 +9,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import * as nodeFs from "node:fs";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,18 +19,24 @@ import { TaskStore } from "../src/task-store.js";
 // A seam inside the critical section. save() ends with renameSync, so a hook there
 // runs while the store holds the lock — the only way to stage a lock changing hands
 // mid-operation, since acquire and release are both internal to withLock.
-const renameHook = vi.hoisted(() => ({ current: null as null | (() => void) }));
-vi.mock("node:fs", async importOriginal => {
-  const actual = await importOriginal<typeof import("node:fs")>();
-  return {
-    ...actual,
-    default: actual,
-    renameSync: (...args: Parameters<typeof actual.renameSync>) => {
-      renameHook.current?.();
-      return actual.renameSync(...args);
-    },
-  };
-});
+const renameHook = ({ current: null as null | (() => void) });
+
+// GC-2026-pi-tasks-test-compat: vitest's `vi.mock("node:fs", async importOriginal => ...)`
+// provided `importOriginal()` so the factory could forward to the real fs while
+// overriding one function. bun:test doesn't pass `importOriginal`. Workaround:
+// capture `nodeFs.renameSync` BEFORE vi.mock so the wrapped closure holds the
+// original reference; after mock, `nodeFs.renameSync` would resolve to the
+// mock's renameSync (recursion), so we must hold our own copy.
+const realRenameSync = nodeFs.renameSync;
+
+vi.mock("node:fs", () => ({
+  ...nodeFs,
+  default: nodeFs,
+  renameSync: (...args: Parameters<typeof realRenameSync>) => {
+    renameHook.current?.();
+    return realRenameSync(...args);
+  },
+}));
 
 let dir: string;
 let file: string;

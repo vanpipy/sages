@@ -19,7 +19,7 @@ import { flush, installSubagentsMock, mockPi, mockSessionCtx } from "./helpers/m
 
 // Pinned so the developer's own <agentDir>/tasks-config.json cannot change what
 // these tests exercise.
-const config = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const config = (({ current: {} as Record<string, unknown> }));
 vi.mock("../src/tasks-config.js", () => ({
   loadGlobalTasksConfig: () => ({ ...config.current }),
   loadTasksConfig: () => ({ ...config.current }),

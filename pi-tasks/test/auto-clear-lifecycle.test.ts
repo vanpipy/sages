@@ -13,7 +13,7 @@ import initExtension from "../src/index.js";
 import { sessionTaskFile } from "../src/task-paths.js";
 import { mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
 
-const config = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const config = (({ current: {} as Record<string, unknown> }));
 vi.mock("../src/tasks-config.js", () => ({
   loadGlobalTasksConfig: () => ({ ...config.current }),
   loadTasksConfig: () => ({ ...config.current }),

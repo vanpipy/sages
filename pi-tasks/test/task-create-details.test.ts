@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockCtx, mockPi } from "./helpers/mock-pi.js";
 
-const cfg = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const cfg = (({ current: {} as Record<string, unknown> }));
 vi.mock("../src/tasks-config.js", () => ({
   loadGlobalTasksConfig: () => ({ ...cfg.current }),
   loadTasksConfig: () => ({ ...cfg.current }),

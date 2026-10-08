@@ -12,7 +12,7 @@ import initExtension from "../src/index.js";
 import { TaskStore } from "../src/task-store.js";
 import { mockPi } from "./helpers/mock-pi.js";
 
-const config = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const config = (({ current: {} as Record<string, unknown> }));
 vi.mock("../src/tasks-config.js", () => ({
   loadGlobalTasksConfig: () => ({ ...config.current }),
   loadTasksConfig: () => ({ ...config.current }),

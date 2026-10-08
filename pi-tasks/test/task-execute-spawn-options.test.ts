@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import initExtension from "../src/index.js";
 import { flush, installSubagentsMock, mockCtx, mockPi } from "./helpers/mock-pi.js";
 
-const config = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const config = (({ current: {} as Record<string, unknown> }));
 vi.mock("../src/tasks-config.js", () => ({
   loadGlobalTasksConfig: () => ({ ...config.current }),
   loadTasksConfig: () => ({ ...config.current }),

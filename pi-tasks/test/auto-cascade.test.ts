@@ -14,7 +14,7 @@ import { flush, installSubagentsMock, mockCtx, mockPi } from "./helpers/mock-pi.
 // Config is mocked rather than written to <cwd>/.pi/tasks-config.json: writing the
 // real file would clobber the user's project settings, and reading it would let the
 // developer's global <agentDir>/tasks-config.json leak into the results.
-const config = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const config = (({ current: {} as Record<string, unknown> }));
 vi.mock("../src/tasks-config.js", () => ({
   loadGlobalTasksConfig: () => ({ ...config.current }),
   loadTasksConfig: () => ({ ...config.current }),

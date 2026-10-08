@@ -1,0 +1,5 @@
+[test]
+# Preload vi-shim before any test file runs so missing vitest APIs
+# (vi.hoisted, importOriginal, vi.advanceTimersByTimeAsync, vi.waitFor)
+# are polyfilled.
+preload = ["./test/vi-shim.ts"]
