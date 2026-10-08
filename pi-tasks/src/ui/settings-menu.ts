@@ -46,15 +46,9 @@ export async function openSettingsMenu(
         currentValue: cfg.taskScope ?? "session",
         values: ["memory", "session", "session-global", "project"],
       },
-      {
-        id: "autoCascade",
-        label: "Auto-cascade agent tasks",
-        description:
-          "When ON: pending agent tasks start automatically once their dependencies complete. " +
-          "When OFF: use TaskExecute to launch them manually.",
-        currentValue: (cfg.autoCascade ?? false) ? "on" : "off",
-        values: ["on", "off"],
-      },
+      // GC-2026-114 FU3: `autoCascade` removed. Cascade is now
+      // unconditional via the unified task-feeder; there is no
+      // user-facing setting to toggle.
       {
         id: "collapseCompleted",
         label: "Collapse completed tasks",
@@ -121,10 +115,6 @@ export async function openSettingsMenu(
       /* maxVisible */ 10,
       getSettingsListTheme(),
       /* onChange */ (id, newValue) => {
-        if (id === "autoCascade") {
-          cfg.autoCascade = newValue === "on";
-          saveTasksConfig(cfg, cwd);
-        }
         if (id === "taskScope") {
           cfg.taskScope = newValue as TasksConfig["taskScope"];
           saveTasksConfig(cfg, cwd);

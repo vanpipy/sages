@@ -222,10 +222,13 @@ export default function (pi: ExtensionAPI) {
   // ── Unified task feeder (GC-2026-113 FU0 Phase 2b) ──
   // Replaces the three previous cascade listeners (workflow-handler
   // direct spawn, decompose-cascade cascade, TaskExecute ad-hoc
-  // cascade) and the cfg.autoCascade gate. ONE feeder owns spawn +
-  // completion for ALL task types (workflow / decompose / user /
-  // TaskExecute). The `cfg.autoCascade` config key becomes a no-op
-  // (cascading is unconditional; the gate is gone).
+  // cascade). ONE feeder owns spawn + completion for ALL task types
+  // (workflow / decompose / user / TaskExecute).
+  //
+  // GC-2026-114 FU3: the `cfg.autoCascade` config key + the related
+  // settings-menu toggle are removed entirely (cascade is unconditional).
+  // The settings-menu item is gone; tasks-config.ts no longer declares
+  // the key.
   //
   // The feeder's spawn callback dispatches by task metadata:
   //   - workflow Developer (has `workflow_run_goal_id`): managed
@@ -286,69 +289,17 @@ export default function (pi: ExtensionAPI) {
   // above; the two coexist because subscribeWorkflow's map covers workflow
   // tasks while agentTaskMap covers ad-hoc TaskExecute tasks.
   let workflowHandlerUnsub: (() => void) | undefined;
+  // GC-2026-114 FU3: workflow-handler delegates spawn + agentTaskMap
+  // management to the unified task-feeder (registered above as `feeder`).
+  // The workflow handler retains verdict parsing + workflow:phase-complete
+  // emission + onTaskChange callbacks; the actual subagent dispatch +
+  // cascade is the feeder's job.
   subscribeWorkflow(store, {
     events: pi.events,
-    spawnAgent: async (task, ctx) => {
-      const type = String(task.metadata.agentType ?? task.subject);
-      const goalId = typeof task.metadata.workflow_run_goal_id === "string"
-        ? task.metadata.workflow_run_goal_id
-        : undefined;
-
-      // GC-2026-pi-tasks-cascade-agentid: the developer agent requires an
-      // explicit isolation choice at spawn time (see pi-subagents
-      // /invocation-config.ts:enforceDeveloperManagedIsolationPolicy).
-      // The orchestrator's workflow_run computes the worktree path at
-      // workflow:start time and threads it through `ctx.worktreePath`;
-      // we translate that into the { goal_id, task_id, mode: "create" }
-      // managed-worktree object that the spawn RPC expects.
-      //
-      // Without this, the very first implement spawn fails with
-      // "developer agent: an explicit isolation choice is required" and
-      // the workflow never advances past workflow:start.
-      const spawnOpts: Record<string, unknown> = {
-        description: task.subject,
-        isBackground: true,
-      };
-      if (
-        type.toLowerCase() === "developer" &&
-        goalId &&
-        ctx?.worktreePath
-      ) {
-        spawnOpts.isolation = {
-          goal_id: goalId,
-          task_id: String(task.id),
-          mode: "create",
-        };
-      }
-      // GC-2026-workflow-chat-stream: forward the workflow context
-      // (goal_id + phase + iteration) so AgentWidget can render a
-      // `(workflow: GC-X · Review 2)` badge. Pulled from the task's
-      // metadata which workflow-handler stamps when creating each phase.
-      if (goalId && task.metadata?.phase) {
-        spawnOpts.workflowContext = {
-          goalId,
-          phase: task.metadata.phase,
-          iteration: Number(task.metadata.iteration ?? 0),
-        };
-      }
-
-      // GC-2026-task-widget-link: only mark the workflow task ACTIVE on the
-      // TaskWidget AFTER spawnSubagent resolves successfully. Marking it
-      // active BEFORE the spawn means the spinner shows for tasks that
-      // never actually start (e.g. deadline-fail-fast path), and the user
-      // sees a flash-then-vanish on every spawn. After-resolve is the
-      // correct gate: only successful spawns animate the widget.
-      let agentId: string;
-      try {
-        agentId = await spawnSubagent(type, task.description, spawnOpts);
-      } catch (err) {
-        // Spawn failed — surface as "failed" so the widget's active marker
-        // never gets set in the first place (we didn't even try).
-        return "" as string;
-      }
-      widget.setActiveTask(task.id, true);
-      return agentId;
+    feed: {
+      maybeAutoSpawn: (task) => feeder.maybeAutoSpawn(task),
     },
+    agentTaskMap,
     // GC-2026-task-widget-link: workflow-handler fires these for the "finished"
     // and "failed" paths; the wrapper translates to widget calls.
     onTaskChange: (taskId, status) => {
@@ -356,8 +307,6 @@ export default function (pi: ExtensionAPI) {
         widget.setActiveTask(taskId, false);
         widget.update();
       }
-      // "spawned" is fired from spawnAgent itself (above) AFTER spawnSubagent
-      // resolves — not from this callback.
     },
   });
   // Track the unsub so future reloads can detach cleanly (not currently used
@@ -523,30 +472,12 @@ export default function (pi: ExtensionAPI) {
   // because they have disjoint phase filters.
   //
   // spawnDecomposeTask issues the subagents:rpc:spawn call and emits
-  // `decompose:spawn` so the listener registers the agentId for cascade
-  // tracking. decompose_task (in pi-orchestrator) also calls this exact
-  // pattern for its first T1 spawn; the listener doesn't care which side
-  // emits the event.
-  registerDecomposeCascade({
-    events: pi.events,
-    store,
-    spawn: async (task: Task): Promise<string> => {
-      const type = String(task.metadata.agentType ?? task.subject);
-      const agentId = await spawnSubagent(type, task.description, {
-        description: task.subject,
-        isBackground: true,
-      });
-      pi.events.emit("decompose:spawn", { agentId, taskId: task.id });
-      widget.setActiveTask(task.id, true);
-      return agentId;
-    },
-    onTaskChange: (taskId, status) => {
-      if (status === "completed" || status === "failed") {
-        widget.setActiveTask(taskId, false);
-        widget.update();
-      }
-    },
-  });
+  // The decompose-cascade.ts listener was removed in GC-2026-114 FU3.
+  // The unified task-feeder (registered above as `feeder`) now handles
+  // decompose-task cascade via its generic cascadeSpawn — the feeder's
+  // listener walks all pending tasks with satisfied blockers, which
+  // includes decompose-chain tasks. The `decompose:spawn` event
+  // channel is no longer emitted.
 
   // ── Context-scoped store initialization ──
   // Project paths cannot be resolved until an ExtensionContext is available.

@@ -16,7 +16,8 @@ export interface TasksConfig {
   // "session" keeps per-session files in the workspace; "session-global" keeps them
   // under the agent directory instead. Same scope, different home — see task-paths.ts.
   taskScope?: "memory" | "session" | "session-global" | "project";  // default: "session"
-  autoCascade?: boolean;   // default: false
+  // GC-2026-114 FU3: `autoCascade` removed. Cascade is now unconditional
+  // via the unified task-feeder; the gate no longer exists in any form.
   autoClearCompleted?: "never" | "on_list_complete" | "on_task_complete";  // default: "on_list_complete"
   collapseCompleted?: boolean;           // default: false
   showAll?: boolean;                     // default: false
