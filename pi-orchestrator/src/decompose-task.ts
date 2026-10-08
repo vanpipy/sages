@@ -205,6 +205,69 @@ function writeAuditFile(
   return auditPath;
 }
 
+// ── Tool wrapper (extracted for testability — GC-2026-fix-decompose-task-ctx-events) ─
+
+/**
+ * Shape the inner `executeDecomposeTask` requires. Mirrors the host's
+ * `ExtensionToolContext` minus the `signal` / `onUpdate` fields the
+ * decompose RPC does not need.
+ */
+export interface SafeDecomposeCtx {
+  cwd: string;
+  events: {
+    emit: (channel: string, data: unknown) => void | Promise<void>;
+    on: (
+      channel: string,
+      handler: (data: unknown) => void | Promise<void>,
+    ) => () => void;
+  };
+  /** Optional RPC timeout override. Defaults to 30s in executeDecomposeTask. */
+  rpcTimeoutMs?: number;
+}
+
+/**
+ * GC-2026-fix-decompose-task-ctx-events: pre-fix the tool wrapper
+ * used `(ctx as SafeDecomposeCtx) ?? { cwd: process.cwd(), events: <no-op> }`,
+ * which only fell back when `ctx` itself was null/undefined. When the
+ * host passed a `ctx` whose `events` field was undefined (the shape
+ * mismatch from the host's `ExtensionToolContext`), the cast silenced
+ * TypeScript but at runtime `safeCtx.events.on(...)` threw
+ * `Cannot read properties of undefined (reading 'on')` — the
+ * 6×-hit runtime bug captured in the GC postmortem. The fix defaults
+ * `events` independently of `cwd`, mirroring the pattern in
+ * `wrapRegisteredTool` (`pi-orchestrator/src/registered-tool-wrapper.ts:124`).
+ */
+export function buildSafeCtx(ctx: unknown): SafeDecomposeCtx {
+  const obj = ctx as Partial<SafeDecomposeCtx> | null | undefined;
+  return {
+    cwd: obj?.cwd ?? process.cwd(),
+    events: obj?.events ?? { emit: () => {}, on: () => () => {} },
+    ...(obj?.rpcTimeoutMs !== undefined ? { rpcTimeoutMs: obj.rpcTimeoutMs } : {}),
+  };
+}
+
+/**
+ * Pure entry point for the `decompose_task` tool. Extracted from
+ * `registerDecomposeTaskTool` so unit tests can exercise the wrapper
+ * logic (the `safeCtx` fallback, the JSON.stringify response shape)
+ * without going through `pi.registerTool`.
+ *
+ * The wrapper's only job is to narrow `ctx: unknown` (the
+ * `registerTool` boundary) into the shape `executeDecomposeTask`
+ * requires. Production callers go through `registerDecomposeTaskTool`;
+ * tests go through this function directly.
+ */
+export async function executeDecomposeTaskTool(
+  params: DecomposeTaskInput,
+  ctx: unknown,
+): Promise<{ content: Array<{ type: "text"; text: string }> }> {
+  const safeCtx = buildSafeCtx(ctx);
+  const result = await executeDecomposeTask(params, safeCtx);
+  return {
+    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+  };
+}
+
 // ── Tool registration ─────────────────────────────────────────────────
 
 export function registerDecomposeTaskTool(pi: unknown): void {
@@ -240,25 +303,6 @@ export function registerDecomposeTaskTool(pi: unknown): void {
       _signal: unknown,
       _onUpdate: unknown,
       ctx: unknown,
-    ) => {
-      const safeCtx =
-        (ctx as {
-          cwd: string;
-          events: {
-            emit: (channel: string, data: unknown) => void | Promise<void>;
-            on: (
-              channel: string,
-              handler: (data: unknown) => void | Promise<void>,
-            ) => () => void;
-          };
-        }) ?? {
-          cwd: process.cwd(),
-          events: { emit: () => {}, on: () => () => {} },
-        };
-      const result = await executeDecomposeTask(params, safeCtx);
-      return {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-      };
-    },
+    ) => executeDecomposeTaskTool(params, ctx),
   });
 }
