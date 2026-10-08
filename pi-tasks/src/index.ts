@@ -281,16 +281,23 @@ export default function (pi: ExtensionAPI) {
         };
       }
       // GC-2026-121 AC3: for the Planner agent, the spawn prompt must
-      // include the originating user task's id so Planner can pass it
-      // to `decompose_task` without an extra lookup. Format:
-      //   <description>
+      // include the originating user task's subject + description + id
+      // so Planner can pass it to `decompose_task` without an extra
+      // lookup. The subject is included as a fallback when description
+      // is empty (the user often runs /tasks create "<subject>" without
+      // --description; the subject alone is enough hint for Planner to
+      // either produce specs or BLOCK).
+      // Format:
+      //   Subject: <subject>
+      //   Description: <description>   (may be empty)
       //   Task ID: <id>
-      //   Call decompose_task(user_task_id="<id>", specs=[...]) to materialize the chain.
+      //   Call `decompose_task(user_task_id="<id>", specs=[...])` to materialize the chain.
       let prompt = task.description;
       if (type === "Planner") {
         prompt =
-          `${task.description}\n\n` +
-          `Task ID: ${task.id}\n` +
+          `Subject: ${task.subject}\n` +
+          `Description: ${task.description}\n` +
+          `Task ID: ${task.id}\n\n` +
           `Call \`decompose_task(user_task_id="${task.id}", specs=[...])\` to materialize the chain.`;
       }
       return spawnSubagent(type, prompt, spawnOpts);
