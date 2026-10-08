@@ -734,7 +734,12 @@ All tasks are created with status \`pending\`.
       subject: Type.String({ description: "A brief title for the task" }),
       description: Type.String({ description: "A detailed description of what needs to be done" }),
       activeForm: Type.Optional(Type.String({ description: "Present continuous form shown in spinner when in_progress (e.g., 'Running tests')" })),
-      agentType: Type.Optional(Type.String({ description: "Agent type for subagent execution (e.g., 'general-purpose', 'Explore'). Tasks with agentType can be started via TaskExecute." })),
+      agentType: Type.Optional(Type.String({
+        description: "Agent type for subagent execution (e.g., 'Developer', 'Explore'). With agentType set, the task is kind=actionable and the unified task-feeder auto-spawns a subagent. Without agentType, the task is kind=intent (planning data) — the assistant must decompose it via decompose_task or claim it via TaskUpdate when starting work.",
+      })),
+      kind: Type.Optional(Type.Unsafe<"intent" | "actionable">({
+        description: "GC-2026-120 AC1/AC2. Optional override for the inferred kind. Defaults to actionable if agentType is set, otherwise intent. step is reserved for orchestrator-internal tasks (workflow / decompose chain) — pass it only via createOrchestratorTask, not here.",
+      })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
       created_by: Type.Optional(
         Type.Unsafe<"orchestrator" | "user">({
@@ -751,6 +756,9 @@ All tasks are created with status \`pending\`.
       autoClear.startNewBatch();
       const meta = params.metadata ?? {};
       if (params.agentType) meta.agentType = params.agentType;
+      // GC-2026-120 AC1/AC2: optional explicit kind override. The store
+      // infers kind from created_by + agentType when this is omitted.
+      if (params.kind) meta.kind = params.kind;
       const task = store.create(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined);
       widget.update();
       // GC-2026-113 FU0 Phase 2b: unified feeder auto-spawns feedable
@@ -759,8 +767,15 @@ All tasks are created with status \`pending\`.
       // Without this, downstream tools like TaskOutput that look up
       // `task.owner` immediately after TaskCreate race the spawn.
       await feeder.maybeAutoSpawn(task);
+      // GC-2026-120 AC1: surface a hint when the assistant created a
+      // kind=intent task without an explicit decomposition route. The
+      // assistant is expected to follow up with decompose_task.
+      const hint =
+        task.metadata.kind === "intent"
+          ? " — intent task; decompose via decompose_task or claim via TaskUpdate."
+          : "";
       return textResult(
-        `Task #${task.id} created successfully: ${task.subject}`,
+        `Task #${task.id} created successfully: ${task.subject}${hint}`,
         { id: task.id, task },
       );
     },
@@ -1497,12 +1512,16 @@ Set up task dependencies:
     subject?: string;
     description?: string;
     agentType?: string;
+    kind?: "intent" | "actionable" | "step";
+    decomposeSpec?: string;
     flags: Set<string>;
   } {
     const out: {
       subject?: string;
       description?: string;
       agentType?: string;
+      kind?: "intent" | "actionable" | "step";
+      decomposeSpec?: string;
       flags: Set<string>;
     } = { flags: new Set() };
     let rest = raw.trim();
@@ -1531,7 +1550,55 @@ Set up task dependencies:
       out.flags.add(flag);
       if (flag === "description" && value !== undefined) out.description = value;
       if (flag === "agent-type" && value !== undefined) out.agentType = value;
+      // GC-2026-120: --kind is the user-facing knob (AC1/AC2). `step`
+      // is orchestrator-internal — accept the literal for forward
+      // compatibility but do not propagate (orchestrators always stamp
+      // via createOrchestratorTask).
+      if (
+        flag === "kind" &&
+        (value === "intent" || value === "actionable" || value === "step")
+      ) {
+        if (value !== "step") out.kind = value;
+      }
+      // GC-2026-120 AC4: --decompose-spec triggers inline materialization.
+      if (flag === "decompose-spec" && value !== undefined) out.decomposeSpec = value;
       rest = rest.slice(flagMatch[0].length).trim();
+    }
+    return out;
+  }
+
+  /**
+   * Parse a `--decompose-spec` value into chain specs.
+   *
+   * Format: `"T1:subject|T1 description;T2:subject|T2 description;..."`.
+   * The pipe separates subject from description; semicolons separate entries.
+   * Whitespace is trimmed. Trailing/empty entries are ignored.
+   *
+   * Throws on entries missing the pipe, subject, or description.
+   *
+   * GC-2026-120 AC4: this is the inline-spec parser that lets the user
+   * decompose without a chat round-trip.
+   */
+  function parseDecomposeSpec(
+    raw: string,
+  ): Array<{ subject: string; description: string }> {
+    const out: Array<{ subject: string; description: string }> = [];
+    for (const entry of raw.split(";")) {
+      const trimmed = entry.trim();
+      if (trimmed.length === 0) continue;
+      const pipeAt = trimmed.indexOf("|");
+      if (pipeAt < 0) {
+        throw new Error(`decompose-spec entry missing '|': "${trimmed}"`);
+      }
+      const subject = trimmed.slice(0, pipeAt).trim();
+      const description = trimmed.slice(pipeAt + 1).trim();
+      if (subject.length === 0) {
+        throw new Error(`decompose-spec entry missing subject: "${trimmed}"`);
+      }
+      if (description.length === 0) {
+        throw new Error(`decompose-spec entry missing description: "${trimmed}"`);
+      }
+      out.push({ subject, description });
     }
     return out;
   }
@@ -1541,15 +1608,19 @@ Set up task dependencies:
     ui: { notify: (msg: string, kind?: "info" | "warning" | "error") => void },
   ): Promise<void> {
     if (rawArgs.length === 0) {
-      ui.notify('Usage: /tasks create "<subject>" [--description "..."] [--agent-type T]', "warning");
+      ui.notify(
+        'Usage: /tasks create "<subject>" [--description "..."] [--agent-type T] [--kind intent|actionable] [--decompose-spec "T1:s|T1 d;T2:s|T2 d"]',
+        "warning",
+      );
       return;
     }
     const parsed = parseCreateArgs(rawArgs);
-    // Reject --decompose explicitly (AC6). The flag is parsed as a known
-    // unknown; we surface a clear warning rather than silently ignore.
+    // Reject --decompose explicitly (AC6 / historical). The flag is parsed
+    // as a known unknown; we surface a clear warning rather than silently
+    // ignore. (--decompose-spec is the new GC-2026-120 inline path.)
     if (parsed.flags.has("decompose")) {
       ui.notify(
-        "--decompose is not exposed. Decomposition is chat-driven (LLM calls the decompose_task tool).",
+        "--decompose is not exposed. Decomposition is chat-driven (LLM calls the decompose_task tool) — or use --decompose-spec for inline decomposition.",
         "warning",
       );
       return;
@@ -1558,12 +1629,52 @@ Set up task dependencies:
       ui.notify("Task subject is required.", "warning");
       return;
     }
+
+    // GC-2026-120 AC4: --decompose-spec triggers immediate inline
+    // decomposition. The user task becomes the user_task_ref root of the
+    // chain. materializeDecomposeChain auto-completes the user task on
+    // success — see AC3.
+    if (parsed.decomposeSpec) {
+      let specs: Array<{ subject: string; description: string }>;
+      try {
+        specs = parseDecomposeSpec(parsed.decomposeSpec);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        ui.notify(`decompose-spec parse error: ${msg}`, "error");
+        return;
+      }
+      if (specs.length < 1) {
+        ui.notify("decompose-spec must contain at least one entry.", "error");
+        return;
+      }
+      // Create the user task first so we have a user_task_id to attach.
+      const userTask = store.create(parsed.subject, parsed.description ?? "", undefined, {
+        created_by: "user",
+      });
+      widget.update();
+      try {
+        const result = await materializeDecomposeChain({
+          user_task_id: userTask.id,
+          specs,
+        });
+        ui.notify(
+          `Task #${userTask.id} decomposed into ${result.tasks.length} subtask(s); chain is executing.`,
+          "info",
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        ui.notify(`decomposition failed: ${msg}`, "error");
+      }
+      return;
+    }
+
     const task = store.create(
       parsed.subject,
       parsed.description ?? "",
       undefined,
       {
         created_by: "user",
+        ...(parsed.kind ? { kind: parsed.kind } : {}),
         ...(parsed.agentType ? { agentType: parsed.agentType } : {}),
       },
     );
