@@ -2231,7 +2231,11 @@ install() {
   # the install verifies what the loader will see at next session start.
   if command -v bun &>/dev/null; then
     echo "==> Verifying extension load via jiti (catches silent fail-soft)..."
-    if ! bun run scripts/verify-extension-load.ts; then
+    # Use $SCRIPT_DIR absolute path so the call works regardless of cwd
+    # (the script is sometimes invoked as `bash pi-orchestrator/scripts/install.sh`
+    # from the repo root, where `bun run scripts/...` would fail with
+    # "Module not found").
+    if ! bun run "$SCRIPT_DIR/verify-extension-load.ts"; then
       echo ""
       echo "Extension load verification failed (see errors above)."
       echo "Re-run with --force to repair: bash $0 --force"
