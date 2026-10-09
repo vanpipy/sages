@@ -927,6 +927,71 @@ verify_critical_tasks_deps() {
 #   - post-install race conditions (something wiped a peer/node_modules
 #     between install_pi_*_files and the next session start)
 #
+# GC-2026-stale-package-entries: auto-prune stale (non-existent,
+# non-managed) entries from settings.json#packages before the gates run.
+# Symptom guarded: a path that points to a directory that no longer exists
+# (e.g. a leftover from an older install attempt with a renamed package
+# dir, or a manual edit that was never cleaned up) fails gate 2
+# (verify_package_existence) AND gate 3 (verify:extension-load) with no
+# obvious recovery — the user sees "1 issue(s); packages already in
+# settings.json" and has to manually edit JSON. Auto-pruning keeps the
+# install self-healing.
+#
+# Scope: only entries that are (a) local-path (not npm:), (b) missing on
+# disk, and (c) NOT one of the sage packages this installer manages.
+# Managed packages that go missing on disk are reinstalled by install()
+# before this gate runs; if a managed package is still missing here, gate
+# 2's loud failure is the correct signal — this function does NOT prune
+# managed packages.
+prune_stale_package_entries() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 0
+  command -v python3 &>/dev/null || return 0
+
+  # Build the managed-paths list as a colon-separated string for python.
+  # `|` is safe because none of the sage dest paths contain it.
+  local managed_paths=""
+  for p in \
+      "$PI_ORCHESTRATOR_DEST_DIR" \
+      "$PI_SUBAGENTS_DEST_DIR" \
+      "$PI_EVALUATOR_DEST_DIR" \
+      "$PI_CODEBASE_MEMORY_DEST_DIR" \
+      "$PI_TASKS_DEST_DIR"; do
+    managed_paths+="|${p}"
+  done
+
+  python3 - "$settings" "$managed_paths" <<'PYEOF'
+import json, os, sys
+settings_path, managed_raw = sys.argv[1], sys.argv[2]
+managed = set(managed_raw.split("|")[1:])  # drop leading empty before first `|`
+try:
+    d = json.load(open(settings_path))
+except Exception:
+    sys.exit(0)  # malformed settings.json — let downstream gates flag it
+pkgs = d.get("packages", [])
+kept, pruned = [], []
+for p in pkgs:
+    if not isinstance(p, str):
+        kept.append(p)  # unexpected type — don't touch
+        continue
+    if p.startswith("npm:"):
+        kept.append(p)  # npm owns lifecycle
+        continue
+    if os.path.isdir(p):
+        kept.append(p)  # existing local-path entry — keep
+        continue
+    if p in managed:
+        kept.append(p)  # managed but missing — let gate 2 flag loud
+        continue
+    pruned.append(p)  # stale: missing AND non-managed AND non-npm
+if pruned:
+    d["packages"] = kept
+    json.dump(d, open(settings_path, "w"), indent=2)
+    for p in pruned:
+        print(f"    pruned stale settings.json entry: {p} (directory does not exist)")
+PYEOF
+}
+
 # The function prints a clear recovery command per missing peer and
 # returns non-zero so the caller exits non-zero.
 # Returns non-zero so the caller exits non-zero.
@@ -1013,6 +1078,12 @@ verify_all_critical_install_deps() {
 # always run because they're cheap and catch real partial-failure bugs.
 run_post_install_gates() {
   local failed=0
+
+  # GC-2026-stale-package-entries: prune stale local-path entries before
+  # the gates so a leftover from a previous install attempt doesn't fail
+  # gate 2 (verify_package_existence) or gate 3 (verify:extension-load).
+  # See prune_stale_package_entries for the full policy.
+  prune_stale_package_entries || true
 
   # Gate 1: critical deps
   if ! verify_all_critical_install_deps; then
