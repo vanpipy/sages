@@ -95,22 +95,34 @@ function normalizeTask(t: Task): Task {
 }
 
 /**
- * GC-2026-120 AC1 + GC-2026-121 AC1: stamp `kind` based on `created_by` + `agentType`:
+ * GC-2026-120 AC1 + GC-2026-122: stamp `kind` based on `created_by` + `agentType`:
  *   - created_by === "user"   && agentType set  → "actionable"
- *   - created_by === "user"   && !agentType     → "intent" + agentType="Planner" + requires_decomposition=true
+ *   - created_by === "user"   && !agentType     → "intent" + requires_decomposition=true
  *   - created_by === "orchestrator"            → "step"
  *
- * GC-2026-121: an intent task now also carries `agentType: "Planner"` so the
- * unified feeder auto-spawns a Planner subagent that handles decomposition
- * autonomously (agent self-consumption). The Planner's system prompt tells
- * it to call `decompose_task(user_task_id, specs=[...])` exactly once, then
- * exit. If the Planner fails to spawn (subagents extension unavailable, RPC
- * timeout, etc.), the task stays in pending state and the existing
- * before_agent_start reminder fires for the LLM as the fallback.
+ * GC-2026-122 reverses GC-2026-121: the Planner auto-spawn (which stamped
+ * `agentType: "Planner"` on every intent task) is removed. Empirically
+ * the Planner conservatively BLOCKed on informational intents (e.g.
+ * "了解一下当前仓库") because its prompt forbids any repo exploration or
+ * context-aware reasoning — it can only pattern-match against a small
+ * allowlist of behaviors, with no access to the project context the main
+ * LLM has.
  *
- * An explicit `kind` from the caller wins (orchestrator-task helpers always
- * stamp "step"). If `kind` resolves to "intent" and the caller did NOT pass
- * `requires_decomposition`, default it to `true`.
+ * The intent task now stays in the store as data:
+ *   - kind: "intent" (semantic: "this intent wants a chain")
+ *   - requires_decomposition: true (hint to the reminder)
+ *   - NO auto-stamped agentType (so the unified feeder does NOT auto-spawn)
+ *
+ * The main LLM is the sole consumer. The `before_agent_start` reminder
+ * (see `pi-tasks/src/intent-reminder.ts`) surfaces pending intent tasks
+ * to the LLM via system-prompt injection; the LLM then either calls
+ * `decompose_task(user_task_id, specs=[...])` directly or chat-answers
+ * the user if the intent is trivial.
+ *
+ * If a caller explicitly passes `agentType` on an intent task, that
+ * wins (the caller may want Explore, general-purpose, or even explicit
+ * Planner dispatch). Same call wins for `kind` — orchestrator helpers
+ * stamp "step" explicitly.
  */
 function inferKind(metadata?: Record<string, any>): Record<string, any> {
   const base = metadata ? { ...metadata } : {};
@@ -124,12 +136,7 @@ function inferKind(metadata?: Record<string, any>): Record<string, any> {
       if (base.requires_decomposition === undefined) {
         base.requires_decomposition = true;
       }
-      // GC-2026-121 AC1: even when the caller explicitly stamps kind=intent,
-      // also stamp the Planner agentType UNLESS the caller already supplied
-      // one (caller wins — they may want Explore, general-purpose, etc.).
-      if (typeof base.agentType !== "string" || base.agentType.length === 0) {
-        base.agentType = "Planner";
-      }
+      // GC-2026-122: caller wins on agentType. No auto-stamp.
     }
     return base;
   }
@@ -146,8 +153,8 @@ function inferKind(metadata?: Record<string, any>): Record<string, any> {
       if (base.requires_decomposition === undefined) {
         base.requires_decomposition = true;
       }
-      // GC-2026-121 AC1: intent tasks auto-default to Planner for self-consumption.
-      base.agentType = "Planner";
+      // GC-2026-122: do NOT auto-stamp agentType. Main LLM consumes via
+      // the before_agent_start reminder (intent-reminder.ts).
     }
   } else {
     base.kind = "step";

@@ -1,39 +1,59 @@
 /**
- * planner-auto-spawn.test.ts — Tests for the Planner self-consumption path
- * (GC-2026-121 AC1/AC5).
+ * planner-auto-spawn.test.ts — INVERTED tests asserting that
+ * `TaskStore.create` does NOT auto-stamp `agentType: "Planner"` on
+ * intent tasks (GC-2026-122).
  *
- * After this GC, every user task with `kind=intent` carries
- * `agentType: "Planner"` so the unified feeder auto-spawns a Planner
- * subagent that handles decomposition autonomously. The Planner's
- * system prompt tells it to call `decompose_task(user_task_id, specs=[])`
- * exactly once, then exit.
+ * GC-2026-121 originally added the Planner auto-spawn so the unified
+ * feeder would dispatch a Planner subagent that calls `decompose_task`
+ * autonomously. This file used to assert the auto-spawn behavior.
+ *
+ * GC-2026-122 reverses that design. The Planner auto-spawn was
+ * empirically too conservative for informational intents (e.g.
+ * "了解一下当前仓库") because the Planner's prompt forbids any repo
+ * exploration or context-aware reasoning — so it BLOCKed on every
+ * intent that wasn't a narrow, mechanically-decomposable ask, leaving
+ * the user task pending forever.
+ *
+ * The fix: intent tasks keep `kind: "intent"` + `requires_decomposition:
+ * true` (semantic markers) but lose the auto-stamped `agentType`. The
+ * main LLM is the sole consumer; the `before_agent_start` reminder in
+ * `pi-tasks/src/intent-reminder.ts` surfaces pending intents to the LLM
+ * via system-prompt injection.
+ *
+ * The Planner subagent itself is still defined in
+ * `pi-subagents/src/default-agents.ts` — the main LLM can dispatch it
+ * explicitly via the `Agent` tool when it wants a mechanical spec
+ * compiler.
  */
 
 import { describe, expect, it, beforeEach } from "bun:test";
 import { TaskStore } from "../src/task-store.js";
 import { isFeedableTask } from "../src/task-feeder.js";
 
-describe("Planner auto-spawn — kind=intent defaults to agentType=Planner (GC-2026-121 AC1)", () => {
+describe("TaskStore.create does NOT auto-stamp agentType=Planner (GC-2026-122 — inverted from GC-2026-121)", () => {
   let store: TaskStore;
 
   beforeEach(() => {
     store = new TaskStore();
   });
 
-  it("infers agentType=Planner when kind=intent (no explicit agentType)", () => {
+  it("infers kind=intent but does NOT auto-stamp agentType=Planner (no agentType default for user tasks)", () => {
     const task = store.create("research X", "Investigate topic X.");
     expect(task.metadata.kind).toBe("intent");
-    expect(task.metadata.agentType).toBe("Planner");
+    expect(task.metadata.agentType).toBeUndefined();
   });
 
-  it("isFeedableTask returns true for the Planner task (so feeder auto-spawns)", () => {
+  it("isFeedableTask returns false for the default intent task (no dispatcher)", () => {
     const task = store.create("research X", "Investigate topic X.");
-    expect(isFeedableTask(task)).toBe(true);
+    // No auto-stamp → isFeedableTask sees no agentType → returns false.
+    // The intent sits in the store until the main LLM handles it via
+    // the before_agent_start reminder.
+    expect(isFeedableTask(task)).toBe(false);
   });
 
   it("does NOT override an explicit user-supplied agentType on intent tasks", () => {
-    // If the caller explicitly sets agentType=Explore, the Planner default
-    // must not clobber it. (Caller is asserting a specific dispatcher.)
+    // If the caller explicitly sets agentType=Explore, the store must
+    // not clobber it. (Caller is asserting a specific dispatcher.)
     const task = store.create("investigate X", "Investigate X deeply.", undefined, {
       created_by: "user",
       kind: "intent",
@@ -60,34 +80,17 @@ describe("Planner auto-spawn — kind=intent defaults to agentType=Planner (GC-2
     expect(task.metadata.agentType).toBe("Developer");
   });
 
-  it("still sets requires_decomposition=true on intent tasks (Planner will consume)", () => {
+  it("still sets requires_decomposition=true on intent tasks (semantic intent marker)", () => {
+    // The semantic intent marker stays even though the auto-stamp is gone —
+    // the before_agent_start reminder reads requires_decomposition to know
+    // this task is an intent (vs an actionable that the LLM just hasn't gotten to).
     const task = store.create("research X", "Investigate X.");
     expect(task.metadata.requires_decomposition).toBe(true);
   });
 
-  it("default-created user task (no metadata, no agentType) is Planner", () => {
+  it("default-created user task (no metadata) is kind=intent with no agentType", () => {
     const task = store.create("do something", "details");
     expect(task.metadata.kind).toBe("intent");
-    expect(task.metadata.agentType).toBe("Planner");
-  });
-});
-
-describe("Planner auto-spawn — feeder integration (GC-2026-121 AC5)", () => {
-  it("feeder.maybeAutoSpawn would invoke spawn with type='Planner'", async () => {
-    const store = new TaskStore();
-    const spawnCalls: Array<{ type: string; prompt: string }> = [];
-    const fakeSpawn = async (task: { metadata: Record<string, any>; description: string; subject: string }) => {
-      spawnCalls.push({
-        type: String(task.metadata.agentType),
-        prompt: task.description,
-      });
-      return "fake-agent-id";
-    };
-    // Mocked feeder: only the parts we care about.
-    const task = store.create("research X", "Investigate X.");
-    // The inferred agentType is "Planner" so any spawn call gets type="Planner".
-    await fakeSpawn(task);
-    expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0].type).toBe("Planner");
+    expect(task.metadata.agentType).toBeUndefined();
   });
 });

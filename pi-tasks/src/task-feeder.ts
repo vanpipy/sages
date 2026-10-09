@@ -49,17 +49,27 @@ function debugLog(...args: unknown[]): void {
  * The predicate deliberately ignores `phase` and `created_by`. With
  * unification, those become pure metadata (routing keys used by the
  * previous split architecture are no longer needed).
+ *
+ * GC-2026-122: the GC-2026-121 follow-up that treated `kind: "intent"`
+ * as feedable (defaulting to Planner spawn) is removed. The Planner
+ * auto-spawn was empirically too conservative for informational
+ * intents (see `intent-no-planner-stamp.test.ts` for the failure mode);
+ * intent tasks now have NO auto-spawn. They are surfaced to the main
+ * LLM via the `before_agent_start` reminder in
+ * `pi-tasks/src/intent-reminder.ts`, which is the only consumer.
+ *
+ * Note: tasks persisted to disk BEFORE this GC landed may still carry
+ * `agentType: "Planner"` (or any other agentType) from the old auto-
+ * stamp — those remain feedable because the explicit agentType wins.
+ * This is the correct behavior: a pre-existing task with an explicit
+ * dispatcher should still run. Only NEW intent tasks (with no caller-
+ * supplied agentType) sit un-feedable.
  */
 export function isFeedableTask(t: Task): boolean {
-  // Explicit agentType wins (actionable + step + orchestrator tasks).
+  // Explicit agentType wins (actionable + step + orchestrator tasks +
+  // pre-GC-2026-122 intent tasks that still carry the Planner stamp).
   const at = t.metadata?.agentType;
   if (typeof at === "string" && at.length > 0) return true;
-  // GC-2026-121 follow-up: kind=intent is feedable even without an
-  // explicit agentType stamp. Handles tasks persisted to disk BEFORE
-  // inferKind started stamping agentType=Planner (the Planner path is
-  // the default consumer for intent tasks). The spawn callback
-  // defaults the spawn type to "Planner" when no agentType is set.
-  if (t.metadata?.kind === "intent") return true;
   return false;
 }
 
