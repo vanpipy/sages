@@ -32,7 +32,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
-import { createJiti } from "jiti/static";
 
 const PI_DIR = process.env.PI_DIR ?? join(process.env.HOME ?? "", ".pi");
 const SETTINGS_PATH = join(PI_DIR, "agent", "settings.json");
@@ -43,6 +42,64 @@ const HOST_PEERS = [
   "pi-tasks",
   "pi-orchestrator",
 ];
+
+// GC-2026-extension-load-verify-fix (follow-up): defer the jiti import so
+// the smoke test can find jiti from the installed package's node_modules
+// when standard resolution from this script's directory fails. Symptom of
+// the regression: `Cannot find module 'jiti/static' from
+// .../pi-orchestrator/scripts/verify-extension-load.ts` after install.sh,
+// because install.sh only runs `bun install` in $PKG_DIR (the installed
+// copy), not in $LOCAL_REPO_ROOT/pi-orchestrator (the source repo this
+// script lives in). jiti is a devDependency, so the source repo's
+// node_modules may never have it populated for end users who never ran
+// `bun install` in pi-orchestrator/.
+//
+// Resolution order:
+//   1. Standard resolution — works for developers who ran `bun install` in
+//      pi-orchestrator/ (jiti lands in devDependencies).
+//   2. Installed copy at $PI_DIR/packages/pi-orchestrator/node_modules/jiti
+//      — populated by install_orchestrator_files's `bun install` step.
+//      install.sh is the canonical entry point for this verifier, so this
+//      path is always available in the install flow.
+//   3. Lazy require via createRequire so the module is loaded on first
+//      use (avoids crashing at script load when both resolution paths
+//      above would miss).
+type JitiFactory = (id: string, opts?: Record<string, unknown>) => {
+  import: (path: string, opts?: Record<string, unknown>) => Promise<unknown>;
+};
+
+function loadCreateJiti(): JitiFactory {
+  const require = createRequire(import.meta.url);
+  // (1) standard resolution — script-local node_modules walk-up.
+  try {
+    return require("jiti/static") as { createJiti: JitiFactory };
+  } catch {
+    // (2) installed copy — $PKG_DIR is guaranteed to have run `bun install`
+    // because install.sh invokes install_orchestrator_files → bun install
+    // before run_post_install_gates → this script.
+    const installed = join(
+      PI_DIR,
+      "packages",
+      "pi-orchestrator",
+      "node_modules",
+      "jiti",
+      "lib",
+      "jiti-static.mjs",
+    );
+    if (existsSync(installed)) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require(installed) as { createJiti: JitiFactory };
+    }
+    throw new Error(
+      `Cannot resolve jiti: tried (1) standard resolution from ${import.meta.url} ` +
+        `and (2) installed copy at ${installed}. Run \`bun install\` in the ` +
+        `pi-orchestrator source repo (or \`bash pi-orchestrator/scripts/install.sh --force\` ` +
+        `to populate the installed copy), then re-run this verifier.`,
+    );
+  }
+}
+
+const { createJiti } = loadCreateJiti();
 
 interface Finding {
   pkg: string;
@@ -169,8 +226,5 @@ async function main(): Promise<void> {
   console.error("  3. Restart the pi session so the loader re-runs with fresh caches");
   process.exit(1);
 }
-
-// re-export createRequire to keep linter happy about unused import
-void createRequire;
 
 main();
