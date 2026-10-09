@@ -25,6 +25,11 @@ import { reclaimGlobalSessionTasksDir, sessionTaskFile } from "./task-paths.js";
 import { TaskStore } from "./task-store.js";
 import { loadGlobalTasksConfig, loadTasksConfig } from "./tasks-config.js";
 import type { Task } from "./types.js";
+import {
+  applyIntentReminderToSystemPrompt,
+  makeIntentReminderState,
+  type IntentReminderState,
+} from "./intent-reminder.js";
 import { subscribeWorkflow } from "./workflow-handler.js";
 import { openSettingsMenu } from "./ui/settings-menu.js";
 import { TaskWidget, type UICtx } from "./ui/task-widget.js";
@@ -755,37 +760,17 @@ export default function (pi: ExtensionAPI) {
   // so autoClear doesn't have to import reminder-cadence.
   let currentTurn = 0;
 
-  // GC-2026-120 AC5 + follow-up: per-intent decomposition reminder.
-// Fires for every NEW intent task (id not in remindedIntentIds),
-// not just the first batch in a session. Reset on session_start
-// below; fired from before_agent_start.
-let remindedIntentIds = new Set<string>();
-
-  function maybeFireDecompositionReminder(ctx: ExtensionContext): void {
-    const intents = store.list().filter(
-      (t) =>
-        t.status === "pending" &&
-        t.metadata?.kind === "intent",
-    );
-    const newIntents = intents.filter((t) => !remindedIntentIds.has(t.id));
-    if (newIntents.length === 0) return;
-    // Update the snapshot to include every current intent (so a later
-    // arrival only fires for the genuinely-new ones).
-    remindedIntentIds = new Set(intents.map((t) => t.id));
-    const lines: string[] = [
-      `[GC-2026-120] ${newIntents.length} new intent task(s) awaiting decomposition:`,
-    ];
-    for (const t of newIntents) {
-      const descPreview = t.description.length > 80
-        ? `${t.description.slice(0, 77)}...`
-        : t.description;
-      lines.push(`- #${t.id}: ${t.subject} — ${descPreview}`);
-    }
-    lines.push(
-      `Call \`decompose_task(user_task_id="<id>", specs=[...])\` for each, or use \`/tasks create --decompose-spec "T1:s|T1 d;..." --user-task-id <id>\` for inline decomposition.`,
-    );
-    ctx.ui.notify(lines.join("\n"), "info");
-  }
+  // GC-2026-120 AC5 + follow-up + GC-2026-122: per-intent decomposition
+  // reminder. State is reset on session_start below; the reminder is
+  // composed by `pi-tasks/src/intent-reminder.ts` and injected into the
+  // LLM's system prompt via the `before_agent_start` handler's return
+  // value (see the `pi.on("before_agent_start", ...)` block further down).
+  //
+  // GC-2026-122 transport change: the previous implementation called
+  // `ctx.ui.notify(...)`, a UI-level toast that the LLM does not see.
+  // The LLM is now reached via a `{ systemPrompt: ... }` return value
+  // (same pattern as `pi-orchestrator/src/extension.ts:215-226`).
+  let intentReminderState: IntentReminderState = makeIntentReminderState();
 
   pi.on("turn_start", async (_event, ctx) => {
     currentTurn += 1;
@@ -831,9 +816,10 @@ let remindedIntentIds = new Set<string>();
     if (isSwitch) {
       persistedTasksShown = false;
       agentsReattached = false;
-      // GC-2026-120 AC5 + follow-up: reset the per-intent reminder
-      // snapshot so the new session sees every pending intent as new.
-      remindedIntentIds.clear();
+      // GC-2026-120 AC5 + follow-up + GC-2026-122: reset the per-intent
+      // reminder snapshot so the new session sees every pending intent
+      // as new.
+      intentReminderState = makeIntentReminderState();
       // Task IDs restart at 1 in every session, so a mapping held over from the
       // previous one points at an unrelated task here — the agent's completion would
       // close a task it never ran. reattachAgents() rebuilds what this session owns.
@@ -863,19 +849,32 @@ let remindedIntentIds = new Set<string>();
 
   // Fallback for hosts that init UI lazily. Guarded by persistedTasksShown, so
   // it never double-renders after session_start.
-  pi.on("before_agent_start", async (_event, ctx) => {
+  //
+  // GC-2026-122: the reminder now reaches the LLM via the handler's
+  // return value (`{ systemPrompt: ... }`), not `ctx.ui.notify` (which
+  // is UI-level and invisible to the LLM). The pattern mirrors
+  // `pi-orchestrator/src/extension.ts:215-226`. If no new intent tasks
+  // are pending, the handler returns undefined (no system-prompt change).
+  pi.on("before_agent_start", async (event, ctx) => {
     latestCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
     initializeStoreForContext(ctx);
     reattachAgents();
     showPersistedTasks();
-    // GC-2026-120 AC5: nudge the LLM about pending intent tasks so it
-    // knows to follow up with decompose_task. Once-per-session.
-    maybeFireDecompositionReminder(ctx);
+    const existingSystemPrompt =
+      typeof event === "object" && event !== null && "systemPrompt" in event
+        ? (event as { systemPrompt?: string }).systemPrompt
+        : undefined;
+    const reminderResult = applyIntentReminderToSystemPrompt(
+      store,
+      intentReminderState,
+      existingSystemPrompt,
+    );
     if (pendingWarning) {
       ctx.ui.notify(pendingWarning, "warning");
       pendingWarning = undefined;
     }
+    return reminderResult;
   });
 
   // Keep latestCtx fresh on every tool execution as well.

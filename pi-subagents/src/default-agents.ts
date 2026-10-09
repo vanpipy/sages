@@ -340,7 +340,7 @@ const PLANNER_AGENT: AgentConfig = {
 	name: "Planner",
 	displayName: "Planner",
 	description:
-		"Chain compiler for user intent tasks (GC-2026-121). Auto-spawned when a user task with kind=intent is created. Reads the intent from the spawn prompt and calls decompose_task(user_task_id, specs=[...]) exactly once to materialize the chain. Returns PLANNER_STATUS: BLOCKED when the intent is too vague.",
+		"Chain compiler for user intent tasks. NOT auto-spawned after GC-2026-122 — the main LLM dispatches it explicitly via the `Agent` tool when it wants a mechanical spec compiler (e.g. after gathering context itself). When dispatched, reads the intent from the spawn prompt and calls `decompose_task(user_task_id, specs=[...])` exactly once to materialize the chain. Returns `PLANNER_STATUS: BLOCKED` when the intent is too vague. For the auto path, see `pi-tasks/src/intent-reminder.ts` (system-prompt reminder that nudges the main LLM to call `decompose_task` directly).",
 	builtinToolNames: ["read"],
 	// Only pi-orchestrator (for decompose_task). No AFT / ctx-search / codebase-memory
 	// — Planner must read intent from the spawn prompt, not explore the repo.

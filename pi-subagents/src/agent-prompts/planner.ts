@@ -1,24 +1,35 @@
 /**
  * planner-prompt.ts — Canonical system prompt for the built-in `Planner` agent.
  *
- * GC-2026-121: when a user task is created via TaskCreate /tasks create without
- * an explicit agentType, the store infers `kind: "intent"` and stamps
- * `agentType: "Planner"` (see `pi-tasks/src/task-store.ts:inferKind`). The unified
- * feeder then auto-spawns this Planner subagent so the user task begins consumption
- * immediately — no chat round-trip required.
+ * GC-2026-121 introduced the Planner with an auto-spawn path: any user task
+ * stamped `kind: "intent"` would automatically receive `agentType: "Planner"`
+ * and the unified feeder would dispatch this agent. Empirically, the Planner
+ * conservatively BLOCKed on informational intents (e.g. "了解一下当前仓库")
+ * because its prompt forbids any repo exploration or context-aware reasoning.
+ * The user task was left `pending` indefinitely — no consumer.
  *
- * Planner's job: read the user task's intent (already supplied as the spawn
- * prompt), break it into a linear chain of orchestrator-tracked sub-tasks, and
- * call `decompose_task(user_task_id, specs=[...])` exactly once. The orchestrator
+ * GC-2026-122 reverses the auto-spawn. The intent task now stays in the store
+ * as data (no `agentType`), and the main LLM is the sole consumer. The main
+ * LLM either:
+ *   (a) calls `decompose_task(user_task_id, specs=[...])` directly, OR
+ *   (b) dispatches this Planner agent explicitly via the `Agent` tool when
+ *       it wants a mechanical spec compiler (e.g. after gathering context
+ *       itself).
+ *
+ * The `before_agent_start` reminder in `pi-tasks/src/intent-reminder.ts`
+ * surfaces pending intent tasks to the main LLM via system-prompt injection
+ * (replacing the old `ctx.ui.notify` UI-toast path, which the LLM could not
+ * see). Without the auto-spawn, that reminder is now the primary signal.
+ *
+ * Planner's job (when explicitly dispatched): read the user task's intent
+ * (already supplied as the spawn prompt), break it into a linear chain of
+ * orchestrator-tracked sub-tasks, and call
+ * `decompose_task(user_task_id, specs=[...])` exactly once. The orchestrator
  * then materializes the chain and runs it serially via the unified feeder.
  *
  * Planner is intentionally narrow: read-only, no architectural decisions, no
  * recursive decomposition. If the source intent is ambiguous and Planner cannot
  * produce specs, it returns `PLANNER_STATUS: BLOCKED` listing what is missing.
- *
- * Fallback: if Planner fails to spawn (subagents extension unavailable, RPC
- * timeout, etc.), the task stays in pending state and the existing
- * `before_agent_start` reminder fires for the LLM in chat context.
  */
 
 export const PLANNER_PROMPT = [
