@@ -23,39 +23,34 @@
  *   }
  */
 
+import { canonicalize } from "./canonicalize.js";
+
 export interface ChainToolCall {
   toolName: string;
   input: Record<string, unknown>;
 }
 
 /**
- * Canonicalize a value so that property order doesn't affect equality.
- * Recursively sorts object keys and JSON-stringifies. Arrays preserve
- * order (positional semantics — [1,2] and [2,1] are different).
+ * Backward-compat alias for `canonicalize` (see `./canonicalize.ts`).
  *
- * Used to build chain-keys that are stable across YAML/JSON formatting
- * variations. Two args objects that are semantically equivalent
- * produce the same canonical string regardless of key order.
+ * Pre-refactor this module defined its own `canonicalJSON` function
+ * (without recursive undefined-skipping). Post-refactor the algorithm
+ * moved to `./canonicalize.ts` and gained the recursive
+ * undefined-skipping behavior mandated by GC-2026-091. This alias
+ * preserves the public export name for callers that import it
+ * directly (the package's `src/index.ts` re-exports the chain-key
+ * surface via `export * from "./chain-key.js"`, so this name is part
+ * of the public API).
  *
- * Mirrors the canonicalization in
- * `pi-orchestrator/src/goal-lock.ts:computeGoalHash` — same algorithm,
- * different scope.
+ * Behavior change vs. pre-refactor: `canonicalJSON(undefined)` now
+ * returns `""` (was `undefined` from `JSON.stringify(undefined)`),
+ * and object keys whose value is `undefined` are skipped (was:
+ * included with the literal value). In practice the chain-key is
+ * built from JSON-deserialized tool-call args which contain no
+ * `undefined` keys, so this is a no-op for the chain-key's primary
+ * use case (stuck-call detection).
  */
-export function canonicalJSON(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return "[" + value.map(canonicalJSON).join(",") + "]";
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  return (
-    "{" +
-    keys.map((k) => JSON.stringify(k) + ":" + canonicalJSON(obj[k])).join(",") +
-    "}"
-  );
-}
+export const canonicalJSON = canonicalize;
 
 /**
  * Build a stable chain-key for a tool call. Two calls produce the same
@@ -66,7 +61,7 @@ export function canonicalJSON(value: unknown): string {
  * collisions between toolName and the first JSON character.
  */
 export function chainKey(toolName: string, input: Record<string, unknown>): string {
-  return `${toolName}::${canonicalJSON(input)}`;
+  return `${toolName}::${canonicalize(input)}`;
 }
 
 /** Per-chain aggregate. */

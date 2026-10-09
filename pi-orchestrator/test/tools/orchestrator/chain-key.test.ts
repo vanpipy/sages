@@ -19,9 +19,15 @@ import {
 describe("chain-key: canonicalJSON (GC-2026-059)", () => {
   it("K-01: primitives serialize as their JSON representation", () => {
     expect(canonicalJSON(null)).toBe("null");
-    // Note: JSON.stringify(undefined) returns undefined (not a string). The
-    // function passes through, so the test asserts that passthrough.
-    expect(canonicalJSON(undefined as any)).toBe(undefined as any);
+    // GC-2026-091 (post-refactor): undefined is now skipped recursively,
+    // returning "" at the top level. Pre-refactor this was an
+    // `undefined` passthrough matching JSON.stringify(undefined) — that
+    // behavior was a latent bug: any tool call with `undefined` in args
+    // produced a non-string chain-key segment ("tool::undefined") with a
+    // collision risk. The unified canonicalize.ts (in ./canonicalize.ts)
+    // returns "" for top-level undefined, consistent with the goal-lock
+    // hashing substrate which has used this convention since GC-2026-091.
+    expect(canonicalJSON(undefined as any)).toBe("");
     expect(canonicalJSON(true)).toBe("true");
     expect(canonicalJSON(false)).toBe("false");
     expect(canonicalJSON(42)).toBe("42");
