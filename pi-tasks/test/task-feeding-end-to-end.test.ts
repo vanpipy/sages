@@ -17,7 +17,7 @@
  * leaves the task consumed (status=completed, owner=agent-N).
  */
 
-import { describe, expect, it, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import initExtension from "../src/index.js";
 import { flush, installSubagentsMock, mockCtx, mockPi } from "./helpers/mock-pi.js";
 import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
@@ -30,7 +30,13 @@ describe("TaskCreate → feeder → subagent consumption end-to-end", () => {
     installTasksConfig({});
   });
 
-  it("kind=intent (no agentType) auto-spawns a Planner and consumes it across N cycles", async () => {
+  it("kind=intent (no agentType) flows through IntentPump and consumes it across N cycles", async () => {
+    // GC-2026-main-agent-proactive-intent-pump: kind=intent no longer
+    // auto-spawns Planner (GC-2026-122 removed that). It now flows
+    // through the IntentPump: no subagent spawn, the pump takes the
+    // task to in_progress with synthetic owner intent-pump:N, and a
+    // simulated LLM TaskUpdate(completed) drives the task to
+    // completed.
     for (let cycle = 1; cycle <= N_CYCLES; cycle++) {
       // Fresh extension per cycle — simulates a clean session boot.
       const mock = mockPi();
@@ -38,8 +44,8 @@ describe("TaskCreate → feeder → subagent consumption end-to-end", () => {
       initExtension(mock.pi as any);
       await mock.fireLifecycle("session_start", { reason: "new" }, mockCtx());
 
-      // Create a user task WITHOUT agentType. GC-2026-121 AC1: this is a
-      // kind=intent task that the store auto-stamps with agentType=Planner.
+      // Create a user task WITHOUT agentType. The store infers
+      // kind=intent (no auto-stamp — that was reverted in GC-2026-122).
       const create = await mock.executeTool("TaskCreate", {
         subject: `cycle-${cycle} subject`,
         description: `Cycle ${cycle}: a high-level intent.`,
@@ -54,23 +60,19 @@ describe("TaskCreate → feeder → subagent consumption end-to-end", () => {
       // 2. The kind=intent hint is surfaced in the response (GC-2026-120 AC1)
       expect(text).toContain("intent task");
 
-      // 3. The feeder has already called subagents:rpc:spawn exactly once.
-      //    Allow a flush so any queued listener work completes.
+      // 3. NO subagent spawn — kind=intent goes to the pump
       await flush();
-      expect(rpc.spawned.length).toBe(1);
-      const spawn = rpc.spawned[0];
-      expect(spawn.type).toBe("Planner");
-      expect(spawn.prompt).toContain(`Task ID: ${taskId}`);
-      expect(spawn.prompt).toContain(`Subject: cycle-${cycle} subject`);
+      expect(rpc.spawned.length).toBe(0);
 
-      // 4. The task is in_progress with owner set to the spawned agent.
+      // 4. The task is in_progress with the pump's synthetic owner
       const afterSpawn = await mock.executeTool("TaskGet", { taskId });
       expect(afterSpawn.content[0].text).toMatch(/Status: in_progress/);
-      expect(afterSpawn.content[0].text).toMatch(/Owner: agent-/);
+      expect(afterSpawn.content[0].text).toMatch(/Owner: intent-pump:/);
 
-      // 5. Simulate the Planner subagent completing normally. The feeder's
-      //    subagents:completed listener should mark the task completed.
-      rpc.complete(spawn.id, "Planner decided specs=[…]");
+      // 5. Simulate the LLM's TaskUpdate(completed) — the consumption
+      //    turn ends with the LLM either calling decompose_task or
+      //    chat-answering + TaskUpdate(completed).
+      await mock.executeTool("TaskUpdate", { taskId, status: "completed" });
       await flush();
 
       const afterComplete = await mock.executeTool("TaskGet", { taskId });
@@ -117,6 +119,10 @@ describe("TaskCreate → feeder → subagent consumption end-to-end", () => {
   });
 
   it("subagent failure reverts task to pending with lastError (the safety net)", async () => {
+    // GC-2026-main-agent-proactive-intent-pump: pass agentType=Developer
+    // so the task takes the SUBAGENT path. The IntentPump doesn't have
+    // a "subagent fail" path (it consumes via the LLM's TaskUpdate);
+    // this safety net only applies to subagent-spawned tasks.
     const mock = mockPi();
     const rpc = installSubagentsMock(mock.pi);
     initExtension(mock.pi as any);
@@ -124,7 +130,8 @@ describe("TaskCreate → feeder → subagent consumption end-to-end", () => {
 
     const create = await mock.executeTool("TaskCreate", {
       subject: "Will fail",
-      description: "An intent that the Planner cannot handle.",
+      description: "An intent that the Developer cannot handle.",
+      agentType: "Developer",
     });
     const idMatch = create.content[0].text.match(/Task #(\d+) created successfully/);
     const taskId = idMatch![1];
@@ -133,7 +140,7 @@ describe("TaskCreate → feeder → subagent consumption end-to-end", () => {
     expect(rpc.spawned.length).toBe(1);
     const agentId = rpc.spawned[0].id;
 
-    // Planner fails
+    // Developer fails
     rpc.fail(agentId, "could not produce specs", "error");
     await flush();
 

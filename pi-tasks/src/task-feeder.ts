@@ -21,8 +21,8 @@
  *             (workflow_run removed; feeder is now the single dispatch path)
  */
 
-import type { Task } from "./types.js";
 import type { TaskStore } from "./task-store.js";
+import type { Task } from "./types.js";
 
 // Local debug logger. Kept minimal to avoid pulling in a separate
 // debug module — production wiring can hook into pi.events if needed.
@@ -41,33 +41,37 @@ function debugLog(...args: unknown[]): void {
 // ── Predicate ─────────────────────────────────────────────────────────
 
 /**
- * A task is "feedable" iff it has an `agentType` set. The feeder only
- * dispatches feedable tasks; everything else sits in the store as data.
+ * A task is "feedable" iff:
+ *   1. It has an explicit `agentType` (actionable / step / orchestrator
+ *      tasks, plus pre-GC intent tasks that still carry the Planner
+ *      stamp from disk), OR
+ *   2. Its `kind` is `"intent"` — the main-agent proactive intent pump
+ *      (GC-2026-main-agent-proactive-intent-pump) is the dispatcher.
  *
  * The predicate deliberately ignores `phase` and `created_by`. With
  * unification, those become pure metadata (routing keys used by the
  * previous split architecture are no longer needed).
  *
- * GC-2026-122: the GC-2026-121 follow-up that treated `kind: "intent"`
- * as feedable (defaulting to Planner spawn) is removed. The Planner
- * auto-spawn was empirically too conservative for informational
- * intents (see `intent-no-planner-stamp.test.ts` for the failure mode);
- * intent tasks now have NO auto-spawn. They are surfaced to the main
- * LLM via the `before_agent_start` reminder in
- * `pi-tasks/src/intent-reminder.ts`, which is the only consumer.
+ * GC-2026-main-agent-proactive-intent-pump: kind=intent is now feedable
+ * to the IntentPump (NOT to a subagent spawn). The `feeder.maybeAutoSpawn`
+ * router inspects `kind` and dispatches kind=intent to
+ * `IntentPump.enqueue(task)` while keeping the existing subagent spawn
+ * path for agentType-bearing tasks.
  *
- * Note: tasks persisted to disk BEFORE this GC landed may still carry
- * `agentType: "Planner"` (or any other agentType) from the old auto-
- * stamp — those remain feedable because the explicit agentType wins.
- * This is the correct behavior: a pre-existing task with an explicit
- * dispatcher should still run. Only NEW intent tasks (with no caller-
- * supplied agentType) sit un-feedable.
+ * Note: tasks persisted to disk before this GC landed may still carry
+ * `agentType: "Planner"` from the GC-2026-121 auto-stamp. Those remain
+ * feedable via the agentType branch — a pre-existing task with an
+ * explicit dispatcher should still run.
  */
 export function isFeedableTask(t: Task): boolean {
-  // Explicit agentType wins (actionable + step + orchestrator tasks +
-  // pre-GC-2026-122 intent tasks that still carry the Planner stamp).
-  const at = t.metadata?.agentType;
+  const meta = t.metadata ?? {};
+  // Branch 1: explicit agentType wins (actionable / step / orchestrator /
+  // pre-GC-122 intent tasks stamped "Planner" by the old auto-stamp).
+  const at = meta.agentType;
   if (typeof at === "string" && at.length > 0) return true;
+  // Branch 2: kind=intent is feedable — main-agent IntentPump dispatches
+  // it. (The router inside `maybeAutoSpawn` picks pump vs subagent.)
+  if (meta.kind === "intent") return true;
   return false;
 }
 
@@ -117,6 +121,18 @@ export interface TaskFeederOptions {
    * `update`).
    */
   onTaskChange?: (taskId: string, status: "completed" | "failed") => void;
+  /**
+   * Optional IntentPump — when provided, `kind=intent` tasks are routed
+   * to the pump's `enqueue` method instead of the regular subagent
+   * `spawn` callback. The pump injects a "Consume intent #N" user
+   * message into the main session; the LLM then calls TaskUpdate or
+   * decompose_task directly. The feeder still tracks the task in the
+   * `agentTaskMap` with a synthetic `intent-pump:<id>` id so widget /
+   * TaskOutput integration is uniform.
+   *
+   * GC-2026-main-agent-proactive-intent-pump.
+   */
+  intentPump?: { enqueue(task: Task): void; isOwned(taskId: string): boolean };
 }
 
 // ── Registration ─────────────────────────────────────────────────────
@@ -134,6 +150,18 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
   // completion listener can resolve agentId → taskId. Other code
   // (widget, TaskOutput) reads from the same map.
   const wrappedSpawn = async (task: Task): Promise<string> => {
+    // GC-2026-main-agent-proactive-intent-pump: kind=intent → pump, not
+    // subagent spawn. The pump injects a "Consume intent #N" user
+    // message into the main session; the LLM updates the task directly
+    // via TaskUpdate (which the pump polls) — no subagents:completed
+    // event fires. The synthetic agentId is recorded in the map for
+    // uniform widget / TaskOutput integration.
+    if (task.metadata?.kind === "intent" && opts.intentPump) {
+      const synthetic = `intent-pump:${task.id}`;
+      agentTaskMap.set(synthetic, task.id);
+      opts.intentPump.enqueue(task);
+      return synthetic;
+    }
     const agentId = await spawn(task);
     agentTaskMap.set(agentId, task.id);
     return agentId;
@@ -159,14 +187,22 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
     const fresh = store.get(task.id) ?? task;
     if (fresh.status !== "pending") return;
 
-    // Cascade gate: only spawn if all blockers are completed.
-    const blockers = task.blockedBy ?? [];
-    if (blockers.length > 0) {
-      const allCompleted = blockers.every((id) => {
-        const b = store.get(id);
-        return b !== undefined && b.status === "completed";
-      });
-      if (!allCompleted) return;
+    // GC-2026-main-agent-proactive-intent-pump: kind=intent bypasses
+    // the blocker gate. The pump's queue is the source of truth for
+    // "next" (FIFO by enqueue order), NOT blockedBy edges. The
+    // blocking semantics belong to actionable / step / orchestrator
+    // tasks — intent tasks are user intents and should be processed
+    // in the order they were created, regardless of any blockedBy
+    // edges that might have been set by callers.
+    if (task.metadata?.kind !== "intent") {
+      const blockers = task.blockedBy ?? [];
+      if (blockers.length > 0) {
+        const allCompleted = blockers.every((id) => {
+          const b = store.get(id);
+          return b !== undefined && b.status === "completed";
+        });
+        if (!allCompleted) return;
+      }
     }
 
     await spawnAndTrack(fresh, store, wrappedSpawn);
@@ -177,6 +213,11 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
     for (const t of all) {
       if (t.status !== "pending") continue;
       if (!isFeedableTask(t)) continue;
+      // GC-2026-main-agent-proactive-intent-pump: intent tasks have
+      // NO cascade. The pump dequeues by FIFO from its own queue and
+      // never walks blockedBy edges. Even if a caller happens to
+      // populate blockedBy on an intent task, cascade must skip it.
+      if (t.metadata?.kind === "intent") continue;
       // GC-2026-118 F5: only walk children of the just-completed task.
       // Top-level pending tasks (no blockers) are spawned directly by
       // TaskCreate / TaskUpdate / materializeDecomposeChain via

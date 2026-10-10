@@ -10,12 +10,12 @@
  *   5. 10× TaskCreate + TaskExecute (separate spawn path) → complete
  */
 
-import { describe, expect, it, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { randomUUID } from "node:crypto";
+import { TASKS_RPC_DECOMPOSE_MATERIALIZE } from "../src/event-channels.js";
 import initExtension from "../src/index.js";
 import { flush, installSubagentsMock, mockCtx, mockPi } from "./helpers/mock-pi.js";
 import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
-import { TASKS_RPC_DECOMPOSE_MATERIALIZE } from "../src/event-channels.js";
-import { randomUUID } from "node:crypto";
 
 const N_CYCLES = 10;
 
@@ -35,8 +35,14 @@ describe("task-feeding 10x stress verification", () => {
     installTasksConfig({});
   });
 
-  it("10x: TaskCreate (kind=intent) → Planner auto-spawn → complete", async () => {
-    await runCycles("intent-spawn", async (cycle) => {
+  it("10x: TaskCreate (kind=intent) → IntentPump → LLM TaskUpdate(completed) → complete", async () => {
+    // GC-2026-main-agent-proactive-intent-pump replaces the
+    // GC-2026-121 Planner auto-spawn. kind=intent now goes through the
+    // IntentPump, NOT a subagent. Verify the pump path: no subagent
+    // spawn, but the task is in_progress with the pump's synthetic
+    // owner, and a simulated LLM TaskUpdate(completed) drives it to
+    // completed.
+    await runCycles("intent-pump", async (cycle) => {
       const mock = mockPi();
       const rpc = installSubagentsMock(mock.pi);
       initExtension(mock.pi as any);
@@ -49,15 +55,16 @@ describe("task-feeding 10x stress verification", () => {
       const taskId = create.content[0].text.match(/Task #(\d+)/)![1];
       await flush();
 
-      expect(rpc.spawned.length).toBe(1);
-      expect(rpc.spawned[0].type).toBe("Planner");
+      // No subagent spawn — kind=intent goes to the pump
+      expect(rpc.spawned.length).toBe(0);
 
-      // Verify task is in_progress with owner
+      // Verify task is in_progress with the IntentPump's synthetic owner
       const t1 = await mock.executeTool("TaskGet", { taskId });
       expect(t1.content[0].text).toMatch(/Status: in_progress/);
+      expect(t1.content[0].text).toMatch(/Owner: intent-pump:1/);
 
-      // Drive completion
-      rpc.complete(rpc.spawned[0].id, `Planner decided specs=[…] cycle ${cycle}`);
+      // Simulate the LLM's TaskUpdate(completed) (the consumption turn)
+      await mock.executeTool("TaskUpdate", { taskId, status: "completed" });
       await flush();
       const t2 = await mock.executeTool("TaskGet", { taskId });
       expect(t2.content[0].text).toMatch(/Status: completed/);
@@ -94,6 +101,11 @@ describe("task-feeding 10x stress verification", () => {
   });
 
   it("10x: late-subagents race — TaskCreate then subagents:ready → sweep re-spawns", async () => {
+    // GC-2026-main-agent-proactive-intent-pump: pass agentType=Developer
+    // so the task takes the SUBAGENT path. The IntentPump doesn't
+    // depend on subagents:ready at all, so without an explicit
+    // agentType the task would be in_progress via the pump and the
+    // subagent-availability race wouldn't apply.
     await runCycles("race-sweep", async (cycle) => {
       const mock = mockPi();
       initExtension(mock.pi as any);
@@ -103,6 +115,7 @@ describe("task-feeding 10x stress verification", () => {
       const create = await mock.executeTool("TaskCreate", {
         subject: `race-${cycle}`,
         description: `Cycle ${cycle} race task.`,
+        agentType: "Developer",
       });
       const taskId = create.content[0].text.match(/Task #(\d+)/)![1];
 
@@ -120,9 +133,9 @@ describe("task-feeding 10x stress verification", () => {
       // Verify sweep re-spawned
       expect(rpc.spawned.length).toBeGreaterThanOrEqual(1);
       const spawn = rpc.spawned[rpc.spawned.length - 1];
-      expect(spawn.type).toBe("Planner");
+      expect(spawn.type).toBe("Developer");
 
-      rpc.complete(spawn.id, "Planner retried");
+      rpc.complete(spawn.id, "Developer retried");
       await flush();
       const done = await mock.executeTool("TaskGet", { taskId });
       expect(done.content[0].text).toMatch(/Status: completed/);
