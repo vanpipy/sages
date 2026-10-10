@@ -424,7 +424,12 @@ The Reviewer must also write the same YAML block atomically to
 `.pi/orchestrator/verdict-{task_id}.md` BEFORE emitting the final
 message (via tmpfile + rename). The parser falls back to this file if
 the message fence is missing — this is the durability boundary that
-survives `max_turns` hard-abort.
+survives any abnormal end (transport timeout, parent-signal abort,
+model API truncation, or manual cancellation). The pre-recording
+framing was "survives `max_turns` hard-abort" but
+GC-2026-subagent-recording-no-budget removed the turn / wall-clock
+budget entirely; the verdict file is now the only durable backup
+for whatever ends the run.
 
 ### Prior-review-summary injection (GC-2026-b6)
 
@@ -674,9 +679,13 @@ to NEEDS_WORK**. A Reviewer must explicitly mark CLEAN with evidence;
 missing evidence should never produce a spurious clean bill of health.
 
 The file-fallback path (`.pi/orchestrator/verdict-{task_id}.md`) is the
-durability boundary that survives `max_turns` hard-abort. The Reviewer
+durability boundary that survives any abnormal end. The Reviewer
 prompt explicitly requires writing the same YAML block atomically (via
-tmpfile + rename) BEFORE emitting the final message.
+tmpfile + rename) BEFORE emitting the final message. As of
+GC-2026-subagent-recording-no-budget, there is no `max_turns` or
+wall-clock budget in the runtime — the verdict file is the only
+durable backup for transport timeouts, parent-signal aborts, model
+API hiccups, and manual cancellations.
 
 ---
 
@@ -762,7 +771,7 @@ Each mode has:
 | `author-fabricated` | spec | commit | escalate-to-l3 | `--author=` or `GIT_AUTHOR_*` used |
 | `pi-orchestrator-leak` | spec | commit | escalate-to-l3 | Sub-agent wrote into `.pi/orchestrator/` |
 | `worktree-ownership-mismatch` | error | worktree-provision | escalate-to-l3 | Worktree `.git` points at foreign clone |
-| `subagent-timeout` | error | implement | mark-stalled | Hard-aborted after `max_turns` + grace |
+| `subagent-timeout` | error | implement | mark-stalled | Transport-layer timeout (HTTP / RPC / model API). No turn or wall-clock budget remains in the runtime post-GC-2026-subagent-recording-no-budget; the JSONL log at `.pi/orchestrator/metrics/subagent-tool-usage.jsonl` + `bun run subagent-usage:summary` is the post-hoc visibility surface. |
 | `worktree-concurrency-cap-reached` | error | worktree-provision | mark-stalled | Per-repo live-lease count at cap |
 | `infra-unhandled` | error | all stages | escalate-to-l3 | Catch-all for unhandled exceptions |
 
