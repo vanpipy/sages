@@ -20,5 +20,5 @@
     }
   },
   "include": ["src/**/*", "test/tools/**/*", "test/bash-guard.test.ts", "test/file-service.test.ts"],
-  "exclude": ["node_modules", "dist", "../pi-subagents", "../pi", "../pi-tasks", "../pi-codebase-memory", "../pi-evaluator", "test/rounds/**/*", "test/agents/**/*", "test/fixtures/**/*", "test/tools/orchestrator/workflow-run*", "test/tools/orchestrator/workflow-handler*", "test/helpers/workflow-run*", "test/workflow-handler*"]
+  "exclude": ["node_modules", "dist", "../pi-subagents", "../pi", "../pi-tasks", "../pi-codebase-memory", "../pi-evaluator", "test/rounds/**/*", "test/agents/**/*", "test/fixtures/**/*"]
 }

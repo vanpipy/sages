@@ -31,7 +31,9 @@ describe("@sages/pi-tasks package exports", () => {
 			"@sages/pi-tasks/event-channels",
 		);
 
-		expect(channels.WORKFLOW_START).toBe("workflow:start");
-		expect(channels.WORKFLOW_PHASE_COMPLETE).toBe("workflow:phase-complete");
+		expect(channels.TASKS_RPC_DECOMPOSE_MATERIALIZE).toBe("tasks:rpc:decompose-materialize");
+		// GC-2026-remove-workflow-run-prod: WORKFLOW_START and
+		// WORKFLOW_PHASE_COMPLETE channels are gone; only the
+		// decompose-materialize RPC channel remains.
 	});
 });

@@ -397,7 +397,7 @@ export function familyOfTool(toolName: string): ToolFamily {
 	// GC-2026-remove-workflow-run-prod: workflow_run removed (100% failure
 	// rate on the 10s watchdog across the last 6 GCs); only goal_contract_create
 	// + decompose_task remain in the orchestrator family.
-	if (toolName === "goal_contract_create") {
+	if (toolName === "goal_contract_create" || toolName === "decompose_task") {
 		return "orchestrator";
 	}
 	// GC-2026-097 M3b: the 7 pi-tasks tools form their own family so

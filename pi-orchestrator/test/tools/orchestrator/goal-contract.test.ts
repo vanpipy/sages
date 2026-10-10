@@ -247,14 +247,19 @@ describe("executeGoalContractCreate (GC-2026-orchestrator-simplify)", () => {
 		expect(text.goal_contract).toBeUndefined();
 	});
 
-	it("T-20: next_step directs the LLM to workflow_run (canonical), NOT raw TaskCreate", async () => {
+	it("T-20: next_step directs the LLM to raw TaskCreate × N + TaskExecute (or decompose_task), NOT workflow_run (GC-2026-remove-workflow-run-prod)", async () => {
 		const result = await executeGoalContractCreate(BASE_INPUT as any, { cwd });
 		const text = JSON.parse(result.content[0]!.text);
-		expect(text.next_step).toContain("workflow_run");
-		expect(text.next_step).toContain("goal_path");
+		expect(text.next_step).toContain("TaskCreate");
+		expect(text.next_step).toContain("decompose_task");
+		expect(text.next_step).not.toContain("workflow_run");
 		expect(text.next_step).not.toContain("dag_synthesize");
-		expect(text.next_step).not.toContain("TaskCreate");
-		expect(text.next_step).not.toContain("TaskExecute");
+		// Post-GC-2026-remove-workflow-run-prod: next_step may mention
+		// TaskExecute as part of the canonical 4-phase shape
+		// (`TaskCreate × N + TaskExecute`); the old assertion that
+		// excluded it was written when the only TaskCreate was the
+		// raw escape-hatch path (no canonical shape).
+		expect(text.next_step).toContain("TaskExecute");
 	});
 
 	it("T-21: verbose=true returns the full goal contract", async () => {
