@@ -1,66 +1,66 @@
 /**
  * intent-reminder.ts — Composes the system-prompt reminder that nudges
- * the main LLM about pending `kind: "intent"` tasks (GC-2026-122).
+ * the main LLM about pending `kind: "intent"` tasks.
  *
- * The previous implementation (GC-2026-120 AC5) called
- * `ctx.ui.notify(...)` to surface the reminder. `ctx.ui.notify` is a
- * UI-level toast — the LLM does NOT see it. The reminder was effectively
- * a user-facing decoration while the LLM remained unaware of the
- * pending intent task, so dropping the Planner auto-spawn would have
- * left intent tasks with NO consumer at all.
+ * The reminder reaches the LLM via the `before_agent_start` handler's
+ * return value (`{ systemPrompt: <existing> + <reminder> }`), not via
+ * `ctx.ui.notify` (which is a UI-level toast the LLM does not see).
+ * The pattern mirrors `pi-orchestrator/src/extension.ts`'s SYSTEM.md
+ * injection. See `pi-tasks/src/index.ts:858-878` for the wiring.
  *
- * GC-2026-122 fixes the transport: the reminder is composed into a
- * string and injected into the LLM's system prompt via the
- * `before_agent_start` handler's return value (mirroring
- * `pi-orchestrator/src/extension.ts`'s SYSTEM.md injection pattern).
- * The text explicitly tells the main LLM to call
- * `decompose_task(user_task_id="<id>", specs=[...])` directly, OR to
- * chat-answer the user if the intent is trivial. Either path consumes
- * the intent; it does not stay silently pending.
+ * ## GC-2026-continuous-intent-reminder: continuous, not one-shot
  *
- * Dedup: per-intent state (`remindedIds`) keeps the same intent from
- * being re-listed in the reminder on every `before_agent_start` fire.
- * The state should be reset on `session_start` (caller's responsibility;
- * see `pi-tasks/src/index.ts:836`).
+ * The pre-fix implementation tracked a per-session `remindedIds` set
+ * and returned `null` once an intent had been listed once. The
+ * "once-per-session" dedup left intent tasks silent whenever the main
+ * LLM got distracted, forgot, or the prior `decompose_task` call
+ * failed — the only way to get re-reminded was a `session_start`
+ * reset, which the user cannot trigger on demand. Empirically
+ * observed in the session that introduced this GC ("了解一下当前仓库"
+ * sat pending across multiple LLM turns with no further push).
+ *
+ * The fix: drop the dedup state. The reminder now lists EVERY pending
+ * `kind: "intent"` task on EVERY call. The intent naturally leaves the
+ * reminder when its `status` flips off `pending`, which happens in two
+ * places:
+ *
+ *   1. `materializeDecomposeChain` auto-completes the user task on
+ *      successful chain materialization (`completed_via: "decomposition"`,
+ *      GC-2026-120 AC3 / D2). Failure path: AC6 rolls the user task
+ *      back to pending, so the reminder re-surfaces it next turn.
+ *   2. The LLM explicitly marks it completed via `TaskUpdate` (the
+ *      chat-answer path from the call-to-action for trivial intents).
+ *
+ * The main LLM is the sole consumer of intent tasks; this GC only
+ * fixes the transport so the consumer is reached until it actually
+ * consumes.
  */
 
 import type { TaskStore } from "./task-store.js";
 
-export interface IntentReminderState {
-  /** IDs of intent tasks already surfaced via the reminder. */
-  remindedIds: Set<string>;
-}
-
-export function makeIntentReminderState(): IntentReminderState {
-  return { remindedIds: new Set() };
-}
-
 /**
- * Compose the reminder text for currently-pending intent tasks that
- * have NOT been reminded before (per the supplied state).
+ * Compose the reminder text for ALL currently-pending `kind: "intent"`
+ * tasks in the store. Returns `null` when no intent task is pending
+ * (the caller then leaves the system prompt untouched).
  *
- * Returns `null` when there are no NEW pending intents (either no
- * intents at all, or every pending intent is already in
- * `state.remindedIds`). The state is mutated in place to add the
- * newly-reminded IDs.
+ * The function is intentionally pure and stateless — the same store
+ * snapshot always produces the same text. Caller-side state is not
+ * needed: the reminder predicate is "status === 'pending' && kind ===
+ * 'intent'", and the natural exit path is the task leaving `pending`
+ * status (auto-complete via decomposition, or explicit TaskUpdate).
  */
-export function composeIntentReminder(
-  store: TaskStore,
-  state: IntentReminderState,
-): string | null {
+export function composeIntentReminder(store: TaskStore): string | null {
   const intents = store.list().filter(
     (t) =>
       t.status === "pending" &&
       t.metadata?.kind === "intent",
   );
-  const newIntents = intents.filter((t) => !state.remindedIds.has(t.id));
-  if (newIntents.length === 0) return null;
-  for (const t of intents) state.remindedIds.add(t.id);
+  if (intents.length === 0) return null;
 
   const lines: string[] = [
-    `[GC-2026-122] ${newIntents.length} pending intent task(s) awaiting your action — call \`decompose_task\` to materialize a chain, or chat-answer directly if the intent is trivial:`,
+    `[GC-2026-122] ${intents.length} pending intent task(s) awaiting your action — call \`decompose_task\` to materialize a chain, or chat-answer directly if the intent is trivial:`,
   ];
-  for (const t of newIntents) {
+  for (const t of intents) {
     const desc = t.description.length > 80
       ? `${t.description.slice(0, 77)}...`
       : t.description;
@@ -74,19 +74,24 @@ export function composeIntentReminder(
 
 /**
  * Build the `{ systemPrompt }` payload that the `before_agent_start`
- * handler should return. Returns `undefined` when there is no new
- * intent to remind about (caller passes that through unchanged).
+ * handler should return. Returns `undefined` when no intent task is
+ * pending (caller passes that through unchanged).
  *
  * The reminder is APPENDED to the existing system prompt with a `---`
  * separator, so existing overlays (e.g. pi-orchestrator's
  * `templates/SYSTEM.md`) are preserved above the reminder block.
+ *
+ * GC-2026-continuous-intent-reminder: the function is now pure and
+ * stateless. The pre-fix signature took a per-session `state` object
+ * to dedup reminded intents; that state was removed because the
+ * reminder needs to keep firing on every call until the intent is
+ * consumed.
  */
 export function applyIntentReminderToSystemPrompt(
   store: TaskStore,
-  state: IntentReminderState,
   existingSystemPrompt: string | undefined,
 ): { systemPrompt: string } | undefined {
-  const reminder = composeIntentReminder(store, state);
+  const reminder = composeIntentReminder(store);
   if (!reminder) return undefined;
   const base = existingSystemPrompt ?? "";
   return {
