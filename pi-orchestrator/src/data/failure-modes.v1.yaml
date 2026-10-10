@@ -105,16 +105,16 @@ modes:
     retryBudget: 0
 
   - id: "subagent-timeout"
-    name: "Sub-agent exceeded its turn or wall budget"
-    description: "The run was hard-aborted after max_turns plus grace, or after the budget tracker tripped. The partial work is on disk (commits, audit file, and — since GC-2026-094 — the verdict-{task_id}.md file when the agent follows the Boundary Discipline prompt section). The run is not resumable in place; re-dispatch with the durable artifacts as starting state."
+    name: "Sub-agent wall-clock deadline exceeded (legacy)"
+    description: "GC-2026-subagent-recording-no-budget removed all budget enforcement — there is no longer a hard turn or wall-clock deadline. This rule remains for the legacy SubagentTimeout detection shape (transport-level timeouts: HTTP, RPC, model API) that can still occur. The previous BudgetExceededError trigger is gone (budget.ts deleted). Operators inspecting the JSONL log via `bun run subagent-usage:summary` see real per-run duration; an agent that runs 5× its nominal deadline is now just visible, not auto-killed."
     kind: "error"
     appliesTo: ["implement"]
     detection:
       kind: "structured"
-      matches: ["SubagentTimeout", "BudgetExceededError"]
+      matches: ["SubagentTimeout"]
     handler:
       kind: "mark-stalled"
-      note: "Sub-agent hit the hard turn limit. Re-dispatch with a narrower brief or a larger budget."
+      note: "Transport-level timeout (HTTP / RPC / model API). Re-dispatch with a narrower brief if it persists; otherwise inspect the log + retry."
     retryBudget: 0
 
   - id: "worktree-concurrency-cap-reached"

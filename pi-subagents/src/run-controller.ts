@@ -158,24 +158,18 @@ export const DEFAULT_PER_TYPE: Record<AgentType, PerTypeDefaults> = {
 };
 // Note: the Developer defaults also serve as the floor for unknown types.
 
-/** Wall-clock deadline envelope — every subagent runs for at least
- *  30 minutes, at most 120 minutes, regardless of config. The
- *  envelope catches two footguns: (1) a too-small env var
- *  (SAGES_PI_AGENT_BUDGET_MS=300000) silently stranding the agent,
- *  (2) a too-large env var (SAGES_PI_AGENT_BUDGET_MS=86400000)
- *  hiding the deadline abort for a day.
- *
- *  GC-2026-subagent-time-only-limits: this is the only operational
- *  safety net on a subagent run. Turn-counting limits were removed
- *  because they bottomed out workflows mid-task (Developer agent
- *  aborted at 60 turns during GC-2026-097 implementation). */
+/** GC-2026-subagent-recording-no-budget: MIN_DEADLINE_MS and
+ *  MAX_DEADLINE_MS are kept as exports for backward compat with the
+ *  tests and any downstream consumers that read them as metadata.
+ *  The wall-clock enforcement is gone (no setTimeout in
+ *  RunController), so the values are documentation rather than
+ *  operational bounds. Callers should not use them to gate behavior. */
 export const MIN_DEADLINE_MS = 30 * 60_000;
 export const MAX_DEADLINE_MS = 120 * 60_000;
 
-/** Clamp deadlineMs into the [MIN_DEADLINE_MS, MAX_DEADLINE_MS] envelope.
- *  Single source of truth — every resolution path in resolveRunConfig
- *  flows through this. Exported so tests + downstream callers can
- *  reason about the bounds without re-implementing the clamp. */
+/** Legacy clamp helper — kept exported for compat. GC-2026-subagent-
+ *  recording-no-budget no longer clamps via this function. Callers
+ *  that need the bounds should read the constants directly. */
 export function clampDeadlineMs(ms: number): number {
 	if (!Number.isFinite(ms) || ms < MIN_DEADLINE_MS) return MIN_DEADLINE_MS;
 	if (ms > MAX_DEADLINE_MS) return MAX_DEADLINE_MS;
@@ -204,14 +198,21 @@ function positiveInt(v: string | undefined, fallback: number): number {
 /**
  * Resolve the run config for a given agent type. Precedence:
  *
- *   1. params.max_duration_minutes (positive only)
+ *   1. params.max_duration_minutes (positive only; floor 1min)
  *   2. per-type env: SAGES_PI_AGENT_<TYPE>_BUDGET_MS
  *   3. generic env:  SAGES_PI_AGENT_BUDGET_MS
  *   4. DEFAULT_PER_TYPE[type] (or Developer defaults for unknown types)
  *
- * Every resolution path is clamped to [MIN_DEADLINE_MS, MAX_DEADLINE_MS].
- * bucketTimeoutsMs is always DEFAULT_BUCKET_TIMEOUTS_MS — the bucket
- * table is enforced by the bash wrapper, not chosen per-run.
+ * GC-2026-subagent-recording-no-budget: the resolved value is NOT
+ * clamped to [MIN_DEADLINE_MS, MAX_DEADLINE_MS]. It's the metadata
+ * value the aggregator script surfaces — not an enforcement
+ * boundary. The deadline timer that previously fired at this value
+ * is gone (see RunController constructor).
+ *
+ * bucketTimeoutsMs is always DEFAULT_BUCKET_TIMEOUTS_MS — the
+ * per-tool bucket table is enforced by the bash wrapper, not
+ * chosen per-run. Bucket timers are per-tool defensive measures,
+ * not session-wide budget limits.
  */
 export function resolveRunConfig(
 	type: AgentType,
@@ -224,23 +225,21 @@ export function resolveRunConfig(
 	const typeUpper = type.toUpperCase();
 
 	// Params win when given as a positive number; 0 / negative / undefined
-	// fall through to env (per-type → generic → default).
+	// fall through to env (per-type → generic → default). Floor at 1min
+	// to keep the unit well-defined for the aggregator's formatter.
 	const paramsMinutes = params.max_duration_minutes;
-
+	const MINUTE_MS = 60_000;
 	const rawDeadlineMs =
 		paramsMinutes !== undefined && paramsMinutes > 0
-			? paramsMinutes * 60_000
+			? Math.max(1, paramsMinutes) * MINUTE_MS
 			: positiveInt(
 					env[`SAGES_PI_AGENT_${typeUpper}_BUDGET_MS`],
 					positiveInt(env.SAGES_PI_AGENT_BUDGET_MS, base.deadlineMs),
 				);
 
-	// run_controller_deadline_envelope: clamp to [30, 120] min.
-	const deadlineMs = clampDeadlineMs(rawDeadlineMs);
-
 	return {
 		type,
-		deadlineMs,
+		deadlineMs: rawDeadlineMs,
 		bucketTimeoutsMs: DEFAULT_BUCKET_TIMEOUTS_MS,
 		runId: identity.runId,
 		traceId: identity.traceId,
@@ -336,6 +335,13 @@ export class RunController {
 	/**
 	 * Per-tool-call signal: inherits run signal + bucket timer.
 	 *
+	 * GC-2026-subagent-recording-no-budget: the bucket timer is a
+	 * per-tool defensive measure (a single bash command taking too
+	 * long is not a "budget" in the user-blocking sense — it's
+	 * malformed input or an accidental infinite loop). It aborts the
+	 * spawned child, not the run. The runtime's own consumption is
+	 * unaffected.
+	 *
 	 * The bucket timer aborts at `bucketTimeoutsMs[bucket]`. The agent
 	 * sees a structured timeout error when this fires.
 	 *
@@ -411,11 +417,12 @@ export class RunController {
 	 */
 	cleanup(): void {
 		// run_controller_cleanup: idempotent timer + signal cleanup.
+		// GC-2026-subagent-recording-no-budget: the deadline timer is gone;
+		// the only timers left are the per-tool bucket timers (which self-
+		// clear when their composed signal aborts, so we don't need to touch
+		// them here).
 		if (this.cleanedUp) return;
 		this.cleanedUp = true;
-		if (this.deadlineTimer !== null) {
-			clearTimeout(this.deadlineTimer);
-		}
 		// Abort the controller so in-flight children die via signal
 		// propagation. Bucket timers self-clear when their composed
 		// signal aborts (see signalForTool's abort listener).

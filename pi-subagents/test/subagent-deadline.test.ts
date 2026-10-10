@@ -1,35 +1,31 @@
 /**
- * subagent-deadline.test.ts — GC-2026-037 T1
+ * subagent-deadline.test.ts — GC-2026-subagent-recording-no-budget
  *
- * Wall-clock deadline enforcement at the Agent tool executor layer.
+ * Wall-clock deadline metadata is preserved (the `deadlineMs` field on
+ * RunConfig + the per-type defaults in settings.ts) so the
+ * `subagent-usage:summary` aggregator can show "this agent ran 87min
+ * past its nominal 30min deadline" without enforcing anything.
  *
- * Surface being verified (after GREEN):
+ * Surface being verified:
  *   - settings.ts: `getSubagentDurationDefault(type)` returns the per-type
- *     default in milliseconds, with a 20-minute hard floor for unknown types.
+ *     default in milliseconds, with a 20-minute floor for unknown types.
  *   - settings.ts: `setSubagentDurationDefaults(d)` overrides the defaults.
  *   - settings.ts: `resolveDeadlineMs(type, overrideMinutes)` priority chain
  *     — caller-supplied minutes > per-type default > 20-minute floor.
- *   - agent-manager.ts: When the caller's signal aborts with a duration-
- *     exceeded Error reason, the agent's `record.error` carries that message
- *     even when `session.prompt()` rejects with a generic AbortError.
- *   - index.ts executor: wires `AbortSignal.any([parent, deadline])` so the
- *     caller signal and the deadline timer both drive agent termination.
+ *   - agent-manager.ts: an externally-aborted parent signal still terminates
+ *     the agent (the parent signal path is preserved; the deadline timer
+ *     is gone).
+ *   - RunController: no internal `setTimeout` is started for the deadline
+ *     (asserted via inspection of the module — there is no observable
+ *     timer to query). Bucket timers for per-tool timeouts are unchanged.
  *
- * The "merge happens in the executor" half is verified by an architectural
- * check (T-DEADLINE-04) — pulling the executor out of `registerTool` for unit
- * testing would require a deep `ExtensionAPI` mock. The architectural assertion
- * matches the project pattern (T-ASYNC-04).
+ * Renamed intent: the previous "wall-clock deadline enforcement" semantics
+ * is gone. This test now pins the no-enforcement + parent-signal + meta
+ * contract. The aggregator script and the JSONL log surface the deadline
+ * value as observability data only.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-// ---- vi.mock for agent-runner -----------------------------------------------
-//
-// The stub captures the signal so the test can drive abort() externally. It
-// then resolves runAgent's promise once the signal aborts (mimicking what the
-// real runner does — forwardAbortSignal calls session.abort() which makes
-// session.prompt() resolve cleanly). The exact resolution shape is irrelevant;
-// what matters is that the agent manager sees the abort before it can complete.
 
 interface CapturedRun {
 	options: any;
@@ -73,9 +69,6 @@ vi.mock("../src/agent-runner.js", () => ({
 			if (sig) {
 				if (sig.aborted) {
 					entry.abortListenerFired = true;
-					// Simulate a typical aborted run: rejects with the signal's reason
-					// wrapped in a fresh AbortError (the SDK does this when session
-					// .prompt() rejects on session.abort()).
 					const reason = sig.reason ?? new Error("aborted");
 					const wrapped =
 						reason instanceof Error ? reason : new Error(String(reason));
@@ -124,9 +117,6 @@ beforeEach(() => {
 	RUN_STATE.calls.length = 0;
 	setDefaultsDisabled(false);
 	registerAgents(new Map());
-	// Restore canonical defaults between tests — `setSubagentDurationDefaults`
-	// is module-level state shared across tests, so any test that mutates it
-	// must reset to known values.
 	setSubagentDurationDefaults({
 		developer: 20 * 60 * 1000,
 		auditor: 20 * 60 * 1000,
@@ -139,20 +129,23 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-describe("subagent wall-clock deadline: settings resolution (GC-2026-037 T1)", () => {
-	it("T-DEADLINE-03a: per-type default applies for known built-in agent types", () => {
+describe("subagent deadline metadata (GC-2026-subagent-recording-no-budget)", () => {
+	it("T-DEADLINE-META-01: per-type default applies for known built-in agent types", () => {
+		// Metadata surface — the value is recorded in the config + the
+		// aggregator script, but no enforcement runs. The aggregator
+		// surfaces "ran N× nominal deadline" post-hoc.
 		expect(getSubagentDurationDefault("developer")).toBe(20 * 60 * 1000);
 		expect(getSubagentDurationDefault("auditor")).toBe(20 * 60 * 1000);
 		expect(getSubagentDurationDefault("Explore")).toBe(5 * 60 * 1000);
 		expect(getSubagentDurationDefault("Plan")).toBe(5 * 60 * 1000);
 	});
 
-	it("T-DEADLINE-03b: unknown agent types fall back to the 20-minute floor", () => {
+	it("T-DEADLINE-META-02: unknown agent types fall back to the 20-minute floor", () => {
 		expect(getSubagentDurationDefault("not-a-real-type")).toBe(20 * 60 * 1000);
 		expect(getSubagentDurationDefault("")).toBe(20 * 60 * 1000);
 	});
 
-	it("T-DEADLINE-03c: setSubagentDurationDefaults overrides the module-level defaults", () => {
+	it("T-DEADLINE-META-03: setSubagentDurationDefaults overrides the module-level defaults", () => {
 		setSubagentDurationDefaults({
 			developer: 7 * 60 * 1000, // 7 min
 			auditor: 20 * 60 * 1000,
@@ -160,43 +153,40 @@ describe("subagent wall-clock deadline: settings resolution (GC-2026-037 T1)", (
 			Plan: 5 * 60 * 1000,
 		});
 		expect(getSubagentDurationDefault("developer")).toBe(7 * 60 * 1000);
-		// Untouched types keep their previous values.
 		expect(getSubagentDurationDefault("Explore")).toBe(5 * 60 * 1000);
 	});
 
-	it("GC-2026-subagent-time-only-limits: deadlineMs clamped to [30, 120] min envelope", () => {
-		// No override → per-type default clamped to floor (30 min).
-		// Developer/Explore/etc all use DEFAULT_PER_TYPE now (uniform 30 min),
-		// so any of them returns 30 min when no override.
+	it("T-DEADLINE-META-04: resolveDeadlineMs returns the metadata value (no clamp)", () => {
+		// GC-2026-subagent-recording-no-budget removed the [30, 120] min
+		// envelope clamp. The resolved value is whatever the caller asked
+		// for (or the per-type default), no minimum / maximum applied.
+		// Canonical PascalCase types route through DEFAULT_PER_TYPE
+		// (Developer / Reviewer / Explore / Plan all 30min); unknown
+		// types fall through to getSubagentDurationDefault.
 		expect(resolveDeadlineMs("developer", undefined)).toBe(30 * 60 * 1000);
-		expect(resolveDeadlineMs("Explore", undefined)).toBe(30 * 60 * 1000);
-		expect(resolveDeadlineMs("not-a-type", undefined)).toBe(30 * 60 * 1000);
-
-		// Caller-supplied minutes within envelope wins
+		expect(resolveDeadlineMs("Developer", undefined)).toBe(30 * 60 * 1000);
+		// Caller-supplied minutes pass through unchanged (no clamp).
 		expect(resolveDeadlineMs("developer", 60)).toBe(60 * 60 * 1000);
-
-		// Caller-supplied minutes below MIN → clamped to floor
-		expect(resolveDeadlineMs("Explore", 0.5)).toBe(30 * 60 * 1000);
-
-		// Caller-supplied minutes above MAX → clamped to ceiling
-		expect(resolveDeadlineMs("developer", 240)).toBe(120 * 60 * 1000);
-
-		// Caller-supplied override also wins for unknown types
-		expect(resolveDeadlineMs("not-a-type", 1)).toBe(30 * 60 * 1000);
-		expect(resolveDeadlineMs("not-a-type", 45)).toBe(45 * 60 * 1000);
+		expect(resolveDeadlineMs("developer", 240)).toBe(240 * 60 * 1000);
+		// Below-min values (e.g. 0.5 min) are NOT clamped to a floor; the
+		// floor of 1min only applies when params are passed through
+		// `resolveRunConfig` directly. The settings.resolveDeadlineMs
+		// path uses getSubagentDurationDefault for legacy types.
+		expect(resolveDeadlineMs("Explore", undefined)).toBe(5 * 60 * 1000);
 	});
 });
 
-describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", () => {
-	it("T-DEADLINE-01: an externally-aborted signal terminates the agent and captures the abort reason in record.error", async () => {
+describe("subagent signal propagation: parent-signal abort still works (no deadline timer)", () => {
+	// GC-2026-subagent-recording-no-budget: the deadline timer is gone,
+	// but parent-driven aborts (the `options.signal` propagated into
+	// RunController) still terminate the agent. The aggregator surfaces
+	// the parent abort reason in the JSONL row.
+	it("T-DEADLINE-SIG-01: an externally-aborted signal terminates the agent and captures the reason", async () => {
 		const manager = new AgentManager();
 		try {
-			const deadlineMs = 100;
 			const externalController = new AbortController();
-			const deadlineReason = new Error(
-				`agent duration exceeded ${deadlineMs}ms`,
-			);
-			setTimeout(() => externalController.abort(deadlineReason), deadlineMs);
+			const externalReason = new Error("user manually cancelled");
+			setTimeout(() => externalController.abort(externalReason), 50);
 
 			const { id, record } = await manager.spawnAndWait(
 				{} as never,
@@ -204,21 +194,14 @@ describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", ()
 				"Explore",
 				"do something slow",
 				{
-					description: "deadline test",
+					description: "external-abort test",
 					signal: externalController.signal,
 				} as never,
 			);
 
-			// The agent must have terminated (status moved past running).
 			expect(["stopped", "aborted", "parent_aborted", "error"]).toContain(record.status);
-			// The reason must surface in record.error (the duration reason, NOT a
-			// generic AbortError message — that's the whole point of capturing
-			// signal.reason before the abort propagates).
 			expect(record.error).toBeDefined();
-			expect(record.error).toContain("agent duration exceeded");
-			expect(record.error).toContain(`${deadlineMs}ms`);
-			// Sanity: runAgent was actually called with our signal so the abort
-			// path was exercised, not short-circuited at the manager boundary.
+			expect(record.error).toContain("user manually cancelled");
 			expect(stubRunAgent).toHaveBeenCalledTimes(1);
 			const captured = RUN_STATE.calls[0];
 			expect(captured.signal).toBe(externalController.signal);
@@ -229,59 +212,11 @@ describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", ()
 		}
 	});
 
-	it("T-DEADLINE-02: a merged signal (parent + deadline) — whichever fires first aborts the agent", async () => {
-		// Simulates what the index.ts executor will do: merge the caller's
-		// AbortSignal with a deadline controller via AbortSignal.any. We verify
-		// the manager honors the merged signal identically to a plain signal.
+	it("T-DEADLINE-SIG-02: agents complete normally when no signal aborts (no implicit deadline)", async () => {
+		// The deadline timer no longer fires. An agent that runs to
+		// completion is the default path; no signal aborts needed.
 		const manager = new AgentManager();
 		try {
-			const parentController = new AbortController();
-			const deadlineController = new AbortController();
-			const deadlineReason = new Error("agent duration exceeded 50ms");
-			setTimeout(() => deadlineController.abort(deadlineReason), 50);
-
-			const mergedSignal = AbortSignal.any([
-				parentController.signal,
-				deadlineController.signal,
-			]);
-
-			// Parent abort fires after the deadline — verify the deadline part
-			// is what actually trips the abort.
-			setTimeout(
-				() => parentController.abort(new Error("parent cancel")),
-				5_000,
-			);
-
-			const { record } = await manager.spawnAndWait(
-				{} as never,
-				{ cwd: process.cwd() } as never,
-				"Explore",
-				"slow task",
-				{
-					description: "merged-signal test",
-					signal: mergedSignal,
-				} as never,
-			);
-
-			expect(["stopped", "aborted", "parent_aborted", "error"]).toContain(record.status);
-			expect(record.error).toBeDefined();
-			// The deadline reason wins because it fired first; record.error
-			// surfaces the deadline message, not a generic abort string.
-			expect(record.error).toContain("agent duration exceeded");
-		} finally {
-			manager.dispose();
-		}
-	});
-
-	it("T-DEADLINE-01b: the deadline timer clears when the agent completes before the deadline fires", async () => {
-		// Stub runAgent resolves immediately — the executor's timer must be
-		// cleared in the finally branch or it leaks. We can't directly observe
-		// the timer (it's in index.ts, not exercised here), so this test acts
-		// as a regression guard for the inline-fixture behavior: a fast
-		// completion leaves record.error undefined and status=completed.
-		const manager = new AgentManager();
-		try {
-			// Force the stub to resolve instead of waiting on abort.
 			stubRunAgent.mockImplementationOnce(async () => ({
 				responseText: "fast",
 				session: {
@@ -312,11 +247,14 @@ describe("subagent wall-clock deadline: signal propagation (GC-2026-037 T1)", ()
 	});
 });
 
-describe("subagent wall-clock deadline: executor wiring (GC-2026-037 T1)", () => {
-	it("T-DEADLINE-04: index.ts executor merges parent signal + deadline timer via AbortSignal.any", async () => {
-		// Architectural check: the Agent tool executor must use AbortSignal.any
-		// to merge the caller's AbortSignal with a deadline-driven
-		// AbortController so either source aborts the agent. Mirrors T-ASYNC-04.
+describe("subagent RunController: no deadline setTimeout (architectural check)", () => {
+	it("T-DEADLINE-ARCH-01: index.ts executor merges parent signal with bucket signals (no deadline controller)", async () => {
+		// GC-2026-subagent-recording-no-budget: the previous T-DEADLINE-04
+		// asserted the executor merges parent + deadline. Now we assert
+		// the executor still uses AbortSignal.any (for parent + bucket
+		// signal composition) but does NOT start a deadline-driven
+		// controller. The architectural shape is preserved; the
+		// enforcement is gone.
 		const { readFileSync } = await import("node:fs");
 		const { fileURLToPath } = await import("node:url");
 		const here = fileURLToPath(import.meta.url);

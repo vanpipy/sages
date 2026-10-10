@@ -105,6 +105,11 @@ const VERIFIERS: { id: string; script: string; label: string }[] = [
 		script: "verify-task-source-invariant.ts",
 		label: "chain-task create sites in materializeDecomposeChain carry user_task_ref (GC-2026-120 AC8)",
 	},
+	{
+		id: "recorder",
+		script: "verify-recorder.ts",
+		label: "subagent tool-use recording layer wired (GC-2026-subagent-recording-no-budget)",
+	},
 ];
 
 interface Result {
