@@ -26,13 +26,14 @@ describe("TaskStore (in-memory)", () => {
     const t = store.create("Task", "Desc", "Running task", { key: "value" });
 
     expect(t.activeForm).toBe("Running task");
-    // GC-2026-120 + GC-2026-121: store infers kind=intent + requires_decomposition=true
-    // + agentType=Planner (for self-consumption via the unified feeder).
+    // GC-2026-120: store infers kind=intent + requires_decomposition=true.
+    // GC-2026-122: agentType is NO LONGER auto-stamped (the main LLM
+    // is the sole consumer of intent tasks, via the before_agent_start
+    // reminder; the unified feeder does not auto-spawn a Planner).
     expect(t.metadata).toEqual({
       key: "value",
       kind: "intent",
       requires_decomposition: true,
-      agentType: "Planner",
     });
   });
 
@@ -152,10 +153,10 @@ describe("TaskStore (in-memory)", () => {
     store.update("1", { metadata: { b: null, d: 4 } });
 
     const task = store.get("1")!;
-    // GC-2026-120 + GC-2026-121: kind=intent, requires_decomposition=true,
-    // agentType=Planner were inferred at create time.
+    // GC-2026-120: kind=intent, requires_decomposition=true inferred at
+    // create time. GC-2026-122: agentType is NOT auto-stamped.
     expect(task.metadata).toEqual({
-      a: 1, c: 3, d: 4, kind: "intent", requires_decomposition: true, agentType: "Planner",
+      a: 1, c: 3, d: 4, kind: "intent", requires_decomposition: true,
     });
   });
 
@@ -232,17 +233,17 @@ describe("TaskStore (in-memory)", () => {
 
   it("creates tasks with metadata via TaskCreate", () => {
     const t = store.create("With meta", "Desc", undefined, { pr: "123", reviewer: "alice" });
-    // GC-2026-120 + GC-2026-121: kind=intent, requires_decomposition=true,
-    // agentType=Planner were inferred.
+    // GC-2026-120: kind=intent, requires_decomposition=true inferred.
+    // GC-2026-122: agentType NOT auto-stamped.
     expect(t.metadata).toEqual({
       pr: "123", reviewer: "alice",
-      kind: "intent", requires_decomposition: true, agentType: "Planner",
+      kind: "intent", requires_decomposition: true,
     });
 
     const retrieved = store.get("1")!;
     expect(retrieved.metadata).toEqual({
       pr: "123", reviewer: "alice",
-      kind: "intent", requires_decomposition: true, agentType: "Planner",
+      kind: "intent", requires_decomposition: true,
     });
   });
 

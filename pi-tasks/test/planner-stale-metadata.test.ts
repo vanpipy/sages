@@ -1,40 +1,53 @@
 /**
- * planner-stale-metadata.test.ts — Tests that the Planner path handles
- * tasks created BEFORE GC-2026-121 (which lack the agentType stamp).
+ * planner-stale-metadata.test.ts — Tests that the post-GC-2026-122 intent-task
+ * predicate + inferKind contract holds for tasks WITHOUT agentType.
  *
- * Tasks on disk with `metadata.kind: "intent"` but no `agentType`
- * (i.e., created before GC-2026-121 changed inferKind) must still be
- * recognized as feedable. The spawn callback defaults the spawn type
- * to "Planner" for these.
+ * GC-2026-122 reversed GC-2026-121: intent tasks no longer auto-stamp
+ * agentType=Planner, and the unified task-feeder no longer auto-spawns a
+ * Planner subagent on intent tasks. The intent task is now exclusively
+ * consumed by the main LLM via the `before_agent_start` reminder (see
+ * `pi-tasks/src/intent-reminder.ts` + `composeIntentReminder`).
+ *
+ * This file pins the post-GC-2026-122 contract:
+ *
+ *   - `isFeedableTask(t)` returns FALSE for `kind=intent` tasks without
+ *     `agentType` — the main LLM is the only consumer.
+ *   - `inferKind` no longer stamps `agentType=Planner` for user-authored
+ *     intent tasks.
+ *   - `isFeedableTask` continues to reject tasks that have neither
+ *     `agentType` nor `kind=intent` (truly orphaned tasks).
+ *
+ * (The pre-GC-2026-122 tests for the auto-stamp fallback were deleted
+ * along with the GC-2026-121 follow-up; the auto-stamp path no longer
+ * exists.)
  */
 
 import { describe, expect, it, beforeEach } from "bun:test";
 import { TaskStore } from "../src/task-store.js";
 import { isFeedableTask } from "../src/task-feeder.js";
 
-describe("Planner handles stale intent tasks without agentType (GC-2026-121 follow-up)", () => {
+describe("Post-GC-2026-122 intent-task predicate (no Planner auto-stamp)", () => {
   let store: TaskStore;
 
   beforeEach(() => {
     store = new TaskStore();
   });
 
-  it("isFeedableTask returns true for kind=intent even without agentType", () => {
-    // Simulate a task on disk created before GC-2026-121: kind=intent
-    // was set, but agentType was NOT stamped (the old inferKind didn't
-    // include that field).
-    const stale = store.create("research X", "Investigate X.");
-    // The post-fix inferKind stamps agentType=Planner — but a stale
-    // task loaded from disk might have been written before this code.
-    // Verify the predicate works for both the freshly-created case
-    // and a hand-crafted stale shape.
-    expect(isFeedableTask(stale)).toBe(true);
-    expect(stale.metadata.kind).toBe("intent");
+  it("isFeedableTask returns FALSE for kind=intent without agentType (main LLM is sole consumer)", () => {
+    // GC-2026-122: the main LLM is the only consumer of intent tasks
+    // (via the before_agent_start reminder). The unified feeder does
+    // NOT auto-spawn a Planner for them anymore.
+    const t = store.create("research X", "Investigate X.");
+    expect(t.metadata.kind).toBe("intent");
+    expect(t.metadata.agentType).toBeUndefined(); // post-122: no auto-stamp
+    expect(isFeedableTask(t)).toBe(false);
   });
 
-  it("isFeedableTask returns true for hand-crafted stale intent tasks", () => {
-    // Bypass inferKind by using a raw Task object representing a task
-    // loaded from a pre-GC-2026-121 store file.
+  it("isFeedableTask returns FALSE for hand-crafted stale intent tasks (no agentType)", () => {
+    // Pre-GC-2026-122 tasks (loaded from a stale on-disk file) with
+    // kind=intent but no agentType are also NOT feedable. The
+    // before_agent_start reminder is the sole consumer, and the
+    // reminder reaches the LLM via the live store, not the feeder.
     const rawTask = {
       id: "stale-1",
       subject: "Pre-fix intent task",
@@ -44,17 +57,20 @@ describe("Planner handles stale intent tasks without agentType (GC-2026-121 foll
         created_by: "user",
         kind: "intent",
         requires_decomposition: true,
-        // NOTE: no agentType — this is the stale shape
+        // NOTE: no agentType — this is the stale shape, but the
+        // post-122 feeder does NOT auto-spawn it.
       },
       blocks: [],
       blockedBy: [],
       createdAt: 0,
       updatedAt: 0,
     };
-    expect(isFeedableTask(rawTask as any)).toBe(true);
+    expect(isFeedableTask(rawTask as any)).toBe(false);
   });
 
   it("isFeedableTask still rejects raw tasks without agentType AND without kind=intent", () => {
+    // Truly orphaned tasks (no agentType, no kind=intent) are still
+    // rejected. The main LLM has no consumer for them either.
     const rawTask = {
       id: "raw-1",
       subject: "Truly manual",
@@ -72,13 +88,13 @@ describe("Planner handles stale intent tasks without agentType (GC-2026-121 foll
     expect(isFeedableTask(rawTask as any)).toBe(false);
   });
 
-  it("inferKind stamps Planner for the legacy agentType-less path", () => {
-    // Re-running inferKind on a metadata blob without kind/agentType
-    // produces kind=intent + agentType=Planner. This is the live path
-    // for new tasks. The fix here is the isFeedableTask fallback
-    // for tasks written before this rule shipped.
+  it("inferKind does NOT stamp Planner for the user-authored agentType-less path", () => {
+    // Post-GC-2026-122: inferKind stamps kind=intent + requires_decomposition=true
+    // but does NOT auto-stamp agentType=Planner. The Planner subagent
+    // is no longer auto-spawned for user-authored intent tasks.
     const t = store.create("research Y", "Investigate Y.");
     expect(t.metadata.kind).toBe("intent");
-    expect(t.metadata.agentType).toBe("Planner");
+    expect(t.metadata.requires_decomposition).toBe(true);
+    expect(t.metadata.agentType).toBeUndefined();
   });
 });
