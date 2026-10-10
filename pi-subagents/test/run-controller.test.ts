@@ -129,17 +129,21 @@ describe("run-controller: deadline envelope (GC-2026-subagent-time-only-limits)"
 		expect(MAX_DEADLINE_MS).toBe(120 * 60_000);
 	});
 
-	it("clampDeadlineMs clamps below the floor to MIN_DEADLINE_MS", async () => {
+	it("clampDeadlineMs clamps below the floor to MIN_DEADLINE_MS — LEGACY (kept for back-compat; not invoked by resolveRunConfig)", async () => {
 		const { clampDeadlineMs, MIN_DEADLINE_MS } = await import(
 			"../src/run-controller.js"
 		);
+		// GC-2026-subagent-recording-no-budget removed the clamp from
+		// resolveRunConfig. The helper itself is kept exported but no
+		// production path calls it. This test pins the legacy behavior
+		// of the helper itself so the export stays stable.
 		expect(clampDeadlineMs(5 * 60_000)).toBe(MIN_DEADLINE_MS);
 		expect(clampDeadlineMs(0)).toBe(MIN_DEADLINE_MS);
 		expect(clampDeadlineMs(-100)).toBe(MIN_DEADLINE_MS);
 		expect(clampDeadlineMs(NaN)).toBe(MIN_DEADLINE_MS);
 	});
 
-	it("clampDeadlineMs clamps above the ceiling to MAX_DEADLINE_MS", async () => {
+	it("clampDeadlineMs clamps above the ceiling to MAX_DEADLINE_MS — LEGACY (kept for back-compat; not invoked)", async () => {
 		const { clampDeadlineMs, MAX_DEADLINE_MS } = await import(
 			"../src/run-controller.js"
 		);
@@ -147,7 +151,7 @@ describe("run-controller: deadline envelope (GC-2026-subagent-time-only-limits)"
 		expect(clampDeadlineMs(9999 * 60_000)).toBe(MAX_DEADLINE_MS);
 	});
 
-	it("clampDeadlineMs passes through values within the envelope", async () => {
+	it("clampDeadlineMs passes through values within the envelope — LEGACY", async () => {
 		const { clampDeadlineMs } = await import("../src/run-controller.js");
 		expect(clampDeadlineMs(45 * 60_000)).toBe(45 * 60_000);
 		expect(clampDeadlineMs(60 * 60_000)).toBe(60 * 60_000);
@@ -157,53 +161,51 @@ describe("run-controller: deadline envelope (GC-2026-subagent-time-only-limits)"
 
 describe("run-controller: resolveRunConfig", () => {
 
-	it("params.max_duration_minutes overrides deadlineMs (positive only; clamped to [30,120] envelope)", async () => {
-		const { resolveRunConfig, MIN_DEADLINE_MS, MAX_DEADLINE_MS } = await import(
-			"../src/run-controller.js"
-		);
-		// 15 min < MIN (30) → clamped to floor
-		const below = resolveRunConfig("Developer", { max_duration_minutes: 15 }, {});
-		expect(below.deadlineMs).toBe(MIN_DEADLINE_MS);
+	it("params.max_duration_minutes overrides deadlineMs (positive only; NO clamp — pass-through)", async () => {
+		const { resolveRunConfig } = await import("../src/run-controller.js");
+		// GC-2026-subagent-recording-no-budget: the [30, 120] envelope clamp
+		// is GONE. Caller-supplied minutes pass through unchanged (with a
+		// 1-min floor for unit well-definedness). The aggregator script
+		// surfaces whatever value the caller requested.
 
-		// 60 min within envelope
+		// 15 min < previous floor (30) → NO clamp; pass through
+		const below = resolveRunConfig("Developer", { max_duration_minutes: 15 }, {});
+		expect(below.deadlineMs).toBe(15 * 60_000);
+
+		// 60 min within envelope (was 60 min, still 60 min)
 		const mid = resolveRunConfig("Developer", { max_duration_minutes: 60 }, {});
 		expect(mid.deadlineMs).toBe(60 * 60_000);
 
-		// 240 min > MAX (120) → clamped to ceiling
+		// 240 min > previous ceiling (120) → NO clamp; pass through
 		const above = resolveRunConfig("Developer", { max_duration_minutes: 240 }, {});
-		expect(above.deadlineMs).toBe(MAX_DEADLINE_MS);
+		expect(above.deadlineMs).toBe(240 * 60_000);
 
 		// Negative values fall through to default (30 min)
 		const neg = resolveRunConfig("Developer", { max_duration_minutes: -5 }, {});
-		expect(neg.deadlineMs).toBe(MIN_DEADLINE_MS);
+		expect(neg.deadlineMs).toBe(30 * 60_000);
 
 		// Zero falls through to default
 		const zero = resolveRunConfig("Developer", { max_duration_minutes: 0 }, {});
-		expect(zero.deadlineMs).toBe(MIN_DEADLINE_MS);
+		expect(zero.deadlineMs).toBe(30 * 60_000);
 	});
 
-	it("env.SAGES_PI_AGENT_BUDGET_MS as fallback for deadlineMs (clamped to envelope)", async () => {
-		const { resolveRunConfig, MIN_DEADLINE_MS } = await import(
-			"../src/run-controller.js"
-		);
-		// 7 min < MIN → clamped to floor
+	it("env.SAGES_PI_AGENT_BUDGET_MS as fallback for deadlineMs (NO clamp — pass-through)", async () => {
+		const { resolveRunConfig } = await import("../src/run-controller.js");
+		// 7 min used to be clamped to floor; now passes through.
 		const env = { SAGES_PI_AGENT_BUDGET_MS: String(7 * 60_000) };
 		const cfg = resolveRunConfig("Developer", {}, env);
-		expect(cfg.deadlineMs).toBe(MIN_DEADLINE_MS);
+		expect(cfg.deadlineMs).toBe(7 * 60_000);
 	});
 
-	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS overrides per-type deadlineMs (clamped)", async () => {
-		const { resolveRunConfig, MIN_DEADLINE_MS } = await import(
-			"../src/run-controller.js"
-		);
+	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS overrides per-type deadlineMs (NO clamp)", async () => {
+		const { resolveRunConfig } = await import("../src/run-controller.js");
 		const env = {
 			SAGES_PI_AGENT_BUDGET_MS: String(7 * 60_000),
 			SAGES_PI_AGENT_DEVELOPER_BUDGET_MS: String(3 * 60_000),
 		};
 		const cfg = resolveRunConfig("Developer", {}, env);
-		// Both values are below MIN → both clamp to floor; per-type wins by
-		// the floor value (same value), so we only assert the floor.
-		expect(cfg.deadlineMs).toBe(MIN_DEADLINE_MS);
+		// Per-type wins; value is 3 min, NO floor applied.
+		expect(cfg.deadlineMs).toBe(3 * 60_000);
 	});
 
 	it("env.SAGES_PI_AGENT_<TYPE>_BUDGET_MS in envelope is respected", async () => {
@@ -213,7 +215,7 @@ describe("run-controller: resolveRunConfig", () => {
 			SAGES_PI_AGENT_DEVELOPER_BUDGET_MS: String(60 * 60_000),
 		};
 		const cfg = resolveRunConfig("Developer", {}, env);
-		expect(cfg.deadlineMs).toBe(60 * 60_000); // per-type wins within envelope
+		expect(cfg.deadlineMs).toBe(60 * 60_000); // per-type wins; 60 min within envelope
 	});
 
 	it("bucketTimeoutsMs is always DEFAULT_BUCKET_TIMEOUTS_MS", async () => {

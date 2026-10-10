@@ -608,17 +608,14 @@ describe("developer-prompt: FIRST tool priorities (GC-2026-087 P2)", () => {
 	});
 });
 
-describe("developer-prompt: Boundary Discipline (GC-2026-094 P1)", () => {
-	// GC-2026-094 P1: 3 Developer + 1 Reviewer all triggered max_turns abort
-	// at ~60 tool_uses. Substantive output (commits / audit-{task_id}.md)
-	// landed on disk, but the YAML verdict block in the final assistant
-	// message was lost. We bake "max_turns survival" discipline into the
-	// prompt so future agents:
-	//   1. order work by durability (commit-then-cleanup),
-	//   2. write the verdict to a durable file AS the work completes
-	//      (not only at the end), and
-	//   3. stop opening new work when the soft-limit steer fires.
-	// The prose may evolve; the four invariants below pin the contract.
+describe("developer-prompt: Tool-Use Recording (GC-2026-subagent-recording-no-budget)", () => {
+	// GC-2026-subagent-recording-no-budget replaces GC-2026-094 P1's
+	// 'Boundary Discipline' section. The previous section taught
+	// agents to commit-then-cleanup before a max_turns hard-abort;
+	// budget enforcement is gone, so the new contract is
+	// "no turn or time limit; trust git + the verdict-{task_id}.md
+	// fallback; the orchestrator may abort manually if it observes
+	// runaway behavior in the log."
 
 	function sectionIndex(name: string): number {
 		const re = new RegExp(`^##\\s+.*${name}.*$`, "m");
@@ -626,53 +623,58 @@ describe("developer-prompt: Boundary Discipline (GC-2026-094 P1)", () => {
 		return m?.index ?? -1;
 	}
 
-	it("declares a 'Boundary Discipline' section header", () => {
+	it("declares a 'Tool-Use Recording' section header", () => {
 		// The section header must be a `## ...` line so it parses as
 		// a real section, not a passing mention.
-		expect(DEVELOPER_PROMPT).toMatch(/^##\s+.*Boundary Discipline.*$/m);
+		expect(DEVELOPER_PROMPT).toMatch(/^##\s+.*Tool-Use Recording.*$/m);
 	});
 
-	it("names the durable verdict path (.pi/orchestrator/verdict-{task_id}.md)", () => {
-		// The whole point of the section: write the YAML verdict to a
-		// file path the orchestrator can read even when the final
-		// assistant message is truncated by max_turns.
-		expect(DEVELOPER_PROMPT).toContain(".pi/orchestrator/verdict-{task_id}.md");
+	it("promises no turn or time limit on the run", () => {
+		// The new contract: there is no enforcement. Agents run
+		// until they finish, get parent-aborted, or the user
+		// manually intervenes.
+		expect(DEVELOPER_PROMPT).toMatch(/\*\*no\s+turn\s+or\s+time\s+limit/);
 	});
 
-	it("pins the commit-then-cleanup ordering rule", () => {
-		// The durability ordering must be stated explicitly. Either
-		// the literal "commit-then-cleanup" or the equivalent "commit
-		// before cleanup" phrasing is acceptable — the rule must
-		// appear in prose, not just be implied by structure.
-		expect(DEVELOPER_PROMPT).toMatch(
-			/commit-then-cleanup|commit.*before.*cleanup|core commit/i,
+	it("names the JSONL log path so agents know what to expect", () => {
+		expect(DEVELOPER_PROMPT).toContain(
+			".pi/orchestrator/metrics/subagent-tool-usage.jsonl",
 		);
 	});
 
-	it("'Boundary Discipline' sits AFTER 'Checkpoint Protocol' and BEFORE 'Final Verdict'", () => {
-		// Positioning is part of the contract: the section is the
-		// bridge from the checkpoint/commit discipline into the final
-		// verdict — its prose references both and therefore must
-		// appear between them.
+	it("names the durable verdict path (.pi/orchestrator/verdict-{task_id}.md)", () => {
+		// The verdict file is still useful for normal end-of-run
+		// verdict emission, even without the previous turn-cap
+		// durability framing. The orchestrator's parser reads this
+		// file when the final assistant message is truncated for
+		// any reason (transport timeout, parent abort, model API
+		// hiccup, etc.).
+		expect(DEVELOPER_PROMPT).toContain(".pi/orchestrator/verdict-{task_id}.md");
+	});
+
+	it("'Tool-Use Recording' sits AFTER 'Checkpoint Protocol' and BEFORE 'Final Verdict'", () => {
+		// Positioning is part of the contract: the recording
+		// section bridges the checkpoint/commit discipline into
+		// the final verdict — its prose references both.
 		const checkpointIdx = sectionIndex("Checkpoint Protocol");
-		const boundaryIdx = sectionIndex("Boundary Discipline");
+		const recordingIdx = sectionIndex("Tool-Use Recording");
 		const verdictIdx = sectionIndex("Final Verdict");
 		expect(
 			checkpointIdx,
 			"'Checkpoint Protocol' must exist",
 		).toBeGreaterThanOrEqual(0);
 		expect(
-			boundaryIdx,
-			"'Boundary Discipline' must exist",
+			recordingIdx,
+			"'Tool-Use Recording' must exist",
 		).toBeGreaterThanOrEqual(0);
 		expect(verdictIdx, "'Final Verdict' must exist").toBeGreaterThanOrEqual(0);
 		expect(
-			boundaryIdx,
-			"'Boundary Discipline' must come AFTER 'Checkpoint Protocol'",
+			recordingIdx,
+			"'Tool-Use Recording' must come AFTER 'Checkpoint Protocol'",
 		).toBeGreaterThan(checkpointIdx);
 		expect(
-			boundaryIdx,
-			"'Boundary Discipline' must come BEFORE 'Final Verdict'",
+			recordingIdx,
+			"'Tool-Use Recording' must come BEFORE 'Final Verdict'",
 		).toBeLessThan(verdictIdx);
 	});
 });
