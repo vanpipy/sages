@@ -26,9 +26,9 @@
  * compiler.
  */
 
-import { describe, expect, it, beforeEach } from "bun:test";
-import { TaskStore } from "../src/task-store.js";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { isFeedableTask } from "../src/task-feeder.js";
+import { TaskStore } from "../src/task-store.js";
 
 describe("TaskStore.create does NOT auto-stamp agentType=Planner (GC-2026-122 — inverted from GC-2026-121)", () => {
   let store: TaskStore;
@@ -43,12 +43,15 @@ describe("TaskStore.create does NOT auto-stamp agentType=Planner (GC-2026-122 �
     expect(task.metadata.agentType).toBeUndefined();
   });
 
-  it("isFeedableTask returns false for the default intent task (no dispatcher)", () => {
+  it("isFeedableTask returns TRUE for the default intent task (dispatcher = IntentPump)", () => {
+    // GC-2026-main-agent-proactive-intent-pump replaces the GC-2026-122
+    // "no consumer" state. The default user task (no agentType) is now
+    // kind=intent and IS feedable — but routed to the IntentPump via
+    // the spawn router in `task-feeder.ts:registerTaskFeeder`, NOT to a
+    // subagent. The pump injects a "Consume intent #N" user message
+    // into the main session.
     const task = store.create("research X", "Investigate topic X.");
-    // No auto-stamp → isFeedableTask sees no agentType → returns false.
-    // The intent sits in the store until the main LLM handles it via
-    // the before_agent_start reminder.
-    expect(isFeedableTask(task)).toBe(false);
+    expect(isFeedableTask(task)).toBe(true);
   });
 
   it("does NOT override an explicit user-supplied agentType on intent tasks", () => {

@@ -27,12 +27,12 @@
  * actually consumes.
  */
 
-import { describe, expect, it, beforeEach } from "bun:test";
-import { TaskStore } from "../src/task-store.js";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  composeIntentReminder,
   applyIntentReminderToSystemPrompt,
+  composeIntentReminder,
 } from "../src/intent-reminder.js";
+import { TaskStore } from "../src/task-store.js";
 
 describe("composeIntentReminder (GC-2026-continuous-intent-reminder)", () => {
   let store: TaskStore;

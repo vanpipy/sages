@@ -1,36 +1,36 @@
 /**
- * intent-not-feedable.test.ts — RED tests asserting that an intent task
- * without an explicit `agentType` is NOT feedable to the unified
- * task-feeder (GC-2026-122).
+ * intent-not-feedable.test.ts — GC-2026-main-agent-proactive-intent-pump
  *
- * GC-2026-121 follow-up made `isFeedableTask` return true for any
- * `kind: "intent"` task (even without agentType) so the feeder would
- * default-spawn a Planner. After GC-2026-122 the auto-spawn is gone,
- * so the predicate is tightened: a task is feedable iff it has an
- * explicit `agentType` (the only path the feeder should dispatch).
+ * Inverts the GC-2026-122 assertions: `kind=intent` (default user task,
+ * no agentType) IS feedable to the IntentPump. Tasks with no `kind` and
+ * no `agentType` are still NOT feedable (truly unmapped). Tasks with
+ * `kind=actionable` and no agentType are also NOT feedable (actionable
+ * requires an explicit dispatcher).
  *
- * The intent task stays in the store as data; the before_agent_start
- * reminder surfaces it to the main LLM.
+ * The feeder's spawn router inside `maybeAutoSpawn` decides whether to
+ * dispatch to IntentPump (kind=intent) or to a subagent (agentType).
+ * `isFeedableTask` only answers the binary "is this dispatcher-eligible"
+ * question.
  */
 
-import { describe, expect, it, beforeEach } from "bun:test";
-import { TaskStore } from "../src/task-store.js";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { isFeedableTask } from "../src/task-feeder.js";
+import { TaskStore } from "../src/task-store.js";
 
-describe("isFeedableTask — intent without agentType is NOT feedable (GC-2026-122)", () => {
+describe("isFeedableTask — kind=intent IS feedable (GC-2026-main-agent-proactive-intent-pump)", () => {
   let store: TaskStore;
 
   beforeEach(() => {
     store = new TaskStore();
   });
 
-  it("kind=intent (default user task) is NOT feedable", () => {
+  it("kind=intent (default user task, no agentType) IS feedable → IntentPump", () => {
     const task = store.create("research X", "Investigate topic X deeply.");
     expect(task.metadata.kind).toBe("intent");
-    expect(isFeedableTask(task)).toBe(false);
+    expect(isFeedableTask(task)).toBe(true);
   });
 
-  it("kind=intent with explicit agentType IS feedable (caller override)", () => {
+  it("kind=intent with explicit agentType IS feedable — caller override (subagent path)", () => {
     const task = store.create("investigate X", "Investigate X.", undefined, {
       created_by: "user",
       kind: "intent",
@@ -57,13 +57,23 @@ describe("isFeedableTask — intent without agentType is NOT feedable (GC-2026-1
     expect(isFeedableTask(task)).toBe(true);
   });
 
-  it("task with no kind and no agentType is NOT feedable", () => {
-    const task = store.create("misc", "details");
-    expect(task.metadata.kind).toBe("intent");
+  it("task with no kind and no agentType is NOT feedable (truly unmapped)", () => {
+    // A caller that explicitly passes neither kind nor agentType has
+    // no dispatcher. inferKind stamps kind=intent for created_by=user
+    // when nothing is supplied, so the public API never produces a
+    // "no kind + no agentType" task. This case is only reachable via
+    // hand-edited files / a forced created_by="orchestrator" path.
+    // We exercise the orchestrator path here: created_by=orchestrator
+    // → kind=step (inferred), but no agentType → NOT feedable.
+    const task = store.create("misc", "details", undefined, {
+      created_by: "orchestrator",
+      // no kind, no agentType
+    });
+    expect(task.metadata.kind).toBe("step");
     expect(isFeedableTask(task)).toBe(false);
   });
 
-  it("kind=actionable with no agentType is NOT feedable (no dispatcher to feed)", () => {
+  it("kind=actionable with no agentType is NOT feedable (no dispatcher)", () => {
     const task = store.create("actionable without agent", "Details.", undefined, {
       created_by: "user",
       kind: "actionable",
