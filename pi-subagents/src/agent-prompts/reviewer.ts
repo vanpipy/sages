@@ -39,9 +39,8 @@
  */
 
 import { CHECKPOINT_PROTOCOL_SECTION } from "./_sections/checkpoint-protocol.js";
-import { BOUNDARY_DISCIPLINE_SECTION } from "./_sections/boundary-discipline.js";
+import { RECORDING_NOTICE_SECTION } from "./_sections/recording-notice.js";
 import { BASH_TIMEOUT_SECTION } from "./_sections/bash-timeout.js";
-import { EXPLORATION_BUDGET_SECTION } from "./_sections/exploration-budget.js";
 import { UNCERTAINTY_THRESHOLD_SECTION } from "./_sections/uncertainty-threshold.js";
 import { COMMIT_CONVENTIONS_SECTION } from "./_sections/commit-conventions.js";
 import { FINAL_VERDICT_REVIEWER_SECTION } from "./_sections/final-verdict-reviewer.js";
@@ -120,11 +119,9 @@ PASS criteria: relevant docs are updated, OR the change is purely internal and d
 
 ${CHECKPOINT_PROTOCOL_SECTION}
 
-${EXPLORATION_BUDGET_SECTION}
+${RECORDING_NOTICE_SECTION}
 
 ${UNCERTAINTY_THRESHOLD_SECTION}
-
-${BOUNDARY_DISCIPLINE_SECTION}
 
 ${BASH_TIMEOUT_SECTION}
 

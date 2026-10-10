@@ -28,7 +28,7 @@
  */
 
 import { COMMIT_DISCIPLINE_SECTION } from "./_sections/commit-discipline.js";
-import { BOUNDARY_DISCIPLINE_SECTION } from "./_sections/boundary-discipline.js";
+import { RECORDING_NOTICE_SECTION } from "./_sections/recording-notice.js";
 import { FINAL_VERDICT_DEVELOPER_SECTION } from "./_sections/final-verdict-developer.js";
 import { WORKSPACE_PROTOCOL_SECTION } from "./_workspace-protocol.js";
 
@@ -122,7 +122,7 @@ typecheck. Do NOT explore.
 
 ${COMMIT_DISCIPLINE_SECTION}
 
-${BOUNDARY_DISCIPLINE_SECTION}
+${RECORDING_NOTICE_SECTION}
 
 ## 🚫 Anti-patterns
 
