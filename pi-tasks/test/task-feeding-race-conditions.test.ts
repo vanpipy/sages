@@ -17,10 +17,16 @@
  *     pending tasks whose lastError starts with the unavailability
  *     marker, re-spawning each.
  *
+ * GC-2026-main-agent-proactive-intent-pump: tests in this file pass an
+ * explicit `agentType: "Developer"` on every TaskCreate so the task
+ * takes the SUBAGENT path (and exercises the subagent-availability
+ * race) rather than the IntentPump path (which doesn't depend on
+ * subagents:ready at all).
+ *
  * Run in cycles (N=10 by default) to catch intermittent failures.
  */
 
-import { describe, expect, it, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import initExtension from "../src/index.js";
 import { flush, installSubagentsMock, mockCtx, mockPi } from "./helpers/mock-pi.js";
 import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
@@ -43,6 +49,7 @@ describe("task feeding race conditions (GC-2026-fix-pending-spawn-after-ready)",
     const create = await mock.executeTool("TaskCreate", {
       subject: "Pending intent",
       description: "Created before subagents is ready.",
+      agentType: "Developer",
     });
 
     const taskId = create.content[0].text.match(/Task #(\d+)/)![1];
@@ -63,6 +70,7 @@ describe("task feeding race conditions (GC-2026-fix-pending-spawn-after-ready)",
       const create = await mock.executeTool("TaskCreate", {
         subject: `scenario-B-${cycle}`,
         description: `Cycle ${cycle}: spawn will fail initially, retry sweep picks it up.`,
+        agentType: "Developer",
       });
       const taskId = create.content[0].text.match(/Task #(\d+)/)![1];
 
@@ -81,7 +89,7 @@ describe("task feeding race conditions (GC-2026-fix-pending-spawn-after-ready)",
       // Verify the retry sweep kicked in.
       expect(rpc.spawned.length).toBeGreaterThanOrEqual(1);
       const spawn = rpc.spawned[rpc.spawned.length - 1];
-      expect(spawn.type).toBe("Planner");
+      expect(spawn.type).toBe("Developer");
 
       // Drive completion and verify the task is consumed.
       rpc.complete(spawn.id, "Planner succeeded on retry");
@@ -104,6 +112,7 @@ describe("task feeding race conditions (GC-2026-fix-pending-spawn-after-ready)",
       await mock.executeTool("TaskCreate", {
         subject: `pending-${i}`,
         description: `Pending task ${i} before subagents is ready.`,
+        agentType: "Developer",
       });
     }
 
@@ -162,12 +171,13 @@ describe("task feeding race conditions (GC-2026-fix-pending-spawn-after-ready)",
       const create = await mock.executeTool("TaskCreate", {
         subject: `happy-${cycle}`,
         description: `Cycle ${cycle}: subagents available from boot.`,
+        agentType: "Developer",
       });
       const taskId = create.content[0].text.match(/Task #(\d+)/)![1];
 
       await flush();
       expect(rpc.spawned.length).toBe(1);
-      expect(rpc.spawned[0].type).toBe("Planner");
+      expect(rpc.spawned[0].type).toBe("Developer");
 
       const inProgress = await mock.executeTool("TaskGet", { taskId });
       expect(inProgress.content[0].text).toMatch(/Status: in_progress/);

@@ -601,9 +601,14 @@ describe("Completion listener", () => {
   });
 
   it("ignores events for unknown agent IDs", async () => {
+    // GC-2026-main-agent-proactive-intent-pump: pass agentType=Developer
+    // so the task takes the subagent path (not the IntentPump path) —
+    // this test is about subagents:completed / subagents:failed event
+    // handling, which only matters for the subagent path.
     await mock.executeTool("TaskCreate", {
       subject: "Unrelated",
       description: "Desc",
+      agentType: "Developer",
     });
 
     // Should not throw or modify anything.
@@ -1282,21 +1287,25 @@ describe("TaskUpdate + TaskOutput race (GC-2026-115)", () => {
   });
 
   it("TaskUpdate with new agentType awaits the spawn (no race with followup TaskOutput)", async () => {
-    // 1. Create a task — Planner auto-spawns, but we mark it pending
-    // and clear agentType to simulate the pre-GC-2026-121 manual path.
-    // GC-2026-121: store.create infers agentType=Planner; the original
-    // "create without agentType" path is no longer available. We
-    // simulate it via TaskUpdate (clear agentType, reset to pending).
+    // 1. Create a task — explicitly set agentType=Developer (NOT
+    // kind=intent) so the task takes the SUBAGENT path. The test is
+    // about the race between TaskUpdate's spawn and a followup
+    // TaskOutput; that race only applies to the subagent path.
+    // GC-2026-main-agent-proactive-intent-pump removed the Planner
+    // auto-stamp (GC-2026-122) and now routes kind=intent through the
+    // IntentPump (this GC), so the "Planner auto-spawn, then clear
+    // agentType" setup no longer reaches the subagent path.
     await mock.executeTool("TaskCreate", {
       subject: "Manual task",
       description: "Add agentType later",
+      agentType: "Developer",
     });
     await mock.executeTool("TaskUpdate", {
       taskId: "1",
       metadata: { agentType: null },
     });
     await mock.executeTool("TaskUpdate", { taskId: "1", status: "pending" });
-    expect(rpc.spawned).toHaveLength(1); // Planner spawned during create
+    expect(rpc.spawned).toHaveLength(1); // Developer spawned during create
     rpc.spawned.length = 0; // reset for the actual test
 
     // 2. Update the task to add agentType. This MUST await the spawn so

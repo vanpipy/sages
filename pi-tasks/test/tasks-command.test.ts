@@ -76,7 +76,17 @@ async function runTasks(script: Answer[], seed: (mock: ReturnType<typeof mockPi>
 }
 
 const create = (subject: string) => async (mock: ReturnType<typeof mockPi>) => {
-  await mock.executeTool("TaskCreate", { subject, description: "d" });
+  // GC-2026-main-agent-proactive-intent-pump: pass explicit agentType
+  // so the task goes through the subagent path (which is unavailable in
+  // this test, leaving the task in pending with lastError) — that's the
+  // state the /tasks UI glyphs in this file are testing. Without the
+  // agentType, the IntentPump would take the task straight to
+  // in_progress and the pending-glyph assertions would all flip.
+  await mock.executeTool("TaskCreate", {
+    subject,
+    description: "d",
+    agentType: "Developer",
+  });
 };
 
 describe("/tasks main menu", () => {
