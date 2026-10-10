@@ -1,5 +1,14 @@
 # `pi-orchestrator` — Deep Dive
 
+> **⚠️ This document describes the architecture as it existed pre-GC-2026-deprecate-workflow-run-docs.**
+> The `workflow_run` tool, the `workflow-handler.ts` / `workflow-graph.ts` modules, the
+> `workflow:start` / `workflow:phase-complete` event channels, the
+> `verify:workflow-meta-invariant` gate, the `workflow_run_goal_id` metadata, and the
+> `MergerAdvisor`-dispatched-by-`workflow_run`-Merge-phase pairing are all being removed across
+> GC-2026-deprecate-workflow-run-docs (announce) → GC-2 (production code removal) → GC-3
+> (test cleanup). This document will be rewritten in GC-2 alongside the production code
+> removal. Until then it remains a historical reference.
+
 > **What this is.** A consolidated architecture + worked-example + GC timeline
 > for `@sages/pi-orchestrator`, written after a full read of every orchestrator
 > source file plus the `pi-tasks` machinery the orchestrator depends on.

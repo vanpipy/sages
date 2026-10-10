@@ -1,6 +1,13 @@
 /**
  * _fix.ts — DEVELOPER_FIX_PROMPT (canonical built-in).
  *
+ * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed.
+ * The Fix subagent itself is unchanged — it's still dispatched on
+ * `verdict === "NEEDS_WORK"` (or the CLEAN empty-commit path), just via raw
+ * `TaskCreate` + `agentType: "Fix"` instead of `workflow_run`'s dynamic cascade.
+ * Body reference to "dispatched by workflow_run" is kept in GC-1; GC-2 will
+ * rephrase to "dispatched by the orchestrator after a NEEDS_WORK verdict".
+ *
  * GC-2026-prompt-parser-contract-cleanup: the Fix task previously inherited the
  * full DEVELOPER_PROMPT (408 lines) which included TDD discipline, design process,
  * scope self-check, etc. — none of which apply to "address findings[] from the

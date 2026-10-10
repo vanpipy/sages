@@ -1,6 +1,15 @@
 /**
  * merger-advisor.ts — Canonical MERGER_ADVISOR_PROMPT (built-in).
  *
+ * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed.
+ * The MergerAdvisor subagent itself is unchanged — it still writes the
+ * `merge-recommendation.md` and never auto-merges. The dispatch path changes:
+ * instead of `workflow_run` auto-dispatching the Merge phase, the orchestrator
+ * main agent dispatches `MergerAdvisor` (via `TaskCreate` + `agentType:
+ * "MergerAdvisor"`, or `Agent({ subagent_type: "MergerAdvisor" })`) after the
+ * last Reviewer verdict is CLEAN. GC-2 will rewrite the body of this prompt to
+ * reflect the new dispatcher. GC-1 only adds this header comment.
+ *
  * Single-workspace advisory merge for workflow_run's Merge phase. Reads the
  * Reviewer's evidence trail, verifies the source branch exists, and writes a
  * human-runnable merge recommendation to `.pi/orchestrator/merge-recommendation.md`.

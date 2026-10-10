@@ -1,6 +1,12 @@
 /**
  * fix-advisor.ts — Canonical FIX_ADVISOR_PROMPT (built-in).
  *
+ * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed.
+ * The FixAdvisor subagent itself is unchanged — the
+ * `fix-advisor-{task_id}.md` verdict format + VERIFIED/INCOMPLETE semantics
+ * are a subagent prompt feature, not a workflow_run feature. GC-2 will rephrase
+ * the body to drop the "workflow_run dispatches you" framing.
+ *
  * GC-2026-advisor-pairs: the verify-phase advisor. Paired with the
  * primary Fix. Runs AFTER the primary Fix finishes, reads the
  * primary's commit chain + the originating Reviewer's findings[],

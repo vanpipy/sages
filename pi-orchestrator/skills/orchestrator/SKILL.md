@@ -3,6 +3,32 @@ name: orchestrator
 description: Orchestrate multi-task workflows via workflow_run (canonical pipeline), decompose_task (linear chain from a user intent), or pi-tasks TaskCreate × N (escape hatch). Coordinates Developer / Reviewer / Fix / MergerAdvisor subagents; pi-tasks drives the cascade. Owns goal_contract_create + workflow_run + decompose_task + 4 subagent-control tools.
 ---
 
+> **⚠️ `workflow_run` is being removed (GC-2026-deprecate-workflow-run-docs).**
+>
+> The `workflow_run` tool has failed the 10s watchdog on every recent GC (100% failure rate across
+> GC-2026-118, -119, -120, -121, -122, -continuous-intent-reminder) because the
+> `pi-tasks` + `pi-subagents` extensions are not registered in the active session.
+> It is being removed in 3 sequential GCs:
+>
+> - **GC-2026-deprecate-workflow-run-docs (this GC)** — announce-only: doc banners + subagent prompt
+>   deprecation comments + delete the workflow_run-specific e2e files.
+> - **GC-2 (next)** — production code removal: 5 files deleted, 12 files modified, 8 subagent
+>   prompts rewritten, catalog + install.sh + tsconfig updated, `verify:workflow-meta-invariant`
+>   gate removed.
+> - **GC-3 (last)** — test cleanup: 7 test files deleted, 6 test files modified.
+>
+> **Migration path for callers of `workflow_run`** (effective immediately):
+> - For linear user-intent chains → use `decompose_task({ user_task_id, specs })` (already covered
+>   by GC-2026-task-feeding-and-decomposition + GC-2026-continuous-intent-reminder).
+> - For production code changes that need a review gate → write `TaskCreate` × N +
+>   `TaskExecute` directly with `agentType: "Developer"` / `"Reviewer"` / `"Fix"` / `"MergerAdvisor"`,
+>   wire `blockedBy` / `blocks` edges to materialize the same Implement → Review ⇆ Fix → Merge
+>   shape. The Reviewer subagent's 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` /
+>   `NEEDS_CLARIFICATION`) is unchanged — the verdict is a subagent prompt feature, not a
+>   workflow_run feature.
+> - For `MergerAdvisor` after a successful goal → dispatch via `Agent({ subagent_type: "MergerAdvisor" })`
+>   or `TaskCreate({ agentType: "MergerAdvisor" })` after the last Reviewer verdict is `CLEAN`.
+
 # Orchestrator — Workflow Coordinator
 
 ## Design intent (read this first)

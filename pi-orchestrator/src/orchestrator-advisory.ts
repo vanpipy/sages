@@ -395,6 +395,10 @@ export function familyOfTool(toolName: string): ToolFamily {
 	// GC-2026-097 M3a: workflow_run is also an orchestrator tool (added
 	// in GC-2026-workflow-run). The four DAG/audit/dispatch/reminder
 	// tools were already removed by GC-2026-orchestrator-simplify.
+	// GC-2026-deprecate-workflow-run-docs: workflow_run is being removed
+	// (100% failure rate on the 10s watchdog across the last 6 GCs). The
+	// tool classification below stays in this GC so the advisory family
+	// remains defined; GC-2 will drop the workflow_run branch.
 	if (toolName === "goal_contract_create" || toolName === "workflow_run") {
 		return "orchestrator";
 	}

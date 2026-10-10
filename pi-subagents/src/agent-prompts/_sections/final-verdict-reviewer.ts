@@ -1,6 +1,13 @@
 /**
  * final-verdict-reviewer.ts — Canonical Reviewer Final Verdict section.
  *
+ * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed.
+ * The 4-state verdict schema (CLEAN / NEEDS_WORK / NEEDS_REDESIGN /
+ * NEEDS_CLARIFICATION) + scope_check / anti_goal_check are a subagent prompt
+ * feature, not a workflow_run feature. No body change in GC-1; GC-2 will check
+ * the parser (pi-tasks/src/verdict-parser.ts) doesn't depend on workflow_run
+ * paths.
+ *
  * Extracted from `reviewer.ts:151-180`. Distinct from `final-verdict-developer.ts`
  * because the schemas are different:
  *   - Reviewer emits **verdict** (4-state set after GC-2026-verdict-states-and-dynamic-cascade).

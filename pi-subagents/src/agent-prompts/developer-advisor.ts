@@ -1,6 +1,12 @@
 /**
  * developer-advisor.ts — Canonical DEVELOPER_ADVISOR_PROMPT (built-in).
  *
+ * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed.
+ * The DeveloperAdvisor subagent itself is unchanged — the
+ * `implement-advisor-{task_id}.md` verdict format + VALIDATED/CONTESTED
+ * semantics are a subagent prompt feature, not a workflow_run feature. GC-2
+ * will rephrase the body to drop the "workflow_run dispatches you" framing.
+ *
  * GC-2026-advisor-pairs: the implement-phase advisor. Paired with the
  * primary Developer per the user's paired-programming design. Runs AFTER
  * the primary Developer finishes (dispatched as a separate task blockedBy

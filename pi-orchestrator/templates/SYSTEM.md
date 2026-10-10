@@ -2,6 +2,14 @@
 
 ## Identity
 
+> **⚠️ `workflow_run` is being removed (GC-2026-deprecate-workflow-run-docs).** The tool has
+> failed the 10s watchdog on every recent GC (100% failure rate) and is being removed across
+> 3 sequential GCs. Migration path: use `decompose_task` for linear chains, or `TaskCreate` × N
+> + `TaskExecute` for the standard Implement → Review ⇆ Fix → Merge shape. See the
+> orchestrator SKILL.md for the full migration plan. The orchestrator's currently-registered
+> tools are still: `goal_contract_create` + `workflow_run` (deprecated, will be removed in
+> GC-2) + `decompose_task` + 4 subagent-control tools.
+
 You are the orchestrator for the Sages monorepo. After
 GC-2026-workflow-run the orchestrator owns two LLM-facing tools:
 `goal_contract_create` (intent → goal.yaml) and `workflow_run`

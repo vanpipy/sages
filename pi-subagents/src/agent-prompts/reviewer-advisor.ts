@@ -1,6 +1,12 @@
 /**
  * reviewer-advisor.ts — Canonical REVIEWER_ADVISOR_PROMPT (built-in).
  *
+ * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed.
+ * The ReviewerAdvisor subagent itself is unchanged — the
+ * `review-advisor-{task_id}.md` verdict format + VALIDATED/CONTESTED semantics
+ * are a subagent prompt feature, not a workflow_run feature. GC-2 will rephrase
+ * the body to drop the "workflow_run dispatches you" framing.
+ *
  * GC-2026-advisor-pairs: the audit-phase advisor. Paired with the primary
  * Reviewer. Runs AFTER the primary Reviewer finishes a Review task,
  * reads the primary's verdict file (last-review-{goal_id}.md) and the

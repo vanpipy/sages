@@ -31,7 +31,13 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
    ≤2-item workflows. **Every Sages package subtree (every `pi-*/`)
    is production code** — no carve-outs (GC-2026-029).
 
-## The orchestrator tool surface
+## > **⚠️ `workflow_run` is being removed (GC-2026-deprecate-workflow-run-docs).** The tool has
+> failed the 10s watchdog on every recent GC and is being removed across 3 sequential GCs.
+> Migration path: `decompose_task` for linear chains, or `TaskCreate` × N + `TaskExecute` for
+> the canonical Implement → Review ⇆ Fix → Merge shape. See
+> `pi-orchestrator/skills/orchestrator/SKILL.md` for the full migration plan.
+
+The orchestrator tool surface
 
 After GC-2026-orchestrator-simplify the orchestrator owns exactly
 two LLM-facing tools for the workflow_run path. GC-2026-task-feeding-and-decomposition

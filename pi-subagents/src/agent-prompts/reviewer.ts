@@ -1,6 +1,16 @@
 /**
  * reviewer-prompt.ts — Canonical system prompt for the built-in `Reviewer` agent.
  *
+ * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed
+ * (100% failure rate on the 10s watchdog). The Reviewer subagent itself is
+ * unchanged — the 5-dim review + 4-state verdict (CLEAN / NEEDS_WORK /
+ * NEEDS_REDESIGN / NEEDS_CLARIFICATION) is a subagent prompt feature, not a
+ * workflow_run feature. Production review is still done by this agent; only the
+ * dispatch mechanism changes (raw `TaskCreate` + `agentType: "Reviewer"` instead
+ * of `workflow_run`-driven). The "workflow_run invokes you" narrative in the
+ * body is kept in GC-1; GC-2 will replace it with "the orchestrator dispatches
+ * you via TaskCreate after the prior Implement/Fix task completes".
+ *
  * Replaces the historical `auditor` agent (renamed in GC-2026-rename-auditor).
  * The `auditor` name carried "SC verification" semantics from the deleted DAG
  * workflow. With DAG gone (GC-2026-orchestrator-simplify), the role is now
