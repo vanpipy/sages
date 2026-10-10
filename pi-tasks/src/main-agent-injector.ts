@@ -1,5 +1,6 @@
 /**
- * main-agent-injector.ts — GC-2026-main-agent-proactive-intent-pump
+ * main-agent-injector.ts — GC-2026-main-agent-proactive-intent-pump +
+ *   GC-2026-intent-default-to-decompose
  *
  * Replaces GC-2026-122's soft system-prompt reminder with a queued,
  * observable pump that injects a "Consume intent #N" user message into
@@ -29,6 +30,32 @@
  * `AgentManager.spawn`. The intent-reminder.ts path stays as a fallback
  * for orphaned intents (the pump exposes `isOwned(taskId)` so the
  * reminder can skip pump-owned tasks).
+ *
+ * ── GC-2026-intent-default-to-decompose ──
+ *
+ * Empirically observed (current chat session and the
+ * GC-2026-continuous-intent-reminder postmortem): when the pump
+ * injects a user-role prompt for a task like "了解一下当前仓库",
+ * the LLM frequently picks option #2 (chat-answer + completed) for
+ * what is plainly a multi-step task. The system-prompt reminder is
+ * verified wired (see `intent-reminder-wiring.test.ts`), but the
+ * user-role injection eclipses it.
+ *
+ * Mitigation: bias the user-role prompt itself toward `decompose_task`
+ * for tasks that look exploration-shaped:
+ *   - A) `detectExplorationIntent(subject)` + a `Routing:` block that
+ *        default-recommends `decompose_task` and shifts the burden of
+ *        justification onto the chat-answer path.
+ *   - B) Empty-description + non-trivial subject (length > 5) gets a
+ *        callout lifted above the numbered `Decide ONE` so the LLM
+ *        cannot miss it.
+ *   - D) `composeSpecSuggestion(task)` returns 3–5 suggested specs for
+ *        known intent patterns (了解/explore/learn, 重构/refactor,
+ *        修复/fix/bug) so the LLM does not have to invent them.
+ *
+ * These three additions make the prompt strongly favor the correct
+ * branch for the most common failure mode without removing the
+ * `Decide ONE` framing (LLM autonomy is preserved).
  */
 
 import type { TaskStore } from "./task-store.js";
@@ -58,34 +85,233 @@ export interface MainAgentTransport {
 
 const MAX_DESCRIPTION_CHARS = 200;
 
+// ── GC-2026-intent-default-to-decompose / A: exploration-verb lexicon ──
+
+/**
+ * Chinese verbs that signal "this task is an exploration/refactor/
+ * investigation that should almost always be decomposed". Matched
+ * case-sensitively (Chinese has no case).
+ */
+export const EXPLORATION_VERBS_CN: readonly string[] = [
+  "了解",
+  "学习",
+  "梳理",
+  "分析",
+  "总结",
+  "调研",
+  "排查",
+  "重构",
+  "修复",
+  "调查",
+  "掌握",
+];
+
+/**
+ * English verbs with the same semantics. Matched case-insensitively
+ * (the matcher lowercases both sides).
+ */
+export const EXPLORATION_VERBS_EN: readonly string[] = [
+  "explore",
+  "learn",
+  "understand",
+  "investigate",
+  "analyze",
+  "summarize",
+  "review",
+  "audit",
+  "refactor",
+  "rewrite",
+  "restructure",
+  "redesign",
+  "build",
+  "implement",
+  "fix",
+  "repair",
+  "patch",
+  "debug",
+];
+
+/**
+ * True iff `subject` contains any verb from the exploration lexicon.
+ * The matching is case-insensitive for English and byte-exact for
+ * Chinese (no case folding). An empty subject returns false.
+ */
+export function detectExplorationIntent(subject: string): boolean {
+  if (!subject) return false;
+  const lower = subject.toLowerCase();
+  for (const v of EXPLORATION_VERBS_CN) {
+    if (subject.includes(v)) return true;
+  }
+  for (const v of EXPLORATION_VERBS_EN) {
+    if (lower.includes(v.toLowerCase())) return true;
+  }
+  return false;
+}
+
+// ── GC-2026-intent-default-to-decompose / D: spec templates ──
+
+interface SpecTemplate {
+  /** Verbs (CN + EN) that match this template. */
+  verbs: readonly string[];
+  /** Suggested spec entries; the LLM may adjust, drop, or extend. */
+  specs: readonly string[];
+}
+
+/**
+ * Per-verb-tribe spec templates. Each template is selected when the
+ * subject contains any of its `verbs`. Ordered by specificity — the
+ * first match wins. New patterns can be added without touching
+ * `composeConsumptionPrompt`.
+ */
+const SPEC_TEMPLATES: readonly SpecTemplate[] = [
+  {
+    verbs: ["了解", "学习", "explore", "learn", "understand", "梳理", "调研"],
+    specs: [
+      "Read top-level docs (README, AGENTS.md, package.json) and write 1-line summary per file",
+      "Map package layout (workspaces, key entry points, public surface)",
+      "Explore key code paths (extension hooks, AgentManager, TaskStore) and capture the call graph",
+      "Synthesize a structured overview for the user (what it is, how it works, where to dive next)",
+    ],
+  },
+  {
+    verbs: ["重构", "refactor", "rewrite", "restructure", "redesign"],
+    specs: [
+      "Identify refactor scope: which files / symbols / contracts are in scope and which are frozen",
+      "Write characterization tests for current behavior (capture the contract before changing it)",
+      "Apply the transformation incrementally, keeping tests green at every step",
+      "Verify behavior unchanged via the full test suite + manual smoke of the user-facing surface",
+    ],
+  },
+  {
+    verbs: ["修复", "fix", "bug", "debug", "repair", "patch"],
+    specs: [
+      "Reproduce the bug with a minimal failing test (RED)",
+      "Locate the root cause in source \u2014 call-graph + diff bisect if needed",
+      "Implement the fix (GREEN) and confirm the failing test now passes",
+      "Run the full regression suite + add a regression test that pins the fix",
+    ],
+  },
+  {
+    verbs: ["分析", "analyze", "审计", "audit", "review", "排查"],
+    specs: [
+      "State the analysis question + success criteria up front",
+      "Gather evidence (grep, read, instrument) and record findings",
+      "Cross-check findings against scope.include / scope.exclude and anti_goals",
+      "Write a structured report with verdict, evidence, and recommended next steps",
+    ],
+  },
+];
+
+/**
+ * Return 3\u20135 suggested specs for the given task based on its subject.
+ * Returns an empty array when no template matches \u2014 the LLM is then
+ * free to invent specs from scratch (the same behavior as before
+ * GC-2026-intent-default-to-decompose).
+ */
+export function composeSpecSuggestion(task: Task): string[] {
+  if (!task.subject) return [];
+  const subjectLower = task.subject.toLowerCase();
+  for (const tmpl of SPEC_TEMPLATES) {
+    for (const v of tmpl.verbs) {
+      const vLower = v.toLowerCase();
+      // For ASCII verbs use case-insensitive substring match; for
+      // non-ASCII (Chinese) use the original-cased substring so we
+      // don't accidentally match a Latin-shaped string.
+      const isAscii = /^[\x00-\x7f]+$/.test(v);
+      if (isAscii ? subjectLower.includes(vLower) : task.subject.includes(v)) {
+        return [...tmpl.specs];
+      }
+    }
+  }
+  return [];
+}
+
+// ── GC-2026-intent-default-to-decompose / B: empty-description default ──
+
+/**
+ * True when the description is empty/whitespace AND the subject is
+ * long enough to be a non-trivial task (>5 chars). Both clauses are
+ * required: a one-word subject like "hi" with empty description is
+ * genuinely trivial and should not trigger the default-decompose
+ * callout (that would over-decompose noise).
+ */
+function isEmptyDescriptionNonTrivialSubject(task: Task): boolean {
+  return task.description.trim() === "" && task.subject.length > 5;
+}
+
 /**
  * Compose the user-role prompt that the pump injects when an intent
- * needs consumption. Pure function — no side effects, no store reads.
+ * needs consumption. Pure function \u2014 no side effects, no store reads.
  *
  * Stable text shape; the LLM is expected to match on `task #N` and
  * `taskId="N"` substrings to call back into TaskUpdate / decompose_task.
+ *
+ * GC-2026-intent-default-to-decompose: the prompt biases toward
+ * `decompose_task` via three additive blocks (none of them remove the
+ * existing `Decide ONE` framing):
+ *   - `Routing:` block when the subject matches the exploration
+ *     lexicon \u2014 default-recommends `decompose_task`, shifts burden
+ *     of justification onto chat-answer.
+ *   - `Empty description` callout lifted above `Decide ONE` when
+ *     description is empty AND subject is non-trivial \u2014 same
+ *     default + a noise signal the LLM cannot miss.
+ *   - `Suggested specs:` block when `composeSpecSuggestion` returns
+ *     entries \u2014 lowers the cost of decomposing by handing the LLM
+ *     a ready-made spec list.
  */
 export function composeConsumptionPrompt(task: Task): string {
   const desc =
     task.description.length > MAX_DESCRIPTION_CHARS
       ? `${task.description.slice(0, MAX_DESCRIPTION_CHARS - 3)}...`
       : task.description;
-  return [
+  const lines: string[] = [
     `[IntentPump] Pending intent task #${task.id}:`,
     ``,
     `Subject: ${task.subject}`,
     `Description: ${desc}`,
     ``,
+  ];
+
+  // A) Routing block \u2014 default-recommend decompose for exploration-shaped subjects.
+  if (detectExplorationIntent(task.subject)) {
+    lines.push(
+      `Routing: Subject matches an exploration verb (\u4e86\u89e3/\u5b66\u4e60/explore/refactor/...) \u2192 default to \`decompose_task\`.`,
+      `If you pick chat-answer anyway, you owe the user an explicit justification for skipping decomposition.`,
+      ``,
+    );
+  }
+
+  // B) Empty-description callout \u2014 lifted above Decide ONE so the LLM cannot miss it.
+  if (isEmptyDescriptionNonTrivialSubject(task)) {
+    lines.push(
+      `\u26a0\ufe0f  Empty description + non-trivial subject (length > 5) \u2192 default to \`decompose_task\`.`,
+      `The subject alone suggests multiple steps; chat-answering would under-serve the user.`,
+      ``,
+    );
+  }
+
+  // D) Spec suggestion \u2014 when a known pattern matches, hand the LLM ready-made specs.
+  const specs = composeSpecSuggestion(task);
+  if (specs.length > 0) {
+    lines.push(`Suggested specs (${specs.length}) \u2014 adjust / drop / extend as needed:`);
+    for (const spec of specs) {
+      lines.push(`  - ${spec}`);
+    }
+    lines.push(``);
+  }
+
+  lines.push(
     `Decide ONE:`,
-    `1. decompose_task(user_task_id="${task.id}", specs=[...])   — multi-step`,
-    `2. chat-answer + TaskUpdate(taskId="${task.id}", status="completed")   — trivial`,
+    `1. decompose_task(user_task_id="${task.id}", specs=[...])   \u2014 multi-step`,
+    `2. chat-answer + TaskUpdate(taskId="${task.id}", status="completed")   \u2014 trivial`,
     ``,
     `If blocked on missing input, emit:`,
     `  TaskUpdate(taskId="${task.id}", status="pending",`,
     `    metadata={blocked_reason:"..."})`,
     `The pump will see the blocked_reason and stay parked until the`,
     `next enqueue. Do NOT leave pending silently.`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 // ── IntentPump ───────────────────────────────────────────────────────

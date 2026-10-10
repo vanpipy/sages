@@ -16,6 +16,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
   composeConsumptionPrompt,
+  composeSpecSuggestion,
+  detectExplorationIntent,
   IntentPump,
   type MainAgentTransport,
 } from "../src/main-agent-injector.js";
@@ -100,6 +102,136 @@ describe("composeConsumptionPrompt", () => {
     const before = JSON.stringify(task);
     composeConsumptionPrompt(task);
     expect(JSON.stringify(task)).toBe(before);
+  });
+
+  // ── GC-2026-intent-default-to-decompose / A: heuristic routing ──
+  it("A: includes a Routing: block when subject contains an exploration verb", () => {
+    const text = composeConsumptionPrompt(makeTask({ id: "1", subject: "了解一下当前仓库" }));
+    expect(text).toContain("Routing:");
+  });
+
+  it("A: default-recommends decompose_task when subject matches an exploration verb", () => {
+    const text = composeConsumptionPrompt(makeTask({ id: "1", subject: "了解一下当前仓库" }));
+    // The Routing block must explicitly recommend decompose_task for exploration subjects.
+    // Find the Routing block and assert the recommendation is there.
+    const routingIdx = text.indexOf("Routing:");
+    const decideIdx = text.indexOf("Decide ONE");
+    expect(routingIdx).toBeGreaterThan(-1);
+    expect(decideIdx).toBeGreaterThan(-1);
+    const routingBlock = text.slice(routingIdx, decideIdx);
+    expect(routingBlock).toContain("decompose_task");
+  });
+
+  it("A: requires justification for chat-answer when subject matches exploration verb", () => {
+    const text = composeConsumptionPrompt(makeTask({ id: "1", subject: "explore the api" }));
+    const routingIdx = text.indexOf("Routing:");
+    const decideIdx = text.indexOf("Decide ONE");
+    expect(routingIdx).toBeGreaterThan(-1);
+    const routingBlock = text.slice(routingIdx, decideIdx === -1 ? text.length : decideIdx);
+    expect(routingBlock.toLowerCase()).toMatch(/justif/);
+  });
+
+  it("A: does NOT include Routing block for trivial subjects without exploration verb", () => {
+    const text = composeConsumptionPrompt(makeTask({ id: "1", subject: "print hello world" }));
+    expect(text).not.toContain("Routing:");
+  });
+
+  // ── GC-2026-intent-default-to-decompose / B: empty-description default ──
+  it("B: includes Empty-description callout when description is empty AND subject length > 5", () => {
+    const text = composeConsumptionPrompt(makeTask({
+      id: "1",
+      subject: "了解一下当前仓库",
+      description: "",
+    }));
+    expect(text).toMatch(/empty description/i);
+  });
+
+  it("B: lifts Empty-description callout ABOVE the Decide ONE line", () => {
+    const text = composeConsumptionPrompt(makeTask({
+      id: "1",
+      subject: "了解一下当前仓库",
+      description: "",
+    }));
+    const calloutIdx = text.toLowerCase().indexOf("empty description");
+    const decideIdx = text.indexOf("Decide ONE");
+    expect(calloutIdx).toBeGreaterThan(-1);
+    expect(decideIdx).toBeGreaterThan(-1);
+    expect(calloutIdx).toBeLessThan(decideIdx);
+  });
+
+  it("B: does NOT include Empty-description callout when description is non-empty", () => {
+    const text = composeConsumptionPrompt(makeTask({
+      id: "1",
+      subject: "了解一下当前仓库",
+      description: "Read README and write summary",
+    }));
+    expect(text).not.toMatch(/empty description/i);
+  });
+
+  it("B: does NOT include Empty-description callout when subject is short", () => {
+    const text = composeConsumptionPrompt(makeTask({
+      id: "1",
+      subject: "hi",
+      description: "",
+    }));
+    expect(text).not.toMatch(/empty description/i);
+  });
+
+  // ── GC-2026-intent-default-to-decompose / D: spec templates ──
+  it("D: composeSpecSuggestion returns learn/explore specs", () => {
+    const specs = composeSpecSuggestion(makeTask({ id: "1", subject: "了解一下当前仓库" }));
+    expect(Array.isArray(specs)).toBe(true);
+    expect(specs.length).toBeGreaterThanOrEqual(3);
+    // The template should cover read-docs / map-package / explore-entries / synthesize.
+    const joined = specs.join(" ").toLowerCase();
+    expect(joined).toMatch(/read|doc/);
+    expect(joined).toMatch(/map|package|layout/);
+  });
+
+  it("D: composeSpecSuggestion returns refactor specs", () => {
+    const specs = composeSpecSuggestion(makeTask({ id: "1", subject: "重构 login flow" }));
+    expect(specs.length).toBeGreaterThanOrEqual(3);
+    const joined = specs.join(" ").toLowerCase();
+    expect(joined).toMatch(/test/);
+  });
+
+  it("D: composeSpecSuggestion returns fix specs", () => {
+    const specs = composeSpecSuggestion(makeTask({ id: "1", subject: "修复登录 bug" }));
+    expect(specs.length).toBeGreaterThanOrEqual(3);
+    const joined = specs.join(" ").toLowerCase();
+    expect(joined).toMatch(/reproduc/);
+  });
+
+  it("D: composeSpecSuggestion returns empty array for unknown pattern", () => {
+    const specs = composeSpecSuggestion(makeTask({ id: "1", subject: "???!!!" }));
+    expect(specs).toEqual([]);
+  });
+
+  it("D: composeConsumptionPrompt includes Suggested specs: line when template matches", () => {
+    const text = composeConsumptionPrompt(makeTask({ id: "1", subject: "了解一下当前仓库" }));
+    expect(text).toMatch(/suggested specs/i);
+  });
+});
+
+// ── GC-2026-intent-default-to-decompose / A: detectExplorationIntent ──
+
+describe("detectExplorationIntent (GC-2026-intent-default-to-decompose / A)", () => {
+  it("matches Chinese exploration verbs", () => {
+    expect(detectExplorationIntent("了解当前仓库")).toBe(true);
+    expect(detectExplorationIntent("学习 pi 源码")).toBe(true);
+    expect(detectExplorationIntent("梳理项目结构")).toBe(true);
+  });
+
+  it("matches English exploration verbs (case-insensitive)", () => {
+    expect(detectExplorationIntent("explore the api")).toBe(true);
+    expect(detectExplorationIntent("Refactor login")).toBe(true);
+    expect(detectExplorationIntent("AUDIT the codebase")).toBe(true);
+  });
+
+  it("does NOT match non-exploration subjects", () => {
+    expect(detectExplorationIntent("print hello")).toBe(false);
+    expect(detectExplorationIntent("???!!!")).toBe(false);
+    expect(detectExplorationIntent("")).toBe(false);
   });
 });
 
