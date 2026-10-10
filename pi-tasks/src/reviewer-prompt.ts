@@ -1,14 +1,14 @@
 /**
  * reviewer-prompt.ts — Unified Reviewer prompt template.
  *
- * GC-2026-task-feeding-and-decomposition (AC2): extracted from
- * `pi-tasks/src/workflow-graph.ts:reviewDescription` so workflow Reviewers
- * and decompose-chain Reviewers share one template.
+ * GC-2026-task-feeding-and-decomposition (AC2): the template is the single
+ * source for Reviewer prompt text. It is parameterized by a discriminated
+ * union context. After GC-2026-remove-workflow-run-prod the `kind:
+ * "workflow"` variant is no longer used (the workflow-graph Reviewer path
+ * was removed along with workflow_run). The `kind: "decompose"` variant
+ * is still used by R1 of decomposed chains.
  *
  * The template is parameterized by a discriminated union context:
- *   - `{ kind: "workflow", goal, iteration, worktreePath, branch,
- *      priorReviewSummary? }`: workflow-graph Reviewer (every Review_i
- *      in workflow_run's static graph).
  *   - `{ kind: "decompose", chainSubjects, chainDescriptions, branch,
  *      parentSubject, parentDescription, parentAgentType, parentIteration,
  *      userTaskRef? }`: decompose-chain R1 (the single Reviewer attached

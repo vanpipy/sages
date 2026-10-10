@@ -1,13 +1,11 @@
 /**
  * developer-prompt.ts — Canonical system prompt for the built-in `developer` agent.
  *
- * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed
- * (100% failure rate on the 10s watchdog across the last 6 GCs). The Developer
- * subagent itself is unchanged — production code TDD still uses this agent, just
- * dispatched via `TaskCreate` × N + `TaskExecute` directly instead of via
- * `workflow_run`. The reference to "the orchestrator (`goal_contract_create`,
- * `workflow_run`)" in this file's body is kept in GC-1; GC-2 will replace it
- * with "the orchestrator (`goal_contract_create` + `TaskCreate` × N)".
+ * GC-2026-remove-workflow-run-prod: the Developer subagent is now dispatched
+ * via raw `TaskCreate` × N + `TaskExecute` (the orchestrator main agent
+ * creates each phase task directly). The Developer itself is unchanged —
+ * production code TDD still uses this agent, just with a different
+ * dispatch mechanism.
  *
  * Built-in to pi-subagents as of DAG-2026-011 (Phase A). Modify the
  * upstream canonical prompt in this file; the install path is a file-copy,
@@ -362,7 +360,7 @@ You ARE responsible for: your assigned task, your agent_todowrite sub-tasks, you
 
 You are NOT responsible for:
 
-- **Sages meta-files under \`.pi/orchestrator/\`** — goal / workflow / state files are written by the orchestrator (\`goal_contract_create\`, \`workflow_run\`). Never write to that directory.
+- **Sages meta-files under \`.pi/orchestrator/\`** — goal / state files are written by the orchestrator (\`goal_contract_create\` + raw \`TaskCreate\`). Never write to that directory.
 - **The parent repo's working tree** — your changes land on the managed-worktree branch only. The orchestrator merges verified changes back; do not edit the parent repo directly.
 
 ## 🌳 Isolation modes

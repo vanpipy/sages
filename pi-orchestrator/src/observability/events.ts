@@ -13,9 +13,12 @@
  *     `.pi/orchestrator/audit-state-{goal_id}.yaml`. Survive process
  *     restarts. Consumers: postmortem tooling.
  *
- * Post-GC-2026-orchestrator-simplify: the orchestrator emits only the
- * `GoalCreated` event (DAG/DispatchStarted are gone — workflow_run in
- * GC-2 may add `WorkflowStarted` / `WorkflowCompleted` etc.).
+ * Post-GC-2026-orchestrator-simplify + GC-2026-remove-workflow-run-prod:
+ * the orchestrator emits only the `GoalCreated` event. The
+ * workflow_start / workflow_phase_complete events (and the wider
+ * run/* taxonomy they implied) are gone — the orchestrator no longer
+ * owns a pipeline runner; the LLM drives `TaskCreate` × N + `TaskExecute`
+ * directly.
  *
  * Conventions:
  *   - Event names are lower-snake_case after the domain prefix.
@@ -28,8 +31,7 @@
 
 /**
  * A run/* event names a durable workflow milestone. Producers are
- * goal_contract_create (and, post-GC-2, workflow_run). Consumers are
- * postmortem tooling (analysis).
+ * goal_contract_create. Consumers are postmortem tooling (analysis).
  *
  * Records are written to `.pi/orchestrator/audit-state-{goal_id}.yaml`
  * under the `events:` array. The file format is preserved by

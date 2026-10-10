@@ -31,11 +31,5 @@
  *     file.
  */
 
-/** Planning layer emits (workflow_run tool); pi-tasks's subscribeWorkflow listens. */
-export const WORKFLOW_START = "workflow:start";
-
-/** Pi-tasks's subscribeWorkflow emits on each phase; planning layer listens. */
-export const WORKFLOW_PHASE_COMPLETE = "workflow:phase-complete";
-
 /** Orchestrator-side decompose_task emits an RPC request; pi-tasks listens + replies on `${TASKS_RPC_DECOMPOSE_MATERIALIZE}:reply:${requestId}`. */
 export const TASKS_RPC_DECOMPOSE_MATERIALIZE = "tasks:rpc:decompose-materialize";

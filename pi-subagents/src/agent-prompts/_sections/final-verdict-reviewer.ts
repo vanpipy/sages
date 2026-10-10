@@ -1,12 +1,15 @@
 /**
  * final-verdict-reviewer.ts — Canonical Reviewer Final Verdict section.
  *
- * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed.
- * The 4-state verdict schema (CLEAN / NEEDS_WORK / NEEDS_REDESIGN /
- * NEEDS_CLARIFICATION) + scope_check / anti_goal_check are a subagent prompt
- * feature, not a workflow_run feature. No body change in GC-1; GC-2 will check
- * the parser (pi-tasks/src/verdict-parser.ts) doesn't depend on workflow_run
- * paths.
+ * GC-2026-remove-workflow-run-prod: the 4-state verdict schema
+ * (CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION) +
+ * scope_check / anti_goal_check are a subagent prompt feature, not a
+ * workflow_run feature. The orchestrator parses this verdict from
+ * the LLM's final message (or the durable backup file at
+ * `.pi/orchestrator/verdict-{task_id}.md`) and decides the next phase:
+ * CLEAN → proceed to next phase; NEEDS_WORK → spawn Fix;
+ * NEEDS_REDESIGN → spawn new Implement; NEEDS_CLARIFICATION → pause
+ * for the user.
  *
  * Extracted from `reviewer.ts:151-180`. Distinct from `final-verdict-developer.ts`
  * because the schemas are different:
@@ -39,7 +42,7 @@ export const FINAL_VERDICT_REVIEWER_SECTION = `
 ## Final Verdict (Pinned Output Shape — GC-2026-verdict-states-and-dynamic-cascade 4-state set)
 
 Your final message MUST contain a single YAML fenced block at the end.
-workflow_run parses it mechanically to decide the next pipeline phase.
+The orchestrator parses it mechanically to decide the next pipeline phase.
 A missing or malformed block fails the pipeline (no clear verdict = NEEDS_WORK).
 
 \`\`\`yaml
@@ -79,7 +82,7 @@ If you can't classify (e.g. first iteration, or no Prior review summary was inje
 
 The pipeline dispatches differently per verdict state:
 
-- **CLEAN**: every dimension passes; findings list is empty. workflow_run proceeds to Merge.
+- **CLEAN**: every dimension passes; findings list is empty. The orchestrator proceeds to the next phase (typically MergerAdvisor).
 - **NEEDS_WORK**: 1+ findings that a Fix can address with local code changes (missing test, lint, wrong signature, etc.). workflow_run spawns Fix → Review loop (capped by max_fix_iterations, default 3).
 - **NEEDS_REDESIGN**: the implementation is fundamentally wrong in a way Fix can't patch (architecture mismatch, wrong abstraction, scope/goal interpretation error). workflow_run spawns a NEW Implement (capped by max_redesigns, default 1). **Findings list MUST be non-empty** with concrete reasons — vague "needs redesign" without specifics fails the parser downgrades.
 - **NEEDS_CLARIFICATION**: the goal contract is ambiguous and you cannot proceed without user input. **open_question is REQUIRED** with a specific, answerable question. workflow_run pauses the workflow and surfaces the question to the orchestrator main agent.

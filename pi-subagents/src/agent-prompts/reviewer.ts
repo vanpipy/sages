@@ -1,15 +1,12 @@
 /**
  * reviewer-prompt.ts — Canonical system prompt for the built-in `Reviewer` agent.
  *
- * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed
- * (100% failure rate on the 10s watchdog). The Reviewer subagent itself is
- * unchanged — the 5-dim review + 4-state verdict (CLEAN / NEEDS_WORK /
- * NEEDS_REDESIGN / NEEDS_CLARIFICATION) is a subagent prompt feature, not a
- * workflow_run feature. Production review is still done by this agent; only the
- * dispatch mechanism changes (raw `TaskCreate` + `agentType: "Reviewer"` instead
- * of `workflow_run`-driven). The "workflow_run invokes you" narrative in the
- * body is kept in GC-1; GC-2 will replace it with "the orchestrator dispatches
- * you via TaskCreate after the prior Implement/Fix task completes".
+ * GC-2026-remove-workflow-run-prod: the orchestrator dispatches the Reviewer
+ * via raw `TaskCreate` + `agentType: "Reviewer"` after the prior Implement
+ * or Fix task completes. The 5-dim review + 4-state verdict
+ * (CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION) is unchanged —
+ * it has always been a subagent-prompt feature, independent of any
+ * pipeline runner.
  *
  * Replaces the historical `auditor` agent (renamed in GC-2026-rename-auditor).
  * The `auditor` name carried "SC verification" semantics from the deleted DAG
@@ -33,9 +30,9 @@
  * (see `pi-tasks/src/verdict-parser.ts`).
  *
  * The role's final assistant message MUST contain a single fenced YAML block
- * conforming to the FINAL_VERDICT_REVIEWER_SECTION schema. workflow_run
+ * conforming to the FINAL_VERDICT_REVIEWER_SECTION schema. The orchestrator
  * parses this block to decide the pipeline's next phase
- * (proceed to Merge vs spawn Fix vs mark blocked).
+ * (proceed to next phase vs spawn Fix vs mark blocked).
  *
  * Built-in to pi-subagents. Modify this file as the upstream canonical prompt;
  * the install path is a file-copy (post GC-2026-073), not a template substitution.
@@ -51,7 +48,7 @@ import { FINAL_VERDICT_REVIEWER_SECTION } from "./_sections/final-verdict-review
 
 export const REVIEWER_PROMPT = `# Reviewer Agent (canonical built-in)
 
-You are the **Reviewer** agent. workflow_run invokes you after a Developer (Implement) task completes, and again after each Fix iteration. Your job is to evaluate the implementation against the goal contract across 5 dimensions and emit a verdict (CLEAN or NEEDS_WORK).
+You are the **Reviewer** agent. The orchestrator dispatches you via TaskCreate + agentType=Reviewer after a Developer (Implement) task completes, and again after each Fix iteration. Your job is to evaluate the implementation against the goal contract across 5 dimensions and emit a verdict (CLEAN or NEEDS_WORK).
 
 ## Role boundary
 
@@ -62,7 +59,7 @@ You are the **Reviewer** agent. workflow_run invokes you after a Developer (Impl
 
 ## Inputs (in the task description)
 
-workflow_run will give you:
+The orchestrator (the LLM that created your TaskCreate call) will give you:
 - **Goal**: title, rationale, scope (include/exclude), anti_goals, done_definition
 - **Implementation**: worktree path, branch name, task report path
 - **Phase**: implement | fix (which iteration)
@@ -158,5 +155,5 @@ ${FINAL_VERDICT_REVIEWER_SECTION}
 11. Write \`.pi/orchestrator/last-review-{goal_id}.md\` with full evidence
 12. Emit the YAML verdict block in your final message
 
-If you need more context, read more files. If you find issues, list them as findings with evidence. Do NOT skip the evidence — workflow_run uses findings to spawn Fix.
+If you need more context, read more files. If you find issues, list them as findings with evidence. Do NOT skip the evidence — the orchestrator uses findings to spawn the next Fix task.
 `;

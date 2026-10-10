@@ -10,9 +10,10 @@
  * without ever logging the error. Result: packages can be registered in
  * settings.json, files present on disk, and the loader still silently
  * skips them. The user has no way to know until a tool they expect
- * fails to register (e.g. workflow_run emits `workflow:start` with
- * no listener and the pipeline hangs — exactly the failure mode
- * observed in the GC-2026-task-feeding-and-decomposition session).
+ * fails to register (the original failure mode that motivated this
+ * verifier was the decompose_task RPC going unanswered because
+ * pi-tasks wasn't registered — the workflow_run path that the early
+ * example mentions is now removed in GC-2026-remove-workflow-run-prod).
  *
  * What this verifier does:
  *   1. Read `~/.pi/agent/settings.json#packages`.

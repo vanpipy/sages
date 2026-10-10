@@ -1,16 +1,18 @@
 /**
  * @sages/pi-orchestrator — package entry point (default pi extension).
  *
- * After GC-2026-orchestrator-simplify + GC-2026-workflow-run +
- * GC-2026-path-B-swap the orchestrator owns exactly TWO tools
- * (`goal_contract_create` + `workflow_run`). The DAG, dispatch,
- * audit, and reminder tools were removed. workflow_run is a thin
- * event-driven shim that emits `workflow:start` to pi-tasks and waits
- * for `workflow:phase-complete`; pi-tasks's `subscribeWorkflow` does
- * the cascade.
+ * After GC-2026-orchestrator-simplify + GC-2026-task-feeding-and-decomposition +
+ * GC-2026-remove-workflow-run-prod the orchestrator owns exactly TWO tools
+ * (`goal_contract_create` + `decompose_task`). The DAG, dispatch, audit,
+ * reminder, and workflow_run tools were removed. The Reviewer / Fix / Merge
+ * subagents are still available — they are dispatched via `TaskCreate` +
+ * `agentType: "Reviewer"` / `"Fix"` / `"MergerAdvisor"` directly; the
+ * 4-state verdict (CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION)
+ * is a subagent-prompt feature, not a workflow-runner feature.
  *
  * Registers:
  *   - `goal_contract_create` — the intent + lock contract tool
+ *   - `decompose_task` — linear chain from a user intent (GC-2026-task-feeding-and-decomposition)
  *   - Orchestrator advisory pipeline (post-tool detector + nudges)
  *
  * GC-2026-boundary-subagent-control: the subagent control tools
@@ -40,7 +42,6 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registerGoalContractTool } from "./goal-contract.js";
-import { registerWorkflowRunTool } from "./workflow-run-tool.js";
 import { registerDecomposeTaskTool } from "./decompose-task.js";
 import {
 	installOrchestratorAdvisoryHandlers,
@@ -51,16 +52,16 @@ import { validateFailureCatalogOnBoot } from "./failure-catalog.js";
 
 /**
  * Tools always exposed to the main agent when the orchestrator
- * extension is loaded. After GC-2026-workflow-run this is two entries:
- * `goal_contract_create` (intent → goal.yaml) and `workflow_run`
- * (one-shot 4-phase pipeline runner: Implement → Review ⇆ Fix → Merge; Fix is dispatched dynamically on NEEDS_WORK per GC-2026-verdict-states-and-dynamic-cascade). The workflow inside
- * `workflow_run` uses pi-tasks (TaskCreate / TaskExecute / etc.)
- * for live progress visibility — the pi-tasks tools are registered
- * by `@sages/pi-tasks` and exposed via the active toolset.
+ * extension is loaded. After GC-2026-remove-workflow-run-prod this is
+ * two entries: `goal_contract_create` (intent → goal.yaml) and
+ * `decompose_task` (linear chain T1 → T2 → … → TN with one Reviewer
+ * sibling on T1). The 4-phase pipeline (Implement → Review ⇆ Fix →
+ * Merge) is no longer a one-shot runner; build it with raw
+ * `TaskCreate` × N + `TaskExecute` (each task's `agentType` is one of
+ * `"Developer"` / `"Reviewer"` / `"Fix"` / `"MergerAdvisor"`).
  */
 export const ORCHESTRATOR_TOOLS: readonly string[] = [
 	"goal_contract_create",
-	"workflow_run",
 	"decompose_task",
 ];
 
@@ -184,8 +185,6 @@ export function registerOrchestratorTools(
 	runtime?: OrchestratorAdvisoryRuntimeDeps,
 ): void {
 	registerGoalContractTool(pi);
-	// GC-2026-workflow-run: one-shot 4-phase pipeline runner.
-	registerWorkflowRunTool(pi);
 	// GC-2026-task-feeding-and-decomposition (AC3): user-task decomposition
 	// into a linear orchestrator chain.
 	registerDecomposeTaskTool(pi);

@@ -13,7 +13,7 @@
  * GC-2026-089 fixed a `TypeError: Cannot read properties of undefined
  * (reading 'filter')` crash in `pi-coding-agent`'s render-utils by
  * hand-wrapping the orchestrator's tool surface (`goal_contract_create`,
- * `workflow_run`,
+ * `decompose_task`,
  * `subagent_status`, `subagent_steer`, `subagent_abort`,
  * `subagent_resume`) in a try/catch that returned the canonical
  * shape. The wrapper was copy-pasted into 5 source files.

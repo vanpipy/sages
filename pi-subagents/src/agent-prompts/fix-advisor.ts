@@ -1,11 +1,11 @@
 /**
  * fix-advisor.ts — Canonical FIX_ADVISOR_PROMPT (built-in).
  *
- * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed.
- * The FixAdvisor subagent itself is unchanged — the
- * `fix-advisor-{task_id}.md` verdict format + VERIFIED/INCOMPLETE semantics
- * are a subagent prompt feature, not a workflow_run feature. GC-2 will rephrase
- * the body to drop the "workflow_run dispatches you" framing.
+ * GC-2026-remove-workflow-run-prod: the orchestrator dispatches FixAdvisor
+ * via `TaskCreate` + `agentType: "FixAdvisor"` AFTER the primary Fix task
+ * completes. The advisor itself is unchanged — the
+ * `fix-advisor-{task_id}.md` verdict format + VERIFIED/INCOMPLETE
+ * semantics are a subagent prompt feature.
  *
  * GC-2026-advisor-pairs: the verify-phase advisor. Paired with the
  * primary Fix. Runs AFTER the primary Fix finishes, reads the
@@ -30,7 +30,7 @@
 
 export const FIX_ADVISOR_PROMPT = `# Fix (Advisor) — verify-phase audit (canonical built-in)
 
-You are **Fix (Advisor)**, the verify-phase audit pair for the canonical Fix agent. workflow_run dispatches you AFTER the primary Fix task completes. Your job is to verify the primary's commit chain addresses the originating Reviewer's findings — not to apply more changes, not to re-run tests, not to refactor.
+You are **Fix (Advisor)**, the verify-phase audit pair for the canonical Fix agent. The orchestrator dispatches you via TaskCreate + agentType=FixAdvisor AFTER the primary Fix task completes. Your job is to verify the primary's commit chain addresses the originating Reviewer's findings — not to apply more changes, not to re-run tests, not to refactor.
 
 You are running as a **sub-agent** spawned by the orchestrator. Your task prompt is pre-clarified: do **NOT** enter brainstorming mode, do **NOT** ask the user questions. Execute the assigned audit using the discipline below.
 

@@ -2,25 +2,23 @@
  * task-feeder.ts — Unified task feeder (GC-2026-108 + GC-2026-113 + GC-2026-117).
  *
  * Replaces the three parallel cascade listeners that previously split
- * dispatch responsibility across `workflow-handler.ts`, the now-deleted
- * `decompose-cascade.ts` (deleted in GC-2026-117 — its listeners were
- * already unified into this module by GC-2026-113 FU0 Phase 2b; the
- * file itself remained as dead code until 117 cleaned it up), and
- * `pi-tasks/src/index.ts:227` (TaskExecute). Every task dispatch path
- * now flows through this single module:
+ * dispatch responsibility across `workflow-handler.ts` (now deleted in
+ * GC-2026-remove-workflow-run-prod), the now-deleted `decompose-cascade.ts`
+ * (deleted in GC-2026-117), and `pi-tasks/src/index.ts:227` (TaskExecute).
+ * Every task dispatch path now flows through this single module:
  *
- *   - Every producer (workflow_run, decompose_task, /tasks create,
- *     TaskCreate LLM, TaskUpdate, TaskExecute) calls the feeder's
- *     `maybeAutoSpawn(task)` after `store.create` / `store.update`.
+ *   - Every producer (decompose_task, /tasks create, TaskCreate LLM,
+ *     TaskUpdate, TaskExecute) calls the feeder's `maybeAutoSpawn(task)`
+ *     after `store.create` / `store.update`.
  *   - A single `agentTaskMap` covers every dispatch path.
  *   - A single `subagents:completed` / `subagents:failed` listener pair
  *     handles completion + cascade.
- *   - Workflow tasks are skipped in `cascadeSpawn` (handled by
- *     workflow-handler.ts's own cascade loop — GC-2026-115 split).
  *
  * Design doc: `.pi/orchestrator/designs/2026-10-08-user-task-feeder.md`
  * Postmortem: `pi/docs/postmortem/GC-2026-task-feeding-and-decomposition.md`
  *             (D4: source-agnostic dispatch; finally realized)
+ * Postmortem: `pi/docs/postmortem/GC-2026-remove-workflow-run-prod.md`
+ *             (workflow_run removed; feeder is now the single dispatch path)
  */
 
 import type { Task } from "./types.js";
@@ -179,15 +177,6 @@ export function registerTaskFeeder(opts: TaskFeederOptions): TaskFeederHandle {
     for (const t of all) {
       if (t.status !== "pending") continue;
       if (!isFeedableTask(t)) continue;
-      // GC-2026-115: workflow tasks are owned by workflow-handler.ts's
-      // cascade loop, which injects the prior-Review summary BEFORE
-      // spawning. If the feeder spawned workflow tasks too, the
-      // workflow-handler's loop would skip them (status !== "pending")
-      // and the summary would never be injected. The cleanest fix is
-      // to keep the responsibilities separate: feeder cascades
-      // user / decompose tasks; workflow-handler cascades workflow
-      // tasks.
-      if (typeof t.metadata?.workflow_run_goal_id === "string") continue;
       // GC-2026-118 F5: only walk children of the just-completed task.
       // Top-level pending tasks (no blockers) are spawned directly by
       // TaskCreate / TaskUpdate / materializeDecomposeChain via

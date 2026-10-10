@@ -26,7 +26,6 @@ import { TaskStore } from "./task-store.js";
 import { loadGlobalTasksConfig, loadTasksConfig } from "./tasks-config.js";
 import type { Task } from "./types.js";
 import { applyIntentReminderToSystemPrompt } from "./intent-reminder.js";
-import { subscribeWorkflow } from "./workflow-handler.js";
 import { openSettingsMenu } from "./ui/settings-menu.js";
 import { TaskWidget, type UICtx } from "./ui/task-widget.js";
 import {
@@ -48,8 +47,8 @@ function debug(...args: unknown[]) {
 function textResult<T = unknown>(msg: string, details?: T) {
   // `details` flows back through the AgentToolCallOutcome envelope
   // (`ctx.executeTool(...).result.details`). Programmatic callers
-  // (e.g. pi-orchestrator/workflow_run's piTasksCreate) read it
-  // to recover structured task IDs without parsing the text body.
+  // (e.g. pi-orchestrator's other tools) read it to recover structured
+  // task IDs without parsing the text body.
   return { content: [{ type: "text" as const, text: msg }], details: details as any };
 }
 
@@ -285,20 +284,20 @@ export default function (pi: ExtensionAPI) {
 
   // ── Unified task feeder (GC-2026-113 FU0 Phase 2b + GC-2026-117) ──
   // Replaces the three previous cascade listeners (workflow-handler
-  // direct spawn, decompose-cascade cascade [GC-2026-117: module
-  // deleted; the cascade logic is here, not in a dedicated module],
-  // TaskExecute ad-hoc cascade). ONE feeder owns spawn + completion
-  // for ALL task types (workflow / decompose / user / TaskExecute).
+  // direct spawn [GC-2026-remove-workflow-run-prod: module deleted],
+  // decompose-cascade cascade [GC-2026-117: module deleted; the cascade
+  // logic is here, not in a dedicated module], TaskExecute ad-hoc cascade).
+  // ONE feeder owns spawn + completion for ALL task types
+  // (decompose / user / TaskExecute).
   //
   // GC-2026-114 FU3: the `cfg.autoCascade` config key + the related
   // settings-menu toggle are removed entirely (cascade is unconditional).
   // The settings-menu item is gone; tasks-config.ts no longer declares
   // the key.
   //
-  // The feeder's spawn callback dispatches by task metadata:
-  //   - workflow Developer (has `workflow_run_goal_id`): managed
-  //     worktree via { goal_id, task_id, mode: "create" } isolation.
-  //   - everything else: current-workspace isolation.
+  // The feeder's spawn callback dispatches with current-workspace
+  // isolation (managed worktree isolation is now a subagent concern,
+  // configured by the LLM when it creates each task).
   const feeder = registerTaskFeeder({
     store,
     events: pi.events,
@@ -338,28 +337,11 @@ export default function (pi: ExtensionAPI) {
           : task.metadata.kind === "intent"
             ? "Planner"
             : String(task.subject);
-      const goalId = typeof task.metadata.workflow_run_goal_id === "string"
-        ? task.metadata.workflow_run_goal_id
-        : undefined;
 
       const spawnOpts: Record<string, unknown> = {
         description: task.subject,
         isBackground: true,
       };
-      if (type.toLowerCase() === "developer" && goalId) {
-        spawnOpts.isolation = {
-          goal_id: goalId,
-          task_id: String(task.id),
-          mode: "create",
-        };
-      }
-      if (goalId && task.metadata?.phase) {
-        spawnOpts.workflowContext = {
-          goalId,
-          phase: task.metadata.phase,
-          iteration: Number(task.metadata.iteration ?? 0),
-        };
-      }
       // GC-2026-121 AC3: for the Planner agent, the spawn prompt must
       // include the originating user task's subject + description + id
       // so Planner can pass it to `decompose_task` without an extra
@@ -395,45 +377,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ── Workflow subscription (GC-2026-path-B-swap) ───────────────────────
-  // Wire pi-tasks's subscribeWorkflow so planning-layer workflow_run
-  // (which emits "workflow:start") drives the static task graph + cascade.
-  // The subscribeWorkflow handler:
-  //   - on "workflow:start" → buildStaticWorkflowGraph + store.create × N + spawn Implement
-  //   - on "subagents:completed" → mark task complete, parseReviewerVerdict for
-  //     review phases, emit "workflow:phase-complete", cascade-spawn unblocked tasks
-  // spawnSubagent is reused for the agent dispatch — it goes through
-  // subagents:rpc:spawn so pi-subagents handles the actual agent lifecycle.
-  // The handler keeps its own agentToTask map, separate from agentTaskMap
-  // above; the two coexist because subscribeWorkflow's map covers workflow
-  // tasks while agentTaskMap covers ad-hoc TaskExecute tasks.
-  let workflowHandlerUnsub: (() => void) | undefined;
-  // GC-2026-114 FU3: workflow-handler delegates spawn + agentTaskMap
-  // management to the unified task-feeder (registered above as `feeder`).
-  // The workflow handler retains verdict parsing + workflow:phase-complete
-  // emission + onTaskChange callbacks; the actual subagent dispatch +
-  // cascade is the feeder's job.
-  subscribeWorkflow(store, {
-    events: pi.events,
-    feed: {
-      maybeAutoSpawn: (task) => feeder.maybeAutoSpawn(task),
-    },
-    agentTaskMap,
-    // GC-2026-task-widget-link: workflow-handler fires these for the "finished"
-    // and "failed" paths; the wrapper translates to widget calls.
-    onTaskChange: (taskId, status) => {
-      if (status === "finished" || status === "failed" || status === "interrupted") {
-        widget.setActiveTask(taskId, false);
-        widget.update();
-      }
-    },
-  });
-  // Track the unsub so future reloads can detach cleanly (not currently used
-  // — extension factory runs once per session — but kept for symmetry with
-  // other listener registrations).
-  void workflowHandlerUnsub;
-
-  // ── Decompose-materialize RPC (GC-2026-task-feeding-and-decomposition AC3) ──
+    // ── Decompose-materialize RPC (GC-2026-task-feeding-and-decomposition AC3) ──
   // decompose_task (in pi-orchestrator) emits a request on this channel
   // with chain specs; this handler materializes the chain in the TaskStore,
   // spawns T1 (so the cascade can pick up the rest), and replies with chain
@@ -945,7 +889,7 @@ All tasks are created with status \`pending\`.
         description: "Agent type for subagent execution (e.g., 'Developer', 'Explore'). With agentType set, the task is kind=actionable and the unified task-feeder auto-spawns a subagent. Without agentType, the task is kind=intent (planning data) — the assistant must decompose it via decompose_task or claim it via TaskUpdate when starting work.",
       })),
       kind: Type.Optional(Type.Unsafe<"intent" | "actionable">({
-        description: "GC-2026-120 AC1/AC2. Optional override for the inferred kind. Defaults to actionable if agentType is set, otherwise intent. step is reserved for orchestrator-internal tasks (workflow / decompose chain) — pass it only via createOrchestratorTask, not here.",
+          description: "GC-2026-120 AC1/AC2. Optional override for the inferred kind. Defaults to actionable if agentType is set, otherwise intent. step is reserved for orchestrator-internal tasks (decompose chain) — pass it only via createOrchestratorTask, not here.",
       })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
       created_by: Type.Optional(

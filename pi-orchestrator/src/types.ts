@@ -1,14 +1,14 @@
 /**
  * Orchestrator Types
  *
- * After GC-2026-orchestrator-simplify + GC-2026-workflow-run +
- * GC-2026-path-B-swap the orchestrator owns TWO tools
- * (`goal_contract_create`, `workflow_run`) — DAG, dispatch, audit,
- * and reminder tools were removed. The intent contract below is what
- * gets written to disk; workflow_run is a thin event-driven shim that
- * emits `workflow:start` to pi-tasks and waits for `workflow:phase-complete`.
- * For escape-hatch shapes the LLM can drive pi-tasks's
- * TaskCreate × N + TaskExecute directly.
+ * After GC-2026-orchestrator-simplify + GC-2026-task-feeding-and-decomposition +
+ * GC-2026-remove-workflow-run-prod the orchestrator owns TWO tools
+ * (`goal_contract_create`, `decompose_task`) — DAG, dispatch, audit,
+ * reminder, and workflow_run tools were removed. The intent contract below
+ * is what gets written to disk; the canonical 4-phase pipeline (Implement
+ * → Review ⇆ Fix → Merge) is materialized by the LLM as raw
+ * `TaskCreate` × N + `TaskExecute` directly, with `agentType` set to
+ * `"Developer"` / `"Reviewer"` / `"Fix"` / `"MergerAdvisor"` per phase.
  *
  * Storage location: .pi/orchestrator/  (NOT .sages/workspace/ — that
  * directory is reserved for ephemeral session state).

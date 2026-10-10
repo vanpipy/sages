@@ -9,22 +9,16 @@
  * The Reviewer attachment is universal: any orchestrator-created task whose
  * blockedBy contains no orchestrator-created predecessors gets one Reviewer
  * sibling. This unifies:
- *   - workflow-graph.ts static-graph Implement (top-level)
- *   - workflow-handler.ts Fix dispatch (not top-level: blocked by Review)
- *   - workflow-handler.ts Redesign dispatch (top-level: new Implement)
  *   - decompose_task.ts T1 (top-level: blockedBy contains only user_task or empty)
  *   - decompose_task.ts T_i (i>0, not top-level: blockedBy = [T_{i-1}])
+ *   - any future top-level orchestrator task created via this helper
  *
  * Merge is the single exception: it always goes through `createMergeTask`,
  * not this one. Merge is not top-level in any graph (it's downstream of every
- * Review in workflow mode).
+ * Review in a standard 4-phase DAG).
  *
  * `traceUserTaskChain` walks the `user_task_ref` chain back to the originating
  * user task. Used by postmortem + audit.
- *
- * `spawnFirstTopLevelTask` is the RPC bridge for the first spawn after a
- * workflow:start event (workflow-handler) or after decompose_task materializes
- * its chain. Shared by both call sites so the spawn contract stays consistent.
  */
 
 import type { TaskStore } from "./task-store.js";
@@ -166,9 +160,6 @@ export function createOrchestratorTaskWithReview(
       iteration: Number(spec.metadata?.iteration ?? 1),
       ...(reviewerContext.kind === "decompose" && reviewerContext.userTaskRef
         ? { user_task_ref: reviewerContext.userTaskRef }
-        : {}),
-      ...(typeof spec.metadata?.workflow_run_goal_id === "string"
-        ? { workflow_run_goal_id: spec.metadata.workflow_run_goal_id }
         : {}),
     },
   );

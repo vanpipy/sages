@@ -360,7 +360,7 @@ export async function executeDecomposeTaskTool(
 // ── Tool registration ─────────────────────────────────────────────────
 
 export function registerDecomposeTaskTool(pi: unknown): void {
-  // Same `pi: any` workaround as workflow-run-tool.ts: pi-coding-agent's
+  // Same `pi: any` workaround as workflow-run-tool.ts (legacy reference, see GC-2026-remove-workflow-run-prod): pi-coding-agent's
   // ToolDefinition uses AgentToolResult<unknown> internally which is
   // structurally incompatible with our local return shape.
   const piAsAny = pi as unknown as {

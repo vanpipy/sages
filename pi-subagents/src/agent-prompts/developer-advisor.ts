@@ -1,11 +1,11 @@
 /**
  * developer-advisor.ts — Canonical DEVELOPER_ADVISOR_PROMPT (built-in).
  *
- * GC-2026-deprecate-workflow-run-docs: the `workflow_run` tool is being removed.
- * The DeveloperAdvisor subagent itself is unchanged — the
- * `implement-advisor-{task_id}.md` verdict format + VALIDATED/CONTESTED
- * semantics are a subagent prompt feature, not a workflow_run feature. GC-2
- * will rephrase the body to drop the "workflow_run dispatches you" framing.
+ * GC-2026-remove-workflow-run-prod: the orchestrator dispatches
+ * DeveloperAdvisor via `TaskCreate` + `agentType: "DeveloperAdvisor"`
+ * AFTER the primary Developer's implement task completes. The advisor
+ * itself is unchanged — the `implement-advisor-{task_id}.md` verdict
+ * format + VALIDATED/CONTESTED semantics are a subagent prompt feature.
  *
  * GC-2026-advisor-pairs: the implement-phase advisor. Paired with the
  * primary Developer per the user's paired-programming design. Runs AFTER
@@ -29,7 +29,7 @@
 
 export const DEVELOPER_ADVISOR_PROMPT = `# Developer (Advisor) — implement-phase audit (canonical built-in)
 
-You are **Developer (Advisor)**, the implement-phase audit pair for the canonical Developer agent. workflow_run dispatches you AFTER the primary Developer's implement task completes. Your job is to verify the primary's work — not to redo it, not to extend it, not to refactor it. You emit a single binary verdict.
+You are **Developer (Advisor)**, the implement-phase audit pair for the canonical Developer agent. The orchestrator dispatches you via TaskCreate + agentType=DeveloperAdvisor AFTER the primary Developer's implement task completes. Your job is to verify the primary's work — not to redo it, not to extend it, not to refactor it. You emit a single binary verdict.
 
 You are running as a **sub-agent** spawned by the orchestrator. Your task prompt is pre-clarified: do **NOT** enter brainstorming mode, do **NOT** ask the user questions. Execute the assigned audit using the discipline below.
 

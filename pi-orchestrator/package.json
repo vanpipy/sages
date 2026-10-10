@@ -1,7 +1,7 @@
 {
   "name": "@sages/pi-orchestrator",
   "version": "0.1.0",
-  "description": "Sages orchestrator: goal_contract_create + workflow_run (event-driven 4-phase pipeline) + brainstorming. Domain capability package, loaded by pi via standard pi.extensions.",
+  "description": "Sages orchestrator: goal_contract_create + decompose_task + brainstorming. Domain capability package, loaded by pi via standard pi.extensions.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -14,7 +14,6 @@
     "verify:gcdb": "bun run scripts/verify-gcdb.ts",
     "verify:created-by-invariant": "bun run scripts/verify-created-by-invariant.ts",
     "verify:extension-load": "bun run scripts/verify-extension-load.ts",
-    "verify:workflow-meta-invariant": "bun run scripts/verify-workflow-meta-invariant.ts",
     "verify:pi-universe": "bun run scripts/verify-pi-universe.ts",
     "verify:task-source-invariant": "bun run scripts/verify-task-source-invariant.ts",
     "verify:all": "bun run scripts/verify-all.ts",
@@ -24,7 +23,6 @@
     "pi-extension",
     "sages",
     "orchestrator",
-    "workflow",
     "brainstorming"
   ],
   "license": "MIT",

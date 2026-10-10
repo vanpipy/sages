@@ -101,11 +101,6 @@ const VERIFIERS: { id: string; script: string; label: string }[] = [
 		label: "every registered package extension loads via jiti",
 	},
 	{
-		id: "workflow-meta-invariant",
-		script: "verify-workflow-meta-invariant.ts",
-		label: "workflow spec builders stamp workflow_run_goal_id (GC-2026-118 F3)",
-	},
-	{
 		id: "task-source-invariant",
 		script: "verify-task-source-invariant.ts",
 		label: "chain-task create sites in materializeDecomposeChain carry user_task_ref (GC-2026-120 AC8)",
