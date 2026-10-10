@@ -32,9 +32,8 @@ import { WORKSPACE_PROTOCOL_SECTION } from "./_workspace-protocol.js";
 import { COMMIT_DISCIPLINE_SECTION } from "./_sections/commit-discipline.js";
 import { COMMIT_CONVENTIONS_SECTION } from "./_sections/commit-conventions.js";
 import { CHECKPOINT_PROTOCOL_SECTION } from "./_sections/checkpoint-protocol.js";
-import { BOUNDARY_DISCIPLINE_SECTION } from "./_sections/boundary-discipline.js";
+import { RECORDING_NOTICE_SECTION } from "./_sections/recording-notice.js";
 import { BASH_TIMEOUT_SECTION } from "./_sections/bash-timeout.js";
-import { EXPLORATION_BUDGET_SECTION } from "./_sections/exploration-budget.js";
 import { UNCERTAINTY_THRESHOLD_SECTION } from "./_sections/uncertainty-threshold.js";
 import { PREVIOUS_FAILURE_SECTION } from "./_sections/previous-failure.js";
 import { FINAL_VERDICT_DEVELOPER_SECTION } from "./_sections/final-verdict-developer.js";
@@ -387,11 +386,9 @@ ${COMMIT_DISCIPLINE_SECTION}
 
 ${CHECKPOINT_PROTOCOL_SECTION}
 
-${BOUNDARY_DISCIPLINE_SECTION}
+${RECORDING_NOTICE_SECTION}
 
 ${BASH_TIMEOUT_SECTION}
-
-${EXPLORATION_BUDGET_SECTION}
 
 ${UNCERTAINTY_THRESHOLD_SECTION}
 

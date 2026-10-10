@@ -452,17 +452,18 @@ export function resolveDeadlineMs(
 	type: string,
 	overrideMinutes: number | undefined,
 ): number {
-	// GC-2026-subagent-time-only-limits: every resolution path flows through
-	// clampDeadlineMs so out-of-band configs (env vars, legacy defaults)
-	// cannot shrink the deadline below the 30-min floor.
+	// GC-2026-subagent-recording-no-budget: the clamp is REMOVED. The
+	// returned value is metadata — the deadline timer that used to fire
+	// at this value is gone. Callers can set any value; the aggregator
+	// surfaces "agent ran N× nominal" for review.
 	if (overrideMinutes != null && overrideMinutes > 0) {
-		return clampDeadlineMs(Math.round(overrideMinutes * 60 * 1000));
+		return Math.round(overrideMinutes * 60 * 1000);
 	}
 	// Legacy capitalized name not in DEFAULT_PER_TYPE — use the GC-2026-037 table.
 	if (type === "Explore") {
-		return clampDeadlineMs(getSubagentDurationDefault(type));
+		return getSubagentDurationDefault(type);
 	}
-	// Canonical types (Developer, Reviewer, Plan, PlanCompiler, Merger) delegate
+	// Canonical types (Developer, Reviewer, Plan, PlanCompiler) delegate
 	// to resolveRunConfig — single source of truth.
 	return resolveRunConfig(type, {}, process.env).deadlineMs;
 }

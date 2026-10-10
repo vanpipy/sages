@@ -15,9 +15,11 @@
     "verify:created-by-invariant": "bun run scripts/verify-created-by-invariant.ts",
     "verify:extension-load": "bun run scripts/verify-extension-load.ts",
     "verify:pi-universe": "bun run scripts/verify-pi-universe.ts",
-    "verify:task-source-invariant": "bun run scripts/verify-task-source-invariant.ts",
-    "verify:all": "bun run scripts/verify-all.ts",
-    "gen:catalog": "bun run scripts/gen-catalog.ts"
+  		"verify:task-source-invariant": "bun run scripts/verify-task-source-invariant.ts",
+		"verify:recorder": "bun run scripts/verify-recorder.ts",
+		"subagent-usage:summary": "bun run scripts/aggregate-subagent-usage.ts",
+		"verify:all": "bun run scripts/verify-all.ts",
+		"gen:catalog": "bun run scripts/gen-catalog.ts"
   },
   "keywords": [
     "pi-extension",

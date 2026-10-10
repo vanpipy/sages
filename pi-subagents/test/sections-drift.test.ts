@@ -21,8 +21,8 @@ import {
 	BASH_TIMEOUT_SECTION,
 } from "../src/agent-prompts/_sections/bash-timeout.js";
 import {
-	EXPLORATION_BUDGET_SECTION,
-} from "../src/agent-prompts/_sections/exploration-budget.js";
+	RECORDING_NOTICE_SECTION,
+} from "../src/agent-prompts/_sections/recording-notice.js";
 import {
 	UNCERTAINTY_THRESHOLD_SECTION,
 } from "../src/agent-prompts/_sections/uncertainty-threshold.js";
@@ -72,12 +72,16 @@ describe("shared sections: shape", () => {
 		expect(REVIEWER_PROMPT).toContain(BASH_TIMEOUT_SECTION);
 	});
 
-	it("EXPLORATION_BUDGET_SECTION is byte-identical across Developer and Reviewer", () => {
-		expect(typeof EXPLORATION_BUDGET_SECTION).toBe("string");
-		expect(EXPLORATION_BUDGET_SECTION.length).toBeGreaterThan(500);
-		expect(EXPLORATION_BUDGET_SECTION).toContain("Exploration Budget (hard caps on read tools)");
-		expect(DEVELOPER_PROMPT).toContain(EXPLORATION_BUDGET_SECTION);
-		expect(REVIEWER_PROMPT).toContain(EXPLORATION_BUDGET_SECTION);
+	it("RECORDING_NOTICE_SECTION is byte-identical across Developer and Reviewer", () => {
+		// GC-2026-subagent-recording-no-budget replaces EXPLORATION_BUDGET_SECTION
+		// (which was a hard-cap enforcement) with RECORDING_NOTICE_SECTION
+		// (pure-observability notice). Both prompts interpolate the same
+		// section so a future drift is caught here.
+		expect(typeof RECORDING_NOTICE_SECTION).toBe("string");
+		expect(RECORDING_NOTICE_SECTION.length).toBeGreaterThan(200);
+		expect(RECORDING_NOTICE_SECTION).toContain("Tool-Use Recording (observability, no enforcement)");
+		expect(DEVELOPER_PROMPT).toContain(RECORDING_NOTICE_SECTION);
+		expect(REVIEWER_PROMPT).toContain(RECORDING_NOTICE_SECTION);
 	});
 
 	it("UNCERTAINTY_THRESHOLD_SECTION is byte-identical across Developer and Reviewer", () => {
@@ -155,8 +159,14 @@ describe("shared sections: removed unused-void suppression", () => {
 	// this GC the four sections are concatenated into DEVELOPER_PROMPT
 	// for real. The anchor strings below are unique enough that a regression
 	// to void-suppression makes every one of these tests fail.
-	it("DEVELOPER_PROMPT contains the EXPLORATION_BUDGET_SECTION header", () => {
-		extract(DEVELOPER_PROMPT, "## Exploration Budget (hard caps on read tools)");
+	//
+	// GC-2026-subagent-recording-no-budget: EXPLORATION_BUDGET_SECTION is
+	// removed entirely (its enforcement is gone); the slot is filled by
+	// RECORDING_NOTICE_SECTION, which the byte-identity pin above already
+	// covers. The 'removed unused-void suppression' describe block still
+	// exists for the remaining three sections.
+	it("DEVELOPER_PROMPT contains the RECORDING_NOTICE_SECTION header", () => {
+		extract(DEVELOPER_PROMPT, "## Tool-Use Recording (observability, no enforcement)");
 	});
 	it("DEVELOPER_PROMPT contains the UNCERTAINTY_THRESHOLD_SECTION header", () => {
 		extract(DEVELOPER_PROMPT, "## Uncertainty Threshold (ask early, ask once)");

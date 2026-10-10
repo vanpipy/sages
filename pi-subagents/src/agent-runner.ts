@@ -28,13 +28,9 @@ import {
 	getReadOnlyMemoryToolNames,
 	getToolNamesForType,
 } from "./agent-types.js";
-import {
-	BudgetExceededError,
-	BudgetTracker,
-	loadBudgetFromEnv,
-} from "./budget.js";
 import { buildParentContext, extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
+import { emitToolUse } from "./recording.js";
 import { diagnosticForRunResult, notifyOrchestrator, retryBudgetLeftFor, writeDiagnostic } from "./diagnostic.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
@@ -1056,33 +1052,12 @@ export async function runAgent(
 
 	options.onSessionCreated?.(session);
 
-	// Track turn count for observability (no enforcement — the wall-clock
-	// deadline in RunController is the only lifecycle limit on a subagent
-	// run; GC-2026-subagent-time-only-limits removed max_turns / graceTurns).
+	// GC-2026-subagent-recording-no-budget: removed all budget enforcement
+	// (turn caps, wall-clock deadlines, per-tool bucket caps). Tools are
+	// recorded for post-hoc analysis; nothing interrupts a run. Observability
+	// stands alone; enforcement does not.
 	let turnCount = 0;
 	let aborted = false;
-
-	// GC-2026-022: per-run budget tracker. The three built-in types each
-	// have a tuned default; custom (user-defined) types fall back to the
-	// developer budget. The tracker writes its own handoff on snapshot
-	// / partial / final events; the rich handoff overwrite is the
-	// orchestrator's job (it knows the gc_id, task_id, and any SC state).
-	const agentTypeForBudget: "developer" | "reviewer" | "explorer" =
-		type === "developer" ||
-		type === "reviewer" ||
-		type === "explorer"
-			? type
-			: "developer";
-	const budgetTracker = new BudgetTracker(
-		loadBudgetFromEnv(agentTypeForBudget),
-		undefined, // default path under .pi/orchestrator/handoff/_budget/
-		{
-			agentType: agentTypeForBudget,
-			taskId: options.agentId ?? type,
-			gcId: "_budget",
-		},
-	);
-	let budgetFailure: string | undefined;
 
 	let currentMessageText = "";
 	// GC-2026-064 T3 (PoC): pre-tool resource-monitor hook. Captured here
@@ -1092,30 +1067,17 @@ export async function runAgent(
 	// advis is false).
 	let pendingAdvisoryText: string | undefined;
 	const monitor = __resourceMonitorForTests ?? new ResourceMonitor();
+	// GC-2026-subagent-recording-no-budget: per-tool start timestamp map so
+	// `tool_execution_end` can compute `durationMs` and so we can capture
+	// the `args` (input keys) for the JSONL row. Keyed by `toolCallId`.
+	const toolStartState = new Map<
+		string,
+		{ startMs: number; args: unknown }
+	>();
 	const unsubTurns = session.subscribe((event: AgentSessionEvent) => {
 		if (event.type === "turn_end") {
 			turnCount++;
 			options.onTurnEnd?.(turnCount);
-			// GC-2026-022: budget tick. On 80% a partial handoff lands; on
-			// 100% the tracker writes the final handoff and throws
-			// BudgetExceededError. We catch it here and call session.abort()
-			// so pi-mono's prompt loop unwinds cleanly — whether the
-			// subscribe callback's throw propagates up or not, the abort
-			// guarantees the run ends within one turn. The outer
-			// `try { await session.prompt(...) }` also catches and converts
-			// the error into `aborted=true` so the SDK caller sees a clean
-			// exit.
-			try {
-				budgetTracker.tick();
-			} catch (err) {
-				if (err instanceof BudgetExceededError) {
-					aborted = true;
-					budgetFailure = `budget exceeded: ${err.message}`;
-					session.abort();
-				} else {
-					throw err;
-				}
-			}
 		}
 		if (event.type === "message_start") {
 			currentMessageText = "";
@@ -1138,6 +1100,20 @@ export async function runAgent(
 			// returns it; otherwise it returns undefined without touching
 			// formatAdvisory.
 			pendingAdvisoryText = captureToolStartAdvisory(monitor);
+			// GC-2026-subagent-recording-no-budget: capture the start timestamp
+			// and the `args` so `tool_execution_end` can emit a row with the
+			// duration + input key set. Cap retained entries at 256 to keep
+			// memory bounded under heavy parallel use; older entries fall
+			// out and produce empty `inputKeys` on their end event (graceful
+			// degradation, not an abort).
+			toolStartState.set(event.toolCallId, {
+				startMs: Date.now(),
+				args: (event as { args?: unknown }).args,
+			});
+			if (toolStartState.size > 256) {
+				const first = toolStartState.keys().next().value;
+				if (first !== undefined) toolStartState.delete(first);
+			}
 			options.onToolActivity?.({ type: "start", toolName: event.toolName });
 		}
 		if (event.type === "tool_execution_end") {
@@ -1151,6 +1127,27 @@ export async function runAgent(
 			// undefined, the helper is a no-op, no steer call happens.
 			deliverPendingAdvisory(session, pendingAdvisoryText);
 			pendingAdvisoryText = undefined;
+			// GC-2026-subagent-recording-no-budget: emit one tool-use record
+			// per tool execution. Compute duration from the start snapshot
+			// (kept above). Cap `args` to a keys-only projection so secrets
+			// never leak into the JSONL log.
+			const start = toolStartState.get(event.toolCallId);
+			toolStartState.delete(event.toolCallId);
+			const durationMs = start ? Math.max(0, Date.now() - start.startMs) : 0;
+			emitToolUse(
+				options.pi.events,
+				{
+					agentId: options.agentId ?? type,
+					agentType: type,
+					taskId: options.agentId ?? type,
+					toolName: event.toolName,
+					input:
+						start && typeof start.args === "object" && start.args !== null
+							? (start.args as Record<string, unknown>)
+							: undefined,
+					durationMs,
+				},
+			);
 			options.onToolActivity?.({ type: "end", toolName: event.toolName });
 		}
 		if (event.type === "message_end" && event.message.role === "assistant") {
@@ -1205,40 +1202,26 @@ export async function runAgent(
 	//   2. Post-check: after session.prompt resolves, if the signal became
 	//      aborted during the run, mark `aborted=true` so the agent
 	//      record surfaces the deadline breach instead of looking complete.
-	if (options.runController?.signal.aborted) {
+	// GC-2026-subagent-recording-no-budget: the previous version of this
+	// block referenced `BudgetExceededError` to detect turn-budget aborts;
+	// both the turn budget and the wall-clock deadline are gone, so the
+	// only abort signal left is an externally-triggered signal on
+	// `options.signal` (the parent-supplied AbortSignal). The
+	// runController's signal remains a pass-through for parent aborts; the
+	// deadline timer is removed in `run-controller.ts`.
+	const abortSignal = options.signal ?? options.runController?.signal;
+	if (abortSignal?.aborted) {
 		aborted = true;
-		budgetFailure = `agent aborted before run start: ${String(
-			options.runController.signal.reason ?? "deadline exceeded",
-		)}`;
 	} else {
 		try {
 			await session.prompt(effectivePrompt);
-		} catch (err) {
-			// GC-2026-022: a budget-throw from the subscriber means the run
-			// exceeded its hard turn / wall budget. Convert it to a graceful
-			// `aborted=true` exit so the SDK cleans up the session without
-			// re-entering pi-mono's prompt loop. The handoff file the tracker
-			// already wrote is what the orchestrator reads to resume.
-			if (err instanceof BudgetExceededError) {
-				aborted = true;
-				budgetFailure = `budget exceeded: ${err.message}`;
-			} else {
-				throw err;
-			}
 		} finally {
 			unsubTurns();
 			collector.unsubscribe();
 			cleanupAbort();
 		}
-		// GC-2026-065: post-prompt abort check. If the deadline fired DURING
-		// session.prompt and the LLM loop ignored the signal, mark the
-		// agent as aborted so the orchestrator records it correctly rather
-		// than treating a deadline breach as a clean completion.
-		if (options.runController?.signal.aborted && !aborted) {
+		if (abortSignal?.aborted && !aborted) {
 			aborted = true;
-			budgetFailure = `agent aborted during run: ${String(
-				options.runController.signal.reason ?? "deadline exceeded",
-			)}`;
 		}
 	}
 
@@ -1269,7 +1252,10 @@ export async function runAgent(
 
 	const responseText =
 		collector.getText().trim() || getLastAssistantText(session, startLen);
-	const failure = budgetFailure ?? finalTurnError(session, startLen);
+	// GC-2026-subagent-recording-no-budget: `budgetFailure` is no longer
+	// produced (BudgetExceededError handler is gone). The failure surface
+	// collapses to `finalTurnError` + the `aborted` flag.
+	const failure = finalTurnError(session, startLen);
 
 	// GC-2026-044 mechanism 1.4 (design §6.4.1): a non-clean exit leaves a typed
 	// record on disk. Today the only trace of an abort is a string in a tool

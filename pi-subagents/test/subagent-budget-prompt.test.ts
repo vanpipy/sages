@@ -1,14 +1,15 @@
 /**
- * subagent-budget-prompt.test.ts — GC-2026-038 T2
+ * subagent-budget-prompt.test.ts — GC-2026-subagent-recording-no-budget
  *
- * Verifies that the 4 built-in agent prompts contain the
- * EXPLORATION_BUDGET_SECTION with the hard caps.
+ * Verifies the prompt-section contract flipped in this GC: the 4 built-in
+ * agent prompts no longer carry hard caps (read 30 / grep 5 / git 3 / AFT 10)
+ * for tool usage. Instead, every prompt that previously included the
+ * EXPLORATION_BUDGET_SECTION now interpolates RECORDING_NOTICE_SECTION —
+ * the "no turn or time limit + every tool call is recorded" replacement.
  *
- * GC-2026-prompt-parser-contract-cleanup: Developer + Reviewer now import
- * the section from `_sections/exploration-budget.ts` and interpolate it
- * into the rendered prompt. Explore + Plan still carry the section inline.
- * We check both shapes: rendered prompt for the importers, source file for
- * the inliners.
+ * The old test pinned the hard caps (GC-2026-038 T2). This file is the
+ * inverse: it pins the absence of hard caps + the presence of the
+ * recording notice across all 4 prompts.
  */
 
 import { readFileSync } from "node:fs";
@@ -17,6 +18,7 @@ import { describe, expect, it } from "vitest";
 
 import { DEVELOPER_PROMPT } from "../src/agent-prompts/developer.js";
 import { REVIEWER_PROMPT } from "../src/agent-prompts/reviewer.js";
+import { RECORDING_NOTICE_SECTION } from "../src/agent-prompts/_sections/recording-notice.js";
 
 const INLINE_PROMPT_FILES = ["explore.ts", "plan.ts"] as const;
 
@@ -32,51 +34,45 @@ function readPrompt(name: string): string {
 	);
 }
 
-describe("subagent exploration budget (GC-2026-038 T2)", () => {
+describe("subagent exploration budget REMOVED + recording notice present (GC-2026-subagent-recording-no-budget)", () => {
+	// Section-deleted assertions: the hard caps that drove GC-2026-038 T2
+	// are gone. Pin the absence so a regression that re-introduces them
+	// (e.g. an unmerged revert) breaks this test.
 	for (const name of INLINE_PROMPT_FILES) {
-		it(`T-BUDGET-${name}: ${name} (inline) contains the exploration budget section`, () => {
+		it(`T-NOCAP-${name}: ${name} (inline) does NOT contain the hard caps`, () => {
 			const text = readPrompt(name);
-			expect(text).toContain("Exploration Budget");
+			expect(text).not.toContain("Exploration Budget (hard caps on read tools)");
 		});
-
-		it(`T-BUDGET-${name}-caps: ${name} (inline) contains the hard caps (read 30, grep 5, git 3, AFT 10)`, () => {
+		it(`T-NOCAP-${name}-read30: ${name} (inline) does NOT cap read at 30`, () => {
 			const text = readPrompt(name);
-			expect(text).toMatch(/max 30|read.*max 30/);
-			expect(text).toMatch(/max 5/);
-			expect(text).toMatch(/max 3/);
-			expect(text).toMatch(/max 10/);
-		});
-
-		it(`T-BUDGET-${name}-escape: ${name} (inline) contains the BLOCKED escape hatch`, () => {
-			const text = readPrompt(name);
-			expect(text).toMatch(/BLOCKED/);
+			expect(text).not.toMatch(/\*\*read\*\*:\s*max 30/);
 		});
 	}
-
 	for (const name of Object.keys(RENDERED_PROMPTS) as Array<"developer.ts" | "reviewer.ts">) {
-		it(`T-BUDGET-${name}: ${name} (rendered) contains the exploration budget section`, () => {
-			expect(RENDERED_PROMPTS[name]).toContain("Exploration Budget");
+		it(`T-NOCAP-${name}: ${name} (rendered) does NOT contain the hard caps`, () => {
+			expect(RENDERED_PROMPTS[name]).not.toContain(
+				"Exploration Budget (hard caps on read tools)",
+			);
 		});
-
-		it(`T-BUDGET-${name}-caps: ${name} (rendered) contains the hard caps (read 30, grep 5, git 3, AFT 10)`, () => {
-			expect(RENDERED_PROMPTS[name]).toMatch(/max 30|read.*max 30/);
-			expect(RENDERED_PROMPTS[name]).toMatch(/max 5/);
-			expect(RENDERED_PROMPTS[name]).toMatch(/max 3/);
-			expect(RENDERED_PROMPTS[name]).toMatch(/max 10/);
-		});
-
-		it(`T-BUDGET-${name}-escape: ${name} (rendered) contains the BLOCKED escape hatch`, () => {
-			expect(RENDERED_PROMPTS[name]).toMatch(/BLOCKED/);
+		it(`T-NOCAP-${name}-read30: ${name} (rendered) does NOT cap read at 30`, () => {
+			expect(RENDERED_PROMPTS[name]).not.toMatch(/\*\*read\*\*:\s*max 30/);
 		});
 	}
 
-	it("T-BUDGET-shared: all 4 prompts pin the same per-type rule (UNLIMITED writes)", () => {
-		for (const name of INLINE_PROMPT_FILES) {
-			const text = readPrompt(name);
-			expect(text).toMatch(/UNLIMITED|unlimited/);
-		}
-		for (const name of Object.keys(RENDERED_PROMPTS) as Array<"developer.ts" | "reviewer.ts">) {
-			expect(RENDERED_PROMPTS[name]).toMatch(/UNLIMITED|unlimited/);
-		}
+	// Recording-notice positive assertions: every prompt that previously
+	// carried the budget now carries the recording notice. The inline
+	// `explore.ts` / `plan.ts` previously had their own embedded budget
+	// sections; we don't pin a specific text on those, but the rendered
+	// Developer + Reviewer prompts MUST contain the section byte-identical.
+	it("T-NOREC-dev: DEVELOPER_PROMPT contains RECORDING_NOTICE_SECTION verbatim", () => {
+		expect(DEVELOPER_PROMPT).toContain(RECORDING_NOTICE_SECTION);
+	});
+	it("T-NOREC-rev: REVIEWER_PROMPT contains RECORDING_NOTICE_SECTION verbatim", () => {
+		expect(REVIEWER_PROMPT).toContain(RECORDING_NOTICE_SECTION);
+	});
+	it("T-NOREC-section: RECORDING_NOTICE_SECTION promises no turn or time limit", () => {
+		expect(RECORDING_NOTICE_SECTION).toMatch(
+			/\*\*no\s+turn\s+or\s+time\s+limit/,
+		);
 	});
 });
