@@ -175,7 +175,7 @@ export interface AgentRecord {
 		| "steered"
 		/**
 		 * GC-2026-subagent-interruption-minimal: aborted because the parent
-		 * signal fired (user closed pi, session ended, or workflow_run
+		 * signal fired (user closed pi, session ended, or the orchestrator
 		 * aborted the cascade). Distinct from `"aborted"` (the agent's own
 		 * deadline hit — no external interruption) and `"stopped"` (the user
 		 * explicitly invoked `subagent_stop` or the Agent tool cancelled).
@@ -242,11 +242,14 @@ export interface AgentRecord {
 	 */
 	isBackground?: boolean;
 	/**
-	 * GC-2026-workflow-chat-stream: when this agent was dispatched by a
-	 * workflow_run (pi-tasks/subscribeWorkflow's cascade), carry the goal
-	 * id and current phase so the AgentWidget can render a
-	 * `(workflow: GC-X · Review 2)` badge alongside the agent label.
-	 * Undefined for ad-hoc TaskExecute dispatches and cross-extension RPC.
+	 * GC-2026-workflow-chat-stream: when this agent is dispatched as a
+	 * phase task of a multi-phase DAG, carry the goal id and current
+	 * phase so the AgentWidget can render a `(goal: GC-X · Review 2)`
+	 * badge alongside the agent label. Post-GC-2026-remove-workflow-run-prod:
+	 * the orchestrator's multi-phase DAG is built via raw TaskCreate × N
+	 * + TaskExecute; the LLM can optionally stamp workflowContext on
+	 * each phase task to opt in to the badge. Undefined for ad-hoc
+	 * TaskExecute dispatches and cross-extension RPC.
 	 */
 	workflowContext?: {
 		goalId: string;

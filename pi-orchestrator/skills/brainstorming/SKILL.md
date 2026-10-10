@@ -3,12 +3,6 @@ name: brainstorming
 description: "Explore user intent, propose approaches, and design before implementation. Use this before any creative work - creating features, building components, adding functionality, or modifying behavior."
 ---
 
-> **⚠️ `workflow_run` is being removed (GC-2026-deprecate-workflow-run-docs).** This skill still
-> works without `workflow_run` — brainstorm → `goal_contract_create` → `decompose_task` (or
-> `TaskCreate` × N + `TaskExecute`) is the migration path. The `Mode B — auto-transition`
-> section below still works in spirit but the post-approval implementation step should now
-> use `decompose_task` or raw pi-tasks DAG instead of `workflow_run`.
-
 # Brainstorming - Design Clarifier
 
 ## Mode Indicator

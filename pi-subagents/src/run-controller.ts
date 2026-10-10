@@ -49,7 +49,7 @@ export type BucketTimeouts = Record<BucketKey, number>;
 // bucket kills on long workflows. A 60s test bucket absorbs typical
 // integration tests in this repo; fullTest 180s covers a clean run;
 // Developer/Reviewer deadlines bumped to 30min / 300 turns so a
-// max_fix_iterations=3 workflow_run doesn't bottom out the budget.
+// multi-phase DAG with a deep Fix loop doesn't bottom out the budget.
 export const DEFAULT_BUCKET_TIMEOUTS_MS: BucketTimeouts = {
 	read: 5_000,
 	search: 10_000,
@@ -118,8 +118,9 @@ export function renderBashTimeoutSection(): string {
  * `explorer` ≠ `Explore` mismatch and adds the missing `Plan` entry.
  *
  * GC-2026-merger-retirement: `Merger` removed — the legacy cross-workspace
- * DAG-synthesis merge agent is gone. MergerAdvisor handles workflow_run's
- * single-workspace advisory merge.
+ * DAG-synthesis merge agent is gone. MergerAdvisor handles the
+ * single-workspace advisory merge (post-3-GC workflow_run removal,
+ * dispatched by the orchestrator main agent after a CLEAN verdict).
  */
 export type AgentType =
 	| "Developer"

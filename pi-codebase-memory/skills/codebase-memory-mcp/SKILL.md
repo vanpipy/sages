@@ -82,10 +82,10 @@ mcp({ tool: "mcp_index_repository", args: '{"project":"."}' })  // invoke a spec
 
 ## Working with orchestrator workflows
 
-> **⚠️ `workflow_run` is being removed (GC-2026-deprecate-workflow-run-docs).** The
-> `workflow_run` task labels below (Implement / Review / Merge) map 1:1 onto the
-> subagent types (Developer / Reviewer / MergerAdvisor) — once `workflow_run` is gone, you
-> drive these phases via `TaskCreate` × N + `TaskExecute` directly, using the same
+> **GC-2026-remove-workflow-run-prod:** the `workflow_run` tool is gone.
+> The phase labels below (Implement / Review / Merge) map 1:1 onto the
+> subagent types (Developer / Reviewer / MergerAdvisor) — drive these
+> phases via `TaskCreate` × N + `TaskExecute` directly, using the same
 > subagent types. The `mcp_*` tools listed in the table are unchanged.
 
 | Orchestrator stage | Recommended codebase-memory-mcp usage |

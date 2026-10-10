@@ -1,11 +1,5 @@
 # Sages
 
-> **⚠️ `workflow_run` is being removed (GC-2026-deprecate-workflow-run-docs).** The tool has
-> failed the 10s watchdog on every recent GC and is being removed across 3 sequential GCs.
-> Migration path: `decompose_task` for linear chains, or `TaskCreate` × N + `TaskExecute` for
-> the canonical Implement → Review ⇆ Fix → Merge shape. See
-> `pi-orchestrator/skills/orchestrator/SKILL.md` for the full migration plan.
-
 Three-layer multi-agent workflow system for [pi](https://pi.dev):
 
 | Layer | Package | Job |

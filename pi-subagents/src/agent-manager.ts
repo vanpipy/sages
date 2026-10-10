@@ -158,9 +158,12 @@ interface SpawnOptions {
 	managedWorktree?: ManagedWorktreeRequest;
 	/**
 	 * GC-2026-workflow-chat-stream: when this agent is dispatched as a
-	 * workflow_run phase (Implement / Review / Fix / Merge), carry the
-	 * goal id + phase + iteration so AgentWidget can render a
-	 * `(workflow: GC-X · Review 2)` badge alongside the agent label.
+	 * phase task of a multi-phase DAG (Implement / Review / Fix / Merge),
+	 * carry the goal id + phase + iteration so AgentWidget can render a
+	 * `(goal: GC-X · Review 2)` badge alongside the agent label.
+	 * Post-GC-2026-remove-workflow-run-prod: no tool fills this field
+	 * automatically (the orchestrator builds the DAG via raw TaskCreate
+	 * × N + TaskExecute, and can stamp workflowContext if desired).
 	 * Undefined for ad-hoc TaskExecute dispatches and cross-extension RPC.
 	 */
 	workflowContext?: {

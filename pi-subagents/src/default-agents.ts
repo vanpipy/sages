@@ -140,11 +140,14 @@ const REVIEWER_AGENT: AgentConfig = {
 
 const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
 
-// GC-2026-merger-advisor-split: MergerAdvisor is the workflow_run Merge-phase
-// agent. Distinct from the DAG-synthesis Merger above — MergerAdvisor is
-// strictly advisory: reads the Reviewer evidence trail, verifies the source
-// branch exists, writes `.pi/orchestrator/merge-recommendation.md`. NEVER
-// executes `git merge` or `git push` against protected branches (per
+// GC-2026-merger-advisor-split: MergerAdvisor is the post-Implement
+// advisory-merge agent. Post-GC-2026-remove-workflow-run-prod, it is
+// dispatched by the orchestrator main agent (via TaskCreate + agentType)
+// after the last Reviewer verdict is CLEAN. Distinct from the
+// DAG-synthesis Merger above — MergerAdvisor is strictly advisory:
+// reads the Reviewer evidence trail, verifies the source branch exists,
+// writes `.pi/orchestrator/merge-recommendation.md`. NEVER executes
+// `git merge` or `git push` against protected branches (per
 // `~/AGENTS.md` "Permission gate required"). Same tool set as the cross-
 // workspace Merger (read + bash only), but a single-workspace advisory
 // contract instead of a multi-workspace auto-merge.
@@ -152,11 +155,12 @@ const MERGER_ADVISOR_AGENT: AgentConfig = {
 	name: "MergerAdvisor",
 	displayName: "Merger (Advisor)",
 	description:
-		"workflow_run Merge-phase advisor — reads the Reviewer evidence trail at " +
+		"Post-Reviewer advisory-merge agent. Reads the Reviewer evidence trail at " +
 		"`.pi/orchestrator/last-review-{goal_id}.md`, verifies the source branch " +
 		"exists, and writes `.pi/orchestrator/merge-recommendation.md` with the " +
 		"exact commands a human should run. Advisory only: NEVER executes `git merge` " +
-		"or `git push` against protected branches.",
+		"or `git push` against protected branches. Dispatched by the orchestrator " +
+		"(via TaskCreate + agentType=MergerAdvisor) after a CLEAN Reviewer verdict.",
 	builtinToolNames: READ_ONLY_TOOLS,
 	extensions: ["aft-pi", "pi-mcp-adapter"],
 	excludeExtensions: ["pi-subagents"],

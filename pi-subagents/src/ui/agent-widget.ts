@@ -599,10 +599,13 @@ export class AgentWidget {
 			const name = getDisplayName(a.type);
 			const modeLabel = getPromptModeLabel(a.type);
 			const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-			// GC-2026-workflow-chat-stream: when the agent was dispatched by
-			// workflow_run, surface a `(workflow: GC-X · Review 2)` badge so the
-			// user can see which workflow goal this agent belongs to. The badge
-			// is rendered between the agent name and the mode tag.
+			// GC-2026-workflow-chat-stream: when the agent was dispatched as a
+			// phase task of a multi-phase DAG, surface a
+			// `(goal: GC-X · Review 2)` badge so the user can see which goal
+			// this agent belongs to. The badge is rendered between the agent
+			// name and the mode tag. Post-GC-2026-remove-workflow-run-prod,
+			// the orchestrator's multi-phase DAG is built via raw TaskCreate;
+			// the LLM can stamp workflowContext on each phase task.
 			const workflowCtx = a.workflowContext;
 			const workflowTag = workflowCtx
 				? ` ${theme.fg("dim", `(workflow: ${workflowCtx.goalId} · ${workflowCtx.phase}${workflowCtx.iteration > 0 ? ` ${workflowCtx.iteration}` : ""})`)}`

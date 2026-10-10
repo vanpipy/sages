@@ -1,13 +1,17 @@
-# `pi-orchestrator` — Deep Dive
+# `pi-orchestrator` — Deep Dive (post-GC-2026-remove-workflow-run-prod)
 
-> **⚠️ This document describes the architecture as it existed pre-GC-2026-deprecate-workflow-run-docs.**
-> The `workflow_run` tool, the `workflow-handler.ts` / `workflow-graph.ts` modules, the
-> `workflow:start` / `workflow:phase-complete` event channels, the
-> `verify:workflow-meta-invariant` gate, the `workflow_run_goal_id` metadata, and the
-> `MergerAdvisor`-dispatched-by-`workflow_run`-Merge-phase pairing are all being removed across
-> GC-2026-deprecate-workflow-run-docs (announce) → GC-2 (production code removal) → GC-3
-> (test cleanup). This document will be rewritten in GC-2 alongside the production code
-> removal. Until then it remains a historical reference.
+> **Post-removal architecture reference.** `workflow_run` was removed in the
+> 3-GC removal plan (GC-2026-deprecate-workflow-run-docs →
+> GC-2026-remove-workflow-run-prod → GC-2026-remove-workflow-run-tests).
+> The orchestrator now owns two tools (`goal_contract_create` +
+> `decompose_task`); the canonical 4-phase shape is built by the LLM
+> as raw `TaskCreate` × N + `TaskExecute` with `agentType` set to
+> `"Developer"` / `"Reviewer"` / `"Fix"` / `"MergerAdvisor"` per phase.
+> The `pi-tasks` unified task-feeder drives the cascade. This document
+> still references the pre-removal architecture in places (path A, the
+> 4-phase pipeline shape) as historical context for the GC timeline;
+> see `pi/docs/postmortem/GC-2026-remove-workflow-run-prod.md` for the
+> full removal writeup.
 
 > **What this is.** A consolidated architecture + worked-example + GC timeline
 > for `@sages/pi-orchestrator`, written after a full read of every orchestrator
@@ -15,9 +19,9 @@
 > Target reader: a future contributor who has to modify the pipeline and needs
 > to know which file owns what before touching anything.
 >
-> **Scope.** `pi-orchestrator/` (20 source files + scripts + skills + templates)
+> **Scope.** `pi-orchestrator/` (post-removal: 18 source files + scripts + skills + templates)
 > and the `pi-tasks/` modules it depends on (`orchestrator-task.ts`,
-> `reviewer-prompt.ts`, `workflow-handler.ts`, `workflow-graph.ts`,
+> `reviewer-prompt.ts`, `task-feeder.ts`, `verdict-parser.ts`, `event-channels.ts`).
 > `task-feeder.ts`, `verdict-parser.ts`, `event-channels.ts`).
 >
 > **Out of scope.** `pi-subagents/` internals beyond the surface contract
@@ -32,13 +36,13 @@ The orchestrator is **layer 1 of three**:
 
 | Layer | Package | Job |
 |---|---|---|
-| **Planning** | `pi-orchestrator` | Declare intent (`goal_contract_create`); run the canonical pipeline (`workflow_run`); break a user intent into a serial chain (`decompose_task`); control subagents in flight |
-| **Tracking** | `pi-tasks` | Hold the task graph; spawn agents per cascade; route both `workflow_run`'s static graph and `decompose_task`'s linear chain through the same dependency-driven dispatch; emit `workflow:phase-complete` events for `workflow_run` |
+| **Planning** | `pi-orchestrator` | Declare intent (`goal_contract_create`); break a user intent into a serial chain (`decompose_task`); control subagents in flight |
+| **Tracking** | `pi-tasks` | Hold the task graph; spawn agents per cascade via the unified task-feeder; route `decompose_task`'s linear chain and the LLM's raw `TaskCreate` DAGs through the same dependency-driven dispatch |
 | **Executing** | `pi-subagents` | One agent = one task. 11 default types covering search, plan, code, review, fix, merge, advisors |
 
 The orchestrator's source is therefore **a slim shell over pi-tasks's
 event bus**. It does not own the cascade, the spawn loop, or the task
-store — it owns the **intent contract**, the **workflow:start emission**,
+store — it owns the **intent contract**, the **decompose_task RPC bridge**
 the **4-state verdict aggregation**, and the **soft-mode governance**.
 Everything else is delegated.
 
@@ -50,7 +54,7 @@ Everything else is delegated.
 flowchart TB
     subgraph Main["Main Agent (Sages orchestrator)"]
         GC["goal_contract_create<br/>(intent → goal.yaml + SHA-256 lock)"]
-        WR["workflow_run<br/>(one-shot 4-phase pipeline runner)"]
+        WR["(REMOVED: workflow_run<br/>one-shot 4-phase pipeline runner)"]
         DC["decompose_task<br/>(linear chain T1→T2→…→TN)"]
         PIT["pi-tasks 7 tools<br/>(escape hatch: TaskCreate × N + TaskExecute)"]
     end
@@ -66,8 +70,8 @@ flowchart TB
     end
 
     subgraph Events["Event bus (pi.events)"]
-        WS["workflow:start<br/>(workflow_run → workflow-handler)"]
-        WPC["workflow:phase-complete<br/>(workflow-handler → workflow_run)"]
+        WS["(REMOVED: workflow:start<br/>workflow_run → workflow-handler)"]
+        WPC["(REMOVED: workflow:phase-complete<br/>workflow-handler → workflow_run)"]
         SC["subagents:completed<br/>(subagent → feeder + handler)"]
         SF["subagents:failed<br/>(subagent → feeder + handler)"]
         DRPC["tasks:rpc:decompose-materialize<br/>(decompose_task → pi-tasks listener)"]
@@ -160,7 +164,7 @@ flowchart TB
 The orchestrator exposes **three pipelines**. The right choice depends on
 the shape of the work, not its size.
 
-### Path A — `workflow_run` (canonical)
+### Path A — `workflow_run` (REMOVED; historical reference)
 
 **When**: the work produces production code that needs a review gate and
 fits the 4-phase shape (Implement → Review ⇆ Fix → Merge).
