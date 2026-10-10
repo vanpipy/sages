@@ -49,16 +49,20 @@ import type { TaskStore } from "./task-store.js";
  * 'intent'", and the natural exit path is the task leaving `pending`
  * status (auto-complete via decomposition, or explicit TaskUpdate).
  */
-export function composeIntentReminder(store: TaskStore): string | null {
+export function composeIntentReminder(
+  store: TaskStore,
+  isOwned?: (taskId: string) => boolean,
+): string | null {
   const intents = store.list().filter(
     (t) =>
       t.status === "pending" &&
-      t.metadata?.kind === "intent",
+      t.metadata?.kind === "intent" &&
+      !(isOwned ? isOwned(t.id) : false),
   );
   if (intents.length === 0) return null;
 
   const lines: string[] = [
-    `[GC-2026-122] ${intents.length} pending intent task(s) awaiting your action — call \`decompose_task\` to materialize a chain, or chat-answer directly if the intent is trivial:`,
+    `[fallback] ${intents.length} orphaned intent task(s) not yet seen by the IntentPump — call ` + "`decompose_task`" + ` or chat-answer + ` + "`TaskUpdate`" + `:`,
   ];
   for (const t of intents) {
     const desc = t.description.length > 80
@@ -90,8 +94,9 @@ export function composeIntentReminder(store: TaskStore): string | null {
 export function applyIntentReminderToSystemPrompt(
   store: TaskStore,
   existingSystemPrompt: string | undefined,
+  isOwned?: (taskId: string) => boolean,
 ): { systemPrompt: string } | undefined {
-  const reminder = composeIntentReminder(store);
+  const reminder = composeIntentReminder(store, isOwned);
   if (!reminder) return undefined;
   const base = existingSystemPrompt ?? "";
   return {

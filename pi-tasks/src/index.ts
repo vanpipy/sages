@@ -19,21 +19,22 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { AutoClearManager } from "./auto-clear.js";
+import { TASKS_RPC_DECOMPOSE_MATERIALIZE } from "./event-channels.js";
+import { applyIntentReminderToSystemPrompt } from "./intent-reminder.js";
+import { IntentPump, type MainAgentTransport } from "./main-agent-injector.js";
+import {
+  createOrchestratorTask,
+  createOrchestratorTaskWithReview,
+} from "./orchestrator-task.js";
 import { ProcessTracker } from "./process-tracker.js";
+import { isFeedableTask, registerTaskFeeder } from "./task-feeder.js";
 import { resolveTaskGlyphs } from "./task-glyphs.js";
 import { reclaimGlobalSessionTasksDir, sessionTaskFile } from "./task-paths.js";
 import { TaskStore } from "./task-store.js";
 import { loadGlobalTasksConfig, loadTasksConfig } from "./tasks-config.js";
 import type { Task } from "./types.js";
-import { applyIntentReminderToSystemPrompt } from "./intent-reminder.js";
 import { openSettingsMenu } from "./ui/settings-menu.js";
 import { TaskWidget, type UICtx } from "./ui/task-widget.js";
-import {
-  createOrchestratorTask,
-  createOrchestratorTaskWithReview,
-} from "./orchestrator-task.js";
-import { isFeedableTask, registerTaskFeeder } from "./task-feeder.js";
-import { TASKS_RPC_DECOMPOSE_MATERIALIZE } from "./event-channels.js";
 
 // ---- Debug ----
 
@@ -94,6 +95,25 @@ export default function (pi: ExtensionAPI) {
   let store = new TaskStore(storeTarget.path);
   const tracker = new ProcessTracker();
   const widget = new TaskWidget(store, cfg);
+
+  // ── IntentPump (GC-2026-main-agent-proactive-intent-pump) ────────
+  // Production transport wraps `pi.sendUserMessage` — it injects a
+  // user-role message into the main session, which the LLM consumes as
+  // if the user had asked. The transport is feature-detected; if the
+  // host does not expose `sendUserMessage`, the pump is not registered
+  // and intent tasks fall back to the GC-2026-122 system-prompt
+  // reminder.
+  const intentTransport: MainAgentTransport = {
+    send: async (content: string) => {
+      const sendFn = (pi as unknown as { sendUserMessage?: (msg: string) => unknown })
+        .sendUserMessage;
+      if (typeof sendFn !== "function") {
+        throw new Error("pi.sendUserMessage is not available on this host");
+      }
+      await sendFn(content);
+    },
+  };
+  const intentPump = new IntentPump(store, intentTransport, { pollMs: 50 });
 
   // ── Subagent integration state ──
   /** Latest ExtensionContext — refreshed on every tool execution so cascade always has a valid one. */
@@ -301,6 +321,7 @@ export default function (pi: ExtensionAPI) {
   const feeder = registerTaskFeeder({
     store,
     events: pi.events,
+    intentPump,
     spawn: async (task: Task) => {
       // GC-2026-121: if pi-subagents is not available, refuse the spawn
       // gracefully — the task stays in pending state and the existing
@@ -811,6 +832,7 @@ export default function (pi: ExtensionAPI) {
     const reminderResult = applyIntentReminderToSystemPrompt(
       store,
       existingSystemPrompt,
+      (taskId) => intentPump.isOwned(taskId),
     );
     if (pendingWarning) {
       ctx.ui.notify(pendingWarning, "warning");
