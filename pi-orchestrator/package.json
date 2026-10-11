@@ -1,11 +1,12 @@
 {
   "name": "@sages/pi-orchestrator",
   "version": "0.1.0",
-  "description": "Sages orchestrator for pi: session hooks (setActiveTools + system-prompt overlay + once-per-session soft-mode reminder) + the `orchestrate(plan)` convenience tool + the `/brainstorm` slash command. Workflows are driven by the LLM via raw `TaskCreate` × N + `TaskExecute`; `orchestrate` collapses the standard Implement → Review shape into one call. Domain capability package, loaded by pi via standard pi.extensions.",
+  "description": "Sages orchestrator for pi: session hooks (setActiveTools + system-prompt overlay + once-per-session soft-mode reminder) + the `orchestrate(plan)` and `task_consume(task_id)` tools (thin shims over the `TaskBoard` domain class) + the `/brainstorm` slash command. Workflows are driven by the LLM via raw `TaskCreate` × N + `TaskExecute`; `orchestrate` collapses the standard Implement → Review shape into one call, and `task_consume` reads a completed task in a structured way, parses the Reviewer's 4-state verdict, and returns a verdict-tailored follow-up suggestion. Domain capability package, loaded by pi via standard pi.extensions.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test ./test --path-ignore-patterns dist/"
+    "test": "bun test ./test --path-ignore-patterns dist/",
+    "demo:task-feeding": "bun run scripts/demo-task-feeding.ts"
   },
   "keywords": [
     "pi-extension",

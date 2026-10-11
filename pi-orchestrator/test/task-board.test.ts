@@ -309,6 +309,94 @@ describe("TaskBoard.consume", () => {
 	});
 });
 
+describe("TaskBoard end-to-end — the Task Feeding loop", () => {
+	let scratch: string;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "pi-orch-task-board-"));
+	});
+
+	/**
+	 * Walk the full orchestrator loop on a real `TaskStore`:
+	 *
+	 *   1. CREATE  — `board.materializePlan({...})` writes the DAG
+	 *   2. SIMULATE — a subagent runs Implement, completes it (the
+	 *      orchestrator's `subagents:completed` listener would do this
+	 *      in production; here we do it directly via the injected store
+	 *      to keep pi's RPC stack out of the test)
+	 *   3. CONSUME  — `board.consume(implement_id)` reads the result
+	 *   4. SIMULATE — Reviewer runs Review, completes with `verdict: CLEAN`
+	 *   5. CONSUME  — `board.consume(review_id)` extracts the verdict
+	 *      and emits a verdict-tailored follow-up suggestion
+	 *   6. VERIFY   — the task is marked consumed in metadata for
+	 *      the audit trail
+	 */
+	it("create -> simulate -> consume loops through Implement + Review with a CLEAN verdict", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		// 1. CREATE
+		const plan = board.materializePlan({
+			intent: "Add login feature",
+			phases: [
+				{ subject: "Implement", agentType: "Developer" },
+				{ subject: "Review", agentType: "Reviewer", blockedBy: ["Implement"] },
+			],
+		});
+		expect(plan.tasks).toHaveLength(2);
+		const implement = plan.tasks.find((t) => t.subject === "Implement")!;
+		const review = plan.tasks.find((t) => t.subject === "Review")!;
+		expect(implement.agentType).toBe("Developer");
+		expect(review.agentType).toBe("Reviewer");
+		expect(review.blockedBy).toEqual([implement.id]);
+		expect(implement.blocks).toEqual([review.id]);
+
+		// 2. SIMULATE executor running Implement
+		store.update(implement.id, {
+			status: "completed",
+			metadata: { result: "Added POST /login with bcrypt + JWT. All unit tests pass." },
+		});
+
+		// 3. CONSUME Implement result — no verdict (Developer)
+		const implOut = board.consume(implement.id);
+		expect(implOut.id).toBe(implement.id);
+		expect(implOut.result).toContain("All unit tests pass");
+		expect(implOut.verdict).toBeUndefined();
+		expect(implOut.follow_up_suggestion).toBeUndefined();
+		expect(implOut.consumed_at).toBeGreaterThan(0);
+
+		// 4. SIMULATE executor running Review (Reviewer emits verdict)
+		store.update(review.id, {
+			status: "completed",
+			metadata: {
+				result: [
+					"Read every file. The implementation is solid.",
+					"",
+					"verdict: CLEAN",
+				].join("\n"),
+			},
+		});
+
+		// 5. CONSUME Review — verifier extracts CLEAN + suggestion
+		const reviewOut = board.consume(review.id);
+		expect(reviewOut.verdict).toBe("CLEAN");
+		expect(reviewOut.follow_up_suggestion).toMatch(/phase complete|move on/i);
+		// consumed_at is a wall-clock ms — back-to-back consume() calls can
+		// land in the same millisecond, so accept >= rather than >.
+		expect(reviewOut.consumed_at).toBeGreaterThanOrEqual(implOut.consumed_at);
+
+		// 6. AUDIT TRAIL — consumed flag set on the review task
+		const persistedReview = store.get(review.id)!;
+		expect(persistedReview.metadata?.consumed).toBe(true);
+		expect(persistedReview.metadata?.consumed_at).toBe(reviewOut.consumed_at);
+
+		// 7. RAW ACCESS — `list()` still surfaces the consumed/audit tasks
+		const all = board.list();
+		expect(all).toHaveLength(2);
+		expect(all.find((t) => t.id === review.id)?.metadata?.consumed).toBe(true);
+	});
+});
+
 // Suppress unused-var lint — scratch is intentionally retained for
 // readability (each beforeEach creates one).
 void rmSync;
