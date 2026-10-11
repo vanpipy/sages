@@ -37,7 +37,6 @@ export {
 	type OrchestratorPlanContext,
 } from "./brainstorming/index.js";
 
-// Helper modules (used by tests + downstream callers)
-export * from "./chain-key.js";
-export * from "./bash-guard.js";
-export * from "./orchestrator-advisory.js";
+// Helper modules removed in chore/remove-orchestrator-advisory:
+// chain-key, bash-guard, orchestrator-advisory — all had the advisory
+// pipeline as their sole production caller and were retired together.

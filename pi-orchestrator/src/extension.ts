@@ -34,11 +34,6 @@ import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import {
-	installOrchestratorAdvisoryHandlers,
-	type OrchestratorAdvisoryRuntimeDeps,
-} from "./orchestrator-advisory.js";
-
 /**
  * Tools registered by `@sages/pi-subagents` (`pi-subagents/src/index.ts`
  * lines 1154, 2040, 2138). `pi-subagents` owns the dispatch surface:
@@ -152,14 +147,13 @@ const SYSTEM_PROMPT_TEMPLATE = join(
 /**
  * Install orchestrator-side handlers on the pi extension. Idempotent.
  *
- * Post the goal-contract removal the orchestrator owns zero tools of
- * its own; only the advisory handlers are wired here.
+ * Post chore/remove-orchestrator-advisory the function is a no-op
+ * (no advisory pipeline to wire). Kept for API compatibility — the
+ * skill and any downstream callers can still invoke it; it just
+ * does nothing now.
  */
-export function registerOrchestratorTools(
-	pi: ExtensionAPI,
-	runtime?: OrchestratorAdvisoryRuntimeDeps,
-): void {
-	installOrchestratorAdvisoryHandlers(pi, runtime);
+export function registerOrchestratorTools(pi: ExtensionAPI): void {
+	// no-op: orchestrator owns no advisory handlers anymore
 }
 
 /**
