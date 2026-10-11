@@ -346,13 +346,12 @@ exit     /^(exit|cancel|quit|end|stop|never mind|...)/i
 Anything unparseable defaults to `proceed` (the user is most likely
 saying "yes, go on"). An empty response also defaults to `proceed`.
 
-Design doc writes currently land at `<cwd>/.pi/orchestrator/designs/`
-(see `pi-orchestrator/src/brainstorming/index.ts:DESIGNS_DIR =
-".pi/orchestrator/designs"`). The brainstorming SKILL.md still
-references `${TMPDIR}/${ORCHESTRATOR_WORKDIR}/designs/`, which is the
-intended path under the new `ORCHESTRATOR_WORKDIR` model — the code
-and the doc have drifted apart here, same kind of gap the task store
-cleanup just closed.
+Design doc writes land at
+`${ORCHESTRATOR_WORKDIR}/${projectKey(cwd)}/designs/`, the same
+per-workspace root the task store lives under. Resolved through
+`pi-tasks/src/task-paths.ts:orchestratorDesignsDir(cwd)`, so a single
+env var (`ORCHESTRATOR_WORKDIR`) controls where every piece of
+orchestrator state lives.
 
 ## Task lifecycle (one task's eye view)
 

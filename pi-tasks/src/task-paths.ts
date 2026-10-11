@@ -92,6 +92,21 @@ export function orchestratorProjectTaskFile(cwd: string): string {
 }
 
 /**
+ * Per-workspace directory where brainstorming-approved design drafts land.
+ *
+ * Sits next to `orchestratorProjectTaskFile` under the same
+ * `<ORCHESTRATOR_WORKDIR>/<projectKey(cwd)>/` tree, so a workspace's
+ * task store and design drafts are co-located in the orchestrator's
+ * per-workspace directory. Approved designs are an in-memory handoff
+ * to the orchestrator's `TaskCreate` chain (see brainstorming SKILL.md
+ * "Trigger Modes"), so persisting them out of the repo is consistent
+ * with how the task store itself lives.
+ */
+export function orchestratorDesignsDir(cwd: string): string {
+  return join(orchestratorWorkdir(), projectKey(cwd), "designs");
+}
+
+/**
  * Remove a workspace's global session directory once it holds nothing.
  *
  * Only the global tree is ever reclaimed. `<workspace>/.pi/tasks/` is left alone

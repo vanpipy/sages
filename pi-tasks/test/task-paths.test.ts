@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { globalSessionTasksDir, orchestratorProjectTaskFile, orchestratorWorkdir, projectKey, sessionTaskFile } from "../src/task-paths.js";
+import { globalSessionTasksDir, orchestratorDesignsDir, orchestratorProjectTaskFile, orchestratorWorkdir, projectKey, sessionTaskFile } from "../src/task-paths.js";
 
 const scratch: string[] = [];
 function workspace(): string {
@@ -80,6 +80,34 @@ describe("orchestratorProjectTaskFile", () => {
   it("sits outside the workspace", () => {
     const cwd = workspace();
     expect(orchestratorProjectTaskFile(cwd).startsWith(cwd)).toBe(false);
+  });
+});
+
+describe("orchestratorDesignsDir", () => {
+  it("lives under ORCHESTRATOR_WORKDIR, sibling of the tasks/ subdir", () => {
+    delete process.env.ORCHESTRATOR_WORKDIR;
+    const cwd = "/Users/me/work/repo";
+    const designs = orchestratorDesignsDir(cwd);
+    const tasks = orchestratorProjectTaskFile(cwd);
+    expect(designs).toBe(join(orchestratorWorkdir(), projectKey(cwd), "designs"));
+    // Both paths share the same `<ORCHESTRATOR_WORKDIR>/<projectKey>` prefix —
+    // `tasks/tasks.json` is one level deeper, but they live in the same root.
+    const prefix = join(orchestratorWorkdir(), projectKey(cwd));
+    expect(designs.startsWith(prefix)).toBe(true);
+    expect(tasks.startsWith(prefix + "/")).toBe(true);
+  });
+
+  it("follows ORCHESTRATOR_WORKDIR when set", () => {
+    const custom = mkdtempSync(join(tmpdir(), "pi-sages-"));
+    scratch.push(custom);
+    vi.stubEnv("ORCHESTRATOR_WORKDIR", custom);
+    const cwd = workspace();
+    expect(orchestratorDesignsDir(cwd)).toBe(join(custom, projectKey(cwd), "designs"));
+  });
+
+  it("sits outside the workspace", () => {
+    const cwd = workspace();
+    expect(orchestratorDesignsDir(cwd).startsWith(cwd)).toBe(false);
   });
 });
 

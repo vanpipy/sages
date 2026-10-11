@@ -149,7 +149,7 @@ If any answer is no, the boundaries need work. Smaller, well-bounded units are e
 
 ## Design Document Template
 
-Write the design doc to `.pi/orchestrator/designs/YYYY-MM-DD-<topic>.md` (see `pi-orchestrator/src/brainstorming/index.ts:writeDesignDoc`):
+Write the design doc to `${ORCHESTRATOR_WORKDIR}/${projectKey(cwd)}/designs/YYYY-MM-DD-<topic>.md`. The resolver lives in `pi-tasks/src/task-paths.ts:orchestratorDesignsDir(cwd)` and writes outside the repo. See `pi-orchestrator/src/brainstorming/index.ts:writeDesignDoc`:
 
 ```markdown
 # Design: <Topic>
@@ -209,7 +209,7 @@ The role names (Task Board / Task Orchestrator / Task Executor) are
 descriptive shorthand — they don't appear in any package's own code,
 just in docs and conversation.
 
-If user says "defer"/"save"/"later", save the design to `${TMPDIR}/${ORCHESTRATOR_WORKDIR}/designs/` and don't start the LLM. "exit"/"cancel" ends without proceeding.
+If user says "defer"/"save"/"later", save the design to `${ORCHESTRATOR_WORKDIR}/${projectKey(cwd)}/designs/` and don't start the LLM. "exit"/"cancel" ends without proceeding.
 
 ## Scope Detection & Decomposition
 

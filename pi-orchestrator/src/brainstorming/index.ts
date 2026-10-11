@@ -6,6 +6,11 @@
 
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
+// Import path-mapped by tsconfig `paths`. Pi-tasks owns the per-workspace
+// orchestrator directory resolver (env var `ORCHESTRATOR_WORKDIR`, default
+// `<tmpdir>/sages-orchestrator`, keyed by `projectKey(cwd)`), so designs
+// land next to the task store — see `pi-tasks/src/task-paths.ts`.
+import { orchestratorDesignsDir } from "@sages/pi-tasks/task-paths";
 import { BrainstormStateMachine, isTerminalPhase, isActivePhase } from "./state";
 import type {
   BrainstormParams,
@@ -19,12 +24,6 @@ import type {
   IntentSpec,
   DesignDoc,
 } from "./types";
-
-// ============================================================================
-// Configuration
-// ============================================================================
-
-const DESIGNS_DIR = ".pi/orchestrator/designs";
 
 // ============================================================================
 // Main Brainstorming Function
@@ -376,32 +375,35 @@ export function writeDesignDoc(
   sections: DesignSection[],
   approach: Approach
 ): string {
-  // Create designs directory
-  const designsPath = join(cwd, DESIGNS_DIR);
+  // Per-workspace designs directory under ORCHESTRATOR_WORKDIR, sitting next to
+  // the task store. Lives outside the repo so approved design drafts don't leak
+  // into version control. Resolved via pi-tasks so a single env var
+  // (`ORCHESTRATOR_WORKDIR`) controls where all orchestrator state goes.
+  const designsPath = orchestratorDesignsDir(cwd);
   if (!existsSync(designsPath)) {
     mkdirSync(designsPath, { recursive: true });
   }
-  
+
   // Generate filename
   const date = new Date().toISOString().split("T")[0];
   const safeName = request.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 50);
   const filename = `${date}-${safeName}.md`;
   const filepath = join(designsPath, filename);
-  
+
   // Build document
   let content = `# Design: ${request}\n\n`;
   content += `**Date:** ${date}\n`;
   content += `**Approach:** ${approach.name}\n\n`;
   content += `---\n\n`;
-  
+
   // Add sections
   for (const section of sections.sort((a, b) => a.order - b.order)) {
     content += section.content + "\n\n";
   }
-  
+
   // Write file
   writeFileSync(filepath, content, "utf-8");
-  
+
   return filepath;
 }
 
