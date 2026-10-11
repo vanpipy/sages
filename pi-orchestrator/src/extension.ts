@@ -28,6 +28,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerOrchestrateTool } from "./orchestrator-tool.js";
 
 /**
  * Tools registered by `@sages/pi-subagents` (`pi-subagents/src/index.ts`
@@ -190,8 +191,11 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 
 /**
  * Default pi extension entrypoint. Wires the three session hooks:
- * session_start / before_agent_start / tool_call.
+ * session_start / before_agent_start / tool_call. Also registers the
+ * orchestrator's first LLM-facing tool, `orchestrate`, which materializes
+ * a multi-phase workflow as a task DAG in pi-tasks's shared store.
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
 	installSessionHooks(pi);
+	registerOrchestrateTool(pi);
 }

@@ -95,16 +95,18 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		pi = new MockPi();
 	});
 
-	it("SMOKE-073-1: default export registers NO orchestrator-owned tools (post goal-contract removal)", async () => {
+	it("SMOKE-073-1: default export registers one orchestrator-owned tool (orchestrate — chore/orchestrator-first-tool)", async () => {
 		const ext = await import("../../src/extension.js");
 		expect(typeof ext.default).toBe("function");
 		ext.default(pi as any);
 		const toolNames = [...pi.tools.keys()].sort();
-		// After chore/remove-goal-contract the orchestrator owns zero tools
-		// of its own. The 4 subagent control tools moved out earlier
-		// (GC-2026-boundary-subagent-control); goal_contract_create was
-		// retired in this one.
-		expect(toolNames).toEqual([]);
+		// After chore/orchestrator-first-tool the orchestrator owns exactly
+		// one tool: `orchestrate`, which materializes a multi-phase plan
+		// as a task DAG in pi-tasks's shared task store. It does NOT
+		// replace the LLM's raw TaskCreate usage — it complements it by
+		// letting the LLM describe the whole plan in one call and get the
+		// cascade wired automatically.
+		expect(toolNames).toEqual(["orchestrate"]);
 	});
 
 	it("SMOKE-073-2: session_start calls setActiveTools with subagent + pi-tasks + AFT + baseline tools (no orchestrator tools post goal-contract removal)", async () => {
