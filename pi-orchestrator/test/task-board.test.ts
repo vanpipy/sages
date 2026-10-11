@@ -578,6 +578,115 @@ describe("TaskBoard end-to-end — the Task Feeding loop", () => {
 		expect(out.result).toBe("Done late.");
 		expect(store.get(next!.id)?.metadata?.consumed).toBe(true);
 	});
+
+	it("active consumption: drains 3 initial + 1 mid-cycle + 3 batch = 7 total, board=0", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		// 1. INITIAL — 3 tasks on the board (the existing queue).
+		const initial = Array.from({ length: 3 }, (_, i) =>
+			board.create({
+				subject: `Initial-${i + 1}`,
+				description: "an existing task",
+				agentType: "Developer",
+			}),
+		);
+		for (const t of initial) {
+			store.update(t.id, {
+				status: "completed",
+				metadata: { result: `result-initial-${t.id}` },
+			});
+		}
+		expect(board.list()).toHaveLength(3);
+
+		// 2. ORCHESTRATOR STARTS PROCESSING — first drain picks up the 3.
+		// The orchestrator is now mid-cycle: drained.length > 0, so it
+		// processes these before checking the board again.
+		const drained1 = board.drain();
+		expect(drained1).toHaveLength(3);
+		expect(drained1.map((d) => d.subject)).toEqual([
+			"Initial-1",
+			"Initial-2",
+			"Initial-3",
+		]);
+		// Consumed tasks stay on the board with metadata.consumed: true.
+		// The "board is empty for the next drain" check is on the queue,
+		// not the full list.
+		expect(board.findNextConsumable()).toBeUndefined();
+		expect(board.drain()).toHaveLength(0);
+
+		// 3. MID-CYCLE — a single follow-up task arrives (e.g. the
+		// orchestrator's own decision during the consumer callback creates
+		// a new task; or a brainstorming hand-off materializes one).
+		const single = board.create({
+			subject: "Single-mid",
+			description: "arrived between cycles",
+			agentType: "Developer",
+		});
+		store.update(single.id, {
+			status: "completed",
+			metadata: { result: "result-single-mid" },
+		});
+		expect(board.findNextConsumable()).toBeDefined();
+
+		// 4. ORCHESTRATOR CONTINUES — next drain picks up the single.
+		const drained2 = board.drain();
+		expect(drained2).toHaveLength(1);
+		expect(drained2[0].subject).toBe("Single-mid");
+		expect(board.findNextConsumable()).toBeUndefined();
+		expect(board.drain()).toHaveLength(0);
+
+		// 5. BATCH OF 3 ARRIVES — "依次批量加入三个任务": the consumer loop
+		//    sees a batch of 3 tasks materialize at once. Each is created
+		//    and marked completed immediately.
+		const batch = Array.from({ length: 3 }, (_, i) =>
+			board.create({
+				subject: `Batch-${i + 1}`,
+				description: "a batched task",
+				agentType: "Developer",
+			}),
+		);
+		for (const t of batch) {
+			store.update(t.id, {
+				status: "completed",
+				metadata: { result: `result-batch-${t.id}` },
+			});
+		}
+		expect(board.findNextConsumable()).toBeDefined();
+		expect(board.list().filter((t) => !t.metadata?.consumed)).toHaveLength(3);
+
+		// 6. ORCHESTRATOR CONTINUES — drain picks up all 3 in id order.
+		const drained3 = board.drain();
+		expect(drained3).toHaveLength(3);
+		expect(drained3.map((d) => d.subject)).toEqual([
+			"Batch-1",
+			"Batch-2",
+			"Batch-3",
+		]);
+
+		// 7. FINAL ASSERTIONS — consumed total = 3 + 1 + 3 = 7.
+		// The "board is empty" state means findNextConsumable() is
+		// undefined; consumed tasks stay on the board with their audit
+		// trail. drain() returns [] in this state.
+		const allConsumed = [...drained1, ...drained2, ...drained3];
+		expect(allConsumed).toHaveLength(7);
+		expect(board.findNextConsumable()).toBeUndefined();
+		expect(board.drain()).toHaveLength(0);
+
+		// 8. AUDIT — every task on the board carries the consumed flag.
+		const all = board.list();
+		expect(all.every((t) => t.metadata?.consumed === true)).toBe(true);
+		// Subjects line up in the order they were consumed.
+		expect(all.map((t) => t.subject)).toEqual([
+			"Initial-1",
+			"Initial-2",
+			"Initial-3",
+			"Single-mid",
+			"Batch-1",
+			"Batch-2",
+			"Batch-3",
+		]);
+	});
 });
 
 // Suppress unused-var lint — scratch is intentionally retained for
