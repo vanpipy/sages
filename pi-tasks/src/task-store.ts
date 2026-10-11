@@ -10,7 +10,11 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { sortTasks, type TaskSortOrder } from "./task-sort.js";
+// Import the canonical Task types for internal use; re-export them
+// for external consumers (e.g. TaskBoard in pi-orchestrator) so they
+// don't have to infer types from `TaskStore.create()`'s return shape.
 import type { Task, TaskStatus, TaskStoreData } from "./types.js";
+export type { Task, TaskStatus, TaskStoreData };
 
 const TASKS_DIR = join(homedir(), ".pi", "tasks");
 const LOCK_RETRY_MS = 50;

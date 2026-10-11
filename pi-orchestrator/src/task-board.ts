@@ -40,15 +40,13 @@
  * the actual logic lives here.
  */
 
-import { TaskStore } from "@sages/pi-tasks/task-store";
+import { TaskStore, type Task } from "@sages/pi-tasks/task-store";
 import { orchestratorProjectTaskFile } from "@sages/pi-tasks/task-paths";
 
-// `Task` is defined in `@sages/pi-tasks/types` but not re-exported through
-// the `task-store` subpath, so we infer it from `TaskStore.create()`'s
-// return type when needed in this file.
-type Task = ReturnType<TaskStore["create"]>;
-type TaskList = ReturnType<TaskStore["list"]>;
-type TaskGet = ReturnType<TaskStore["get"]>;
+/** A single task from the store. */
+type TaskGet = Task | undefined;
+/** All tasks on the store, sorted by id (TaskStore.list() default). */
+type TaskList = Task[];
 
 /**
  * The 4-state verdict the Reviewer agent emits. Matches the contract
