@@ -392,12 +392,12 @@ export function familyOfTool(toolName: string): ToolFamily {
 	) {
 		return "subagent_control";
 	}
-	// GC-2026-097 M3a: orchestrator tools. The four DAG/audit/dispatch/
-	// reminder tools were already removed by GC-2026-orchestrator-simplify.
-	// GC-2026-remove-workflow-run-prod: workflow_run removed (100% failure
-	// rate on the 10s watchdog across the last 6 GCs); only goal_contract_create
-	// + decompose_task remain in the orchestrator family.
-	if (toolName === "goal_contract_create" || toolName === "decompose_task") {
+	// After the goal-contract removal (chore/remove-goal-contract) and
+	// the prior decompose_task removal the orchestrator family is empty
+	// — there are no tools owned by this extension. The check stays so
+	// that if a future orchestrator-owned tool is added, it can be
+	// classified by adding a clause here. Today no toolName matches.
+	if (false) {
 		return "orchestrator";
 	}
 	// GC-2026-097 M3b: the 7 pi-tasks tools form their own family so

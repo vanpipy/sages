@@ -443,8 +443,14 @@ describe("orchestrator advisory: family classifier", () => {
 		expect(familyOfTool("subagent_abort")).toBe("subagent_control");
 	});
 
-	it("FAM-6: goal_contract_create -> orchestrator family (decompose_task removed in GC-2026-decompose-task-removed)", () => {
-		expect(familyOfTool("goal_contract_create")).toBe("orchestrator");
+	it("FAM-6: orchestrator family is empty after goal-contract removal (no orchestrator-registered tools)", () => {
+		// After chore/remove-goal-contract there are no orchestrator-registered
+		// tools; the familyOfTool function still classifies any toolName but
+		// the only "orchestrator" match previously was goal_contract_create
+		// and decompose_task, both gone. An arbitrary non-special toolName
+		// should land in "other".
+		expect(familyOfTool("goal_contract_create")).toBe("other");
+		expect(familyOfTool("decompose_task")).toBe("other");
 	});
 
 	it("GC-2026-097 M3b: TaskCreate / TaskList / TaskGet / TaskUpdate / TaskOutput / TaskStop / TaskExecute -> tasks family", () => {

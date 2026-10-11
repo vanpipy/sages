@@ -1,37 +1,31 @@
 /**
  * @sages/pi-orchestrator — package entry point (default pi extension).
  *
- * After GC-2026-orchestrator-simplify + GC-2026-remove-workflow-run-prod +
- * GC-2026-decompose-task-removed the orchestrator owns exactly ONE tool
- * (`goal_contract_create`). The DAG, dispatch, audit,
- * reminder, and workflow_run tools were removed. The Reviewer / Fix / Merge
- * subagents are still available — they are dispatched via `TaskCreate` +
- * `agentType: "Reviewer"` / `"Fix"` / `"MergerAdvisor"` directly; the
- * 4-state verdict (CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION)
- * is a subagent-prompt feature, not a workflow-runner feature.
+ * Post-GC-2026-orchestrator-simplify + GC-2026-remove-workflow-run-prod +
+ * GC-2026-decompose-task-removed + the goal-contract removal (this
+ * commit): the orchestrator owns **no orchestrator-registered tools**.
+ * It exists as a soft-infrastructure layer:
  *
- * Registers:
- *   - `goal_contract_create` — the intent + lock contract tool
- *   - Orchestrator advisory pipeline (post-tool detector + nudges)
+ *   - session_start: `pi.setActiveTools([...])` gates which tools the
+ *     LLM can see (PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL / AFT /
+ *     BASELINE) — none of those are owned by the orchestrator; the
+ *     orchestrator only curates the allowlist.
+ *   - before_agent_start: prepend `templates/SYSTEM.md` (the orchestrator
+ *     constitution) to the LLM system prompt.
+ *   - tool_call: once-per-session soft-mode reminder that fires on the
+ *     first side-effecting call (bash / edit / write).
+ *   - orchestrator advisory pipeline: post-tool nudges (family-mix,
+ *     repeat_call_chain, goal_drift_detected — the latter is now a
+ *     no-op since goal contracts are gone, but the rule is preserved
+ *     for future contracts).
+ *   - brainstorming slash command (registered via the skill at
+ *     `skills/brainstorming/SKILL.md`).
  *
- * GC-2026-boundary-subagent-control: the subagent control tools
- * (subagent_status / steer / abort / resume) used to be registered
- * here. They are now owned by pi-subagents itself — the runtime
- * that owns the AgentManager also owns the tools that operate on it.
- * The orchestrator's `setActiveTools` still gates their visibility
- * via the `SUBAGENT_CONTROL_TOOLS` constant below, so non-orchestrator
- * sessions can opt in or out via `setActiveTools` policy.
- *
- * Three session-level hooks (preserved):
- *   1. `session_start`        — `pi.setActiveTools([...])`
- *   2. `before_agent_start`   — prepend `templates/SYSTEM.md`
- *   3. `tool_call`            — soft-mode reminder (first bash call)
- *
- * Brainstorming is registered separately as a slash command.
- *
- * Peer dependencies:
- *   - @earendil-works/pi-coding-agent  — ExtensionAPI type
- *   - @sages/pi-subagents           — Agent / get_subagent_result / steer_subagent
+ * The orchestrator used to own `goal_contract_create` as its single
+ * tool. That tool was deleted along with its entire support stack
+ * (state-persistence, workdir, namespace-ownership, observability
+ * runner, types, goal-lock). With no orchestrator state there is no
+ * orchestrator tool; the layer above becomes pure advisory + curation.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -40,27 +34,11 @@ import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { registerGoalContractTool } from "./goal-contract.js";
 import {
 	installOrchestratorAdvisoryHandlers,
 	type OrchestratorAdvisoryRuntimeDeps,
 } from "./orchestrator-advisory.js";
 import { validateFailureCatalogOnBoot } from "./failure-catalog.js";
-
-
-/**
- * Tools always exposed to the main agent when the orchestrator
- * extension is loaded. After GC-2026-remove-workflow-run-prod +
- * GC-2026-decompose-task-removed this is one entry:
- * `goal_contract_create` (intent → goal.yaml). The 4-phase pipeline
- * (Implement → Review ⇆ Fix → Merge) is no longer a one-shot runner;
- * build it with raw `TaskCreate` × N + `TaskExecute` (each task's
- * `agentType` is one of `"Developer"` / `"Reviewer"` / `"Fix"` /
- * `"MergerAdvisor"`).
- */
-export const ORCHESTRATOR_TOOLS: readonly string[] = [
-	"goal_contract_create",
-];
 
 /**
  * Tools registered by `@sages/pi-subagents` (`pi-subagents/src/index.ts`
@@ -116,9 +94,7 @@ export const BASELINE_TOOLS: readonly string[] = [
 /**
  * Pi-tasks tools (registered by `@sages/pi-tasks`). Exposed so the LLM
  * can drive the Implement → Review → optional Fix → Merge pipeline
- * directly via TaskCreate / TaskList / TaskExecute / etc. (escape hatch
- * for non-standard DAG shapes). `workflow_run` is the canonical one-shot
- * pipeline runner; use it whenever the work fits the 4-phase shape.
+ * directly via TaskCreate / TaskList / TaskExecute / etc.
  */
 export const PI_TASKS_TOOLS: readonly string[] = [
 	"TaskCreate",
@@ -149,18 +125,18 @@ export const AFT_TOOLS: readonly string[] = [
 ];
 
 /**
- * Soft-mode reminder text. Fires once per session on the first `bash`
- * tool call to nudge the LLM toward the pi-tasks-driven workflow when
- * the active task list exceeds 2 items (the historical `dag_threshold`).
+ * Soft-mode reminder text. Fires once per session on the first side-effecting
+ * tool call (bash / edit / write) to nudge the LLM toward the
+ * pi-tasks-driven workflow when the active task list exceeds 2 items.
  */
 const SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — workflow pipeline recommended**
 >
 > If this is part of a larger workflow (>2 items in your active task list,
 > i.e. above the **task-count threshold**), consider driving it through
-> the pi-tasks workflow: \`goal_contract_create\` → \`TaskCreate\` × 4
-> (Implement / Review / optional Fix / Merge) → \`TaskExecute\`. For ≤2
-> tasks (below the task-count threshold), direct handling is acceptable.
-> This is a recommendation — the agent decides. No commands are blocked.
+> the pi-tasks workflow: raw \`TaskCreate\` × N (one per phase: Developer /
+> Reviewer / Fix / MergerAdvisor) → \`TaskExecute\`. For ≤2 tasks (below
+> the task-count threshold), direct handling is acceptable. This is a
+> recommendation — the agent decides. No commands are blocked.
 `;
 
 /**
@@ -175,14 +151,15 @@ const SYSTEM_PROMPT_TEMPLATE = join(
 );
 
 /**
- * Register all orchestrator tools on the pi extension. Idempotent.
+ * Install orchestrator-side handlers on the pi extension. Idempotent.
+ *
+ * Post the goal-contract removal the orchestrator owns zero tools of
+ * its own; only the advisory handlers are wired here.
  */
 export function registerOrchestratorTools(
 	pi: ExtensionAPI,
 	runtime?: OrchestratorAdvisoryRuntimeDeps,
 ): void {
-	registerGoalContractTool(pi);
-	// GC-2026-053: orchestrator tool_call audit wiring.
 	installOrchestratorAdvisoryHandlers(pi, runtime);
 }
 
@@ -193,7 +170,6 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 	// 1. session_start — setActiveTools + setStatus.
 	pi.on("session_start", () => {
 		const tools: string[] = [
-			...ORCHESTRATOR_TOOLS,
 			...PI_TASKS_TOOLS,
 			...SUBAGENT_TOOLS,
 			...AFT_TOOLS,
@@ -219,9 +195,7 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 	});
 
 	// 3. tool_call — fire the soft-mode reminder once per session on the
-	// first side-effecting tool call (bash / edit / write). GC-2026-098
-	// L3: previously gated on bash only; if the LLM began a workflow
-	// with edit/write directly (no bash), the nudge was missed.
+	// first side-effecting tool call (bash / edit / write).
 	let reminderFired = false;
 	pi.on("tool_call", (event: unknown) => {
 		if (reminderFired) return undefined;
@@ -237,16 +211,11 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 }
 
 /**
-  * Default pi extension entrypoint.
+ * Default pi extension entrypoint.
  *
  * GC-2026-097 M5: synchronously validate the failure-catalog at boot
  * (NOT on first lookup) so a malformed shipped catalog throws at
  * session_start instead of deep in a workflow 4 tool calls later.
- *
- * GC-2026-098 L8: the previous `registerBrainstormCommand` stub was
- * deleted. The `/brainstorm` slash command is registered via the
- * skill at `skills/brainstorming/SKILL.md` — see that file for the
- * registration mechanism.
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
 	validateFailureCatalogOnBoot();

@@ -31,12 +31,15 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
    ≤2-item workflows. **Every Sages package subtree (every `pi-*/`)
    is production code** — no carve-outs (GC-2026-029).
 
-## > **Removed in GC-2026-remove-workflow-run-prod:** the `workflow_run` tool
-> is gone (100% failure rate on the 10s watchdog across 6 GCs). The orchestrator
-> now owns `goal_contract_create` + `decompose_task` + 4 subagent-control
-> tools. The canonical 4-phase shape is built directly with `TaskCreate`
-> × N + `TaskExecute`. See `pi-orchestrator/skills/orchestrator/SKILL.md`
-> for the post-removal decision recipe.
+## > **Removed tools (historical):** the orchestrator once owned
+> `goal_contract_create` (chore/remove-goal-contract), `decompose_task`
+> (GC-2026-decompose-task-removed), and `workflow_run`
+> (GC-2026-remove-workflow-run-prod — 100% failure rate on the 10s
+> watchdog across 6 GCs). Post chore/remove-goal-contract the orchestrator
+> owns **zero** tools of its own. The canonical 4-phase shape is built
+> directly with `TaskCreate` × N + `TaskExecute` — no orchestrator
+> tool mediates. See `pi-orchestrator/skills/orchestrator/SKILL.md`
+> for the workflow recipe.
 
 The orchestrator tool surface
 
@@ -145,33 +148,27 @@ the workflow is:
    Chat-driven decomposition pulls a user task into the
    `decompose_task` path.
 
-State persists in `.pi/orchestrator/audit-state-{goal_id}.yaml` so work
-can resume after context compaction. Decompose state is on the
-chain's parent task in pi-tasks + an audit file at
-`.pi/orchestrator/decompose-<id>.yaml`.
+State used to persist in `.pi/orchestrator/audit-state-{goal_id}.yaml`
+so work could resume after context compaction. After the
+chore/orchestrator-workdir-tmpdir migration that state moved to
+`${TMPDIR}/${ORCHESTRATOR_WORKDIR}`, and after this commit
+(chore/remove-goal-contract) there is no per-goal orchestrator state at
+all — the orchestrator is purely advisory + tooling-curation.
 
 ## Key paths
 
-- `.pi/orchestrator/goal-*.yaml`, `audit-state-*.yaml`,
-  `decompose-*.yaml` — workflow / decompose state
 - pi-tasks store (per-session / project) — task graph; source of
-  truth for every task in flight
+  truth for every task in flight. (No more `.pi/orchestrator/`
+  files; that namespace was migrated to `${TMPDIR}/${ORCHESTRATOR_WORKDIR}`
+  in chore/orchestrator-workdir-tmpdir and deleted entirely in
+  chore/remove-goal-contract.)
 - `pi-orchestrator/src/extension.ts` — orchestrator entrypoint
   (default export wires `registerOrchestratorTools` + the three
   session hooks: `session_start` `setActiveTools`, `before_agent_start`
-  prompt overlay, `tool_call` once-per-session soft-mode reminder)
-- `pi-orchestrator/src/goal-contract.ts` — `goal_contract_create` tool
-- `pi-orchestrator/src/workflow-run-tool.ts` — `workflow_run` tool
-  (event-driven shim: emits `workflow:start`, subscribes to
-  `workflow:phase-complete`)
-- `pi-orchestrator/src/decompose-task.ts` — `decompose_task` tool
-  (linear chain materialization, single shared `R1` Reviewer)
-- `pi-orchestrator/src/orchestrator-task.ts` — `createOrchestratorTask`
-  (low-level) + `createOrchestratorTaskWithReview` (high-level, with
-  top-level Reviewer attachment); used by all three tools above
-- `pi-orchestrator/src/reviewer-prompt.ts` — single Reviewer template
-  shared by workflow Reviewers and decompose `R1` (discriminated
-  union: `kind: "workflow" | "decompose"`)
+  prompt overlay, `tool_call` once-per-session soft-mode reminder).
+  Post chore/remove-goal-contract the orchestrator owns zero
+  tools of its own — it curates PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL /
+  AFT / BASELINE tool allowlists and runs the advisory pipeline.
 - `pi-orchestrator/src/orchestrator-advisory.ts` — orchestrator
   advisory pipeline (pre-tool blocker + history tracker + error
   tracker + assistant-text tracker)
@@ -180,6 +177,13 @@ chain's parent task in pi-tasks + an audit file at
 - `pi-orchestrator/skills/orchestrator/SKILL.md` — full workflow reference
 - `pi-orchestrator/templates/agent-tool-description.md` — Agent tool
   description template (LLM-visible after install)
+
+Removed in earlier GCs (file no longer exists):
+  - `pi-orchestrator/src/goal-contract.ts` (`goal_contract_create`) — chore/remove-goal-contract
+  - `pi-orchestrator/src/workflow-run-tool.ts` (`workflow_run`) — GC-2026-remove-workflow-run-prod
+  - `pi-orchestrator/src/decompose-task.ts` (`decompose_task`) — GC-2026-decompose-task-removed
+  - `pi-orchestrator/src/orchestrator-task.ts` (`createOrchestratorTask*`) — with the above
+  - `pi-orchestrator/src/reviewer-prompt.ts` (Reviewer template) — with the above
 
 The package map belongs in [README.md § Repository layout](README.md#repository-layout).
 
