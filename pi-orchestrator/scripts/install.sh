@@ -891,19 +891,21 @@ verify_critical_codebase_memory_deps() {
   return 0
 }
 
-# verify_critical_tasks_deps — GC-2026-install-pi-tasks
+# verify_critical_tasks_deps — GC-2026-install-pi-tasks + GC-2026-pi-tasks-exports-fix
 # pi-tasks imports typebox at module-load time (for the TaskCreate /
 # TaskUpdate TypeBox parameter schemas in src/index.ts). typebox is
-# declared in pi-tasks/package.json#dependencies as "^1.1.34", not
-# peerDependencies, so it must be installed under pi-tasks/node_modules/.
-# Without it, TaskCreate throws "Cannot find module 'typebox'" at
-# pi session start.
+# declared in pi-tasks/package.json#peerDependencies as "*", not
+# dependencies, so the host (pi-coding-agent) is responsible for
+# providing it via its bundled node_modules. pi's extension loader
+# aliases `typebox` to the host's bundled copy at load time, so the
+# extension never needs a local install of typebox. We deliberately
+# do NOT check for `$pkg_dir/node_modules/typebox` here — that path
+# is expected to be absent after `bun install`, and its presence
+# would mean a duplicate runtime module bypassed the host loader
+# (the same warning pi emits when typebox is in dependencies).
 verify_critical_tasks_deps() {
   local pkg_dir="$1"
   local missing=()
-  if [[ ! -d "$pkg_dir/node_modules/typebox" ]]; then
-    missing+=("typebox")
-  fi
   if [[ ${#missing[@]} -gt 0 ]]; then
     echo "  ERROR: pi-tasks critical deps missing after bun install:"
     for dep in "${missing[@]}"; do
