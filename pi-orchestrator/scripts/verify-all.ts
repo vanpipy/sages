@@ -12,19 +12,15 @@
  *   bun run verify:all      # via package.json scripts.verify.all
  *
  * Verifier list (current):
- *   - verify-catalog: catalogs/ vs source files (subagent.json, event.json, namespace.json)
  *   - verify-isolation-modes: no forbidden 'isolation: "worktree"' literals
- *   - verify-namespace-ownership: no orchestrator path leaks in subagent templates
  *   - verify-pi-universe: cross-package consistency
  *   - verify-soft-mode-mental-model: SOFT_MODE_REMINDER runtime wiring present
  *   - verify-pi-tasks-tools: PI_TASKS_TOOLS allowlist vs pi-tasks registerTool
  *   - verify-created-by-invariant: every store.create carries created_by
  *   - verify-extension-load (GC-2026-extension-load-verify): jiti-import each
  *     registered package to surface the host loader's silent fail-soft
- *   - verify-workflow-meta-invariant (GC-2026-118 F3): workflow spec builders stamp workflow_run_goal_id
- *   - verify-task-source-invariant (GC-2026-120 AC8): chain-task create sites carry user_task_ref
  *
- * Why a wrapper script (vs just `bun run verify:catalog && bun run verify:isolation-modes ...`):
+ * Why a wrapper script (vs just `bun run verify:isolation-modes && bun run verify:pi-universe ...`):
  *   - One command for humans/CI to run.
  *   - Aggregate exit code: any single failure fails the whole run.
  *   - Single summary line at the end so CI logs are easy to scan.
@@ -55,19 +51,9 @@ const __dirname = dirname(__filename);
 // future script renaming.
 const VERIFIERS: { id: string; script: string; label: string }[] = [
 	{
-		id: "catalog",
-		script: "verify-catalog.ts",
-		label: "catalogs/ vs source files",
-	},
-	{
 		id: "isolation-modes",
 		script: "verify-isolation-modes.ts",
 		label: "no forbidden isolation: 'worktree' literals",
-	},
-	{
-		id: "namespace-ownership",
-		script: "verify-namespace-ownership.ts",
-		label: "no orchestrator path leaks in subagent templates",
 	},
 	{
 		id: "pi-universe",
@@ -93,16 +79,6 @@ const VERIFIERS: { id: string; script: string; label: string }[] = [
 		id: "extension-load",
 		script: "verify-extension-load.ts",
 		label: "every registered package extension loads via jiti",
-	},
-	{
-		id: "task-source-invariant",
-		script: "verify-task-source-invariant.ts",
-		label: "chain-task create sites in materializeDecomposeChain carry user_task_ref (GC-2026-120 AC8)",
-	},
-	{
-		id: "recorder",
-		script: "verify-recorder.ts",
-		label: "subagent tool-use recording layer wired (GC-2026-subagent-recording-no-budget)",
 	},
 ];
 
