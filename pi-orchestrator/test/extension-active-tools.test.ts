@@ -1,11 +1,9 @@
 /**
- * extension-active-tools.test.ts — GC-2026-orchestrator-simplify +
- * GC-2026-remove-workflow-run-prod: removed `workflow_run` (3 tools → 2).
+ * extension-active-tools.test.ts — post goal-contract removal.
  *
- * Asserts the session_start `setActiveTools` allowlist:
- *   - ORCHESTRATOR_TOOLS contains exactly 1 tool
- *     (`goal_contract_create` — GC-2026-remove-workflow-run-prod + GC-2026-decompose-task-removed
- *     the latter as a one-shot 5-phase pipeline runner)
+ * After chore/remove-goal-contract the orchestrator owns zero tools of
+ * its own. This file now asserts the remaining 4 allowlists that the
+ * session_start hook still curates:
  *   - PI_SUBAGENT_TOOLS contains 3 tools (Agent / get_subagent_result /
  *     steer_subagent — registered by `@sages/pi-subagents`)
  *   - SUBAGENT_CONTROL_TOOLS contains 4 tools (subagent_status / steer /
@@ -17,14 +15,9 @@
  *   - PI_TASKS_TOOLS contains 7 workflow tools
  *   - AFT_TOOLS contains 11 tools (registered by `@cortexkit/aft-pi`)
  *
- * The orchestrator's 4 DAG / dispatch / audit / reminder tools plus
- * the todowrite trio are gone after orchestrator-simplify — the
- * TODOWRITE_TOOLS and CTX_TOOLS allowlists were already removed in
- * the GC-2026-remove-magic-context GC.
- *
- * Total active toolset: 2 (ORCHESTRATOR) + 7 (SUBAGENT) + 7 (PI_TASKS) +
- * 11 (AFT) + 7 (BASELINE) = 34. GC-2026-remove-workflow-run-prod: now 2
- * orchestrator (goal_contract_create) → 32 total.
+ * Total active toolset: 7 (SUBAGENT) + 7 (PI_TASKS) + 11 (AFT) +
+ * 7 (BASELINE) = 32. Was 33 pre-chore/remove-goal-contract (when the
+ * orchestrator contributed `goal_contract_create`).
  *
  * Run: cd pi-orchestrator && bun test ./test/extension-active-tools.test.ts
  */
@@ -35,7 +28,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-	ORCHESTRATOR_TOOLS,
 	PI_SUBAGENT_TOOLS,
 	SUBAGENT_CONTROL_TOOLS,
 	SUBAGENT_TOOLS,
@@ -107,19 +99,14 @@ describe("AFT_TOOLS constant (GC-2026-086)", () => {
 	});
 });
 
-describe("existing tool allowlist constants — regression (GC-2026-orchestrator-simplify)", () => {
-	it("ORCHESTRATOR_TOOLS contains exactly 1 tool: goal_contract_create (GC-2026-task-feeding-and-decomposition + GC-2026-remove-workflow-run-prod + GC-2026-decompose-task-removed)", () => {
-		expect(ORCHESTRATOR_TOOLS).toEqual([
-			"goal_contract_create",
-		]);
-		expect(ORCHESTRATOR_TOOLS.length).toBe(1);
-	});
-
-	it("ORCHESTRATOR_TOOLS does NOT include any of the removed 4 tools", () => {
-		expect(ORCHESTRATOR_TOOLS).not.toContain("dag_synthesize");
-		expect(ORCHESTRATOR_TOOLS).not.toContain("task_dispatch");
-		expect(ORCHESTRATOR_TOOLS).not.toContain("orchestrator_audit");
-		expect(ORCHESTRATOR_TOOLS).not.toContain("sages_reminder");
+describe("existing tool allowlist constants — regression (post goal-contract removal)", () => {
+	it("ORCHESTRATOR_TOOLS is no longer exported from extension.ts (orchestrator owns zero tools)", () => {
+		// The orchestrator's previous `ORCHESTRATOR_TOOLS = ["goal_contract_create"]`
+		// was retired along with the tool itself. Asserting against the
+		// export would be impossible (compile error); instead this test
+		// pins the source-level contract.
+		const src = readFileSync(EXTENSION_TS_PATH, "utf-8");
+		expect(src).not.toMatch(/export\s+const\s+ORCHESTRATOR_TOOLS\b/);
 	});
 
 	it("PI_SUBAGENT_TOOLS contains exactly the 3 tools registered by pi-subagents", () => {
@@ -183,8 +170,8 @@ describe("session_start hook text scan (GC-2026-orchestrator-simplify)", () => {
 		expect(block).toContain("...AFT_TOOLS");
 	});
 
-	it("session_start hook spreads ORCHESTRATOR_TOOLS (regression)", () => {
-		expect(block).toContain("...ORCHESTRATOR_TOOLS");
+	it("session_start hook does NOT spread ORCHESTRATOR_TOOLS (retired)", () => {
+		expect(block).not.toContain("...ORCHESTRATOR_TOOLS");
 	});
 
 	it("session_start hook spreads SUBAGENT_TOOLS (regression)", () => {
@@ -209,7 +196,7 @@ describe("session_start hook text scan (GC-2026-orchestrator-simplify)", () => {
 });
 
 describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", () => {
-	it("fires setActiveTools with 33 entries: 1 orchestrator + 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline (GC-2026-remove-workflow-run-prod removes workflow_run; GC-2026-decompose-task-removed removes decompose_task)", async () => {
+	it("fires setActiveTools with 32 entries: 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline (post goal-contract removal removed the orchestrator's single tool)", async () => {
 		const activeToolsCalls: string[][] = [];
 		const pi = {
 			setActiveTools(tools: string[]) {
@@ -242,8 +229,8 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 
 		expect(activeToolsCalls.length).toBe(1);
 		const tools = activeToolsCalls[0];
-		// ORCHESTRATOR family — goal_contract_create (decompose_task removed in GC-2026-decompose-task-removed)
-		expect(tools).toContain("goal_contract_create");
+		// No orchestrator-owned tool post goal-contract removal.
+		expect(tools).not.toContain("goal_contract_create");
 		expect(tools).not.toContain("decompose_task");
 		expect(tools).not.toContain("dag_synthesize");
 		expect(tools).not.toContain("task_dispatch");
@@ -257,9 +244,9 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 		for (const t of SUBAGENT_TOOLS) expect(tools).toContain(t);
 		// BASELINE family
 		for (const t of BASELINE_TOOLS) expect(tools).toContain(t);
-		// Total: 1 + 7 + 7 + 11 + 7 = 33, no duplicates
-		expect(tools.length).toBe(33);
-		expect(new Set(tools).size).toBe(33);
+		// Total: 7 + 7 + 11 + 7 = 32, no duplicates
+		expect(tools.length).toBe(32);
+		expect(new Set(tools).size).toBe(32);
 	});
 });
 
@@ -332,8 +319,8 @@ describe("setActiveTools order — pi-tasks/AFT before BASELINE", () => {
 		expect(lastPiTasksIdx).toBeLessThan(firstBaselineIdx);
 	});
 
-	it("keeps the 33-entry total after reorder (no silent additions / removals — was 35 before GC-2026-remove-workflow-run-prod, then 34 before GC-2026-decompose-task-removed)", async () => {
+	it("keeps the 32-entry total after reorder (no silent additions / removals — was 33 before goal-contract removal)", async () => {
 		const tools = await captureTools();
-		expect(tools.length).toBe(33);
+		expect(tools.length).toBe(32);
 	});
 });

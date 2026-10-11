@@ -563,8 +563,14 @@ export interface TransitionResult {
 }
 
 /**
- * Context for orchestrator workflow transition — the brainstorming
- * design becomes the rationale for a GoalContract.
+ * Context for orchestrator workflow transition.
+ *
+ * Post chore/remove-goal-contract there is no GoalContract surface
+ * anymore. This type is now a pure in-memory handoff: callers feed
+ * `designDoc`, `projectContext`, and the original `request` into a
+ * raw `TaskCreate` × N + `TaskExecute` sequence (no orchestrator
+ * tool mediates the transition). Kept as a type so the brainstorming
+ * slash command can still surface the design state to the LLM.
  */
 export interface OrchestratorPlanContext {
   planName: string;
@@ -604,8 +610,8 @@ export function generateApprovalMessage(
 
 **Next Steps:**
 
-1. **Proceed** → Start orchestrator workflow to create GoalContract
-2. **Defer** → Save design, start later with \`/orchestrate <plan>\`
+1. **Proceed** → Start raw TaskCreate × N + TaskExecute (no GoalContract)
+2. **Defer** → Save design, start later
 3. **Exit** → Save nothing, end session
 
 ---
@@ -650,9 +656,9 @@ export function parseTransitionResponse(response: string): TransitionResult {
 /**
  * Create orchestrator context from brainstorm design.
  *
- * The design becomes the rationale for a goal contract — callers feed
- * `designDoc`, `projectContext`, and the original `request` into
- * `goal_contract_create` to seed the orchestrator workflow.
+ * Post chore/remove-goal-contract this is a pure in-memory handoff
+ * that the LLM feeds directly into `TaskCreate` × N + `TaskExecute`.
+ * No orchestrator tool mediates the transition anymore.
  */
 export function createOrchestratorContext(
   request: string,

@@ -95,30 +95,24 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		pi = new MockPi();
 	});
 
-	it("SMOKE-073-1: default export registers the orchestrator's own tool (goal_contract_create — GC-2026-remove-workflow-run-prod removed workflow_run, GC-2026-decompose-task-removed removed decompose_task)", async () => {
+	it("SMOKE-073-1: default export registers NO orchestrator-owned tools (post goal-contract removal)", async () => {
 		const ext = await import("../../src/extension.js");
 		expect(typeof ext.default).toBe("function");
 		ext.default(pi as any);
 		const toolNames = [...pi.tools.keys()].sort();
-		// GC-2026-boundary-subagent-control: the 4 subagent control tools
-		// (subagent_status / steer / abort / resume) moved out of the
-		// orchestrator and into pi-subagents. After GC-2026-decompose-task-removed
-		// the orchestrator's default export registers exactly one
-		// orchestrator-owned tool (goal_contract_create). The 4 subagent
-		// control tools are covered by pi-subagents' own smoke test.
-		expect(toolNames).toEqual([
-			"goal_contract_create",
-		]);
+		// After chore/remove-goal-contract the orchestrator owns zero tools
+		// of its own. The 4 subagent control tools moved out earlier
+		// (GC-2026-boundary-subagent-control); goal_contract_create was
+		// retired in this one.
+		expect(toolNames).toEqual([]);
 	});
 
-	it("SMOKE-073-2: session_start calls setActiveTools with orchestrator + subagent + pi-tasks + AFT + baseline tools", async () => {
+	it("SMOKE-073-2: session_start calls setActiveTools with subagent + pi-tasks + AFT + baseline tools (no orchestrator tools post goal-contract removal)", async () => {
 		const ext = await import("../../src/extension.js");
 		ext.default(pi as any);
 		pi.fireSessionStart();
 		expect(pi.setActiveToolsCalls.length).toBe(1);
 		const tools = pi.setActiveToolsCalls[0];
-		// Orchestrator
-		expect(tools).toContain("goal_contract_create");
 		// Subagent (pi-subagents)
 		expect(tools).toContain("Agent");
 		expect(tools).toContain("get_subagent_result");
@@ -147,6 +141,10 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		expect(tools).not.toContain("todowrite_compile");
 		expect(tools).not.toContain("todowrite_progress");
 		expect(tools).not.toContain("todowrite");
+		// After goal-contract removal, the orchestrator contributes no
+		// own tools; goal_contract_create must not appear.
+		expect(tools).not.toContain("goal_contract_create");
+		expect(tools).not.toContain("decompose_task");
 	});
 
 	it("SMOKE-073-3: session_start calls setStatus with the orchestrator banner", async () => {

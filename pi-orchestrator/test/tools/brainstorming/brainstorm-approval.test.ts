@@ -33,16 +33,17 @@ describe('generateApprovalMessage', () => {
     expect(message).toContain('Exit');
   });
 
-  it('should mention orchestrator workflow for proceed option', () => {
+  it('should mention the raw TaskCreate workflow for proceed option (post goal-contract removal)', () => {
     const message = generateApprovalMessage(
       'build feature',
       '/path/to/design.md',
       { id: '1', name: 'B', description: 'B', pros: [], cons: [], complexity: 'medium' }
     );
 
-    // The proceed option now hands off to the orchestrator (goal_contract_create)
-    // instead of the legacy Fuxi workflow.
-    expect(message).toMatch(/orchestrator|goal_contract_create/i);
+    // After chore/remove-goal-contract the proceed option hands off to
+    // raw TaskCreate × N + TaskExecute (no orchestrator tool mediates).
+    expect(message).toMatch(/TaskCreate|TaskExecute/i);
+    expect(message).not.toMatch(/goal_contract_create/i);
   });
 });
 
