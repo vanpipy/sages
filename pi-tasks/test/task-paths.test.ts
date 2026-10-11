@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { globalSessionTasksDir, projectKey, sessionTaskFile } from "../src/task-paths.js";
+import { globalSessionTasksDir, orchestratorProjectTaskFile, orchestratorWorkdir, projectKey, sessionTaskFile } from "../src/task-paths.js";
 
 const scratch: string[] = [];
 function workspace(): string {
@@ -35,6 +35,51 @@ describe("projectKey", () => {
 
   it("resolves a relative workspace against the process directory", () => {
     expect(projectKey(".")).toBe(projectKey(process.cwd()));
+  });
+});
+
+describe("orchestratorWorkdir", () => {
+  it("defaults to <tmpdir>/sages-orchestrator when ORCHESTRATOR_WORKDIR is unset", () => {
+    delete process.env.ORCHESTRATOR_WORKDIR;
+    expect(orchestratorWorkdir()).toBe(join(tmpdir(), "sages-orchestrator"));
+  });
+
+  it("follows ORCHESTRATOR_WORKDIR when set", () => {
+    const custom = join(tmpdir(), "my-sages-state");
+    vi.stubEnv("ORCHESTRATOR_WORKDIR", custom);
+    expect(orchestratorWorkdir()).toBe(custom);
+  });
+});
+
+describe("orchestratorProjectTaskFile", () => {
+  it("lives under ORCHESTRATOR_WORKDIR, keyed by repositoryKey(cwd)", () => {
+    delete process.env.ORCHESTRATOR_WORKDIR;
+    const cwd = "/Users/me/work/repo";
+    expect(orchestratorProjectTaskFile(cwd)).toBe(
+      join(orchestratorWorkdir(), projectKey(cwd), "tasks", "tasks.json"),
+    );
+  });
+
+  it("uses the same path regardless of the ORCHESTRATOR_WORKDIR override", () => {
+    const custom = mkdtempSync(join(tmpdir(), "pi-sages-"));
+    scratch.push(custom);
+    vi.stubEnv("ORCHESTRATOR_WORKDIR", custom);
+    const cwd = "/Users/me/work/repo";
+    expect(orchestratorProjectTaskFile(cwd)).toBe(
+      join(custom, projectKey(cwd), "tasks", "tasks.json"),
+    );
+  });
+
+  it("separates two workspaces that share a basename", () => {
+    // Two `/.../foo` workspaces encode into different projectKeys because
+    // the full path is part of the key.
+    expect(orchestratorProjectTaskFile("/Users/alice/foo"))
+      .not.toBe(orchestratorProjectTaskFile("/Users/bob/foo"));
+  });
+
+  it("sits outside the workspace", () => {
+    const cwd = workspace();
+    expect(orchestratorProjectTaskFile(cwd).startsWith(cwd)).toBe(false);
   });
 });
 

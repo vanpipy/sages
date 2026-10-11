@@ -237,7 +237,10 @@ describe("Workspace-scoped store resolution", () => {
       description: "Must use the project-scoped store",
     }, ctx);
 
-    const taskFile = join(cwd, ".pi", "tasks", "tasks.json");
+    // Project-scope file moved out of the workspace (under ORCHESTRATOR_WORKDIR).
+    // Test resolves the same path the board resolves, then reads it.
+    const { orchestratorProjectTaskFile } = await import("../src/task-paths.js");
+    const taskFile = orchestratorProjectTaskFile(cwd);
     expect(new TaskStore(taskFile).list().map(t => t.subject)).toEqual(["Shared workspace task"]);
   });
 

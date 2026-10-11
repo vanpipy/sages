@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { AutoClearManager } from "./auto-clear.js";
@@ -29,7 +29,7 @@ import {
   resetCadenceState,
 } from "./reminder-cadence.js";
 import { resolveTaskGlyphs } from "./task-glyphs.js";
-import { reclaimGlobalSessionTasksDir, sessionTaskFile } from "./task-paths.js";
+import { reclaimGlobalSessionTasksDir, orchestratorProjectTaskFile, sessionTaskFile } from "./task-paths.js";
 import { TaskStore } from "./task-store.js";
 import { loadGlobalTasksConfig, loadTasksConfig } from "./tasks-config.js";
 import type { Task } from "./types.js";
@@ -154,7 +154,11 @@ export default function (pi: ExtensionAPI) {
       return { key: `path:${path}`, path };
     }
     if (isSessionScope()) return { key: "pending:session" };
-    const path = join(cwd, ".pi", "tasks", "tasks.json");
+    // `project` scope: the shared task file the orchestrator's `orchestrate`
+    // also writes to, so both surfaces agree on the DAG. Lives under
+    // ORCHESTRATOR_WORKDIR (one directory for all sages workspaces), not in
+    // the repo itself.
+    const path = orchestratorProjectTaskFile(cwd);
     return { key: `path:${path}`, path };
   }
 

@@ -1,9 +1,11 @@
 /**
- * task-paths.ts — Where session task files live.
+ * task-paths.ts — Where session and project task files live.
  *
  * `session` scope keeps them in the workspace, as it always has. `session-global`
  * keeps them under pi's agent directory instead, beside pi's own per-workspace
  * session logs, for people who would rather their repositories stayed clean.
+ * `project` scope lives under `ORCHESTRATOR_WORKDIR`, a single per-workspace
+ * directory owned by the Sages orchestrator that survives across sessions.
  *
  * The choice only ever decides where a *new* file is created. A session already
  * holding a file in the workspace keeps using it under either setting, so opting
@@ -11,9 +13,29 @@
  */
 
 import { existsSync, rmdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import process from "node:process";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { TasksConfig } from "./tasks-config.js";
+
+/**
+ * Root directory holding per-workspace orchestrator state. The env var
+ * overrides the default; the default itself lives under TMPDIR so a fresh
+ * install never writes inside any project.
+ *
+ * Any sages workspace gets its own subdirectory under ORCHESTRATOR_WORKDIR
+ * (keyed by `repositoryKey(cwd)`): design drafts at `…/<key>/designs/`, the
+ * shared task file at `…/<key>/tasks/tasks.json`, and anything else the
+ * orchestrator needs to keep across sessions.
+ */
+const DEFAULT_ORCHESTRATOR_WORKDIR = join(tmpdir(), "sages-orchestrator");
+
+/** Resolve `ORCHESTRATOR_WORKDIR` at call time (matches pi-tasks's own per-call
+ *  resolution of `getAgentDir()` — env vars may be set between calls). */
+export function orchestratorWorkdir(): string {
+  return process.env.ORCHESTRATOR_WORKDIR ?? DEFAULT_ORCHESTRATOR_WORKDIR;
+}
 
 type TaskScope = NonNullable<TasksConfig["taskScope"]>;
 
@@ -51,6 +73,22 @@ export function sessionTaskFile(cwd: string, sessionId: string, scope: TaskScope
   const inWorkspace = workspaceSessionTaskFile(cwd, sessionId);
   if (scope !== "session-global") return inWorkspace;
   return existsSync(inWorkspace) ? inWorkspace : join(globalSessionTasksDir(cwd), `tasks-${sessionId}.json`);
+}
+
+/**
+ * The per-workspace project task file under `taskScope: "project"`.
+ *
+ * Lives under ORCHESTRATOR_WORKDIR (one root directory holding every sages
+ * workspace's shared orchestrator state) keyed by `projectKey(cwd)` (the
+ * same path-encoded identifier pi-tasks's session-global scope uses — in
+ * user-facing terms this is the workspace's "repository name" within
+ * the orchestrator's directory tree). The orchestrator's `orchestrate(plan)`
+ * tool and the board's own `taskScope: "project"` mode both write here
+ * so the LLM's `TaskList` shows what `orchestrate` just created and
+ * vice versa.
+ */
+export function orchestratorProjectTaskFile(cwd: string): string {
+  return join(orchestratorWorkdir(), projectKey(cwd), "tasks", "tasks.json");
 }
 
 /**

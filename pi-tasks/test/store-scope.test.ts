@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import initExtension from "../src/index.js";
-import { globalSessionTasksDir, sessionTaskFile, workspaceSessionTaskFile } from "../src/task-paths.js";
+import { globalSessionTasksDir, orchestratorProjectTaskFile, sessionTaskFile, workspaceSessionTaskFile } from "../src/task-paths.js";
 import { TaskStore } from "../src/task-store.js";
 import { mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
 
@@ -39,7 +39,9 @@ afterEach(() => {
 /** Every context carries the workspace, since that is what task paths resolve against. */
 const ctxFor = (sessionId = "s1", opts?: { persisted?: boolean }) =>
   mockSessionCtx(sessionId, { ...opts, cwd });
-const projectFile = () => join(cwd, ".pi", "tasks", "tasks.json");
+// Project task file moved out of the workspace into ORCHESTRATOR_WORKDIR/<projectKey>/tasks/tasks.json
+// (see task-paths.ts:orchestratorProjectTaskFile). Test follows the same resolver.
+const projectFile = () => orchestratorProjectTaskFile(cwd);
 const sessionFile = (id: string) => workspaceSessionTaskFile(cwd, id);
 
 describe("taskScope: project", () => {

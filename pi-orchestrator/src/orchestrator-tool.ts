@@ -5,8 +5,9 @@
  *
  *   - LLM calls `orchestrate(intent, phases)` with a list of phase specs.
  *   - For each phase, the tool creates a task in pi-tasks's shared
- *     task store (`<cwd>/.pi/tasks/tasks.json`) with the phase's
- *     `agentType` recorded in task metadata.
+ *     task store (under `ORCHESTRATOR_WORKDIR/<repositoryKey>/tasks/tasks.json`,
+ *     the same file the board's `taskScope: "project"` mode uses) with the
+ *     phase's `agentType` recorded in task metadata.
  *   - Phase-level `blockedBy` references (by subject) are resolved to
  *     task IDs and wired into both the predecessor's `blocks` and the
  *     dependent's `blockedBy`. After this call, pi-tasks's normal
@@ -22,12 +23,12 @@
  * @tintinweb/pi-tasks v0.9.0) — no modifications to pi-tasks needed.
  */
 
-import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import type { ExtensionAPI, AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 // Import path-mapped by tsconfig `paths`. The orchestrator does not
-// reach into pi-tasks's internals beyond the TaskStore class.
+// reach into pi-tasks's internals beyond the path resolver + TaskStore class.
 import { TaskStore } from "@sages/pi-tasks/task-store";
+import { orchestratorProjectTaskFile } from "@sages/pi-tasks/task-paths";
 
 /**
  * The two canonical agent types that pi-subagents ships with
@@ -91,13 +92,16 @@ export interface OrchestrateOutput {
 }
 
 /**
- * Path to pi-tasks's per-project task store. Mirrors
- * `pi-tasks/src/index.ts:resolveStoreTarget()` (the non-session branch)
- * so tasks created here are visible to pi-tasks's own TaskCreate / TaskList
- * / TaskExecute. The orchestrator's tool is co-resident in cwd.
+ * Path to pi-tasks's per-project task store. Thin wrapper around
+ * `pi-tasks/src/task-paths.ts:orchestratorProjectTaskFile` — the orchestrator
+ * and the board both go through the same resolver so they write to the same
+ * file. Result: `<ORCHESTRATOR_WORKDIR>/<repositoryKey>/tasks/tasks.json`,
+ * where `ORCHESTRATOR_WORKDIR` defaults to `<tmpdir>/sages-orchestrator` and
+ * `repositoryKey` is the path-encoded cwd that pi-tasks's `session-global`
+ * scope also uses.
  */
 export function tasksStorePath(cwd: string): string {
-	return join(cwd, ".pi", "tasks", "tasks.json");
+	return orchestratorProjectTaskFile(cwd);
 }
 
 /**
