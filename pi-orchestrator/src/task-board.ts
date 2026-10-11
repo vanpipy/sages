@@ -7,15 +7,25 @@
  *
  *   - `materializePlan(input)` — creation side: take a list of phases,
  *     create one task per phase, wire `blockedBy` / `blocks` in both
- *     directions by subject.
- *   - `consume(taskId)` — consumption side: read a completed task in a
- *     structured way. For Reviewer tasks, parse the 4-state verdict
+ *     directions.
+ *   - `consume(taskId)` — consumption side: read a completed plan task
+ *     in a structured way. For Reviewer tasks, parse the 4-state verdict
  *     and emit a verdict-tailored follow-up suggestion. Mark the task
  *     consumed in metadata for the audit trail.
- *   - `parseVerdict(result)` / `suggestFollowUp(verdict)` — verdict
- *     helpers, exposed as methods so callers (and tests) can reach them
- *     without going through `consume`.
- *   - `get(taskId)` / `list()` — raw access for inspection + edge cases.
+ *   - `createIntent(input)` — /tasks side: write an intent task onto the
+ *     board. Intent tasks are raw material — never matched to a subagent,
+ *     never dispatched, never consumed directly. They wait for the
+ *     orchestrator's `convertIntent()` to turn them into plan tasks.
+ *   - `convertIntent(input)` — the orchestrator's unique conversion
+ *     operator: take an intent task off the "intent surface" and produce
+ *     one plan task in its place. Audit trail: intent's
+ *     `metadata.converted: true, converted_at: <ts>`; plan's
+ *     `metadata.source_intent: <intentId>`.
+ *   - `drain()` / `findNextConsumable()` / `awaitNextConsumable(opts)` —
+ *     the consumer loop's iteration surface. All three return ONLY plan
+ *     tasks (intent tasks stay on the board as audit material but never
+ *     reach the executor).
+ *   - `get(taskId)` / `list()` — raw read access for inspection.
  *
  * The class holds a `TaskStore` instance pointed at the orchestrator's
  * project task file (the same file the board's own `taskScope: "project"`
@@ -61,6 +71,25 @@ const VERDICTS: readonly Verdict[] = [
 /** The two shipped agent types the orchestrator dispatches. */
 export type AgentType = "Developer" | "Reviewer";
 
+/**
+ * Two kinds of tasks live on the board. The orchestrator is the unique
+ * operator that converts intent → plan.
+ *
+ *   - `intent` — created by `/tasks` (or any user-facing custom-task path).
+ *     Raw material that the orchestrator has to interpret and turn into
+ *     a plan. Never matched to a subagent; never dispatched; never consumed
+ *     directly. The orchestrator reads the board, decides how to shape each
+ *     intent, and calls `board.convertIntent()` to produce one plan task.
+ *   - `plan`   — created by the orchestrator (`board.create()`,
+ *     `board.materializePlan()`, or `board.convertIntent()`). Has an
+ *     `agentType`, is matched to a subagent, dispatched via `TaskExecute`,
+ *     and consumed by the orchestrator after the executor reports back.
+ *
+ * Only `plan` tasks appear in the consumer loop's
+ * `findNextConsumable() / drain() / awaitNextConsumable()` results.
+ */
+export type TaskKind = "intent" | "plan";
+
 export interface TaskBoardOptions {
 	/** Workspace cwd. Resolved against the orchestrator's project task file. */
 	cwd: string;
@@ -72,7 +101,35 @@ export interface TaskBoardOptions {
 	store?: TaskStore;
 }
 
-// ─── Creation: plan input/output ──────────────────────────────────────────
+// ─── Errors ──────────────────────────────────────────────────────────────────
+
+/** Errors `consume` throws — caught and formatted by the tool wrapper. */
+export class TaskBoardConsumeError extends Error {
+	constructor(
+		public readonly kind: "not_found" | "not_completed" | "not_plan",
+		message: string,
+	) {
+		super(message);
+		this.name = "TaskBoardConsumeError";
+	}
+}
+
+/** Errors `TaskBoard` throws — the convert-* family uses these. */
+export class TaskBoardError extends Error {
+	constructor(
+		public readonly kind:
+			| "intent_not_found"
+			| "not_intent"
+			| "already_converted"
+			| "plan_requires_agent_type",
+		message: string,
+	) {
+		super(message);
+		this.name = "TaskBoardError";
+	}
+}
+
+// ─── Creation: plan input/output ────────────────────────────────────────────
 
 export interface TaskBoardPlanPhase {
 	subject: string;
@@ -103,7 +160,7 @@ export interface TaskBoardPlanOutput {
 	}>;
 }
 
-// ─── Consumption: options/output ──────────────────────────────────────────
+// ─── Consumption: options/output ────────────────────────────────────────────
 
 export interface TaskBoardConsumeOptions {
 	/**
@@ -133,9 +190,9 @@ export interface TaskBoardConsumeOutput {
 export interface TaskBoardCreateInput {
 	subject: string;
 	description: string;
-	agentType?: AgentType;
+	agentType: AgentType;
 	activeForm?: string;
-	/** Other metadata keys to merge into `metadata.agentType` (if set) or directly. */
+	/** Other metadata keys to merge into `metadata.kind` (default "plan") + agentType. */
 	metadata?: Record<string, unknown>;
 	/** Task IDs this new task should block (set on the predecessor's `blocks`). */
 	blocks?: string[];
@@ -143,15 +200,30 @@ export interface TaskBoardCreateInput {
 	blockedBy?: string[];
 }
 
-/** Errors `consume` throws — caught and formatted by the tool wrapper. */
-export class TaskBoardConsumeError extends Error {
-	constructor(
-		public readonly kind: "not_found" | "not_completed",
-		message: string,
-	) {
-		super(message);
-		this.name = "TaskBoardConsumeError";
-	}
+export interface TaskBoardCreateIntentInput {
+	subject: string;
+	description: string;
+	activeForm?: string;
+	metadata?: Record<string, unknown>;
+}
+
+export interface TaskBoardConvertIntentInput {
+	intentTaskId: string;
+	plan: {
+		subject?: string;
+		description?: string;
+		agentType: AgentType;
+		activeForm?: string;
+		blocks?: string[];
+		blockedBy?: string[];
+		metadata?: Record<string, unknown>;
+	};
+}
+
+export interface TaskBoardConvertIntentOutput {
+	planTask: TaskGet;
+	intentTask: TaskGet;
+	convertedAt: number;
 }
 
 // ─── TaskBoard ─────────────────────────────────────────────────────────────
@@ -166,13 +238,12 @@ export class TaskBoard {
 
 	/**
 	 * Materialize a multi-phase plan as a DAG with auto-wired dependencies.
+	 * The orchestrator's plan-task batch entry point.
 	 *
 	 * Two-pass: first pass creates every task and maps subject -> id; second
 	 * pass wires `blockedBy` / `blocks` in both directions. Missing
-	 * predecessor references are silently dropped (the caller will see the
-	 * missing-subject count in the returned payload's `tasks` and can
-	 * surface it). Cyclic dependencies are not detected (caller's
-	 * responsibility).
+	 * predecessor references are silently dropped. Cyclic dependencies are
+	 * not detected.
 	 */
 	materializePlan(input: TaskBoardPlanInput): TaskBoardPlanOutput {
 		const subjectToId = new Map<string, string>();
@@ -183,7 +254,7 @@ export class TaskBoard {
 				phase.subject,
 				phase.detail ?? input.intent,
 				undefined,
-				{ agentType: phase.agentType },
+				{ kind: "plan", agentType: phase.agentType },
 			);
 			subjectToId.set(phase.subject, task.id);
 			createdIds.push(task.id);
@@ -221,20 +292,31 @@ export class TaskBoard {
 	}
 
 	/**
-	 * Create a single task on the board. The orchestrator's single-creator
-	 * role — when the LLM wants to add one follow-up task (e.g. a
-	 * NEEDS_WORK Developer task after a Reviewer verdict, or a single
-	 * ad-hoc task outside a full plan), it calls `board.create({...})`.
+	 * Create a single plan task. The orchestrator's single-creator
+	 * plan-task entry point — when the LLM wants to add one follow-up
+	 * task (e.g. a NEEDS_WORK Developer task after a Reviewer verdict)
+	 * outside a full plan, it calls `board.create({...})`.
 	 *
-	 * `agentType` (when set) is stored under `metadata.agentType` so the
-	 * later consumption side can identify Developer vs Reviewer tasks for
-	 * verdict parsing. `blocks` / `blockedBy` are wired in both directions
-	 * just like `materializePlan` does. Returns the freshly-created task
-	 * (re-read from the store after wiring).
+	 * `agentType` is REQUIRED: this entry point produces plan tasks only,
+	 * and the consumer loop only matches plan tasks to subagents. Use
+	 * `board.createIntent({...})` for /tasks-style intent tasks.
+	 *
+	 * Returns the freshly-created task (re-read from the store after
+	 * wiring). Throws `TaskBoardError("plan_requires_agent_type")` if no
+	 * agentType is given.
 	 */
 	create(input: TaskBoardCreateInput): TaskGet {
-		const meta: Record<string, unknown> = { ...(input.metadata ?? {}) };
-		if (input.agentType) meta.agentType = input.agentType;
+		if (!input.agentType) {
+			throw new TaskBoardError(
+				"plan_requires_agent_type",
+				`board.create() is the orchestrator's plan-task entry point; agentType is required. Use board.createIntent() for user-facing custom tasks.`,
+			);
+		}
+		const meta: Record<string, unknown> = {
+			kind: "plan",
+			agentType: input.agentType,
+			...input.metadata,
+		};
 
 		const task = this.store.create(
 			input.subject,
@@ -256,13 +338,117 @@ export class TaskBoard {
 	}
 
 	/**
+	 * Create an intent task. The /tasks-side (user-facing custom-task)
+	 * entry point. No agentType: intent tasks are raw material for the
+	 * orchestrator to interpret and convert.
+	 *
+	 * Intent tasks DO show up in `board.list()` so the orchestrator can
+	 * see them, but `findNextConsumable()` filters them out — they wait
+	 * for `convertIntent()` to become plan tasks.
+	 */
+	createIntent(input: TaskBoardCreateIntentInput): TaskGet {
+		const meta: Record<string, unknown> = {
+			kind: "intent",
+			...input.metadata,
+		};
+		const task = this.store.create(
+			input.subject,
+			input.description,
+			input.activeForm,
+			meta,
+		);
+		return this.store.get(task.id)!;
+	}
+
+	/**
+	 * The orchestrator's unique intent → plan conversion operator.
+	 *
+	 *   1. Verify the source task is an intent task (kind === "intent").
+	 *      A non-intent source throws `TaskBoardError("not_intent")` so
+	 *      callers can't accidentally double-convert.
+	 *   2. Refuse already-converted intents — every intent converts once.
+	 *   3. Mark the source as converted: `metadata.converted: true,
+	 *      metadata.converted_at: <ts>`. It stays on the board as a
+	 *      record of the user's original intent.
+	 *   4. Create the new plan task with `kind: "plan"`, agentType from
+	 *      the spec, and `metadata.source_intent: <intentId>` so the
+	 *      audit trail survives both directions.
+	 *   5. Wire `blocks` / `blockedBy` on the new task in both directions.
+	 */
+	convertIntent(
+		input: TaskBoardConvertIntentInput,
+	): TaskBoardConvertIntentOutput {
+		const intent = this.store.get(input.intentTaskId);
+		if (!intent) {
+			throw new TaskBoardError(
+				"intent_not_found",
+				`No intent task with ID #${input.intentTaskId}.`,
+			);
+		}
+		if (intent.metadata?.kind !== "intent") {
+			throw new TaskBoardError(
+				"not_intent",
+				`Task #${intent.id} is not an intent task (kind=${intent.metadata?.kind ?? "missing"}).`,
+			);
+		}
+		if (intent.metadata?.converted) {
+			throw new TaskBoardError(
+				"already_converted",
+				`Intent task #${intent.id} was already converted at ${intent.metadata.converted_at}.`,
+			);
+		}
+
+		const convertedAt = Date.now();
+		this.store.update(intent.id, {
+			metadata: {
+				kind: "intent",
+				converted: true,
+				converted_at: convertedAt,
+			},
+		});
+
+		const planMeta: Record<string, unknown> = {
+			kind: "plan",
+			agentType: input.plan.agentType,
+			source_intent: intent.id,
+			...input.plan.metadata,
+		};
+		const planTask = this.store.create(
+			input.plan.subject ?? intent.subject,
+			input.plan.description ?? intent.description,
+			input.plan.activeForm,
+			planMeta,
+		);
+		if (input.plan.blocks) {
+			for (const target of input.plan.blocks) {
+				this.store.update(planTask.id, { addBlocks: [target] });
+			}
+		}
+		if (input.plan.blockedBy) {
+			for (const pred of input.plan.blockedBy) {
+				this.store.update(planTask.id, { addBlockedBy: [pred] });
+			}
+		}
+
+		return {
+			planTask: this.store.get(planTask.id)!,
+			intentTask: this.store.get(intent.id)!,
+			convertedAt,
+		};
+	}
+
+	/**
 	 * Read a completed task's result in a structured way. Parses the
 	 * Reviewer's 4-state verdict when present and emits a verdict-tailored
 	 * follow-up suggestion. Marks the task consumed in metadata.
 	 *
-	 * Throws `TaskBoardConsumeError` when the task is missing or not yet
-	 * completed — the tool wrapper translates that to an error response
-	 * the LLM can act on.
+	 * Only plan tasks are consumable. Intent tasks throw
+	 * `TaskBoardConsumeError("not_plan")` — they need
+	 * `board.convertIntent()` first.
+	 *
+	 * Throws `TaskBoardConsumeError` when the task is missing, an intent
+	 * task, or not yet completed — the tool wrapper translates that to an
+	 * error response.
 	 */
 	consume(taskId: string, opts: TaskBoardConsumeOptions = {}): TaskBoardConsumeOutput {
 		const task = this.store.get(taskId);
@@ -270,6 +456,15 @@ export class TaskBoard {
 			throw new TaskBoardConsumeError(
 				"not_found",
 				`No task with ID #${taskId}. Use TaskList to find the right ID.`,
+			);
+		}
+		// Missing `kind` defaults to "plan" so tasks created directly via
+		// store.create (e.g. older tests, hand-edited fixtures) still work
+		// through the consumer loop. Only explicitly-intent tasks are filtered.
+		if (task.metadata?.kind === "intent") {
+			throw new TaskBoardConsumeError(
+				"not_plan",
+				`Task #${task.id} is an intent task; convert it to a plan via board.convertIntent() before consume.`,
 			);
 		}
 		if (task.status !== "completed") {
@@ -361,19 +556,20 @@ export class TaskBoard {
 		return this.store.get(taskId);
 	}
 
-	/** List all tasks, sorted by id (TaskStore's default). */
+	/** List all tasks (intent + plan), sorted by id (TaskStore's default). */
 	list(): TaskList {
 		return this.store.list();
 	}
 
 	/**
-	 * Find the next task that is `completed` and not yet consumed.
+	 * Find the next task that is `completed`, `plan`, and not yet consumed.
 	 * Returns undefined when none exists. Sorted by id ascending so the
 	 * consumer loop drains in FIFO order; a follow-up child task created
 	 * mid-drain naturally lands at the end of the list and gets picked up
 	 * after its parent.
 	 *
-	 * Internal helper — exposed for tests.
+	 * Intent tasks never appear here — they wait for the orchestrator to
+	 * convert them via `convertIntent()` before becoming consumable.
 	 */
 	findNextConsumable(): TaskGet | undefined {
 		return this.store
@@ -381,6 +577,7 @@ export class TaskBoard {
 			.filter(
 				(t) =>
 					t.status === "completed" &&
+					t.metadata?.kind !== "intent" &&
 					!t.metadata?.consumed,
 			)
 			.sort((a, b) => Number(a.id) - Number(b.id))[0];
@@ -394,9 +591,7 @@ export class TaskBoard {
 	 * The orchestrator's consumer loop is `while (true) { const out =
 	 * board.drain(); if (out.length === 0) break; ...process each... }`
 	 * — i.e. drain until empty, then `awaitNextConsumable()` to wait
-	 * for the next completion. Each `consume()` call inside `drain`
-	 * still marks its task consumed in metadata; calling `drain()`
-	 * twice in a row is a no-op on the second call.
+	 * for the next completion.
 	 */
 	drain(): TaskBoardConsumeOutput[] {
 		const out: TaskBoardConsumeOutput[] = [];
@@ -409,8 +604,8 @@ export class TaskBoard {
 	}
 
 	/**
-	 * Wait for the next completed-but-unconsumed task to appear on the
-	 * board, polling the store at `pollIntervalMs`. Returns the task
+	 * Wait for the next completed-but-unconsumed `plan` task to appear
+	 * on the board, polling the store at `pollIntervalMs`. Returns the task
 	 * when one is found, or undefined if `timeoutMs` is reached first.
 	 *
 	 * Used by the orchestrator's consumer loop after `drain()` returns

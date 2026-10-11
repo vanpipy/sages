@@ -14,7 +14,7 @@ import { describe, expect, it, beforeEach } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TaskBoard, TaskBoardConsumeError, type Verdict } from "../src/task-board.js";
+import { TaskBoard, TaskBoardConsumeError, TaskBoardError, type Verdict } from "../src/task-board.js";
 import { TaskStore } from "@sages/pi-tasks/task-store";
 
 describe("TaskBoard.parseVerdict", () => {
@@ -686,6 +686,247 @@ describe("TaskBoard end-to-end — the Task Feeding loop", () => {
 			"Batch-2",
 			"Batch-3",
 		]);
+	});
+});
+
+describe("TaskBoard — kind distinction (intent vs plan)", () => {
+	let scratch: string;
+
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "pi-orch-task-board-"));
+	});
+
+	it("createIntent() creates intent tasks; never appear in findNextConsumable()", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		const intent = board.createIntent({
+			subject: "User-requested work",
+			description: "needs to be turned into a plan",
+		});
+		expect(intent.metadata?.kind).toBe("intent");
+		expect(intent.metadata?.agentType).toBeUndefined();
+
+		expect(board.list()).toHaveLength(1);
+		expect(board.findNextConsumable()).toBeUndefined();
+		expect(board.drain()).toHaveLength(0);
+
+		// Even if marked completed, intent stays non-consumable.
+		store.update(intent.id, {
+			status: "completed",
+			metadata: { result: "ignored" },
+		});
+		expect(board.findNextConsumable()).toBeUndefined();
+		expect(board.drain()).toHaveLength(0);
+	});
+
+	it("create() refuses to build a plan task without agentType", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		expect(() =>
+			board.create({ subject: "no agentType", description: "..." }),
+		).toThrow(TaskBoardError);
+
+		const plan = board.create({
+			subject: "with agentType",
+			description: "...",
+			agentType: "Developer",
+		});
+		expect(plan.metadata?.kind).toBe("plan");
+		expect(plan.metadata?.agentType).toBe("Developer");
+	});
+
+	it("materializePlan() creates plan tasks only, never intent", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		const plan = board.materializePlan({
+			intent: "ship feature X",
+			phases: [
+				{ subject: "A", agentType: "Developer" },
+				{ subject: "B", agentType: "Reviewer", blockedBy: ["A"] },
+			],
+		});
+		expect(plan.tasks).toHaveLength(2);
+		for (const t of plan.tasks) {
+			expect(t.agentType).toBeDefined();
+		}
+	});
+
+	it("convertIntent(): orchestrator's unique intent → plan conversion", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		const intent = board.createIntent({
+			subject: "Add a /login endpoint",
+			description: "User asked via /tasks",
+		});
+		expect(intent.metadata?.kind).toBe("intent");
+
+		const { planTask, intentTask, convertedAt } = board.convertIntent({
+			intentTaskId: intent.id,
+			plan: {
+				agentType: "Developer",
+				subject: "Implement /login endpoint",
+				description: "Converted from /tasks intent",
+			},
+		});
+
+		expect(planTask.id).not.toBe(intent.id);
+		expect(planTask.metadata?.kind).toBe("plan");
+		expect(planTask.metadata?.agentType).toBe("Developer");
+		expect(planTask.metadata?.source_intent).toBe(intent.id);
+
+		expect(intentTask.metadata?.converted).toBe(true);
+		expect(intentTask.metadata?.converted_at).toBe(convertedAt);
+
+		expect(board.list()).toHaveLength(2);
+		// The plan task is still pending until the executor runs. Verify
+		// the kind filter keeps it out of findNextConsumable until then.
+		expect(board.findNextConsumable()).toBeUndefined();
+
+		// Mark the plan task completed (simulating the executor).
+		store.update(planTask.id, {
+			status: "completed",
+			metadata: { result: "Done" },
+		});
+
+		const consumable = board.findNextConsumable();
+		expect(consumable?.id).toBe(planTask.id);
+		expect(consumable?.metadata?.kind).toBe("plan");
+	});
+
+	it("convertIntent() refuses non-intent sources and already-converted intents", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		const plan = board.create({
+			subject: "a plan",
+			description: "...",
+			agentType: "Developer",
+		});
+		try {
+			board.convertIntent({
+				intentTaskId: plan.id,
+				plan: { agentType: "Reviewer" },
+			});
+			expect.unreachable("convertIntent should have thrown on a plan source");
+		} catch (err) {
+			expect(err).toBeInstanceOf(TaskBoardError);
+			expect((err as TaskBoardError).kind).toBe("not_intent");
+		}
+
+		const intent = board.createIntent({
+			subject: "user wish",
+			description: "...",
+		});
+		board.convertIntent({
+			intentTaskId: intent.id,
+			plan: { agentType: "Developer" },
+		});
+		try {
+			board.convertIntent({
+				intentTaskId: intent.id,
+				plan: { agentType: "Reviewer" },
+			});
+			expect.unreachable("convertIntent should have thrown on already-converted");
+		} catch (err) {
+			expect(err).toBeInstanceOf(TaskBoardError);
+			expect((err as TaskBoardError).kind).toBe("already_converted");
+		}
+	});
+
+	it("consumer loop ignores intent tasks even when many are present", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		for (let i = 0; i < 3; i++) {
+			board.createIntent({ subject: `intent-${i}`, description: "..." });
+		}
+
+		expect(board.list()).toHaveLength(3);
+		expect(board.findNextConsumable()).toBeUndefined();
+		expect(board.drain()).toHaveLength(0);
+
+		const first = board.list()[0];
+		const { planTask } = board.convertIntent({
+			intentTaskId: first.id,
+			plan: { agentType: "Developer", subject: first.subject },
+		});
+		store.update(planTask.id, {
+			status: "completed",
+			metadata: { result: "Done" },
+		});
+
+		const next = board.findNextConsumable();
+		expect(next?.id).toBe(planTask.id);
+
+		const drained = board.drain();
+		expect(drained).toHaveLength(1);
+		expect(drained[0].subject).toBe(first.subject);
+	});
+
+	it("consume() refuses intent tasks with a clear error", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		const intent = board.createIntent({
+			subject: "raw intent",
+			description: "...",
+		});
+		store.update(intent.id, { status: "completed" });
+		expect(() => board.consume(intent.id)).toThrow(TaskBoardConsumeError);
+		try {
+			board.consume(intent.id);
+		} catch (err) {
+			expect((err as TaskBoardConsumeError).kind).toBe("not_plan");
+			expect(err.message).toMatch(/convert.*plan/i);
+		}
+	});
+
+	it("end-to-end intent flow: /tasks -> orchestrator converts -> consume plans", () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		// 1. /tasks creates 2 intents
+		board.createIntent({ subject: "Add /login", description: "..." });
+		board.createIntent({ subject: "Add /logout", description: "..." });
+
+		expect(board.list()).toHaveLength(2);
+		expect(board.findNextConsumable()).toBeUndefined();
+
+		// 2. Orchestrator converts both into plan tasks
+		const intentIds = board.list().map((t) => t.id);
+		const plans = intentIds.map((id) =>
+			board.convertIntent({
+				intentTaskId: id,
+				plan: { agentType: "Developer" },
+			}),
+		);
+
+		// 3. Board now has 2 intents + 2 plans
+		expect(board.list()).toHaveLength(4);
+		const planIds = plans.map((p) => p.planTask.id);
+		expect(planIds.every((id) => board.get(id)?.metadata?.agentType === "Developer")).toBe(true);
+
+		// 4. Simulate subagent completions on the plans
+		for (const id of planIds) {
+			store.update(id, {
+				status: "completed",
+				metadata: { result: "Done" },
+			});
+		}
+
+		// 5. Drain the plans; the intents stay as audit records
+		const drained = board.drain();
+		expect(drained).toHaveLength(2);
+		for (const id of intentIds) {
+			expect(board.get(id)?.metadata?.converted).toBe(true);
+		}
+		for (const id of planIds) {
+			expect(board.get(id)?.metadata?.consumed).toBe(true);
+		}
 	});
 });
 
