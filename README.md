@@ -119,6 +119,5 @@ of Chinese mythology, plus an FSM-style orchestrator. After the
 2026-10-01 GC-2026-path-B-swap, the runtime is two orchestrator tools
 (`goal_contract_create`, `workflow_run`) + four subagent-control
 tools; orchestration logic lives in `pi-tasks` (`subscribeWorkflow`),
-not in the orchestrator. See `pi/docs/postmortem/GC-2026-path-B-*.md`
-for the migration write-up.
+not in the orchestrator.
 
