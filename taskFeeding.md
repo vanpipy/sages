@@ -165,6 +165,48 @@ LLM ─► pi (route) ─► pi-tasks TaskCreate handler ─► TaskStore.create
 orchestrator orchestrate() ─► new TaskStore(...) ─┘ (same file, file-locked)
 ```
 
+## Closing the loop — consumption
+
+`orchestrate` is the creation side. `task_consume` is the consumption
+side. Together they complete the orchestrator's sole-creator /
+sole-consumer role.
+
+After a task runs to `completed`, the orchestrator's LLM calls:
+
+```text
+task_consume(task_id="<review_id>")
+```
+
+The tool (`pi-orchestrator/src/orchestrator-consume-tool.ts`):
+
+1. Reads the task via `TaskStore` at the same
+   `${ORCHESTRATOR_WORKDIR}/${projectKey(cwd)}/tasks/tasks.json` path.
+2. Returns `undefined` for non-`completed` tasks (error path telling
+   the LLM to use `TaskOutput(block: true)` first).
+3. For Reviewer tasks, runs `parseVerdict(result)` against the
+   4-state set (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` /
+   `NEEDS_CLARIFICATION`). Two matchers run — a prefixed form
+   (`verdict: STATE`) and a standalone-line form — both anchored to
+   avoid prose-word false matches.
+4. Runs `suggestFollowUp(verdict)` to emit a verdict-tailored hint:
+   `CLEAN` → "move on", `NEEDS_WORK` → "spawn Developer with the
+   feedback as description", `NEEDS_REDESIGN` → "spawn a new Implement",
+   `NEEDS_CLARIFICATION` → "pause for the user".
+5. Marks the task consumed: `metadata.consumed = true`,
+   `metadata.consumed_at = <ts>` (the audit trail).
+6. Returns a structured payload:
+   `{ id, subject, status, agentType, result, verdict?,
+   consumed_at, follow_up_suggestion? }`.
+
+The LLM uses `follow_up_suggestion` as a hint, then makes the actual
+decision: spawn a Developer task (the suggested `blockedBy` Review
+chain keeps the causality traceable), spawn a new Implement for a
+redesign, pause for user clarification, or move on.
+
+For Developer tasks, no verdict is parsed (the Developer contract
+doesn't emit one) — the tool just returns the result text verbatim
+plus `consumed_at` and the metadata audit.
+
 ## Subtle interactions
 
 **Auto-cascade.** When `autoCascade: true`, the board itself spawns

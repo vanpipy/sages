@@ -175,11 +175,15 @@ shape, `orchestrate(plan)` collapses it into one call.
 
 ### 5. Sages orchestrator (1 + 4 subagent control) — `pi-orchestrator`
 
-#### 5.1 Orchestrator-owned tool (1)
+#### 5.1 Orchestrator-owned tools (2)
+
+The orchestrator owns two LLM-facing tools that together close the
+sole-creator / sole-consumer role: one for writing, one for reading.
 
 | Tool | Use for |
 |---|---|
-| `orchestrate` | materialize a multi-phase plan as a task DAG in pi-tasks's shared task store (`<ORCHESTRATOR_WORKDIR>/<projectKey(cwd)>/tasks/tasks.json`, resolved via `pi-tasks/src/task-paths.ts:orchestratorProjectTaskFile`). For each phase, a task is created with the chosen `agentType` recorded in metadata; phase-level `blockedBy` references (by subject) are resolved to task IDs and wired into both ends of the edge. After this call, `TaskExecute` on the first ready task drives the cascade. |
+| `orchestrate(plan)` | Creation side — materialize a multi-phase plan as a task DAG in pi-tasks's shared task store (`<ORCHESTRATOR_WORKDIR>/<projectKey(cwd)>/tasks/tasks.json`, resolved via `pi-tasks/src/task-paths.ts:orchestratorProjectTaskFile`). For each phase, a task is created with the chosen `agentType` recorded in metadata; phase-level `blockedBy` references (by subject) are resolved to task IDs and wired into both ends of the edge. After this call, `TaskExecute` on the first ready task drives the cascade. |
+| `task_consume(task_id, include_transcript?)` | Consumption side — read a completed task's result in a structured way. Returns `{ id, subject, status, agentType, result, verdict?, consumed_at, follow_up_suggestion? }`. For Reviewer tasks it parses the 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and emits a verdict-tailored follow-up suggestion; for Developer tasks it returns the result verbatim. Marks the task consumed in metadata (`consumed: true`, `consumed_at`) so a repeat call sees the audit trail. The task must be `completed`; if it's still `in_progress`, use `TaskOutput(task_id, block: true)` first. |
 
 #### 5.2 Subagent control (4 — GC-2026-073)
 

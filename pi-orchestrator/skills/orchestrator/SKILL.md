@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the orchestrator constitution), and tool_call (once-per-session soft-mode reminder). Owns one LLM-facing tool: `orchestrate(plan)` which materializes a multi-phase workflow as a task DAG in pi-tasks's shared task store. The LLM still drives raw `TaskCreate` × N + `TaskExecute` directly when it wants full control; `orchestrate` is the convenience path for whole-plan-at-once creation with automatic dependency wiring.
+description: "Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the orchestrator constitution), and tool_call (once-per-session soft-mode reminder). Owns one LLM-facing tool: `orchestrate(plan)` which materializes a multi-phase workflow as a task DAG in pi-tasks's shared task store. The LLM still drives raw `TaskCreate` × N + `TaskExecute` directly when it wants full control; `orchestrate` is the convenience path for whole-plan-at-once creation with automatic dependency wiring."
 ---
 
 # Orchestrator — Soft Infrastructure
@@ -70,9 +70,11 @@ orchestrate({
 The Reviewer reads the Implement task's `metadata.result` via `TaskOutput`
 and emits one of CLEAN / NEEDS_WORK / NEEDS_REDESIGN /
 NEEDS_CLARIFICATION as plain text in its own result. The orchestrator
-(the main LLM) reads the verdict via `TaskOutput` and decides whether
-to declare done or to spawn a follow-up Fix task (with
-`agentType: "Developer"`, blockedBy the Review) by hand.
+then calls `task_consume(review_task_id)` to read that result in a
+structured way: `parseVerdict` extracts the verdict and `suggestFollowUp`
+emits a verdict-tailored next-step hint (spawn Developer follow-up /
+spawn new Implement / pause for user / move on). The task is marked
+consumed in metadata so the audit trail is recorded.
 
 ## Soft mode (unchanged)
 

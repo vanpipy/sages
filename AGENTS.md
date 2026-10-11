@@ -54,11 +54,13 @@ evidence. Three guiding principles govern the work (soft mode — GC-2026-031):
 
 ## The orchestrator tool surface
 
-The orchestrator owns exactly **one** LLM-facing tool:
+The orchestrator owns **two** LLM-facing tools, one per side of the
+sole-creator / sole-consumer role:
 
 | Tool | Output | Use for |
 |---|---|---|
 | `orchestrate(plan)` | task DAG materialized in pi-tasks's shared store (`<ORCHESTRATOR_WORKDIR>/<projectKey(cwd)>/tasks/tasks.json`, resolved via `pi-tasks/src/task-paths.ts:orchestratorProjectTaskFile`) | Materialize a multi-phase plan as a DAG in one call. For each phase, a task is created with the chosen `agentType`; phase-level `blockedBy` references (by subject) are resolved to task IDs and wired into both ends of every edge. After this returns, `TaskExecute` on the first ready task drives the cascade. |
+| `task_consume(task_id, include_transcript?)` | structured payload: `{ id, subject, status, agentType, result, verdict?, consumed_at, follow_up_suggestion? }` | Read a completed task in a structured way. For Reviewer tasks, parses the 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and returns a verdict-tailored follow-up suggestion. Marks the task consumed in metadata. The task must be `completed`; if it's still `in_progress`, use `TaskOutput(task_id, block: true)` first. |
 
 For full per-step control the orchestrator uses the raw pi-tasks tools
 directly: `TaskCreate` × N + `TaskExecute`. Both paths produce the same

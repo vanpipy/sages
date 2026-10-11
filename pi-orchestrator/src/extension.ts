@@ -30,6 +30,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerConsumeTool } from "./orchestrator-consume-tool.js";
 import { registerOrchestrateTool } from "./orchestrator-tool.js";
 
 /**
@@ -196,10 +197,22 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 /**
  * Default pi extension entrypoint. Wires the three session hooks:
  * session_start / before_agent_start / tool_call. Also registers the
- * orchestrator's first LLM-facing tool, `orchestrate`, which materializes
- * a multi-phase workflow as a task DAG in pi-tasks's shared store.
+ * orchestrator's two LLM-facing tools:
+ *
+ *   - `orchestrate(plan)` — materializes a multi-phase workflow as a
+ *     task DAG in pi-tasks's shared store (the creation side of the
+ *     Task Feeding loop).
+ *   - `task_consume(task_id)` — reads a completed task's result in a
+ *     structured way, parses the Reviewer's 4-state verdict, and
+ *     returns a verdict-tailored follow-up suggestion (the consumption
+ *     side of the loop).
+ *
+ * Together they close the orchestrator's sole-creator / sole-consumer
+ * role: `orchestrate` writes, `TaskExecute` dispatches, the board
+ * tracks, `task_consume` decides.
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
 	installSessionHooks(pi);
 	registerOrchestrateTool(pi);
+	registerConsumeTool(pi);
 }
