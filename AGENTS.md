@@ -193,40 +193,10 @@ Do not commit ephemeral `.pi/` state.
 
 ## Verify gates
 
-Sages exposes a layered set of verifiers that run via `bun run <gate>`.
-A `verify:all` aggregator wires them into one entry point for CI.
-After GC-2026-task-feeding-and-decomposition the gate list grew to
-cover the new helpers and after GC-2026-extension-load-verify it
-gained a load-time jiti smoke test.
-
-| Gate | Command | Catches |
-|---|---|---|
-| Type check | `bun run typecheck` | Type errors anywhere |
-| Unit suite | `bun test ./test` | Behavior regression |
-| Catalog | `bun run verify:catalog` | Drift between source + `.pi/orchestrator/catalogs/*.json` |
-| Isolation modes | `bun run verify:isolation-modes` | Literal `isolation: "worktree"` (forbidden) |
-| Namespace ownership | `bun run verify:namespace-ownership` | Subagent templates declaring `.pi/orchestrator/...` in files[] |
-| Soft-mode mental model | `bun run verify:soft-mode-mental-model` | Docs "soft mode" mentions vs `src/extension.ts` reminder wiring |
-| PI_TASKS_TOOLS allowlist | `bun run verify:pi-tasks-tools` | Drift between orchestrator's PI_TASKS_TOOLS and pi-tasks's registerTool |
-| `created_by` invariant | `bun run verify:created-by-invariant` | Any `store.create(` in `pi-tasks/src` missing the `created_by` stamp (every task must be either orchestrator- or user-tracked) |
-| Extension load (jiti) | `bun run verify:extension-load` | Catches the host loader's silent fail-soft at install time — jiti-imports each registered package, asserts default export is a function |
-| **All** | `bun run verify:all` | Runs every gate above; CI single entry point |
-
-GC-2026-069 retired `verify:subagent-roster` alongside `pi/templates/SUBAGENTS.md` — the roster table it parsed is no longer installed to user machines and the LLM-facing roster comes from `pi/templates/agent-tool-description.md`'s `{{typeList}}` template rendering (sourced from `pi-subagents/src/default-agents.ts`).
-
-The pre-commit hook (`orchestrator:typecheck` + `orchestrator:test`) still runs automatically and must pass before commit. Run the rest locally from `pi-orchestrator/`:
+The pre-commit hook (`orchestrator:typecheck` + `orchestrator:test`) is the only gate that runs automatically; it must pass before every commit. The earlier layered verifier scripts (`verify:isolation-modes`, `verify:soft-mode-mental-model`, `verify:pi-tasks-tools`, `verify:created-by-invariant`, `verify:extension-load`, `verify:pi-universe`, `verify:catalog`, `verify:all`, etc.) were retired along with the `pi-orchestrator/catalogs/` directory they produced. Run the two remaining gates locally from `pi-orchestrator/`:
 
 - `bun run typecheck` — orchestrator typecheck
 - `bun test ./test` — orchestrator unit + integration tests
-- `bun run verify:catalog` — fails when any of the 5 catalogues under `pi-orchestrator/catalogs/` drift from their source files. Run after editing `pi-orchestrator/src/*.ts` or `pi-orchestrator/templates/agent-tool-description.md`.
-- `bun run verify:isolation-modes` — fails when any subagent template or worker dispatch uses the literal `isolation: "worktree"` token. Use the explicit managed-worktree object or `"current-workspace"`.
-- `bun run verify:namespace-ownership` — fails when a subagent template declares a `.pi/orchestrator/...` path inside its `files[]` allow-list (cross-namespace overwrites).
-- `bun run verify:soft-mode-mental-model` — fails when docs references to "soft mode" drift from the `SOFT_MODE_REMINDER` constant + `pi.on("tool_call")` wiring in `pi-orchestrator/src/extension.ts`.
-- `bun run verify:pi-tasks-tools` — fails when orchestrator's PI_TASKS_TOOLS allowlist (extension.ts) drifts from what pi-tasks actually registers.
-- `bun run verify:created-by-invariant` — fails when any `store.create(` in `pi-tasks/src` lacks the `created_by` stamp.
-- `bun run verify:extension-load` — jiti-imports each registered package, asserts default export is a function. Catches the host's silent fail-soft path that swallowed `loader.js:363-381` errors during the GC-2026-task-feeding-and-decomposition session.
-
-If you change any source file listed in a catalog's `_source_files`, re-run `bun run gen:catalog` and commit the regenerated `pi-orchestrator/catalogs/*.json` along with the source change.
 
 ## Soft mode and the task-count threshold
 
