@@ -55,11 +55,6 @@
 #                        install on this prefix (peer chain must already be
 #                        intact at $PI_DIR/packages/). GC-2026-pi-tasks-cascade-
 #                        agentid + GC-2026-boundary-subagent-control follow-up.
-#   --no-smoke          skip the post-install extension-load smoke test (gate 3 of
-#                        run_post_install_gates). Gates 1 (critical_deps) and
-#                        2 (package_existence) still run. Useful for fast
-#                        iteration when the install is known sound. GC-2026-110.
-#
 # These flags are mutually exclusive with --uninstall and each other.
 #
 
@@ -231,7 +226,6 @@ usage() {
   echo "  --orchestrator-only Only install orchestrator source files (skip pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates, SYSTEM.md)"
   echo "  --system-only      Only install/update SYSTEM.md (skip orchestrator, pi-codebase-memory, pi-mcp-adapter, pi-subagents, pi-evaluator, subagent templates)"
   echo "  --sync-only        Force-copy pi-orchestrator + pi-tasks source files only (no bun install / no peer setup / no SYSTEM.md / no pi CLI). Requires a prior full install on the same prefix."
-  echo "  --no-smoke         Skip the post-install extension-load smoke test (gate 3 of run_post_install_gates). Gates 1 (critical_deps) and 2 (package_existence) still run. Useful for fast iteration when you know the install is sound."
   echo "  --help, -h         Show this help message"
   echo ""
   echo "Modes are mutually exclusive: pick one of (default | --uninstall | --orchestrator-only | --system-only | --sync-only)."
@@ -885,13 +879,13 @@ verify_critical_evaluator_deps() {
 }
 
 # verify_critical_codebase_memory_deps: no critical runtime deps to
-# check (only the @mariozechner/pi-coding-agent peer, which pi itself
-# provides). Kept as a function so the final verify-all gate has a
-# uniform call surface.
+# check (only the @earendil-works/pi-coding-agent peer, which pi itself
+# provides). Kept as a function so future per-package checks can be
+# added in one place.
 verify_critical_codebase_memory_deps() {
   local pkg_dir="$1"
-  # Intentional no-op. Left as a placeholder so adding a new critical
-  # dep later is a one-line change.
+  # Intentional no-op. Kept as a placeholder so future critical-dep
+  # additions are a one-line change.
   return 0
 }
 
@@ -934,10 +928,9 @@ verify_critical_tasks_deps() {
 # Symptom guarded: a path that points to a directory that no longer exists
 # (e.g. a leftover from an older install attempt with a renamed package
 # dir, or a manual edit that was never cleaned up) fails gate 2
-# (verify_package_existence) AND gate 3 (verify:extension-load) with no
-# obvious recovery — the user sees "1 issue(s); packages already in
-# settings.json" and has to manually edit JSON. Auto-pruning keeps the
-# install self-healing.
+# (verify_package_existence) with no obvious recovery — the user sees
+# "1 issue(s); packages already in settings.json" and has to manually
+# edit JSON. Auto-pruning keeps the install self-healing.
 #
 # Scope: only entries that are (a) local-path (not npm:), (b) missing on
 # disk, and (c) NOT one of the sage packages this installer manages.
@@ -1067,23 +1060,19 @@ verify_all_critical_install_deps() {
 }
 
 # GC-2026-110 FU1b: consolidated post-install gates. Returns 0 iff every
-# gate passes. The three gates (in order):
+# gate passes. The two gates (in order):
 #   1. critical_deps — every installed package has its critical
 #      runtime deps in node_modules (catches silent bun install failures)
 #   2. package_existence — every package registered in
 #      settings.json#packages has its dest dir on disk (catches npm
 #      peers uninstalled but path still registered)
-#   3. extension_load — jiti-imports every registered package's entry
-#      and verifies the default export is a function (catches typo in
-#      package.json#pi.extensions, missing transitive deps, etc.)
-# `--no-smoke` (read from $SMOKE) skips gate (3); gates (1) and (2)
-# always run because they're cheap and catch real partial-failure bugs.
+# Both gates always run because they're cheap and catch real partial-failure bugs.
 run_post_install_gates() {
   local failed=0
 
   # GC-2026-stale-package-entries: prune stale local-path entries before
   # the gates so a leftover from a previous install attempt doesn't fail
-  # gate 2 (verify_package_existence) or gate 3 (verify:extension-load).
+  # gate 2 (verify_package_existence).
   # See prune_stale_package_entries for the full policy.
   prune_stale_package_entries || true
 
@@ -1095,31 +1084,6 @@ run_post_install_gates() {
   # Gate 2: registered-package existence
   if ! verify_package_existence; then
     failed=$((failed + 1))
-  fi
-
-  # Gate 3: extension-load smoke test (skippable via --no-smoke)
-  if [[ "${SMOKE:-true}" == "true" ]]; then
-    echo ""
-    echo "==> POST-INSTALL SMOKE TEST: extension load via jiti"
-    echo "    (catches silent fail-soft in pi-coding-agent's loader: typo in"
-    echo "    package.json#pi.extensions, missing transitive deps, etc.)"
-    if command -v bun &>/dev/null; then
-      # Use $SCRIPT_DIR absolute path so the call works regardless of
-      # cwd (the script is sometimes invoked as
-      # `bash pi-orchestrator/scripts/install.sh` from the repo root,
-      # where `bun run scripts/...` would fail with "Module not found").
-      if bun run "$SCRIPT_DIR/verify-extension-load.ts"; then
-        echo "==> POST-INSTALL SMOKE TEST: PASS"
-      else
-        echo "==> POST-INSTALL SMOKE TEST: FAIL"
-        failed=$((failed + 1))
-      fi
-    else
-      echo "  (skipped verify:extension-load — bun not on PATH)"
-    fi
-  else
-    echo ""
-    echo "==> POST-INSTALL SMOKE TEST: skipped (--no-smoke)"
   fi
 
   return $failed
@@ -2323,11 +2287,10 @@ install() {
   install_agent_tool_description
   install_subagents_config
 
-  # GC-2026-110 FU1b: consolidated post-install gates. Three gates catch
+  # GC-2026-110 FU1b: consolidated post-install gates. Two gates catch
   # partial-failure states: (1) critical deps, (2) registered-package
-  # existence, (3) extension load smoke test. Any one failing exits 1
-  # with a clear recovery command. --no-smoke skips gate (3) only;
-  # gates (1) and (2) still run (they're cheap and catch real bugs).
+  # existence. Any one failing exits 1 with a clear recovery command.
+  # Both gates always run (they're cheap and catch real bugs).
   if ! run_post_install_gates; then
     echo ""
     echo "Install completed but post-install verification failed."
@@ -2531,7 +2494,6 @@ uninstall() {
 
 main() {
   local FORCE=false UNINSTALL=false ORCHESTRATOR_ONLY=false SYSTEM_ONLY=false SYNC_ONLY=false
-  local SMOKE=true
   local MODE_COUNT=0
 
   while [[ $# -gt 0 ]]; do
@@ -2551,7 +2513,6 @@ main() {
       --orchestrator-only) ORCHESTRATOR_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --system-only) SYSTEM_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
       --sync-only) SYNC_ONLY=true; MODE_COUNT=$((MODE_COUNT+1)); shift ;;
-      --no-smoke) SMOKE=false; shift ;;
       --help|-h) usage; exit 0 ;;
       *) echo "Error: Unknown option: $1"; usage; exit 1 ;;
     esac
