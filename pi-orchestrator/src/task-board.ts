@@ -315,4 +315,75 @@ export class TaskBoard {
 	list(): TaskList {
 		return this.store.list();
 	}
+
+	/**
+	 * Find the next task that is `completed` and not yet consumed.
+	 * Returns undefined when none exists. Sorted by id ascending so the
+	 * consumer loop drains in FIFO order; a follow-up child task created
+	 * mid-drain naturally lands at the end of the list and gets picked up
+	 * after its parent.
+	 *
+	 * Internal helper — exposed for tests.
+	 */
+	findNextConsumable(): TaskGet | undefined {
+		return this.store
+			.list()
+			.filter(
+				(t) =>
+					t.status === "completed" &&
+					!t.metadata?.consumed,
+			)
+			.sort((a, b) => Number(a.id) - Number(b.id))[0];
+	}
+
+	/**
+	 * Drain every currently-consumable task: each call to `consume` in
+	 * turn until `findNextConsumable()` returns undefined. Returns the
+	 * structured payload for each in the order they were consumed.
+	 *
+	 * The orchestrator's consumer loop is `while (true) { const out =
+	 * board.drain(); if (out.length === 0) break; ...process each... }`
+	 * — i.e. drain until empty, then `awaitNextConsumable()` to wait
+	 * for the next completion. Each `consume()` call inside `drain`
+	 * still marks its task consumed in metadata; calling `drain()`
+	 * twice in a row is a no-op on the second call.
+	 */
+	drain(): TaskBoardConsumeOutput[] {
+		const out: TaskBoardConsumeOutput[] = [];
+		while (true) {
+			const next = this.findNextConsumable();
+			if (!next) break;
+			out.push(this.consume(next.id));
+		}
+		return out;
+	}
+
+	/**
+	 * Wait for the next completed-but-unconsumed task to appear on the
+	 * board, polling the store at `pollIntervalMs`. Returns the task
+	 * when one is found, or undefined if `timeoutMs` is reached first.
+	 *
+	 * Used by the orchestrator's consumer loop after `drain()` returns
+	 * empty: the consumer switches from "drain in a tight loop" to
+	 * "wait for the next one" once the board is momentarily empty. A
+	 * real production deployment would prefer a push-based subscription
+	 * (TaskStore change events or `subagents:completed`); polling is the
+	 * self-contained test-friendly option.
+	 */
+	async awaitNextConsumable(
+		opts: {
+			timeoutMs?: number;
+			pollIntervalMs?: number;
+		} = {},
+	): Promise<TaskGet | undefined> {
+		const timeoutMs = opts.timeoutMs ?? 60_000;
+		const pollMs = opts.pollIntervalMs ?? 100;
+		const start = Date.now();
+		while (Date.now() - start < timeoutMs) {
+			const next = this.findNextConsumable();
+			if (next) return next;
+			await new Promise((resolve) => setTimeout(resolve, pollMs));
+		}
+		return undefined;
+	}
 }

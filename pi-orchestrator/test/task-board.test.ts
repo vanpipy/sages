@@ -395,6 +395,97 @@ describe("TaskBoard end-to-end — the Task Feeding loop", () => {
 		expect(all).toHaveLength(2);
 		expect(all.find((t) => t.id === review.id)?.metadata?.consumed).toBe(true);
 	});
+
+	it("drain() consumes 10 tasks in order; awaitNextConsumable() waits for the next one", async () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		// 1. CREATE — materialize a 10-phase plan.
+		const plan = board.materializePlan({
+			intent: "10-task flow",
+			phases: Array.from({ length: 10 }, (_, i) => ({
+				subject: `T${i + 1}`,
+				agentType: "Developer" as const,
+			})),
+		});
+		expect(plan.tasks).toHaveLength(10);
+
+		// 2. SIMULATE — all 10 tasks complete (executors can run in parallel).
+		for (const t of plan.tasks) {
+			store.update(t.id, {
+				status: "completed",
+				metadata: { result: `result for ${t.subject}` },
+			});
+		}
+
+		// 3. DRAIN — the orchestrator's consumer loop picks up all 10.
+		const drained = board.drain();
+		expect(drained).toHaveLength(10);
+		// FIFO by id ascending.
+		expect(drained.map((d) => d.subject)).toEqual([
+			"T1",
+			"T2",
+			"T3",
+			"T4",
+			"T5",
+			"T6",
+			"T7",
+			"T8",
+			"T9",
+			"T10",
+		]);
+		// Each carries its own metadata + consumed_at.
+		for (const out of drained) {
+			expect(out.consumed_at).toBeGreaterThan(0);
+			expect(out.status).toBe("completed");
+			expect(out.result).toMatch(/^result for T\d+$/);
+		}
+
+		// 4. AUDIT — every task on the board is now `consumed`.
+		const all = board.list();
+		expect(all).toHaveLength(10);
+		expect(all.every((t) => t.metadata?.consumed === true)).toBe(true);
+		// Every consumed_at matches the corresponding drain entry.
+		const consumedAtById = new Map(drained.map((d) => [d.id, d.consumed_at]));
+		for (const t of all) {
+			expect(t.metadata?.consumed_at).toBe(consumedAtById.get(t.id));
+		}
+
+		// 5. DRAIN AGAIN — empty: nothing left to consume.
+		const drainedAgain = board.drain();
+		expect(drainedAgain).toHaveLength(0);
+
+		// 6. LISTEN — schedule a new completion, then await it.
+		// This is the orchestrator's post-drain state: the consumer loop
+		// gives up busy-polling and waits for the next completion event.
+		setTimeout(() => {
+			const late = store.create("LateArrival", "do the late thing");
+			store.update(late.id, {
+				status: "completed",
+				metadata: { result: "I'm late" },
+			});
+		}, 150);
+
+		const next = await board.awaitNextConsumable({
+			timeoutMs: 5_000,
+			pollIntervalMs: 50,
+		});
+		expect(next).toBeDefined();
+		expect(next?.subject).toBe("LateArrival");
+
+		// 7. CONSUME the late arrival — the loop continues.
+		const lateOut = board.consume(next!.id);
+		expect(lateOut.subject).toBe("LateArrival");
+		expect(lateOut.result).toBe("I'm late");
+
+		// 8. After consume, awaitNextConsumable would block again. Verify
+		// with a short timeout that no new task arrives.
+		const empty = await board.awaitNextConsumable({
+			timeoutMs: 200,
+			pollIntervalMs: 50,
+		});
+		expect(empty).toBeUndefined();
+	});
 });
 
 // Suppress unused-var lint — scratch is intentionally retained for
