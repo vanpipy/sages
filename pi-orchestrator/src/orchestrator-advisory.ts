@@ -15,10 +15,7 @@
  *                              within stuckIntervalMs. General stuck-on-same-call
  *                              detector; mirrors deepseek-harness's
  *                              `repeat-tool-reminder` chain-key semantics.
- *   - goal_drift_detected   — any tool call references paths that fall
- *                              outside the active goal contract's
- *                              scope.include (and not in scope.exclude).
- *
+ 
  * Output contract mirrors the subagent advisory exactly:
  *
  *   [orchestrator advisory — N/M] <rule>: <issue>. Fix: <directive>.
@@ -46,9 +43,7 @@ import {
 	isStructuralExploration,
 } from "./bash-guard.js";
 
-export type OrchestratorAdvisoryRuleId =
-	| "goal_drift_detected"
-	| "repeat_call_chain";
+export type OrchestratorAdvisoryRuleId = "repeat_call_chain";
 
 export interface OrchestratorAdvisoryFinding {
 	rule: OrchestratorAdvisoryRuleId;
@@ -82,12 +77,7 @@ export interface OrchestratorToolResult {
 	isError: boolean;
 }
 
-/** Snapshot of the active goal contract used by goal_drift_detected. */
-export interface GoalScopeSnapshot {
-	goal_id: string;
-	scope_include: string[];
-	scope_exclude: string[];
-}
+
 
 export interface OrchestratorAdvisoryContext {
 	/** Rules already advised in this process. Used to fire-once dedup
@@ -124,8 +114,7 @@ export interface OrchestratorAdvisoryOptions {
 	 *  clearly signalled intent to retry with reasoning. Use this to
 	 *  suppress false positives on thoughtful retries. */
 	lastAssistantMessage?: string;
-	/** Loader for the active goal contract (used by goal_drift_detected). */
-	loadGoalScope?: (goalId: string) => GoalScopeSnapshot | null;
+	
 	/** Per-severity cap override. Merged on top of
 	 *  DEFAULT_ADVISORY_BUDGET_BY_SEVERITY. Set a severity to
 	 *  `Number.POSITIVE_INFINITY` to disable its cap entirely. */
@@ -162,8 +151,6 @@ export const ADVISORY_MIN_SEVERITY: OrchestratorAdvisorySeverity = "major";
 
 /** Per-rule actionable fix text. */
 export const RULE_FIX_DIRECTIVES: Record<OrchestratorAdvisoryRuleId, string> = {
-	goal_drift_detected:
-		"Check whether the paths you wrote are inside the active goal contract's scope.include; if they are new files, call goal_contract_create to amend scope.include before continuing",
 	repeat_call_chain:
 		"You called the same tool with identical args ≥3 times — this indicates you are stuck. Stop, re-read the last result, and decide whether to change approach or conclude. Do not keep repeating the same call",
 };
@@ -270,80 +257,6 @@ function detectRepeatCallChain(
 		recommendation:
 			"orchestrator is calling the same tool with identical arguments in rapid succession; this suggests it is stuck. Re-read the last result, change approach, or conclude",
 	};
-}
-
-/** Detect `goal_drift_detected`: any tool call references paths that fall outside
- *  the active goal contract's scope.include (and not in scope.exclude). */
-function detectGoalDrift(
-	history: OrchestratorToolCall[],
-	loadGoalScope: ((goalId: string) => GoalScopeSnapshot | null) | undefined,
-): OrchestratorAdvisoryFinding | null {
-	if (!loadGoalScope) return null;
-	for (const call of history) {
-		// Scan tools that carry explicit path-bearing fields. We avoid
-		// anchoring on `read`/`bash` because their paths are noisy and
-		// most legitimate (e.g. reading AGENTS.md for project context).
-		const paths = extractPathsFromInput(call.toolName, call.input);
-		if (paths.length === 0) continue;
-
-		const goalId = (call.input.goal_id as string | undefined)
-			?? (call.input.id as string | undefined);
-		if (typeof goalId !== "string") continue;
-
-		const scope = loadGoalScope(goalId);
-		if (!scope) continue;
-
-		const outOfScope: string[] = [];
-		for (const p of paths) {
-			if (!isPathInScope(p, scope)) outOfScope.push(p);
-		}
-		if (outOfScope.length > 0) {
-			return {
-				rule: "goal_drift_detected",
-				severity: "major",
-				issue: `${outOfScope.length} path(s) reference entries outside goal ${goalId}'s scope.include`,
-				evidence: outOfScope.slice(0, 5).join(", "),
-				recommendation:
-					"either rewrite the action to use in-scope paths, or amend goal_contract scope.include before continuing",
-			};
-		}
-	}
-	return null;
-}
-
-/** Best-effort path extraction from a tool call's input. Conservative —
- *  only inspects well-known fields. Returns empty array when no path
- *  field is present, so the detector skips the call rather than firing
- *  on noise. */
-function extractPathsFromInput(toolName: string, input: Record<string, unknown>): string[] {
-	if (toolName === "write" || toolName === "edit" || toolName === "read") {
-		const p = (input as { path?: unknown; file_path?: unknown }).path
-			?? (input as { file_path?: unknown }).file_path;
-		return typeof p === "string" ? [p] : [];
-	}
-	if (toolName === "write") {
-		const p = (input as { file_path?: unknown }).file_path;
-		return typeof p === "string" ? [p] : [];
-	}
-	if (toolName === "bash") {
-		// Heuristic: skip bash because path extraction is unreliable and
-		// most legitimate bash calls touch many paths. Returning empty
-		// here is intentional — the bash-nudge system handles the
-		// codebase/ctx promotion path separately.
-		return [];
-	}
-	return [];
-}
-
-/** A path is "in scope" if it is prefixed by any scope_include entry
- *  AND not prefixed by any scope_exclude entry. Empty scope.include
- *  means nothing is constrained (no drift detected). Empty scope.exclude
- *  means nothing is forbidden. */
-function isPathInScope(path: string, scope: GoalScopeSnapshot): boolean {
-	if (scope.scope_include.length === 0) return true;
-	const included = scope.scope_include.some((prefix) => path.startsWith(prefix));
-	const excluded = scope.scope_exclude.some((prefix) => path.startsWith(prefix));
-	return included && !excluded;
 }
 
 // =============================================================================
@@ -479,15 +392,11 @@ export function extractOrchestratorFindings(
 	const opts = {
 		repeatThreshold: options.repeatThreshold ?? 3,
 		stuckIntervalMs: options.stuckIntervalMs ?? DEFAULT_STUCK_INTERVAL_MS,
-		loadGoalScope: options.loadGoalScope,
 	};
 
 	const findings: OrchestratorAdvisoryFinding[] = [];
 
 	const sevRank: Record<OrchestratorAdvisorySeverity, number> = { minor: 0, major: 1, critical: 2 };
-
-	const f1 = detectGoalDrift(history, opts.loadGoalScope);
-	if (f1) findings.push(f1);
 
 	const f2 = detectRepeatCallChain(
 		history,
@@ -595,13 +504,6 @@ export function installOrchestratorAdvisoryHandlers(
 	};
 	const familyCounts: Record<ToolFamily, number> = emptyFamilyCounts();
 
-	const advisoryOptions: OrchestratorAdvisoryOptions = {
-		loadGoalScope: (goalId: string) => {
-			const cwd = process.cwd();
-			return deps.loadGoalScope(goalId, cwd);
-		},
-	};
-
 	// GC-2026-097 L4: reset all closure-scoped advisory state on each
 	// session_start. The orchestrator extension is loaded once per pi
 	// process (not per session); without this reset, alreadyAdvisedRules
@@ -624,9 +526,9 @@ export function installOrchestratorAdvisoryHandlers(
 		resetAdvisoryState();
 	});
 
-	// Pre-tool blocker (no-op after orchestrator-simplify — no critical
-	// orchestrator rules remain; subagent advisory still owns the
-	// dispatch / execution side).
+	// Pre-tool blocker (no-op after chore/remove-goal-contract). The
+	// orchestrator owns no tools, so there is nothing orchestrator can
+	// block. Subagent advisory still owns the dispatch / execution side.
 	pi.on("tool_call", (event: any, _ctx: any) => {
 		const toolName: string = event?.toolName;
 		if (typeof toolName !== "string" || toolName.length === 0) return;
@@ -637,25 +539,8 @@ export function installOrchestratorAdvisoryHandlers(
 			input,
 			timestamp: Date.now(),
 		};
-
-		const decision = preToolBlockDecision(upcoming, orchestratorHistory, {
-			...advisoryOptions,
-			errorHistory,
-			lastAssistantMessage: lastAssistantMessage ?? undefined,
-		});
-		if (decision) {
-			const ruleMatch = decision.reason.match(/pre-tool block\] (\w+)/);
-			const ruleId = ruleMatch?.[1];
-			if (ruleId && !l1Ctx.alreadyAdvisedRules.has(ruleId)) {
-				pi.appendEntry("system", decision.reason);
-				l1Ctx.alreadyAdvisedRules.add(ruleId);
-				l1Ctx.advisoriesBySeverity.critical =
-					(l1Ctx.advisoriesBySeverity.critical ?? 0) + 1;
-			} else if (ruleId) {
-				l1Ctx.alreadyAdvisedRules.add(ruleId);
-			}
-		}
-		return decision;
+		// `upcoming` is built (kept for forward-compat with future pre-tool
+		// detectors) but no pre-tool decision is computed today.
 	});
 
 	// Post-tool history-tracker + advisory emitter.
@@ -671,7 +556,6 @@ export function installOrchestratorAdvisoryHandlers(
 		familyCounts[familyOfTool(toolName)] += 1;
 
 		const advisories = orchestratorAdvisoryFor(orchestratorHistory, l1Ctx, {
-			...advisoryOptions,
 			errorHistory,
 			lastAssistantMessage: lastAssistantMessage ?? undefined,
 		});

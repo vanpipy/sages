@@ -1,7 +1,7 @@
 {
   "name": "@sages/pi-orchestrator",
   "version": "0.1.0",
-  "description": "Sages orchestrator: goal_contract_create + decompose_task + brainstorming. Domain capability package, loaded by pi via standard pi.extensions.",
+  "description": "Sages orchestrator: a soft-infrastructure layer for pi (session hooks + advisory nudges + brainstorming slash command). Post chore/remove-goal-contract the orchestrator owns zero tools of its own — workflows are driven by the LLM via raw TaskCreate × N + TaskExecute. Domain capability package, loaded by pi via standard pi.extensions.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
