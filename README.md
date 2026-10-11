@@ -23,7 +23,7 @@ LLM in main session (Task Orchestrator)
         │
         │ orchestrate(plan) OR raw TaskCreate × N
         ▼
-pi-tasks TaskStore at <cwd>/.pi/tasks/tasks.json  (Task Board)
+pi-tasks TaskStore at ${ORCHESTRATOR_WORKDIR}/${projectKey(cwd)}/tasks/tasks.json  (Task Board)
         │
         │ TaskExecute on first ready task
         ▼

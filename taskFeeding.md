@@ -305,7 +305,7 @@ exploring           clarifying              proposing
                           └────  finalizeDesign()  ─────►
                                   │
                                   │ writeDesignDoc()
-                                  │ → .pi/orchestrator/designs/<date>-<topic>.md
+                                  │ → ${ORCHESTRATOR_WORKDIR}/${projectKey(cwd)}/designs/<date>-<topic>.md
                                   ▼
                           createOrchestratorContext()
                           = OrchestratorPlanContext

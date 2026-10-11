@@ -12,7 +12,7 @@ describe('generateApprovalMessage', () => {
   it('should include design approval status', () => {
     const message = generateApprovalMessage(
       'add login feature',
-      '.pi/orchestrator/designs/2024-01-01-login.md',
+      '<ORCHESTRATOR_WORKDIR>/--Users-me-work-repo--/designs/2024-01-01-login.md',
       { id: '1', name: 'JWT', description: 'Use JWT', pros: [], cons: [], complexity: 'medium' }
     );
 

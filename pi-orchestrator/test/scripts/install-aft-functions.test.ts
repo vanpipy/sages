@@ -2,7 +2,9 @@
  * install-aft-functions.test.ts -- GC-2026-096
  *
  * Pins the AFT install integration in `pi-orchestrator/scripts/install.sh`.
- * The design (`.pi/orchestrator/designs/2026-10-01-aft-install-integration.md`)
+ * The design (`${ORCHESTRATOR_WORKDIR}/${projectKey(cwd)}/designs/2026-10-01-aft-install-integration.md`,
+ * i.e. per-workspace under the orchestrator workdir — see
+ * `pi-tasks/src/task-paths.ts:orchestratorDesignsDir`)
  * specifies eight new install.sh functions, eight constants, and wiring into
  * `install()` and `uninstall()`. This test verifies:
  *

@@ -179,7 +179,7 @@ shape, `orchestrate(plan)` collapses it into one call.
 
 | Tool | Use for |
 |---|---|
-| `orchestrate` | materialize a multi-phase plan as a task DAG in pi-tasks's shared task store (`<cwd>/.pi/tasks/tasks.json`). For each phase, a task is created with the chosen `agentType` recorded in metadata; phase-level `blockedBy` references (by subject) are resolved to task IDs and wired into both ends of the edge. After this call, `TaskExecute` on the first ready task drives the cascade. |
+| `orchestrate` | materialize a multi-phase plan as a task DAG in pi-tasks's shared task store (`<ORCHESTRATOR_WORKDIR>/<projectKey(cwd)>/tasks/tasks.json`, resolved via `pi-tasks/src/task-paths.ts:orchestratorProjectTaskFile`). For each phase, a task is created with the chosen `agentType` recorded in metadata; phase-level `blockedBy` references (by subject) are resolved to task IDs and wired into both ends of the edge. After this call, `TaskExecute` on the first ready task drives the cascade. |
 
 #### 5.2 Subagent control (4 — GC-2026-073)
 

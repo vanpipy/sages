@@ -58,7 +58,7 @@ The orchestrator owns exactly **one** LLM-facing tool:
 
 | Tool | Output | Use for |
 |---|---|---|
-| `orchestrate(plan)` | task DAG materialized in pi-tasks's shared store (`<cwd>/.pi/tasks/tasks.json`) | Materialize a multi-phase plan as a DAG in one call. For each phase, a task is created with the chosen `agentType`; phase-level `blockedBy` references (by subject) are resolved to task IDs and wired into both ends of every edge. After this returns, `TaskExecute` on the first ready task drives the cascade. |
+| `orchestrate(plan)` | task DAG materialized in pi-tasks's shared store (`<ORCHESTRATOR_WORKDIR>/<projectKey(cwd)>/tasks/tasks.json`, resolved via `pi-tasks/src/task-paths.ts:orchestratorProjectTaskFile`) | Materialize a multi-phase plan as a DAG in one call. For each phase, a task is created with the chosen `agentType`; phase-level `blockedBy` references (by subject) are resolved to task IDs and wired into both ends of every edge. After this returns, `TaskExecute` on the first ready task drives the cascade. |
 
 For full per-step control the orchestrator uses the raw pi-tasks tools
 directly: `TaskCreate` × N + `TaskExecute`. Both paths produce the same

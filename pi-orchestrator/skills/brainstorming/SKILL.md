@@ -93,7 +93,7 @@ Complete these items in order:
 3. **Grill: Resolve decision branches** — One question at a time with recommendations
 4. **Propose 2-3 approaches** — With tradeoffs and recommendation
 5. **Present design sections** — Get approval after each section
-6. **Write design doc** — Save to `${TMPDIR}/${ORCHESTRATOR_WORKDIR}/designs/YYYY-MM-DD-<topic>.md`
+6. **Write design doc** — Save to `${ORCHESTRATOR_WORKDIR}/${projectKey(cwd)}/designs/YYYY-MM-DD-<topic>.md`
 7. **Spec self-review** — 4-step inline check (see below)
 8. **User reviews written spec** — Wait for approval
 9. **Transition to implementation** — User drives raw `TaskCreate` × N + `TaskExecute` (the orchestrator owns no goal-contracting or pipeline-runner tool anymore)
