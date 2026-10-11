@@ -201,16 +201,23 @@ describe("/tasks clearing", () => {
 });
 
 describe("/tasks create", () => {
-  it("creates a task from the subject and description prompts", async () => {
-    const { mock, inputs } = await runTasks(
-      ["Create task", "Ship it", "Get the release out", undefined],
-      async () => {},
-    );
-    expect(inputs).toEqual(["Task subject", "Task description"]);
-    const task = (await mock.executeTool("TaskGet", { taskId: "1" })).content[0].text;
-    expect(task).toContain("Ship it");
-    expect(task).toContain("Get the release out");
-  });
+	it("creates a task from the subject and description prompts, marked as intent", async () => {
+		const { mock, inputs } = await runTasks(
+			["Create task", "Ship it", "Get the release out", undefined],
+			async () => {},
+		);
+		expect(inputs).toEqual(["Task subject", "Task description"]);
+		const task = (await mock.executeTool("TaskGet", { taskId: "1" })).content[0].text;
+		expect(task).toContain("Ship it");
+		expect(task).toContain("Get the release out");
+
+		// /tasks creates raw user-facing material — the orchestrator is
+		// the unique operator that converts intent → plan, so the kind
+		// marker is what makes the conversion path discoverable.
+		const store = new TaskStore(taskFile);
+		const stored = store.get("1")!;
+		expect(stored.metadata?.kind).toBe("intent");
+	});
 
   it("creates nothing when the subject prompt is cancelled", async () => {
     const { mock, inputs } = await runTasks(["Create task", undefined], async () => {});

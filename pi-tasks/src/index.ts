@@ -1344,7 +1344,13 @@ Set up task dependencies:
         const description = await ui.input("Task description");
         if (!description) return mainMenu();
 
-        store.create(subject, description);
+        // /tasks creates raw user-facing material — mark it with the
+        // `intent` kind so the orchestrator's `task_convert_intent` is
+        // the unique operator that turns it into a plan task. Without
+        // the marker, intent and plan tasks would be indistinguishable
+        // and the orchestrator's consumer loop would have no way to
+        // know which tasks are user wishes vs. ready-to-execute plans.
+        store.create(subject, description, undefined, { kind: "intent" });
         widget.update();
         return mainMenu();
       };
