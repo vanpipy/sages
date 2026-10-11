@@ -38,7 +38,6 @@ import {
 	installOrchestratorAdvisoryHandlers,
 	type OrchestratorAdvisoryRuntimeDeps,
 } from "./orchestrator-advisory.js";
-import { validateFailureCatalogOnBoot } from "./failure-catalog.js";
 
 /**
  * Tools registered by `@sages/pi-subagents` (`pi-subagents/src/index.ts`
@@ -213,12 +212,11 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 /**
  * Default pi extension entrypoint.
  *
- * GC-2026-097 M5: synchronously validate the failure-catalog at boot
- * (NOT on first lookup) so a malformed shipped catalog throws at
- * session_start instead of deep in a workflow 4 tool calls later.
+ * Post chore/drop-failure-catalog the orchestrator does no boot-time
+ * validation (the failure-modes catalog + retry-helper were removed).
+ * It just wires the advisory handlers + session hooks.
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
-	validateFailureCatalogOnBoot();
 	registerOrchestratorTools(pi);
 	installSessionHooks(pi);
 }
