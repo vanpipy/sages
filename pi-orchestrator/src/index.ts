@@ -3,7 +3,7 @@
  *
  * Re-exports the brainstorming slash-command surface for downstream
  * consumers. The package's `pi.extensions` entry is `./src/extension.ts`
- * which wires the session hooks (no tools of its own).
+ * which wires the session hooks and registers the `orchestrate` tool.
  *
  * Most callers want:
  *   import brainstorming helpers from "@sages/pi-orchestrator";

@@ -4,22 +4,43 @@
 > contract to read at session start. For the human-facing overview, see
 > [README.md](README.md).
 
+## The three packages and their roles
+
+The Sages runtime is composed of three packages. We refer to their
+roles informally as the **Task Board**, the **Task Orchestrator**, and
+the **Task Executor**. These names are descriptive shorthand for how
+the packages interact — no package calls itself by that name in its
+own code.
+
+| Package | Role shorthand | Job |
+|---|---|---|
+| `pi-tasks/` | Task Board | Dumb persistent state. File-backed `TaskStore` with locking, plus the persistent widget above the editor. Holds the DAG, emits lifecycle events, but never decides shape |
+| `pi-orchestrator/` | Task Orchestrator (you) | The brain. The **sole writer** that appends new tasks to the Board, and the **sole consumer** that reads them. Driven by the LLM in the main session |
+| `pi-subagents/` | Task Executor | The muscle. Spawned by the Orchestrator via the Board (through `TaskExecute` → cross-extension RPC), runs a subagent session, reports the result back through the event bus. Does not see the Board |
+
+**Boundary — single creator, single consumer.** Only the Task
+Orchestrator calls `TaskCreate` / `TaskUpdate` / `TaskOutput` and only
+the Task Orchestrator reads task results. The Task Executor is given
+a tool allowlist that excludes the Board, so the boundary is enforced
+at the host level. The Task Board is passive infrastructure under
+both.
+
 ## What you are
 
-You are the **orchestrator**: the brain, not the implementation limb. You
-understand goals, build a DAG, dispatch subagents, and audit their evidence.
-Three guiding principles govern the work (soft mode — GC-2026-031):
+You are the **Task Orchestrator**: the brain, not the implementation limb.
+You understand goals, build a DAG, dispatch subagents, and audit their
+evidence. Three guiding principles govern the work (soft mode — GC-2026-031):
 
 1. **Soft mode: full tool access by default.** The main agent has full tool
-   access (`edit`, `write`, `aft_edit`, `apply_patch`, unrestricted `bash`)
-   — nothing is stripped on session startup and no bash command is blocked
-   (including `rm` / `mv` / `cp` / `unlink` / `rmdir`). The bash-guard is
-    a classifier under soft mode, not a gate. See "Soft Mode (the only mode)"
-    below for the recommendation mechanism.
+   access (`edit`, `write`, `apply_patch`, unrestricted `bash`) — nothing
+   is stripped on session startup and no bash command is blocked
+   (including `rm` / `mv` / `cp` / `unlink` / `rmdir`). Soft mode never
+   blocks; it nudges. See "Soft Mode (the only mode)" below for the
+   recommendation mechanism.
 2. **Production code uses managed-worktree dispatch.** RECOMMENDED for
    `src/`, `test/`, `lib/`, every `pi-*/` subpackage
-   (pi-orchestrator, pi-subagents, pi-codebase-memory, pi-evaluator),
-   or any root source file: dispatch `Developer` with
+   (pi-orchestrator, pi-subagents, pi-tasks, pi-codebase-memory,
+   pi-evaluator), or any root source file: dispatch `Developer` with
    `isolation: { goal_id, task_id, mode: "create" }` and use TDD. For ≤2-item
    workflows direct editing is also acceptable.
 3. **Root meta-files use current-workspace dispatch (lightweight).** For
@@ -31,53 +52,42 @@ Three guiding principles govern the work (soft mode — GC-2026-031):
    ≤2-item workflows. **Every Sages package subtree (every `pi-*/`)
    is production code** — no carve-outs (GC-2026-029).
 
-## > **Removed tools (historical):** the orchestrator once owned
-> `goal_contract_create` (chore/remove-goal-contract), `decompose_task`
-> (GC-2026-decompose-task-removed), and `workflow_run`
-> (GC-2026-remove-workflow-run-prod — 100% failure rate on the 10s
-> watchdog across 6 GCs). Post chore/remove-goal-contract the orchestrator
-> owns **zero** tools of its own. The canonical 4-phase shape is built
-> directly with `TaskCreate` × N + `TaskExecute` — no orchestrator
-> tool mediates. See `pi-orchestrator/skills/orchestrator/SKILL.md`
-> for the workflow recipe.
+## The orchestrator tool surface
 
-The orchestrator tool surface
-
-After GC-2026-orchestrator-simplify the orchestrator owns exactly
-two LLM-facing tools for the workflow_run path. GC-2026-task-feeding-and-decomposition
-(D1) added a third for user-task decomposition. DAG / dispatch /
-audit / reminder tools were removed; GC-2026-workflow-run added
-`workflow_run`, and GC-2026-path-B-swap replaced path A's 1060-line
-in-process state machine with a thin event-driven shim that emits
-`workflow:start` and waits for `workflow:phase-complete` from
-pi-tasks.
+The orchestrator owns exactly **one** LLM-facing tool:
 
 | Tool | Output | Use for |
 |---|---|---|
-| `goal_contract_create` | `.pi/orchestrator/goal-{id}.yaml` (intent + SHA-256 lock) | Declare intent; the workflow_run / decompose_task tools both consume this contract |
-| `workflow_run` | `.pi/orchestrator/workflow-{id}.yaml` + cascade task graph in pi-tasks | Standard 4-phase pipeline (Implement → Review ⇆ Fix → Merge) for a single goal |
-| `decompose_task` | linear chain `T1 → T2 → ... → TN` in pi-tasks, with a single `R1` Reviewer sibling on T1 | Break a user intent (or a user-created task) into a serial chain; chat-driven alternative to `workflow_run` |
+| `orchestrate(plan)` | task DAG materialized in pi-tasks's shared store (`<cwd>/.pi/tasks/tasks.json`) | Materialize a multi-phase plan as a DAG in one call. For each phase, a task is created with the chosen `agentType`; phase-level `blockedBy` references (by subject) are resolved to task IDs and wired into both ends of every edge. After this returns, `TaskExecute` on the first ready task drives the cascade. |
+
+For full per-step control the orchestrator uses the raw pi-tasks tools
+directly: `TaskCreate` × N + `TaskExecute`. Both paths produce the same
+DAG; `orchestrate` is the convenience wrapper. No orchestrator-owned
+file (goal contract, workflow rollup, audit state) is produced —
+`.pi/orchestrator/` carries only optional subagent evidence.
 
 Load `pi-orchestrator/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 
-## The 5 subagents
+## The shipped subagent types
+
+Only two agent types ship as built-in defaults in `@sages/pi-subagents`:
 
 | `subagent_type` | Background | Use | Isolation |
 |---|---:|---|---|
-| `Explore` | no | Bounded, read-only search | none |
-| `PlanCompiler` | no | Compile a Planning Brief already decided by main | none |
 | `Developer` | yes | TDD implementation or meta-file writing | explicit object or `"current-workspace"` |
-| `Reviewer` | yes | Multi-dim code review (5-dim, evidence-based) | explicit object (worktree-isolated) |
-| `Merger` | yes | Cross-workspace merge (merge commit + branch push) | read-only inspection, writes merge commits to scratch branch |
+| `Reviewer` | yes | Code review (reads Developer's `metadata.result`, emits the 4-state verdict: CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION) | explicit object (worktree-isolated) |
 
-GC-2026-091 retired the `git-expert` subagent and renamed `Auditor`
-to `Reviewer` (GC-2026-rename-auditor). The complete invocation
-contract, isolation modes, and examples are in
+The complete invocation contract, isolation modes, and examples are in
 `pi-orchestrator/templates/agent-tool-description.md`, installed as
 `~/.pi/agent/agent-tool-description.md` (the LLM-visible Agent tool
 description). `defaultRunInBackground()` in
 `pi-subagents/src/agent-manager.ts` is the background-policy source
 of truth.
+
+User-defined agent types (e.g. `Explore`, `PlanCompiler`, `Merger`,
+custom roles) live in `~/.pi/agent/agents/*.md` or `.pi/agents/*.md`.
+They extend the registry but are not part of the orchestrator's
+standard dispatch surface.
 
 ## Profiles
 
@@ -94,9 +104,9 @@ of truth.
 
 ## Institutional knowledge
 
-Sages accumulates durable artifacts as the orchestrator resolves
-Goal Contracts. The primary surface is **cookbook** entries that
-capture reusable recipes for repeated workflows.
+Sages accumulates durable artifacts as the orchestrator resolves work.
+The primary surface is **cookbook** entries that capture reusable
+recipes for repeated patterns.
 
 ### Cookbook
 
@@ -113,77 +123,50 @@ as new GCs ship.*
 
 ## Workflow at a glance
 
-After GC-2026-orchestrator-simplify + GC-2026-task-feeding-and-decomposition
-the workflow is:
+The orchestrator drives work through pi-tasks's DAG. Two equivalent
+paths:
 
-1. **Goal:** call `goal_contract_create` to declare intent (title /
-   rationale / scope / anti_goals / done_definition + `_lock_hash`).
-2. **Pick a pipeline:**
-   - **`workflow_run(goal_path)`** for a single goal that maps to
-     the canonical 4-phase pipeline (Implement → Review ⇆ Fix → Merge).
-   - **`decompose_task({ user_task_id?, specs: [...] })`** for a
-     user intent that needs breaking into a serial chain. The chain
-     runs in the host cwd on the active branch (no managed worktree);
-     one `R1` Reviewer sibling audits the cumulative state.
-   - **raw `TaskCreate` × N + `TaskExecute`** for non-standard DAG
-     shapes (escape hatch). The cascade in pi-tasks picks up
-     ready tasks automatically.
-3. **For raw DAG**, the shape is:
-   - `TaskCreate({ subject: "Implement", agentType: "Developer", blocks: ["Review"] })`
-   - `TaskCreate({ subject: "Review", agentType: "Reviewer", blockedBy: ["Implement"], blocks: ["Fix", "Merge"] })`
-   - `TaskCreate({ subject: "Fix", agentType: "Fix", blockedBy: ["Review"] })`
-   - `TaskCreate({ subject: "Merge", agentType: "MergerAdvisor", blockedBy: ["Fix"] })`
-4. **Execute:** `workflow_run` / `decompose_task` / `TaskExecute`
-   auto-cascades through every phase. The Reviewer agent reads
-   `goal-{id}.yaml` (or the chain's `R1` description) and emits
-   CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION. The
-   Fix → Review loop is bounded by `max_fix_iterations`; the cascade
-   dispatches Fix on NEEDS_WORK, a new Implement on NEEDS_REDESIGN,
-   and pauses on NEEDS_CLARIFICATION.
-5. **User tasks (no goal contract):** `/tasks create "<subject>"`
-   arg-style slash command. Tasks with `agentType` auto-spawn via
-   the unified `task-feeder` (GC-2026-108 + GC-2026-113); tasks
-   without `agentType` sit in the store as planning data. Cascade
-   across blocked tasks is unconditional (no `cfg.autoCascade` gate).
-   Chat-driven decomposition pulls a user task into the
-   `decompose_task` path.
+1. **One-shot DAG via `orchestrate(plan)`** — for the standard
+   Implement → Review shape, materialize both tasks in a single call.
+2. **Raw `TaskCreate` × N + `TaskExecute`** — for any non-standard
+   shape (multi-package coordination, parallel tracks, conditional
+   dependencies, fan-out / fan-in). The cascade in pi-tasks picks up
+   ready tasks automatically.
 
-State used to persist in `.pi/orchestrator/audit-state-{goal_id}.yaml`
-so work could resume after context compaction. After the
-chore/orchestrator-workdir-tmpdir migration that state moved to
-`${TMPDIR}/${ORCHESTRATOR_WORKDIR}`, and after this commit
-(chore/remove-goal-contract) there is no per-goal orchestrator state at
-all — the orchestrator is purely advisory + tooling-curation.
+The Reviewer agent reads the Developer's `metadata.result` via the
+incoming `TaskOutput` and emits one of CLEAN / NEEDS_WORK /
+NEEDS_REDESIGN / NEEDS_CLARIFICATION. The orchestrator (the main
+LLM) reads the verdict via `TaskOutput` and decides whether to
+declare the work done or to spawn a follow-up Fix task (with
+`agentType: "Developer"`, blockedBy the Review) by hand.
+
+### User tasks (no goal contract)
+
+`/tasks create "<subject>"` arg-style slash command. Tasks with
+`agentType` auto-spawn via the unified `task-feeder` (GC-2026-108 +
+GC-2026-113); tasks without `agentType` sit in the store as planning
+data. Cascade across blocked tasks is unconditional (no
+`cfg.autoCascade` gate).
 
 ## Key paths
 
-- pi-tasks store (per-session / project) — task graph; source of
-  truth for every task in flight. (No more `.pi/orchestrator/`
-  files; that namespace was migrated to `${TMPDIR}/${ORCHESTRATOR_WORKDIR}`
-  in chore/orchestrator-workdir-tmpdir and deleted entirely in
-  chore/remove-goal-contract.)
+- `pi-tasks/` task store (per-session / project) — task graph; source
+  of truth for every task in flight.
 - `pi-orchestrator/src/extension.ts` — orchestrator entrypoint
-  (default export wires `registerOrchestratorTools` + the three
-  session hooks: `session_start` `setActiveTools`, `before_agent_start`
-  prompt overlay, `tool_call` once-per-session soft-mode reminder).
-  Post chore/remove-goal-contract the orchestrator owns zero
-  tools of its own — it curates PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL /
-  AFT / BASELINE tool allowlists and runs the advisory pipeline.
-- `pi-orchestrator/src/orchestrator-advisory.ts` — orchestrator
-  advisory pipeline (pre-tool blocker + history tracker + error
-  tracker + assistant-text tracker)
-- `pi-orchestrator/src/bash-guard.ts` — shell command classifier
-  (`shouldBlockBashCommand` is advisory under soft mode; never blocks)
+  (default export wires `installSessionHooks` + the `orchestrate` tool).
+  The orchestrator curates PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL /
+  AFT / BASELINE tool allowlists via `setActiveTools` at session_start.
+- `pi-orchestrator/src/orchestrator-tool.ts` — the `orchestrate(plan)`
+  tool: takes a multi-phase plan, materializes it as a DAG in
+  pi-tasks's shared store.
+- `pi-orchestrator/src/brainstorming/` — the `/brainstorm` slash
+  command's 5-phase state machine (exploring → grilling → proposing →
+  designing → approved).
 - `pi-orchestrator/skills/orchestrator/SKILL.md` — full workflow reference
 - `pi-orchestrator/templates/agent-tool-description.md` — Agent tool
   description template (LLM-visible after install)
-
-Removed in earlier GCs (file no longer exists):
-  - `pi-orchestrator/src/goal-contract.ts` (`goal_contract_create`) — chore/remove-goal-contract
-  - `pi-orchestrator/src/workflow-run-tool.ts` (`workflow_run`) — GC-2026-remove-workflow-run-prod
-  - `pi-orchestrator/src/decompose-task.ts` (`decompose_task`) — GC-2026-decompose-task-removed
-  - `pi-orchestrator/src/orchestrator-task.ts` (`createOrchestratorTask*`) — with the above
-  - `pi-orchestrator/src/reviewer-prompt.ts` (Reviewer template) — with the above
+- `pi-orchestrator/templates/SYSTEM.md` — orchestrator constitution
+  prepended to every agent system prompt.
 
 The package map belongs in [README.md § Repository layout](README.md#repository-layout).
 
@@ -197,7 +180,7 @@ Do not commit ephemeral `.pi/` state.
 
 ## Verify gates
 
-The pre-commit hook (`orchestrator:typecheck` + `orchestrator:test`) is the only gate that runs automatically; it must pass before every commit. The earlier layered verifier scripts (`verify:isolation-modes`, `verify:soft-mode-mental-model`, `verify:pi-tasks-tools`, `verify:created-by-invariant`, `verify:extension-load`, `verify:pi-universe`, `verify:catalog`, `verify:all`, etc.) were retired along with the `pi-orchestrator/catalogs/` directory they produced. Run the two remaining gates locally from `pi-orchestrator/`:
+The pre-commit hook (`orchestrator:typecheck` + `orchestrator:test`) is the only gate that runs automatically; it must pass before every commit. Earlier layered verifier scripts (`verify:isolation-modes`, `verify:soft-mode-mental-model`, `verify:pi-tasks-tools`, `verify:created-by-invariant`, `verify:extension-load`, `verify:pi-universe`, `verify:catalog`, `verify:all`, etc.) were retired along with the `pi-orchestrator/catalogs/` directory they produced. Run the two remaining gates locally from `pi-orchestrator/`:
 
 - `bun run typecheck` — orchestrator typecheck
 - `bun test ./test` — orchestrator unit + integration tests
@@ -207,20 +190,22 @@ The pre-commit hook (`orchestrator:typecheck` + `orchestrator:test`) is the only
 Under soft mode (GC-2026-031) nothing is mechanically blocked. The
 recommendation mechanism is the **task-count threshold**:
 
-- If your active task list has **>2 items**, the recommended pattern is
-  the pi-tasks workflow (`goal_contract_create` → `TaskCreate` × 4
-  (Implement / Review / optional Fix / Merge) → `TaskExecute`) —
-  or, equivalently, dispatching `Developer` with managed-worktree
-  isolation for production code. The TDD discipline, worktree
-  isolation, and Reviewer evidence gate all pay off at this scale.
+- If your active task list has **>2 items**, the recommended pattern
+  is the pi-tasks workflow: `TaskCreate` × N (one per phase, with
+  `agentType: "Developer"` for Implement and `agentType: "Reviewer"`
+  for Review) → `TaskExecute`. For the standard 2-phase shape, the
+  `orchestrate(plan)` tool collapses it into one call. Production
+  code edits dispatch `Developer` with managed-worktree isolation;
+  the TDD discipline, worktree isolation, and Reviewer evidence
+  trail all pay off at this scale.
 - If your active task list has **≤2 items**, direct handling with
   `edit` / `write` / `bash` in the main session is also acceptable.
   No task graph is required.
 
-Drift from the recommended pattern is **auto-steered**: the bash-guard
-classifier detects write-intent bash calls and the extension appends a
-once-per-session system reminder via `pi.appendEntry("system",
-SOFT_MODE_REMINDER)`. The reminder is goal-orientation — it nudges
+Drift from the recommended pattern is **auto-steered**: the
+extension appends a once-per-session system reminder via
+`pi.appendEntry("system", SOFT_MODE_REMINDER)` on the first
+side-effecting call. The reminder is goal-orientation — it nudges
 back toward staying aligned with your goal; it does **not** flag
 specific write actions as "production code". Drift is never blocked.
 
@@ -256,10 +241,10 @@ fallback.
    — orchestrator-side commits land directly on the worker's branch.
    If the dispatch used `"current-workspace"`, commits land on the
    orchestrator's branch.
-4. **Record findings** in the dispatch's task report file
-   (`.pi/orchestrator/task-{task_id}-report.md`) with a `developer_commits`
-   list — the Reviewer agent reads this to verify evidence.
-5. **Mark the task as completed** in the pi-tasks view (`TaskUpdate`).
+4. **Record findings** in the dispatch's task metadata
+   (`metadata.developer_commits` list on the task) — the Reviewer agent
+   reads `metadata.result` of the prior task to verify evidence.
+6. **Mark the task as completed** in the pi-tasks view (`TaskUpdate`).
 
 ### Why this is a contract, not a workaround
 
@@ -274,45 +259,36 @@ subagent dispatch.
 
 1. **Subagent dispatch is RECOMMENDED for >2-item workflows.** When your
    active task list has more than two items, prefer the pi-tasks
-   workflow (`goal_contract_create` → `TaskCreate` × 4 → `TaskExecute`)
-   or dispatch `Developer` with managed-worktree isolation (for
-   production code) or `isolation: "current-workspace"` + `tdd: "none"`
-   (for meta-file edits). The main agent may handle ≤2 tasks directly
-   with `edit` / `write` / `bash`. The bash-guard is advisory under
-   soft mode — no commands are blocked (including `rm` / `mv` / `cp` /
-   `unlink` / `rmdir`).
+   workflow (`TaskCreate` × N + `TaskExecute`, optionally
+   `orchestrate(plan)` for the standard 2-phase shape) or dispatch
+   `Developer` with managed-worktree isolation (for production code)
+   or `isolation: "current-workspace"` + `tdd: "none"` (for meta-file
+   edits). The main agent may handle ≤2 tasks directly with
+   `edit` / `write` / `bash`. Soft mode never blocks — including
+   `rm` / `mv` / `cp` / `unlink` / `rmdir`.
 2. **Never use `isolation: "worktree"`.** Use the explicit managed-worktree
    object or `"current-workspace"`.
 3. **Never omit `Developer` isolation.** Every developer dispatch must choose an
    explicit mode.
-4. **Respect `.pi/orchestrator/` namespace ownership.** Subagents may write
-   only their role-owned task report, handoff, or audit paths; they must not
-   overwrite orchestrator workflow state.
+4. **Respect `.pi/orchestrator/` namespace ownership.** The orchestrator
+   owns no per-task state file; subagents may write optional evidence
+   under `.pi/orchestrator/` but must not overwrite each other.
 5. **Avoid destructive git operations** such as path checkout, hard reset,
    clean, or force push. Under soft mode these are no longer hard-blocked;
    dispatch `Developer` for an audit trail on complex workflows.
-6. **Never use an unregistered subagent type.** Valid types are listed in
-   `pi-subagents/src/default-agents.ts` (canonical registry; the LLM
-   sees a 5-type headline in `templates/agent-tool-description.md`:
-   `Explore`, `PlanCompiler`, `Developer`, `Reviewer`, `Merger`).
-   Subtypes like `Fix`, `MergerAdvisor`, `DeveloperAdvisor`,
-   `ReviewerAdvisor`, `FixAdvisor` are paired to primaries via the
-   `advisorAgentType` workflow-graph metadata; pair-programming for
-   audit, not independent top-level dispatch.
+6. **Never use an unregistered subagent type.** Built-in defaults are
+   `Developer` and `Reviewer` (per `pi-subagents/src/default-agents.ts`,
+   the canonical registry); other types come from user-defined
+   `~/.pi/agent/agents/*.md` or `.pi/agents/*.md`. Resolve any new
+   type with `resolveEnabledTypeIn(registry, name)` — case-ambiguous
+   or disabled names are rejected, never silently fallen back.
 7. **Never self-declare workflow `PASS`.** The Reviewer agent
-   certifies the Implementer's output against the goal contract.
+   certifies the Developer's output against the goal via the
+   4-state verdict (CLEAN / NEEDS_WORK / NEEDS_REDESIGN /
+   NEEDS_CLARIFICATION).
 8. **Never commit with `--no-verify`.** Repository hooks must run.
-10. **Never claim a tool result that was not returned.** Retry or report the
-    failure instead.
-
-## `.pi/orchestrator/` namespace ownership
-
-Subagents may write only their role-owned records: developers write
-`task-{task_id}-report.md` and
-`handoff/{workspace_id}/{task_id}-handoff.md`; auditors write
-`audit-{task_id}.md`. The orchestrator owns `goal-{id}.yaml`, DAG, audit-state, and workflow
-rollup files. Cross-namespace overwrites are prohibited; Explore and Plan stay
-read-only.
+9. **Never claim a tool result that was not returned.** Retry or report the
+   failure instead.
 
 ## Deep references
 

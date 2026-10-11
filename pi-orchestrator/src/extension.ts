@@ -3,8 +3,9 @@
  *
  * Post the orchestrator-simplify + remove-workflow-run-prod +
  * decompose-task-removed + remove-goal-contract + remove-orchestrator-advisory
- * + drop-failure-catalog cascades the package owns no tools. It exists
- * as a thin session-hook layer + a brainstorming slash command:
+ * + drop-failure-catalog cascades the package owns exactly one
+ * LLM-facing tool (`orchestrate`, see `./orchestrator-tool.ts`) and a
+ * thin session-hook layer + a brainstorming slash command:
  *
  *   - session_start: `pi.setActiveTools([...])` gates which tools the
  *     LLM can see (PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL / AFT /
@@ -18,9 +19,10 @@
  *     `skills/brainstorming/SKILL.md`).
  *
  * The orchestrator exports a curated tool allowlist + soft-mode reminder
- * + system-prompt overlay. The LLM drives any multi-stage work via raw
- * `TaskCreate` × N + `TaskExecute` directly. No orchestrator-registered
- * tool mediates the workflow.
+ * + system-prompt overlay + the `orchestrate` convenience tool. The LLM
+ * can drive any multi-stage work via raw `TaskCreate` × N +
+ * `TaskExecute` directly; `orchestrate` collapses the standard
+ * 2-phase (Implement + Review) shape into one call.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -83,8 +85,8 @@ export const BASELINE_TOOLS: readonly string[] = [
 
 /**
  * Pi-tasks tools (registered by `@sages/pi-tasks`). Exposed so the LLM
- * can drive the Implement → Review → optional Developer → Reviewer pipeline
- * directly via TaskCreate / TaskList / TaskExecute / etc.
+ * can drive the Implement → Review pipeline directly via TaskCreate /
+ * TaskList / TaskExecute / etc.
  */
 export const PI_TASKS_TOOLS: readonly string[] = [
 	"TaskCreate",
@@ -123,10 +125,12 @@ const SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — workflow pipeline recommend
 >
 > If this is part of a larger workflow (>2 items in your active task list,
 > i.e. above the **task-count threshold**), consider driving it through
-> the pi-tasks workflow: raw \`TaskCreate\` × N (one per phase: Developer /
-> Reviewer / Fix / MergerAdvisor) → \`TaskExecute\`. For ≤2 tasks (below
-> the task-count threshold), direct handling is acceptable. This is a
-> recommendation — the agent decides. No commands are blocked.
+> the pi-tasks workflow: raw \`TaskCreate\` × N (one per phase: Developer
+> for Implement, Reviewer for Review) → \`TaskExecute\`. For the
+> standard 2-phase shape, the \`orchestrate(plan)\` tool collapses both
+> \`TaskCreate\` calls into one. For ≤2 tasks (below the task-count
+> threshold), direct handling is acceptable. This is a recommendation
+> — the agent decides. No commands are blocked.
 `;
 
 /**

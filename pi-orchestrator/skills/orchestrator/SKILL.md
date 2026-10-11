@@ -5,10 +5,22 @@ description: Soft-infrastructure layer for pi. Wires session_start (curates the 
 
 # Orchestrator — Soft Infrastructure
 
+The orchestrator plays the **Task Orchestrator** role in the three-package
+composition: the sole writer and sole consumer of the Task Board
+(`pi-tasks/`). The Task Executor (`pi-subagents/`) is spawned through
+it, never sees the Board, and reports results back through the event
+bus. The boundary is enforced by the host tool allowlist, not by
+convention. See [`AGENTS.md`](../../../AGENTS.md#the-three-packages-and-their-roles)
+for the full role description.
+
+These role names (Task Board / Task Orchestrator / Task Executor) are
+descriptive shorthand; they appear in docs and conversation but not in
+the packages' own code.
+
 Post GC-2026-orchestrator-simplify + GC-2026-remove-workflow-run-prod +
 GC-2026-decompose-task-removed + **chore/remove-goal-contract** the
-orchestrator owns **zero tools**. It exists as a curating + advising
-layer only.
+orchestrator owns exactly **one** LLM-facing tool (`orchestrate`).
+The orchestrator's other surface is a curating + advising layer.
 
 ## What the orchestrator does
 
@@ -37,19 +49,30 @@ layer only.
 
 ## The LLM's responsibility
 
-Multi-stage work — anything that warrants a 2-agent shape — is the LLM's
-job now. The canonical pattern:
+Multi-stage work is the LLM's job. The canonical 2-phase pattern:
 
 ```text
+// raw TaskCreate × N + TaskExecute
 TaskCreate({ subject: "Implement", agentType: "Developer", blocks: ["Review"] })
-TaskCreate({ subject: "Review",   agentType: "Reviewer", blockedBy: ["Developer"], blocks: ["Reviewer", "Merge"] })
-TaskCreate({ subject: "Reviewer",      agentType: "Developer",      blockedBy: ["Review"] })
-TaskCreate({ subject: "Merge",    agentType: "Reviewer", blockedBy: ["Reviewer"] })
+TaskCreate({ subject: "Review",    agentType: "Reviewer",  blockedBy: ["Implement"] })
 TaskExecute  // auto-cascades through every phase
+
+// or the same DAG via the orchestrate shortcut
+orchestrate({
+  intent: "Add feature X",
+  phases: [
+    { subject: "Implement", agentType: "Developer" },
+    { subject: "Review",    agentType: "Reviewer", blockedBy: ["Implement"] },
+  ],
+})
 ```
 
-The orchestrator's only support during this cascade is the `repeat_call_chain`
-nudge if the LLM starts looping on `TaskCreate({...})` with identical args.
+The Reviewer reads the Implement task's `metadata.result` via `TaskOutput`
+and emits one of CLEAN / NEEDS_WORK / NEEDS_REDESIGN /
+NEEDS_CLARIFICATION as plain text in its own result. The orchestrator
+(the main LLM) reads the verdict via `TaskOutput` and decides whether
+to declare done or to spawn a follow-up Fix task (with
+`agentType: "Developer"`, blockedBy the Review) by hand.
 
 ## Soft mode (unchanged)
 

@@ -201,9 +201,13 @@ Fix any issues inline. No need to re-review — just fix and move on.
 
 ## Trigger Modes
 
-**Mode A — standalone (no orchestrator active)**: brainstorming is the **recommended first step** for any new feature/change. After approval, the user drives the implementation directly: raw `TaskCreate` × N + `TaskExecute` with `agentType` set to `"Developer"` / `"Reviewer"` / `"Reviewer"` / `"Reviewer"`.
+**Mode A — standalone (no orchestrator active)**: brainstorming is the **recommended first step** for any new feature/change. After approval, the user drives the implementation directly: raw `TaskCreate` × N + `TaskExecute` with `agentType` set to `"Developer"` (Implement) and `"Reviewer"` (Review). The main LLM is the Task Orchestrator (it alone calls `TaskCreate` / reads `TaskOutput`); `pi-tasks/` is the Task Board; `pi-subagents/` is the Task Executor spawned through the Board.
 
-**Mode B — auto-transition (when the orchestrator advisory is active)**: when design is approved, the LLM self-hands-off via raw `TaskCreate` × N (one task per phase, with `agentType` and the standard `blockedBy`/`blocks` edge set). The orchestrator's advisory pipeline emits nudges via `pi.appendEntry("system", ...)`; the orchestrator owns no goal-contracting or pipeline-runner tools anymore.
+**Mode B — auto-transition (when the orchestrator advisory is active)**: when design is approved, the LLM self-hands-off via raw `TaskCreate` × N (one task per phase, with `agentType` and the standard `blockedBy`/`blocks` edge set), or via the `orchestrate(plan)` shortcut for the standard 2-phase shape. The Task Orchestrator remains the sole writer and sole consumer of the Board throughout the transition; the orchestrator emits the once-per-session soft-mode reminder via `pi.appendEntry("system", ...)`; no orchestrator-owned tool mediates the transition.
+
+The role names (Task Board / Task Orchestrator / Task Executor) are
+descriptive shorthand — they don't appear in any package's own code,
+just in docs and conversation.
 
 If user says "defer"/"save"/"later", save the design to `${TMPDIR}/${ORCHESTRATOR_WORKDIR}/designs/` and don't start the LLM. "exit"/"cancel" ends without proceeding.
 

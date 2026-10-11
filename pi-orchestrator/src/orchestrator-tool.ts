@@ -1,13 +1,7 @@
 /**
- * orchestrator-tool.ts — the orchestrator's first LLM-facing tool:
+ * orchestrator-tool.ts — the orchestrator's LLM-facing tool:
  * `orchestrate(plan)` materializes a multi-phase workflow as a task DAG
  * by writing directly into pi-tasks's task store.
- *
- * Post chore/remove-goal-contract + drop-data + remove-workflow-run-prod
- * + decompose-task-removed + remove-orchestrator-advisory the orchestrator
- * owns zero tools. This commit re-introduces a single orchestrator-owned
- * tool — the only one needed for "the orchestrator does the orchestration
- * and creates tasks":
  *
  *   - LLM calls `orchestrate(intent, phases)` with a list of phase specs.
  *   - For each phase, the tool creates a task in pi-tasks's shared
