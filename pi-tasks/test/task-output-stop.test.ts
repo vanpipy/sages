@@ -20,12 +20,8 @@ afterEach(() => { delete process.env.PI_TASKS; });
 
 /** Create an agent-backed task and launch it, returning the harness. */
 async function launchAgentTask(mock: ReturnType<typeof mockPi>, subject = "Agent task") {
-  // GC-2026-113 FU0 Phase 2b: TaskCreate auto-spawns any task that
-  // has agentType. The followup TaskExecute would error with "not
-  // pending" because the task is already in_progress. The first
-  // auto-spawn produces "agent-1" (the mock increments the id
-  // counter), which is what the tests below expect.
   await mock.executeTool("TaskCreate", { subject, description: "d", agentType: "general-purpose" });
+  await mock.executeTool("TaskExecute", { task_ids: ["1"] });
 }
 
 describe("TaskOutput", () => {
@@ -105,7 +101,11 @@ describe("TaskOutput", () => {
       .rejects.toThrow("task_id is required");
   });
 
-  it.skip("throws for a task with neither a process nor an agent — REMOVED: GC-2026-121 makes this state unreachable via the public API (TaskCreate auto-spawns Planner, leaving task.owner populated even after manual metadata changes). The TaskOutput rejection path remains as defense-in-depth.", async () => {});
+  it("throws for a task with neither a process nor an agent", async () => {
+    await mock.executeTool("TaskCreate", { subject: "Manual", description: "d" });
+    await expect(mock.executeTool("TaskOutput", { task_id: "1", block: false, timeout: 30000 }))
+      .rejects.toThrow("No background process for task 1");
+  });
 });
 
 describe("TaskOutput — agent ID lookups", () => {
@@ -226,7 +226,11 @@ describe("TaskStop", () => {
     await expect(mock.executeTool("TaskStop", {})).rejects.toThrow("task_id is required");
   });
 
-  it.skip("throws for a task with no running agent — REMOVED: GC-2026-121 makes this state unreachable via the public API. The TaskStop rejection path remains as defense-in-depth.", async () => {});
+  it("throws for a task with no running agent", async () => {
+    await mock.executeTool("TaskCreate", { subject: "Manual", description: "d" });
+    await expect(mock.executeTool("TaskStop", { task_id: "1" }))
+      .rejects.toThrow("No running background process for task 1");
+  });
 
   it("throws for an unknown ID", async () => {
     await expect(mock.executeTool("TaskStop", { task_id: "99" }))

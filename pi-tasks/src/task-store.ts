@@ -94,74 +94,6 @@ function normalizeTask(t: Task): Task {
   };
 }
 
-/**
- * GC-2026-120 AC1 + GC-2026-122: stamp `kind` based on `created_by` + `agentType`:
- *   - created_by === "user"   && agentType set  → "actionable"
- *   - created_by === "user"   && !agentType     → "intent" + requires_decomposition=true
- *   - created_by === "orchestrator"            → "step"
- *
- * GC-2026-122 reverses GC-2026-121: the Planner auto-spawn (which stamped
- * `agentType: "Planner"` on every intent task) is removed. Empirically
- * the Planner conservatively BLOCKed on informational intents (e.g.
- * "了解一下当前仓库") because its prompt forbids any repo exploration or
- * context-aware reasoning — it can only pattern-match against a small
- * allowlist of behaviors, with no access to the project context the main
- * LLM has.
- *
- * The intent task now stays in the store as data:
- *   - kind: "intent" (semantic: "this intent wants a chain")
- *   - requires_decomposition: true (hint to the reminder)
- *   - NO auto-stamped agentType (so the unified feeder does NOT auto-spawn)
- *
- * The main LLM is the sole consumer. The `before_agent_start` reminder
- * (see `pi-tasks/src/intent-reminder.ts`) surfaces pending intent tasks
- * to the LLM via system-prompt injection; the LLM then either calls
- * `decompose_task(user_task_id, specs=[...])` directly or chat-answers
- * the user if the intent is trivial.
- *
- * If a caller explicitly passes `agentType` on an intent task, that
- * wins (the caller may want Explore, general-purpose, or even explicit
- * Planner dispatch). Same call wins for `kind` — orchestrator helpers
- * stamp "step" explicitly.
- */
-function inferKind(metadata?: Record<string, any>): Record<string, any> {
-  const base = metadata ? { ...metadata } : {};
-  const explicitKind = base.kind;
-  if (
-    explicitKind === "intent" ||
-    explicitKind === "actionable" ||
-    explicitKind === "step"
-  ) {
-    if (explicitKind === "intent") {
-      if (base.requires_decomposition === undefined) {
-        base.requires_decomposition = true;
-      }
-      // GC-2026-122: caller wins on agentType. No auto-stamp.
-    }
-    return base;
-  }
-  // Default: a task with no `created_by` is treated as user-authored
-  // (TaskCreate tool's schema default is "user" — see
-  // pi-tasks/src/index.ts:739-744). orchestrator callers always stamp
-  // `created_by: "orchestrator"` explicitly via the helper.
-  const createdBy = base.created_by ?? "user";
-  if (createdBy === "user") {
-    if (typeof base.agentType === "string" && base.agentType.length > 0) {
-      base.kind = "actionable";
-    } else {
-      base.kind = "intent";
-      if (base.requires_decomposition === undefined) {
-        base.requires_decomposition = true;
-      }
-      // GC-2026-122: do NOT auto-stamp agentType. Main LLM consumes via
-      // the before_agent_start reminder (intent-reminder.ts).
-    }
-  } else {
-    base.kind = "step";
-  }
-  return base;
-}
-
 export class TaskStore {
   private filePath: string | undefined;
   private lockPath: string | undefined;
@@ -247,7 +179,6 @@ export class TaskStore {
   create(subject: string, description: string, activeForm?: string, metadata?: Record<string, any>): Task {
     return this.withLock(() => {
       const now = Date.now();
-      const meta = inferKind(metadata);
       const task: Task = {
         id: String(this.nextId++),
         subject,
@@ -255,7 +186,7 @@ export class TaskStore {
         status: "pending",
         activeForm,
         owner: undefined,
-        metadata: meta,
+        metadata: metadata ?? {},
         blocks: [],
         blockedBy: [],
         createdAt: now,

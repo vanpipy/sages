@@ -26,15 +26,7 @@ describe("TaskStore (in-memory)", () => {
     const t = store.create("Task", "Desc", "Running task", { key: "value" });
 
     expect(t.activeForm).toBe("Running task");
-    // GC-2026-120: store infers kind=intent + requires_decomposition=true.
-    // GC-2026-122: agentType is NO LONGER auto-stamped (the main LLM
-    // is the sole consumer of intent tasks, via the before_agent_start
-    // reminder; the unified feeder does not auto-spawn a Planner).
-    expect(t.metadata).toEqual({
-      key: "value",
-      kind: "intent",
-      requires_decomposition: true,
-    });
+    expect(t.metadata).toEqual({ key: "value" });
   });
 
   it("gets a task by ID", () => {
@@ -153,11 +145,7 @@ describe("TaskStore (in-memory)", () => {
     store.update("1", { metadata: { b: null, d: 4 } });
 
     const task = store.get("1")!;
-    // GC-2026-120: kind=intent, requires_decomposition=true inferred at
-    // create time. GC-2026-122: agentType is NOT auto-stamped.
-    expect(task.metadata).toEqual({
-      a: 1, c: 3, d: 4, kind: "intent", requires_decomposition: true,
-    });
+    expect(task.metadata).toEqual({ a: 1, c: 3, d: 4 });
   });
 
   it("sets up bidirectional blocks via addBlocks", () => {
@@ -233,18 +221,10 @@ describe("TaskStore (in-memory)", () => {
 
   it("creates tasks with metadata via TaskCreate", () => {
     const t = store.create("With meta", "Desc", undefined, { pr: "123", reviewer: "alice" });
-    // GC-2026-120: kind=intent, requires_decomposition=true inferred.
-    // GC-2026-122: agentType NOT auto-stamped.
-    expect(t.metadata).toEqual({
-      pr: "123", reviewer: "alice",
-      kind: "intent", requires_decomposition: true,
-    });
+    expect(t.metadata).toEqual({ pr: "123", reviewer: "alice" });
 
     const retrieved = store.get("1")!;
-    expect(retrieved.metadata).toEqual({
-      pr: "123", reviewer: "alice",
-      kind: "intent", requires_decomposition: true,
-    });
+    expect(retrieved.metadata).toEqual({ pr: "123", reviewer: "alice" });
   });
 
   it("allows circular dependencies with warning", () => {
@@ -540,52 +520,22 @@ describe("TaskStore (absolute path)", () => {
   });
 });
 
-describe.skip("TaskStore (list ID resolution) — SKIPPED (GC-2026-pi-tasks-test-compat: bun:test cannot re-evaluate TASKS_DIR)", () => {
-  // GC-2026-pi-tasks-test-compat: this test is marked .skip — it relies
-  // on `vi.resetModules()` to force a fresh module instance after stubbing
-  // HOME. bun:test's `vi` does not expose `resetModules` and the various
-  // workarounds (cache-busting specifier, doMock+reimport, mutating
-  // node:os) all break sibling tests. The underlying behavior is real
-  // and the production code is correct; the test runner just can't
-  // re-evaluate the TASKS_DIR top-level constant in this environment.
-  // Re-enable when migrating to vitest or when bun:test grows a resetModules
-  // equivalent.
-  it.skip("resolves a bare list ID under the user's home directory, not the working directory", async () => {
+describe("TaskStore (list ID resolution)", () => {
+  it("resolves a bare list ID under the user's home directory, not the working directory", async () => {
     // PI_TASKS=my-list is a shared-list name, not a path — it must land in
-    // ~/.pi/tasks/. TASKS_DIR is computed at module load via os.homedir(),
-    // so we use vi.stubEnv("HOME", home) + vi.resetModules() to force a
-    // fresh module instance. bun:test's `vi` does not expose
-    // `resetModules` (see .skip note above).
+    // ~/.pi/tasks/. TASKS_DIR is computed at module load, so the module has to be
+    // re-imported after HOME is stubbed.
     const home = mkdtempSync(join(tmpdir(), "pi-tasks-home-"));
     vi.stubEnv("HOME", home);
+    vi.resetModules();
     try {
-      // The dynamic import specifier suffix is the closest bun:supports
-      // workaround — it forces a fresh module instance for this specific
-      // call. (Use a high-entropy suffix to defeat any cache dedup.)
-      const cacheBust = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const { TaskStore: FreshTaskStore } = await import(
-        `../src/task-store.js?cache-bust=${cacheBust}`
-      );
+      const { TaskStore: FreshTaskStore } = await import("../src/task-store.js");
       new FreshTaskStore("my-list").create("Shared list task", "d");
 
-      // On some bun:test versions the cache-bust suffix is honored and
-      // the assertion passes. On others the suffix is ignored and
-      // TASKS_DIR was already computed with the original HOME — leaving
-      // the file under <cwd>/.pi/tasks/ instead. We accept either: the
-      // production behavior is asserted by the next 2 tests (which use
-      // a static path) and the file-creation behavior is what the path
-      // resolution test in subagent-integration exercises.
-      const expectedAtHome = existsSync(join(home, ".pi", "tasks", "my-list.json"));
-      if (!expectedAtHome) {
-        // The HOME stub didn't reach TASKS_DIR on this bun version —
-        // at minimum, the file must exist somewhere on disk.
-        const cwdFile = join(process.cwd(), ".pi", "tasks", "my-list.json");
-        expect(existsSync(cwdFile) || expectedAtHome).toBe(true);
-      } else {
-        expect(expectedAtHome).toBe(true);
-      }
+      expect(existsSync(join(home, ".pi", "tasks", "my-list.json"))).toBe(true);
     } finally {
       vi.unstubAllEnvs();
+      vi.resetModules();
       rmSync(home, { recursive: true, force: true });
     }
   });

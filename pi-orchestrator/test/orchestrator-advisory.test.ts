@@ -443,9 +443,8 @@ describe("orchestrator advisory: family classifier", () => {
 		expect(familyOfTool("subagent_abort")).toBe("subagent_control");
 	});
 
-	it("FAM-6: goal_contract_create + decompose_task -> orchestrator family", () => {
+	it("FAM-6: goal_contract_create -> orchestrator family (decompose_task removed in GC-2026-decompose-task-removed)", () => {
 		expect(familyOfTool("goal_contract_create")).toBe("orchestrator");
-		expect(familyOfTool("decompose_task")).toBe("orchestrator");
 	});
 
 	it("GC-2026-097 M3b: TaskCreate / TaskList / TaskGet / TaskUpdate / TaskOutput / TaskStop / TaskExecute -> tasks family", () => {

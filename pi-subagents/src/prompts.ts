@@ -6,10 +6,33 @@ import type { AgentConfig, EnvInfo } from "./types.js";
 
 /** Extra sections to inject into the system prompt (memory, skills, etc.). */
 export interface PromptExtras {
-	/** Persistent memory content to inject (first 200 lines of MEMORY.md + instructions). */
-	memoryBlock?: string;
-	/** Preloaded skill contents to inject. */
-	skillBlocks?: { name: string; content: string }[];
+  /** Persistent memory content to inject (first 200 lines of MEMORY.md + instructions). */
+  memoryBlock?: string;
+  /** Preloaded skill contents to inject. */
+  skillBlocks?: { name: string; content: string }[];
+  /**
+   * Parent directory the worktree copy was created from. Set only for
+   * `isolation: "worktree"` spawns — triggers the block that tells the agent
+   * to stay in the copy.
+   */
+  worktreeBase?: string;
+  /**
+   * Set only for a workflow's own children, and only when they have no
+   * `StructuredOutput` tool to answer through.
+   *
+   * A workflow child's final text is not read by a human — it is the value
+   * `agent()` resolves to, and the script interpolates it straight into the
+   * next stage's prompt. Without this, children answer the way every other
+   * subagent does (a report addressed to a reader), and the padding becomes
+   * input tokens for the stage downstream. Claude Code's `Workflow` tool
+   * documents this contract to the script-writing model; this is the end of it
+   * that makes the documentation true.
+   *
+   * Deliberately NOT applied to every subagent. In pi an ordinary agent's
+   * output IS read by a human — through FleetView, the conversation viewer and
+   * `get_subagent_result` — so terse raw data would be the wrong answer there.
+   */
+  workflowChild?: boolean;
 }
 
 /**
@@ -30,47 +53,55 @@ export interface PromptExtras {
  * @param extras  Optional extra sections to inject (memory, preloaded skills).
  */
 export function buildAgentPrompt(
-	config: AgentConfig,
-	cwd: string,
-	env: EnvInfo,
-	parentSystemPrompt?: string,
-	extras?: PromptExtras,
+  config: AgentConfig,
+  cwd: string,
+  env: EnvInfo,
+  parentSystemPrompt?: string,
+  extras?: PromptExtras,
 ): string {
-	const activeAgentTag = `<active_agent name="${config.name}"/>\n\n`;
+  const activeAgentTag = `<active_agent name="${config.name}"/>\n\n`;
 
-	const envBlock = `# Environment
+  const envBlock = `# Environment
 Working directory: ${cwd}
 ${env.isGitRepo ? `Git repository: yes\nBranch: ${env.branch}` : "Not a git repository"}
 Platform: ${env.platform}`;
 
-	// Build optional extras suffix
-	const extraSections: string[] = [];
-	if (extras?.memoryBlock) {
-		extraSections.push(extras.memoryBlock);
-	}
-	if (extras?.skillBlocks?.length) {
-		for (const skill of extras.skillBlocks) {
-			extraSections.push(
-				`\n# Preloaded Skill: ${skill.name}\n${skill.content}`,
-			);
-		}
-	}
-	const extrasSuffix =
-		extraSections.length > 0 ? "\n\n" + extraSections.join("\n") : "";
+  // A worktree agent is told its cwd twice: by the env block above (the copy)
+  // and by whatever names the main checkout — the inherited parent prompt in
+  // append mode, or the task prompt in either mode. It follows the latter and
+  // works in the shared tree (#187), so resolve the contradiction explicitly.
+  const worktreeBlock = extras?.worktreeBase
+    ? `\n\n<worktree_isolation>
+Your working directory is an isolated git worktree copy of ${extras.worktreeBase}.
+Work only inside it — never in ${extras.worktreeBase}, even if other instructions name that path as your working directory.
+</worktree_isolation>`
+    : "";
 
-	if (config.promptMode === "append") {
-		// Append mode was historically paired with a "genericBase" fallback
-		// when the parent system prompt was unavailable — that fallback
-		// belonged to the removed `general-purpose` agent. Append mode is
-		// now only used for the `developer` and `Reviewer` built-ins, both
-		// of which always provide a `parentSystemPrompt`; the fallback
-		// path is unreachable. If you hit a caller that does NOT provide
-		// a parent, `parentSystemPrompt` will be undefined and `identity`
-		// will be the empty string — the LLM still has `config.systemPrompt`
-		// and the surrounding bridge/env blocks.
-		const identity = parentSystemPrompt ?? "";
+  // The script, not a person, reads what this child returns — see
+  // `PromptExtras.workflowChild` for why only workflow children get this.
+  const workflowBlock = extras?.workflowChild
+    ? `\n\n<workflow_child>
+Your final message IS the return value of this task. A workflow script captures it and passes it to the next stage; no person reads it.
+Return only the answer, in exactly the shape the prompt asks for — no preamble, no summary of what you did, no offer to continue.
+</workflow_child>`
+    : "";
 
-		const bridge = `<sub_agent_context>
+  // Build optional extras suffix
+  const extraSections: string[] = [];
+  if (extras?.memoryBlock) {
+    extraSections.push(extras.memoryBlock);
+  }
+  if (extras?.skillBlocks?.length) {
+    for (const skill of extras.skillBlocks) {
+      extraSections.push(`\n# Preloaded Skill: ${skill.name}\n${skill.content}`);
+    }
+  }
+  const extrasSuffix = extraSections.length > 0 ? "\n\n" + extraSections.join("\n") : "";
+
+  if (config.promptMode === "append") {
+    const identity = parentSystemPrompt || genericBase;
+
+    const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.
 - Use the read tool instead of cat/head/tail
 - Use the edit tool instead of sed/awk
@@ -81,37 +112,31 @@ You are operating as a sub-agent invoked to handle a specific task.
 - Use absolute file paths
 - Do not use emojis
 - Be concise but complete
-- Never write files under .pi/orchestrator/; that state is owned by the Sages host/orchestrator
 </sub_agent_context>`;
 
-		const customSection = config.systemPrompt?.trim()
-			? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
-			: "";
+    const customSection = config.systemPrompt?.trim()
+      ? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
+      : "";
 
-		// Place shared/stable content first so the LLM's KV cache can reuse the
-		// inherited prefix across all subagent invocations. The parent prompt is
-		// placed verbatim (no wrapper tag) so it forms an identical byte prefix
-		// with the parent session, maximising KV cache hits. The <active_agent>
-		// tag and env block vary per call and are placed after the cached prefix.
-		return (
-			identity +
-			"\n\n" +
-			bridge +
-			"\n\n" +
-			activeAgentTag +
-			envBlock +
-			customSection +
-			extrasSuffix
-		);
-	}
+    // Place shared/stable content first so the LLM's KV cache can reuse the
+    // inherited prefix across all subagent invocations. The parent prompt is
+    // placed verbatim (no wrapper tag) so it forms an identical byte prefix
+    // with the parent session, maximising KV cache hits. The <active_agent>
+    // tag and env block vary per call and are placed after the cached prefix.
+    return identity + "\n\n" + bridge + "\n\n" + activeAgentTag + envBlock + worktreeBlock + workflowBlock + customSection + extrasSuffix;
+  }
 
-	// "replace" mode — env header + the config's full system prompt
-	const replaceHeader = `You are a pi coding agent sub-agent.
+  // "replace" mode — env header + the config's full system prompt
+  const replaceHeader = `You are a pi coding agent sub-agent.
 You have been invoked to handle a specific task autonomously.
 
 ${envBlock}`;
 
-	return (
-		activeAgentTag + replaceHeader + "\n\n" + config.systemPrompt + extrasSuffix
-	);
+  return activeAgentTag + replaceHeader + worktreeBlock + workflowBlock + "\n\n" + config.systemPrompt + extrasSuffix;
 }
+
+/** Fallback base prompt when parent system prompt is unavailable in append mode. */
+const genericBase = `# Role
+You are a general-purpose coding agent for complex, multi-step tasks.
+You have full access to read, write, edit files, and execute commands.
+Do what has been asked; nothing more, nothing less.`;

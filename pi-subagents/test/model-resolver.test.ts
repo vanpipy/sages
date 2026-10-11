@@ -1,214 +1,271 @@
-/**
- * model-resolver.test.ts — Pin the Agent dispatcher fallback policy.
- *
- * GC-2026-014 follow-up: when `resolveModel` returns an error string and the
- * model came from caller-supplied params (most commonly Anthropic-fuzzy
- * names like "haiku" / "sonnet" on a non-Anthropic registry), the dispatcher
- * used to hard-error and abort the spawn. The new policy is to warn + fall
- * back:
- *
- *   1. `resolveDispatcherModelFallback()` is the single source of truth for
- *      the policy. The dispatcher is thin wiring around it; these tests pin
- *      the policy behavior.
- *   2. Resolver success path → use the returned Model directly, no warning.
- *   3. Resolver error + caller-supplied (`modelFromParams: true`) →
- *      prefer the settings.json default (when `registry.find` returns a
- *      usable Model), else fall through to the parent session's model.
- *      Either fallback emits a warning.
- *   4. Resolver error + frontmatter-pinned (`modelFromParams: false`) →
- *      silent fallback to the parent (the user's authored/installed config
- *      is trusted; the existing GC-2026-011/012/014 dispatcher invariant).
- *   5. No fallback target anywhere → return `model: undefined` and no
- *      warning; the agent runner will fall through to its standard
- *      inheritance.
- *
- * The resolver itself stays a pure function over the registry
- * (see `src/model-resolver.ts`). The fallback policy lives next to it in
- * `src/model-fallback.ts` so it can be unit-tested without spinning up
- * the Agent tool.
- */
-
-import type { Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { resolveDispatcherModelFallback } from "../src/model-fallback.js";
+import { describeModel, type ModelRegistry, resolveModel } from "../src/model-resolver.js";
 
-/** Bare-bones Model object — only the fields the policy touches. */
-function mkModel(provider: string, id: string): Model<any> {
-	return {
-		provider,
-		id,
-		name: id,
-		api: "anthropic-messages" as any,
-		baseUrl: "https://example.test/",
-		reasoning: false,
-		input: ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 1,
-		maxTokens: 1,
-	};
+// Mock model entries matching typical pi model registry shape
+const MODELS = [
+  { id: "claude-opus-4-6", name: "Claude Opus 4.6", provider: "anthropic" },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "anthropic" },
+  { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", provider: "anthropic" },
+  { id: "gpt-4o", name: "GPT-4o", provider: "openai" },
+  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "google" },
+];
+
+function makeRegistry(models = MODELS, available?: typeof MODELS): ModelRegistry {
+  return {
+    find(provider: string, modelId: string) {
+      return models.find(m => m.provider === provider && m.id === modelId);
+    },
+    getAll() {
+      return models;
+    },
+    getAvailable: available ? () => available : undefined,
+  };
 }
 
-const FALLBACK_MODEL = mkModel("fallback", "fallback-model");
-const SETTINGS_MODEL = mkModel("settings-provider", "settings-model");
+describe("resolveModel", () => {
+  describe("exact match (provider/modelId)", () => {
+    it("resolves exact provider/modelId", () => {
+      const result = resolveModel("anthropic/claude-opus-4-6", makeRegistry());
+      expect(result).toEqual(MODELS[0]);
+    });
 
-function mkRegistry(findMap: Record<string, Model<any>> = {}): {
-	find(p: string, id: string): Model<any> | undefined;
-} {
-	return {
-		find(provider, id) {
-			return findMap[`${provider}/${id}`];
-		},
-	};
-}
+    it("resolves another exact provider/modelId", () => {
+      const result = resolveModel("openai/gpt-4o", makeRegistry());
+      expect(result).toEqual(MODELS[3]);
+    });
 
-describe("model-fallback: resolver success path", () => {
-	it("uses the resolved Model directly and emits no warning", () => {
-		const resolved = mkModel("direct", "direct-model");
-		const decision = resolveDispatcherModelFallback({
-			resolved,
-			registry: mkRegistry(),
-			parentModel: FALLBACK_MODEL,
-			settingsDefault: undefined,
-			modelFromParams: true,
-		});
-		expect(decision.model).toBe(resolved);
-		expect(decision.shouldWarn).toBe(false);
-		expect(decision.fallbackKind).toBe("none");
-	});
+    it("falls through to fuzzy when exact provider/modelId not found", () => {
+      // "anthropic/haiku" is not an exact match, but fuzzy should find it
+      const result = resolveModel("anthropic/haiku", makeRegistry());
+      expect(result).toEqual(MODELS[2]); // haiku
+    });
+  });
+
+  describe("fuzzy match — exact id", () => {
+    it("matches exact model id without provider", () => {
+      const result = resolveModel("claude-opus-4-6", makeRegistry());
+      expect(result).toEqual(MODELS[0]);
+    });
+
+    it("is case-insensitive", () => {
+      const result = resolveModel("Claude-Opus-4-6", makeRegistry());
+      expect(result).toEqual(MODELS[0]);
+    });
+
+    it("matches exact id for non-anthropic models", () => {
+      const result = resolveModel("gpt-4o", makeRegistry());
+      expect(result).toEqual(MODELS[3]);
+    });
+  });
+
+  describe("fuzzy match — substring", () => {
+    it("matches 'haiku' to claude-haiku model", () => {
+      const result = resolveModel("haiku", makeRegistry());
+      expect(result).toEqual(MODELS[2]);
+    });
+
+    it("matches 'sonnet' to claude-sonnet model", () => {
+      const result = resolveModel("sonnet", makeRegistry());
+      expect(result).toEqual(MODELS[1]);
+    });
+
+    it("matches 'opus' to claude-opus model", () => {
+      const result = resolveModel("opus", makeRegistry());
+      expect(result).toEqual(MODELS[0]);
+    });
+
+    it("matches 'gemini' to gemini model", () => {
+      const result = resolveModel("gemini", makeRegistry());
+      expect(result).toEqual(MODELS[4]);
+    });
+
+    it("is case-insensitive for substring", () => {
+      const result = resolveModel("HAIKU", makeRegistry());
+      expect(result).toEqual(MODELS[2]);
+    });
+  });
+
+  describe("fuzzy match — separator equivalence (dash vs dot)", () => {
+    // id uses dashes and the name carries no version number — the case that
+    // failed before separators were normalized (the "4.5" token couldn't be
+    // found anywhere, so the dotted query matched nothing).
+    const HAIKU = { id: "claude-haiku-4-5", name: "Claude Haiku", provider: "anthropic" };
+    const dashReg = makeRegistry([HAIKU]);
+
+    it("matches a dotted query to a dashed id", () => {
+      expect(resolveModel("claude-haiku-4.5", dashReg)).toEqual(HAIKU);
+    });
+
+    it("matches a dotted provider/id query to a dashed id", () => {
+      expect(resolveModel("anthropic/claude-haiku-4.5", dashReg)).toEqual(HAIKU);
+    });
+
+    it("matches a dashed query to a dotted id", () => {
+      expect(resolveModel("gemini-2-5-pro", makeRegistry())).toEqual(MODELS[4]);
+    });
+  });
+
+  describe("fuzzy match — trailing date-stamp is optional", () => {
+    // A date-pinned config (e.g. an agent's frontmatter, or a shipped default)
+    // should still resolve when the registry lists the model without the stamp.
+    const HAIKU_DASH = { id: "claude-haiku-4-5", name: "Claude Haiku", provider: "anthropic" };
+    const HAIKU_DOT = { id: "claude-haiku-4.5", name: "Claude Haiku", provider: "anthropic" };
+
+    it("matches a dated provider/id config to an undated registry id", () => {
+      expect(resolveModel("anthropic/claude-haiku-4-5-20251001", makeRegistry([HAIKU_DASH]))).toEqual(HAIKU_DASH);
+    });
+
+    it("matches a dated config to an undated *dotted* registry id (date + separator)", () => {
+      expect(resolveModel("anthropic/claude-haiku-4-5-20251001", makeRegistry([HAIKU_DOT]))).toEqual(HAIKU_DOT);
+    });
+
+    it("still prefers an exact dated id when the registry has it", () => {
+      const dated = { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", provider: "anthropic" };
+      expect(resolveModel("anthropic/claude-haiku-4-5-20251001", makeRegistry([dated]))).toEqual(dated);
+    });
+  });
+
+  describe("provider fallback (prefer named provider, else any)", () => {
+    const gatewayHaiku = { id: "claude-haiku-4-5", name: "Claude Haiku", provider: "openrouter" };
+    const anthropicHaiku = { id: "claude-haiku-4-5", name: "Claude Haiku", provider: "anthropic" };
+
+    it("falls back to another provider when the named one lacks the model", () => {
+      expect(resolveModel("anthropic/claude-haiku-4-5", makeRegistry([gatewayHaiku]))).toEqual(gatewayHaiku);
+    });
+
+    it("prefers the named provider when it has the model", () => {
+      expect(resolveModel("anthropic/claude-haiku-4-5", makeRegistry([gatewayHaiku, anthropicHaiku]))).toEqual(anthropicHaiku);
+    });
+
+    it("still errors when no provider has the model", () => {
+      expect(typeof resolveModel("anthropic/nonexistent-xyz", makeRegistry([gatewayHaiku]))).toBe("string");
+    });
+  });
+
+  describe("fuzzy match — name contains", () => {
+    it("matches 'Opus 4.6' via model name", () => {
+      const result = resolveModel("Opus 4.6", makeRegistry());
+      expect(result).toEqual(MODELS[0]);
+    });
+
+    it("matches 'Haiku 4.5' via model name", () => {
+      const result = resolveModel("Haiku 4.5", makeRegistry());
+      expect(result).toEqual(MODELS[2]);
+    });
+  });
+
+  describe("fuzzy match — multi-part", () => {
+    it("matches 'anthropic opus' across provider and id", () => {
+      const result = resolveModel("anthropic opus", makeRegistry());
+      expect(result).toEqual(MODELS[0]);
+    });
+
+    it("matches 'google pro' across provider and id", () => {
+      const result = resolveModel("google pro", makeRegistry());
+      expect(result).toEqual(MODELS[4]);
+    });
+  });
+
+  describe("fuzzy match — prefers tighter matches", () => {
+    it("prefers exact id over substring", () => {
+      const result = resolveModel("gpt-4o", makeRegistry());
+      expect(result).toEqual(MODELS[3]);
+    });
+
+    it("substring match prefers shorter model id (tighter fit)", () => {
+      // Both opus and sonnet contain their query as substring, but "opus" is a tighter match
+      // for "opus" than "sonnet" is for "sonnet" — each should resolve to itself
+      expect(resolveModel("opus", makeRegistry())).toEqual(MODELS[0]);
+      expect(resolveModel("sonnet", makeRegistry())).toEqual(MODELS[1]);
+    });
+  });
+
+  describe("no match", () => {
+    it("returns error string for unknown model", () => {
+      const result = resolveModel("nonexistent-model", makeRegistry());
+      expect(typeof result).toBe("string");
+      expect(result).toContain('Model not found: "nonexistent-model"');
+      expect(result).toContain("Available models:");
+    });
+
+    it("error lists available models", () => {
+      const result = resolveModel("xyz", makeRegistry());
+      expect(result).toContain("anthropic/claude-opus-4-6");
+      expect(result).toContain("openai/gpt-4o");
+    });
+
+    it("empty string matches a model (multi-part vacuous truth)", () => {
+      // Empty string splits to empty parts; every() on empty array is true
+      // This is fine — callers guard against empty input
+      const result = resolveModel("", makeRegistry());
+      expect(typeof result).toBe("object");
+    });
+  });
+
+  describe("getAvailable filtering", () => {
+    it("uses getAvailable when present (filters to configured models)", () => {
+      const available = [MODELS[0], MODELS[2]]; // only opus and haiku
+      const result = resolveModel("sonnet", makeRegistry(MODELS, available));
+      // sonnet is in getAll but not in getAvailable — should not fuzzy match
+      expect(typeof result).toBe("string");
+      expect(result).toContain("Model not found");
+    });
+
+    it("exact match fails when model is not in getAvailable (no auth)", () => {
+      const available = [MODELS[0]]; // only opus available
+      const result = resolveModel("anthropic/claude-sonnet-4-6", makeRegistry(MODELS, available));
+      expect(typeof result).toBe("string");
+      expect(result).toContain("Model not found");
+    });
+
+    it("fuzzy matches against available models only", () => {
+      const available = [MODELS[2]]; // only haiku available
+      const result = resolveModel("haiku", makeRegistry(MODELS, available));
+      expect(result).toEqual(MODELS[2]);
+    });
+  });
+
+  describe("ambiguous matches", () => {
+    const SIMILAR_MODELS = [
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "anthropic" },
+      { id: "claude-sonnet-4-5-20241022", name: "Claude Sonnet 4.5", provider: "anthropic" },
+      { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", provider: "anthropic" },
+    ];
+
+    it("'sonnet' prefers tighter id match (shorter id)", () => {
+      const result = resolveModel("sonnet", makeRegistry(SIMILAR_MODELS));
+      // "sonnet" is a larger fraction of "claude-sonnet-4-6" than "claude-sonnet-4-5-20241022"
+      expect(result).toEqual(SIMILAR_MODELS[0]);
+    });
+
+    it("'sonnet 4.5' resolves to the 4.5 model via name", () => {
+      const result = resolveModel("sonnet 4.5", makeRegistry(SIMILAR_MODELS));
+      expect(result).toEqual(SIMILAR_MODELS[1]);
+    });
+
+    it("'4-6' picks the 4.6 model", () => {
+      const result = resolveModel("4-6", makeRegistry(SIMILAR_MODELS));
+      expect(result).toEqual(SIMILAR_MODELS[0]);
+    });
+  });
+
+  describe("empty registry", () => {
+    it("returns error with empty available list", () => {
+      const result = resolveModel("haiku", makeRegistry([]));
+      expect(typeof result).toBe("string");
+      expect(result).toContain("Model not found");
+    });
+  });
 });
 
-describe("model-fallback: caller-supplied unresolvable (modelFromParams=true)", () => {
-	it("falls back to settings.json default when the registry hydrates it (warns)", () => {
-		const registry = mkRegistry({
-			[`${SETTINGS_MODEL.provider}/${SETTINGS_MODEL.id}`]: SETTINGS_MODEL,
-		});
-		const decision = resolveDispatcherModelFallback({
-			resolved: 'Model not found: "haiku".\n\nAvailable models:\n  ...',
-			registry,
-			parentModel: FALLBACK_MODEL,
-			settingsDefault: {
-				provider: SETTINGS_MODEL.provider,
-				model: SETTINGS_MODEL.id,
-			},
-			modelFromParams: true,
-		});
-		expect(decision.model).toBe(SETTINGS_MODEL);
-		expect(decision.shouldWarn).toBe(true);
-		expect(decision.fallbackKind).toBe("settings");
-	});
+describe("describeModel", () => {
+  it("gives a short label and a canonical id", () => {
+    expect(describeModel({ provider: "anthropic", id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" }))
+      .toEqual({ modelName: "sonnet 4.6", modelId: "anthropic/claude-sonnet-4-6" });
+  });
 
-	it("falls back to parent session model when settings default is unavailable (warns)", () => {
-		// Registry has the settings default provider/id but they don't resolve — the
-		// helper should fall through to the parent model rather than silently fail.
-		const decision = resolveDispatcherModelFallback({
-			resolved: 'Model not found: "haiku".\n\nAvailable models:\n  ...',
-			registry: mkRegistry({}),
-			parentModel: FALLBACK_MODEL,
-			settingsDefault: { provider: "ghost", model: "ghost-model" },
-			modelFromParams: true,
-		});
-		expect(decision.model).toBe(FALLBACK_MODEL);
-		expect(decision.shouldWarn).toBe(true);
-		expect(decision.fallbackKind).toBe("parent");
-	});
-
-	it("falls back to parent session model when settings default is absent", () => {
-		const decision = resolveDispatcherModelFallback({
-			resolved: 'Model not found: "haiku".\n\nAvailable models:\n  ...',
-			registry: mkRegistry(),
-			parentModel: FALLBACK_MODEL,
-			settingsDefault: undefined,
-			modelFromParams: true,
-		});
-		expect(decision.model).toBe(FALLBACK_MODEL);
-		expect(decision.shouldWarn).toBe(true);
-		expect(decision.fallbackKind).toBe("parent");
-	});
-
-	it("prefers the settings default over the parent model when both resolve", () => {
-		const registry = mkRegistry({
-			[`${SETTINGS_MODEL.provider}/${SETTINGS_MODEL.id}`]: SETTINGS_MODEL,
-		});
-		const decision = resolveDispatcherModelFallback({
-			resolved: 'Model not found: "haiku".',
-			registry,
-			parentModel: FALLBACK_MODEL,
-			settingsDefault: {
-				provider: SETTINGS_MODEL.provider,
-				model: SETTINGS_MODEL.id,
-			},
-			modelFromParams: true,
-		});
-		// Settings default explicitly wins — the user's settings.json is the
-		// operator-chosen default, intentionally overriding the live session model.
-		expect(decision.model).toBe(SETTINGS_MODEL);
-		expect(decision.shouldWarn).toBe(true);
-		expect(decision.fallbackKind).toBe("settings");
-	});
-
-	it("returns model=undefined (no warning) when no fallback target exists", () => {
-		// Both settings default and parent model missing: the dispatcher cannot
-		// pick anything, but surfacing "Model not found" mid-session is noisier
-		// than letting the agent runner fall through. Empty warning matches the
-		// existing invariant that no warning = no extra notification toast.
-		const decision = resolveDispatcherModelFallback({
-			resolved: 'Model not found: "haiku".',
-			registry: mkRegistry(),
-			parentModel: undefined,
-			settingsDefault: undefined,
-			modelFromParams: true,
-		});
-		expect(decision.model).toBeUndefined();
-		expect(decision.shouldWarn).toBe(false);
-		expect(decision.fallbackKind).toBe("none");
-	});
-});
-
-describe("model-fallback: frontmatter-pinned unresolvable (modelFromParams=false)", () => {
-	it("silently falls back to parent — settings default is NOT consulted for frontmatter pins", () => {
-		// Two invariants ride together here:
-		//   (1) Frontmatter is the user-installed config (agent author /
-		//       installer chose this); we never warn for an out-of-scope
-		//       frontmatter pin — the existing GC-2026-011 scope-pinned
-		//       fallback invariant must survive.
-		//   (2) The settings.json default override only applies when the
-		//       CALLER (LLM-supplied params) chooses an unresolvable model.
-		//       Frontmatter is authoritative for the agent's own identity —
-		//       the user-installed agent wins, not the session default.
-		// The test sets settingsDefault to something the registry COULD hydrate
-		// so a future contributor who naively lifts the settings check out of
-		// the modelFromParams branch would see the helper prefer the settings
-		// model here, and this test would catch it.
-		const registry = mkRegistry({
-			[`${SETTINGS_MODEL.provider}/${SETTINGS_MODEL.id}`]: SETTINGS_MODEL,
-		});
-		const decision = resolveDispatcherModelFallback({
-			resolved: 'Model not found: "x-test-only".',
-			registry,
-			parentModel: FALLBACK_MODEL,
-			settingsDefault: {
-				provider: SETTINGS_MODEL.provider,
-				model: SETTINGS_MODEL.id,
-			},
-			modelFromParams: false,
-		});
-		expect(decision.model).toBe(FALLBACK_MODEL);
-		expect(decision.shouldWarn).toBe(false);
-		expect(decision.fallbackKind).toBe("parent");
-	});
-
-	it("returns model=undefined without warning when parent is also unavailable", () => {
-		// Symmetric with the caller-supplied path: no target = no warning, let
-		// the agent runner's standard inheritance kick in.
-		const decision = resolveDispatcherModelFallback({
-			resolved: 'Model not found: "x".',
-			registry: mkRegistry(),
-			parentModel: undefined,
-			settingsDefault: undefined,
-			modelFromParams: false,
-		});
-		expect(decision.model).toBeUndefined();
-		expect(decision.shouldWarn).toBe(false);
-		expect(decision.fallbackKind).toBe("none");
-	});
+  it("falls back to the id when the model has no display name", () => {
+    expect(describeModel({ provider: "openai-codex", id: "gpt-5.6-sol" }))
+      .toEqual({ modelName: "gpt-5.6-sol", modelId: "openai-codex/gpt-5.6-sol" });
+  });
 });

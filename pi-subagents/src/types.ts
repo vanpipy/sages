@@ -4,21 +4,15 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { RunController } from "./run-controller.js";
 import type { LifetimeUsage } from "./usage.js";
-import type { ManagedWorktreeRequest } from "./worktree-contract.js";
 
 export type { ThinkingLevel };
 
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
 
-/** Names of the two read-only embedded default agents. The `developer`
- * and `auditor` agents are also built-in but are NOT in this list —
- * they are not dispatched by the "Explore / Plan" pre-task defaults
- * path; they require explicit caller intent (a DAG task template, an
- * orchestrator audit, etc.). */
-export const DEFAULT_AGENT_NAMES = ["Explore", "Plan"] as const;
+/** Names of the three embedded default agents. */
+export const DEFAULT_AGENT_NAMES = ["general-purpose", "Explore", "Plan"] as const;
 
 /** Memory scope for persistent agent memory. */
 export type MemoryScope = "user" | "project" | "local";
@@ -26,131 +20,77 @@ export type MemoryScope = "user" | "project" | "local";
 /**
  * Isolation mode for agent execution.
  *
- * - `"worktree"`         — legacy literal, rejected by the Agent tool's
- *                          runtime (kept for type-completeness so legacy
- *                          callers see a precise diagnostic instead of a
- *                          silent /tmp fallback). Use the explicit
- *                          `ManagedWorktreeRequest` object form for
- *                          worktree dispatch.
- * - `"current-workspace"`— GC-2026-017: explicit opt-in that runs the
- *                          agent in the caller's own cwd on the caller's
- *                          branch (no managed worktree provisioned).
- *                          Reserved for known-safe tasks (meta-file
- *                          edits, single-line AGENTS.md patches,
- *                          design-doc writes). Default for `developer`
- *                          remains worktree dispatch — opt in
- *                          explicitly.
+ * `"off"` exists for the caller's benefit, not the runtime's: models that fill
+ * every optional parameter had no legal way to decline a single-value
+ * `isolation` field and kept spawning worktrees they had just reasoned their
+ * way out of (#231, #184). It is an input spelling only —
+ * `resolveAgentInvocationConfig` collapses it to `undefined`, so nothing
+ * downstream sees a value other than `"worktree"`. In an agent file it is a
+ * genuine veto, since agent config outranks tool-call params.
  */
-export type IsolationMode = "worktree" | "current-workspace";
-
-/**
- * Handoff metadata the Agent manager attaches to `AgentRecord.managedWorktree`
- * after provisioning a managed worktree. Stable shape so callers can rely on
- * the field set across create / reuse / get_subagent_result / steer / resume.
- *
- * Concurrency controlled by an in-process lease token (no string format
- * guarantee; treat as opaque). The lease holder is the only one allowed to
- * release the worktree through `AgentManager.releaseManagedWorktree`.
- */
-export interface ManagedWorktreeHandoff {
-	/** Absolute path of the on-disk worktree, as returned by create/reuse. */
-	path: string;
-	/** Branch checked out in the worktree. Always `sages/<dag>/<task_id>`. */
-	branch: string;
-	/** sha of the commit the worktree was provisioned from (pinned at first provision). */
-	baseSha: string;
-	/** The ref the worktree was provisioned from. Always `origin/main`. */
-	/**
-	 * The ref the worktree was provisioned from. Defaults to
-	 * `origin/main` when the caller did not specify a `base_ref` and
-	 * the current working directory has no detectable branch
-	 * (detached HEAD); otherwise the resolved ref at provision time
-	 * (e.g. `origin/main`, `origin/feature/x`, `feature/x`).
-	 */
-	baseRef: string;
-	/** Current HEAD SHA inside the worktree (captured at provision time). */
-	head: string;
-	/** True when the worktree had uncommitted changes at provision time. */
-	dirty: boolean;
-	/** Whether the helper re-entered an existing managed worktree. */
-	reused: boolean;
-	/** Opaque lease token; required by the release path. */
-	leaseToken: string;
-	/** Goal identity carried for caller convenience. */
-	goal_id: string;
-	/** task_id / worktree_id carried for caller convenience. */
-	task_id: string;
-	/** worktree_id when supplied explicitly; defaults to task_id when absent. */
-	worktree_id: string;
-	/** Repo root hosting the worktree. */
-	repoRoot: string;
-}
+export type IsolationMode = "worktree" | "off";
 
 /** Unified agent configuration — used for both default and user-defined agents. */
 export interface AgentConfig {
-	name: string;
-	displayName?: string;
-	description: string;
-	builtinToolNames?: string[];
-	/** Raw `ext:` selector entries from the `tools:` CSV, e.g. ["ext:foo", "ext:bar/x"].
-	 * Presence of any entry flips extension tools to an explicit allowlist. */
-	extSelectors?: string[];
-	/** Tool denylist — these tools are removed even if `builtinToolNames` or extensions include them. */
-	disallowedTools?: string[];
-	/** true = inherit all, string[] = only listed, false = none */
-	extensions: true | string[] | false;
-	/** Extension-name denylist applied after the `extensions:` include set. Exclude wins.
-	 * Plain canonical names only (case-insensitive); no paths, no wildcard. */
-	excludeExtensions?: string[];
-	/** true = inherit all, string[] = only listed, false = none */
-	skills: true | string[] | false;
-	model?: string;
-	thinking?: ThinkingLevel;
-	/** Persist this subagent as a normal pi session instead of keeping it in memory only. */
-	persistSession?: boolean;
-	/** Write the subagent's .output transcript. Defaults to true; false suppresses only that transcript. */
-	outputTranscript?: boolean;
-	/** Optional session directory used when persistSession is true. Omitted = pi's normal session location. */
-	sessionDir?: string;
-	systemPrompt: string;
-	promptMode: "replace" | "append";
-	/** Default for spawn: fork parent conversation. undefined = caller decides. */
-	inheritContext?: boolean;
-	/** Default for spawn: run in background. undefined = caller decides. */
-	runInBackground?: boolean;
-	/** Default for spawn: no extension tools. undefined = caller decides. */
-	isolated?: boolean;
-	/**
-	 * Per-agent-type background concurrency cap (the third tier in the
-	 * effective-cap merge — see `AgentManager.spawn` for the resolution
-	 * order). When this agent type is spawned as background, the manager
-	 * will queue further spawns once this many of THIS type are already
-	 * running, even if the global `maxConcurrent` budget still has room.
-	 *
-	 * Defaults live in `default-agents.ts` (developer: 2, auditor: 2,
-	 * Explore: 4, Plan: 2, merger: 1, git-expert: 1). User-level overrides
-	 * via `subagents.json`'s `maxConcurrentByType` win over the AgentConfig
-	 * default; either loses to the global cap.
-	 */
-	maxConcurrent?: number;
-	/** Persistent memory scope — agents with memory get a persistent directory and MEMORY.md */
-	memory?: MemoryScope;
-	/** Isolation mode — "worktree" runs the agent in a temporary git worktree */
-	isolation?: IsolationMode;
-	/** true = this is an embedded default agent (informational) */
-	isDefault?: boolean;
-	/** false = agent is hidden from the registry */
-	enabled?: boolean;
-	/** Where this agent was loaded from */
-	source?: "default" | "project" | "global";
-	// Removed in GC-2026-014: the `aliases` field was dropped from
-	// `AgentConfig`. See DAG-2026-011 Phase A + Phase B for the migration
-	// history (the canonical `developer` / `auditor` agents no longer
-	// accept the legacy `software-developer` / `software-auditor`
-	// spellings — those names are unknown agent types, not aliases).
+  name: string;
+  /** UI name. `display_name` wins; Claude Code's `name` is accepted as a fallback. */
+  displayName?: string;
+  /** Claude Code-compatible name color (named color or #RRGGBB). */
+  color?: string;
+  description: string;
+  builtinToolNames?: string[];
+  /** Raw `ext:` selector entries from the `tools:` CSV, e.g. ["ext:foo", "ext:bar/x"].
+   * Presence of any entry flips extension tools to an explicit allowlist. */
+  extSelectors?: string[];
+  /** Tool denylist — these tools are removed even if `builtinToolNames` or extensions include them. */
+  disallowedTools?: string[];
+  /** true = inherit all, string[] = only listed, false = none */
+  extensions: true | string[] | false;
+  /** Extension-name denylist applied after the `extensions:` include set. Exclude wins.
+   * Plain canonical names only (case-insensitive); no paths, no wildcard. */
+  excludeExtensions?: string[];
+  /** true = inherit all, string[] = only listed, false = none */
+  skills: true | string[] | false;
+  model?: string;
+  thinking?: ThinkingLevel;
+  maxTurns?: number;
+  /** Persist this subagent as a normal pi session instead of keeping it in memory only. */
+  persistSession?: boolean;
+  /** Write the subagent's .output transcript. Defaults to true; false suppresses only that transcript. */
+  outputTranscript?: boolean;
+  /** Optional session directory used when persistSession is true. Omitted = pi's normal session location. */
+  sessionDir?: string;
+  /**
+   * Nested delegation, off by default: undefined = no nested tools;
+   * "all" = any enabled agent; string[] = only those agent types.
+   */
+  allowedSubagents?: "all" | string[];
+  systemPrompt: string;
+  promptMode: "replace" | "append";
+  /** Default for spawn: fork parent conversation. undefined = caller decides. */
+  inheritContext?: boolean;
+  /** Default for spawn: run in background. undefined = caller decides. */
+  runInBackground?: boolean;
+  /** Default for spawn: no extension tools. undefined = caller decides. */
+  isolated?: boolean;
+  /** Persistent memory scope — agents with memory get a persistent directory and MEMORY.md */
+  memory?: MemoryScope;
+  /**
+   * Isolation mode — "worktree" runs the agent in a temporary git worktree,
+   * "off" refuses one even when the caller asks (frontmatter outranks params).
+   */
+  isolation?: IsolationMode;
+  /** true = this is an embedded default agent (informational) */
+  isDefault?: boolean;
+  /** false = agent is hidden from the registry */
+  enabled?: boolean;
+  /** Where this agent was loaded from */
+  source?: "default" | "project" | "global";
+  /** Path of the .md it was loaded from. Unset for embedded defaults. */
+  sourcePath?: string;
 }
 
-export type JoinMode = "async" | "group" | "smart";
+export type JoinMode = 'async' | 'group' | 'smart';
 
 /**
  * Display mode for the persistent above-editor agent widget.
@@ -159,151 +99,238 @@ export type JoinMode = "async" | "group" | "smart";
  *   Agent tool result, #118); show background/queued/scheduled/RPC.
  * - `off`: hide the widget entirely.
  */
-export type WidgetMode = "all" | "background" | "off";
+export type WidgetMode = 'all' | 'background' | 'off';
 
-export interface AgentRecord {
-	id: string;
-	type: SubagentType;
-	// Removed in GC-2026-014: `requestedName` and `aliasUsed` were
-	// dropped from `AgentRecord`. See DAG-2026-011 Phase A + Phase B for
-	// the migration history.
-	description: string;
-	status:
-		| "queued"
-		| "running"
-		| "completed"
-		| "steered"
-		/**
-		 * GC-2026-subagent-interruption-minimal: aborted because the parent
-		 * signal fired (user closed pi, session ended, or the orchestrator
-		 * aborted the cascade). Distinct from `"aborted"` (the agent's own
-		 * deadline hit — no external interruption) and `"stopped"` (the user
-		 * explicitly invoked `subagent_stop` or the Agent tool cancelled).
-		 */
-		| "parent_aborted"
-		| "aborted"
-		| "stopped"
-		| "error";
-	result?: string;
-	error?: string;
-	toolUses: number;
-	startedAt: number;
-	completedAt?: number;
-	session?: AgentSession;
-	abortController?: AbortController;
-	/**
-	 * GC-2026-043: single source of truth for per-run timeouts.
-	 *
-	 * When present, `runController.signal` is the composed abort signal
-	 * (parent + run deadline + per-tool bucket timer). `abortController`
-	 * above is the SAME instance as `runController.abortController` —
-	 * kept for backward compat with UI/observability code that reads it.
-	 */
-	runController?: RunController;
-	promise?: Promise<string>;
-	groupId?: string;
-	joinMode?: JoinMode;
-	/** Set when result was already consumed via get_subagent_result — suppresses completion notification. */
-	resultConsumed?: boolean;
-	/** Steering messages queued before the session was ready. */
-	pendingSteers?: string[];
-	/** Worktree info if the agent is running in an isolated worktree. */
-	worktree?: {
-		path: string;
-		branch: string;
-		baseSha: string;
-		workPath: string;
-	};
-	/** Worktree cleanup result after agent completion. */
-	worktreeResult?: { hasChanges: boolean; branch?: string };
-	/** The tool_use_id from the original Agent tool call. */
-	toolCallId?: string;
-	/** Path to the streaming output transcript file. */
-	outputFile?: string;
-	/** Cleanup function for the output file stream subscription. */
-	outputCleanup?: () => void;
-	/**
-	 * Lifetime usage breakdown, accumulated via `message_end` events. Survives
-	 * compaction. Total = input + output + cacheWrite (cacheRead deliberately
-	 * excluded — see issue #38). Initialized to zeros at spawn.
-	 */
-	lifetimeUsage: LifetimeUsage;
-	/** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
-	compactionCount: number;
-	/**
-	 * Whether this agent was spawned to run in the background. Tri-state, set at
-	 * spawn from `SpawnOptions.isBackground`: `true` = background, `false` =
-	 * foreground (has an inline Agent tool-result surface), `undefined` = the
-	 * caller never declared it (e.g. a cross-extension RPC spawn, which is detached
-	 * and has no inline surface). The widget's background-only filter keys off this
-	 * — and excludes only explicit `false`, so `undefined` agents stay visible.
-	 * Reliable across ALL spawn paths, unlike the UI-only `invocation` snapshot,
-	 * which only the Agent-tool path populates.
-	 */
-	isBackground?: boolean;
-	/**
-	 * GC-2026-workflow-chat-stream: when this agent is dispatched as a
-	 * phase task of a multi-phase DAG, carry the goal id and current
-	 * phase so the AgentWidget can render a `(goal: GC-X · Review 2)`
-	 * badge alongside the agent label. Post-GC-2026-remove-workflow-run-prod:
-	 * the orchestrator's multi-phase DAG is built via raw TaskCreate × N
-	 * + TaskExecute; the LLM can optionally stamp workflowContext on
-	 * each phase task to opt in to the badge. Undefined for ad-hoc
-	 * TaskExecute dispatches and cross-extension RPC.
-	 */
-	workflowContext?: {
-		goalId: string;
-		phase: "implement" | "review" | "fix" | "merge" | "needs_clarification" | "redesign";
-		iteration: number;
-	};
-	/** Resolved spawn params, captured for UI display. Fixed at spawn time. */
-	invocation?: AgentInvocation;
-	/**
-	 * Managed-worktree handoff attached when `SpawnOptions.managedWorktree` is
-	 * set. Carries the path / branch / base / lease information downstream
-	 * consumers (UI, get_subagent_result, steer_subagent) need to re-enter the
-	 * same worktree. Set BEFORE `runAgent` runs and BEFORE the child's cwd is
-	 * decided — once attached, the agent's cwd is the worktree path.
-	 */
-	managedWorktree?: ManagedWorktreeHandoff;
-	/**
-	 * Opaque lease token for the managed-worktree slot. Mirrored on
-	 * `managedWorktree.leaseToken` so callers that only have the record can
-	 * release the worktree without re-reading the handoff.
-	 */
-	managedWorktreeLease?: string;
+/**
+ * How much of the conversation viewer's transcript is rendered as Markdown.
+ * - `off`: every line wraps as literal text, as it did before the mode existed.
+ * - `assistant`: assistant text renders as Markdown; tool results stay verbatim
+ *   and dim. The default, because assistant text *is* Markdown by contract
+ *   while a tool result is arbitrary bytes — a Markdown pass over a log or a
+ *   diff eats `#` from shell comments, swallows a `---` line into a setext
+ *   heading, re-fences indented output and redraws `| a | b |` as a table.
+ *   (Ordered-list renumbering is the one such rewrite actively suppressed —
+ *   see `MARKDOWN_OPTIONS` — because it silently changes data, not layout.)
+ * - `all`: tool results render as Markdown too, for tools that genuinely emit
+ *   it (#210's `ctx_execute`), accepting the rewrites above on ones that don't.
+ */
+export type ViewerMarkdownMode = 'off' | 'assistant' | 'all';
+
+/**
+ * How `@handle message` starts an agent that is not already running.
+ * - `model`: inject Claude Code's `agent_mention` reminder and let the main
+ *   model spawn it with the `Agent` tool, which is what Claude Code does.
+ * - `direct`: spawn it here, immediately, with the typed message as its prompt
+ *   and no main-model turn spent.
+ * - `off`: `@` means only "attach a file" again.
+ *
+ * Messaging a running agent and resuming a finished one are direct in every
+ * mode — Claude Code only differs from us on the *new* invocation.
+ */
+export type AgentMentionMode = 'model' | 'direct' | 'off';
+
+/**
+ * What survives a record's eviction so `@handle` keeps working. The live record
+ * is discarded after ~10 minutes, but the pi session it wrote is still on disk,
+ * and this is the little that is needed to find and describe it again.
+ */
+export interface AgentTombstone {
+  handle: string;
+  alias?: string;
+  id: string;
+  type: SubagentType;
+  description: string;
+  /** Always set — a record with no session file is never tombstoned. */
+  sessionFile: string;
+  completedAt: number;
 }
 
+/**
+ * What `@handle` resolved to: an agent still in memory, or the remains of one
+ * whose conversation can be reopened from disk.
+ */
+export type MentionResolution =
+  | { kind: "live"; record: AgentRecord }
+  | { kind: "tombstone"; entry: AgentTombstone };
+
+export interface AgentRecord {
+  id: string;
+  type: SubagentType;
+  /**
+   * Typeable name for the `@handle message` prompt mention, derived from the
+   * agent type and numbered when siblings collide (`explore`, `explore-2`).
+   * Top-level agents only — nested children are hidden from every top-level
+   * surface, so nothing can address them.
+   */
+  handle?: string;
+  /**
+   * A second, memorable handle from the spawner's `name` (`@auth-audit`), drawn
+   * from the same namespace as `handle` so the two can never collide. Purely
+   * additive: `handle` is assigned regardless, so a named agent stays reachable
+   * by its type and `@explore` never comes to mean "start another one".
+   */
+  alias?: string;
+  description: string;
+  status: "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
+  result?: string;
+  error?: string;
+  toolUses: number;
+  startedAt: number;
+  completedAt?: number;
+  session?: AgentSession;
+  abortController?: AbortController;
+  promise?: Promise<string>;
+  /**
+   * A caller is awaiting this agent inline (`spawnAndWait`) — what
+   * `maxConcurrentForeground` bounds. Distinct from `isBackground === false`,
+   * which says only that the agent has an inline result surface: a detached
+   * cross-extension RPC spawn is foreground by that measure and yet blocks
+   * nobody, so it takes no slot.
+   */
+  blocking?: boolean;
+  /**
+   * Present only while the record is "queued": resolves when it leaves the
+   * queue, started or aborted. `spawnAndWait` waits on this because a queued
+   * record has no `promise` yet. Always resolves, never rejects — a rejection
+   * would escape into the caller's tool `execute` and take down pi's whole
+   * Promise.all tool batch.
+   */
+  startGate?: Promise<void>;
+  groupId?: string;
+  joinMode?: JoinMode;
+  /** Set when result was already consumed via get_subagent_result — suppresses completion notification. */
+  resultConsumed?: boolean;
+  /** Steering messages queued before the session was ready. */
+  pendingSteers?: string[];
+  /** Worktree info if the agent is running in an isolated worktree. */
+  worktree?: { path: string; branch: string; baseSha: string; workPath: string };
+  /** Worktree cleanup result after agent completion. */
+  worktreeResult?: { hasChanges: boolean; branch?: string };
+  /** The tool_use_id from the original Agent tool call. */
+  toolCallId?: string;
+  /** Path to the streaming output transcript file. */
+  outputFile?: string;
+  /**
+   * The agent's pi session file, when it was persisted (`persist_session`, or
+   * the `rememberAgents` default). Captured so a mention can reopen the
+   * conversation after the record itself has been evicted; undefined for an
+   * in-memory session, which leaves nothing to reopen.
+   */
+  sessionFile?: string;
+  /** Cleanup function for the output file stream subscription. */
+  outputCleanup?: () => void;
+  /**
+   * Lifetime usage breakdown, accumulated via `message_end` events. Survives
+   * compaction. Total = input + output + cacheWrite (cacheRead deliberately
+   * excluded — see issue #38). Initialized to zeros at spawn.
+   */
+  lifetimeUsage: LifetimeUsage;
+  /** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
+  compactionCount: number;
+  /**
+   * Whether this agent was spawned to run in the background. Tri-state, set at
+   * spawn from `SpawnOptions.isBackground`: `true` = background, `false` =
+   * foreground (has an inline Agent tool-result surface), `undefined` = the
+   * caller never declared it (e.g. a cross-extension RPC spawn, which is detached
+   * and has no inline surface). The widget's background-only filter keys off this
+   * — and excludes only explicit `false`, so `undefined` agents stay visible.
+   * Reliable across ALL spawn paths, unlike the UI-only `invocation` snapshot,
+   * which only the Agent-tool path populates.
+   */
+  isBackground?: boolean;
+  /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
+  invocation?: AgentInvocation;
+  /** Nesting depth: top-level subagent = 1. */
+  depth?: number;
+  /**
+   * The validated `StructuredOutput` payload, as canonical JSON.
+   *
+   * Set only when the spawn asked for a schema. Separate from `result` because
+   * `result` is prose for a reader — previewed in the widget, written to the
+   * transcript, and appended to with the worktree branch note — and JSON that
+   * has been appended to no longer parses.
+   */
+  structuredJson?: string;
+  /** Whether the child needed the extra structured-output prompt. */
+  structuredRetried?: boolean;
+  /** Parent agent ID for ownership-scoped nested controls. */
+  parentAgentId?: string;
+  /**
+   * The workflow run that owns this child, when a workflow spawned it.
+   *
+   * Owned the same way a nested child is owned by its parent: filtered out of
+   * every top-level surface, and outside the `maxConcurrent` pool. See
+   * `isTopLevelAgent`.
+   */
+  workflowId?: string;
+  /** Effective inherited nesting cap for this branch. */
+  maxSubagentDepth?: number;
+  /**
+   * Session id of the root (main) session this branch descends from. Nested
+   * spawns inherit it so their transcripts file under the same session
+   * directory as their ancestors' instead of the child session's own id.
+   */
+  rootSessionId?: string;
+}
+
+/**
+ * What a session reports as its level: pi's `ThinkingLevel` plus the `"off"` a
+ * model with thinking disabled reports. Display-only — spawning still takes a
+ * `ThinkingLevel`, so this widening cannot leak into an invocation.
+ */
+export type EffectiveThinkingLevel = ThinkingLevel | "off";
+
 export interface AgentInvocation {
-	/** Short display name when the subagent's model differs from the parent's; absent when inherited. */
-	modelName?: string;
-	thinking?: ThinkingLevel;
-	isolated?: boolean;
-	inheritContext?: boolean;
-	runInBackground?: boolean;
-	isolation?: IsolationMode;
+  /** Short display name for tight rows, e.g. "haiku 4.5". Always set once known. */
+  modelName?: string;
+  /** Canonical `provider/id`, for surfaces with room to disambiguate providers. */
+  modelId?: string;
+  /** The level actually in effect, once a session exists to report one. */
+  thinking?: EffectiveThinkingLevel;
+  /**
+   * What the caller asked for, kept only when they did not get it — pi clamped
+   * the level to the model's capabilities, or an agent file's frontmatter
+   * outranked the parameter (#182). The snapshot exists to answer "did the spawn
+   * honor my instructions?" (#62), which it cannot do if the request is lost, so
+   * neither `requested*` field is overwritten once set.
+   */
+  requestedThinking?: EffectiveThinkingLevel;
+  /** The caller's `model` parameter, as written, when an agent file's pin won. */
+  requestedModel?: string;
+  maxTurns?: number;
+  isolated?: boolean;
+  inheritContext?: boolean;
+  runInBackground?: boolean;
+  isolation?: IsolationMode;
 }
 
 /** Details attached to custom notification messages for visual rendering. */
 export interface NotificationDetails {
-	id: string;
-	description: string;
-	status: string;
-	toolUses: number;
-	turnCount: number;
-	totalTokens: number;
-	durationMs: number;
-	outputFile?: string;
-	error?: string;
-	resultPreview: string;
-	/** Additional agents in a group notification. */
-	others?: NotificationDetails[];
+  id: string;
+  description: string;
+  status: string;
+  toolUses: number;
+  turnCount: number;
+  maxTurns?: number;
+  totalTokens: number;
+  /**
+   * Estimated cost in USD, from pi's per-message `usage.cost.total`. Always
+   * populated (0 when the model has no pricing); the renderer decides whether
+   * to show it, per the `showCost` setting.
+   */
+  totalCost?: number;
+  durationMs: number;
+  outputFile?: string;
+  error?: string;
+  resultPreview: string;
+  /** Additional agents in a group notification. */
+  others?: NotificationDetails[];
 }
 
 export interface EnvInfo {
-	isGitRepo: boolean;
-	branch: string;
-	platform: string;
+  isGitRepo: boolean;
+  branch: string;
+  platform: string;
 }
 
 /**
@@ -313,43 +340,38 @@ export interface EnvInfo {
  * survives `/resume` but resets on `/new`, mirroring pi-chonky-tasks.
  */
 export interface ScheduledSubagent {
-	id: string;
-	/** Unique within store. Defaults to `description`. */
-	name: string;
-	description: string;
-	/** Raw user input — cron expr | "+10m" | ISO | "5m". */
-	schedule: string;
-	scheduleType: "cron" | "once" | "interval";
-	/** Computed at create time for interval/once. */
-	intervalMs?: number;
+  id: string;
+  /** Unique within store. Defaults to `description`. */
+  name: string;
+  description: string;
+  /** Raw user input — cron expr | "+10m" | ISO | "5m". */
+  schedule: string;
+  scheduleType: "cron" | "once" | "interval";
+  /** Computed at create time for interval/once. */
+  intervalMs?: number;
 
-	// spawn params (subset of Agent tool params; no inherit_context, no resume)
-	subagent_type: SubagentType;
-	prompt: string;
-	model?: string;
-	thinking?: ThinkingLevel;
-	max_turns?: number;
-	isolated?: boolean;
-	/**
-	 * Accepts the legacy "worktree" literal (deprecated for Sages callers)
-	 * or the explicit managed-worktree object. Stored verbatim and re-passed
-	 * to `manager.spawn` at fire time.
-	 */
-	isolation?: IsolationMode | ManagedWorktreeRequest;
+  // spawn params (subset of Agent tool params; no inherit_context, no resume)
+  subagent_type: SubagentType;
+  prompt: string;
+  model?: string;
+  thinking?: ThinkingLevel;
+  max_turns?: number;
+  isolated?: boolean;
+  isolation?: IsolationMode;
 
-	// state
-	enabled: boolean;
-	/** ISO timestamp. */
-	createdAt: string;
-	lastRun?: string;
-	lastStatus?: "success" | "error" | "running";
-	/** Refreshed on every fire and on store load. */
-	nextRun?: string;
-	runCount: number;
+  // state
+  enabled: boolean;
+  /** ISO timestamp. */
+  createdAt: string;
+  lastRun?: string;
+  lastStatus?: "success" | "error" | "running";
+  /** Refreshed on every fire and on store load. */
+  nextRun?: string;
+  runCount: number;
 }
 
 export interface ScheduleStoreData {
-	/** For future migrations. */
-	version: 1;
-	jobs: ScheduledSubagent[];
+  /** For future migrations. */
+  version: 1;
+  jobs: ScheduledSubagent[];
 }

@@ -16,27 +16,27 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import initExtension from "../src/index.js";
 import { flush, installSubagentsMock, mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
-import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
 
-// GC-2026-116: replaced the `vi.mock("../src/tasks-config.js", ...)`
-// pattern with a real-file fixture. The mock leaked across test files
-// under bun:test and broke `tasks-config.test.ts` when run in the same
-// invocation. `installTasksConfig({})` pins an empty config (so the
-// developer's own <agentDir>/tasks-config.json cannot change what these
-// tests exercise) via a per-test temp dir + PI_CODING_AGENT_DIR.
+// Pinned so the developer's own <agentDir>/tasks-config.json cannot change what
+// these tests exercise.
+const config = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+vi.mock("../src/tasks-config.js", () => ({
+  loadGlobalTasksConfig: () => ({ ...config.current }),
+  loadTasksConfig: () => ({ ...config.current }),
+  saveTasksConfig: () => {},
+}));
 
 let dir: string;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pi-tasks-reattach-"));
   process.env.PI_TASKS = join(dir, "tasks.json");
-  installTasksConfig({});
+  config.current = {};
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.PI_TASKS;
-  uninstallTasksConfig();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -45,14 +45,6 @@ async function sessionWithRunningAgent() {
   const mock = mockPi();
   const rpc = installSubagentsMock(mock.pi);
   initExtension(mock.pi as any);
-  // GC-2026-112 FU0 Phase 2a: GC-2026-113 (not yet landed) will make
-  // TaskCreate auto-spawn any task that has agentType set. Until 113
-  // lands, the production code only spawns on explicit TaskExecute —
-  // and TaskExecute is the ONLY way to populate `agentTaskMap` in
-  // session 1 (which the legacy subagents:failed listener needs to
-  // revert the task on a failure event). After 113, the feeder
-  // populates `agentTaskMap` directly and this helper can collapse
-  // to a single TaskCreate call.
   await mock.executeTool("TaskCreate", { subject: "Long job", description: "d", agentType: "general-purpose" });
   await mock.executeTool("TaskExecute", { task_ids: ["1"] });
   rpc.unsub();

@@ -19,15 +19,15 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { AutoClearManager } from "./auto-clear.js";
-import { TASKS_RPC_DECOMPOSE_MATERIALIZE } from "./event-channels.js";
-import { applyIntentReminderToSystemPrompt } from "./intent-reminder.js";
-import { IntentPump, type MainAgentTransport } from "./main-agent-injector.js";
-import {
-  createOrchestratorTask,
-  createOrchestratorTaskWithReview,
-} from "./orchestrator-task.js";
 import { ProcessTracker } from "./process-tracker.js";
-import { isFeedableTask, registerTaskFeeder } from "./task-feeder.js";
+import {
+  type CadenceConfig,
+  createCadenceState,
+  drainReminderForContext,
+  evaluateToolResult,
+  onTurnStart,
+  resetCadenceState,
+} from "./reminder-cadence.js";
 import { resolveTaskGlyphs } from "./task-glyphs.js";
 import { reclaimGlobalSessionTasksDir, sessionTaskFile } from "./task-paths.js";
 import { TaskStore } from "./task-store.js";
@@ -45,16 +45,86 @@ function debug(...args: unknown[]) {
 
 // ---- Helpers ----
 
-function textResult<T = unknown>(msg: string, details?: T) {
-  // `details` flows back through the AgentToolCallOutcome envelope
-  // (`ctx.executeTool(...).result.details`). Programmatic callers
-  // (e.g. pi-orchestrator's other tools) read it to recover structured
-  // task IDs without parsing the text body.
-  return { content: [{ type: "text" as const, text: msg }], details: details as any };
+function textResult(msg: string) {
+  return { content: [{ type: "text" as const, text: msg }], details: undefined as any };
+}
+
+/** Task tool names — used to detect task tool usage for reminder suppression. */
+const TASK_TOOL_NAMES = new Set(["TaskCreate", "TaskList", "TaskGet", "TaskUpdate", "TaskOutput", "TaskStop", "TaskExecute"]);
+
+/** How many turns without task tool usage before injecting a reminder. */
+const REMINDER_INTERVAL = 4;
+
+/** Shorter interval used while any task is in_progress, so stale work is caught faster. */
+const ACTIVE_REMINDER_INTERVAL = 2;
+
+/** Cap on how many tasks the reminder echoes, to bound its size on large lists. */
+const REMINDER_MAX_TASKS = 10;
+
+/** Effective reminder interval for a given task list (pure — no disk I/O). */
+function intervalFor(tasks: Task[]): number {
+  return tasks.some(t => t.status === "in_progress") ? ACTIVE_REMINDER_INTERVAL : REMINDER_INTERVAL;
 }
 
 /** How many turns completed tasks linger before auto-clearing. */
 const AUTO_CLEAR_DELAY = 4;
+
+/** Neutralize a task field for the echo: collapse newlines and strip reminder tags. */
+function sanitizeField(value: string): string {
+  return value.replace(/[\r\n]+/g, " ").replace(/<\/?system-reminder>/gi, "").trim();
+}
+
+/**
+ * Build the system reminder, shaped after Claude Code's todo reminders: an
+ * empty-list nudge, or a state echo that dumps the current list as JSON. The
+ * wording mirrors Claude Code (adapted to this extension's task tool names).
+ */
+function buildSystemReminder(tasks: Task[]): string {
+  if (tasks.length === 0) {
+    return [
+      "<system-reminder>",
+      "This is a reminder that your task list is currently empty. DO NOT mention this to the user explicitly because they are already aware. If you are working on tasks that would benefit from a task list please use the TaskCreate tool to create one. If not, please feel free to ignore. Again do not mention this message to the user.",
+      "</system-reminder>",
+    ].join("\n");
+  }
+
+  // Bound the echo on large lists. When over the cap, drop completed tasks
+  // first (the reminder exists to surface unfinished work); ties keep task
+  // order since Array.sort is stable.
+  let shown = tasks;
+  if (tasks.length > REMINDER_MAX_TASKS) {
+    const rank = (t: Task) => (t.status === "in_progress" ? 0 : t.status === "pending" ? 1 : 2);
+    shown = [...tasks].sort((a, b) => rank(a) - rank(b)).slice(0, REMINDER_MAX_TASKS);
+  }
+  const hidden = tasks.length - shown.length;
+  const overflow = hidden > 0
+    ? ` (${hidden} more task${hidden === 1 ? "" : "s"} not shown — use TaskList for the full list.)`
+    : "";
+
+  const items = shown.map(t => {
+    const item: Record<string, string> = {
+      id: t.id,
+      content: sanitizeField(t.subject),
+      status: t.status,
+    };
+    if (t.activeForm) item.activeForm = sanitizeField(t.activeForm);
+    return item;
+  });
+
+  // When truncated, don't claim these are the full contents.
+  const prefix = "The task tools haven't been used recently. DO NOT mention this explicitly to the user.";
+  const header = hidden > 0
+    ? `${prefix} Here are your most relevant tasks (list truncated):`
+    : `${prefix} Here are the latest contents of your task list:`;
+
+  return [
+    "<system-reminder>",
+    header,
+    "",
+    `${JSON.stringify(items)}.${overflow} Continue on with the tasks at hand if applicable.`,
+    "</system-reminder>",
+  ].join("\n");
+}
 
 export default function (pi: ExtensionAPI) {
   // Project overrides require ExtensionContext.cwd, which is unavailable while
@@ -96,29 +166,12 @@ export default function (pi: ExtensionAPI) {
   const tracker = new ProcessTracker();
   const widget = new TaskWidget(store, cfg);
 
-  // ── IntentPump (GC-2026-main-agent-proactive-intent-pump) ────────
-  // Production transport wraps `pi.sendUserMessage` — it injects a
-  // user-role message into the main session, which the LLM consumes as
-  // if the user had asked. The transport is feature-detected; if the
-  // host does not expose `sendUserMessage`, the pump is not registered
-  // and intent tasks fall back to the GC-2026-122 system-prompt
-  // reminder.
-  const intentTransport: MainAgentTransport = {
-    send: async (content: string) => {
-      const sendFn = (pi as unknown as { sendUserMessage?: (msg: string) => unknown })
-        .sendUserMessage;
-      if (typeof sendFn !== "function") {
-        throw new Error("pi.sendUserMessage is not available on this host");
-      }
-      await sendFn(content);
-    },
-  };
-  const intentPump = new IntentPump(store, intentTransport, { pollMs: 50 });
-
   // ── Subagent integration state ──
   /** Latest ExtensionContext — refreshed on every tool execution so cascade always has a valid one. */
   let latestCtx: ExtensionContext | undefined;
-  /** Maps agent IDs to task IDs for O(1) completion lookup. Shared with the unified task feeder. */
+  /** Cascade config — set by TaskExecute, consumed by completion listener. */
+  let cascadeConfig: { additionalContext?: string; model?: string; maxTurns?: number } | undefined;
+  /** Maps agent IDs to task IDs for O(1) completion lookup. */
   const agentTaskMap = new Map<string, string>();
 
   // ── Subagent RPC helpers ──
@@ -178,96 +231,33 @@ export default function (pi: ExtensionAPI) {
   let subagentsAvailable = false;
   let pendingWarning: string | undefined;
 
-  /** GC-2026-fix-pending-spawn-after-ready: the message we attach to a
-   *  spawn failure when subagents is not yet available. Used both as the
-   *  thrown error and as a marker for the `subagents:ready` retry sweep
-   *  to identify which pending tasks should be re-spawned when
-   *  subagents finally comes online. */
-  const SUBAGENTS_UNAVAILABLE_MESSAGE =
-    "subagents extension unavailable; Planner fallback engages";
-
-  /** Ping subagents and check protocol version. Returns a Promise that
-   *  resolves when the ping settles (success OR timeout). Works with any
-   *  handler version. */
-  function checkSubagentsVersion(): Promise<void> {
-    if (subagentsAvailable) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      const requestId = randomUUID();
-      let settled = false;
-      const finalize = () => {
-        if (settled) return;
-        settled = true;
-        unsub();
-        clearTimeout(timer);
-        resolve();
-      };
-      const unsub = pi.events.on(`subagents:rpc:ping:reply:${requestId}`, (raw: unknown) => {
-        const remoteVersion = (raw as any)?.data?.version as number | undefined;
-        if (remoteVersion === undefined) {
-          pendingWarning =
-            "@tintinweb/pi-subagents is outdated — please update for task execution support.";
-        } else if (remoteVersion > PROTOCOL_VERSION) {
-          pendingWarning =
-            `@tintinweb/pi-tasks is outdated (protocol v${PROTOCOL_VERSION}, ` +
-            `pi-subagents has v${remoteVersion}) — please update for task execution support.`;
-        } else if (remoteVersion < PROTOCOL_VERSION) {
-          pendingWarning =
-            `@tintinweb/pi-subagents is outdated (protocol v${remoteVersion}, ` +
-            `pi-tasks has v${PROTOCOL_VERSION}) — please update for task execution support.`;
-        } else {
-          subagentsAvailable = true;
-        }
-        finalize();
-      });
-      const timer = setTimeout(finalize, 5_000);
-      pi.events.emit("subagents:rpc:ping", { requestId });
+  /** Ping subagents and check protocol version. Works with any handler version. */
+  function checkSubagentsVersion() {
+    const requestId = randomUUID();
+    const timer = setTimeout(() => { unsub(); }, 5_000);
+    const unsub = pi.events.on(`subagents:rpc:ping:reply:${requestId}`, (raw: unknown) => {
+      unsub(); clearTimeout(timer);
+      const remoteVersion = (raw as any)?.data?.version as number | undefined;
+      if (remoteVersion === undefined) {
+        pendingWarning =
+          "@tintinweb/pi-subagents is outdated — please update for task execution support.";
+      } else if (remoteVersion > PROTOCOL_VERSION) {
+        pendingWarning =
+          `@tintinweb/pi-tasks is outdated (protocol v${PROTOCOL_VERSION}, ` +
+          `pi-subagents has v${remoteVersion}) — please update for task execution support.`;
+      } else if (remoteVersion < PROTOCOL_VERSION) {
+        pendingWarning =
+          `@tintinweb/pi-subagents is outdated (protocol v${remoteVersion}, ` +
+          `pi-tasks has v${PROTOCOL_VERSION}) — please update for task execution support.`;
+      } else {
+        subagentsAvailable = true;
+      }
     });
-  }
-
-  /** GC-2026-fix-pending-spawn-after-ready: when subagents comes online,
-   *  retry every pending task that previously failed because subagents
-   *  wasn't yet ready. Without this sweep, a TaskCreate fired before
-   *  `subagents:ready` would leave the task in pending with
-   *  `lastError = SUBAGENTS_UNAVAILABLE_MESSAGE` — never consumed.
-   *
-   *  Implementation note: we do NOT block the spawn callback waiting for
-   *  subagents to come online — that would slow TaskCreate by up to 10s
-   *  in the genuine "subagents absent" case and break tests that depend
-   *  on fast spawn failures. Instead, the spawn callback throws
-   *  immediately (pre-fix behavior) and this sweep re-spawns the
-   *  failed task once `subagents:ready` fires. Tradeoff: a TaskCreate
-   *  that hits the race window sees its task briefly as "pending with
-   *  lastError" before the sweep fires the retry — typically within a
-   *  few hundred ms of subagents:ready. */
-  async function retryPendingSpawnsAfterReady(): Promise<void> {
-    for (const t of store.list()) {
-      if (t.status !== "pending") continue;
-      if (!isFeedableTask(t)) continue;
-      const lastError = t.metadata?.lastError;
-      if (typeof lastError !== "string" || !lastError.includes(SUBAGENTS_UNAVAILABLE_MESSAGE)) continue;
-      // Clear the lastError marker so the feeder has a clean slate and
-      // we don't loop forever if the retry also fails.
-      store.update(t.id, {
-        metadata: { ...t.metadata, lastError: null },
-      });
-      const fresh = store.get(t.id);
-      if (fresh) await feeder.maybeAutoSpawn(fresh);
-    }
+    pi.events.emit("subagents:rpc:ping", { requestId });
   }
 
   checkSubagentsVersion();
-  pi.events.on("subagents:ready", () => {
-    // Re-ping to set subagentsAvailable, then sweep pending tasks that
-    // previously failed because subagents wasn't ready. The sweep is
-    // gated on the ping reply — `checkSubagentsVersion` resolves when
-    // the ping settles, by which point subagentsAvailable reflects the
-    // handshake outcome.
-    void checkSubagentsVersion().then(() => {
-      if (subagentsAvailable) {
-        void retryPendingSpawnsAfterReady();
-      }
-    });
-  });
+  pi.events.on("subagents:ready", () => checkSubagentsVersion());
 
   /** Build a prompt for a task being executed by a subagent.
    *  Injects completed dependency results so cascaded agents have context from prerequisites.
@@ -302,321 +292,75 @@ export default function (pi: ExtensionAPI) {
 
   const autoClear = new AutoClearManager(() => store, () => cfg.autoClearCompleted ?? "on_list_complete", AUTO_CLEAR_DELAY);
 
-  // ── Unified task feeder (GC-2026-113 FU0 Phase 2b + GC-2026-117) ──
-  // Replaces the three previous cascade listeners (workflow-handler
-  // direct spawn [GC-2026-remove-workflow-run-prod: module deleted],
-  // decompose-cascade cascade [GC-2026-117: module deleted; the cascade
-  // logic is here, not in a dedicated module], TaskExecute ad-hoc cascade).
-  // ONE feeder owns spawn + completion for ALL task types
-  // (decompose / user / TaskExecute).
-  //
-  // GC-2026-114 FU3: the `cfg.autoCascade` config key + the related
-  // settings-menu toggle are removed entirely (cascade is unconditional).
-  // The settings-menu item is gone; tasks-config.ts no longer declares
-  // the key.
-  //
-  // The feeder's spawn callback dispatches with current-workspace
-  // isolation (managed worktree isolation is now a subagent concern,
-  // configured by the LLM when it creates each task).
-  const feeder = registerTaskFeeder({
-    store,
-    events: pi.events,
-    intentPump,
-    spawn: async (task: Task) => {
-      // GC-2026-121: if pi-subagents is not available, refuse the spawn
-      // gracefully — the task stays in pending state and the existing
-      // before_agent_start reminder fires for the LLM as the fallback.
-      // Without this guard, a missing subagents extension hangs the
-      // feeder forever waiting for an RPC reply that never comes.
-      //
-      // GC-2026-fix-pending-spawn-after-ready: throw synchronously when
-      // subagents is unavailable (preserves pre-fix behavior — the spawn
-      // callback is a fast path and never blocks). The task is reverted
-      // to pending with `lastError = SUBAGENTS_UNAVAILABLE_MESSAGE`,
-      // and the `subagents:ready` listener below sweeps that marker
-      // and re-spawns every pending failed task once subagents
-      // broadcasts ready.
-      //
-      // The race we close: pre-fix, pi-subagents registers its RPC
-      // handlers in session_start, AFTER pi-tasks's extension factory
-      // emits the boot ping. A TaskCreate that runs in that gap threw
-      // "subagents extension unavailable" and the task was stuck in
-      // pending forever. Post-fix, the listener walks pending tasks on
-      // subagents:ready and re-spawns each one whose lastError matches
-      // the marker.
-      if (!subagentsAvailable) {
-        throw new Error(SUBAGENTS_UNAVAILABLE_MESSAGE);
-      }
-      // GC-2026-121 follow-up: tasks created BEFORE the Planner
-      // agentType stamp shipped (or loaded from a pre-fix store file)
-      // have kind=intent but no agentType. Default the spawn type to
-      // Planner in that case so the unified feeder still consumes them.
-      const explicitType = task.metadata.agentType;
-      const type =
-        typeof explicitType === "string" && explicitType.length > 0
-          ? explicitType
-          : task.metadata.kind === "intent"
-            ? "Planner"
-            : String(task.subject);
+  // ── Subagent completion listener ──
+  // Listens for subagent lifecycle events to update task status and optionally cascade.
 
-      const spawnOpts: Record<string, unknown> = {
-        description: task.subject,
-        isBackground: true,
-      };
-      // GC-2026-121 AC3: for the Planner agent, the spawn prompt must
-      // include the originating user task's subject + description + id
-      // so Planner can pass it to `decompose_task` without an extra
-      // lookup. The subject is included as a fallback when description
-      // is empty (the user often runs /tasks create "<subject>" without
-      // --description; the subject alone is enough hint for Planner to
-      // either produce specs or BLOCK).
-      // Format:
-      //   Subject: <subject>
-      //   Description: <description>   (may be empty)
-      //   Task ID: <id>
-      //   Call `decompose_task(user_task_id="<id>", specs=[...])` to materialize the chain.
-      let prompt = task.description;
-      if (type === "Planner") {
-        prompt =
-          `Subject: ${task.subject}\n` +
-          `Description: ${task.description}\n` +
-          `Task ID: ${task.id}\n\n` +
-          `Call \`decompose_task(user_task_id="${task.id}", specs=[...])\` to materialize the chain.`;
-      }
-      return spawnSubagent(type, prompt, spawnOpts);
-    },
-    agentTaskMap,
-    onTaskChange: (taskId, status) => {
-      if (status === "completed") {
-        widget.setActiveTask(taskId, false);
-        autoClear.trackCompletion(taskId, currentTurn);
-      } else {
-        widget.setActiveTask(taskId, false);
-        autoClear.resetBatchCountdown();
-      }
-      widget.update();
-    },
-  });
+  // Success → mark task completed, cascade if enabled
+  pi.events.on("subagents:completed", async (data) => {
+    const { id, result } = data as { id: string; result?: string };
+    const taskId = agentTaskMap.get(id);
+    if (!taskId) return;
+    agentTaskMap.delete(id);
+    const task = store.get(taskId);
+    if (!task) return;
 
-    // ── Decompose-materialize RPC (GC-2026-task-feeding-and-decomposition AC3) ──
-  // decompose_task (in pi-orchestrator) emits a request on this channel
-  // with chain specs; this handler materializes the chain in the TaskStore,
-  // spawns T1 (so the cascade can pick up the rest), and replies with chain
-  // metadata on the reply channel.
-  //
-  // Channel constants are duplicated across packages (string literals) —
-  // see pi-orchestrator/src/decompose-task.ts.
-  pi.events.on(TASKS_RPC_DECOMPOSE_MATERIALIZE, async (raw: unknown) => {
-    const payload = raw as { requestId?: unknown; params?: unknown };
-    if (typeof payload.requestId !== "string" || !payload.params) return;
-    const requestId = payload.requestId;
-    const replyChannel = `tasks:rpc:decompose-materialize:reply:${requestId}`;
-    try {
-      const params = payload.params as {
-        user_task_id?: string;
-        specs: Array<{ subject: string; description: string; activeForm?: string }>;
-      };
-      const result = await materializeDecomposeChain(params);
-      pi.events.emit(replyChannel, { success: true, data: result });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      pi.events.emit(replyChannel, { success: false, error: message });
-    }
-  });
+    store.update(task.id, { status: "completed", metadata: { ...task.metadata, result } });
+    widget.setActiveTask(task.id, false);
 
-  async function materializeDecomposeChain(params: {
-    user_task_id?: string;
-    specs: Array<{ subject: string; description: string; activeForm?: string }>;
-  }): Promise<{
-    status: "success";
-    summary: string;
-    tasks: Array<{
-      task_id: string;
-      subject: string;
-      reviewer_id: string | undefined;
-      is_top_level: boolean;
-    }>;
-    user_task_chain?: string[];
-    first_task_spawned?: { task_id: string; agent_id: string };
-  }> {
-    if (!Array.isArray(params.specs) || params.specs.length < 1 || params.specs.length > 20) {
-      throw new Error(`specs.length must be in [1, 20], got ${params.specs?.length}`);
-    }
-    for (let i = 0; i < params.specs.length; i++) {
-      const spec = params.specs[i];
-      if (!spec || typeof spec.subject !== "string" || spec.subject.length === 0) {
-        throw new Error(`specs[${i}].subject is required`);
-      }
-      if (typeof spec.description !== "string" || spec.description.length < 10) {
-        throw new Error(`specs[${i}].description must be ≥ 10 chars`);
-      }
-    }
-    let userTask: Task | undefined;
-    if (params.user_task_id !== undefined) {
-      userTask = store.get(params.user_task_id);
-      if (!userTask) throw new Error(`user_task_id ${params.user_task_id} not found`);
-      if (userTask.metadata.created_by !== "user") {
-        throw new Error(
-          `user_task_id ${params.user_task_id} is not user-created (created_by=${userTask.metadata.created_by})`,
-        );
-      }
-    }
-
-    const created: Task[] = [];
-    let reviewer: Task | undefined;
-    const chainSubjects = params.specs.map((s) => s.subject);
-    const chainDescriptions = params.specs.map((s) => s.description);
-    // GC-2026-120 AC6: capture the user task's pre-state so we can roll it
-    // back if the chain materialization throws after AC3's auto-complete
-    // fires.
-    let userTaskAutoCompleted = false;
-    const priorUserTaskMetadata = userTask ? { ...userTask.metadata } : undefined;
-    try {
-      for (let i = 0; i < params.specs.length; i++) {
-        const spec = params.specs[i];
-        const baseMeta: Record<string, unknown> = {
-          phase: "decomposition_chain",
-          agentType: "Developer",
-          created_by: "orchestrator",
-          ...(userTask ? { user_task_ref: userTask.id } : {}),
-        };
-        if (i === 0) {
-          // GC-2026-120 AC3: T1 is the chain head — no `blockedBy` on the
-          // user task. The user task is auto-completed below, so T1's only
-          // dependency is the feeder noticing `blockedBy === []` and
-          // spawning. The old code's `blockedBy: userTask ? [userTask.id] : []`
-          // created a deadlock: userTask had no agent to complete it.
-          const out = createOrchestratorTaskWithReview(
-            store,
-            {
-              subject: spec.subject,
-              description: spec.description,
-              activeForm: spec.activeForm,
-              agentType: "Developer",
-              blockedBy: [],
-              metadata: baseMeta,
-            },
-            {
-              kind: "decompose",
-              parentSubject: spec.subject,
-              parentDescription: spec.description,
-              parentAgentType: "Developer",
-              parentIteration: 1,
-              chainSubjects,
-              chainDescriptions,
-              branch: "",
-              ...(userTask ? { userTaskRef: userTask.id } : {}),
-            },
-          );
-          created.push(out.task);
-          reviewer = out.reviewer;
-        } else {
-          const task = createOrchestratorTask(store, {
-            subject: spec.subject,
-            description: spec.description,
-            activeForm: spec.activeForm,
-            agentType: "Developer",
-            blockedBy: [created[i - 1].id],
-            metadata: baseMeta,
+    // Auto-cascade: find unblocked dependents with agentType
+    if ((cfg.autoCascade ?? false) && cascadeConfig && latestCtx) {
+      const unblocked = store.list().filter(t =>
+        t.status === "pending" &&
+        t.metadata?.agentType &&
+        t.blockedBy.includes(task.id) &&
+        t.blockedBy.every(depId => store.get(depId)?.status === "completed")
+      );
+      for (const next of unblocked) {
+        store.update(next.id, { status: "in_progress" });
+        const prompt = buildTaskPrompt(next, cascadeConfig.additionalContext);
+        try {
+          const agentId = await spawnSubagent(next.metadata.agentType, prompt, {
+            description: next.subject,
+            isBackground: true,
+            maxTurns: cascadeConfig.maxTurns,
+            ...(cascadeConfig.model ? { model: cascadeConfig.model } : {}),
           });
-          created.push(task);
+          agentTaskMap.set(agentId, next.id);
+          store.update(next.id, { owner: agentId, metadata: { ...next.metadata, agentId } });
+          widget.setActiveTask(next.id);
+        } catch (err: any) {
+          store.update(next.id, { status: "pending", metadata: { ...next.metadata, result: null, lastError: err.message } });
         }
       }
-
-      // GC-2026-120 AC3: auto-complete the user task on successful chain
-      // materialization. The user task was a record of intent; once it is
-      // decomposed into actionable sub-tasks, it has served its purpose.
-      // This eliminates the pre-GC deadlock where T1.blockedBy contained
-      // userTask.id but no agent ever completed userTask.
-      if (userTask) {
-        store.update(userTask.id, {
-          status: "completed",
-          metadata: {
-            ...userTask.metadata,
-            completed_via: "decomposition",
-            completed_at: new Date().toISOString(),
-          },
-        });
-        userTaskAutoCompleted = true;
-      }
-    } catch (err) {
-      // GC-2026-120 AC6: transactional rollback. Delete every chain task
-      // (and the reviewer) created before the throw, and revert userTask
-      // auto-completion if it already fired.
-      for (const t of created) store.delete(t.id);
-      if (reviewer) store.delete(reviewer.id);
-      if (userTaskAutoCompleted && userTask && priorUserTaskMetadata) {
-        store.update(userTask.id, {
-          status: "pending",
-          metadata: priorUserTaskMetadata,
-        });
-      }
-      throw err;
     }
+    autoClear.trackCompletion(task.id, cadence.currentTurn);
+    widget.update();
+  });
 
-    let firstSpawned: { task_id: string; agent_id: string } | undefined;
-    const t1 = created[0];
-    if (t1) {
-      // GC-2026-113 FU0 Phase 2b: delegate T1's first spawn to the
-      // unified feeder. The feeder populates agentTaskMap + emits the
-      // events the unified listener watches.
-      // GC-2026-117: the legacy `decompose:spawn` event channel was removed;
-      // the unified feeder's `subagents:completed` listener now handles
-      // decompose-chain cascade via its generic `cascadeSpawn` walk (any
-      // pending feedable task with satisfied blockers).
-      // GC-2026-120 AC3: the prior `(!userTask || userTask.status === "completed")`
-      // gate simplified — userTask is auto-completed above iff it existed.
-      try {
-        await feeder.maybeAutoSpawn(t1);
-      } catch (spawnErr) {
-        // AC6 extension: if the spawn RPC fails (e.g., subagents extension
-        // not registered), the chain is still materialised — tasks are
-        // persisted, just unowned. The caller can retry the spawn later
-        // (e.g., via TaskExecute). Do NOT roll back the chain on a spawn
-        // failure — that would discard work the user asked for.
-        const message = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
-        // eslint-disable-next-line no-console
-        console.error("[materializeDecomposeChain] T1 spawn failed:", message);
-      }
-      const afterT1 = store.get(t1.id);
-      if (afterT1?.owner) {
-        widget.setActiveTask(t1.id, true);
-        firstSpawned = { task_id: t1.id, agent_id: afterT1.owner };
-      }
+  // Failure → store error, revert to pending, don't cascade (branch stops)
+  // Intentional stop (status === "stopped") → mark completed, preserve partial result
+  pi.events.on("subagents:failed", (data) => {
+    const { id, error, result, status } = data as { id: string; error?: string; result?: string; status: string };
+    const taskId = agentTaskMap.get(id);
+    if (!taskId) return;
+    agentTaskMap.delete(id);
+    const task = store.get(taskId);
+    if (!task) return;
+
+    if (status === "stopped") {
+      // Intentional stop — mark completed, preserve partial result
+      store.update(task.id, { status: "completed", metadata: { ...task.metadata, result: result || task.metadata?.result } });
+      autoClear.trackCompletion(task.id, cadence.currentTurn);
+    } else {
+      // Actual error — revert to pending. `result: null` drops it (the store deletes
+      // a key set to null): a task back to pending has no current result, and an
+      // earlier run's would otherwise outrank this error everywhere it is read.
+      store.update(task.id, { status: "pending", metadata: { ...task.metadata, result: null, lastError: error || status } });
+      autoClear.resetBatchCountdown();
     }
-
-    const tasks = created.map((t, i) => ({
-      task_id: t.id,
-      subject: t.subject,
-      reviewer_id: i === 0 ? reviewer?.id : undefined,
-      is_top_level: i === 0,
-    }));
-    const user_task_chain = userTask
-      ? [userTask.id, ...created.map((t) => t.id)]
-      : undefined;
-
-    return {
-      status: "success",
-      summary: `Decomposed into ${created.length} task(s); 1 Reviewer on T1. Chain will execute serially.`,
-      tasks,
-      ...(user_task_chain ? { user_task_chain } : {}),
-      ...(firstSpawned ? { first_task_spawned: firstSpawned } : {}),
-    };
-  }
-
-  // ── Decompose-chain cascade ──
-  // Decompose-chain tasks (phase: "decomposition_chain") are cascaded by the
-  // unified task-feeder registered above. The feeder's generic cascadeSpawn
-  // walks all pending feedable tasks with satisfied blockers, which includes
-  // decompose-chain tasks (their `blockedBy` edges are serial: T_i depends on
-  // T_{i-1}; the chain head has no orchestrator-created predecessors so it
-  // spawns immediately when materializeDecomposeChain calls
-  // `feeder.maybeAutoSpawn(t1)`).
-  //
-  // Pre-GC-2026-114 FU3, a dedicated `registerDecomposeCascade` module owned
-  // this responsibility. After FU3 the module was retired and the cascade
-  // moved entirely into the feeder. The module itself is deleted as of
-  // GC-2026-117 — the listener no longer exists in the source tree.
+    widget.setActiveTask(task.id, false);
+    widget.update();
+  });
 
   // ── Context-scoped store initialization ──
   // Project paths cannot be resolved until an ExtensionContext is available.
@@ -669,28 +413,17 @@ export default function (pi: ExtensionAPI) {
    *  `agentTaskMap` lives only in this extension instance, so a reload starts empty
    *  while the agents keep going — their completion events would then be dropped and
    *  the tasks would stay in_progress forever. Everything needed is already on disk:
-   *  GC-2026-113's unified task feeder stores the agent ID on `task.owner` (set
-   *  by the feeder's `spawnAndTrack` after a successful spawn). The legacy path
-   *  also recorded `metadata.agentId`; we read both for backward compat.
+   *  TaskExecute records the agent ID in task metadata.
    *
    *  Only in_progress tasks are relinked. A task reverted to pending keeps its
-   *  `owner` / `metadata.agentId`, and relinking that would let a late event
-   *  resurrect work the user has already reset. Only runs once — the first caller wins. */
+   *  `metadata.agentId`, and relinking that would let a late event resurrect work the
+   *  user has already reset. Only runs once — the first caller wins. */
   function reattachAgents() {
     if (agentsReattached) return;
     agentsReattached = true;
     for (const task of store.list()) {
-      if (task.status !== "in_progress") continue;
-      // GC-2026-113 FU0 Phase 2b: prefer `task.owner` (set by the
-      // unified feeder); fall back to `metadata.agentId` for tasks
-      // spawned by the legacy `TaskExecute` tool path.
-      const agentId =
-        typeof task.owner === "string" && task.owner
-          ? task.owner
-          : typeof task.metadata?.agentId === "string"
-            ? task.metadata.agentId
-            : undefined;
-      if (agentId) {
+      const agentId = task.metadata?.agentId;
+      if (task.status === "in_progress" && typeof agentId === "string" && agentId) {
         agentTaskMap.set(agentId, task.id);
       }
     }
@@ -714,33 +447,21 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // ── Turn tracking (for autoClear's "completed N turns ago" math) ──
-  // GC-2026-system-reminder-remove: the cadence module used to track
-  // currentTurn too, but with the reminder mechanism removed we only need
-  // a counter for autoClear's per-task linger window. Keep it local here
-  // so autoClear doesn't have to import reminder-cadence.
-  let currentTurn = 0;
-
-  // GC-2026-120 AC5 + follow-up + GC-2026-122 + GC-2026-continuous-intent-reminder:
-  // per-intent decomposition reminder. GC-2026-122 fixed the transport
-  // (system-prompt injection, not `ctx.ui.notify`). GC-2026-continuous-
-  // intent-reminder dropped the per-session `remindedIds` dedup so the
-  // reminder keeps firing on every `before_agent_start` until the
-  // intent is consumed (auto-completed by `materializeDecomposeChain`
-  // or marked completed by the LLM via `TaskUpdate`). The reminder is
-  // composed by `pi-tasks/src/intent-reminder.ts` and injected into
-  // the LLM's system prompt via the `before_agent_start` handler's
-  // return value (see the `pi.on("before_agent_start", ...)` block
-  // further down). No caller-side state needed — the predicate is
-  // `status === "pending" && kind === "intent"`, evaluated fresh each
-  // call against the live store.
+  // ── Turn tracking for system-reminder injection ──
+  // Cadence decisions live in `reminder-cadence.ts` so they're
+  // unit-testable without spinning up a fake ExtensionAPI.
+  const cadence = createCadenceState();
+  const cadenceConfig: CadenceConfig = {
+    reminderInterval: REMINDER_INTERVAL,
+    taskToolNames: TASK_TOOL_NAMES,
+  };
 
   pi.on("turn_start", async (_event, ctx) => {
-    currentTurn += 1;
+    onTurnStart(cadence);
     latestCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
     initializeStoreForContext(ctx);
-    if (autoClear.onTurnStart(currentTurn)) {
+    if (autoClear.onTurnStart(cadence.currentTurn)) {
       if (isSessionScope()) deleteSessionFileIfEmpty();
       widget.update();
     }
@@ -753,13 +474,80 @@ export default function (pi: ExtensionAPI) {
     autoClear.onRunEnded();
   });
 
-  // ── Token usage tracking ──
+  // ── Token usage tracking + stale-task detection ──
   // Feed per-turn token counts from assistant messages into the widget.
+  // Also detect when the agent has stopped referencing tasks but left
+  // them in_progress — schedule a reminder for the next LLM call.
   pi.on("turn_end", async (event) => {
     const msg = event.message as any;
     if (msg?.role === "assistant" && msg.usage) {
       widget.addTokenUsage(msg.usage.input ?? 0, msg.usage.output ?? 0);
     }
+
+    // Stale-task detection: catch the case where the agent finishes work in a
+    // text-only turn (no tool calls, so tool_result never fires) but left tasks
+    // in_progress. Cheap-first: only read the store once the turn gap could
+    // matter — the in_progress interval is the smallest a reminder can need.
+    if (!cadence.reminderInjectedThisCycle && !cadence.reminderDue) {
+      const gap = cadence.currentTurn - cadence.lastTaskToolUseTurn;
+      if (gap >= ACTIVE_REMINDER_INTERVAL && store.list().some(t => t.status === "in_progress")) {
+        cadence.reminderDue = true;
+      }
+    }
+  });
+
+  // ── System-reminder injection ──
+  //
+  // tool_result is used ONLY to track cadence. We DO NOT mutate non-task
+  // tool result content — appending a <system-reminder> there would
+  // corrupt model-visible transcript semantics for unrelated tools (read,
+  // bash, grep, …) and make tool-output debugging miserable.
+  //
+  // The actual injection happens in the `context` hook below, which fires
+  // before each LLM call and returns a modified copy of the messages
+  // without persisting or polluting any tool output.
+  pi.on("tool_result", async (event) => {
+    // Task tool usage resets cadence (interval is irrelevant on this path — the
+    // helper resets and returns before reading it).
+    if (TASK_TOOL_NAMES.has(event.toolName)) {
+      evaluateToolResult(cadence, event.toolName, false, cadenceConfig);
+      return {};
+    }
+
+    if (cadence.reminderInjectedThisCycle) return {};
+    // Cheap-first: avoid store.list() disk I/O until the turn gap could matter.
+    // ACTIVE_REMINDER_INTERVAL is the smallest interval any reminder can need.
+    if (cadence.currentTurn - cadence.lastTaskToolUseTurn < ACTIVE_REMINDER_INTERVAL) return {};
+
+    const tasks = store.list();
+    // Shorter interval while in_progress; passed per-call so the shared config
+    // is never mutated.
+    evaluateToolResult(cadence, event.toolName, tasks.length > 0, {
+      ...cadenceConfig,
+      reminderInterval: intervalFor(tasks),
+    });
+    return {};
+  });
+
+  // Inject the transient system-reminder into the upcoming LLM call's
+  // messages, never into a tool result. The reminder is appended as a
+  // user message so models that don't support custom message types still
+  // receive it. It is not persisted in the session store — `context`
+  // returns a transformed messages array used only for this one request.
+  pi.on("context", async (event) => {
+    if (!drainReminderForContext(cadence)) return {};
+    const tasks = store.list();
+
+    return {
+      messages: [
+        ...event.messages,
+        {
+          role: "user" as const,
+          content: [{ type: "text" as const, text: buildSystemReminder(tasks) }],
+          timestamp: Date.now(),
+        },
+      ],
+    };
   });
 
   // session_start replaces the never-emitted session_switch event. Rehydrating
@@ -779,15 +567,11 @@ export default function (pi: ExtensionAPI) {
     if (isSwitch) {
       persistedTasksShown = false;
       agentsReattached = false;
-      // GC-2026-continuous-intent-reminder: no per-session reminder
-      // state to reset — the reminder is stateless and reads the live
-      // store on every `before_agent_start`. The reminder naturally
-      // re-surfaces any pending intent on the first turn of a new
-      // session without explicit reset.
       // Task IDs restart at 1 in every session, so a mapping held over from the
       // previous one points at an unrelated task here — the agent's completion would
       // close a task it never ran. reattachAgents() rebuilds what this session owns.
       agentTaskMap.clear();
+      resetCadenceState(cadence);
       autoClear.reset();
       // Memory mode has no file to switch — clear tasks explicitly on /new.
       if (reason === "new" && taskScope === "memory") {
@@ -813,32 +597,16 @@ export default function (pi: ExtensionAPI) {
 
   // Fallback for hosts that init UI lazily. Guarded by persistedTasksShown, so
   // it never double-renders after session_start.
-  //
-  // GC-2026-122: the reminder now reaches the LLM via the handler's
-  // return value (`{ systemPrompt: ... }`), not `ctx.ui.notify` (which
-  // is UI-level and invisible to the LLM). The pattern mirrors
-  // `pi-orchestrator/src/extension.ts:215-226`. If no new intent tasks
-  // are pending, the handler returns undefined (no system-prompt change).
-  pi.on("before_agent_start", async (event, ctx) => {
+  pi.on("before_agent_start", async (_event, ctx) => {
     latestCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
     initializeStoreForContext(ctx);
     reattachAgents();
     showPersistedTasks();
-    const existingSystemPrompt =
-      typeof event === "object" && event !== null && "systemPrompt" in event
-        ? (event as { systemPrompt?: string }).systemPrompt
-        : undefined;
-    const reminderResult = applyIntentReminderToSystemPrompt(
-      store,
-      existingSystemPrompt,
-      (taskId) => intentPump.isOwned(taskId),
-    );
     if (pendingWarning) {
       ctx.ui.notify(pendingWarning, "warning");
       pendingWarning = undefined;
     }
-    return reminderResult;
   });
 
   // Keep latestCtx fresh on every tool execution as well.
@@ -907,50 +675,20 @@ All tasks are created with status \`pending\`.
       subject: Type.String({ description: "A brief title for the task" }),
       description: Type.String({ description: "A detailed description of what needs to be done" }),
       activeForm: Type.Optional(Type.String({ description: "Present continuous form shown in spinner when in_progress (e.g., 'Running tests')" })),
-      agentType: Type.Optional(Type.String({
-        description: "Agent type for subagent execution (e.g., 'Developer', 'Explore'). With agentType set, the task is kind=actionable and the unified task-feeder auto-spawns a subagent. Without agentType, the task is kind=intent (planning data) — the assistant must decompose it via decompose_task or claim it via TaskUpdate when starting work.",
-      })),
-      kind: Type.Optional(Type.Unsafe<"intent" | "actionable">({
-          description: "GC-2026-120 AC1/AC2. Optional override for the inferred kind. Defaults to actionable if agentType is set, otherwise intent. step is reserved for orchestrator-internal tasks (decompose chain) — pass it only via createOrchestratorTask, not here.",
-      })),
+      agentType: Type.Optional(Type.String({ description: "Agent type for subagent execution (e.g., 'general-purpose', 'Explore'). Tasks with agentType can be started via TaskExecute." })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
-      created_by: Type.Optional(
-        Type.Unsafe<"orchestrator" | "user">({
-          description: 'GC-2026-task-feeding-and-decomposition (D1): task source provenance. "orchestrator" routes through the helper (no auto-Reviewer); "user" (default) creates the task directly.',
-          default: "user",
-        }),
-      ),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       // A finished list must not collect the batch that follows it. The turn countdowns
       // cannot be relied on for that: they only tick at `turn_start`, so a run that ends
       // right after its last completion freezes one mid-count.
       autoClear.startNewBatch();
       const meta = params.metadata ?? {};
       if (params.agentType) meta.agentType = params.agentType;
-      // GC-2026-120 AC1/AC2: optional explicit kind override. The store
-      // infers kind from created_by + agentType when this is omitted.
-      if (params.kind) meta.kind = params.kind;
       const task = store.create(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined);
       widget.update();
-      // GC-2026-113 FU0 Phase 2b: unified feeder auto-spawns feedable
-      // tasks. We `await` (not `void`) so the TaskCreate tool doesn't
-      // return until the spawn RPC has at least populated task.owner.
-      // Without this, downstream tools like TaskOutput that look up
-      // `task.owner` immediately after TaskCreate race the spawn.
-      await feeder.maybeAutoSpawn(task);
-      // GC-2026-120 AC1: surface a hint when the assistant created a
-      // kind=intent task without an explicit decomposition route. The
-      // assistant is expected to follow up with decompose_task.
-      const hint =
-        task.metadata.kind === "intent"
-          ? " — intent task; decompose via decompose_task or claim via TaskUpdate."
-          : "";
-      return textResult(
-        `Task #${task.id} created successfully: ${task.subject}${hint}`,
-        { id: task.id, task },
-      );
+      return Promise.resolve(textResult(`Task #${task.id} created successfully: ${task.subject}`));
     },
   });
 
@@ -1192,19 +930,12 @@ Set up task dependencies:
       addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: "Task IDs that block this task" })),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+    execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { taskId, ...fields } = params;
-      // GC-2026-113 FU0 Phase 2b: capture the prior agentType so we can
-      // detect an add/change and trigger the unified feeder once.
-      const prior = store.get(taskId);
-      const priorAgentType =
-        prior && typeof prior.metadata?.agentType === "string"
-          ? prior.metadata.agentType
-          : "";
       const { task, changedFields, warnings } = store.update(taskId, fields);
 
       if (changedFields.length === 0 && !task) {
-        return textResult(`Task #${taskId} not found`);
+        return Promise.resolve(textResult(`Task #${taskId} not found`));
       }
 
       // Update widget active task tracking
@@ -1215,29 +946,7 @@ Set up task dependencies:
         autoClear.resetBatchCountdown();
       } else if (fields.status === "completed" || fields.status === "deleted") {
         widget.setActiveTask(taskId, false);
-        if (fields.status === "completed") autoClear.trackCompletion(taskId, currentTurn);
-      }
-
-      // GC-2026-113 FU0 Phase 2b: if metadata.agentType was added (was
-      // empty, now non-empty) or changed (different non-empty value),
-      // the task just became feedable. Trigger the unified feeder.
-      //
-      // GC-2026-115: `await` (not `void`) so the spawn RPC completes
-      // before the tool returns. Without this, a followup TaskOutput
-      // call from the LLM races the spawn: task.owner is still
-      // undefined when TaskOutput reads it, and TaskOutput errors
-      // with "No background process".
-      const newAgentType =
-        task && typeof task.metadata?.agentType === "string"
-          ? task.metadata.agentType
-          : "";
-      if (
-        task &&
-        task.status === "pending" &&
-        newAgentType.length > 0 &&
-        newAgentType !== priorAgentType
-      ) {
-        await feeder.maybeAutoSpawn(task);
+        if (fields.status === "completed") autoClear.trackCompletion(taskId, cadence.currentTurn);
       }
 
       widget.update();
@@ -1245,7 +954,7 @@ Set up task dependencies:
       if (warnings.length > 0) {
         msg += ` (warning: ${warnings.join("; ")})`;
       }
-      return textResult(msg);
+      return Promise.resolve(textResult(msg));
     },
   });
 
@@ -1289,24 +998,17 @@ Set up task dependencies:
         const task = store.get(resolvedId);
         if (!task) throw new Error(`No task found with ID ${task_id}`);
 
-        // GC-2026-113 FU0 Phase 2b: the unified feeder sets the agent
-        // ID on `task.owner` (and also on `task.metadata.agentId` for
-        // legacy TaskExecute-spawned tasks). Either signals "this is a
-        // subagent task".
-        const subagentId: string | undefined =
-          (typeof task.owner === "string" && task.owner) ||
-          (typeof task.metadata?.agentId === "string" ? task.metadata.agentId : undefined);
-        if (subagentId) {
+        if (task.metadata?.agentId) {
           // Subagent task — wait for completion if blocking
           if (block && task.status === "in_progress") {
             await new Promise<void>((resolve) => {
               const timer = setTimeout(() => { unsubOk(); unsubFail(); resolve(); }, timeout ?? 30000);
               const cleanup = () => { clearTimeout(timer); resolve(); };
               const unsubOk = pi.events.on("subagents:completed", (d: unknown) => {
-                if ((d as any).id === subagentId) { unsubOk(); unsubFail(); cleanup(); }
+                if ((d as any).id === task.metadata?.agentId) { unsubOk(); unsubFail(); cleanup(); }
               });
               const unsubFail = pi.events.on("subagents:failed", (d: unknown) => {
-                if ((d as any).id === subagentId) { unsubOk(); unsubFail(); cleanup(); }
+                if ((d as any).id === task.metadata?.agentId) { unsubOk(); unsubFail(); cleanup(); }
               });
               // Re-read before committing to the wait. Nothing awaits since the outer
               // check, so this only differs on a shared file-backed list, where
@@ -1319,11 +1021,7 @@ Set up task dependencies:
           // Re-read by resolved ID — `task` predates the wait, and a file-backed
           // store deserializes a fresh object on every load, so it is stale here.
           const updated = store.get(resolvedId) ?? task;
-          // GC-2026-113 FU0 Phase 2b: agent ID lives on `task.owner`
-          // (preferred) or `task.metadata.agentId` (legacy TaskExecute
-          // path). The earlier `if (subagentId)` guard ensures
-          // `updated.owner || updated.metadata.agentId` is defined here.
-          const agentId: string = subagentId;
+          const agentId: string = task.metadata.agentId;
           // Consume only what is actually handed over: the agent has reported back
           // (it leaves the map when it does) and the task carries its outcome. Short
           // of both — still running, or an update that never landed — the model is
@@ -1386,17 +1084,10 @@ Set up task dependencies:
           }
         }
         const task = store.get(resolvedId);
-        // GC-2026-113 FU0 Phase 2b: the unified feeder sets the agent
-        // ID on `task.owner` (preferred) or `task.metadata.agentId`
-        // (legacy TaskExecute path). Either signals "this is a subagent
-        // task that's safe to stop".
-        const subagentId: string | undefined =
-          (typeof task?.owner === "string" && task.owner) ||
-          (typeof task?.metadata?.agentId === "string" ? task.metadata.agentId : undefined);
-        if (subagentId && task?.status === "in_progress") {
+        if (task?.metadata?.agentId && task.status === "in_progress") {
           store.update(resolvedId, { status: "completed" });
-          autoClear.trackCompletion(resolvedId, currentTurn);
-          await stopSubagent(subagentId);
+          autoClear.trackCompletion(resolvedId, cadence.currentTurn);
+          await stopSubagent(task.metadata.agentId);
           widget.setActiveTask(resolvedId, false);
           widget.update();
           return textResult(`Task #${resolvedId} stopped successfully`);
@@ -1405,7 +1096,7 @@ Set up task dependencies:
       }
 
       store.update(taskId, { status: "completed" });
-      autoClear.trackCompletion(taskId, currentTurn);
+      autoClear.trackCompletion(taskId, cadence.currentTurn);
       widget.setActiveTask(taskId, false);
       widget.update();
       return textResult(`Task #${taskId} stopped successfully`);
@@ -1480,33 +1171,33 @@ Set up task dependencies:
           continue;
         }
 
-        // GC-2026-113 FU0 Phase 2b: delegate to the unified task feeder.
-        // The feeder owns the spawn + agentTaskMap population. The
-        // additional_context / model / max_turns options are plumbed
-        // through via the prompt (buildTaskPrompt appends
-        // additional_context) and the spawn options below.
-        const before = store.get(taskId);
+        // Mark in_progress and spawn agent via RPC
+        store.update(taskId, { status: "in_progress" });
+        const prompt = buildTaskPrompt(task, params.additional_context);
         try {
-          await feeder.maybeAutoSpawn(task);
-          const after = store.get(taskId);
-          if (after?.owner) {
-            launched.push(`#${taskId} → agent ${after.owner}`);
-            widget.setActiveTask(taskId);
-          } else if (after?.metadata?.lastError) {
-            // Spawn failed inside the feeder; surface to caller.
-            results.push(`#${taskId}: spawn failed — ${after.metadata.lastError}`);
-          } else if (before === after) {
-            // Feeder skipped the spawn (e.g. blockers changed mid-flight).
-            results.push(`#${taskId}: not dispatched (status: ${after?.status ?? "unknown"})`);
-          }
+          const agentId = await spawnSubagent(task.metadata.agentType, prompt, {
+            description: task.subject,
+            isBackground: true,
+            maxTurns: params.max_turns,
+            ...(params.model ? { model: params.model } : {}),
+          });
+          agentTaskMap.set(agentId, taskId);
+          store.update(taskId, { owner: agentId, metadata: { ...task.metadata, agentId } });
+          widget.setActiveTask(taskId);
+          launched.push(`#${taskId} → agent ${agentId}`);
         } catch (err: any) {
           debug(`spawn:error task=#${taskId}`, err);
-          results.push(`#${taskId}: spawn failed — ${err.message ?? String(err)}`);
+          store.update(taskId, { status: "pending" });
+          results.push(`#${taskId}: spawn failed — ${err.message}`);
         }
       }
 
-      // GC-2026-113 FU0 Phase 2b: cascade is unconditional via the unified
-      // feeder. No cascadeConfig to maintain here.
+      // Save cascade config for the completion listener
+      cascadeConfig = {
+        additionalContext: params.additional_context,
+        model: params.model,
+        maxTurns: params.max_turns,
+      };
 
       widget.update();
 
@@ -1529,21 +1220,12 @@ Set up task dependencies:
   // ──────────────────────────────────────────────────
 
   pi.registerCommand("tasks", {
-    description: "Manage tasks — view, create, clear completed. Subcommand: /tasks create \"<subject>\" [--description \"...\"] [--agent-type T]",
-    handler: async (args: string, ctx: ExtensionCommandContext) => {
+    description: "Manage tasks — view, create, clear completed",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
       latestCtx = ctx;
       widget.setUICtx(ctx.ui as UICtx);
       initializeStoreForContext(ctx);
       const ui = ctx.ui;
-
-      // GC-2026-task-feeding-and-decomposition (AC6): route the `create`
-      // subcommand to a no-UI arg parser. Empty args fall through to the
-      // existing interactive menu (back-compat).
-      const trimmed = args.trim();
-      if (trimmed.startsWith("create")) {
-        await handleCreateCommand(trimmed.slice("create".length).trim(), ui);
-        return;
-      }
 
       const mainMenu = async (): Promise<void> => {
         const tasks = store.list();
@@ -1636,7 +1318,7 @@ Set up task dependencies:
           return viewTasks();
         } else if (action === "✓ Complete") {
           store.update(taskId, { status: "completed" });
-          autoClear.trackCompletion(taskId, currentTurn);
+          autoClear.trackCompletion(taskId, cadence.currentTurn);
           widget.setActiveTask(taskId, false);
           widget.update();
           return viewTasks();
@@ -1666,196 +1348,4 @@ Set up task dependencies:
       await mainMenu();
     },
   });
-
-  // ──────────────────────────────────────────────────
-  // /tasks create (arg-style subcommand)
-  // ──────────────────────────────────────────────────
-
-  /**
-   * Minimal shell-style parser: captures the first quoted token as `subject`,
-   * then walks remaining `--flag "value"` (or `--flag value`) pairs.
-   *
-   * The parser is intentionally narrow — complex shell syntax (nested quotes,
-   * escaped characters, env expansion) is out of scope. Users with complex
-   * inputs should call the LLM-facing TaskCreate tool via chat.
-   */
-  function parseCreateArgs(
-    raw: string,
-  ): {
-    subject?: string;
-    description?: string;
-    agentType?: string;
-    kind?: "intent" | "actionable" | "step";
-    decomposeSpec?: string;
-    flags: Set<string>;
-  } {
-    const out: {
-      subject?: string;
-      description?: string;
-      agentType?: string;
-      kind?: "intent" | "actionable" | "step";
-      decomposeSpec?: string;
-      flags: Set<string>;
-    } = { flags: new Set() };
-    let rest = raw.trim();
-    // First quoted token → subject.
-    const subjectMatch = rest.match(/^"([^"]*)"/);
-    if (subjectMatch) {
-      out.subject = subjectMatch[1];
-      rest = rest.slice(subjectMatch[0].length).trim();
-    } else {
-      const untilSpace = rest.match(/^(\S+)/);
-      if (untilSpace) {
-        out.subject = untilSpace[1];
-        rest = rest.slice(untilSpace[0].length).trim();
-      }
-    }
-    // Walk --flag [value] pairs.
-    while (rest.length > 0) {
-      const flagMatch = rest.match(/^--([a-zA-Z][a-zA-Z0-9_-]*)(?:\s+(?:"([^"]*)"|(\S+)))?/);
-      if (!flagMatch) {
-        // Unknown token — skip silently (lenient).
-        rest = rest.replace(/^\S+/, "").trim();
-        continue;
-      }
-      const flag = flagMatch[1];
-      const value = flagMatch[2] ?? flagMatch[3];
-      out.flags.add(flag);
-      if (flag === "description" && value !== undefined) out.description = value;
-      if (flag === "agent-type" && value !== undefined) out.agentType = value;
-      // GC-2026-120: --kind is the user-facing knob (AC1/AC2). `step`
-      // is orchestrator-internal — accept the literal for forward
-      // compatibility but do not propagate (orchestrators always stamp
-      // via createOrchestratorTask).
-      if (
-        flag === "kind" &&
-        (value === "intent" || value === "actionable" || value === "step")
-      ) {
-        if (value !== "step") out.kind = value;
-      }
-      // GC-2026-120 AC4: --decompose-spec triggers inline materialization.
-      if (flag === "decompose-spec" && value !== undefined) out.decomposeSpec = value;
-      rest = rest.slice(flagMatch[0].length).trim();
-    }
-    return out;
-  }
-
-  /**
-   * Parse a `--decompose-spec` value into chain specs.
-   *
-   * Format: `"T1:subject|T1 description;T2:subject|T2 description;..."`.
-   * The pipe separates subject from description; semicolons separate entries.
-   * Whitespace is trimmed. Trailing/empty entries are ignored.
-   *
-   * Throws on entries missing the pipe, subject, or description.
-   *
-   * GC-2026-120 AC4: this is the inline-spec parser that lets the user
-   * decompose without a chat round-trip.
-   */
-  function parseDecomposeSpec(
-    raw: string,
-  ): Array<{ subject: string; description: string }> {
-    const out: Array<{ subject: string; description: string }> = [];
-    for (const entry of raw.split(";")) {
-      const trimmed = entry.trim();
-      if (trimmed.length === 0) continue;
-      const pipeAt = trimmed.indexOf("|");
-      if (pipeAt < 0) {
-        throw new Error(`decompose-spec entry missing '|': "${trimmed}"`);
-      }
-      const subject = trimmed.slice(0, pipeAt).trim();
-      const description = trimmed.slice(pipeAt + 1).trim();
-      if (subject.length === 0) {
-        throw new Error(`decompose-spec entry missing subject: "${trimmed}"`);
-      }
-      if (description.length === 0) {
-        throw new Error(`decompose-spec entry missing description: "${trimmed}"`);
-      }
-      out.push({ subject, description });
-    }
-    return out;
-  }
-
-  async function handleCreateCommand(
-    rawArgs: string,
-    ui: { notify: (msg: string, kind?: "info" | "warning" | "error") => void },
-  ): Promise<void> {
-    if (rawArgs.length === 0) {
-      ui.notify(
-        'Usage: /tasks create "<subject>" [--description "..."] [--agent-type T] [--kind intent|actionable] [--decompose-spec "T1:s|T1 d;T2:s|T2 d"]',
-        "warning",
-      );
-      return;
-    }
-    const parsed = parseCreateArgs(rawArgs);
-    // Reject --decompose explicitly (AC6 / historical). The flag is parsed
-    // as a known unknown; we surface a clear warning rather than silently
-    // ignore. (--decompose-spec is the new GC-2026-120 inline path.)
-    if (parsed.flags.has("decompose")) {
-      ui.notify(
-        "--decompose is not exposed. Decomposition is chat-driven (LLM calls the decompose_task tool) — or use --decompose-spec for inline decomposition.",
-        "warning",
-      );
-      return;
-    }
-    if (!parsed.subject || parsed.subject.length === 0) {
-      ui.notify("Task subject is required.", "warning");
-      return;
-    }
-
-    // GC-2026-120 AC4: --decompose-spec triggers immediate inline
-    // decomposition. The user task becomes the user_task_ref root of the
-    // chain. materializeDecomposeChain auto-completes the user task on
-    // success — see AC3.
-    if (parsed.decomposeSpec) {
-      let specs: Array<{ subject: string; description: string }>;
-      try {
-        specs = parseDecomposeSpec(parsed.decomposeSpec);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        ui.notify(`decompose-spec parse error: ${msg}`, "error");
-        return;
-      }
-      if (specs.length < 1) {
-        ui.notify("decompose-spec must contain at least one entry.", "error");
-        return;
-      }
-      // Create the user task first so we have a user_task_id to attach.
-      const userTask = store.create(parsed.subject, parsed.description ?? "", undefined, {
-        created_by: "user",
-      });
-      widget.update();
-      try {
-        const result = await materializeDecomposeChain({
-          user_task_id: userTask.id,
-          specs,
-        });
-        ui.notify(
-          `Task #${userTask.id} decomposed into ${result.tasks.length} subtask(s); chain is executing.`,
-          "info",
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        ui.notify(`decomposition failed: ${msg}`, "error");
-      }
-      return;
-    }
-
-    const task = store.create(
-      parsed.subject,
-      parsed.description ?? "",
-      undefined,
-      {
-        created_by: "user",
-        ...(parsed.kind ? { kind: parsed.kind } : {}),
-        ...(parsed.agentType ? { agentType: parsed.agentType } : {}),
-      },
-    );
-    widget.update();
-    // GC-2026-113 FU0 Phase 2b: await the auto-spawn so task.owner
-    // is populated by the time /tasks create returns (avoids race with
-    // followup TaskOutput / TaskUpdate calls).
-    await feeder.maybeAutoSpawn(task);
-    ui.notify(`Task #${task.id} created: ${task.subject}`, "info");
-  }
 }

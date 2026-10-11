@@ -1,20 +1,9 @@
 {
   "name": "@sages/pi-tasks",
   "version": "0.1.0",
-  "description": "Sages fork — A pi extension that brings Claude Code-style task tracking and coordination to pi.",
+  "description": "A pi extension that brings Claude Code-style task tracking and coordination to pi.",
   "author": "vanpipy",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/vanpipy/sages.git"
-  },
-  "homepage": "https://github.com/vanpipy/sages#readme",
-  "bugs": {
-    "url": "https://github.com/vanpipy/sages/issues"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
   "keywords": [
     "pi-package",
     "pi",
@@ -26,10 +15,11 @@
   ],
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.80.5",
-    "@earendil-works/pi-tui": ">=0.80.5",
-    "typebox": "*"
+    "@earendil-works/pi-tui": ">=0.80.5"
   },
-  "dependencies": {},
+  "dependencies": {
+    "typebox": "^1.1.34"
+  },
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
     "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build",
@@ -44,7 +34,6 @@
     "@earendil-works/pi-coding-agent": "0.84.2",
     "@earendil-works/pi-tui": "0.84.2",
     "@types/node": "^25.0.0",
-    "typebox": "^1.1.34",
     "typescript": "^6.0.0",
     "vitest": "^4.1.5"
   },
@@ -54,15 +43,5 @@
     ],
     "video": "https://github.com/tintinweb/pi-tasks/raw/master/media/demo.mp4",
     "image": "https://github.com/tintinweb/pi-tasks/raw/master/media/screenshot.png"
-  },
-  "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
-    },
-    "./*": {
-      "types": "./src/*.ts",
-      "default": "./src/*.ts"
-    }
   }
 }

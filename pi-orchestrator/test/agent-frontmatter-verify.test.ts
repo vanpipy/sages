@@ -132,9 +132,6 @@ describe("default-agents.ts: shipped built-in frontmatter (no third-party deps)"
 
   for (const name of [
     "Explore",
-    "PlanCompiler",
-    "Developer",
-    "Reviewer",
   ] as const) {
     it(`${name} config block exists with the required keys`, () => {
       const block = extractAgentBlock(name);

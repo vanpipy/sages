@@ -24,134 +24,79 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isSymlink, isUnsafeName, safeReadFile } from "./memory.js";
-import { inc as profileInc } from "./profile.js";
-
-const SKILL_CACHE_TTL_MS = 5 * 60 * 1000;
-
-interface SkillCacheEntry {
-	loadedAt: number;
-	content: string;
-}
-
-const skillCache = new Map<string, SkillCacheEntry>();
-
-/** Test-only helper. */
-export function _getSkillCacheSize(): number {
-	return skillCache.size;
-}
-
-/** Test-only helper. */
-export function _clearSkillCache(): void {
-	skillCache.clear();
-}
-
-function skillCacheKey(cwd: string, name: string): string {
-	return `${cwd}::${name}`;
-}
-
-function touchCache(
-	cwd: string,
-	name: string,
-	content: string,
-	loadedAt: number,
-): string {
-	skillCache.set(skillCacheKey(cwd, name), { loadedAt, content });
-	return content;
-}
 
 export interface PreloadedSkill {
-	name: string;
-	content: string;
+  name: string;
+  content: string;
 }
 
-export function preloadSkills(
-	skillNames: string[],
-	cwd: string,
-): PreloadedSkill[] {
-	return skillNames.map((name) => ({
-		name,
-		content: loadSkillContent(name, cwd),
-	}));
+export function preloadSkills(skillNames: string[], cwd: string): PreloadedSkill[] {
+  return skillNames.map((name) => ({ name, content: loadSkillContent(name, cwd) }));
 }
 
-export function loadSkillContent(name: string, cwd: string): string {
-	if (isUnsafeName(name)) {
-		return `(Skill "${name}" skipped: name contains path traversal characters)`;
-	}
-
-	const cacheKey = skillCacheKey(cwd, name);
-	const cached = skillCache.get(cacheKey);
-	const now = Date.now();
-	if (cached && now - cached.loadedAt < SKILL_CACHE_TTL_MS) {
-		profileInc("skill_preload_hit");
-		return cached.content;
-	}
-	profileInc("skill_preload_miss");
-
-	const roots = [
-		join(cwd, ".pi", "skills"), // project — Pi standard
-		join(cwd, ".agents", "skills"), // project — Agent Skills spec
-		join(getAgentDir(), "skills"), // user — Pi standard
-		join(homedir(), ".agents", "skills"), // user — Agent Skills spec
-		join(homedir(), ".pi", "skills"), // legacy global, pre-Pi
-	];
-	for (const root of roots) {
-		const content = findInRoot(root, name);
-		if (content !== undefined) return touchCache(cwd, name, content, now);
-	}
-	return touchCache(
-		cwd,
-		name,
-		`(Skill "${name}" not found in .pi/skills/, .agents/skills/, or global skill locations)`,
-		now,
-	);
+function loadSkillContent(name: string, cwd: string): string {
+  if (isUnsafeName(name)) {
+    return `(Skill "${name}" skipped: name contains path traversal characters)`;
+  }
+  const roots = [
+    join(cwd, ".pi", "skills"), // project — Pi standard
+    join(cwd, ".agents", "skills"), // project — Agent Skills spec
+    join(getAgentDir(), "skills"), // user — Pi standard
+    join(homedir(), ".agents", "skills"), // user — Agent Skills spec
+    join(homedir(), ".pi", "skills"), // legacy global, pre-Pi
+  ];
+  for (const root of roots) {
+    const content = findInRoot(root, name);
+    if (content !== undefined) return content;
+  }
+  return `(Skill "${name}" not found in .pi/skills/, .agents/skills/, or global skill locations)`;
 }
 
 function findInRoot(root: string, name: string): string | undefined {
-	if (isSymlink(root)) return undefined; // reject symlinked roots entirely
-	const flat = safeReadFile(join(root, `${name}.md`))?.trim();
-	if (flat !== undefined) return flat;
-	return findSkillDirectory(root, name);
+  if (isSymlink(root)) return undefined; // reject symlinked roots entirely
+  const flat = safeReadFile(join(root, `${name}.md`))?.trim();
+  if (flat !== undefined) return flat;
+  return findSkillDirectory(root, name);
 }
 
 /** BFS under `root` for a directory named `name` containing `SKILL.md`. Pi-conforming filters. */
 function findSkillDirectory(root: string, name: string): string | undefined {
-	if (!existsSync(root)) return undefined;
-	const queue: string[] = [root];
+  if (!existsSync(root)) return undefined;
+  const queue: string[] = [root];
 
-	while (queue.length > 0) {
-		const current = queue.shift();
-		if (current === undefined) continue;
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === undefined) continue;
 
-		let entries: Dirent<string>[];
-		try {
-			entries = readdirSync(current, { withFileTypes: true });
-		} catch {
-			continue;
-		}
+    let entries: Dirent<string>[];
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
 
-		// Deterministic byte-order traversal — locale-independent.
-		entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    // Deterministic byte-order traversal — locale-independent.
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
-		for (const entry of entries) {
-			if (!entry.isDirectory()) continue;
-			if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
 
-			// Symlinked dirs already filtered by entry.isDirectory() — Dirent uses lstat semantics.
-			const path = join(current, entry.name);
-			const skillMd = join(path, "SKILL.md");
-			const isSkillDir = existsSync(skillMd);
+      // Symlinked dirs already filtered by entry.isDirectory() — Dirent uses lstat semantics.
+      const path = join(current, entry.name);
+      const skillMd = join(path, "SKILL.md");
+      const isSkillDir = existsSync(skillMd);
 
-			if (isSkillDir) {
-				if (entry.name === name) {
-					const content = safeReadFile(skillMd)?.trim();
-					if (content !== undefined) return content;
-				}
-				continue; // Pi rule: skills don't nest — don't descend into a skill dir
-			}
+      if (isSkillDir) {
+        if (entry.name === name) {
+          const content = safeReadFile(skillMd)?.trim();
+          if (content !== undefined) return content;
+        }
+        continue; // Pi rule: skills don't nest — don't descend into a skill dir
+      }
 
-			queue.push(path);
-		}
-	}
-	return undefined;
+      queue.push(path);
+    }
+  }
+  return undefined;
 }

@@ -3,8 +3,8 @@
  * GC-2026-remove-workflow-run-prod: removed `workflow_run` (3 tools → 2).
  *
  * Asserts the session_start `setActiveTools` allowlist:
- *   - ORCHESTRATOR_TOOLS contains exactly 2 tools
- *     (`goal_contract_create`, `decompose_task` — GC-2026-remove-workflow-run-prod
+ *   - ORCHESTRATOR_TOOLS contains exactly 1 tool
+ *     (`goal_contract_create` — GC-2026-remove-workflow-run-prod + GC-2026-decompose-task-removed
  *     the latter as a one-shot 5-phase pipeline runner)
  *   - PI_SUBAGENT_TOOLS contains 3 tools (Agent / get_subagent_result /
  *     steer_subagent — registered by `@sages/pi-subagents`)
@@ -24,7 +24,7 @@
  *
  * Total active toolset: 2 (ORCHESTRATOR) + 7 (SUBAGENT) + 7 (PI_TASKS) +
  * 11 (AFT) + 7 (BASELINE) = 34. GC-2026-remove-workflow-run-prod: now 2
- * orchestrator (goal_contract_create + decompose_task) → 33 total.
+ * orchestrator (goal_contract_create) → 32 total.
  *
  * Run: cd pi-orchestrator && bun test ./test/extension-active-tools.test.ts
  */
@@ -108,12 +108,11 @@ describe("AFT_TOOLS constant (GC-2026-086)", () => {
 });
 
 describe("existing tool allowlist constants — regression (GC-2026-orchestrator-simplify)", () => {
-	it("ORCHESTRATOR_TOOLS contains exactly 2 tools: goal_contract_create + decompose_task (GC-2026-task-feeding-and-decomposition + GC-2026-remove-workflow-run-prod)", () => {
+	it("ORCHESTRATOR_TOOLS contains exactly 1 tool: goal_contract_create (GC-2026-task-feeding-and-decomposition + GC-2026-remove-workflow-run-prod + GC-2026-decompose-task-removed)", () => {
 		expect(ORCHESTRATOR_TOOLS).toEqual([
 			"goal_contract_create",
-			"decompose_task",
 		]);
-		expect(ORCHESTRATOR_TOOLS.length).toBe(2);
+		expect(ORCHESTRATOR_TOOLS.length).toBe(1);
 	});
 
 	it("ORCHESTRATOR_TOOLS does NOT include any of the removed 4 tools", () => {
@@ -210,7 +209,7 @@ describe("session_start hook text scan (GC-2026-orchestrator-simplify)", () => {
 });
 
 describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", () => {
-	it("fires setActiveTools with 34 entries: 2 orchestrator + 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline (GC-2026-remove-workflow-run-prod removes workflow_run)", async () => {
+	it("fires setActiveTools with 33 entries: 1 orchestrator + 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline (GC-2026-remove-workflow-run-prod removes workflow_run; GC-2026-decompose-task-removed removes decompose_task)", async () => {
 		const activeToolsCalls: string[][] = [];
 		const pi = {
 			setActiveTools(tools: string[]) {
@@ -243,9 +242,9 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 
 		expect(activeToolsCalls.length).toBe(1);
 		const tools = activeToolsCalls[0];
-		// ORCHESTRATOR family — goal_contract_create + decompose_task
+		// ORCHESTRATOR family — goal_contract_create (decompose_task removed in GC-2026-decompose-task-removed)
 		expect(tools).toContain("goal_contract_create");
-		expect(tools).toContain("decompose_task");
+		expect(tools).not.toContain("decompose_task");
 		expect(tools).not.toContain("dag_synthesize");
 		expect(tools).not.toContain("task_dispatch");
 		expect(tools).not.toContain("orchestrator_audit");
@@ -258,9 +257,9 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 		for (const t of SUBAGENT_TOOLS) expect(tools).toContain(t);
 		// BASELINE family
 		for (const t of BASELINE_TOOLS) expect(tools).toContain(t);
-		// Total: 2 + 7 + 7 + 11 + 7 = 34, no duplicates
-		expect(tools.length).toBe(34);
-		expect(new Set(tools).size).toBe(34);
+		// Total: 1 + 7 + 7 + 11 + 7 = 33, no duplicates
+		expect(tools.length).toBe(33);
+		expect(new Set(tools).size).toBe(33);
 	});
 });
 
@@ -333,8 +332,8 @@ describe("setActiveTools order — pi-tasks/AFT before BASELINE", () => {
 		expect(lastPiTasksIdx).toBeLessThan(firstBaselineIdx);
 	});
 
-	it("keeps the 34-entry total after reorder (no silent additions / removals — was 35 before GC-2026-remove-workflow-run-prod)", async () => {
+	it("keeps the 33-entry total after reorder (no silent additions / removals — was 35 before GC-2026-remove-workflow-run-prod, then 34 before GC-2026-decompose-task-removed)", async () => {
 		const tools = await captureTools();
-		expect(tools.length).toBe(34);
+		expect(tools.length).toBe(33);
 	});
 });

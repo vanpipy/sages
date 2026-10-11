@@ -13,23 +13,23 @@ import { TaskStore } from "../src/task-store.js";
 import { TaskWidget, type Theme, type UICtx } from "../src/ui/task-widget.js";
 import { installSubagentsMock, type MockEventBus, mockCtx, mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
 
-// GC-2026-116: real-file config fixture replaces the leaking
-// `vi.mock("../src/tasks-config.js", ...)`. The fixture pins an empty
-// config via a per-test temp agent dir + PI_CODING_AGENT_DIR, so the
-// developer's global <agentDir>/tasks-config.json cannot leak into the
-// results, and the mock no longer pollutes sibling test files.
-import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
+// Config is mocked rather than written to <cwd>/.pi/tasks-config.json: writing the
+// real file would clobber the user's project settings, and reading it would let the
+// developer's global <agentDir>/tasks-config.json leak into the results.
+const config = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+vi.mock("../src/tasks-config.js", () => ({
+  loadGlobalTasksConfig: () => ({ ...config.current }),
+  loadTasksConfig: () => ({ ...config.current }),
+  saveTasksConfig: () => {},
+}));
 
 // Force in-memory task store for all integration tests — prevents file-backed
 // store from loading stale tasks across test instances.
 beforeEach(() => {
   process.env.PI_TASKS = "off";
-  installTasksConfig({});
+  config.current = {};
 });
-afterEach(() => {
-  delete process.env.PI_TASKS;
-  uninstallTasksConfig();
-});
+afterEach(() => { delete process.env.PI_TASKS; });
 
 describe("Session task rehydration", () => {
   // Task paths resolve against the session workspace (ctx.cwd), so every test gets
@@ -225,7 +225,7 @@ describe("Workspace-scoped store resolution", () => {
 
   it("loads project scope from ctx.cwd and stores the shared task list there", async () => {
     const cwd = workspace("project-scope");
-    installTasksConfig({ taskScope: "project" });
+    config.current = { taskScope: "project" };
     delete process.env.PI_TASKS;
     const mock = mockPi();
     initExtension(mock.pi as any);
@@ -315,21 +315,18 @@ describe("TaskExecute", () => {
     expect(mock.tools.has("TaskExecute")).toBe(true);
   });
 
-  it.skip("returns error when subagent extension is not loaded — REMOVED: spawn RPC timeout makes this hang; new model is in task-feeder.test.ts", async () => {
-    // GC-2026-113 FU0 Phase 2b: with auto-spawn on TaskCreate, the
-    // "subagent extension not loaded" error now fires from TaskCreate
-    // (which triggers the spawn). However, the feeder awaits the
-    // spawn RPC, which has a 30s timeout — so this test would hang
-    // for 30s waiting for a non-existent responder. The new model
-    // is covered by task-feeder.test.ts's spawn-failure tests.
+  it("returns error when subagent extension is not loaded", async () => {
+    // Re-init without mock to simulate missing extension
     const freshMock = mockPi();
     initExtension(freshMock.pi as any);
 
-    const result = await freshMock.executeTool("TaskCreate", {
+    await freshMock.executeTool("TaskCreate", {
       subject: "Test task",
       description: "Do something",
       agentType: "general-purpose",
     });
+
+    const result = await freshMock.executeTool("TaskExecute", { task_ids: ["1"] });
     expect(result.content[0].text).toContain("Subagent execution is currently unavailable");
   });
 
@@ -338,30 +335,29 @@ describe("TaskExecute", () => {
     expect(result.content[0].text).toContain("#999: not found");
   });
 
-  it.skip("rejects tasks without agentType — REMOVED: GC-2026-121 makes this state unreachable via TaskCreate (Planner is auto-stamped). The TaskExecute rejection path remains as defense-in-depth but cannot be exercised via the public API.", async () => {});
+  it("rejects tasks without agentType", async () => {
+    await mock.executeTool("TaskCreate", {
+      subject: "No agent type",
+      description: "Plain task",
+    });
+
+    const result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    expect(result.content[0].text).toContain("#1: no agentType set");
+  });
 
   it("rejects non-pending tasks", async () => {
-    // GC-2026-113 FU0 Phase 2b: with the unified feeder, TaskCreate
-    // auto-spawns any task that has agentType. The "not pending"
-    // branch is now the natural state of an auto-spawned task.
     await mock.executeTool("TaskCreate", {
       subject: "Already started",
       description: "Desc",
       agentType: "general-purpose",
     });
+    await mock.executeTool("TaskUpdate", { taskId: "1", status: "in_progress" });
 
     const result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
     expect(result.content[0].text).toContain("#1: not pending");
   });
 
-  it.skip("rejects tasks with unresolved blockers — REMOVED: blocker check moved to feeder's auto-spawn (task-feeder.test.ts cascadeSpawn)", async () => {
-    // GC-2026-113 FU0 Phase 2b: with auto-spawn on TaskCreate, the
-    // blocker check happens during the feeder's maybeAutoSpawn (not in
-    // TaskExecute). The test as-written cannot reproduce the post-113
-    // flow because task 2 auto-spawns before its blocker (task 1) is
-    // added. The new behavior is covered by task-feeder.test.ts's
-    // cascadeSpawn tests; the removed "rejected by TaskExecute"
-    // path is no longer reachable.
+  it("rejects tasks with unresolved blockers", async () => {
     await mock.executeTool("TaskCreate", {
       subject: "Blocker",
       description: "Desc",
@@ -379,17 +375,17 @@ describe("TaskExecute", () => {
   });
 
   it("spawns agent for valid task and updates metadata", async () => {
-    // GC-2026-113 FU0 Phase 2b: the spawn now happens in TaskCreate
-    // (via the unified feeder). The assertion that the RPC responder
-    // was called moves to the TaskCreate test below; here we verify
-    // the in_progress state was set.
     await mock.executeTool("TaskCreate", {
       subject: "Run tests",
       description: "Run the test suite",
       agentType: "general-purpose",
     });
 
-    // Verify the RPC responder was called (auto-spawn during TaskCreate)
+    const result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    expect(result.content[0].text).toContain("Launched 1 agent");
+    expect(result.content[0].text).toContain("#1 → agent agent-1");
+
+    // Verify the RPC responder was called
     expect(rpc.spawned).toHaveLength(1);
     expect(rpc.spawned[0].type).toBe("general-purpose");
     expect(rpc.spawned[0].prompt).toContain("Run the test suite");
@@ -397,34 +393,23 @@ describe("TaskExecute", () => {
   });
 
   it("passes additional_context and max_turns to spawned agents", async () => {
-    // GC-2026-113 FU0 Phase 2b: with auto-spawn on TaskCreate, the
-    // additional_context / max_turns options are not surfaced via
-    // TaskCreate. They live on the feeder's spawn callback (in
-    // extension factory), which currently doesn't read them from
-    // task metadata. The boundary test moved to
-    // test/task-execute-spawn-options.test.ts which exercises the
-    // feeder's spawn directly. This test now asserts that the
-    // additional_context is plumbed via buildTaskPrompt.
     await mock.executeTool("TaskCreate", {
       subject: "Explore codebase",
       description: "Find all API endpoints",
       agentType: "Explore",
     });
 
-    // The auto-spawned agent's prompt should include the description
-    // (buildTaskPrompt prepends additional_context when set, but the
-    // spawn path here doesn't pass it through).
-    expect(rpc.spawned[0].type).toBe("Explore");
-    expect(rpc.spawned[0].prompt).toContain("Find all API endpoints");
+    await mock.executeTool("TaskExecute", {
+      task_ids: ["1"],
+      additional_context: "Focus on REST endpoints only",
+      max_turns: 10,
+    });
+
+    expect(rpc.spawned[0].prompt).toContain("Focus on REST endpoints only");
+    expect(rpc.spawned[0].options.maxTurns).toBe(10);
   });
 
-  it.skip("allows executing tasks whose blockers are all completed — REMOVED: cascade via feeder's subagents:completed listener (test-fixture race)", async () => {
-    // GC-2026-113 FU0 Phase 2b: the test as-written has a fixture
-    // race — both tasks have agentType, so the second TaskCreate
-    // auto-spawns immediately BEFORE the addBlockedBy call. The
-    // intended cascade behavior (blocker completes → dependent
-    // auto-spawns) is already covered by task-feeder.test.ts's
-    // cascadeSpawn test, which uses a real blocker setup.
+  it("allows executing tasks whose blockers are all completed", async () => {
     await mock.executeTool("TaskCreate", {
       subject: "Blocker",
       description: "Desc",
@@ -436,54 +421,34 @@ describe("TaskExecute", () => {
       agentType: "general-purpose",
     });
     await mock.executeTool("TaskUpdate", { taskId: "2", addBlockedBy: ["1"] });
+    await mock.executeTool("TaskUpdate", { taskId: "1", status: "completed" });
 
-    // Initial state: only the blocker auto-spawned (the dependent is
-    // blocked on the blocker).
-    expect(rpc.spawned).toHaveLength(1);
-    expect(rpc.spawned[0].subject).toBe("Blocker");
-
-    // Complete the blocker via the feeder's subagents:completed
-    // listener; this should cascade-spawn the dependent.
-    mock.emitEvent("subagents:completed", { id: "agent-1", result: "done" });
-    await flush();
-
-    expect(rpc.spawned).toHaveLength(2);
-    expect(rpc.spawned[1].subject).toBe("Dependent");
+    const result = await mock.executeTool("TaskExecute", { task_ids: ["2"] });
+    expect(result.content[0].text).toContain("Launched 1 agent");
   });
 
   it("handles mixed valid and invalid tasks in one call", async () => {
-    // GC-2026-113 FU0 Phase 2b: with auto-spawn on TaskCreate, task 1
-    // (with agentType) is already in_progress by the time the test
-    // reaches this point. TaskExecute is now a re-dispatch tool for
-    // pending tasks only.
-    // GC-2026-121: TaskCreate without agentType now auto-spawns
-    // Planner, so both tasks are "not pending" — only the not-found
-    // case for #999 is still hit.
     await mock.executeTool("TaskCreate", {
       subject: "Valid",
       description: "Desc",
       agentType: "general-purpose",
     });
     await mock.executeTool("TaskCreate", {
-      subject: "Implicit Planner",
+      subject: "No agent type",
       description: "Desc",
     });
 
     const result = await mock.executeTool("TaskExecute", { task_ids: ["1", "2", "999"] });
     const text = result.content[0].text;
-    // Both tasks were auto-spawned; only the not-found case remains.
-    expect(text).toContain("#1: not pending");
-    expect(text).toContain("#2: not pending");
+    expect(text).toContain("Launched 1 agent");
+    expect(text).toContain("#2: no agentType set");
     expect(text).toContain("#999: not found");
   });
 });
 
 describe("TaskExecute via ready broadcast", () => {
   it("detects subagents when ready fires after tasks init", async () => {
-    // GC-2026-113 FU0 Phase 2b: with auto-spawn on TaskCreate, the
-    // first TaskCreate is called BEFORE the mock is installed, so it
-    // errors with the spawn timeout. With the mock installed after,
-    // the second TaskCreate auto-spawns successfully.
+    // Init tasks WITHOUT the mock — subagents not available yet
     const mock = mockPi();
     initExtension(mock.pi as any);
 
@@ -496,6 +461,9 @@ describe("TaskExecute via ready broadcast", () => {
       description: "Desc",
       agentType: "general-purpose",
     });
+
+    const result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    expect(result.content[0].text).toContain("Launched 1 agent");
     expect(rpc.spawned).toHaveLength(1);
 
     rpc.unsub();
@@ -601,39 +569,21 @@ describe("Completion listener", () => {
   });
 
   it("ignores events for unknown agent IDs", async () => {
-    // GC-2026-main-agent-proactive-intent-pump: pass agentType=Developer
-    // so the task takes the subagent path (not the IntentPump path) —
-    // this test is about subagents:completed / subagents:failed event
-    // handling, which only matters for the subagent path.
     await mock.executeTool("TaskCreate", {
       subject: "Unrelated",
       description: "Desc",
-      agentType: "Developer",
     });
 
-    // Should not throw or modify anything.
-    // GC-2026-121: TaskCreate auto-spawns Planner, so the task is
-    // in_progress by this point. The unknown-agent events must still
-    // not modify anything — we assert that the status remains
-    // in_progress (Planner's spawn is the only thing that changed it)
-    // and the metadata does not gain a result/lastError field.
+    // Should not throw or modify anything
     mock.emitEvent("subagents:completed", { id: "unknown-agent" });
     mock.emitEvent("subagents:failed", { id: "unknown-agent", error: "boom", status: "error" });
 
     const result = await mock.executeTool("TaskGet", { taskId: "1" });
-    expect(result.content[0].text).toContain("Status: in_progress");
-    expect(result.content[0].text).toContain("Owner: agent-1");
-    expect(result.content[0].text).not.toContain("lastError");
+    expect(result.content[0].text).toContain("Status: pending");
   });
 });
 
-describe("Auto-cascade (GC-2026-113: cfg.autoCascade gate removed)", () => {
-  // GC-2026-113 FU0 Phase 2b: the cfg.autoCascade gate is removed.
-  // Cascade is unconditional via the unified task feeder. The two
-  // behaviors these tests pinned ("off (default) → no cascade" and
-  // "on → cascade") collapse into a single "always cascade". Tests
-  // skip here with a follow-up note; the unconditional cascade is
-  // covered by `task-feeder.test.ts` (cascadeSpawn tests).
+describe("Auto-cascade", () => {
   let mock: ReturnType<typeof mockPi>;
   let rpc: ReturnType<typeof installSubagentsMock>;
 
@@ -647,7 +597,7 @@ describe("Auto-cascade (GC-2026-113: cfg.autoCascade gate removed)", () => {
     rpc.unsub();
   });
 
-  it.skip("does NOT cascade when auto-cascade is off (default) — REMOVED: cascade is now unconditional", async () => {
+  it("does NOT cascade when auto-cascade is off (default)", async () => {
     // Create A → B chain
     await mock.executeTool("TaskCreate", {
       subject: "Task A",
@@ -676,7 +626,7 @@ describe("Auto-cascade (GC-2026-113: cfg.autoCascade gate removed)", () => {
     expect(result.content[0].text).toContain("Status: pending");
   });
 
-  it.skip("does NOT cascade on failure (branch stops) — REPLACED: cascade is unconditional but 'branch stops' is now observed via lastError", async () => {
+  it("does NOT cascade on failure (branch stops)", async () => {
     await mock.executeTool("TaskCreate", {
       subject: "Task A",
       description: "Desc",
@@ -698,7 +648,25 @@ describe("Auto-cascade (GC-2026-113: cfg.autoCascade gate removed)", () => {
     expect(result.content[0].text).toContain("Status: pending");
   });
 
-  it.skip("tasks without agentType are not cascaded — REMOVED: GC-2026-121 makes this state unreachable via TaskCreate (Planner auto-stamps). Cascade rejection of no-agentType tasks is still in place as defense-in-depth.", async () => {});
+  it("tasks without agentType are not cascaded even if unblocked", async () => {
+    await mock.executeTool("TaskCreate", {
+      subject: "Agent task",
+      description: "Desc",
+      agentType: "general-purpose",
+    });
+    await mock.executeTool("TaskCreate", {
+      subject: "Manual task",
+      description: "Desc",
+      // No agentType — manual
+    });
+    await mock.executeTool("TaskUpdate", { taskId: "2", addBlockedBy: ["1"] });
+
+    await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    mock.emitEvent("subagents:completed", { id: "agent-1" });
+
+    // Manual task should stay pending
+    expect(rpc.spawned).toHaveLength(1);
+  });
 });
 
 
@@ -747,11 +715,7 @@ describe("Standalone operation (no subagents extension)", () => {
     expect(result.content[0].text).toContain("in_progress");
   });
 
-  it.skip("TaskExecute gracefully refuses without subagents — REMOVED: the refusal now fires from TaskCreate (auto-spawn), not TaskExecute", async () => {
-    // GC-2026-113 FU0 Phase 2b: with auto-spawn on TaskCreate, the
-    // "subagent extension not loaded" error fires from TaskCreate
-    // (which triggers the spawn), not from TaskExecute. The new
-    // model is covered by task-feeder.test.ts's spawn-failure tests.
+  it("TaskExecute gracefully refuses without subagents", async () => {
     await mock.executeTool("TaskCreate", {
       subject: "Agent task",
       description: "desc",
@@ -830,10 +794,7 @@ describe("RPC protocol correctness", () => {
     rpc.unsub();
   });
 
-  // GC-2026-pi-tasks-test-compat: skipped under bun:test (no
-  // `vi.advanceTimersByTimeAsync` with fake-timer backing; the vi-shim
-  // fallback would burn 31s of real wall time, exceeding the test timeout).
-  it.skip("spawn RPC rejects on timeout when no responder exists", async () => {
+  it("spawn RPC rejects on timeout when no responder exists", async () => {
     const mock = mockPi();
     // Install ping handler (for version check) but no spawn handler
     installVersionedMock(mock.pi, 2);
@@ -856,53 +817,32 @@ describe("RPC protocol correctness", () => {
     vi.useRealTimers();
   });
 
-  it.skip("ready broadcast sets subagentsAvailable even after init — REMOVED: test as-written hangs (feeder awaits spawn RPC 30s); new model surface is in task-feeder.test.ts", async () => {
-    // GC-2026-113 FU0 Phase 2b: with auto-spawn on TaskCreate, the
-    // "subagent not available" error fires from TaskCreate (not
-    // TaskExecute). However, the feeder awaits the spawn RPC, which
-    // has a 30s timeout — so this test would hang for 30s waiting
-    // for a non-existent responder. The new model is covered by
-    // task-feeder.test.ts's spawn-failure tests; this test
-    // fixture needs a different setup (mock the RPC to fail-fast).
+  it("ready broadcast sets subagentsAvailable even after init", async () => {
     const mock = mockPi();
     initExtension(mock.pi as any);
 
-    // Initially no subagents — TaskCreate surfaces the error.
-    let result = await mock.executeTool("TaskCreate", {
+    // Initially no subagents
+    await mock.executeTool("TaskCreate", {
       subject: "Test",
       description: "desc",
       agentType: "general-purpose",
     });
+    let result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
     expect(result.content[0].text).toContain("Subagent execution is currently unavailable");
 
-    // Reset task status (the spawn failure set lastError, but the
-    // task itself stays in pending).
+    // Reset task status
     await mock.executeTool("TaskUpdate", { taskId: "1", status: "pending" });
 
     // Late subagents extension broadcasts ready
     const rpc = installSubagentsMock(mock.pi);
 
-    // Now TaskCreate on a fresh task would auto-spawn. Verify
-    // the late-arriving extension is wired up.
-    result = await mock.executeTool("TaskCreate", {
-      subject: "Test 2",
-      description: "desc",
-      agentType: "general-purpose",
-    });
-    expect(rpc.spawned).toHaveLength(1);
+    result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    expect(result.content[0].text).toContain("Launched 1 agent");
 
     rpc.unsub();
   });
 
   it("spawn RPC rejects with error message from server", async () => {
-    // GC-2026-113 FU0 Phase 2b: the error now surfaces as the
-    // TaskCreate result via `feeder.maybeAutoSpawn` (caught and
-    // reverted to pending + lastError). The TaskExecute call still
-    // runs but errors with "not pending" because the task is back in
-    // pending and the error is recoverable, but the test as-written
-    // expected the "No active session" text in TaskExecute's output.
-    // With the unified feeder, that error text surfaces in the
-    // task's lastError metadata; the test updated to assert that.
     const mock = mockPi();
     installSubagentsMock(mock.pi, { spawnError: "No active session" });
     initExtension(mock.pi as any);
@@ -913,8 +853,8 @@ describe("RPC protocol correctness", () => {
       agentType: "general-purpose",
     });
 
-    const get = await mock.executeTool("TaskGet", { taskId: "1" });
-    expect(get.content[0].text).toContain("No active session");
+    const result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    expect(result.content[0].text).toContain("No active session");
   });
 
   it("stop RPC resolves on success", async () => {
@@ -922,12 +862,13 @@ describe("RPC protocol correctness", () => {
     const rpc = installSubagentsMock(mock.pi);
     initExtension(mock.pi as any);
 
-    // GC-2026-113 FU0 Phase 2b: auto-spawn on TaskCreate.
+    // Spawn a task so we have an agent to stop
     await mock.executeTool("TaskCreate", {
       subject: "Stoppable",
       description: "desc",
       agentType: "general-purpose",
     });
+    await mock.executeTool("TaskExecute", { task_ids: ["1"] });
     expect(rpc.spawned).toHaveLength(1);
 
     const result = await mock.executeTool("TaskStop", { task_id: "1" });
@@ -942,12 +883,13 @@ describe("RPC protocol correctness", () => {
     const rpc = installSubagentsMock(mock.pi);
     initExtension(mock.pi as any);
 
-    // GC-2026-113 FU0 Phase 2b: auto-spawn on TaskCreate.
+    // Create and execute a task, then simulate agent already gone
     await mock.executeTool("TaskCreate", {
       subject: "Ghost",
       description: "desc",
       agentType: "general-purpose",
     });
+    await mock.executeTool("TaskExecute", { task_ids: ["1"] });
 
     // Clear spawned list so the mock's stop handler won't find the agent
     rpc.spawned.length = 0;
@@ -959,7 +901,7 @@ describe("RPC protocol correctness", () => {
     rpc.unsub();
   });
 
-  it.skip("stop RPC returns false on timeout without throwing", async () => {
+  it("stop RPC returns false on timeout without throwing", async () => {
     const mock = mockPi();
     initExtension(mock.pi as any);
 
@@ -1056,8 +998,7 @@ describe("Protocol version mismatch", () => {
     );
   });
 
-  // GC-2026-pi-tasks-test-compat: same fake-timer limitation.
-  it.skip("warning shown only once", async () => {
+  it("warning shown only once", async () => {
     const mock = mockPi();
     installVersionedMock(mock.pi);  // v1 — triggers warning
     initExtension(mock.pi as any);
@@ -1172,7 +1113,7 @@ describe("Cascade data injection (buildTaskPrompt)", () => {
   let rpc: ReturnType<typeof installSubagentsMock>;
 
   beforeEach(async () => {
-    installTasksConfig({});
+    config.current = { autoCascade: true };
 
     mock = mockPi();
     rpc = installSubagentsMock(mock.pi);
@@ -1186,7 +1127,7 @@ describe("Cascade data injection (buildTaskPrompt)", () => {
     rpc.unsub();
   });
 
-  it.skip("injects prerequisite result into cascaded agent prompt", async () => {
+  it("injects prerequisite result into cascaded agent prompt", async () => {
     await mock.executeTool("TaskCreate", {
       subject: "Task A",
       description: "Produce a result",
@@ -1204,7 +1145,7 @@ describe("Cascade data injection (buildTaskPrompt)", () => {
 
     mock.emitEvent("subagents:completed", { id: "agent-1", result: "The answer is 42" });
 
-    await vi.waitFor(() => expect(rpc.spawned).toHaveLength(2), { timeout: 5000 });
+    await vi.waitFor(() => expect(rpc.spawned).toHaveLength(2), { timeout: 1000 });
 
     const bPrompt = rpc.spawned[1].prompt;
     expect(bPrompt).toContain("Prerequisite task results");
@@ -1212,7 +1153,7 @@ describe("Cascade data injection (buildTaskPrompt)", () => {
     expect(bPrompt).toContain("The answer is 42");
   });
 
-  it.skip("truncates long prerequisite results at 4KB", async () => {
+  it("truncates long prerequisite results at 4KB", async () => {
     await mock.executeTool("TaskCreate", {
       subject: "Task A",
       description: "Produce a long result",
@@ -1230,7 +1171,7 @@ describe("Cascade data injection (buildTaskPrompt)", () => {
     const longResult = "x".repeat(5000);
     mock.emitEvent("subagents:completed", { id: "agent-1", result: longResult });
 
-    await vi.waitFor(() => expect(rpc.spawned).toHaveLength(2), { timeout: 5000 });
+    await vi.waitFor(() => expect(rpc.spawned).toHaveLength(2), { timeout: 1000 });
 
     const bPrompt = rpc.spawned[1].prompt;
     expect(bPrompt).toContain("truncated");
@@ -1238,7 +1179,7 @@ describe("Cascade data injection (buildTaskPrompt)", () => {
     expect(bPrompt.length).toBeLessThan(longResult.length);
   });
 
-  it.skip("handles dependencies with no stored result gracefully", async () => {
+  it("handles dependencies with no stored result gracefully", async () => {
     await mock.executeTool("TaskCreate", {
       subject: "Task A",
       description: "No result stored",
@@ -1255,78 +1196,9 @@ describe("Cascade data injection (buildTaskPrompt)", () => {
 
     mock.emitEvent("subagents:completed", { id: "agent-1" });
 
-    await vi.waitFor(() => expect(rpc.spawned).toHaveLength(2), { timeout: 5000 });
+    await vi.waitFor(() => expect(rpc.spawned).toHaveLength(2), { timeout: 1000 });
 
     const bPrompt = rpc.spawned[1].prompt;
     expect(bPrompt).not.toContain("Prerequisite task results");
-  });
-});
-
-// GC-2026-115 FU0 Phase 2a: TaskUpdate awaits `feeder.maybeAutoSpawn`
-// when the user adds an agentType. Without the `await`, a followup
-// TaskOutput (which reads `task.owner` synchronously) would race the
-// spawn RPC and error with "No background process". This test pins
-// the awaited behavior — the spawn completes before the TaskUpdate
-// tool returns, so a subsequent TaskOutput finds the agent ID via
-// the shared agentTaskMap.
-describe("TaskUpdate + TaskOutput race (GC-2026-115)", () => {
-  let mock: ReturnType<typeof mockPi>;
-  let rpc: ReturnType<typeof installSubagentsMock>;
-
-  beforeEach(async () => {
-    installTasksConfig({});
-    mock = mockPi();
-    rpc = installSubagentsMock(mock.pi);
-    initExtension(mock.pi as any);
-    // Set latestCtx via turn_start lifecycle event
-    await mock.fireLifecycle("turn_start", {}, mockCtx());
-  });
-
-  afterEach(() => {
-    rpc.unsub();
-  });
-
-  it("TaskUpdate with new agentType awaits the spawn (no race with followup TaskOutput)", async () => {
-    // 1. Create a task — explicitly set agentType=Developer (NOT
-    // kind=intent) so the task takes the SUBAGENT path. The test is
-    // about the race between TaskUpdate's spawn and a followup
-    // TaskOutput; that race only applies to the subagent path.
-    // GC-2026-main-agent-proactive-intent-pump removed the Planner
-    // auto-stamp (GC-2026-122) and now routes kind=intent through the
-    // IntentPump (this GC), so the "Planner auto-spawn, then clear
-    // agentType" setup no longer reaches the subagent path.
-    await mock.executeTool("TaskCreate", {
-      subject: "Manual task",
-      description: "Add agentType later",
-      agentType: "Developer",
-    });
-    await mock.executeTool("TaskUpdate", {
-      taskId: "1",
-      metadata: { agentType: null },
-    });
-    await mock.executeTool("TaskUpdate", { taskId: "1", status: "pending" });
-    expect(rpc.spawned).toHaveLength(1); // Developer spawned during create
-    rpc.spawned.length = 0; // reset for the actual test
-
-    // 2. Update the task to add agentType. This MUST await the spawn so
-    //    a followup TaskOutput can read task.owner.
-    const updateResult = await mock.executeTool("TaskUpdate", {
-      taskId: "1",
-      metadata: { agentType: "general-purpose" },
-    });
-    expect(updateResult.content[0].text).toContain("Updated task #1");
-    expect(rpc.spawned).toHaveLength(1);
-
-    // 3. TaskOutput immediately after TaskUpdate should see the spawned
-    //    agent. Before GC-2026-115, the `void` made this race-prone and
-    //    sometimes errored with "No background process for task 1" when
-    //    the spawn hadn't completed yet.
-    const out = await mock.executeTool("TaskOutput", {
-      task_id: "1",
-      block: false,
-      timeout: 5000,
-    });
-    expect(out.content[0].text).toContain("Task #1 [in_progress]");
-    expect(out.content[0].text).toContain("subagent agent-2");
   });
 });

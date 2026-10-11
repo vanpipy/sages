@@ -247,13 +247,13 @@ describe("executeGoalContractCreate (GC-2026-orchestrator-simplify)", () => {
 		expect(text.goal_contract).toBeUndefined();
 	});
 
-	it("T-20: next_step directs the LLM to raw TaskCreate × N + TaskExecute (or decompose_task), NOT workflow_run (GC-2026-remove-workflow-run-prod)", async () => {
+	it("T-20: next_step directs the LLM to raw TaskCreate × N + TaskExecute, NOT workflow_run or decompose_task (GC-2026-remove-workflow-run-prod + GC-2026-decompose-task-removed)", async () => {
 		const result = await executeGoalContractCreate(BASE_INPUT as any, { cwd });
 		const text = JSON.parse(result.content[0]!.text);
 		expect(text.next_step).toContain("TaskCreate");
-		expect(text.next_step).toContain("decompose_task");
 		expect(text.next_step).not.toContain("workflow_run");
 		expect(text.next_step).not.toContain("dag_synthesize");
+		expect(text.next_step).not.toContain("decompose_task");
 		// Post-GC-2026-remove-workflow-run-prod: next_step may mention
 		// TaskExecute as part of the canonical 4-phase shape
 		// (`TaskCreate × N + TaskExecute`); the old assertion that

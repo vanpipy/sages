@@ -11,10 +11,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import initExtension from "../src/index.js";
 import { TaskStore } from "../src/task-store.js";
 import { mockPi } from "./helpers/mock-pi.js";
-import { installTasksConfig, uninstallTasksConfig } from "./helpers/tasks-config-fixture.js";
 
-// GC-2026-116: real-file config fixture replaces the leaking
-// `vi.mock("../src/tasks-config.js", ...)`.
+const config = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+vi.mock("../src/tasks-config.js", () => ({
+  loadGlobalTasksConfig: () => ({ ...config.current }),
+  loadTasksConfig: () => ({ ...config.current }),
+  saveTasksConfig: () => {},
+}));
 
 /** A script entry is either the literal answer or an index into the offered choices. */
 type Answer = string | number | undefined;
@@ -56,12 +59,11 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pi-tasks-cmd-"));
   taskFile = join(dir, "tasks.json");
   process.env.PI_TASKS = taskFile;
-  installTasksConfig({});
+  config.current = {};
 });
 
 afterEach(() => {
   delete process.env.PI_TASKS;
-  uninstallTasksConfig();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -76,17 +78,7 @@ async function runTasks(script: Answer[], seed: (mock: ReturnType<typeof mockPi>
 }
 
 const create = (subject: string) => async (mock: ReturnType<typeof mockPi>) => {
-  // GC-2026-main-agent-proactive-intent-pump: pass explicit agentType
-  // so the task goes through the subagent path (which is unavailable in
-  // this test, leaving the task in pending with lastError) — that's the
-  // state the /tasks UI glyphs in this file are testing. Without the
-  // agentType, the IntentPump would take the task straight to
-  // in_progress and the pending-glyph assertions would all flip.
-  await mock.executeTool("TaskCreate", {
-    subject,
-    description: "d",
-    agentType: "Developer",
-  });
+  await mock.executeTool("TaskCreate", { subject, description: "d" });
 };
 
 describe("/tasks main menu", () => {
@@ -150,7 +142,7 @@ describe("/tasks task detail", () => {
 
   it("acts on the picked row even when the status glyph contains an ID", async () => {
     // Nothing stops a hand-written glyph from looking like a task marker.
-    installTasksConfig({ glyphs: { pending: "#12" } });
+    config.current = { glyphs: { pending: "#12" } };
 
     const { mock } = await runTasks([0, 0, "✗ Delete"], create("Work"));
 
@@ -163,7 +155,7 @@ describe("/tasks task detail", () => {
   });
 
   it("lists tasks with the configured status glyphs", async () => {
-    installTasksConfig({ glyphs: { pending: "[ ]" } });
+    config.current = { glyphs: { pending: "[ ]" } };
 
     const { selects } = await runTasks([0, undefined], create("Work"));
 

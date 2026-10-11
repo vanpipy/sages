@@ -278,7 +278,7 @@ export async function executeGoalContractCreate(
 		},
 		summary: summaryForGoal(contract),
 		goal_contract_path: path,
-		next_step: `TaskCreate × N (one per phase) + TaskExecute (canonical 4-phase shape), or decompose_task({ user_task_id, specs }) for linear user-intent chains.`,
+		next_step: `TaskCreate × N (one per phase) + TaskExecute (canonical 4-phase shape).`,
 	};
 	if (params.verbose === true) {
 		response.goal_contract = contract;
