@@ -1201,7 +1201,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ---- Disable default agents configuration ----
-  // When enabled, the three hardcoded default agents (general-purpose, Explore,
+  // When enabled, the two hardcoded default agents (Developer,
   // Plan) are not registered. User-defined agents from project/global custom
   // agent dirs are completely unaffected — only DEFAULT_AGENTS are suppressed.
   // Defaults to false; opt-in via `/agents → Settings` or subagents.json.
@@ -3326,7 +3326,7 @@ Guidelines for choosing settings:
 
 Write the file using the write tool. Only write the file, nothing else.`;
 
-    const { record } = await manager.spawnAndWait(pi, ctx, "general-purpose", generatePrompt, {
+    const { record } = await manager.spawnAndWait(pi, ctx, "Developer", generatePrompt, {
       description: `Generate ${name} agent`,
       maxTurns: 5,
       // Exempt from maxConcurrentForeground. This runs from a modal wizard, not
@@ -3466,7 +3466,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
       // `fallbackSubagent` below.
       workflowsEnabled: isWorkflowsPinned() ? isWorkflowsEnabled() : undefined,
       maxSubagentDepth: getMaxSubagentDepth(),
-      // Deliberately NOT `?? "general-purpose"`: every settings change writes the
+      // Deliberately NOT `?? "Developer"`: every settings change writes the
       // whole snapshot, and materializing the implicit default would turn it into
       // explicit configuration — which then fails loudly if general-purpose later
       // goes away. undefined is dropped by JSON.stringify.
@@ -3505,7 +3505,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
       // there would advertise strict dispatch for the most permissive state.
       // `values` still offers only resolvable targets, so the user cannot
       // persist a fallback that would hard-error on every dispatch.
-      const fallbackValue = getFallbackSubagent() ?? "general-purpose";
+      const fallbackValue = getFallbackSubagent() ?? "Developer";
       const fallbackValues = [...new Set([...getAvailableTypes(), NO_FALLBACK])];
 
       return [
@@ -3591,7 +3591,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
         {
           id: "disableDefaultAgents",
           label: "Disable defaults",
-          description: "Hide built-in agents (general-purpose, Explore, Plan) — custom agents are unaffected",
+          description: "Hide built-in agents (Developer, Reviewer) — custom agents are unaffected",
           currentValue: isDefaultsDisabled() ? "on" : "off",
           values: ["on", "off"],
         },
@@ -3785,7 +3785,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
           ctx,
           value === NO_FALLBACK
             ? "Unknown or disabled agent types will now be rejected"
-            : `Unknown agent types will fall back to ${value}`,
+            : `Unknown agent types will fall back to Developer`,
         );
       } else if (id === "outputTranscript") {
         const enabled = value === "on";

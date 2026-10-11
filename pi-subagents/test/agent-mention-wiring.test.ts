@@ -105,7 +105,7 @@ function bootDirect(settings: Record<string, unknown> = {}) {
   return boot({ agentMentions: "direct", ...settings });
 }
 
-async function spawnBackground(tools: Map<string, any>, subagent_type = "Explore"): Promise<string> {
+async function spawnBackground(tools: Map<string, any>, subagent_type = "Developer"): Promise<string> {
   const r = await tools.get("Agent").execute(
     "tc-spawn",
     { prompt: "go", description: "find flaky tests", subagent_type, run_in_background: true },
@@ -395,7 +395,7 @@ describe("resolving which agent a handle means", () => {
     expect(await send(lifecycle, "@explore reach into a child")).toEqual({ action: "handled" });
     expect(child.steer).not.toHaveBeenCalled();
     expect(runAgent).toHaveBeenCalledWith(
-      expect.anything(), "Explore", "reach into a child", expect.anything(),
+      expect.anything(), "Developer", "reach into a child", expect.anything(),
     );
   });
 
@@ -418,7 +418,7 @@ describe("resolving which agent a handle means", () => {
     await send(lifecycle, "@explore start over");
 
     expect(resumeAgent).not.toHaveBeenCalled();
-    expect(runAgent).toHaveBeenCalledWith(expect.anything(), "Explore", "start over", expect.anything());
+    expect(runAgent).toHaveBeenCalledWith(expect.anything(), "Developer", "start over", expect.anything());
 
   });
 });
@@ -437,7 +437,7 @@ describe("mentioning an agent that has never run", () => {
     expect(result).toEqual({ action: "handled" });
     expect(runAgent).toHaveBeenCalledWith(
       expect.anything(),
-      "Explore",
+      "Developer",
       "find every retry marker",
       expect.anything(),
     );
@@ -588,7 +588,7 @@ describe("letting a clone of the conversation start the agent", () => {
 
     expect(runMentionClone).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "Plan",
+        type: "Developer",
         message: "sketch the migration",
         agentTool: tools.get("Agent"),
       }),
@@ -951,7 +951,7 @@ describe("@agent-<type> — Claude Code's manual spelling", () => {
 
     expect(result).toEqual({ action: "handled" });
     expect(vi.mocked(runAgent)).toHaveBeenCalledWith(
-      expect.anything(), "Explore", "find the flaky test", expect.anything(),
+      expect.anything(), "Developer", "find the flaky test", expect.anything(),
     );
   });
 
@@ -980,7 +980,7 @@ describe("@agent-<type> — Claude Code's manual spelling", () => {
     await spawnBackground(tools); // plain Explore → @explore
     await tools.get("Agent").execute(
       "tc-named",
-      { prompt: "go", description: "named", subagent_type: "Plan", name: "agent-explore", run_in_background: true },
+      { prompt: "go", description: "named", subagent_type: "Developer", name: "agent-explore", run_in_background: true },
       undefined, undefined, ctx(),
     );
     await flush();
@@ -1043,7 +1043,7 @@ describe("resuming an evicted agent by name", () => {
     expect(result).toEqual({ action: "handled" });
     expect(vi.mocked(runAgent)).toHaveBeenCalledWith(
       expect.anything(),
-      "Explore",
+      "Developer",
       "anything else?",
       expect.objectContaining({ resumeSessionFile: sessionPath() }),
     );
@@ -1098,7 +1098,7 @@ describe("resuming an evicted agent by name", () => {
     finishedRun(fakeSession());
     const spawned = await tools.get("Agent").execute(
       "tc-named",
-      { prompt: "audit", description: "audit the auth flow", subagent_type: "Explore", name: "auth-audit", run_in_background: true },
+      { prompt: "audit", description: "audit the auth flow", subagent_type: "Developer", name: "auth-audit", run_in_background: true },
       undefined, undefined, ctx(),
     );
     await flush();
@@ -1112,7 +1112,7 @@ describe("resuming an evicted agent by name", () => {
 
     const manager = (globalThis as any)[Symbol.for("pi-subagents:manager")];
     const resumedId = (vi.mocked(runAgent).mock.calls[0][3] as any).agentId;
-    expect(manager.getRecord(resumedId)).toMatchObject({ handle: "explore", alias: "auth-audit" });
+    expect(manager.getRecord(resumedId)).toMatchObject({ handle: "developer", alias: "auth-audit" });
   });
 
   it("refuses to reopen a conversation under a substitute agent", async () => {
@@ -1213,7 +1213,7 @@ describe("resuming an evicted agent by name", () => {
     await flush();
 
     expect(vi.mocked(runAgent)).toHaveBeenLastCalledWith(
-      expect.anything(), "Explore", "try again",
+      expect.anything(), "Developer", "try again",
       expect.objectContaining({ resumeSessionFile: sessionPath() }),
     );
   });
@@ -1301,7 +1301,7 @@ describe("resuming an evicted agent by name", () => {
     await flush();
 
     expect(vi.mocked(runAgent)).toHaveBeenCalledWith(
-      expect.anything(), "Explore", "start over",
+      expect.anything(), "Developer", "start over",
       expect.not.objectContaining({ resumeSessionFile: expect.anything() }),
     );
     expect(uiCtx.ui.notify).toHaveBeenCalledWith("Started @explore", "info");
@@ -1333,7 +1333,7 @@ describe("handles as tool arguments", () => {
     heldRun(session);
     await tools.get("Agent").execute(
       "tc-named",
-      { prompt: "go", description: "audit", subagent_type: "Explore", name: "auth-audit", run_in_background: true },
+      { prompt: "go", description: "audit", subagent_type: "Developer", name: "auth-audit", run_in_background: true },
       undefined, undefined, ctx(),
     );
     await flush();

@@ -60,7 +60,7 @@ describe("journalKey", () => {
     const keys = new Set([
       journalKey(base),
       journalKey({ ...base, model: "haiku" }),
-      journalKey({ ...base, agentType: "Explore" }),
+      journalKey({ ...base, agentType: "Developer" }),
       journalKey({ ...base, effort: "high" }),
       journalKey({ ...base, isolation: "worktree" }),
       journalKey({ ...base, gate: "npm test" }),

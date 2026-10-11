@@ -127,7 +127,7 @@ describe("SubagentScheduler — lifecycle", () => {
       name: "j1",
       description: "test",
       schedule: "1h",
-      subagent_type: "general-purpose",
+      subagent_type: "Developer",
       prompt: "hi",
     });
     expect(job.scheduleType).toBe("interval");
@@ -136,21 +136,21 @@ describe("SubagentScheduler — lifecycle", () => {
   });
 
   it("addJob rejects duplicate names", () => {
-    scheduler.addJob({ name: "j1", description: "x", schedule: "1h", subagent_type: "general-purpose", prompt: "p" });
+    scheduler.addJob({ name: "j1", description: "x", schedule: "1h", subagent_type: "Developer", prompt: "p" });
     expect(() => scheduler.addJob({
-      name: "j1", description: "y", schedule: "2h", subagent_type: "general-purpose", prompt: "p2",
+      name: "j1", description: "y", schedule: "2h", subagent_type: "Developer", prompt: "p2",
     })).toThrow(/already exists/);
   });
 
   it("removeJob clears the job and emits removed", () => {
-    const job = scheduler.addJob({ name: "j1", description: "x", schedule: "1h", subagent_type: "general-purpose", prompt: "p" });
+    const job = scheduler.addJob({ name: "j1", description: "x", schedule: "1h", subagent_type: "Developer", prompt: "p" });
     expect(scheduler.removeJob(job.id)).toBe(true);
     expect(scheduler.list()).toEqual([]);
     expect(pi.events.emit).toHaveBeenCalledWith("subagents:scheduled", expect.objectContaining({ type: "removed", jobId: job.id }));
   });
 
   it("updateJob({enabled: false}) unschedules but keeps the record", () => {
-    const job = scheduler.addJob({ name: "j1", description: "x", schedule: "1h", subagent_type: "general-purpose", prompt: "p" });
+    const job = scheduler.addJob({ name: "j1", description: "x", schedule: "1h", subagent_type: "Developer", prompt: "p" });
     scheduler.updateJob(job.id, { enabled: false });
     expect(scheduler.list()[0].enabled).toBe(false);
     expect(scheduler.getNextRun(job.id)).toBeUndefined();
@@ -163,7 +163,7 @@ describe("SubagentScheduler — lifecycle", () => {
     const before = Date.now();
     const job = scheduler.addJob({
       name: "fresh-interval", description: "x", schedule: "1h",
-      subagent_type: "general-purpose", prompt: "p",
+      subagent_type: "Developer", prompt: "p",
     });
     const next = scheduler.getNextRun(job.id);
     expect(next).toBeDefined();
@@ -177,7 +177,7 @@ describe("SubagentScheduler — lifecycle", () => {
   it("getNextRun uses lastRun when present for interval jobs", () => {
     const job = scheduler.addJob({
       name: "ran-once", description: "x", schedule: "1h",
-      subagent_type: "general-purpose", prompt: "p",
+      subagent_type: "Developer", prompt: "p",
     });
     const lastRun = new Date(Date.now() - 30 * 60_000).toISOString(); // 30m ago
     scheduler.updateJob(job.id, { lastRun });
@@ -188,7 +188,7 @@ describe("SubagentScheduler — lifecycle", () => {
   it("rejects past one-shot timestamps upfront — no record created", () => {
     const past = new Date(Date.now() - 60_000).toISOString();
     expect(() => scheduler.addJob({
-      name: "past", description: "x", schedule: past, subagent_type: "general-purpose", prompt: "p",
+      name: "past", description: "x", schedule: past, subagent_type: "Developer", prompt: "p",
     })).toThrow(/in the past/);
     // No dead-on-arrival record left behind
     expect(scheduler.list()).toEqual([]);
@@ -208,7 +208,7 @@ describe("SubagentScheduler — lifecycle", () => {
       description: "reload",
       schedule: past,
       scheduleType: "once",
-      subagent_type: "general-purpose",
+      subagent_type: "Developer",
       prompt: "x",
       enabled: true,
       createdAt: past,
@@ -260,7 +260,7 @@ describe("SubagentScheduler — fire path", () => {
   it("interval jobs fire repeatedly via setInterval", () => {
     scheduler.addJob({
       name: "every-10s", description: "tick", schedule: "10s",
-      subagent_type: "general-purpose", prompt: "tick",
+      subagent_type: "Developer", prompt: "tick",
     });
 
     expect(manager.spawn).toHaveBeenCalledTimes(0);
@@ -299,7 +299,7 @@ describe("SubagentScheduler — fire path", () => {
   it("one-shot fires once and auto-disables", async () => {
     const job = scheduler.addJob({
       name: "soon", description: "once", schedule: "+1s",
-      subagent_type: "general-purpose", prompt: "once",
+      subagent_type: "Developer", prompt: "once",
     });
 
     vi.advanceTimersByTime(2_000);
@@ -316,7 +316,7 @@ describe("SubagentScheduler — fire path", () => {
   it("fire passes bypassQueue: true to manager.spawn", () => {
     scheduler.addJob({
       name: "every-1s", description: "x", schedule: "1s",
-      subagent_type: "general-purpose", prompt: "x",
+      subagent_type: "Developer", prompt: "x",
     });
 
     vi.advanceTimersByTime(1_000);
@@ -333,7 +333,7 @@ describe("SubagentScheduler — fire path", () => {
     // once the session reports it.
     scheduler.addJob({
       name: "every-1s", description: "x", schedule: "1s",
-      subagent_type: "general-purpose", prompt: "x",
+      subagent_type: "Developer", prompt: "x",
       thinking: "high", max_turns: 12, isolated: true,
     });
 
@@ -352,7 +352,7 @@ describe("SubagentScheduler — fire path", () => {
     // 0 means unlimited; "max turns: 0" would read as a limit of none.
     scheduler.addJob({
       name: "unlimited", description: "x", schedule: "1s",
-      subagent_type: "general-purpose", prompt: "x", max_turns: 0,
+      subagent_type: "Developer", prompt: "x", max_turns: 0,
     });
 
     vi.advanceTimersByTime(1_000);
@@ -362,7 +362,7 @@ describe("SubagentScheduler — fire path", () => {
   it("disabled jobs do not fire", () => {
     const job = scheduler.addJob({
       name: "off", description: "x", schedule: "1s",
-      subagent_type: "general-purpose", prompt: "x",
+      subagent_type: "Developer", prompt: "x",
     });
     scheduler.updateJob(job.id, { enabled: false });
     vi.advanceTimersByTime(5_000);
@@ -372,7 +372,7 @@ describe("SubagentScheduler — fire path", () => {
   it("emits fired event with agentId on successful spawn", () => {
     scheduler.addJob({
       name: "fire-once", description: "x", schedule: "+1s",
-      subagent_type: "general-purpose", prompt: "x",
+      subagent_type: "Developer", prompt: "x",
     });
     vi.advanceTimersByTime(2_000);
     expect(pi.events.emit).toHaveBeenCalledWith("subagents:scheduled", expect.objectContaining({
@@ -384,7 +384,7 @@ describe("SubagentScheduler — fire path", () => {
     manager.spawn.mockImplementationOnce(() => { throw new Error("no slots"); });
     const job = scheduler.addJob({
       name: "boom", description: "x", schedule: "+1s",
-      subagent_type: "general-purpose", prompt: "x",
+      subagent_type: "Developer", prompt: "x",
     });
     vi.advanceTimersByTime(2_000);
 
@@ -402,7 +402,7 @@ describe("SubagentScheduler — fire path", () => {
     manager.awaitStartup.mockRejectedValueOnce(new Error('Cannot run with isolation: "worktree"'));
     const job = scheduler.addJob({
       name: "no-worktree", description: "x", schedule: "+1s",
-      subagent_type: "general-purpose", prompt: "x", isolation: "worktree",
+      subagent_type: "Developer", prompt: "x", isolation: "worktree",
     });
     vi.advanceTimersByTime(2_000);
     await vi.advanceTimersByTimeAsync(0);
@@ -434,7 +434,7 @@ describe("SubagentScheduler — fire path", () => {
       const records = installFaithfulMock();
       const job = scheduler.addJob({
         name: "fail-job", description: "x", schedule: "+1s",
-        subagent_type: "general-purpose", prompt: "x",
+        subagent_type: "Developer", prompt: "x",
       });
 
       vi.advanceTimersByTime(2_000);
@@ -455,7 +455,7 @@ describe("SubagentScheduler — fire path", () => {
       const records = installFaithfulMock();
       const job = scheduler.addJob({
         name: "ok-job", description: "x", schedule: "+1s",
-        subagent_type: "general-purpose", prompt: "x",
+        subagent_type: "Developer", prompt: "x",
       });
 
       vi.advanceTimersByTime(2_000);
@@ -472,11 +472,11 @@ describe("SubagentScheduler — fire path", () => {
       const records = installFaithfulMock();
       const a = scheduler.addJob({
         name: "abort-job", description: "x", schedule: "+1s",
-        subagent_type: "general-purpose", prompt: "x",
+        subagent_type: "Developer", prompt: "x",
       });
       const b = scheduler.addJob({
         name: "stop-job", description: "x", schedule: "+2s",
-        subagent_type: "general-purpose", prompt: "x",
+        subagent_type: "Developer", prompt: "x",
       });
 
       vi.advanceTimersByTime(3_000);
@@ -498,7 +498,7 @@ describe("SubagentScheduler — stopped state", () => {
   it("throws on mutation when not started", () => {
     const scheduler = new SubagentScheduler();
     expect(() => scheduler.addJob({
-      name: "x", description: "x", schedule: "1h", subagent_type: "general-purpose", prompt: "p",
+      name: "x", description: "x", schedule: "1h", subagent_type: "Developer", prompt: "p",
     })).toThrow(/not started/);
   });
 

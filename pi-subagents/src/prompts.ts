@@ -99,7 +99,7 @@ Return only the answer, in exactly the shape the prompt asks for — no preamble
   const extrasSuffix = extraSections.length > 0 ? "\n\n" + extraSections.join("\n") : "";
 
   if (config.promptMode === "append") {
-    const identity = parentSystemPrompt || genericBase;
+    const identity = parentSystemPrompt;
 
     const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.
@@ -135,8 +135,4 @@ ${envBlock}`;
   return activeAgentTag + replaceHeader + worktreeBlock + workflowBlock + "\n\n" + config.systemPrompt + extrasSuffix;
 }
 
-/** Fallback base prompt when parent system prompt is unavailable in append mode. */
-const genericBase = `# Role
-You are a general-purpose coding agent for complex, multi-step tasks.
-You have full access to read, write, edit files, and execute commands.
-Do what has been asked; nothing more, nothing less.`;
+

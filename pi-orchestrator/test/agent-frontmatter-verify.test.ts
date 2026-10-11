@@ -83,96 +83,22 @@ it("templates/agents/ is EMPTY (no user-level subagent templates are shipped)", 
 });
 
 describe("default-agents.ts: shipped built-in frontmatter (no third-party deps)", () => {
-  // We grep the source file rather than importing it: pi-subagents
-  // transitively depends on pi-coding-agent's heavy runtime (sessions,
-  // UI, scheduler), and we only need a syntactic check here. The
-  // exhaustive runtime contract is covered by
-  // `pi-subagents/test/default-agents.test.ts`.
-  const source = readFileSync(DEFAULT_AGENTS_FILE, "utf-8");
-
-  // For every default agent, the AgentConfig literal must carry the
-  // fields pi-subagents requires to surface a working Agent tool entry.
-  // We extract the block by anchoring on `name: "X",` and walking to
-  // the enclosing `{ ... }` brace pair (matched by tracking brace
-  // depth) — more robust than a regex against `},` / `};` boundaries.
-  //
-  // Some agents are declared as top-level `const X: AgentConfig = { ... }`
-  // literals (developer, auditor): the opening `{` precedes the
-  // `name: "X",` field, so we walk back from the name to find it.
-  // Others are declared inline inside a `Map` array
-  // (`["X", { name: "X", ... }]`) — same shape, walk-back still works.
-  function extractAgentBlock(name: string): string | null {
-    const escaped = name.replace(/-/g, "\\-");
-    const re = new RegExp(`name:\\s*"${escaped}",`);
-    const m = source.match(re);
-    if (!m || m.index === undefined) return null;
-    // Walk back to the nearest preceding `{` (the block's opening
-    // brace may sit before the `name:` field, e.g. for top-level
-    // const-declared AgentConfig literals).
-    let openIdx = m.index;
-    while (openIdx > 0 && source[openIdx] !== "{") openIdx--;
-    if (source[openIdx] !== "{") return null;
-    let i = openIdx;
-    let depth = 0;
-    let started = false;
-    for (; i < source.length; i++) {
-      const ch = source[i];
-      if (ch === "{") {
-        depth++;
-        started = true;
-      } else if (ch === "}") {
-        depth--;
-        if (started && depth === 0) {
-          return source.slice(openIdx, i + 1);
-        }
-      }
-    }
-    return null;
-  }
-
-  for (const name of [
-    "Explore",
-  ] as const) {
-    it(`${name} config block exists with the required keys`, () => {
-      const block = extractAgentBlock(name);
-      if (!block) throw new Error(`${name} config block must exist`);
-      // Required fields per AgentConfig interface:
-      if (!/description:/.test(block)) {
-        throw new Error(`${name} must declare description`);
-      }
-      if (!/systemPrompt:/.test(block)) {
-        throw new Error(`${name} must declare systemPrompt`);
-      }
-      if (!/promptMode:\s*"replace"/.test(block)) {
-        throw new Error(`${name} must declare promptMode: "replace"`);
-      }
-      if (!/extensions:/.test(block)) {
-        throw new Error(`${name} must declare extensions`);
-      }
-      // All checks passed — the it() block returns.
-      expect(true).toBe(true);
-    });
-
-    it(`${name} built-in frontmatter honors the model-pinning policy`, () => {
-      // A built-in that pins `model: "anthropic/claude-sonnet-..."`
-      // (or any non-haiku model) on a role that should inherit the
-      // parent would override the orchestrator's chosen model and
-      // blow up the per-subagent cost budget. The intentional
-      // exceptions are Explore (cheap haiku-4-5 for read-only search)
-      // and Plan (cheap haiku-4-5 + `thinking: "minimal"` so the main
-      // agent's reasoning model never bleeds into the plan compiler,
-      // per DAG-2026-017-plan-compiler). Every other built-in must
-      // inherit. If a new agent is added that needs to pin, add it
-      // to PINNED_MODEL_EXCEPTIONS with a justifying comment.
-      if (PINNED_MODEL_EXCEPTIONS.has(name)) return;
-      const block = extractAgentBlock(name);
-      if (!block) throw new Error(`${name} config block must exist`);
-      if (/^\s*model:\s*"/m.test(block)) {
-        throw new Error(
-          `${name} must not pin 'model:' (built-ins inherit parent model)`,
-        );
-      }
-      expect(true).toBe(true);
-    });
-  }
+	// Post chore/only-developer-and-reviewer the shipped default agents are
+	// Developer + Reviewer. Their configs are minimal (no `model:` pin, no
+	// special promptMode, no per-agent READ_ONLY_TOOLS gate). The original
+	// frontmatter-verification loop targeted Explore + PlanCompiler's
+	// model-pinning + read-only restrictions — none of those concerns
+	// apply to the new minimal defaults, so the parameterized loop was
+	// removed. The substantive assertion lives below.
+	it("lists exactly Developer + Reviewer (no third-party deps)", () => {
+		const source = readFileSync(DEFAULT_AGENTS_FILE, "utf-8");
+		expect(source).toMatch(/^export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map\(\[$/m);
+		expect(source).toMatch(/^\s*"Developer",$/m);
+		expect(source).toMatch(/^\s*"Reviewer",$/m);
+		expect(source).not.toMatch(/^\s*"Explore",$/m);
+		expect(source).not.toMatch(/^\s*"Plan",$/m);
+		expect(source).not.toMatch(/^\s*"PlanCompiler",$/m);
+		expect(source).not.toMatch(/^\s*"general-purpose",$/m);
+	});
 });
+

@@ -38,7 +38,7 @@ import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helper
 function record(overrides: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id: "agent-1",
-    type: "general-purpose",
+    type: "Developer",
     description: "a child",
     status: "completed",
     result: "the answer",
@@ -78,7 +78,7 @@ const request = (overrides: Partial<WorkflowSpawnRequest> = {}): WorkflowSpawnRe
   index: 0,
   prompt: "do the thing",
   label: "step",
-  agentType: "general-purpose",
+  agentType: "Developer",
   ...overrides,
 });
 
@@ -115,7 +115,7 @@ describe("createWorkflowHost — spawn mapping", () => {
     // budget is. Billing a fan-out's re-sent input would swamp it.
     expect(result.outputTokens).toBe(20);
     const [, , type, prompt, options] = stub.spawnAndWait.mock.calls[0];
-    expect(type).toBe("general-purpose");
+    expect(type).toBe("Developer");
     expect(prompt).toBe("do the thing");
     // The label is the child's display description, so the fleet list and the
     // workflow tree name the same agent the same way.
@@ -149,7 +149,7 @@ describe("createWorkflowHost — spawn mapping", () => {
 
     const fellBack = await host.spawnAgent(request({ agentType: "no-such-agent" }));
     expect(fellBack.ok).toBe(true);
-    expect(stub.spawnAndWait.mock.calls[0][2]).toBe("general-purpose");
+    expect(stub.spawnAndWait.mock.calls[0][2]).toBe("Developer");
 
     // …and fails closed here too when the project configured strict dispatch.
     setFallbackSubagent(NO_FALLBACK);
@@ -354,7 +354,7 @@ describe("createWorkflowHost — scopeModels", () => {
     );
     notify = vi.fn();
     // "pinned" stands in for a user-authored agent file with `model:` in its
-    // frontmatter; the defaults come along, so "general-purpose" still resolves.
+    // frontmatter; the defaults come along, so "Developer" still resolves.
     registerAgents(new Map([["pinned", {
       name: "pinned",
       displayName: "Pinned",
@@ -1185,7 +1185,7 @@ describe("--subagents-workflow-file", () => {
           agentCount: 1,
           totalTokens: 0,
           progress: [
-            { type: "workflow_agent", index: 0, label: "step", state: "done", agentType: "Explore" },
+            { type: "workflow_agent", index: 0, label: "step", state: "done", agentType: "Developer" },
           ],
         },
       },

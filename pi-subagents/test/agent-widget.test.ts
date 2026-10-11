@@ -72,7 +72,7 @@ describe("AgentWidget", () => {
   ) {
     return {
       id,
-      type: "general-purpose",
+      type: "Developer",
       description: `${id} description`,
       status: "running",
       toolUses: 0,
@@ -275,7 +275,7 @@ describe("AgentWidget cost display", () => {
   function render(showCost: boolean, cost: number): string {
     const agent = {
       id: "a1",
-      type: "general-purpose",
+      type: "Developer",
       description: "spending agent",
       status: "running",
       toolUses: 1,
@@ -328,7 +328,7 @@ describe("AgentWidget cost display", () => {
     // line reading from it would drop the number precisely when the question
     // "what did that cost" gets asked.
     const finished = {
-      id: "a1", type: "general-purpose", description: "done agent", status: "completed",
+      id: "a1", type: "Developer", description: "done agent", status: "completed",
       toolUses: 2, startedAt: Date.now() - 1000, completedAt: Date.now(),
       lifetimeUsage: { input: 1000, output: 200, cacheWrite: 0, cost: 0.0042 },
       compactionCount: 0,
@@ -349,7 +349,7 @@ describe("AgentWidget cost display", () => {
     // A scheduled agent has no activity entry — it spawns through the manager
     // directly — and used to render with no tokens and no cost at all.
     const running = {
-      id: "sched", type: "general-purpose", description: "scheduled agent", status: "running",
+      id: "sched", type: "Developer", description: "scheduled agent", status: "running",
       toolUses: 1, startedAt: Date.now(),
       lifetimeUsage: { input: 1000, output: 200, cacheWrite: 0, cost: 0.0042 },
       compactionCount: 0,
@@ -368,7 +368,7 @@ describe("AgentWidget cost display", () => {
 
   it("defaults to hiding it", () => {
     const agent = {
-      id: "a1", type: "general-purpose", description: "d", status: "running",
+      id: "a1", type: "Developer", description: "d", status: "running",
       toolUses: 0, startedAt: Date.now(),
       lifetimeUsage: { input: 1000, output: 200, cacheWrite: 0, cost: 0.5 }, compactionCount: 0,
     };
@@ -390,7 +390,7 @@ describe("AgentWidget overflow accounting", () => {
   function record(id: string, status: string) {
     return {
       id,
-      type: "general-purpose",
+      type: "Developer",
       description: `${id} description`,
       status,
       toolUses: 0,

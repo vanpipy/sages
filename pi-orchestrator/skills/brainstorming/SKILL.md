@@ -201,7 +201,7 @@ Fix any issues inline. No need to re-review — just fix and move on.
 
 ## Trigger Modes
 
-**Mode A — standalone (no orchestrator active)**: brainstorming is the **recommended first step** for any new feature/change. After approval, the user drives the implementation directly: raw `TaskCreate` × N + `TaskExecute` with `agentType` set to `"Developer"` / `"Reviewer"` / `"Fix"` / `"MergerAdvisor"`.
+**Mode A — standalone (no orchestrator active)**: brainstorming is the **recommended first step** for any new feature/change. After approval, the user drives the implementation directly: raw `TaskCreate` × N + `TaskExecute` with `agentType` set to `"Developer"` / `"Reviewer"` / `"Reviewer"` / `"Reviewer"`.
 
 **Mode B — auto-transition (when the orchestrator advisory is active)**: when design is approved, the LLM self-hands-off via raw `TaskCreate` × N (one task per phase, with `agentType` and the standard `blockedBy`/`blocks` edge set). The orchestrator's advisory pipeline emits nudges via `pi.appendEntry("system", ...)`; the orchestrator owns no goal-contracting or pipeline-runner tools anymore.
 

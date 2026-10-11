@@ -46,9 +46,9 @@ describe("agent type registry", () => {
 
   describe("default agents", () => {
     it("recognizes all default agent types", () => {
-      expect(isValidType("general-purpose")).toBe(true);
-      expect(isValidType("Explore")).toBe(true);
-      expect(isValidType("Plan")).toBe(true);
+      expect(isValidType("Developer")).toBe(true);
+      expect(isValidType("Developer")).toBe(true);
+      expect(isValidType("Developer")).toBe(true);
     });
 
     it("does not include removed agents", () => {
@@ -70,39 +70,27 @@ describe("agent type registry", () => {
 
     it("case-insensitive lookup works for getAgentConfig", () => {
       const config = getAgentConfig("explore");
-      expect(config?.name).toBe("Explore");
+      expect(config?.name).toBe("Developer");
       expect(config?.model).toBe("anthropic/claude-haiku-4-5");
     });
 
     it("resolveType returns canonical key or undefined", () => {
-      expect(resolveType("Explore")).toBe("Explore");
-      expect(resolveType("explore")).toBe("Explore");
-      expect(resolveType("GENERAL-PURPOSE")).toBe("general-purpose");
+      expect(resolveType("Developer")).toBe("Developer");
+      expect(resolveType("explore")).toBe("Developer");
+      expect(resolveType("GENERAL-PURPOSE")).toBe("Developer");
       expect(resolveType("nonexistent")).toBeUndefined();
     });
 
     it("returns correct config for default types", () => {
-      const config = getConfig("general-purpose");
+      const config = getConfig("Developer");
       expect(config.displayName).toBe("Agent");
       expect(config.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
       expect(config.extensions).toBe(true);
       expect(config.skills).toBe(true);
     });
 
-    it("Explore has read-only tools", () => {
-      const config = getConfig("Explore");
-      expect(config.builtinToolNames).toEqual(["read", "bash", "grep", "find", "ls"]);
-      expect(config.builtinToolNames).not.toContain("edit");
-      expect(config.builtinToolNames).not.toContain("write");
-    });
-
-    it("Explore has haiku model in config", () => {
-      const cfg = getAgentConfig("Explore");
-      expect(cfg?.model).toBe("anthropic/claude-haiku-4-5");
-    });
-
     it("default agents are marked isDefault", () => {
-      const cfg = getAgentConfig("general-purpose");
+      const cfg = getAgentConfig("Developer");
       expect(cfg?.isDefault).toBe(true);
     });
 
@@ -110,7 +98,7 @@ describe("agent type registry", () => {
     // An explicit `false` here would silently win over the caller's `true` via `??` in
     // resolveAgentInvocationConfig, breaking documented Agent tool params.
     it("default agents do not lock strategy fields (run_in_background / inherit_context / isolated)", () => {
-      for (const name of ["general-purpose", "Explore", "Plan"]) {
+      for (const name of ["Developer", "Developer", "Developer"]) {
         const cfg = getAgentConfig(name);
         expect(cfg?.runInBackground, `${name}.runInBackground`).toBeUndefined();
         expect(cfg?.inheritContext, `${name}.inheritContext`).toBeUndefined();
@@ -120,9 +108,9 @@ describe("agent type registry", () => {
 
     it("getDefaultAgentNames returns default agent names", () => {
       const names = getDefaultAgentNames();
-      expect(names).toContain("general-purpose");
-      expect(names).toContain("Explore");
-      expect(names).toContain("Plan");
+      expect(names).toContain("Developer");
+      expect(names).toContain("Developer");
+      expect(names).toContain("Developer");
     });
 
     it("BUILTIN_TOOL_NAMES includes all built-in tools", () => {
@@ -153,9 +141,9 @@ describe("agent type registry", () => {
       registerAgents(new Map());
 
       expect(getAvailableTypes()).toEqual([]);
-      expect(isValidType("general-purpose")).toBe(false);
-      expect(isValidType("Explore")).toBe(false);
-      expect(isValidType("Plan")).toBe(false);
+      expect(isValidType("Developer")).toBe(false);
+      expect(isValidType("Developer")).toBe(false);
+      expect(isValidType("Developer")).toBe(false);
     });
 
     it("user agents are unaffected when defaults are disabled", () => {
@@ -170,20 +158,20 @@ describe("agent type registry", () => {
     it("re-enabling restores defaults on next registerAgents", () => {
       setDefaultsDisabled(true);
       registerAgents(new Map());
-      expect(isValidType("general-purpose")).toBe(false);
+      expect(isValidType("Developer")).toBe(false);
 
       setDefaultsDisabled(false);
       registerAgents(new Map());
-      expect(isValidType("general-purpose")).toBe(true);
-      expect(isValidType("Explore")).toBe(true);
-      expect(isValidType("Plan")).toBe(true);
+      expect(isValidType("Developer")).toBe(true);
+      expect(isValidType("Developer")).toBe(true);
+      expect(isValidType("Developer")).toBe(true);
     });
 
     it("getConfig falls back to the hardcoded config when defaults are disabled and no user agents exist", () => {
       setDefaultsDisabled(true);
       registerAgents(new Map());
 
-      const config = getConfig("general-purpose");
+      const config = getConfig("Developer");
       expect(config.displayName).toBe("Agent");
       expect(config.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
       expect(config.promptMode).toBe("append");
@@ -204,8 +192,8 @@ describe("agent type registry", () => {
       registerAgents(agents);
 
       const types = getAvailableTypes();
-      expect(types).toContain("general-purpose");
-      expect(types).toContain("Explore");
+      expect(types).toContain("Developer");
+      expect(types).toContain("Developer");
       expect(types).toContain("auditor");
     });
 
@@ -218,7 +206,7 @@ describe("agent type registry", () => {
 
       const names = getUserAgentNames();
       expect(names).toEqual(["auditor", "reviewer"]);
-      expect(names).not.toContain("general-purpose");
+      expect(names).not.toContain("Developer");
     });
 
     it("getConfig returns config for user agents", () => {
@@ -274,10 +262,10 @@ describe("agent type registry", () => {
       expect(getToolNamesForType("ext-only")).toEqual([]);
     });
 
-    it("getConfig falls back to general-purpose for unknown types", () => {
+    it("getConfig falls back to Developer for unknown types", () => {
       const config = getConfig("nonexistent");
-      expect(config.displayName).toBe("Agent");
-      expect(config.description).toBe(DEFAULT_AGENTS.get("general-purpose")?.description);
+      expect(config.displayName).toBe("Developer");
+      expect(config.description).toBe(DEFAULT_AGENTS.get("Developer")?.description);
     });
 
     it("clearing user agents works (defaults remain)", () => {
@@ -287,43 +275,43 @@ describe("agent type registry", () => {
 
       registerAgents(new Map());
       expect(isValidType("auditor")).toBe(false);
-      expect(isValidType("general-purpose")).toBe(true);
+      expect(isValidType("Developer")).toBe(true);
     });
 
     it("user agent overrides default with same name", () => {
-      const agents = new Map([["Explore", makeAgentConfig({
-        name: "Explore",
+      const agents = new Map([["Developer", makeAgentConfig({
+        name: "Developer",
         description: "Custom Explore",
         builtinToolNames: BUILTIN_TOOL_NAMES,
       })]]);
       registerAgents(agents);
 
-      const config = getConfig("Explore");
+      const config = getConfig("Developer");
       expect(config.description).toBe("Custom Explore");
       expect(config.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
     });
 
     it("disabled agent is excluded from available types", () => {
-      const agents = new Map([["Plan", makeAgentConfig({
-        name: "Plan",
+      const agents = new Map([["Developer", makeAgentConfig({
+        name: "Developer",
         enabled: false,
       })]]);
       registerAgents(agents);
 
-      expect(isValidType("Plan")).toBe(false);
-      expect(getAvailableTypes()).not.toContain("Plan");
+      expect(isValidType("Developer")).toBe(false);
+      expect(getAvailableTypes()).not.toContain("Developer");
     });
 
-    it("general-purpose can be disabled but fallback still works", () => {
-      const agents = new Map([["general-purpose", makeAgentConfig({
-        name: "general-purpose",
+    it("Developer fallback can be disabled but fallback still works", () => {
+      const agents = new Map([["Developer", makeAgentConfig({
+        name: "Developer",
         enabled: false,
       })]]);
       registerAgents(agents);
 
-      expect(isValidType("general-purpose")).toBe(false);
+      expect(isValidType("Developer")).toBe(false);
       // getConfig fallback should still return something reasonable
-      const config = getConfig("general-purpose");
+      const config = getConfig("Developer");
       expect(config.displayName).toBe("Agent");
     });
   });
@@ -398,10 +386,10 @@ describe("resolveSpawnType — fail-closed dispatch (#183)", () => {
     expect(resolveSpawnType("SCOUT")).toEqual({ ok: true, type: "scout" });
   });
 
-  it("falls back to general-purpose when unset, reporting what was asked for", () => {
+  it("falls back to Developer when unset, reporting what was asked for", () => {
     registerAgents(roster());
     expect(resolveSpawnType("typoo")).toEqual({
-      ok: true, type: "general-purpose", fellBackFrom: "typoo",
+      ok: true, type: "Developer", fellBackFrom: "typoo",
     });
   });
 
@@ -421,7 +409,7 @@ describe("resolveSpawnType — fail-closed dispatch (#183)", () => {
     // disabled agent dispatched with its own prompt and general-purpose's tools.
     registerAgents(roster());
     expect(resolveSpawnType("retired")).toEqual({
-      ok: true, type: "general-purpose", fellBackFrom: "retired",
+      ok: true, type: "Developer", fellBackFrom: "retired",
     });
     setFallbackSubagent(NO_FALLBACK);
     expect(resolveSpawnType("retired").ok).toBe(false);
@@ -437,7 +425,7 @@ describe("resolveSpawnType — fail-closed dispatch (#183)", () => {
     // ...but a differently-cased spelling matches both, so it must not pick one.
     expect(resolveSpawnType("SCOUT").ok).toBe(true);
     expect(resolveSpawnType("SCOUT")).toEqual({
-      ok: true, type: "general-purpose", fellBackFrom: "SCOUT",
+      ok: true, type: "Developer", fellBackFrom: "SCOUT",
     });
   });
 
@@ -465,7 +453,7 @@ describe("resolveSpawnType — fail-closed dispatch (#183)", () => {
     // opting in should change that, so the default must stay permissive.
     registerAgents(roster());
     for (const empty of ["", "   ", undefined]) {
-      expect(resolveSpawnType(empty)).toMatchObject({ ok: true, type: "general-purpose" });
+      expect(resolveSpawnType(empty)).toMatchObject({ ok: true, type: "Developer" });
     }
 
     setFallbackSubagent(NO_FALLBACK);

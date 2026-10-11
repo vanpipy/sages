@@ -49,7 +49,7 @@ describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)",
     });
     resolvedRun();
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -70,7 +70,7 @@ describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)",
     });
     resolvedRun();
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -90,7 +90,7 @@ describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)",
     });
     resolvedRun();
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -107,7 +107,7 @@ describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)",
     });
     resolvedRun();
 
-    const { record } = await manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
+    const { record } = await manager.spawnAndWait(mockPi, mockCtx, "Developer", "test", {
       description: "test",
     });
 
@@ -145,7 +145,7 @@ describe("AgentManager — spawnAndWait onSpawned + foreground output file wirin
       return { responseText: "done", session, aborted: false, steered: false };
     });
 
-    await manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
+    await manager.spawnAndWait(mockPi, mockCtx, "Developer", "test", {
       description: "test",
     }, (fgId) => {
       capturedId = fgId;
@@ -160,7 +160,7 @@ describe("AgentManager — spawnAndWait onSpawned + foreground output file wirin
     let spawnedId: string | undefined;
     resolvedRun();
 
-    const { id } = await manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
+    const { id } = await manager.spawnAndWait(mockPi, mockCtx, "Developer", "test", {
       description: "test",
     }, (fgId) => { spawnedId = fgId; });
 
@@ -180,10 +180,10 @@ describe("AgentManager — spawnAndWait onSpawned + foreground output file wirin
       });
     const firstCallback = vi.fn();
 
-    const first = manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "first", {
+    const first = manager.spawnAndWait(mockPi, mockCtx, "Developer", "first", {
       description: "first",
     }, firstCallback);
-    const secondId = manager.spawn(mockPi, mockCtx, "general-purpose", "second", {
+    const secondId = manager.spawn(mockPi, mockCtx, "Developer", "second", {
       description: "second",
       isBackground: true,
     });
@@ -206,7 +206,7 @@ describe("AgentManager — spawnAndWait onSpawned + foreground output file wirin
     manager = new AgentManager((r) => { completedRecord = r; });
     vi.mocked(runAgent).mockRejectedValue(new Error("agent failed"));
 
-    const { record } = await manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
+    const { record } = await manager.spawnAndWait(mockPi, mockCtx, "Developer", "test", {
       description: "test",
     });
 
@@ -299,7 +299,7 @@ describe("AgentManager — nested runtime propagation", () => {
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
     manager = new AgentManager(undefined, 1);
 
-    const parentId = manager.spawn(mockPi, mockCtx, "general-purpose", "parent", {
+    const parentId = manager.spawn(mockPi, mockCtx, "Developer", "parent", {
       description: "parent",
       isBackground: true,
     });
@@ -310,7 +310,7 @@ describe("AgentManager — nested runtime propagation", () => {
       parentAgentId: parentId,
     });
     // A second top-level background agent still queues — the pool is untouched.
-    const siblingId = manager.spawn(mockPi, mockCtx, "general-purpose", "sibling", {
+    const siblingId = manager.spawn(mockPi, mockCtx, "Developer", "sibling", {
       description: "sibling",
       isBackground: true,
     });
@@ -326,7 +326,7 @@ describe("AgentManager — nested runtime propagation", () => {
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
     manager = new AgentManager(undefined, 1);
 
-    const holder = manager.spawn(mockPi, mockCtx, "general-purpose", "holder", {
+    const holder = manager.spawn(mockPi, mockCtx, "Developer", "holder", {
       description: "holder",
       isBackground: true,
     });
@@ -336,7 +336,7 @@ describe("AgentManager — nested runtime propagation", () => {
       workflowId: "wf_run1",
     });
     // A second top-level background agent still queues — the pool is untouched.
-    const siblingId = manager.spawn(mockPi, mockCtx, "general-purpose", "sibling", {
+    const siblingId = manager.spawn(mockPi, mockCtx, "Developer", "sibling", {
       description: "sibling",
       isBackground: true,
     });
@@ -350,14 +350,14 @@ describe("AgentManager — nested runtime propagation", () => {
     // Same reasoning as a nested child: it is filtered out of every top-level
     // surface, so a handle would name something unreachable and consume a name
     // a visible agent could have taken.
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "child", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "child", {
       description: "child",
       workflowId: "wf_run1",
     });
     expect(manager.getRecord(id)?.handle).toBeUndefined();
 
-    const visible = manager.spawn(mockPi, mockCtx, "general-purpose", "mine", { description: "mine" });
-    expect(manager.getRecord(visible)?.handle).toBe("general-purpose");
+    const visible = manager.spawn(mockPi, mockCtx, "Developer", "mine", { description: "mine" });
+    expect(manager.getRecord(visible)?.handle).toBe("Developer");
   });
 
   it("aborts owned children when the parent settles", async () => {
@@ -374,7 +374,7 @@ describe("AgentManager — nested runtime propagation", () => {
       .mockImplementation(abortable as any);
     manager = new AgentManager();
 
-    const parentId = manager.spawn(mockPi, mockCtx, "general-purpose", "parent", {
+    const parentId = manager.spawn(mockPi, mockCtx, "Developer", "parent", {
       description: "parent",
       isBackground: true,
     });
@@ -411,7 +411,7 @@ describe("AgentManager — nested runtime propagation", () => {
     });
     manager = new AgentManager();
 
-    const parentId = manager.spawn(mockPi, mockCtx, "general-purpose", "parent", {
+    const parentId = manager.spawn(mockPi, mockCtx, "Developer", "parent", {
       description: "parent",
       isBackground: true,
     });
@@ -448,7 +448,7 @@ describe("AgentManager — completion callbacks", () => {
     });
     resolvedRun();
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -483,7 +483,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     manager = new AgentManager();
     resolvedRun();
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -503,12 +503,12 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
       () => new Promise(() => {}), // hangs forever
     );
 
-    const id1 = manager.spawn(mockPi, mockCtx, "general-purpose", "test1", {
+    const id1 = manager.spawn(mockPi, mockCtx, "Developer", "test1", {
       description: "running agent",
       isBackground: true,
     });
     // Second agent should be queued (limit=1)
-    const id2 = manager.spawn(mockPi, mockCtx, "general-purpose", "test2", {
+    const id2 = manager.spawn(mockPi, mockCtx, "Developer", "test2", {
       description: "queued agent",
       isBackground: true,
     });
@@ -538,7 +538,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
       steered: false,
     });
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -553,7 +553,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     manager = new AgentManager();
     vi.mocked(runAgent).mockRejectedValue(new Error("boom"));
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -568,7 +568,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     manager = new AgentManager();
     resolvedRun();
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -584,7 +584,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     manager = new AgentManager();
     resolvedRun();
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -600,7 +600,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     manager = new AgentManager();
     vi.mocked(runAgent).mockRejectedValue(new Error("boom"));
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -636,7 +636,7 @@ describe("AgentManager — the usage hook fires once per assistant message", () 
       return { responseText: "done", session: mockSession(), aborted: false, steered: false };
     });
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -660,14 +660,14 @@ describe("AgentManager — the usage hook fires once per assistant message", () 
       return { responseText: "done", session: mockSession(), aborted: false, steered: false };
     });
 
-    const parentId = manager.spawn(mockPi, mockCtx, "general-purpose", "parent", {
+    const parentId = manager.spawn(mockPi, mockCtx, "Developer", "parent", {
       description: "parent",
       isBackground: true,
     });
     await manager.getRecord(parentId)!.promise;
     seen.length = 0;
 
-    const childId = manager.spawn(mockPi, mockCtx, "general-purpose", "child", {
+    const childId = manager.spawn(mockPi, mockCtx, "Developer", "child", {
       description: "child",
       isBackground: true,
       parentAgentId: parentId,
@@ -698,7 +698,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     // Don't resolve the run — we just want to inspect the record at spawn time.
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -723,7 +723,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
       return { responseText: "done", session: mockSession(), aborted: false, steered: false };
     });
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -751,7 +751,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
       compactSeen.push({ count: record.compactionCount, reason: info.reason });
     });
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -776,7 +776,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
       steered: false,
     });
 
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isBackground: true,
     });
@@ -820,7 +820,7 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
     vi.mocked(runAgent).mockClear();
 
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isolation: "worktree",
     });
@@ -840,7 +840,7 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
     vi.mocked(runAgent).mockClear();
 
     manager = new AgentManager();
-    await expect(manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
+    await expect(manager.spawnAndWait(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isolation: "worktree",
     })).rejects.toThrow(/isolation: "worktree"/);
@@ -861,8 +861,8 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
 
     manager = new AgentManager();
     manager.setMaxConcurrentForeground(1);
-    const blocker = manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "blocker", { description: "blocker" });
-    const queued = manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
+    const blocker = manager.spawnAndWait(mockPi, mockCtx, "Developer", "blocker", { description: "blocker" });
+    const queued = manager.spawnAndWait(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isolation: "worktree",
     });
@@ -1109,7 +1109,7 @@ describe("AgentManager — worktreeIsolation: false refuses worktrees", () => {
     vi.mocked(isWorktreeIsolationEnabled).mockReturnValue(false);
 
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isolation: "worktree",
     });
@@ -1128,7 +1128,7 @@ describe("AgentManager — worktreeIsolation: false refuses worktrees", () => {
     // The refusal above is silent, but a real failure still surfaces — through
     // awaitStartup rather than a throw out of spawn(), since the repo copy is
     // an awaited git call.
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isolation: "worktree",
     });
@@ -1143,14 +1143,14 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
   it("passes cwd to runAgent as the working dir, parent cwd as configCwd", async () => {
     resolvedRun();
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       cwd: "/", // absolute and always exists
     });
     await manager.getRecord(id)!.promise;
 
     expect(runAgent).toHaveBeenCalledWith(
-      mockCtx, "general-purpose", "test",
+      mockCtx, "Developer", "test",
       expect.objectContaining({ cwd: "/", configCwd: "/tmp" }),
     );
   });
@@ -1161,7 +1161,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     vi.mocked(runAgent).mockClear();
     resolvedRun();
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
     });
     await manager.getRecord(id)!.promise;
@@ -1175,7 +1175,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     vi.mocked(runAgent).mockClear();
     resolvedRun();
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       cwd: null as any,
     });
@@ -1194,7 +1194,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     resolvedRun();
 
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       cwd: "/",
       isolation: "worktree",
@@ -1208,7 +1208,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     // Worktree wins for the working dir — at workPath, so subdirectory scoping
     // survives isolation. Config still anchored to the parent.
     expect(runAgent).toHaveBeenCalledWith(
-      mockCtx, "general-purpose", "test",
+      mockCtx, "Developer", "test",
       expect.objectContaining({ cwd: "/wt/copy/packages/api", configCwd: "/tmp", worktreeBase: "/" }),
     );
     expect(cleanupWorktree).toHaveBeenCalledWith(mockPi, "/", expect.anything(), "test");
@@ -1226,7 +1226,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     resolvedRun();
 
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       isolation: "worktree",
     });
@@ -1246,7 +1246,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     resolvedRun();
 
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", { description: "test" });
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "test", { description: "test" });
     await manager.getRecord(id)!.promise;
 
     expect(vi.mocked(runAgent).mock.lastCall![3].worktreeBase).toBeUndefined();
@@ -1257,14 +1257,14 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     resolvedRun();
 
     manager = new AgentManager();
-    const owned = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    const owned = manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       workflowId: "wf_abc123",
     });
     await manager.getRecord(owned)!.promise;
     expect(vi.mocked(runAgent).mock.lastCall![3].workflow).toBe(true);
 
-    const plain = manager.spawn(mockPi, mockCtx, "general-purpose", "test", { description: "test" });
+    const plain = manager.spawn(mockPi, mockCtx, "Developer", "test", { description: "test" });
     await manager.getRecord(plain)!.promise;
     expect(vi.mocked(runAgent).mock.lastCall![3].workflow).toBe(false);
   });
@@ -1272,7 +1272,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
   it("relative cwd throws immediately; no orphan record", () => {
     vi.mocked(runAgent).mockClear();
     manager = new AgentManager();
-    expect(() => manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    expect(() => manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       cwd: "relative/path",
     })).toThrow(/absolute path/);
@@ -1283,7 +1283,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
   it("nonexistent cwd throws immediately; no orphan record", () => {
     vi.mocked(runAgent).mockClear();
     manager = new AgentManager();
-    expect(() => manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    expect(() => manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       cwd: "/nonexistent-pi-subagents-test-dir",
     })).toThrow(/does not exist/);
@@ -1294,7 +1294,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
   it("cwd pointing at a regular file throws a curated 'not a directory' error", () => {
     vi.mocked(runAgent).mockClear();
     manager = new AgentManager();
-    expect(() => manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    expect(() => manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       cwd: fileURLToPath(import.meta.url), // this test file: absolute, exists, not a directory
     })).toThrow(/not a directory/);
@@ -1305,7 +1305,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
   it("non-string cwd (RPC junk) throws the curated error, not a TypeError from path internals", () => {
     vi.mocked(runAgent).mockClear();
     manager = new AgentManager();
-    expect(() => manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+    expect(() => manager.spawn(mockPi, mockCtx, "Developer", "test", {
       description: "test",
       cwd: 123 as any,
     })).toThrow(/must be an absolute path/);
@@ -1719,13 +1719,13 @@ describe("AgentManager — pool slot accounting on settle", () => {
     const resolvers = controllableRuns();
     manager = new AgentManager(undefined, 1);
 
-    const parentId = manager.spawn(mockPi, mockCtx, "general-purpose", "parent", {
+    const parentId = manager.spawn(mockPi, mockCtx, "Developer", "parent", {
       description: "parent", isBackground: true,
     });
     manager.spawn(mockPi, mockCtx, "scout", "child", {
       description: "child", isBackground: true, depth: 2, parentAgentId: parentId,
     });
-    const siblingId = manager.spawn(mockPi, mockCtx, "general-purpose", "sibling", {
+    const siblingId = manager.spawn(mockPi, mockCtx, "Developer", "sibling", {
       description: "sibling", isBackground: true,
     });
     expect(manager.getRecord(siblingId)?.status).toBe("queued");
@@ -1747,13 +1747,13 @@ describe("AgentManager — pool slot accounting on settle", () => {
     );
     manager = new AgentManager(undefined, 1);
 
-    const parentId = manager.spawn(mockPi, mockCtx, "general-purpose", "parent", {
+    const parentId = manager.spawn(mockPi, mockCtx, "Developer", "parent", {
       description: "parent", isBackground: true,
     });
     const childId = manager.spawn(mockPi, mockCtx, "scout", "child", {
       description: "child", isBackground: true, depth: 2, parentAgentId: parentId,
     });
-    const siblingId = manager.spawn(mockPi, mockCtx, "general-purpose", "sibling", {
+    const siblingId = manager.spawn(mockPi, mockCtx, "Developer", "sibling", {
       description: "sibling", isBackground: true,
     });
 
@@ -1770,10 +1770,10 @@ describe("AgentManager — pool slot accounting on settle", () => {
     const resolvers = controllableRuns();
     manager = new AgentManager(undefined, 1);
 
-    const parentId = manager.spawn(mockPi, mockCtx, "general-purpose", "parent", {
+    const parentId = manager.spawn(mockPi, mockCtx, "Developer", "parent", {
       description: "parent", isBackground: true,
     });
-    const siblingId = manager.spawn(mockPi, mockCtx, "general-purpose", "sibling", {
+    const siblingId = manager.spawn(mockPi, mockCtx, "Developer", "sibling", {
       description: "sibling", isBackground: true,
     });
     expect(manager.getRecord(siblingId)?.status).toBe("queued");
@@ -2082,7 +2082,7 @@ describe("AgentManager — background resume", () => {
       aborted: false,
       steered: false,
     });
-    const id = mgr.spawn(mockPi, mockCtx, "general-purpose", "task", {
+    const id = mgr.spawn(mockPi, mockCtx, "Developer", "task", {
       description: "task",
       isBackground: true,
     });
@@ -2168,7 +2168,7 @@ describe("AgentManager — background resume", () => {
 
     // Occupy the single slot with a never-settling background spawn.
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
-    const blockerId = manager.spawn(mockPi, mockCtx, "general-purpose", "blocker", {
+    const blockerId = manager.spawn(mockPi, mockCtx, "Developer", "blocker", {
       description: "blocker",
       isBackground: true,
     });
@@ -2234,7 +2234,7 @@ describe("AgentManager — background resume", () => {
     const id = await spawnSettled(manager);
 
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
-    manager.spawn(mockPi, mockCtx, "general-purpose", "blocker", {
+    manager.spawn(mockPi, mockCtx, "Developer", "blocker", {
       description: "blocker",
       isBackground: true,
     });
@@ -2259,7 +2259,7 @@ describe("AgentManager — background resume", () => {
     // Occupy the only slot with a run we can release on demand.
     let releaseBlocker!: (v: any) => void;
     vi.mocked(runAgent).mockImplementation(() => new Promise((resolve) => { releaseBlocker = resolve; }));
-    manager.spawn(mockPi, mockCtx, "general-purpose", "blocker", {
+    manager.spawn(mockPi, mockCtx, "Developer", "blocker", {
       description: "blocker",
       isBackground: true,
     });
@@ -2284,7 +2284,7 @@ describe("AgentManager — background resume", () => {
     const id = await spawnSettled(manager);
 
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
-    manager.spawn(mockPi, mockCtx, "general-purpose", "blocker", {
+    manager.spawn(mockPi, mockCtx, "Developer", "blocker", {
       description: "blocker",
       isBackground: true,
     });
@@ -2318,7 +2318,7 @@ describe("AgentManager — names as additive aliases", () => {
   it("assigns the type handle as well as the alias", () => {
     resolvedRun();
     manager = new AgentManager();
-    const record = manager.getRecord(spawnNamed(manager, "Explore", "auth-audit"))!;
+    const record = manager.getRecord(spawnNamed(manager, "Developer", "auth-audit"))!;
 
     expect(record.handle).toBe("explore");
     expect(record.alias).toBe("auth-audit");
@@ -2327,7 +2327,7 @@ describe("AgentManager — names as additive aliases", () => {
   it("reaches the same agent by either name", () => {
     resolvedRun();
     manager = new AgentManager();
-    const id = spawnNamed(manager, "Explore", "auth-audit");
+    const id = spawnNamed(manager, "Developer", "auth-audit");
 
     expect(manager.resolveMention("auth-audit")).toMatchObject({ kind: "live", record: { id } });
     expect(manager.resolveMention("explore")).toMatchObject({ kind: "live", record: { id } });
@@ -2336,7 +2336,7 @@ describe("AgentManager — names as additive aliases", () => {
   it("slugs a name that isn't typeable rather than rejecting the spawn", () => {
     resolvedRun();
     manager = new AgentManager();
-    const record = manager.getRecord(spawnNamed(manager, "Explore", "Auth Audit!"))!;
+    const record = manager.getRecord(spawnNamed(manager, "Developer", "Auth Audit!"))!;
 
     expect(record.alias).toBe("auth-audit");
   });
@@ -2346,7 +2346,7 @@ describe("AgentManager — names as additive aliases", () => {
     // names on one record, and later a second agent could take one of them.
     resolvedRun();
     manager = new AgentManager();
-    const record = manager.getRecord(spawnNamed(manager, "Explore", "explore"))!;
+    const record = manager.getRecord(spawnNamed(manager, "Developer", "explore"))!;
 
     expect(record.handle).toBe("explore");
     expect(record.alias).toBe("explore-2");
@@ -2355,8 +2355,8 @@ describe("AgentManager — names as additive aliases", () => {
   it("stops a later type handle from colliding with an existing alias", () => {
     resolvedRun();
     manager = new AgentManager();
-    spawnNamed(manager, "Plan", "explore"); // alias squats the Explore name
-    const second = manager.getRecord(spawnNamed(manager, "Explore"))!;
+    spawnNamed(manager, "Developer", "explore"); // alias squats the Explore name
+    const second = manager.getRecord(spawnNamed(manager, "Developer"))!;
 
     expect(second.handle).toBe("explore-2");
   });
@@ -2364,7 +2364,7 @@ describe("AgentManager — names as additive aliases", () => {
   it("refuses to alias an agent to the reserved main handle", () => {
     resolvedRun();
     manager = new AgentManager();
-    const record = manager.getRecord(spawnNamed(manager, "Explore", "main"))!;
+    const record = manager.getRecord(spawnNamed(manager, "Developer", "main"))!;
 
     expect(record.alias).toBe("main-2");
   });
@@ -2372,7 +2372,7 @@ describe("AgentManager — names as additive aliases", () => {
   it("gives an unnamed agent no alias at all", () => {
     resolvedRun();
     manager = new AgentManager();
-    const record = manager.getRecord(spawnNamed(manager, "Explore"))!;
+    const record = manager.getRecord(spawnNamed(manager, "Developer"))!;
 
     expect(record.alias).toBeUndefined();
     expect(record.handle).toBe("explore");
@@ -2383,7 +2383,7 @@ describe("AgentManager — names as additive aliases", () => {
     // one addressable through a boundary only its owner may cross.
     resolvedRun();
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "Explore", "go", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "go", {
       description: "go",
       name: "child",
       parentAgentId: "parent-1",
@@ -2400,15 +2400,15 @@ describe("AgentManager — names as additive aliases", () => {
     vi.mocked(runAgent).mockImplementation(async (_ctx: any, _type: any, _prompt: any, options: any) => {
       options.onSessionCreated?.({
         dispose: vi.fn(),
-        sessionManager: { getSessionFile: () => "/sessions/explore.jsonl" },
+        sessionManager: { getSessionFile: () => "/sessions/developer.jsonl" },
       });
       return { responseText: "done", session: mockSession(), aborted: false, steered: false } as any;
     });
     manager = new AgentManager();
-    const id = spawnNamed(manager, "Explore");
+    const id = spawnNamed(manager, "Developer");
     await manager.getRecord(id)!.promise;
 
-    expect(manager.getRecord(id)!.sessionFile).toBe("/sessions/explore.jsonl");
+    expect(manager.getRecord(id)!.sessionFile).toBe("/sessions/developer.jsonl");
   });
 
   it("records no session file for an in-memory session", async () => {
@@ -2417,7 +2417,7 @@ describe("AgentManager — names as additive aliases", () => {
       return { responseText: "done", session: mockSession(), aborted: false, steered: false } as any;
     });
     manager = new AgentManager();
-    const id = spawnNamed(manager, "Explore");
+    const id = spawnNamed(manager, "Developer");
     await manager.getRecord(id)!.promise;
 
     expect(manager.getRecord(id)!.sessionFile).toBeUndefined();
@@ -2442,7 +2442,7 @@ describe("AgentManager — effective model and thinking write-back", () => {
       return { responseText: "done", session: mockSession(), aborted: false, steered: false } as any;
     });
     manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "Explore", "go", {
+    const id = manager.spawn(mockPi, mockCtx, "Developer", "go", {
       description: "go",
       isBackground: true,
       invocation,

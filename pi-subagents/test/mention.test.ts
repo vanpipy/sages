@@ -13,11 +13,11 @@ import { agentMentionReminder, assignHandle, describeMention, handleBase, isRese
 
 describe("handleBase", () => {
   it("lowercases so the handle matches how it is typed", () => {
-    expect(handleBase("Explore")).toBe("explore");
+    expect(handleBase("Developer")).toBe("explore");
   });
 
   it("keeps a hyphenated type as-is", () => {
-    expect(handleBase("general-purpose")).toBe("general-purpose");
+    expect(handleBase("Developer")).toBe("Developer");
   });
 
   it("reduces anything outside [\\w-] to hyphens, without leaving edge hyphens", () => {
@@ -43,7 +43,7 @@ describe("handleBase", () => {
   });
 
   it("only ever produces handles the suggestion trigger can match", () => {
-    for (const type of ["Explore", "general-purpose", "Code Review!", "!!!", "デバッグ"]) {
+    for (const type of ["Developer", "Developer", "Code Review!", "!!!", "デバッグ"]) {
       expect(MENTION_TRIGGER.test(`@${handleBase(type)}`)).toBe(true);
     }
   });
@@ -76,11 +76,11 @@ describe("assignHandle", () => {
 });
 
 describe("resolveHandleToType", () => {
-  const TYPES = ["general-purpose", "Explore", "Code Review!"];
+  const TYPES = ["Developer", "Developer", "Code Review!"];
 
   it("finds the type a handle was derived from, whatever its casing", () => {
-    expect(resolveHandleToType("explore", TYPES)).toBe("Explore");
-    expect(resolveHandleToType("EXPLORE", TYPES)).toBe("Explore");
+    expect(resolveHandleToType("explore", TYPES)).toBe("Developer");
+    expect(resolveHandleToType("EXPLORE", TYPES)).toBe("Developer");
   });
 
   it("resolves a type whose slug differs from its name", () => {
@@ -158,14 +158,14 @@ describe("describeMention", () => {
 describe("parseMention", () => {
   it("splits a leading handle from its message", () => {
     expect(parseMention("@explore check the RPC path")).toEqual({
-      handle: "explore",
+      handle: "developer",
       message: "check the RPC path",
     });
   });
 
   it("trims the message and accepts a newline as the separator", () => {
-    expect(parseMention("@explore   spaced   ")).toEqual({ handle: "explore", message: "spaced" });
-    expect(parseMention("@explore\nline1\nline2")).toEqual({ handle: "explore", message: "line1\nline2" });
+    expect(parseMention("@explore   spaced   ")).toEqual({ handle: "developer", message: "spaced" });
+    expect(parseMention("@explore\nline1\nline2")).toEqual({ handle: "developer", message: "line1\nline2" });
   });
 
   it("rejects a bare handle — that belongs to the main model", () => {
@@ -197,6 +197,6 @@ describe("agentMentionReminder", () => {
   });
 
   it("names the agent it was given", () => {
-    expect(agentMentionReminder("Plan")).toContain('invoke the agent "Plan"');
+    expect(agentMentionReminder("Developer")).toContain('invoke the agent "Developer"');
   });
 });

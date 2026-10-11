@@ -83,7 +83,7 @@ describe("orchestrator-tool.plan", () => {
 				phases: [
 					{ subject: "Implement", agentType: "Developer" },
 					{ subject: "Review", agentType: "Reviewer" },
-					{ subject: "Merge", agentType: "MergerAdvisor" },
+					{ subject: "Merge", agentType: "Reviewer" },
 				],
 			},
 			store,
@@ -98,7 +98,7 @@ describe("orchestrator-tool.plan", () => {
 		expect(out.tasks.map((t) => t.agentType)).toEqual([
 			"Developer",
 			"Reviewer",
-			"MergerAdvisor",
+			"Reviewer",
 		]);
 	});
 
@@ -149,14 +149,14 @@ describe("orchestrator-tool.plan", () => {
 						blockedBy: ["Implement"],
 					},
 					{
-						subject: "Fix",
-						agentType: "Fix",
+						subject: "Reviewer",
+						agentType: "Developer",
 						blockedBy: ["Review"],
 					},
 					{
 						subject: "Merge",
-						agentType: "MergerAdvisor",
-						blockedBy: ["Fix"],
+						agentType: "Reviewer",
+						blockedBy: ["Reviewer"],
 					},
 				],
 			},

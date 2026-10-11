@@ -26,7 +26,7 @@ function getDefaultConfig(name: string): AgentConfig {
 
 describe("buildAgentPrompt", () => {
   it("includes cwd and git info", () => {
-    const config = getDefaultConfig("general-purpose");
+    const config = getDefaultConfig("Developer");
     const prompt = buildAgentPrompt(config, "/workspace", env);
     expect(prompt).toContain("/workspace");
     expect(prompt).toContain("Branch: main");
@@ -34,28 +34,14 @@ describe("buildAgentPrompt", () => {
   });
 
   it("handles non-git repos", () => {
-    const config = getDefaultConfig("Explore");
+    const config = getDefaultConfig("Developer");
     const prompt = buildAgentPrompt(config, "/workspace", envNoGit);
     expect(prompt).toContain("Not a git repository");
     expect(prompt).not.toContain("Branch:");
   });
 
-  it("Explore prompt is read-only", () => {
-    const config = getDefaultConfig("Explore");
-    const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("file search specialist");
-  });
-
-  it("Plan prompt is read-only", () => {
-    const config = getDefaultConfig("Plan");
-    const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("software architect");
-  });
-
   it("general-purpose uses append mode (parent twin)", () => {
-    const config = getDefaultConfig("general-purpose");
+    const config = getDefaultConfig("Developer");
     const parentPrompt = "You are a parent coding agent with full powers.";
     const prompt = buildAgentPrompt(config, "/workspace", env, parentPrompt);
     expect(prompt).toContain("parent coding agent with full powers");
@@ -66,11 +52,15 @@ describe("buildAgentPrompt", () => {
     expect(prompt).not.toContain("<agent_instructions>");
   });
 
-  it("general-purpose without parent prompt falls back to generic base", () => {
-    const config = getDefaultConfig("general-purpose");
+  it("default Developer agent identity surfaces when no parent and no systemPrompt override", () => {
+    const config = getDefaultConfig("Developer");
     const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("general-purpose coding agent");
-    expect(prompt).not.toContain("READ-ONLY");
+    // Post chore/only-developer-and-reviewer: no genericBase fallback
+    // (general-purpose is gone). The agent-identity block carries the
+    // agent name + env block; the agent's own systemPrompt is "" so the
+    // body has no extra prose.
+    expect(prompt).toContain("<active_agent name=\"Developer\"/>");
+    expect(prompt).not.toContain("general-purpose coding agent");
   });
 
   it("append mode with parent prompt includes parent + custom instructions", () => {
@@ -96,7 +86,7 @@ describe("buildAgentPrompt", () => {
     expect(prompt).toContain("Extra custom instructions here.");
   });
 
-  it("append mode without parent prompt falls back to generic base", () => {
+  it("append mode without parent prompt uses config.systemPrompt only (no generic-base fallback)", () => {
     const config: AgentConfig = {
       name: "appender",
       description: "Appender",
@@ -111,7 +101,7 @@ describe("buildAgentPrompt", () => {
     };
     const prompt = buildAgentPrompt(config, "/workspace", env);
     expect(prompt).toContain("/workspace");
-    expect(prompt).toContain("general-purpose coding agent");
+    expect(prompt).not.toContain("general-purpose coding agent");
     expect(prompt).toContain("Extra custom instructions here.");
   });
 
@@ -175,7 +165,7 @@ describe("buildAgentPrompt", () => {
   });
 
   it("append mode bridge contains tool reminders", () => {
-    const config = getDefaultConfig("general-purpose");
+    const config = getDefaultConfig("Developer");
     const prompt = buildAgentPrompt(config, "/workspace", env, "Parent prompt.");
     expect(prompt).toContain("Use the read tool instead of cat");
     expect(prompt).toContain("Use the edit tool instead of sed");

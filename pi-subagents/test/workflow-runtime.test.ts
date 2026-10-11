@@ -95,7 +95,7 @@ describe("script globals", () => {
     expect(result.meta.name).toBe("probe");
     expect(result.agentCount).toBe(1);
     expect(calls).toHaveLength(1);
-    expect(calls[0].agentType).toBe("general-purpose");
+    expect(calls[0].agentType).toBe("Developer");
     expect(calls[0].label).toBe("hello");
   });
 
@@ -945,7 +945,7 @@ describe("Claude Code option compatibility", () => {
     );
 
     expect(result.status).toBe("completed");
-    expect(stub.calls[0]).toMatchObject({ label: "L", agentType: "general-purpose", effort: "high" });
+    expect(stub.calls[0]).toMatchObject({ label: "L", agentType: "Developer", effort: "high" });
   });
 
   it("passes each pipeline stage (previous, item, index), as Claude Code does", async () => {
