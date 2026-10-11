@@ -95,19 +95,18 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		pi = new MockPi();
 	});
 
-	it("SMOKE-073-1: default export registers two orchestrator-owned tools (orchestrate + task_consume)", async () => {
+	it("SMOKE-073-1: default export registers two orchestrator-owned tools (task_consume + task_convert_intent)", async () => {
 		const ext = await import("../../src/extension.js");
 		expect(typeof ext.default).toBe("function");
 		ext.default(pi as any);
 		const toolNames = [...pi.tools.keys()].sort();
-		// The orchestrator owns two LLM-facing tools: `orchestrate` (creation
-		// side of the Task Feeding loop — materializes a multi-phase plan as
-		// a task DAG) and `task_consume` (consumption side — reads a completed
-		// task in a structured way, parses the Reviewer's 4-state verdict,
-		// returns a verdict-tailored follow-up suggestion). Together they
-		// close the sole-creator / sole-consumer role. They do NOT replace
-		// raw `TaskCreate` / `TaskOutput` — they complement them.
-		expect(toolNames).toEqual(["orchestrate", "task_consume"]);
+		// The orchestrator owns two LLM-facing tools:
+		//   - task_consume(task_id) — read + parse verdict (consumption side)
+		//   - task_convert_intent(intent_task_id, plan) — the unique
+		//     intent→plan converter (write side, one-time action)
+		// The orchestrator does NOT have orchestrate or task_create — it
+		// consumes and adds tasks via pi-tasks's existing 7 tools directly.
+		expect(toolNames).toEqual(["task_consume", "task_convert_intent"]);
 	});
 
 	it("SMOKE-073-2: session_start calls setActiveTools with subagent + pi-tasks + AFT + baseline tools (no orchestrator tools post goal-contract removal)", async () => {

@@ -1,7 +1,7 @@
 {
   "name": "@sages/pi-orchestrator",
   "version": "0.1.0",
-  "description": "Sages orchestrator for pi: session hooks (setActiveTools + system-prompt overlay + once-per-session soft-mode reminder) + the `orchestrate(plan)` and `task_consume(task_id)` tools (thin shims over the `TaskBoard` domain class) + the `/brainstorm` slash command. Workflows are driven by the LLM via raw `TaskCreate` × N + `TaskExecute`; `orchestrate` collapses the standard Implement → Review shape into one call, and `task_consume` reads a completed task in a structured way, parses the Reviewer's 4-state verdict, and returns a verdict-tailored follow-up suggestion. Domain capability package, loaded by pi via standard pi.extensions.",
+  "description": "Sages orchestrator for pi: session hooks (setActiveTools + system-prompt overlay + once-per-session soft-mode reminder) + two LLM-facing tools (`task_consume` for verdict-parsed reads, `task_convert_intent` as the unique intent→plan converter) + the `/brainstorm` slash command. The orchestrator is a consumer of the task flow, not its manager — it adds tasks via pi-tasks's `TaskCreate` (with metadata.kind = 'intent' or 'plan'), reads via `TaskList` / `TaskGet`, and dispatches via `TaskExecute`. The orchestrator's two tools add: verdict parsing on the read side, and intent→plan conversion on the write side. Domain capability package, loaded by pi via standard pi.extensions.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",

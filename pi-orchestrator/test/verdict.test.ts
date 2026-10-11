@@ -1,23 +1,10 @@
 /**
- * orchestrator-consume-tool.test.ts — Unit tests for the consume tool's
- * pure helpers and verdict-parsing contract.
- *
- * `parseVerdict` and `suggestFollowUp` are the two pieces worth pinning:
- * the verdict regex determines what the orchestrator sees as the
- * Reviewer's decision; the suggestion table determines what the
- * orchestrator does with it. Anything outside those is wiring.
- *
- * The tool wrapper itself (`taskConsume`) reads from a `TaskStore`; the
- * store's own tests cover the read path. We test the tool wrapper end
- * to end with an in-memory stub store.
+ * verdict.test.ts — Unit tests for the verdict parser + follow-up
+ * helper. Pure functions, no state.
  */
 
 import { describe, expect, it } from "bun:test";
-import {
-	parseVerdict,
-	suggestFollowUp,
-	type Verdict,
-} from "../src/orchestrator-consume-tool.js";
+import { parseVerdict, suggestFollowUp, type Verdict } from "../src/verdict.js";
 
 describe("parseVerdict", () => {
 	it("extracts a bare CLEAN token on its own line", () => {
@@ -39,11 +26,6 @@ describe("parseVerdict", () => {
 	it("is case-insensitive on the verdict token (prefixed form)", () => {
 		expect(parseVerdict("verdict: clean")).toBe("CLEAN");
 		expect(parseVerdict("VERDICT: needs_work")).toBe("NEEDS_WORK");
-	});
-
-	it("matches a verdict token on its own line (standalone form)", () => {
-		expect(parseVerdict("All checks passed.\nCLEAN\n")).toBe("CLEAN");
-		expect(parseVerdict("NEEDS_WORK\n")).toBe("NEEDS_WORK");
 	});
 
 	it("returns undefined when no verdict token appears", () => {
