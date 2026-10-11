@@ -1,10 +1,10 @@
 /**
  * @sages/pi-orchestrator — package entry point (default pi extension).
  *
- * Post-GC-2026-orchestrator-simplify + GC-2026-remove-workflow-run-prod +
- * GC-2026-decompose-task-removed + the goal-contract removal (this
- * commit): the orchestrator owns **no orchestrator-registered tools**.
- * It exists as a soft-infrastructure layer:
+ * Post the orchestrator-simplify + remove-workflow-run-prod +
+ * decompose-task-removed + remove-goal-contract + remove-orchestrator-advisory
+ * + drop-failure-catalog cascades the package owns no tools. It exists
+ * as a thin session-hook layer + a brainstorming slash command:
  *
  *   - session_start: `pi.setActiveTools([...])` gates which tools the
  *     LLM can see (PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL / AFT /
@@ -14,18 +14,13 @@
  *     constitution) to the LLM system prompt.
  *   - tool_call: once-per-session soft-mode reminder that fires on the
  *     first side-effecting call (bash / edit / write).
- *   - orchestrator advisory pipeline: post-tool nudges (family-mix,
- *     repeat_call_chain, goal_drift_detected — the latter is now a
- *     no-op since goal contracts are gone, but the rule is preserved
- *     for future contracts).
  *   - brainstorming slash command (registered via the skill at
  *     `skills/brainstorming/SKILL.md`).
  *
- * The orchestrator used to own `goal_contract_create` as its single
- * tool. That tool was deleted along with its entire support stack
- * (state-persistence, workdir, namespace-ownership, observability
- * runner, types, goal-lock). With no orchestrator state there is no
- * orchestrator tool; the layer above becomes pure advisory + curation.
+ * The orchestrator exports a curated tool allowlist + soft-mode reminder
+ * + system-prompt overlay. The LLM drives any multi-stage work via raw
+ * `TaskCreate` × N + `TaskExecute` directly. No orchestrator-registered
+ * tool mediates the workflow.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -144,17 +139,7 @@ const SYSTEM_PROMPT_TEMPLATE = join(
 	"SYSTEM.md",
 );
 
-/**
- * Install orchestrator-side handlers on the pi extension. Idempotent.
- *
- * Post chore/remove-orchestrator-advisory the function is a no-op
- * (no advisory pipeline to wire). Kept for API compatibility — the
- * skill and any downstream callers can still invoke it; it just
- * does nothing now.
- */
-export function registerOrchestratorTools(pi: ExtensionAPI): void {
-	// no-op: orchestrator owns no advisory handlers anymore
-}
+
 
 /**
  * Install the three session-level hooks.
@@ -204,13 +189,9 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 }
 
 /**
- * Default pi extension entrypoint.
- *
- * Post chore/drop-failure-catalog the orchestrator does no boot-time
- * validation (the failure-modes catalog + retry-helper were removed).
- * It just wires the advisory handlers + session hooks.
+ * Default pi extension entrypoint. Wires the three session hooks:
+ * session_start / before_agent_start / tool_call.
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
-	registerOrchestratorTools(pi);
 	installSessionHooks(pi);
 }

@@ -698,15 +698,3 @@ export const BRAINSTORM_TOOL = {
     required: [],
   },
 };
-
-export default {
-  BRAINSTORM_TOOL,
-  startBrainstorm,
-  processClarifyingPhase,
-  processProposingPhase,
-  processDesigningPhase,
-  finalizeDesign,
-  generateApprovalMessage,
-  parseTransitionResponse,
-  createOrchestratorContext,
-};

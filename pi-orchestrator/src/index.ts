@@ -1,20 +1,13 @@
 /**
  * @sages/pi-orchestrator — public surface.
  *
- * Re-exports helper modules and the orchestrator registrars.
- * The package's `pi.extensions` entry is `./src/extension.ts` which
- * calls `registerOrchestratorTools`.
- *
- * Post the goal-contract removal the orchestrator registers NO tools of
- * its own. It only wires advisory handlers + session-level hooks and
- * re-exports the helper modules that downstream callers (brainstorming,
- * tests) consume.
+ * Re-exports the brainstorming slash-command surface for downstream
+ * consumers. The package's `pi.extensions` entry is `./src/extension.ts`
+ * which wires the session hooks (no tools of its own).
  *
  * Most callers want:
- *   import { registerOrchestratorTools } from "@sages/pi-orchestrator";
+ *   import brainstorming helpers from "@sages/pi-orchestrator";
  */
-
-export { registerOrchestratorTools } from "./extension.js";
 
 // Brainstorming slash command
 export {
