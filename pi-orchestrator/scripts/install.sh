@@ -96,7 +96,7 @@ SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 # Subagent template install info (GC-2026-066 reversal).
 #
 # Every default subagent (Explore, PlanCompiler, Developer, Reviewer,
-# Fix, Merger, MergerAdvisor, +3 advisor agents) is a canonical
+# Developer, Reviewer (the two shipped agents)) is a canonical
 # built-in in pi-subagents — see `pi-subagents/src/default-agents.ts`.
 # No user-level template is shipped, and there is no install /
 # uninstall path for subagent templates anymore. Pre-existing
@@ -173,7 +173,7 @@ PI_EVALUATOR_PKG="$PI_EVALUATOR_DEST_DIR"
 # TaskExecute (Claude Code-compatible task tracking). Post
 # chore/remove-goal-contract the only consumer is the LLM itself,
 # which drives raw TaskCreate × N + TaskExecute for the canonical
-# 4-phase shape (Implement / Review / Fix / MergerAdvisor). The
+# 2-agent shape (Implement / Review). The
 # orchestrator's own chain tools (decompose_task, workflow_run) were
 # retired in earlier GCs; pi-tasks's TaskStore stays as the substrate
 # that the LLM writes against.
@@ -1543,7 +1543,7 @@ except Exception as e:
 # TaskGet, TaskUpdate, TaskOutput, TaskStop, TaskExecute). Post
 # chore/remove-goal-contract the only consumer is the LLM itself,
 # which drives raw TaskCreate × N + TaskExecute for the canonical
-# 4-phase shape (Implement / Review / Fix / MergerAdvisor). The
+# 2-agent shape (Implement / Review). The
 # orchestrator's own chain tools (decompose_task, workflow_run) were
 # retired in earlier GCs; pi-tasks's TaskStore stays as the substrate
 # that the LLM writes against.

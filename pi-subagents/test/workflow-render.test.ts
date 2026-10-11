@@ -75,19 +75,19 @@ describe("inline glyph mapping", () => {
   it("says a replayed agent came from the resume journal", () => {
     const lines = card({
       progress: [
-        agentEntry({ index: 0, label: "audit", state: "done", cached: true, agentType: "general-purpose" }),
+        agentEntry({ index: 0, label: "audit", state: "done", cached: true, agentType: "Developer" }),
       ],
     });
 
     const row = treeRows(lines)[1];
     // Ahead of the stat tail, so the row reads "why" before "how much".
     expect(row).toContain("from resume journal");
-    expect(row.indexOf("from resume journal")).toBeLessThan(row.indexOf("general-purpose"));
+    expect(row.indexOf("from resume journal")).toBeLessThan(row.indexOf("Developer"));
   });
 
   it("leaves an agent that actually ran unannotated", () => {
     const lines = card({
-      progress: [agentEntry({ index: 0, label: "audit", state: "done", agentType: "general-purpose" })],
+      progress: [agentEntry({ index: 0, label: "audit", state: "done", agentType: "Developer" })],
     });
 
     expect(treeRows(lines)[1]).not.toContain("resume journal");
@@ -230,8 +230,8 @@ describe("effective-vs-requested disclosure", () => {
     // It lives in the dialog's detail pane instead: `thinking: medium` on every
     // row of a fan-out is width the description needs more.
     expect(
-      agentStatSegments(agentEntry({ index: 0, agentType: "Explore", model: "haiku", thinking: "low" })),
-    ).toEqual(["Explore", "haiku"]);
+      agentStatSegments(agentEntry({ index: 0, agentType: "Developer", model: "haiku", thinking: "low" })),
+    ).toEqual(["Developer", "haiku"]);
   });
 });
 
@@ -241,14 +241,14 @@ describe("stat segments", () => {
       agentStatSegments(
         agentEntry({
           index: 0,
-          agentType: "Explore",
+          agentType: "Developer",
           model: "haiku",
           tokens: 18_400,
           toolCalls: 12,
           durationMs: 42_000,
         }),
       ),
-    ).toEqual(["Explore", "haiku", "18.4k", "12 tool calls", "42s"]);
+    ).toEqual(["Developer", "haiku", "18.4k", "12 tool calls", "42s"]);
   });
 
   it("omits every stat that is absent", () => {
@@ -274,7 +274,7 @@ describe("stat segments", () => {
             index: 0,
             label: "review:bugs",
             state: "done",
-            agentType: "Explore",
+            agentType: "Developer",
             model: "haiku",
             tokens: 18_400,
             toolCalls: 12,
@@ -416,7 +416,7 @@ describe("width", () => {
     agentEntry({
       index: 0,
       label: "an-extremely-long-agent-label-that-would-otherwise-wrap-the-whole-card",
-      agentType: "general-purpose",
+      agentType: "Developer",
       model: "claude-opus-4-5-20260101",
       tokens: 1_240_000,
       toolCalls: 412,

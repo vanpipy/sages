@@ -55,7 +55,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       prompt: "Delegate the greeting to a subagent.",
       respond: routeBySession({
         parentInitial: agentCall({
-          subagent_type: "general-purpose",
+          subagent_type: "Developer",
           description: "greet",
           prompt: "Say hello.",
           run_in_background: true,
@@ -86,7 +86,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       prompt: "Delegate the greeting to a subagent.",
       respond: routeBySession({
         parentInitial: agentCall({
-          subagent_type: "general-purpose",
+          subagent_type: "Developer",
           description: "greet",
           prompt: "Say hello.",
           run_in_background: false,

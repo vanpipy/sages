@@ -120,14 +120,14 @@ function cloneSession(turn?: (tool: any) => Promise<void> | void) {
 }
 
 /** What the model does when it plays along: one Agent call. */
-const callsAgent = (params: Record<string, unknown> = { subagent_type: "Explore", prompt: "go" }) =>
+const callsAgent = (params: Record<string, unknown> = { subagent_type: "Developer", prompt: "go" }) =>
   async (tool: any) => {
     await tool.execute("clone-tool-call-1", params, undefined, undefined, { cwd: "/fork" });
   };
 
 const opts = (over: Record<string, unknown> = {}) => ({
   ctx: mainCtx(),
-  type: "Explore",
+  type: "Developer",
   message: "find the flaky test",
   agentTool: agentTool(),
   ...over,
@@ -269,7 +269,7 @@ describe("cloning the conversation", () => {
     await runMentionClone(opts());
 
     expect(session.prompt).toHaveBeenCalledWith(
-      `find the flaky test\n\n${agentMentionReminder("Explore")}`,
+      `find the flaky test\n\n${agentMentionReminder("Developer")}`,
     );
   });
 });
@@ -302,12 +302,12 @@ describe("attributing the spawn to the real session", () => {
 
   it("forwards the parameters the clone chose", async () => {
     const tool = agentTool();
-    cloneSession(callsAgent({ subagent_type: "Plan", prompt: "sketch the migration" }));
+    cloneSession(callsAgent({ subagent_type: "Developer", prompt: "sketch the migration" }));
 
     await runMentionClone(opts({ agentTool: tool }));
 
     expect(tool.execute.mock.calls[0][1]).toEqual({
-      subagent_type: "Plan",
+      subagent_type: "Developer",
       prompt: "sketch the migration",
       run_in_background: true,
     });
@@ -322,7 +322,7 @@ describe("attributing the spawn to the real session", () => {
     // fleet, and its answer reaches nobody. The main conversation is not part
     // of the clone's turn, so background delivery is the only way back.
     const tool = agentTool();
-    cloneSession(callsAgent({ subagent_type: "Explore", prompt: "go" }));
+    cloneSession(callsAgent({ subagent_type: "Developer", prompt: "go" }));
 
     await runMentionClone(opts({ agentTool: tool }));
 
@@ -334,7 +334,7 @@ describe("attributing the spawn to the real session", () => {
     // explicit `false` is a reasonable thing for it to emit. It must not decide
     // this one.
     const tool = agentTool();
-    cloneSession(callsAgent({ subagent_type: "Explore", prompt: "go", run_in_background: false }));
+    cloneSession(callsAgent({ subagent_type: "Developer", prompt: "go", run_in_background: false }));
 
     await runMentionClone(opts({ agentTool: tool }));
 
@@ -360,7 +360,7 @@ describe("attributing the spawn to the real session", () => {
     const captured: any[] = [];
     cloneSession(async (t) => {
       await callsAgent()(t);
-      captured.push(await t.execute("c2", { subagent_type: "Explore", prompt: "again" }, undefined, undefined, {}));
+      captured.push(await t.execute("c2", { subagent_type: "Developer", prompt: "again" }, undefined, undefined, {}));
     });
 
     await runMentionClone(opts());

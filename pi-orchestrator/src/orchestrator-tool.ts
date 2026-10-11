@@ -36,15 +36,16 @@ import type { ExtensionAPI, AgentToolResult, AgentToolUpdateCallback } from "@ea
 import { TaskStore } from "@sages/pi-tasks/task-store";
 
 /**
- * The four canonical agent types that pi-tasks's TaskStore metadata
- * captures. Kept narrow on purpose — the orchestrator does not invent
- * new agent roles; the LLM picks one of these per phase.
+ * The two canonical agent types that pi-subagents ships with
+ * (chore/only-developer-and-reviewer). Kept narrow on purpose — the
+ * orchestrator does not invent new agent roles; the LLM picks one of
+ * these per phase. Custom agents via `~/.pi/agent/agents/*.md` extend
+ * the set, but the tool's static `AgentType` union stays at the
+ * shipped set so the typebox schema is tight.
  */
 export const AGENT_TYPES = [
 	"Developer",
 	"Reviewer",
-	"Fix",
-	"MergerAdvisor",
 ] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
@@ -64,8 +65,6 @@ export const OrchestrateParams = Type.Object({
 			agentType: Type.Union([
 				Type.Literal("Developer"),
 				Type.Literal("Reviewer"),
-				Type.Literal("Fix"),
-				Type.Literal("MergerAdvisor"),
 			]),
 			detail: Type.Optional(
 				Type.String({
@@ -209,8 +208,8 @@ export function registerOrchestrateTool(pi: ExtensionAPI): void {
 				"are resolved to task IDs and wired into both sides of the " +
 				"dependency. After this call, the standard cascade (via " +
 				"`TaskExecute` on the first ready task) drives the phases in " +
-				"dependency order. The four canonical agent types are " +
-				"Developer / Reviewer / Fix / MergerAdvisor.",
+				"dependency order. The two shipped agent types are " +
+				"Developer and Reviewer.",
 		parameters: OrchestrateParams,
 		execute: orchestrate,
 	});

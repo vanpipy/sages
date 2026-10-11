@@ -83,7 +83,7 @@ export const BASELINE_TOOLS: readonly string[] = [
 
 /**
  * Pi-tasks tools (registered by `@sages/pi-tasks`). Exposed so the LLM
- * can drive the Implement → Review → optional Fix → Merge pipeline
+ * can drive the Implement → Review → optional Developer → Reviewer pipeline
  * directly via TaskCreate / TaskList / TaskExecute / etc.
  */
 export const PI_TASKS_TOOLS: readonly string[] = [

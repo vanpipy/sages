@@ -38,7 +38,7 @@ const spawnRequest = (overrides: Partial<WorkflowSpawnRequest> = {}): WorkflowSp
   index: 0,
   prompt: "do the thing",
   label: "impl",
-  agentType: "general-purpose",
+  agentType: "Developer",
   ...overrides,
 });
 

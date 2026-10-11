@@ -13,7 +13,7 @@
  * 1 tool (`goal_contract_create`) + 4 subagent control tools. The
  * active toolset now includes pi-tasks tools (TaskCreate / TaskList /
  * TaskExecute / etc.) for driving the Implement → Review → optional
- * Fix → Merge pipeline.
+ * Developer → Reviewer pipeline.
  *
  * Self-contained MockPi (no real pi runtime). Run:
  *   cd pi-orchestrator && bun test ./test/smoke/gc-2026-073.test.ts

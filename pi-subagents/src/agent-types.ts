@@ -215,7 +215,7 @@ export function resolveSpawnTypeIn(
   // unregistered general-purpose resolving to `getConfig`'s all-tools hardcoded
   // tier — is what `fallbackSubagent: none` is for, not something to close
   // under everyone silently.
-  return { ok: true, type: "general-purpose", fellBackFrom: raw };
+  return { ok: true, type: "Developer", fellBackFrom: raw };
 }
 
 /** Resolve a caller-supplied agent type against the process-wide registry. */
@@ -319,7 +319,7 @@ export function getConfig(type: string): {
   }
 
   // Fallback for unknown/disabled types — general-purpose config
-  const gp = agents.get("general-purpose");
+  const gp = agents.get("Developer");
   if (gp && gp.enabled !== false) {
     return {
       displayName: gp.displayName ?? gp.name,

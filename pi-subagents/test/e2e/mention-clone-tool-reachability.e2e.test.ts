@@ -91,7 +91,7 @@ describe("mention clone tool reachability against real pi-mono", () => {
 
     // Never rejects by contract; a faux turn that cannot complete is fine,
     // because the tool set is fixed at construction.
-    await runMentionClone({ ctx, type: "Explore", message: "go", agentTool });
+    await runMentionClone({ ctx, type: "Developer", message: "go", agentTool });
 
     expect(sessions).toHaveLength(1);
     // The bug this file exists for: with an empty allowlist this is `[]`.
@@ -128,7 +128,7 @@ describe("mention clone tool reachability against real pi-mono", () => {
     faux.setResponses([
       (context: Context) => {
         seen = context;
-        return fauxAssistantMessage(fauxToolCall("Agent", { subagent_type: "Explore", prompt: "go" }));
+        return fauxAssistantMessage(fauxToolCall("Agent", { subagent_type: "Developer", prompt: "go" }));
       },
       fauxAssistantMessage("done"),
     ]);
@@ -139,7 +139,7 @@ describe("mention clone tool reachability against real pi-mono", () => {
       execute: vi.fn(async () => ({ content: [{ type: "text", text: "Agent ID: a1" }], details: undefined })),
     } as any;
 
-    const result = await runMentionClone({ ctx, type: "Explore", message: "go", agentTool });
+    const result = await runMentionClone({ ctx, type: "Developer", message: "go", agentTool });
 
     expect(result).toEqual({ spawned: true });
     expect(seen).toBeDefined();

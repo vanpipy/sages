@@ -52,7 +52,7 @@ const FAKE_SESSION = { subscribe: () => () => {}, messages: [] };
 function makeRecord(over: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id: "a1",
-    type: "general-purpose",
+    type: "Developer",
     description: "Sleep then report 1",
     status: "running",
     toolUses: 0,
@@ -260,7 +260,7 @@ describe("FleetList navigation", () => {
     expect(selected).toContain("<text>one</text>");
     expect(selected).toMatch(/<text>\d+s · ↓ [\d.]+k? tokens<\/text>/);
     // Agent display name rendered with the text token too (this type has no badge).
-    expect(selected).toContain(`<text>${getDisplayName("general-purpose")}</text>`);
+    expect(selected).toContain(`<text>${getDisplayName("Developer")}</text>`);
     // Inactive rows keep the muted/dim treatment.
     const unselected = h.render().find(l => l.includes("two"))!;
     expect(unselected).toContain("<dim>○</dim>");
@@ -439,7 +439,7 @@ describe("FleetList rendering", () => {
     expect(lines.find(l => l.includes("main"))).toContain("●"); // main selected by default
     const agentLine = lines.find(l => l.includes("Sleep then report 1"))!;
     expect(agentLine).toContain("○");
-    expect(agentLine).toContain(getDisplayName("general-purpose"));
+    expect(agentLine).toContain(getDisplayName("Developer"));
     expect(agentLine).toContain("↓ 13.1k tokens");
     expect(agentLine).toMatch(/\d+s · ↓/); // "<seconds>s · ↓ ..." (timing-agnostic)
   });

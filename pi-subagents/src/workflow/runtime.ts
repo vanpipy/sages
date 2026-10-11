@@ -849,7 +849,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       // reads the same as the row it continues.
       const agentId = resumed?.agentId ?? `wf-agent-${index}`;
       const label = payload.label ?? resumed?.label ?? derivedLabel(payload.prompt);
-      const agentType = resumed?.agentType ?? payload.agentType ?? "general-purpose";
+      const agentType = resumed?.agentType ?? payload.agentType ?? "Developer";
       const model = resumed !== undefined ? resumed.model : payload.model;
       const isolation = resumed !== undefined ? resumed.isolation : payload.isolation;
       openLaunches.set(callId, label);

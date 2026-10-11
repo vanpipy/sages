@@ -37,14 +37,14 @@ layer only.
 
 ## The LLM's responsibility
 
-Multi-stage work — anything that warrants a 4-phase shape — is the LLM's
+Multi-stage work — anything that warrants a 2-agent shape — is the LLM's
 job now. The canonical pattern:
 
 ```text
 TaskCreate({ subject: "Implement", agentType: "Developer", blocks: ["Review"] })
-TaskCreate({ subject: "Review",   agentType: "Reviewer", blockedBy: ["Implement"], blocks: ["Fix", "Merge"] })
-TaskCreate({ subject: "Fix",      agentType: "Fix",      blockedBy: ["Review"] })
-TaskCreate({ subject: "Merge",    agentType: "MergerAdvisor", blockedBy: ["Fix"] })
+TaskCreate({ subject: "Review",   agentType: "Reviewer", blockedBy: ["Developer"], blocks: ["Reviewer", "Merge"] })
+TaskCreate({ subject: "Reviewer",      agentType: "Developer",      blockedBy: ["Review"] })
+TaskCreate({ subject: "Merge",    agentType: "Reviewer", blockedBy: ["Reviewer"] })
 TaskExecute  // auto-cascades through every phase
 ```
 
