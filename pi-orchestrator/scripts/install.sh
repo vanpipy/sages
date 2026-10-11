@@ -22,9 +22,10 @@
 #     pi-evaluator         → ~/.pi/packages/pi-evaluator
 #     pi-tasks             → ~/.pi/packages/pi-tasks  (workflow engine: TaskCreate/TaskUpdate/TaskExecute/...)
 #                              GC-2026-install-pi-tasks: Sages fork of @tintinweb/pi-tasks v0.9.0.
-#                              Used by decompose_task for chain materialization
-#                              + the LLM-driven raw TaskCreate × N + TaskExecute flow
-#                              (post-GC-2026-remove-workflow-run-prod).
+#                              Underpins the LLM-driven raw TaskCreate × N + TaskExecute
+#                              flow. Pre-chore/remove-goal-contract the orchestrator also
+#                              consumed it for decompose_task chains; post that commit the
+#                              only consumer is the LLM's own TaskCreate usage.
 #
 #   npm-installed extensions (--prefix ~/.pi/agent/npm), latest
 #   from the npm registry — no version pin (see header below):
@@ -169,12 +170,13 @@ PI_EVALUATOR_PKG="$PI_EVALUATOR_DEST_DIR"
 
 # pi-tasks package info (sage peer, deployed by file-copy)
 # pi-tasks is the task-graph engine: TaskCreate / TaskList / TaskUpdate /
-# TaskExecute (Claude Code-compatible task tracking). decompose_task
-# (the orchestrator's user-intent chain tool, GC-2026-task-feeding-and-decomposition)
-# materializes chains via pi-tasks's TaskStore; the LLM also drives
-# raw TaskCreate × N + TaskExecute for the canonical 4-phase shape
-# (Implement / Review / Fix / MergerAdvisor) since
-# GC-2026-remove-workflow-run-prod removed the one-shot pipeline runner.
+# TaskExecute (Claude Code-compatible task tracking). Post
+# chore/remove-goal-contract the only consumer is the LLM itself,
+# which drives raw TaskCreate × N + TaskExecute for the canonical
+# 4-phase shape (Implement / Review / Fix / MergerAdvisor). The
+# orchestrator's own chain tools (decompose_task, workflow_run) were
+# retired in earlier GCs; pi-tasks's TaskStore stays as the substrate
+# that the LLM writes against.
 #
 # @sages/pi-tasks is the Sages fork of @tintinweb/pi-tasks v0.9.0
 # (added in commit 8fd2693; sagesized to @sages/* namespace). npm
@@ -1096,10 +1098,13 @@ is_pi_orchestrator_installed() {
   # (line ~1127) + is_pi_evaluator_installed + is_pi_tasks_installed.
   # GC-2026-main-agent-tool-surface: this was the only missing guard.
   # Without it, a deleted $PI_DIR/packages/pi-orchestrator/ passed the
-  # early-return at line ~2093 below, and the orchestrator's tools
-  # (goal_contract_create + decompose_task) silently vanished from the
-  # LLM-facing tool surface — the host's extension loader at
-  # pi-coding-agent's loader.js:541-555 fail-softs with zero logging.
+  # early-return at line ~2093 below, and the orchestrator's
+  # extension would silently fail to register — the host's extension
+  # loader at pi-coding-agent's loader.js:541-555 fail-softs with zero
+  # logging. (Historical context: pre-chore/remove-goal-contract the
+  # orchestrator's registered tools were goal_contract_create +
+  # decompose_task. Both are gone; this guard now just ensures the
+  # extension entrypoint is on disk.)
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && return 1
 
@@ -1535,13 +1540,13 @@ except Exception as e:
 # pi-tasks — workflow engine for pi (GC-2026-install-pi-tasks)
 #
 # pi-tasks exposes 7 Claude Code-compatible tools (TaskCreate, TaskList,
-# TaskGet, TaskUpdate, TaskOutput, TaskStop, TaskExecute). The
-# decompose_task (GC-2026-task-feeding-and-decomposition) materializes
-# a linear chain (T1 → T2 → … → TN with R1 Reviewer on T1) via
-# pi-tasks's TaskStore. The canonical 4-phase shape
-# (Implement / Review / Fix / MergerAdvisor) is now built directly
-# by the LLM via raw TaskCreate × N + TaskExecute, since
-# GC-2026-remove-workflow-run-prod removed the one-shot workflow_run.
+# TaskGet, TaskUpdate, TaskOutput, TaskStop, TaskExecute). Post
+# chore/remove-goal-contract the only consumer is the LLM itself,
+# which drives raw TaskCreate × N + TaskExecute for the canonical
+# 4-phase shape (Implement / Review / Fix / MergerAdvisor). The
+# orchestrator's own chain tools (decompose_task, workflow_run) were
+# retired in earlier GCs; pi-tasks's TaskStore stays as the substrate
+# that the LLM writes against.
 #
 # pi-tasks is file-copied from $LOCAL_REPO_ROOT/pi-tasks (the Sages
 # fork of @tintinweb/pi-tasks v0.9.0). The npm upstream
@@ -2211,7 +2216,8 @@ install() {
   install_pi_codebase_memory || exit 1
   write_codebase_memory_mcp_config
 
-  # Install pi-tasks sage peer (task-graph engine for decompose_task + raw TaskCreate).
+  # Install pi-tasks sage peer (workflow engine used by the LLM via raw
+  # TaskCreate / TaskExecute; the orchestrator no longer mediates this).
   # GC-2026-install-pi-tasks: must land BEFORE install_orchestrator_files so
   # the orchestrator's `file:../pi-tasks` dep can resolve during bun install.
   install_pi_tasks || exit 1
