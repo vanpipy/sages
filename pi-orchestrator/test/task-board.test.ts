@@ -486,6 +486,98 @@ describe("TaskBoard end-to-end — the Task Feeding loop", () => {
 		});
 		expect(empty).toBeUndefined();
 	});
+
+	it("starts from an empty board, a single new task is created and consumed", async () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+
+		// 1. INITIAL STATE — empty board. The orchestrator's consumer
+		// loop is in its listen phase: drain returns nothing,
+		// findNextConsumable returns undefined.
+		expect(board.list()).toHaveLength(0);
+		expect(board.findNextConsumable()).toBeUndefined();
+		expect(board.drain()).toHaveLength(0);
+
+		// 2. NEW TASK ARRIVES — a single follow-up or ad-hoc task is
+		// created (e.g. the LLM spawns a NEEDS_WORK Developer task after
+		// a Reviewer verdict, or a brainstorming hand-off materializes a
+		// single ad-hoc task outside a full plan).
+		const created = board.create({
+			subject: "Single new task",
+			description: "the only task on the board",
+			agentType: "Developer",
+		});
+		expect(board.list()).toHaveLength(1);
+		expect(board.list()[0].id).toBe(created.id);
+		// Created in `pending` — not consumable yet.
+		expect(board.findNextConsumable()).toBeUndefined();
+
+		// 3. EXECUTOR COMPLETES — the simulated subagent marks the task
+		// completed with a result.
+		store.update(created.id, {
+			status: "completed",
+			metadata: { result: "Done. Tests pass." },
+		});
+
+		// 4. ORCHESTRATOR WAKES UP — the next findNextConsumable() picks
+		// up the new arrival. Drain consumes it in one go.
+		const next = board.findNextConsumable();
+		expect(next).toBeDefined();
+		expect(next?.id).toBe(created.id);
+		expect(next?.subject).toBe("Single new task");
+
+		const drained = board.drain();
+		expect(drained).toHaveLength(1);
+		expect(drained[0].id).toBe(created.id);
+		expect(drained[0].result).toBe("Done. Tests pass.");
+		// Developer path: no verdict, no follow-up suggestion.
+		expect(drained[0].verdict).toBeUndefined();
+		expect(drained[0].follow_up_suggestion).toBeUndefined();
+
+		// 5. AUDIT — the new task is now `consumed`.
+		const after = store.get(created.id)!;
+		expect(after.metadata?.consumed).toBe(true);
+		expect(after.metadata?.consumed_at).toBe(drained[0].consumed_at);
+
+		// 6. BOARD IS EMPTY AGAIN — second drain returns nothing, the
+		// orchestrator is back to listening.
+		expect(board.drain()).toHaveLength(0);
+		expect(board.findNextConsumable()).toBeUndefined();
+	});
+
+	it("awaitNextConsumable picks up a single new arrival on an empty board", async () => {
+		const store = new TaskStore(join(scratch, "tasks.json"));
+		const board = new TaskBoard({ cwd: scratch, store });
+		expect(board.list()).toHaveLength(0);
+
+		// Schedule a single task to appear 100ms from now. In production
+		// this would be the LLM calling board.create() or the
+		// brainstorming hand-off materializing a task; the orchestrator
+		// is in its listening branch and should pick it up immediately.
+		setTimeout(() => {
+			const t = board.create({
+				subject: "Late arrival",
+				description: "the only task on the board",
+				agentType: "Developer",
+			});
+			store.update(t.id, {
+				status: "completed",
+				metadata: { result: "Done late." },
+			});
+		}, 100);
+
+		const next = await board.awaitNextConsumable({
+			timeoutMs: 1_000,
+			pollIntervalMs: 25,
+		});
+		expect(next).toBeDefined();
+		expect(next?.subject).toBe("Late arrival");
+
+		// Consume it and verify the audit trail.
+		const out = board.consume(next!.id);
+		expect(out.result).toBe("Done late.");
+		expect(store.get(next!.id)?.metadata?.consumed).toBe(true);
+	});
 });
 
 // Suppress unused-var lint — scratch is intentionally retained for

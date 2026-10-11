@@ -128,6 +128,21 @@ export interface TaskBoardConsumeOutput {
 	follow_up_suggestion?: string;
 }
 
+// ─── Creation: single-task input ────────────────────────────────────────────
+
+export interface TaskBoardCreateInput {
+	subject: string;
+	description: string;
+	agentType?: AgentType;
+	activeForm?: string;
+	/** Other metadata keys to merge into `metadata.agentType` (if set) or directly. */
+	metadata?: Record<string, unknown>;
+	/** Task IDs this new task should block (set on the predecessor's `blocks`). */
+	blocks?: string[];
+	/** Task IDs this new task depends on (set on this task's `blockedBy`). */
+	blockedBy?: string[];
+}
+
 /** Errors `consume` throws — caught and formatted by the tool wrapper. */
 export class TaskBoardConsumeError extends Error {
 	constructor(
@@ -203,6 +218,41 @@ export class TaskBoard {
 				blocks: t.blocks,
 			}));
 		return { intent: input.intent, tasks };
+	}
+
+	/**
+	 * Create a single task on the board. The orchestrator's single-creator
+	 * role — when the LLM wants to add one follow-up task (e.g. a
+	 * NEEDS_WORK Developer task after a Reviewer verdict, or a single
+	 * ad-hoc task outside a full plan), it calls `board.create({...})`.
+	 *
+	 * `agentType` (when set) is stored under `metadata.agentType` so the
+	 * later consumption side can identify Developer vs Reviewer tasks for
+	 * verdict parsing. `blocks` / `blockedBy` are wired in both directions
+	 * just like `materializePlan` does. Returns the freshly-created task
+	 * (re-read from the store after wiring).
+	 */
+	create(input: TaskBoardCreateInput): TaskGet {
+		const meta: Record<string, unknown> = { ...(input.metadata ?? {}) };
+		if (input.agentType) meta.agentType = input.agentType;
+
+		const task = this.store.create(
+			input.subject,
+			input.description,
+			input.activeForm,
+			meta,
+		);
+		if (input.blocks) {
+			for (const target of input.blocks) {
+				this.store.update(task.id, { addBlocks: [target] });
+			}
+		}
+		if (input.blockedBy) {
+			for (const pred of input.blockedBy) {
+				this.store.update(task.id, { addBlockedBy: [pred] });
+			}
+		}
+		return this.store.get(task.id)!;
 	}
 
 	/**
