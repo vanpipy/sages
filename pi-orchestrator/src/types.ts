@@ -2,16 +2,18 @@
  * Orchestrator Types
  *
  * After GC-2026-orchestrator-simplify + GC-2026-task-feeding-and-decomposition +
- * GC-2026-remove-workflow-run-prod the orchestrator owns TWO tools
- * (`goal_contract_create`, `decompose_task`) — DAG, dispatch, audit,
- * reminder, and workflow_run tools were removed. The intent contract below
- * is what gets written to disk; the canonical 4-phase pipeline (Implement
- * → Review ⇆ Fix → Merge) is materialized by the LLM as raw
- * `TaskCreate` × N + `TaskExecute` directly, with `agentType` set to
- * `"Developer"` / `"Reviewer"` / `"Fix"` / `"MergerAdvisor"` per phase.
+ * GC-2026-remove-workflow-run-prod + GC-2026-decompose-task-removed the
+ * orchestrator owns ONE tool (`goal_contract_create`) — DAG, dispatch,
+ * audit, reminder, workflow_run, and decompose_task tools were removed.
+ * The intent contract below is what gets written to disk; the canonical
+ * 4-phase pipeline (Implement → Review ⇆ Fix → Merge) is materialized
+ * by the LLM as raw `TaskCreate` × N + `TaskExecute` directly, with
+ * `agentType` set to `"Developer"` / `"Reviewer"` / `"Fix"` /
+ * `"MergerAdvisor"` per phase.
  *
- * Storage location: .pi/orchestrator/  (NOT .sages/workspace/ — that
- * directory is reserved for ephemeral session state).
+ * Storage location: `${TMPDIR}/${ORCHESTRATOR_WORKDIR}` (see
+ * `./workdir.ts`). The legacy per-project `.pi/orchestrator/` layout was
+ * retired — see git log: chore/orchestrator-workdir-tmpdir.
  */
 
 /** The contract that the orchestrator commits to satisfying. */
@@ -44,11 +46,5 @@ export interface GoalContract {
 	created_at: string;
 }
 
-/** Path conventions — single source of truth for the orchestrator directory layout. */
-export const ORCHESTRATOR_DIR = ".pi/orchestrator";
+/** Path conventions — prefix for goal-contract filenames. */
 export const GOAL_CONTRACT_PREFIX = "goal-";
-
-/** Returns the path for a goal contract YAML. */
-export function goalContractPath(cwd: string, id: string): string {
-	return `${cwd}/${ORCHESTRATOR_DIR}/${GOAL_CONTRACT_PREFIX}${id}.yaml`;
-}

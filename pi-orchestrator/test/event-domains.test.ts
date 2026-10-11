@@ -9,26 +9,41 @@
  *
  * The test DAG id is `TEST-DAG-event-domains`, isolated from any real
  * orchestrator state.
+ *
+ * Migration note: post the chore/orchestrator-workdir-tmpdir commit
+ * the orchestrator's storage root is `${TMPDIR}/${ORCHESTRATOR_WORKDIR}`
+ * (no `.pi/orchestrator` segment). The test routes ORCHESTRATOR_WORKDIR
+ * at a per-test tempdir so the audit-state files land somewhere we can
+ * clean up.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { readFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-	RunEvent,
-	emitRunEvent,
-	domainOf,
-} from "../src/observability/index.js";
+import { RunEvent, emitRunEvent, domainOf } from "../src/observability/index.js";
+import { resolveOrchestratorWorkdir, resetOrchestratorWorkdirCache } from "../src/workdir.js";
 
 const TEST_DAG = "TEST-DAG-event-domains";
-const auditStatePath = (): string => join(".pi/orchestrator", `audit-state-${TEST_DAG}.yaml`);
+let workdir: string;
 
 describe("event domains — isolation", () => {
 	beforeEach(() => {
+		// Route the orchestrator's workdir at a per-test tempdir.
+		const testWorkdir = mkdtempSync(join(tmpdir(), "sages-event-domains-"));
+		process.env.ORCHESTRATOR_WORKDIR = testWorkdir;
+		resetOrchestratorWorkdirCache();
+		workdir = resolveOrchestratorWorkdir();
 		// Clean up any prior test state so each test starts fresh.
-		const p = auditStatePath();
+		const p = join(workdir, `audit-state-${TEST_DAG}.yaml`);
 		if (existsSync(p)) rmSync(p);
+	});
+
+	afterEach(() => {
+		resetOrchestratorWorkdirCache();
+		delete process.env.ORCHESTRATOR_WORKDIR;
+		if (existsSync(workdir)) rmSync(workdir, { recursive: true, force: true });
 	});
 
 	it("RunEvent values start with 'run/'", () => {
@@ -39,11 +54,9 @@ describe("event domains — isolation", () => {
 	});
 
 	it("emitRunEvent writes to audit-state-{dag}.yaml", () => {
-		// Ensure the orchestrator dir exists before the emit so we exercise the
-		// emitter's directory-ensure branch end-to-end.
-		mkdirSync(".pi/orchestrator", { recursive: true });
+		// The emitter mkdirs the workdir itself, so no pre-mkdir needed here.
 		emitRunEvent(TEST_DAG, RunEvent.GoalCreated, { foo: "bar" });
-		const path = auditStatePath();
+		const path = join(workdir, `audit-state-${TEST_DAG}.yaml`);
 		expect(existsSync(path)).toBe(true);
 		const raw = readFileSync(path, "utf-8");
 		expect(raw).toContain("run/goal_created");

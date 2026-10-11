@@ -9,14 +9,21 @@
  *      bare symlink IS "not a file" under lstat, so the existing check
  *      DOES catch it. But there's a window between the check (line 132)
  *      and the rename (line 140) where an attacker could plant a
- *      symlink pointing outside .pi/orchestrator/. The rename would
- *      then write through the symlink to a sensitive location.
+ *      symlink pointing outside the workdir. The rename would then
+ *      write through the symlink to a sensitive location.
  *   2. The directory walk in resolveContainedPath (mkdirSync loop) runs
  *      BEFORE acquireLock. An attacker could swap a directory component
  *      for a symlink between mkdir and lock acquisition.
  *
  * P3 fix: re-run lstatSync(target).isSymbolicLink() INSIDE the lock,
  * immediately before renameSync. Throw on hit.
+ *
+ * Migration note: post the chore/orchestrator-workdir-tmpdir commit
+ * the orchestrator's storage root is the `workdir` passed to the
+ * storage functions (no `.pi/orchestrator` segment under it). The
+ * tests below pass `mkdtempSync(...)` as `workdir` and plant the
+ * attack symlink directly at `workdir` (or `workdir/<rel>`) rather
+ * than at `workdir/.pi/orchestrator/<rel>`.
  */
 
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
@@ -43,9 +50,9 @@ describe("state-persistence TOCTOU window (GC-2026-097 P3)", () => {
 	});
 
 	it("P3-1: writing through a pre-planted symlink target throws", () => {
-		// Pre-plant a symlink at the target path pointing outside .pi/orchestrator/.
+		// Pre-plant a symlink at the target path pointing outside the workdir.
 		// After the lock is acquired, re-check lstat and reject.
-		const targetDir = join(cwd, ".pi", "orchestrator");
+		const targetDir = cwd;
 		// First write creates the directory.
 		atomicWriteOrchestratorFile(cwd, "goal-GC-T1.yaml", VALID_GOAL, {
 			owner: "orchestrator",
@@ -80,7 +87,7 @@ describe("state-persistence TOCTOU window (GC-2026-097 P3)", () => {
 		// directory. The pre-lock walk would have created it as a normal
 		// dir, but if the attacker swaps it for a symlink between the
 		// walk and the lock, the lock-internal re-check catches it.
-		const targetDir = join(cwd, ".pi", "orchestrator");
+		const targetDir = cwd;
 		atomicWriteOrchestratorFile(cwd, "goal-GC-T3.yaml", VALID_GOAL, {
 			owner: "orchestrator",
 			validate: VALIDATOR,

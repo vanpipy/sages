@@ -2,7 +2,8 @@
  * runner — durable run/* event emitter.
  *
  * Appends a single run/* event record to
- * `.pi/orchestrator/audit-state-{goal_id}.yaml`. Preserves the existing
+ * `{ORCHESTRATOR_WORKDIR}/audit-state-{goal_id}.yaml` (the orchestrator's
+ * tmpdir-resolved workdir — see `./workdir.ts`). Preserves the existing
  * audit-state format (top-level yaml mapping with an `events:` array
  * of {name, domain, ts, payload?} records). Reads the current state,
  * appends the new event, writes back via a temp + rename so the file
@@ -30,8 +31,10 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import * as yaml from "js-yaml";
 import { RunEvent, domainOf } from "./events.js";
+import { resolveOrchestratorWorkdir } from "../workdir.js";
 
-const ORCHESTRATOR_DIR = ".pi/orchestrator";
+/** Path segment for the audit-state files inside the workdir. */
+const AUDIT_DIR = "";
 
 /**
  * Shape of a single record written to the audit-state `events:` array.
@@ -50,7 +53,7 @@ export interface AuditEvent {
 }
 
 /**
- * Append a run/* event to `.pi/orchestrator/audit-state-{goal_id}.yaml`.
+ * Append a run/* event to `{ORCHESTRATOR_WORKDIR}/audit-state-{goal_id}.yaml`.
  *
  * Creates the directory + file if absent. Asserts that `event` is a
  * `run/*` member (other domains are routed to their own emitter).
@@ -69,8 +72,9 @@ export function emitRunEvent(
   if (domainOf(event) !== "run") {
     throw new Error(`emitRunEvent called with non-run event: ${event}`);
   }
-  const path = auditStatePath(goalId);
-  ensureDir();
+  const workdir = resolveOrchestratorWorkdir();
+  const path = auditStatePath(workdir, goalId);
+  ensureDir(workdir);
   const state = readAuditState(path);
   const record: AuditEvent = {
     name: event,
@@ -82,12 +86,12 @@ export function emitRunEvent(
   writeAuditState(path, state);
 }
 
-function auditStatePath(goalId: string): string {
-  return join(ORCHESTRATOR_DIR, `audit-state-${goalId}.yaml`);
+function auditStatePath(workdir: string, goalId: string): string {
+  return join(workdir, AUDIT_DIR, `audit-state-${goalId}.yaml`);
 }
 
-function ensureDir(): void {
-  if (!existsSync(ORCHESTRATOR_DIR)) mkdirSync(ORCHESTRATOR_DIR, { recursive: true });
+function ensureDir(workdir: string): void {
+  if (!existsSync(workdir)) mkdirSync(workdir, { recursive: true, mode: 0o700 });
 }
 
 function readAuditState(path: string): { events: AuditEvent[]; [k: string]: unknown } {

@@ -21,6 +21,10 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+	resolveOrchestratorWorkdir,
+	resetOrchestratorWorkdirCache,
+} from "@/workdir.js";
 import * as yaml from "js-yaml";
 import {
 	buildGoalContract,
@@ -37,13 +41,23 @@ import {
 import type { GoalContract } from "@/types.js";
 
 let cwd: string;
+let workdir: string;
 
 beforeEach(() => {
 	cwd = mkdtempSync(join(tmpdir(), "goal-contract-test-"));
+	// Route the orchestrator's runtime state into the test's own tmpdir
+	// (so the test doesn't trample on the host's TMPDIR) — see
+	// `./workdir.ts` for the production path.
+	process.env.ORCHESTRATOR_WORKDIR = cwd;
+	resetOrchestratorWorkdirCache();
+	workdir = resolveOrchestratorWorkdir();
 });
 
 afterEach(() => {
-	if (existsSync(cwd)) rmSync(cwd, { recursive: true, force: true });
+	resetOrchestratorWorkdirCache();
+	delete process.env.ORCHESTRATOR_WORKDIR;
+	if (existsSync(workdir)) rmSync(workdir, { recursive: true, force: true });
+	if (existsSync(cwd) && cwd !== workdir) rmSync(cwd, { recursive: true, force: true });
 });
 
 const BASE_INPUT = {
@@ -229,7 +243,9 @@ describe("executeGoalContractCreate (GC-2026-orchestrator-simplify)", () => {
 	it("T-18: writes the goal yaml file", async () => {
 		const result = await executeGoalContractCreate(BASE_INPUT as any, { cwd });
 		expect(result.details?.contract).toBeTruthy();
-		const path = join(cwd, ".pi/orchestrator/goal-GC-2026-orchestrator-simplify.yaml");
+		// Post the chore/orchestrator-workdir-tmpdir migration the orchestrator
+		// state lands at `<workdir>/goal-{id}.yaml` (no `.pi/orchestrator`).
+		const path = join(workdir, "goal-GC-2026-orchestrator-simplify.yaml");
 		expect(existsSync(path)).toBe(true);
 		const raw = readFileSync(path, "utf8");
 		const parsed = yaml.load(raw) as any;
@@ -280,7 +296,7 @@ describe("executeGoalContractCreate (GC-2026-orchestrator-simplify)", () => {
 		const text = JSON.parse(result.content[0]!.text);
 		expect(text.status).toBe("error");
 		expect(text.validation.errors.length).toBeGreaterThan(0);
-		expect(existsSync(join(cwd, ".pi/orchestrator/goal-GC-2026-orchestrator-simplify.yaml"))).toBe(false);
+		expect(existsSync(join(workdir, "goal-GC-2026-orchestrator-simplify.yaml"))).toBe(false);
 	});
 });
 
