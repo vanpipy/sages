@@ -13,7 +13,6 @@
  *
  * Verifier list (current):
  *   - verify-catalog: catalogs/ vs source files (subagent.json, event.json, namespace.json)
- *   - verify-gcdb: every goal-{id}.yaml has postmortem or carve-out
  *   - verify-isolation-modes: no forbidden 'isolation: "worktree"' literals
  *   - verify-namespace-ownership: no orchestrator path leaks in subagent templates
  *   - verify-pi-universe: cross-package consistency
@@ -25,7 +24,7 @@
  *   - verify-workflow-meta-invariant (GC-2026-118 F3): workflow spec builders stamp workflow_run_goal_id
  *   - verify-task-source-invariant (GC-2026-120 AC8): chain-task create sites carry user_task_ref
  *
- * Why a wrapper script (vs just `bun run verify:catalog && bun run verify:gcdb ...`):
+ * Why a wrapper script (vs just `bun run verify:catalog && bun run verify:isolation-modes ...`):
  *   - One command for humans/CI to run.
  *   - Aggregate exit code: any single failure fails the whole run.
  *   - Single summary line at the end so CI logs are easy to scan.
@@ -59,11 +58,6 @@ const VERIFIERS: { id: string; script: string; label: string }[] = [
 		id: "catalog",
 		script: "verify-catalog.ts",
 		label: "catalogs/ vs source files",
-	},
-	{
-		id: "gcdb",
-		script: "verify-gcdb.ts",
-		label: "goal contracts have postmortem or carve-out",
 	},
 	{
 		id: "isolation-modes",

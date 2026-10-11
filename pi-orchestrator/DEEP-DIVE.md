@@ -10,8 +10,8 @@
 > The `pi-tasks` unified task-feeder drives the cascade. This document
 > still references the pre-removal architecture in places (path A, the
 > 4-phase pipeline shape) as historical context for the GC timeline;
-> see `pi/docs/postmortem/GC-2026-remove-workflow-run-prod.md` for the
-> full removal writeup.
+> see the relevant GC postmortem in `pi/docs/postmortem/` (when
+> present) for the full removal writeup.
 
 > **What this is.** A consolidated architecture + worked-example + GC timeline
 > for `@sages/pi-orchestrator`, written after a full read of every orchestrator
@@ -249,7 +249,7 @@ The user task is the **intent record (seed/source)**, not a child task in the ch
 - **T1 has no `blockedBy`** (line 530). The old contract `T1.blockedBy = [userTask.id]` deadlocked (userTask has no agent to run it, so T1 waited forever). The new contract is `blockedBy: []` so T1 runs immediately on creation.
 - **Linkage via metadata, not blockedBy**: every chain task stamps `metadata.user_task_ref = userTask.id`. `traceUserTaskChain` in `pi-tasks/src/orchestrator-task.ts:216-230` walks `blockedBy[0]` backward through the chain. Each `Ti.blockedBy = [Ti-1]`; the user task is the origin (no blockedBy). The RPC reply includes `user_task_chain: [userTask.id, ...created.map(t => t.id)]` so callers can build the full provenance order when they need it.
 
-**Why this matters**: an early reader might expect the decomposed chain to be appended after the user task via `blockedBy` (i.e., T1 should wait for userTask to complete, then run). That contract deadlocked. See GC-2026-120 for the full postmortem. The design is intentionally **intent derives, doesn't gate**: the user task is the seed that produces the chain, not a child that gets executed.
+**Why this matters**: an early reader might expect the decomposed chain to be appended after the user task via `blockedBy` (i.e., T1 should wait for userTask to complete, then run). That contract deadlocked. See the GC-2026-120 postmortem for the full analysis. The design is intentionally **intent derives, doesn't gate**: the user task is the seed that produces the chain, not a child that gets executed.
 
 **What you give up**: no managed worktree per chain task (runs in cwd on
 the active branch; R1 audits via `git log`); no NEEDS_REDESIGN / multiple
@@ -260,10 +260,9 @@ The RPC has a 30s timeout + 3 retries on timeout only (no retry on
 listener-side errors). The retry is **not idempotent** — if the listener
 processed the first attempt but the reply didn't make it back within
 the timeout, the retry will issue a new `requestId` and the listener
-will create a duplicate chain. See
-`pi/docs/postmortem/GC-2026-decompose-task-retry.md` for the full
-analysis (a follow-up GC against pi-tasks is needed for true
-idempotency).
+will create a duplicate chain. See the GC-2026-decompose-task-retry
+postmortem for the full analysis (a follow-up GC against pi-tasks is
+needed for true idempotency).
 
 ---
 
@@ -1390,9 +1389,6 @@ A clean `bun run verify:all` is the merge gate. The pre-commit hook
   Agent tool description
 - `pi-orchestrator/skills/brainstorming/SKILL.md` — brainstorming skill
   (5-phase: exploring → grilling → proposing → designing → approved)
-- `pi/docs/gc-index.md` — every GC id merged, with links to goal yaml
-  and postmortem
-- `pi/docs/postmortem/GC-*.md` — write-ups from resolved GCs
 
 ### pi-orchestrator source (the orchestrator's own code)
 
