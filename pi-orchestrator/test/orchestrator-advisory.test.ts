@@ -1,26 +1,26 @@
 /**
- * orchestrator-advisory.test.ts — GC-2026-053 + GC-2026-059 (orchestrator-simplify)
+ * orchestrator-advisory.test.ts — post chore/remove-goal-contract
  *
- * After GC-2026-orchestrator-simplify the orchestrator owns only one
- * tool (`goal_contract_create`) — DAG / dispatch / audit / reminder
- * detectors are gone. The remaining detectors are:
+ * After GC-2026-orchestrator-simplify + chore/remove-goal-contract the
+ * orchestrator owns zero tools of its own. The `goal_drift_detected`
+ * rule (which required an active goal contract to fire) and the
+ * `dag_*` / `dispatch_*` / `transition_*` / `no_progress_*` rules (tied
+ * to deleted DAG / dispatch / audit tools) are all removed. One rule
+ * remains:
  *
  *   - repeat_call_chain    (general stuck-on-same-call detector)
- *   - goal_drift_detected  (writes/reads outside active goal's scope)
  *
  * Also covers:
- *   - family classifier (orchestrator family contains goal_contract_create
- *     only — the four DAG/audit/dispatch/reminder tools are gone)
- *   - family-mix reminder (still works)
- *   - preToolBlockDecision (no-op after orchestrator-simplify — no
- *     critical orchestrator rules remain)
+ *   - family classifier (orchestrator family is empty after the
+ *     goal-contract removal)
+ *   - family-mix reminder
+ *   - RULE_FIX_DIRECTIVES surface (single entry: repeat_call_chain)
  */
 
 import { describe, expect, it } from "bun:test";
 import {
 	extractOrchestratorFindings,
 	orchestratorAdvisoryFor,
-	preToolBlockDecision,
 	familyOfTool,
 	emptyFamilyCounts,
 	familyMixReminderText,
@@ -36,13 +36,7 @@ function makeCall(toolName: string, input: Record<string, unknown>, t: number): 
 	return { toolName, input, timestamp: t };
 }
 
-const DEFAULT_OPTS = {
-	loadGoalScope: (id: string) => ({
-		goal_id: id,
-		scope_include: ["src/"],
-		scope_exclude: ["vendor/"],
-	}),
-};
+const DEFAULT_OPTS = {};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Empty / well-formed history
@@ -184,77 +178,6 @@ describe("orchestrator advisory: repeat_call_chain (GC-2026-059)", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// goal_drift_detected detector
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("orchestrator advisory: goal_drift_detected", () => {
-	it("GD-01: fires when a write references a path outside goal scope", () => {
-		const history = [
-			makeCall("write", { path: "vendor/foo.ts", goal_id: "GC-053" }, 1000),
-		];
-		const findings = extractOrchestratorFindings(history, {
-			...DEFAULT_OPTS,
-		});
-		expect(findings.some((f) => f.rule === "goal_drift_detected")).toBeTruthy();
-	});
-
-	it("GD-02: does NOT fire when paths are within scope", () => {
-		const history = [
-			makeCall("write", { path: "src/foo.ts", goal_id: "GC-053" }, 1000),
-			makeCall("edit", { path: "src/bar.ts", goal_id: "GC-053" }, 1100),
-			makeCall("read", { path: "src/baz.ts", goal_id: "GC-053" }, 1200),
-		];
-		const findings = extractOrchestratorFindings(history, {
-			...DEFAULT_OPTS,
-		});
-		expect(findings.find((f) => f.rule === "goal_drift_detected")).toBeUndefined();
-	});
-
-	it("GD-03: does NOT fire when input has no recognizable path field", () => {
-		const history = [
-			makeCall("bash", { command: "ls", goal_id: "GC-053" }, 1000),
-			makeCall("grep", { pattern: "foo", goal_id: "GC-053" }, 1100),
-		];
-		const findings = extractOrchestratorFindings(history, {
-			...DEFAULT_OPTS,
-		});
-		expect(findings.find((f) => f.rule === "goal_drift_detected")).toBeUndefined();
-	});
-
-	it("GD-04: does NOT fire when no goal scope loader is provided", () => {
-		const history = [
-			makeCall("write", { path: "vendor/foo.ts", goal_id: "GC-053" }, 1000),
-		];
-		const findings = extractOrchestratorFindings(history, {
-			loadGoalScope: undefined,
-		});
-		expect(findings.find((f) => f.rule === "goal_drift_detected")).toBeUndefined();
-	});
-
-	it("GD-05: empty scope.include means nothing is constrained (no drift)", () => {
-		const history = [
-			makeCall("write", { path: "vendor/foo.ts", goal_id: "GC-053" }, 1000),
-		];
-		const findings = extractOrchestratorFindings(history, {
-			loadGoalScope: (id) => ({ goal_id: id, scope_include: [], scope_exclude: [] }),
-		});
-		expect(findings.find((f) => f.rule === "goal_drift_detected")).toBeUndefined();
-	});
-
-	it("GD-06: does NOT fire when write has no goal_id (can't associate to a scope)", () => {
-		// Without goal_id the detector can't look up the active scope —
-		// we conservatively skip rather than fire on noise.
-		const history = [
-			makeCall("write", { path: "vendor/foo.ts" }, 1000),
-		];
-		const findings = extractOrchestratorFindings(history, {
-			...DEFAULT_OPTS,
-		});
-		expect(findings.find((f) => f.rule === "goal_drift_detected")).toBeUndefined();
-	});
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Budget + dedup + cap
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -372,12 +295,8 @@ describe("orchestrator advisory: rule fix directives", () => {
 		expect(RULE_FIX_DIRECTIVES.repeat_call_chain).toMatch(/change approach or conclude/);
 	});
 
-	it("FIX-2: goal_drift_detected fix mentions scope", () => {
-		expect(RULE_FIX_DIRECTIVES.goal_drift_detected).toMatch(/scope\.include/);
-	});
-
-	it("FIX-3: RULE_FIX_DIRECTIVES has exactly 2 entries after orchestrator-simplify", () => {
-		expect(Object.keys(RULE_FIX_DIRECTIVES).length).toBe(2);
+	it("FIX-2: RULE_FIX_DIRECTIVES has exactly 1 entry post goal-contract removal", () => {
+		expect(Object.keys(RULE_FIX_DIRECTIVES).length).toBe(1);
 	});
 
 	it("FIX-4: advisory text injects the per-rule fix directive verbatim", () => {
@@ -392,23 +311,6 @@ describe("orchestrator advisory: rule fix directives", () => {
 		});
 		expect(out.length).toBeGreaterThan(0);
 		expect(out[0]!.text).toContain(RULE_FIX_DIRECTIVES.repeat_call_chain);
-	});
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pre-tool block decision — no-op after orchestrator-simplify
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("orchestrator advisory: preToolBlockDecision (no-op after orchestrator-simplify)", () => {
-	it("PRE-1: returns undefined for any input — no critical orchestrator rules remain", () => {
-		const upcoming = makeCall("bash", { command: "ls" }, 1000);
-		const history = [
-			makeCall("bash", { command: "ls" }, 500),
-			makeCall("bash", { command: "ls" }, 600),
-			makeCall("bash", { command: "ls" }, 700),
-		];
-		const decision = preToolBlockDecision(upcoming, history, DEFAULT_OPTS);
-		expect(decision).toBeUndefined();
 	});
 });
 

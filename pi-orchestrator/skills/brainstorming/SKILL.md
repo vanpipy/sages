@@ -56,7 +56,7 @@ flowchart TD
     M --> N[User Reviews Spec]
     N -->|Changes| O[Update Spec]
     O --> N
-    N -->|Approved| P[Transition to goal_contract_create]
+    N -->|Approved| P[User drives raw TaskCreate × N + TaskExecute]
     P --> Q[End - User proceeds]
 ```
 
@@ -93,10 +93,10 @@ Complete these items in order:
 3. **Grill: Resolve decision branches** — One question at a time with recommendations
 4. **Propose 2-3 approaches** — With tradeoffs and recommendation
 5. **Present design sections** — Get approval after each section
-6. **Write design doc** — Save to `.pi/orchestrator/designs/YYYY-MM-DD-<topic>.md`
+6. **Write design doc** — Save to `${TMPDIR}/${ORCHESTRATOR_WORKDIR}/designs/YYYY-MM-DD-<topic>.md`
 7. **Spec self-review** — 4-step inline check (see below)
 8. **User reviews written spec** — Wait for approval
-9. **Transition to implementation** — Can invoke `goal_contract_create` to seed the orchestrator workflow (optional; auto-synthesizes a DAG from the design)
+9. **Transition to implementation** — User drives raw `TaskCreate` × N + `TaskExecute` (the orchestrator owns no goal-contracting or pipeline-runner tool anymore)
 
 ## Key Principles
 
@@ -201,11 +201,11 @@ Fix any issues inline. No need to re-review — just fix and move on.
 
 ## Trigger Modes
 
-**Mode A — standalone (no orchestrator active)**: brainstorming is the **recommended first step** for any new feature/change. After approval, suggest `/orchestrate` or auto-transition to `goal_contract_create` if user consents.
+**Mode A — standalone (no orchestrator active)**: brainstorming is the **recommended first step** for any new feature/change. After approval, the user drives the implementation directly: raw `TaskCreate` × N + `TaskExecute` with `agentType` set to `"Developer"` / `"Reviewer"` / `"Fix"` / `"MergerAdvisor"`.
 
-**Mode B — auto-transition (orchestrator active)**: when design is approved, auto-invoke `goal_contract_create` with the design as rationale. The orchestrator then runs `workflow_run(goal_path)` to drive the 5-phase pipeline (Implement → Review ⇆ Fix → Merge) and notifies the user.
+**Mode B — auto-transition (when the orchestrator advisory is active)**: when design is approved, the LLM self-hands-off via raw `TaskCreate` × N (one task per phase, with `agentType` and the standard `blockedBy`/`blocks` edge set). The orchestrator's advisory pipeline emits nudges via `pi.appendEntry("system", ...)`; the orchestrator owns no goal-contracting or pipeline-runner tools anymore.
 
-If user says "defer"/"save"/"later", save the design to `.pi/orchestrator/designs/` and don't start the orchestrator. "exit"/"cancel" ends without proceeding.
+If user says "defer"/"save"/"later", save the design to `${TMPDIR}/${ORCHESTRATOR_WORKDIR}/designs/` and don't start the LLM. "exit"/"cancel" ends without proceeding.
 
 ## Scope Detection & Decomposition
 
@@ -235,7 +235,7 @@ When you anticipate visual questions (mockups, layouts, diagrams):
 ## Related Skills
 
 - **Grill-Me**: Standalone decision tree resolver (embedded in brainstorming)
-- **Orchestrator**: Goal contract + workflow_run pipeline (after brainstorming approval, auto-invoked via `goal_contract_create` → `workflow_run(goal_path)`)
+- **Orchestrator**: advisory pipeline (post-tool nudges); workflow is driven by the LLM via raw `TaskCreate` × N + `TaskExecute` (post chore/remove-goal-contract)
 
 ## Example: Simple Feature
 
@@ -281,4 +281,5 @@ For complex multi-subsystem projects, decompose first (see Scope Detection above
 
 *Brainstorming skill for the orchestrator workflow*
 *Integrates Grill-Me protocol for decision tree resolution*
-*Hands off approved designs to `goal_contract_create` to seed the orchestrator*
+*Hands off approved designs for the user to drive via `TaskCreate` × N + `TaskExecute`*
+*(post chore/remove-goal-contract: orchestrator owns no tool that mediates this transition)*
