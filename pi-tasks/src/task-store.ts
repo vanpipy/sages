@@ -16,6 +16,12 @@ import { sortTasks, type TaskSortOrder } from "./task-sort.js";
 import type { Task, TaskStatus, TaskStoreData } from "./types.js";
 export type { Task, TaskStatus, TaskStoreData };
 
+// Re-export the intent/plan type system. The TaskKind lives in its
+// own file (`./task-kind.ts`) but consumers should import from this
+// subpath alongside `Task` — same package, same export surface.
+export type { TaskKind, TASK_KINDS, DEFAULT_TASK_KIND } from "./task-kind.js";
+export { isPlanKind, isIntentKind, isPlanTask, isIntentTask, taskKindOf } from "./task-kind.js";
+
 const TASKS_DIR = join(homedir(), ".pi", "tasks");
 const LOCK_RETRY_MS = 50;
 const LOCK_MAX_RETRIES = 100; // 5s max

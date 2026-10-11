@@ -22,7 +22,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./task-store": "./src/task-store.ts",
-    "./task-paths": "./src/task-paths.ts"
+    "./task-paths": "./src/task-paths.ts",
+    "./task-kind": "./src/task-kind.ts"
   },
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",

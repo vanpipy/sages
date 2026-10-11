@@ -37,19 +37,13 @@ import type { ExtensionAPI, AgentToolResult, AgentToolUpdateCallback } from "@ea
 // resolver. They do NOT own any state — they read + write through the
 // store and let the LLM drive the lifecycle via pi-tasks's existing
 // 7 tools.
-import { TaskStore } from "@sages/pi-tasks/task-store";
+import { TaskStore, type TaskKind } from "@sages/pi-tasks/task-store";
 import { orchestratorProjectTaskFile } from "@sages/pi-tasks/task-paths";
 import { parseVerdict, suggestFollowUp, type Verdict } from "./verdict.js";
 
-// ─── Two kinds of tasks ────────────────────────────────────────────────────
-
-/**
- * Tasks on the board are typed as either intent (raw material from
- * `/tasks`, not executable) or plan (executable, has `agentType`). The
- * orchestrator's `task_convert_intent` is the unique operator that
- * converts intent → plan.
- */
-export type TaskKind = "intent" | "plan";
+// Re-exported for downstream callers (orchestrator-tool.ts was the
+// original home of TaskKind before it moved to pi-tasks).
+export type { TaskKind };
 
 /** The two shipped agent types. */
 export type AgentType = "Developer" | "Reviewer";
