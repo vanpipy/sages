@@ -26,7 +26,7 @@ describe("shared orchestrator state persistence", () => {
           typeof value === "object" && value !== null && (value as any).id === "GC-test" && typeof (value as any).title === "string",
       });
       expect(loaded).toEqual({ id: "GC-test", title: "test" });
-      expect(readFileSync(join(cwd, ".pi/orchestrator/goal-GC-test.yaml"), "utf8")).toContain("GC-test");
+      expect(readFileSync(join(cwd, "goal-GC-test.yaml"), "utf8")).toContain("GC-test");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -35,12 +35,11 @@ describe("shared orchestrator state persistence", () => {
   it("rejects malformed state instead of returning an unchecked cast", () => {
     const cwd = mkdtempSync(join(tmpdir(), "sages-state-"));
     try {
-      mkdirSync(join(cwd, ".pi/orchestrator"), { recursive: true });
       // After GC-2026-orchestrator-simplify only goal-* and audit-state-* are
       // owned by the orchestrator. Use audit-state-* for the malformed-load
       // test since goal-* would also work but the schema there is more
       // tied to GoalContract.
-      writeFileSync(join(cwd, ".pi/orchestrator/audit-state-test.yaml"), "tasks: nope\n");
+      writeFileSync(join(cwd, "audit-state-test.yaml"), "tasks: nope\n");
       expect(() => loadYamlOrchestratorFile(cwd, "audit-state-test.yaml", {
         owner: "orchestrator",
         validate: (value): value is { tasks: unknown[] } =>
@@ -55,8 +54,14 @@ describe("shared orchestrator state persistence", () => {
     const cwd = mkdtempSync(join(tmpdir(), "sages-state-"));
     const outside = mkdtempSync(join(tmpdir(), "sages-outside-"));
     try {
-      mkdirSync(join(cwd, ".pi"), { recursive: true });
-      symlinkSync(outside, join(cwd, ".pi/orchestrator"));
+      // Replace the workdir itself with a symlink to a directory outside
+      // the cwd the test created — equivalent to the prior `.pi/orchestrator`
+      // symlink attack against a per-project storage root.
+      rmSync(cwd, { recursive: true, force: true });
+      // Create a fresh tempdir to use as the symlink target so the test
+      // doesn't trample on the host's tmp
+      const linkTarget = mkdtempSync(join(tmpdir(), "sages-state-linktarget-"));
+      symlinkSync(linkTarget, cwd);
       expect(() => atomicWriteOrchestratorFile(cwd, "goal-GC-test.yaml", "id: GC-test\n", {
         owner: "orchestrator",
         validate: (_value: unknown): _value is unknown => true,

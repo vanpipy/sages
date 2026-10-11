@@ -12,7 +12,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import * as yaml from "js-yaml";
 import { assertOrchestratorNamespaceOwner, type OrchestratorNamespaceOwner } from "./namespace-ownership.js";
 
@@ -48,29 +48,31 @@ function assertDirectoryNotSymlink(path: string): void {
   if (!stat.isDirectory()) throw new Error(`Expected directory in orchestrator state path: ${path}`);
 }
 
-function ensureStateDirectory(cwd: string): string {
-  const root = resolve(cwd);
-  const piDir = join(root, ".pi");
-  const stateDir = join(piDir, "orchestrator");
-  assertDirectoryNotSymlink(piDir);
-  if (!existsSync(piDir)) mkdirSync(piDir, { mode: 0o700 });
-  assertDirectoryNotSymlink(piDir);
-  assertDirectoryNotSymlink(stateDir);
-  if (!existsSync(stateDir)) mkdirSync(stateDir, { mode: 0o700 });
-  assertDirectoryNotSymlink(stateDir);
+/**
+ * Make sure `workdir` exists as a real (non-symlink) directory and
+ * return its canonical absolute path. The orchestrator's state lives
+ * directly under `workdir` (no `.pi/orchestrator` segment) — the
+ * workdir is the namespacing boundary itself.
+ *
+ * Migrated from the old `<cwd>/.pi/orchestrator` two-segment nesting
+ * (see git log: chore/orchestrator-workdir-tmpdir). The workdir is
+ * now the system temp dir by default (`$TMPDIR/$ORCHESTRATOR_WORKDIR`
+ * via `resolveOrchestratorWorkdir()`); per-project cwd is no longer
+ * the storage root.
+ */
+function ensureStateDirectory(workdir: string): string {
+  const root = resolve(workdir);
+  assertDirectoryNotSymlink(root);
+  if (!existsSync(root)) mkdirSync(root, { recursive: true, mode: 0o700 });
+  assertDirectoryNotSymlink(root);
   const realRoot = realpathSync(root);
-  const realState = realpathSync(stateDir);
-  const fromRoot = relative(realRoot, realState);
-  if (fromRoot.startsWith("..") || isAbsolute(fromRoot)) {
-    throw new Error(`Orchestrator state directory is not contained by cwd: ${stateDir}`);
-  }
-  try { chmodSync(stateDir, 0o700); } catch { /* non-POSIX */ }
-  return realState;
+  try { chmodSync(realRoot, 0o700); } catch { /* non-POSIX */ }
+  return realRoot;
 }
 
-function resolveContainedPath(cwd: string, relativePath: string, owner: OrchestratorNamespaceOwner): string {
+function resolveContainedPath(workdir: string, relativePath: string, owner: OrchestratorNamespaceOwner): string {
   assertOrchestratorNamespaceOwner(relativePath, owner);
-  const stateDir = ensureStateDirectory(cwd);
+  const stateDir = ensureStateDirectory(workdir);
   const target = resolve(stateDir, relativePath);
   if (target !== stateDir && !target.startsWith(`${stateDir}${sep}`)) {
     throw new Error(`Orchestrator state path must be contained: ${relativePath}`);
@@ -84,7 +86,7 @@ function resolveContainedPath(cwd: string, relativePath: string, owner: Orchestr
   for (const component of parentRelative === "" ? [] : parentRelative.split(sep)) {
     cursor = join(cursor, component);
     assertDirectoryNotSymlink(cursor);
-    if (!existsSync(cursor)) mkdirSync(cursor, { mode: 0o700 });
+    if (!existsSync(cursor)) mkdirSync(cursor, { recursive: true, mode: 0o700 });
     assertDirectoryNotSymlink(cursor);
   }
   if (existsSync(target) && lstatSync(target).isSymbolicLink()) {
@@ -128,16 +130,20 @@ function validateSerializedYaml<T>(content: string, options: StatePersistenceOpt
   return parsed;
 }
 
-/** Atomically create or replace an owned YAML artifact under .pi/orchestrator. */
+/**
+ * Atomically create or replace an owned YAML artifact directly under
+ * the orchestrator's workdir (no `.pi/orchestrator` segment — see
+ * `workdir.ts` for the migration rationale).
+ */
 export function atomicWriteOrchestratorFile<T>(
-  cwd: string,
+  workdir: string,
   relativePath: string,
   content: string,
   options: StatePersistenceOptions<T>,
 ): string {
   validateSerializedYaml(content, options, relativePath);
-  const target = resolveContainedPath(cwd, relativePath, options.owner);
-  const stateDir = ensureStateDirectory(cwd);
+  const target = resolveContainedPath(workdir, relativePath, options.owner);
+  const stateDir = ensureStateDirectory(workdir);
   const parentRelative = relative(stateDir, dirname(target));
   const lock = acquireLock(target);
   try {
@@ -188,11 +194,11 @@ export function atomicWriteOrchestratorFile<T>(
 
 /** Load owned YAML only after containment, symlink, parse, and runtime checks. */
 export function loadYamlOrchestratorFile<T>(
-  cwd: string,
+  workdir: string,
   relativePath: string,
   options: StatePersistenceOptions<T>,
 ): T | null {
-  const target = resolveContainedPath(cwd, relativePath, options.owner);
+  const target = resolveContainedPath(workdir, relativePath, options.owner);
   if (!existsSync(target)) return null;
   const stat = lstatSync(target);
   if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Unsafe state target: ${relativePath}`);

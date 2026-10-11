@@ -13,6 +13,10 @@
  * `TaskCreate` + `TaskExecute`); both pick up the contract and run the
  * Implement → Review → optional Fix → Merge sequence.
  *
+ * Goal contracts are written under the orchestrator's workdir (see
+ * `./workdir.ts`); the cwd passed in the tool call context is NOT used
+ * as the storage root.
+ *
  * Hard rules (enforced):
  *   1. anti_goals may be empty but not undefined
  *   2. done_definition must be non-empty (≥ 10 chars)
@@ -27,11 +31,11 @@
 import { Type, type Static } from "typebox";
 import * as yaml from "js-yaml";
 import type { GoalContract } from "./types.js";
-import {
-	atomicWriteOrchestratorFile,
+import { atomicWriteOrchestratorFile,
 	isGoalContractState,
 	loadYamlOrchestratorFile,
 } from "./state-persistence.js";
+import { resolveOrchestratorWorkdir } from "./workdir.js";
 import { wrapRegisteredTool } from "./registered-tool-wrapper.js";
 import { lockGoal } from "./goal-lock.js";
 import { RunEvent } from "./observability/events.js";
@@ -213,11 +217,20 @@ export function summaryForGoal(contract: GoalContract) {
  * malformed. Used by Reviewer agent to read
  * the active intent contract.
  */
-export function loadGoalContract(cwd: string, goalId: string): GoalContract | null {
-	return loadYamlOrchestratorFile(cwd, `goal-${goalId}.yaml`, {
+export function loadGoalContract(workdir: string, goalId: string): GoalContract | null {
+	return loadYamlOrchestratorFile(workdir, `goal-${goalId}.yaml`, {
 		owner: "orchestrator",
 		validate: isGoalContractState as unknown as (value: unknown) => value is GoalContract,
 	});
+}
+
+/**
+ * Resolve the orchestrator workdir (see `./workdir.ts`). Tool callers
+ * that need the workdir should go through this instead of reading the
+ * env vars directly so the cache is honored.
+ */
+export function getOrchestratorWorkdir(): string {
+	return resolveOrchestratorWorkdir();
 }
 
 /**
@@ -227,9 +240,9 @@ export function loadGoalContract(cwd: string, goalId: string): GoalContract | nu
  */
 export async function executeGoalContractCreate(
 	params: GoalContractInput,
-	ctx: { cwd: string },
+	_ctx: { cwd: string },
 ): Promise<{ content: { type: "text"; text: string }[]; details?: { path: string; contract: GoalContract } }> {
-	const cwd: string = ctx.cwd;
+	const workdir: string = resolveOrchestratorWorkdir();
 
 	// Validate
 	const result = validateGoalContract(params);
@@ -250,7 +263,7 @@ export async function executeGoalContractCreate(
 	// Build and write
 	const contract = buildGoalContract(params);
 	const path = atomicWriteOrchestratorFile(
-		cwd,
+		workdir,
 		`goal-${contract.id}.yaml`,
 		yaml.dump(contract, { indent: 2, lineWidth: 120, noRefs: true }),
 		{ owner: "orchestrator", validate: isGoalContractState },
@@ -297,7 +310,7 @@ export function registerGoalContractTool(pi: any): void {
 	pi.registerTool({
 		name: "goal_contract_create",
 		label: "Goal Contract",
-		description: "Stage 1: turn user intent into a verifiable contract. Writes .pi/orchestrator/goal-{id}.yaml. After saving, drive the Implement → Review → optional Fix → Merge pipeline via pi-tasks (TaskCreate × 4 + TaskExecute).",
+		description: "Stage 1: turn user intent into a verifiable contract. Writes {ORCHESTRATOR_WORKDIR}/goal-{id}.yaml. After saving, drive the Implement → Review → optional Fix → Merge pipeline via pi-tasks (TaskCreate × 4 + TaskExecute).",
 		parameters: GoalContractParams,
 
 		execute: wrapRegisteredTool<GoalContractInput, ReturnType<typeof executeGoalContractCreate>>(
