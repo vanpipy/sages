@@ -10,7 +10,7 @@
  *      4-state verdict from the result text and returns it together
  *      with a verdict-tailored follow-up suggestion.
  *
- *   2. WRITE — `task_convert_intent(intent_task_id, plan)` is the
+ *   2. WRITE — `task_convert_intent(task_id, plan)` is the
  *      orchestrator's unique intent → plan conversion operator. Reads
  *      an intent task, marks it converted, and creates a new plan task
  *      wired with the spec. Audit trail: intent's
@@ -187,7 +187,7 @@ async function taskConsume(
 	if (task.type === "intent") {
 		throw new TaskConsumeError(
 			"not_plan",
-			`Task #${task.id} is an intent task; convert it to a plan via task_convert_intent(intent_task_id) before consume.`,
+			`Task #${task.id} is an intent task; convert it to a plan via task_convert_intent(task_id) before consume.`,
 		);
 	}
 	if (task.status !== "completed") {
@@ -226,9 +226,9 @@ async function taskConsume(
 // ─── `task_convert_intent` — the unique intent → plan operator ───────────
 
 export const ConvertIntentParams = Type.Object({
-	intent_task_id: Type.String({
+	task_id: Type.String({
 		description:
-			"The ID of an intent task to convert. The task must have type='intent' and not yet be converted (each intent converts once).",
+			"The ID of the intent task to convert. The task must have type='intent' and not yet be converted (each intent converts once). Call task_inspect first to confirm the type — the parameter name is just `task_id` for consistency with task_inspect / task_consume; the routing is what makes it an intent.",
 	}),
 	plan: Type.Object({
 		subject: Type.Optional(
@@ -292,11 +292,11 @@ async function taskConvertIntent(
 	ctx: { cwd: string },
 ): Promise<AgentToolResult<ConvertIntentOutput | undefined>> {
 	const store = new TaskStore(orchestratorProjectTaskFile(ctx.cwd));
-	const intent = store.get(params.intent_task_id);
+	const intent = store.get(params.task_id);
 	if (!intent) {
 		throw new ConvertIntentError(
 			"intent_not_found",
-			`No intent task with ID #${params.intent_task_id}.`,
+			`No intent task with ID #${params.task_id}.`,
 		);
 	}
 	if (intent.type !== "intent") {
@@ -365,7 +365,7 @@ async function taskConvertIntent(
  *     can route (intent → convert, plan-pending → execute,
  *     plan-completed → consume).
  *   - `task_consume(task_id, include_transcript?)` — read + parse
- *   - `task_convert_intent(intent_task_id, plan)` — the unique converter
+ *   - `task_convert_intent(task_id, plan)` — the unique converter
  */
 export function registerOrchestratorTools(pi: ExtensionAPI): void {
 	pi.registerTool({

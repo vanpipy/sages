@@ -104,7 +104,7 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		//   - task_inspect(task_id) — read type + status + agentType (LLM's
 		//     first call on every task; the LLM invokes this to inspect)
 		//   - task_consume(task_id) — read + parse verdict (consumption side)
-		//   - task_convert_intent(intent_task_id, plan) — the unique
+		//   - task_convert_intent(task_id, plan) — the unique
 		//     intent→plan converter (write side, one-time action)
 		// The orchestrator does NOT have orchestrate or task_create — it
 		// consumes and adds tasks via pi-tasks's existing 7 tools directly.
