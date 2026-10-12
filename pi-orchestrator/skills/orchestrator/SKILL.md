@@ -23,7 +23,7 @@ the packages' own code.
 Post GC-2026-orchestrator-simplify + GC-2026-remove-workflow-run-prod +
 GC-2026-decompose-task-removed + **chore/remove-goal-contract** +
 **taskBoard-removed** the orchestrator owns exactly **three** LLM-facing
-tools: `task_inspect` (route by kind/status), `task_consume` (read+parse
+tools: `task_inspect` (route by type/status), `task_consume` (read+parse
 verdict), and `task_convert_intent` (the unique intent→plan converter).
 The orchestrator is a consumer — it does not manage the task flow.
 
@@ -61,16 +61,16 @@ Multi-stage work is the LLM's job. The canonical flow is
 
 ```text
 // 1. /tasks create "Add /login endpoint" — user-facing intent task appears
-2.   TaskList → [{ id: 1, subject: "Add /login endpoint", kind: "intent" }]
+2.   TaskList → [{ id: 1, subject: "Add /login endpoint", type: "intent" }]
 3.   task_inspect({ task_id: 1 })
-     → { id: 1, kind: "intent", status: "pending", ... }
+     → { id: 1, type: "intent", status: "pending", ... }
 4.   // LLM thinks + plans: agentType=Developer, no blocks/blockedBy
 5.   task_convert_intent({ intent_task_id: 1, plan: { agentType: "Developer" } })
      → plan task #2 created, intent #1 marked converted
 7.   TaskExecute([2])  // dispatches the plan task to a subagent
 8.   // subagent completes → orchestrator's next turn:
 9.   task_inspect({ task_id: 2 })
-     → { id: 2, kind: "plan", status: "completed", agentType: "Developer", hasResult: true }
+     → { id: 2, type: "plan", status: "completed", agentType: "Developer", hasResult: true }
 10.  task_consume({ task_id: 2 })
      → { id, subject, result, verdict?, follow_up_suggestion? }
 ```
@@ -82,7 +82,7 @@ next-step hint (spawn Developer follow-up / spawn new Implement /
 pause for user / move on).
 
 The orchestrator's `task_inspect` is the LLM's first call on every
-task — it sees the kind without erroring, then routes explicitly.
+task — it sees the type without erroring, then routes explicitly.
 
 ## Soft mode (unchanged)
 

@@ -101,7 +101,7 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		ext.default(pi as any);
 		const toolNames = [...pi.tools.keys()].sort();
 		// The orchestrator owns three LLM-facing tools:
-		//   - task_inspect(task_id) — read kind + status + agentType (LLM's
+		//   - task_inspect(task_id) — read type + status + agentType (LLM's
 		//     first call on every task; the LLM invokes this to inspect)
 		//   - task_consume(task_id) — read + parse verdict (consumption side)
 		//   - task_convert_intent(intent_task_id, plan) — the unique
