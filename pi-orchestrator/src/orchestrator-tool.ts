@@ -10,20 +10,21 @@
  *      4-state verdict from the result text and returns it together
  *      with a verdict-tailored follow-up suggestion.
  *
- *   2. WRITE — `task_convert_intent(task_id, plan)` is the
+ *   2. WRITE — `task_convert_intent(task_id, plan[])` is the
  *      orchestrator's unique intent → plan conversion operator. Reads
- *      an intent task, marks it converted, and creates a new plan task
- *      wired with the spec. Audit trail: intent's
- *      `metadata.converted / converted_at`, plan's
+ *      an intent task, marks it converted, and creates one or more
+ *      plan tasks wired from the spec list. The caller (LLM) does the
+ *      decomposition; the function just commits. Audit trail: intent's
+ *      `metadata.converted / converted_at`, every new plan task's
  *      `metadata.source_intent`.
  *
  * The orchestrator does NOT have an `orchestrate` tool, does NOT have
- * a `task_create` tool, does NOT have `drain` / `findNextConsumable`
- * / `awaitNextConsumable` tools. The LLM uses pi-tasks's existing
- * `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` / `TaskOutput`
- * / `TaskExecute` directly. The orchestrator's two tools add: verdict
- * parsing on the read side, and intent → plan conversion on the write
- * side.
+ *      a `task_create` tool, does NOT have `drain` / `findNextConsumable`
+ *      / `awaitNextConsumable` tools. The LLM uses pi-tasks's existing
+ *      `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` / `TaskOutput`
+ *      / `TaskExecute` directly. The orchestrator's two tools add: verdict
+ *      parsing on the read side, and intent → plan conversion on the
+ *      write side (N plan tasks per intent in a single call).
  *
  * Both tools read/write the same TaskStore the board's own
  * `taskScope: "project"` mode uses — see
@@ -230,37 +231,40 @@ export const ConvertIntentParams = Type.Object({
 		description:
 			"The ID of the intent task to convert. The task must have type='intent' and not yet be converted (each intent converts once). Call task_inspect first to confirm the type — the parameter name is just `task_id` for consistency with task_inspect / task_consume; the routing is what makes it an intent.",
 	}),
-	plan: Type.Object({
-		subject: Type.Optional(
-			Type.String({
-				description:
-					"Subject for the new plan task. Defaults to the intent task's subject if omitted.",
-			}),
-		),
-		description: Type.Optional(
-			Type.String({
-				description:
-					"Description for the new plan task. Defaults to the intent task's description if omitted.",
-			}),
-		),
-		agentType: Type.Union([
-			Type.Literal("Developer"),
-			Type.Literal("Reviewer"),
-		]),
-		activeForm: Type.Optional(Type.String()),
-		blockedBy: Type.Optional(
-			Type.Array(Type.String({ description: "Task IDs the new plan task depends on." })),
-		),
-		blocks: Type.Optional(
-			Type.Array(Type.String({ description: "Task IDs the new plan task will block." })),
-		),
-		metadata: Type.Optional(Type.Record(Type.String(), Type.Any())),
-	}),
+	plan: Type.Array(
+		Type.Object({
+			subject: Type.Optional(
+				Type.String({
+					description:
+						"Subject for the new plan task. Defaults to the intent task's subject if omitted.",
+				}),
+			),
+			description: Type.Optional(
+				Type.String({
+					description:
+						"Description for the new plan task. Defaults to the intent task's description if omitted.",
+				}),
+			),
+			agentType: Type.Union([
+				Type.Literal("Developer"),
+				Type.Literal("Reviewer"),
+			]),
+			activeForm: Type.Optional(Type.String()),
+			blockedBy: Type.Optional(
+				Type.Array(Type.String({ description: "Task IDs the new plan task depends on." })),
+			),
+			blocks: Type.Optional(
+				Type.Array(Type.String({ description: "Task IDs the new plan task will block." })),
+			),
+			metadata: Type.Optional(Type.Record(Type.String(), Type.Any())),
+		}),
+		{ description: "One or more plan task specs to materialize from the intent. The caller (LLM) does the decomposition; the function commits it. Each spec becomes one plan task; `agentType` is the only required field. Empty array is rejected — a conversion must produce at least one plan." },
+	),
 });
 export type ConvertIntentInput = Static<typeof ConvertIntentParams>;
 
 export interface ConvertIntentOutput {
-	plan_task_id: string;
+	plan_task_ids: string[];
 	intent_task_id: string;
 	converted_at: number;
 }
@@ -271,7 +275,8 @@ export class ConvertIntentError extends Error {
 		public readonly kind:
 			| "intent_not_found"
 			| "not_intent"
-			| "already_converted",
+			| "already_converted"
+			| "empty_plan",
 		message: string,
 	) {
 		super(message);
@@ -284,7 +289,7 @@ export class ConvertIntentError extends Error {
  * verify state, create the plan, wire edges, mark the intent as
  * converted. One-way: an already-converted intent can't be re-converted.
  */
-async function taskConvertIntent(
+export async function taskConvertIntent(
 	toolCallId: string,
 	params: ConvertIntentInput,
 	_signal: AbortSignal | undefined,
@@ -323,31 +328,47 @@ async function taskConvertIntent(
 		},
 	});
 
-	const planMeta: Record<string, unknown> = {
-		agentType: params.plan.agentType,
-		source_intent: intent.id,
-		...params.plan.metadata,
-	};
-	const planTask = store.create(
-		params.plan.subject ?? intent.subject,
-		params.plan.description ?? intent.description,
-		params.plan.activeForm,
-		planMeta,
-		"plan",
-	);
-	if (params.plan.blocks) {
-		for (const target of params.plan.blocks) {
-			store.update(planTask.id, { addBlocks: [target] });
-		}
+	// Reject empty plans: a conversion with no plan tasks is a no-op that
+	// still flips the intent's `converted` flag — better caught at the
+	// boundary than after the audit lands.
+	if (params.plan.length === 0) {
+		throw new ConvertIntentError(
+			"empty_plan",
+			`Intent task #${intent.id} would convert into zero plan tasks; pass at least one plan spec.`,
+		);
 	}
-	if (params.plan.blockedBy) {
-		for (const pred of params.plan.blockedBy) {
-			store.update(planTask.id, { addBlockedBy: [pred] });
+
+	// Create each plan task in order, wiring its edges. The caller (LLM)
+	// decomposes the intent; this function just commits.
+	const planTaskIds: string[] = [];
+	for (const spec of params.plan) {
+		const planMeta: Record<string, unknown> = {
+			agentType: spec.agentType,
+			source_intent: intent.id,
+			...spec.metadata,
+		};
+		const planTask = store.create(
+			spec.subject ?? intent.subject,
+			spec.description ?? intent.description,
+			spec.activeForm,
+			planMeta,
+			"plan",
+		);
+		if (spec.blocks) {
+			for (const target of spec.blocks) {
+				store.update(planTask.id, { addBlocks: [target] });
+			}
 		}
+		if (spec.blockedBy) {
+			for (const pred of spec.blockedBy) {
+				store.update(planTask.id, { addBlockedBy: [pred] });
+			}
+		}
+		planTaskIds.push(planTask.id);
 	}
 
 	const data: ConvertIntentOutput = {
-		plan_task_id: planTask.id,
+		plan_task_ids: planTaskIds,
 		intent_task_id: intent.id,
 		converted_at: convertedAt,
 	};

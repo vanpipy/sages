@@ -37,7 +37,7 @@ The orchestrator is a consumer — it does not manage the task flow.
 | **Post-tool advisory nudges** | On every tool call, the `repeat_call_chain` detector fires when the same `(tool, args)` pair is seen ≥3 times within 2s — a generic stuck-on-same-call detector. Findings are appended via `pi.appendEntry("system", ...)`. |
 | **`task_inspect(task_id)` tool** | Read type+status+agentType. The LLM's first call on every task. Routes to `task_convert_intent` (intent), `TaskExecute` (plan pending), `TaskOutput(block=true)` (plan in_progress), or `task_consume` (plan completed). Lighter than `TaskGet`. |
 | **`task_consume(task_id, include_transcript?)` tool** | Read a completed plan task in a structured way. Parses the Reviewer's 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and emits a verdict-tailored follow-up suggestion. Returns `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }`. Pure read — does not mutate the store. Intent tasks throw `not_plan` — call `task_convert_intent` first. |
-| **`task_convert_intent(task_id, plan)` tool** | The orchestrator's unique intent → plan conversion operator. Reads an intent task (`type='intent'`), marks it converted (audit: `metadata.converted / metadata.converted_at`), creates a new plan task with `type='plan'`, `agentType` from the spec, and `metadata.source_intent` linking back to the intent. The parameter is just `task_id` for consistency with `task_inspect` / `task_consume`; the routing (not the name) is what makes it an intent. Refuses non-intent sources and already-converted intents. |
+| **`task_convert_intent(task_id, plan[])` tool** | The orchestrator's unique intent → plan conversion operator. Reads an intent task (`type='intent'`), marks it converted (audit: `metadata.converted / metadata.converted_at`), creates one or more plan tasks with `type='plan'` and `metadata.source_intent` linking each back to the intent. The caller (LLM) does the decomposition into N specs; the function commits it in one call. The parameter is just `task_id` for consistency with `task_inspect` / `task_consume`; the routing (not the name) is what makes it an intent. Refuses empty arrays, non-intent sources, and already-converted intents. |
 
 ## Subagent `max_turns` tiers
 
@@ -88,8 +88,16 @@ Multi-stage work is the LLM's job. The canonical flow is
 3.   task_inspect({ task_id: 1 })
      → { id: 1, type: "intent", status: "pending", ... }
 4.   // LLM thinks + plans: agentType=Developer, no blocks/blockedBy
-5.   task_convert_intent({ task_id: 1, plan: { agentType: "Developer" } })
-     → plan task #2 created, intent #1 marked converted
+5.   task_convert_intent({
+       task_id: 1,
+       plan: [
+         { subject: "Design schema", agentType: "Developer" },
+         { subject: "Implement", agentType: "Developer" },
+         { subject: "Write tests", agentType: "Developer" },
+         { subject: "Review", agentType: "Reviewer" },
+       ],
+     })
+   → plan tasks #2–#5 created in order, intent #1 marked converted
 7.   TaskExecute([2])  // dispatches the plan task to a subagent
 8.   // subagent completes → orchestrator's next turn:
 9.   task_inspect({ task_id: 2 })

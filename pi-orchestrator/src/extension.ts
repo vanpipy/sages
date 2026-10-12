@@ -203,7 +203,9 @@ export function installSessionHooks(pi: ExtensionAPI): void {
  * it adds tasks via pi-tasks's `TaskCreate` (with `type` set to
  * "intent" or "plan"), reads via `TaskList` / `TaskGet`, and dispatches
  * via `TaskExecute`. The orchestrator's two tools add: verdict parsing
- * on the read side, and intent → plan conversion on the write side.
+ * on the read side, and intent → plan conversion on the write side
+ * (`task_convert_intent` accepts a `plan[]` array so a single intent
+ * can be committed as N plan tasks in one call).
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
 	installSessionHooks(pi);
