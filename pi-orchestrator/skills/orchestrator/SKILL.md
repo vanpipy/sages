@@ -1,16 +1,19 @@
 ---
 name: orchestrator
-description: "Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the orchestrator constitution), and tool_call (once-per-session soft-mode reminder). Owns one LLM-facing tool: `orchestrate(plan)` which materializes a multi-phase workflow as a task DAG in pi-tasks's shared task store. The LLM still drives raw `TaskCreate` × N + `TaskExecute` directly when it wants full control; `orchestrate` is the convenience path for whole-plan-at-once creation with automatic dependency wiring."
+description: "Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the orchestrator constitution), and tool_call (once-per-session soft-mode reminder). Owns three LLM-facing tools: `task_inspect` (read kind+status+agentType so the LLM can route), `task_consume` (read+parse verdict for completed plan tasks), and `task_convert_intent` (the unique intent→plan converter). The LLM adds tasks via pi-tasks's `TaskCreate` (with metadata.kind = 'intent' or 'plan') and dispatches via `TaskExecute`. The orchestrator does not manage the task flow — it only reads and adds; convertIntent is its only state-changing write, and only within the intent→plan conversion path."
 ---
 
 # Orchestrator — Soft Infrastructure
 
 The orchestrator plays the **Task Orchestrator** role in the three-package
-composition: the sole writer and sole consumer of the Task Board
-(`pi-tasks/`). The Task Executor (`pi-subagents/`) is spawned through
-it, never sees the Board, and reports results back through the event
-bus. The boundary is enforced by the host tool allowlist, not by
-convention. See [`AGENTS.md`](../../../AGENTS.md#the-three-packages-and-their-roles)
+composition: a **consumer** of the Task Board (`pi-tasks/`), not its
+manager. It adds tasks via pi-tasks's existing `TaskCreate` (with
+`metadata.kind = 'intent' | 'plan'`) and reads them via `task_inspect` /
+`task_consume`. The Task Executor (`pi-subagents/`) is spawned by the
+board via `TaskExecute`, never sees the board itself, and reports
+results back through the event bus. The boundary is enforced by the
+host tool allowlist, not by convention. See
+[`AGENTS.md`](../../../AGENTS.md#the-three-packages-and-their-roles)
 for the full role description.
 
 These role names (Task Board / Task Orchestrator / Task Executor) are
@@ -18,9 +21,11 @@ descriptive shorthand; they appear in docs and conversation but not in
 the packages' own code.
 
 Post GC-2026-orchestrator-simplify + GC-2026-remove-workflow-run-prod +
-GC-2026-decompose-task-removed + **chore/remove-goal-contract** the
-orchestrator owns exactly **one** LLM-facing tool (`orchestrate`).
-The orchestrator's other surface is a curating + advising layer.
+GC-2026-decompose-task-removed + **chore/remove-goal-contract** +
+**taskBoard-removed** the orchestrator owns exactly **three** LLM-facing
+tools: `task_inspect` (route by kind/status), `task_consume` (read+parse
+verdict), and `task_convert_intent` (the unique intent→plan converter).
+The orchestrator is a consumer — it does not manage the task flow.
 
 ## What the orchestrator does
 
@@ -30,7 +35,9 @@ The orchestrator's other surface is a curating + advising layer.
 | **Constitution overlay at before_agent_start** | Prepends `templates/SYSTEM.md` to the LLM's system prompt. The system prompt is the orchestrator's only persistent instruction surface. |
 | **Soft-mode reminder on first side-effecting call** | On the first `bash` / `edit` / `write` tool call per session, appends a reminder that recommends the pi-tasks workflow for active task lists of >2 items. Fires once per session; subsequent calls are silent. |
 | **Post-tool advisory nudges** | On every tool call, the `repeat_call_chain` detector fires when the same `(tool, args)` pair is seen ≥3 times within 2s — a generic stuck-on-same-call detector. Findings are appended via `pi.appendEntry("system", ...)`. |
-| **`orchestrate(plan)` tool** | The orchestrator's only LLM-facing tool. Materializes a multi-phase workflow as a task DAG in pi-tasks's shared task store (`<ORCHESTRATOR_WORKDIR>/<projectKey(cwd)>/tasks/tasks.json`, resolved via `pi-tasks/src/task-paths.ts:orchestratorProjectTaskFile`). For each phase, creates a task carrying `agentType` in metadata; phase-level `blockedBy` (by subject) is resolved to task IDs and wired into both sides of the edge. After the call, the standard cascade (via `TaskExecute` on the first ready task) drives the phases in dependency order. The LLM can still use raw `TaskCreate` × N + `TaskExecute` for full control; `orchestrate` is the convenience path for whole-plan-at-once creation with auto-wired dependencies. |
+| **`task_inspect(task_id)` tool** | Read kind+status+agentType. The LLM's first call on every task. Routes to `task_convert_intent` (intent), `TaskExecute` (plan pending), `TaskOutput(block=true)` (plan in_progress), or `task_consume` (plan completed). Lighter than `TaskGet`. |
+| **`task_consume(task_id, include_transcript?)` tool** | Read a completed plan task in a structured way. Parses the Reviewer's 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and emits a verdict-tailored follow-up suggestion. Returns `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }`. Pure read — does not mutate the store. Intent tasks throw `not_plan` — call `task_convert_intent` first. |
+| **`task_convert_intent(intent_task_id, plan)` tool** | The orchestrator's unique intent → plan conversion operator. Reads an intent task (kind='intent'), marks it converted (audit: `metadata.converted / converted_at`), creates a new plan task with `agentType` from the spec, `metadata.kind='plan'`, and `metadata.source_intent` linking back to the intent. Refuses non-intent sources and already-converted intents. |
 | **Brainstorming slash command** | `/brainstorm [request]` is registered separately via `skills/brainstorming/SKILL.md`; the orchestrator's own registration machinery is limited to the session hooks + advisory handlers above. |
 
 ## What the orchestrator no longer does
@@ -49,32 +56,33 @@ The orchestrator's other surface is a curating + advising layer.
 
 ## The LLM's responsibility
 
-Multi-stage work is the LLM's job. The canonical 2-phase pattern:
+Multi-stage work is the LLM's job. The canonical flow is
+**inspect → route**:
 
 ```text
-// raw TaskCreate × N + TaskExecute
-TaskCreate({ subject: "Implement", agentType: "Developer", blocks: ["Review"] })
-TaskCreate({ subject: "Review",    agentType: "Reviewer",  blockedBy: ["Implement"] })
-TaskExecute  // auto-cascades through every phase
-
-// or the same DAG via the orchestrate shortcut
-orchestrate({
-  intent: "Add feature X",
-  phases: [
-    { subject: "Implement", agentType: "Developer" },
-    { subject: "Review",    agentType: "Reviewer", blockedBy: ["Implement"] },
-  ],
-})
+// 1. /tasks create "Add /login endpoint" — user-facing intent task appears
+2.   TaskList → [{ id: 1, subject: "Add /login endpoint", kind: "intent" }]
+3.   task_inspect({ task_id: 1 })
+     → { id: 1, kind: "intent", status: "pending", ... }
+4.   // LLM thinks + plans: agentType=Developer, no blocks/blockedBy
+5.   task_convert_intent({ intent_task_id: 1, plan: { agentType: "Developer" } })
+     → plan task #2 created, intent #1 marked converted
+7.   TaskExecute([2])  // dispatches the plan task to a subagent
+8.   // subagent completes → orchestrator's next turn:
+9.   task_inspect({ task_id: 2 })
+     → { id: 2, kind: "plan", status: "completed", agentType: "Developer", hasResult: true }
+10.  task_consume({ task_id: 2 })
+     → { id, subject, result, verdict?, follow_up_suggestion? }
 ```
 
-The Reviewer reads the Implement task's `metadata.result` via `TaskOutput`
-and emits one of CLEAN / NEEDS_WORK / NEEDS_REDESIGN /
-NEEDS_CLARIFICATION as plain text in its own result. The orchestrator
-then calls `task_consume(review_task_id)` to read that result in a
-structured way: `parseVerdict` extracts the verdict and `suggestFollowUp`
-emits a verdict-tailored next-step hint (spawn Developer follow-up /
-spawn new Implement / pause for user / move on). The task is marked
-consumed in metadata so the audit trail is recorded.
+The Reviewer emits one of CLEAN / NEEDS_WORK / NEEDS_REDESIGN /
+NEEDS_CLARIFICATION as plain text in its own result. `task_consume`'s
+verdict parser extracts it and `suggestFollowUp` emits a verdict-tailored
+next-step hint (spawn Developer follow-up / spawn new Implement /
+pause for user / move on).
+
+The orchestrator's `task_inspect` is the LLM's first call on every
+task — it sees the kind without erroring, then routes explicitly.
 
 ## Soft mode (unchanged)
 

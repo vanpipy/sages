@@ -48,7 +48,80 @@ export type { TaskKind };
 /** The two shipped agent types. */
 export type AgentType = "Developer" | "Reviewer";
 
-// ─── `task_consume` — read a plan task's result in a structured way ─────
+// ─── `task_inspect` — read just the routing-relevant fields ──────────────────
+
+export const InspectParams = Type.Object({
+	task_id: Type.String({
+		description:
+			"The task ID to inspect. Use this before deciding which other orchestrator tool to call: " +
+			"`task_consume` works only on completed `plan` tasks, `task_convert_intent` works only on " +
+			"`intent` tasks, and `TaskExecute` works only on pending plan tasks. This tool returns " +
+			"`metadata.kind`, `status`, and `agentType` so the LLM can route correctly.",
+	}),
+});
+export type InspectInput = Static<typeof InspectParams>;
+
+export interface InspectOutput {
+	id: string;
+	subject: string;
+	kind: TaskKind;
+	status: string;
+	agentType?: string;
+	hasResult: boolean;
+}
+
+/** Errors `task_inspect` throws. */
+export class TaskInspectError extends Error {
+	constructor(public readonly kind: "not_found", message: string) {
+		super(message);
+		this.name = "TaskInspectError";
+	}
+}
+
+/**
+ * Read just the routing-relevant fields of a task. Lighter than TaskGet
+ * (which returns the full raw task); this returns only what the
+ * orchestrator's LLM needs to decide which follow-up tool to call.
+ *
+ * The flow:
+ *   - kind='intent'                       → call `task_convert_intent(intent_id, plan)`
+ *   - kind='plan' + status='pending'      → call `TaskExecute([id])`
+ *   - kind='plan' + status='in_progress'  → wait via `TaskOutput(task_id, block=true)`
+ *   - kind='plan' + status='completed'    → call `task_consume(id)`
+ */
+export async function taskInspect(
+	toolCallId: string,
+	params: InspectInput,
+	_signal: AbortSignal | undefined,
+	_onUpdate: AgentToolUpdateCallback<InspectOutput | undefined> | undefined,
+	ctx: { cwd: string },
+): Promise<AgentToolResult<InspectOutput | undefined>> {
+	const store = new TaskStore(orchestratorProjectTaskFile(ctx.cwd));
+	const task = store.get(params.task_id);
+	if (!task) {
+		throw new TaskInspectError(
+			"not_found",
+			`No task with ID #${params.task_id}. Use TaskList to find the right ID.`,
+		);
+	}
+
+	const data: InspectOutput = {
+		id: task.id,
+		subject: task.subject,
+		// Default to "plan" for legacy tasks without an explicit kind.
+		kind: task.metadata?.kind === "intent" ? "intent" : "plan",
+		status: task.status,
+		agentType:
+			typeof task.metadata?.agentType === "string"
+				? task.metadata.agentType
+				: undefined,
+		// Only plan tasks have results (intent tasks don't reach the executor).
+		hasResult: typeof task.metadata?.result === "string",
+	};
+	return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], details: data };
+}
+
+// ─── `task_consume` — read a plan task's result in a structured way ──────────────
 
 export const ConsumeParams = Type.Object({
 	task_id: Type.String({
@@ -281,14 +354,30 @@ async function taskConvertIntent(
 // ─── Registration ────────────────────────────────────────────────────────
 
 /**
- * Register both orchestrator tools on the given pi extension. The
- * orchestrator's full LLM-facing surface (in addition to pi-tasks's
- * 7 tools, which are separately registered by pi-tasks itself):
+ * Register the orchestrator's three LLM-facing tools on the given pi
+ * extension (in addition to pi-tasks's 7 tools, which are separately
+ * registered by pi-tasks itself):
  *
+ *   - `task_inspect(task_id)` — read kind + status + agentType so the LLM
+ *     can route (intent → convert, plan-pending → execute,
+ *     plan-completed → consume).
  *   - `task_consume(task_id, include_transcript?)` — read + parse
  *   - `task_convert_intent(intent_task_id, plan)` — the unique converter
  */
 export function registerOrchestratorTools(pi: ExtensionAPI): void {
+	pi.registerTool({
+		name: "task_inspect",
+		label: "task_inspect",
+		description:
+			"Inspect a task — returns its `kind` ('intent' | 'plan'), `status`, " +
+			"and `agentType`. Use this BEFORE deciding which other tool to call: " +
+			"intent → `task_convert_intent`, plan-pending → `TaskExecute`, " +
+			"plan-completed → `task_consume`. Lighter than `TaskGet` (returns " +
+			"only the routing-relevant fields, not the full raw task).",
+		parameters: InspectParams,
+		execute: taskInspect,
+	});
+
 	pi.registerTool({
 		name: "task_consume",
 		label: "task_consume",

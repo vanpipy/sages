@@ -95,18 +95,24 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		pi = new MockPi();
 	});
 
-	it("SMOKE-073-1: default export registers two orchestrator-owned tools (task_consume + task_convert_intent)", async () => {
+	it("SMOKE-073-1: default export registers three orchestrator-owned tools (task_inspect + task_consume + task_convert_intent)", async () => {
 		const ext = await import("../../src/extension.js");
 		expect(typeof ext.default).toBe("function");
 		ext.default(pi as any);
 		const toolNames = [...pi.tools.keys()].sort();
-		// The orchestrator owns two LLM-facing tools:
+		// The orchestrator owns three LLM-facing tools:
+		//   - task_inspect(task_id) — read kind + status + agentType (LLM's
+		//     first call on every task; the LLM invokes this to inspect)
 		//   - task_consume(task_id) — read + parse verdict (consumption side)
 		//   - task_convert_intent(intent_task_id, plan) — the unique
 		//     intent→plan converter (write side, one-time action)
 		// The orchestrator does NOT have orchestrate or task_create — it
 		// consumes and adds tasks via pi-tasks's existing 7 tools directly.
-		expect(toolNames).toEqual(["task_consume", "task_convert_intent"]);
+		expect(toolNames).toEqual([
+			"task_consume",
+			"task_convert_intent",
+			"task_inspect",
+		]);
 	});
 
 	it("SMOKE-073-2: session_start calls setActiveTools with subagent + pi-tasks + AFT + baseline tools (no orchestrator tools post goal-contract removal)", async () => {
