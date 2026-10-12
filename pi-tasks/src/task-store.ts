@@ -13,14 +13,8 @@ import { sortTasks, type TaskSortOrder } from "./task-sort.js";
 // Import the canonical Task types for internal use; re-export them
 // for external consumers (e.g. TaskBoard in pi-orchestrator) so they
 // don't have to infer types from `TaskStore.create()`'s return shape.
-import type { Task, TaskStatus, TaskStoreData } from "./types.js";
-export type { Task, TaskStatus, TaskStoreData };
-
-// Re-export the intent/plan type system. The TaskKind lives in its
-// own file (`./task-kind.ts`) but consumers should import from this
-// subpath alongside `Task` — same package, same export surface.
-export type { TaskKind, TASK_KINDS, DEFAULT_TASK_KIND } from "./task-kind.js";
-export { isPlanKind, isIntentKind, isPlanTask, isIntentTask, taskKindOf } from "./task-kind.js";
+import type { Task, TaskStatus, TaskStoreData, TaskType } from "./types.js";
+export type { Task, TaskStatus, TaskStoreData, TaskType };
 
 const TASKS_DIR = join(homedir(), ".pi", "tasks");
 const LOCK_RETRY_MS = 50;
@@ -89,13 +83,17 @@ function isProcessRunning(pid: number): boolean {
  * Fill defaults for tasks persisted by older versions. Task files written
  * before the blocking feature have no `blockedBy`/`blocks`/`metadata`, so
  * consumers that read those fields unguarded (e.g. `task.blockedBy.length`)
- * would throw. Normalizing at the load boundary lets every consumer trust the
- * shape. Also guards against wrong types in hand-edited files.
+ * would throw. Task files written before the intent/plan `type` distinction
+ * have no `type` field, so consumers that read `task.type` unguarded would
+ * get `undefined`. Normalizing at the load boundary lets every consumer trust
+ * the shape. Also guards against wrong types in hand-edited files.
  */
 function normalizeTask(t: Task): Task {
   const now = Date.now();
+  const type: TaskType = t.type === "intent" ? "intent" : "plan";
   return {
     ...t,
+    type,
     metadata: t.metadata && typeof t.metadata === "object" && !Array.isArray(t.metadata) ? t.metadata : {},
     blocks: Array.isArray(t.blocks) ? t.blocks : [],
     blockedBy: Array.isArray(t.blockedBy) ? t.blockedBy : [],
@@ -186,11 +184,18 @@ export class TaskStore {
     }
   }
 
-  create(subject: string, description: string, activeForm?: string, metadata?: Record<string, any>): Task {
+  create(
+    subject: string,
+    description: string,
+    activeForm?: string,
+    metadata?: Record<string, any>,
+    type: TaskType = "plan",
+  ): Task {
     return this.withLock(() => {
       const now = Date.now();
       const task: Task = {
         id: String(this.nextId++),
+        type,
         subject,
         description,
         status: "pending",

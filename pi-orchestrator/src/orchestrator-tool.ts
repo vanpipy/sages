@@ -37,13 +37,14 @@ import type { ExtensionAPI, AgentToolResult, AgentToolUpdateCallback } from "@ea
 // resolver. They do NOT own any state — they read + write through the
 // store and let the LLM drive the lifecycle via pi-tasks's existing
 // 7 tools.
-import { TaskStore, type TaskKind } from "@sages/pi-tasks/task-store";
+import { TaskStore, type TaskType } from "@sages/pi-tasks/task-store";
 import { orchestratorProjectTaskFile } from "@sages/pi-tasks/task-paths";
 import { parseVerdict, suggestFollowUp, type Verdict } from "./verdict.js";
 
-// Re-exported for downstream callers (orchestrator-tool.ts was the
-// original home of TaskKind before it moved to pi-tasks).
-export type { TaskKind };
+// Re-exported for downstream callers. The orchestrator's consumer
+// tools (`task_inspect`, `task_consume`, `task_convert_intent`) all
+// import `TaskType` from this module.
+export type { TaskType };
 
 /** The two shipped agent types. */
 export type AgentType = "Developer" | "Reviewer";
@@ -56,7 +57,7 @@ export const InspectParams = Type.Object({
 			"The task ID to inspect. Use this before deciding which other orchestrator tool to call: " +
 			"`task_consume` works only on completed `plan` tasks, `task_convert_intent` works only on " +
 			"`intent` tasks, and `TaskExecute` works only on pending plan tasks. This tool returns " +
-			"`metadata.kind`, `status`, and `agentType` so the LLM can route correctly.",
+			"`type`, `status`, and `agentType` so the LLM can route correctly.",
 	}),
 });
 export type InspectInput = Static<typeof InspectParams>;
@@ -64,7 +65,7 @@ export type InspectInput = Static<typeof InspectParams>;
 export interface InspectOutput {
 	id: string;
 	subject: string;
-	kind: TaskKind;
+	type: TaskType;
 	status: string;
 	agentType?: string;
 	hasResult: boolean;
@@ -84,10 +85,10 @@ export class TaskInspectError extends Error {
  * orchestrator's LLM needs to decide which follow-up tool to call.
  *
  * The flow:
- *   - kind='intent'                       → call `task_convert_intent(intent_id, plan)`
- *   - kind='plan' + status='pending'      → call `TaskExecute([id])`
- *   - kind='plan' + status='in_progress'  → wait via `TaskOutput(task_id, block=true)`
- *   - kind='plan' + status='completed'    → call `task_consume(id)`
+ *   - type='intent'                       → call `task_convert_intent(intent_id, plan)`
+ *   - type='plan' + status='pending'      → call `TaskExecute([id])`
+ *   - type='plan' + status='in_progress'  → wait via `TaskOutput(task_id, block=true)`
+ *   - type='plan' + status='completed'    → call `task_consume(id)`
  */
 export async function taskInspect(
 	toolCallId: string,
@@ -108,8 +109,8 @@ export async function taskInspect(
 	const data: InspectOutput = {
 		id: task.id,
 		subject: task.subject,
-		// Default to "plan" for legacy tasks without an explicit kind.
-		kind: task.metadata?.kind === "intent" ? "intent" : "plan",
+		// task.type is normalized at load: legacy tasks default to "plan".
+		type: task.type,
 		status: task.status,
 		agentType:
 			typeof task.metadata?.agentType === "string"
@@ -126,7 +127,7 @@ export async function taskInspect(
 export const ConsumeParams = Type.Object({
 	task_id: Type.String({
 		description:
-			"The task ID to read. Must be `completed` and `kind='plan'`; intent tasks throw a `not_plan` error pointing the LLM at `task_convert_intent`. If the task is still running, the LLM should call `TaskOutput(task_id, block=true)` first.",
+			"The task ID to read. Must be `completed` and `type='plan'`; intent tasks throw a `not_plan` error pointing the LLM at `task_convert_intent`. If the task is still running, the LLM should call `TaskOutput(task_id, block=true)` first.",
 	}),
 	include_transcript: Type.Optional(
 		Type.Boolean({
@@ -183,7 +184,7 @@ async function taskConsume(
 			`No task with ID #${params.task_id}. Use TaskList to find the right ID.`,
 		);
 	}
-	if (task.metadata?.kind === "intent") {
+	if (task.type === "intent") {
 		throw new TaskConsumeError(
 			"not_plan",
 			`Task #${task.id} is an intent task; convert it to a plan via task_convert_intent(intent_task_id) before consume.`,
@@ -227,7 +228,7 @@ async function taskConsume(
 export const ConvertIntentParams = Type.Object({
 	intent_task_id: Type.String({
 		description:
-			"The ID of an intent task to convert. The task must have kind='intent' and not yet be converted (each intent converts once).",
+			"The ID of an intent task to convert. The task must have type='intent' and not yet be converted (each intent converts once).",
 	}),
 	plan: Type.Object({
 		subject: Type.Optional(
@@ -298,10 +299,10 @@ async function taskConvertIntent(
 			`No intent task with ID #${params.intent_task_id}.`,
 		);
 	}
-	if (intent.metadata?.kind !== "intent") {
+	if (intent.type !== "intent") {
 		throw new ConvertIntentError(
 			"not_intent",
-			`Task #${intent.id} is not an intent task (kind=${intent.metadata?.kind ?? "missing"}).`,
+			`Task #${intent.id} is not an intent task (type=${intent.type}).`,
 		);
 	}
 	if (intent.metadata?.converted) {
@@ -312,16 +313,17 @@ async function taskConvertIntent(
 	}
 
 	const convertedAt = Date.now();
+	// The intent task keeps its `type='intent'` on the Task field; only the
+	// audit fields land in metadata. We do NOT redundantly stamp
+	// `metadata.type='intent'` — task.type is the single source of truth.
 	store.update(intent.id, {
 		metadata: {
-			kind: "intent",
 			converted: true,
 			converted_at: convertedAt,
 		},
 	});
 
 	const planMeta: Record<string, unknown> = {
-		kind: "plan",
 		agentType: params.plan.agentType,
 		source_intent: intent.id,
 		...params.plan.metadata,
@@ -331,6 +333,7 @@ async function taskConvertIntent(
 		params.plan.description ?? intent.description,
 		params.plan.activeForm,
 		planMeta,
+		"plan",
 	);
 	if (params.plan.blocks) {
 		for (const target of params.plan.blocks) {
@@ -358,7 +361,7 @@ async function taskConvertIntent(
  * extension (in addition to pi-tasks's 7 tools, which are separately
  * registered by pi-tasks itself):
  *
- *   - `task_inspect(task_id)` — read kind + status + agentType so the LLM
+ *   - `task_inspect(task_id)` — read type + status + agentType so the LLM
  *     can route (intent → convert, plan-pending → execute,
  *     plan-completed → consume).
  *   - `task_consume(task_id, include_transcript?)` — read + parse
@@ -369,7 +372,7 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 		name: "task_inspect",
 		label: "task_inspect",
 		description:
-			"Inspect a task — returns its `kind` ('intent' | 'plan'), `status`, " +
+			"Inspect a task — returns its `type` ('intent' | 'plan'), `status`, " +
 			"and `agentType`. Use this BEFORE deciding which other tool to call: " +
 			"intent → `task_convert_intent`, plan-pending → `TaskExecute`, " +
 			"plan-completed → `task_consume`. Lighter than `TaskGet` (returns " +
@@ -398,9 +401,9 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 		label: "task_convert_intent",
 		description:
 			"The orchestrator's unique intent → plan converter. " +
-			"Reads an intent task (kind='intent'), marks it converted (audit: " +
-			"`metadata.converted / converted_at`), and creates a new plan task " +
-			"with `agentType` from the spec, `metadata.kind='plan'`, and " +
+			"Reads an intent task (type='intent'), marks it converted (audit: " +
+			"`metadata.converted / metadata.converted_at`), and creates a new plan task " +
+			"with `type='plan'`, `agentType` from the spec, and " +
 			"`metadata.source_intent` linking back to the intent. Refuses " +
 			"non-intent sources and already-converted intents. Use this for " +
 			"every intent task you see — until an intent is on the board, " +

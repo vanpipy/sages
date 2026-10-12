@@ -212,11 +212,11 @@ describe("/tasks create", () => {
 		expect(task).toContain("Get the release out");
 
 		// /tasks creates raw user-facing material — the orchestrator is
-		// the unique operator that converts intent → plan, so the kind
+		// the unique operator that converts intent → plan, so the type
 		// marker is what makes the conversion path discoverable.
 		const store = new TaskStore(taskFile);
 		const stored = store.get("1")!;
-		expect(stored.metadata?.kind).toBe("intent");
+		expect(stored.type).toBe("intent");
 	});
 
   it("creates nothing when the subject prompt is cancelled", async () => {

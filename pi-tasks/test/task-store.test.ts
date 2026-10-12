@@ -501,6 +501,64 @@ describe("TaskStore (absolute path)", () => {
     }
   });
 
+  it("normalizes legacy task records missing `type` to 'plan' on load", () => {
+    // A task file written before the intent/plan type distinction existed has no
+    // `type` field. Loading it must produce type='plan' so downstream consumers
+    // can read `task.type` unguarded.
+    const dir = join(tmpdir(), `pi-tasks-legacy-type-${process.pid}-${Date.now()}`);
+    const filePath = join(dir, "tasks.json");
+    mkdirSync(dir, { recursive: true });
+    try {
+      writeFileSync(filePath, JSON.stringify({
+        nextId: 1,
+        tasks: [{
+          id: "1",
+          subject: "Legacy task",
+          description: "...",
+          status: "pending",
+          metadata: {},
+          blocks: [],
+          blockedBy: [],
+          createdAt: 1,
+          updatedAt: 1,
+        }],
+      }));
+
+      const task = new TaskStore(filePath).get("1")!;
+      expect(task.type).toBe("plan");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a valid `type: 'intent'` field across a reload", () => {
+    const dir = join(tmpdir(), `pi-tasks-intent-${process.pid}-${Date.now()}`);
+    const filePath = join(dir, "tasks.json");
+    mkdirSync(dir, { recursive: true });
+    try {
+      writeFileSync(filePath, JSON.stringify({
+        nextId: 1,
+        tasks: [{
+          id: "1",
+          type: "intent",
+          subject: "User intent",
+          description: "...",
+          status: "pending",
+          metadata: {},
+          blocks: [],
+          blockedBy: [],
+          createdAt: 1,
+          updatedAt: 1,
+        }],
+      }));
+
+      const task = new TaskStore(filePath).get("1")!;
+      expect(task.type).toBe("intent");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("creates the backing directory lazily — not on construction, but on first write", () => {
     const parentDir = join(tmpdir(), `pi-tasks-lazy-${Date.now()}`);
     const filePath = join(parentDir, "tasks.json");

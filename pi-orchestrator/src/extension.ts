@@ -200,8 +200,8 @@ export function installSessionHooks(pi: ExtensionAPI): void {
  * `task_convert_intent`).
  *
  * The orchestrator is a consumer of the task flow, not its manager —
- * it adds tasks via pi-tasks's `TaskCreate` (with metadata.kind set
- * to "intent" or "plan"), reads via `TaskList` / `TaskGet`, and dispatches
+ * it adds tasks via pi-tasks's `TaskCreate` (with `type` set to
+ * "intent" or "plan"), reads via `TaskList` / `TaskGet`, and dispatches
  * via `TaskExecute`. The orchestrator's two tools add: verdict parsing
  * on the read side, and intent → plan conversion on the write side.
  */

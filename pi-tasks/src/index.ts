@@ -679,6 +679,12 @@ All tasks are created with status \`pending\`.
       subject: Type.String({ description: "A brief title for the task" }),
       description: Type.String({ description: "A detailed description of what needs to be done" }),
       activeForm: Type.Optional(Type.String({ description: "Present continuous form shown in spinner when in_progress (e.g., 'Running tests')" })),
+      type: Type.Optional(Type.Unsafe<"intent" | "plan">({
+        type: "string",
+        enum: ["intent", "plan"],
+        description: "Task type on the board: 'intent' for raw user-facing material (orchestrator converts via task_convert_intent), 'plan' for orchestrator-shaped tasks ready for dispatch. Defaults to 'plan' when omitted.",
+        default: "plan",
+      })),
       agentType: Type.Optional(Type.String({ description: "Agent type for subagent execution (e.g., 'Developer', 'Reviewer'). Tasks with agentType can be started via TaskExecute." })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
     }),
@@ -690,7 +696,13 @@ All tasks are created with status \`pending\`.
       autoClear.startNewBatch();
       const meta = params.metadata ?? {};
       if (params.agentType) meta.agentType = params.agentType;
-      const task = store.create(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined);
+      const task = store.create(
+        params.subject,
+        params.description,
+        params.activeForm,
+        Object.keys(meta).length > 0 ? meta : undefined,
+        params.type ?? "plan",
+      );
       widget.update();
       return Promise.resolve(textResult(`Task #${task.id} created successfully: ${task.subject}`));
     },
@@ -738,7 +750,7 @@ Use TaskGet with a specific task ID to view full details including description a
       });
 
       const lines = sorted.map(task => {
-        let line = `#${task.id} [${task.status}] ${task.subject}`;
+        let line = `#${task.id} [${task.status}] [${task.type}] ${task.subject}`;
 
         if (task.owner) {
           line += ` (${task.owner})`;
@@ -804,6 +816,7 @@ Returns full task details:
       const lines: string[] = [
         `Task #${task.id}: ${task.subject}`,
         `Status: ${task.status}`,
+        `Type: ${task.type}`,
       ];
       if (task.owner) {
         lines.push(`Owner: ${task.owner}`);
@@ -823,10 +836,13 @@ Returns full task details:
         lines.push(`Blocks: ${task.blocks.map(id => "#" + id).join(", ")}`);
       }
 
-      // Show metadata if non-empty
-      const metaKeys = Object.keys(task.metadata);
+      // Show metadata if non-empty. The `type` field is its own first-class column
+      // above, so strip a stray legacy `metadata.type` echo to avoid two truths.
+      const { type: _strippedType, ...rest } = task.metadata;
+      void _strippedType;
+      const metaKeys = Object.keys(rest);
       if (metaKeys.length > 0) {
-        lines.push(`Metadata: ${JSON.stringify(task.metadata)}`);
+        lines.push(`Metadata: ${JSON.stringify(rest)}`);
       }
 
       return Promise.resolve(textResult(lines.join("\n")));
@@ -874,6 +890,7 @@ Returns full task details:
 ## Fields You Can Update
 
 - **status**: The task status (see Status Workflow below)
+- **type**: Change the task type (intent ↔ plan). Only accepted while status is 'pending'; once a task is in flight, its type is immutable. The orchestrator's \`task_convert_intent\` is the canonical operator for intent → plan conversion and produces a new task so the original intent is preserved as audit material.
 - **subject**: Change the task title (imperative form, e.g., "Run tests")
 - **description**: Change the task description
 - **activeForm**: Present continuous form shown in spinner when in_progress (e.g., "Running tests")
@@ -925,6 +942,11 @@ Set up task dependencies:
         enum: ["pending", "in_progress", "completed", "deleted"],
         description: "New status for the task",
       })),
+      type: Type.Optional(Type.Unsafe<"intent" | "plan">({
+        type: "string",
+        enum: ["intent", "plan"],
+        description: "New type for the task. Only accepted while status is 'pending'; once a task is in flight, its type is immutable.",
+      })),
       subject: Type.Optional(Type.String({ description: "New subject for the task" })),
       description: Type.Optional(Type.String({ description: "New description for the task" })),
       activeForm: Type.Optional(Type.String({ description: "Present continuous form shown in spinner when in_progress" })),
@@ -940,6 +962,17 @@ Set up task dependencies:
 
       if (changedFields.length === 0 && !task) {
         return Promise.resolve(textResult(`Task #${taskId} not found`));
+      }
+
+      // `type` is pending-only. The store doesn't enforce it because callers
+      // that already hold a known-pending task pass `type` freely; the gate
+      // belongs at the LLM-facing tool boundary, where the failure mode (a
+      // thrown error) is observable. After `store.update` has read the live
+      // status, refuse if the task has already moved on.
+      if (fields.type !== undefined && task && task.status !== "pending") {
+        return Promise.resolve(textResult(
+          `Task #${taskId} type is immutable once it leaves 'pending' (current status: ${task.status}). Use task_convert_intent for intent → plan conversion.`,
+        ));
       }
 
       // Update widget active task tracking
@@ -1344,13 +1377,13 @@ Set up task dependencies:
         const description = await ui.input("Task description");
         if (!description) return mainMenu();
 
-        // /tasks creates raw user-facing material — mark it with the
-        // `intent` kind so the orchestrator's `task_convert_intent` is
+        // /tasks creates raw user-facing material — mark it with
+        // type='intent' so the orchestrator's `task_convert_intent` is
         // the unique operator that turns it into a plan task. Without
-        // the marker, intent and plan tasks would be indistinguishable
+        // the type, intent and plan tasks would be indistinguishable
         // and the orchestrator's consumer loop would have no way to
         // know which tasks are user wishes vs. ready-to-execute plans.
-        store.create(subject, description, undefined, { kind: "intent" });
+        store.create(subject, description, undefined, undefined, "intent");
         widget.update();
         return mainMenu();
       };

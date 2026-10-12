@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: "Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the orchestrator constitution), and tool_call (once-per-session soft-mode reminder). Owns three LLM-facing tools: `task_inspect` (read kind+status+agentType so the LLM can route), `task_consume` (read+parse verdict for completed plan tasks), and `task_convert_intent` (the unique intent→plan converter). The LLM adds tasks via pi-tasks's `TaskCreate` (with metadata.kind = 'intent' or 'plan') and dispatches via `TaskExecute`. The orchestrator does not manage the task flow — it only reads and adds; convertIntent is its only state-changing write, and only within the intent→plan conversion path."
+description: "Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the orchestrator constitution), and tool_call (once-per-session soft-mode reminder). Owns three LLM-facing tools: `task_inspect` (read type+status+agentType so the LLM can route), `task_consume` (read+parse verdict for completed plan tasks), and `task_convert_intent` (the unique intent→plan converter). The LLM adds tasks via pi-tasks's `TaskCreate` (with `type` set to 'intent' or 'plan') and dispatches via `TaskExecute`. The orchestrator does not manage the task flow — it only reads and adds; convertIntent is its only state-changing write, and only within the intent→plan conversion path."
 ---
 
 # Orchestrator — Soft Infrastructure
@@ -8,7 +8,7 @@ description: "Soft-infrastructure layer for pi. Wires session_start (curates the
 The orchestrator plays the **Task Orchestrator** role in the three-package
 composition: a **consumer** of the Task Board (`pi-tasks/`), not its
 manager. It adds tasks via pi-tasks's existing `TaskCreate` (with
-`metadata.kind = 'intent' | 'plan'`) and reads them via `task_inspect` /
+`type` set to `'intent' | 'plan'`) and reads them via `task_inspect` /
 `task_consume`. The Task Executor (`pi-subagents/`) is spawned by the
 board via `TaskExecute`, never sees the board itself, and reports
 results back through the event bus. The boundary is enforced by the
@@ -35,9 +35,9 @@ The orchestrator is a consumer — it does not manage the task flow.
 | **Constitution overlay at before_agent_start** | Prepends `templates/SYSTEM.md` to the LLM's system prompt. The system prompt is the orchestrator's only persistent instruction surface. |
 | **Soft-mode reminder on first side-effecting call** | On the first `bash` / `edit` / `write` tool call per session, appends a reminder that recommends the pi-tasks workflow for active task lists of >2 items. Fires once per session; subsequent calls are silent. |
 | **Post-tool advisory nudges** | On every tool call, the `repeat_call_chain` detector fires when the same `(tool, args)` pair is seen ≥3 times within 2s — a generic stuck-on-same-call detector. Findings are appended via `pi.appendEntry("system", ...)`. |
-| **`task_inspect(task_id)` tool** | Read kind+status+agentType. The LLM's first call on every task. Routes to `task_convert_intent` (intent), `TaskExecute` (plan pending), `TaskOutput(block=true)` (plan in_progress), or `task_consume` (plan completed). Lighter than `TaskGet`. |
+| **`task_inspect(task_id)` tool** | Read type+status+agentType. The LLM's first call on every task. Routes to `task_convert_intent` (intent), `TaskExecute` (plan pending), `TaskOutput(block=true)` (plan in_progress), or `task_consume` (plan completed). Lighter than `TaskGet`. |
 | **`task_consume(task_id, include_transcript?)` tool** | Read a completed plan task in a structured way. Parses the Reviewer's 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and emits a verdict-tailored follow-up suggestion. Returns `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }`. Pure read — does not mutate the store. Intent tasks throw `not_plan` — call `task_convert_intent` first. |
-| **`task_convert_intent(intent_task_id, plan)` tool** | The orchestrator's unique intent → plan conversion operator. Reads an intent task (kind='intent'), marks it converted (audit: `metadata.converted / converted_at`), creates a new plan task with `agentType` from the spec, `metadata.kind='plan'`, and `metadata.source_intent` linking back to the intent. Refuses non-intent sources and already-converted intents. |
+| **`task_convert_intent(intent_task_id, plan)` tool** | The orchestrator's unique intent → plan conversion operator. Reads an intent task (`type='intent'`), marks it converted (audit: `metadata.converted / metadata.converted_at`), creates a new plan task with `type='plan'`, `agentType` from the spec, and `metadata.source_intent` linking back to the intent. Refuses non-intent sources and already-converted intents. |
 | **Brainstorming slash command** | `/brainstorm [request]` is registered separately via `skills/brainstorming/SKILL.md`; the orchestrator's own registration machinery is limited to the session hooks + advisory handlers above. |
 
 ## What the orchestrator no longer does

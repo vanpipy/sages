@@ -98,6 +98,7 @@ Create a structured task. Used proactively for complex multi-step work.
 | `subject` | string | yes | Brief imperative title |
 | `description` | string | yes | Detailed context and acceptance criteria |
 | `activeForm` | string | no | Present continuous form for spinner (e.g., "Running tests") |
+| `type` | `"intent"` / `"plan"` | no | Task type on the board (see [Task type](#task-type)). Defaults to `"plan"`. Use `"intent"` for raw user-facing material that an orchestrator will later convert to a dispatchable plan. |
 | `agentType` | string | no | Agent type for subagent execution (e.g., `"general-purpose"`, `"Explore"`) |
 | `metadata` | object | no | Arbitrary key-value pairs |
 
@@ -107,12 +108,12 @@ Create a structured task. Used proactively for complex multi-step work.
 
 ### `TaskList`
 
-List all tasks with status, owner, and blocked-by info.
+List all tasks with status, type, owner, and blocked-by info.
 
 ```
-#1 [pending] Fix authentication bug
-#2 [in_progress] Write unit tests (agent-1)
-#3 [pending] Update docs [blocked by #1, #2]
+#1 [pending] [plan] Fix authentication bug
+#2 [in_progress] [plan] Write unit tests (agent-1)
+#3 [pending] [intent] Update docs [blocked by #1, #2]
 ```
 
 Sort order: pending first, then in-progress, then completed (each group by ID).
@@ -124,13 +125,14 @@ Get full details for a specific task.
 ```
 Task #2: Write unit tests
 Status: in_progress
+Type: plan
 Owner: agent-1
 Description: Add tests for the auth module
 Blocked by: #1
 Blocks: #3
 ```
 
-Shows owner (if set) and open (non-completed) dependency edges. Non-empty metadata is displayed as JSON.
+Shows owner (if set) and open (non-completed) dependency edges. Non-empty metadata is displayed as JSON. The `type` field is surfaced as its own line (not inside the metadata blob) — see [Task type](#task-type) for the intent/plan distinction.
 
 ### `TaskUpdate`
 
@@ -140,6 +142,7 @@ Update task fields, status, metadata, and dependencies.
 |-----------|------|-------------|
 | `taskId` | string | Task ID (required) |
 | `status` | `pending` / `in_progress` / `completed` / `deleted` | New status |
+| `type` | `"intent"` / `"plan"` | New type. **Only accepted while `status === 'pending'`** — once a task is in flight, its type is immutable. For intent → plan conversion, prefer the orchestrator's `task_convert_intent` (in pi-orchestrator), which produces a new plan task and preserves the original intent as audit material. |
 | `subject` | string | New title |
 | `description` | string | New description |
 | `activeForm` | string | Spinner text |
@@ -159,6 +162,28 @@ Update task fields, status, metadata, and dependencies.
 Setting `status: "deleted"` permanently removes the task.
 
 Dependencies are bidirectional: `addBlocks: ["3"]` on task 1 also adds `blockedBy: ["1"]` to task 3.
+
+## Task type
+
+Every task has a first-class `type` field: `"intent"` or `"plan"`. The
+type discriminates raw user material from orchestrator-shaped, ready-
+to-dispatch work. It is set at creation (via the `TaskCreate` tool's
+`type` parameter, which defaults to `"plan"`) and is immutable once
+the task leaves `pending` — see [`TaskUpdate`](#taskupdate) above for
+why.
+
+| Type | Meaning |
+|------|---------|
+| `"intent"` | Raw material from a user-facing entry point (`/tasks` create, or any custom-task surface). Never matched to a subagent; never dispatched; never consumed directly. The orchestrator's `task_convert_intent` is the unique operator that turns an intent into a plan task. |
+| `"plan"`   | Created by the orchestrator (raw `TaskCreate` with `agentType`, or via `task_convert_intent`). Has an `agentType`, is matched to a subagent, dispatched via `TaskExecute`, and consumed by the orchestrator after the executor reports back. |
+
+### Backward compatibility
+
+Task files written before the `type` distinction existed have no
+`type` field. The store normalizes those records at load time to
+`type: "plan"` (see `normalizeTask` in `src/task-store.ts`), so every
+consumer can read `task.type` unguarded. There is no separate predicate
+to remember; missing-type and explicit-plan are the same value.
 
 ### `TaskOutput`
 
