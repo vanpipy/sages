@@ -750,10 +750,21 @@ Use TaskGet with a specific task ID to view full details including description a
       });
 
       const lines = sorted.map(task => {
-        let line = `#${task.id} [${task.status}] [${task.type}] ${task.subject}`;
+        // '!' prefix is the orchestrator's at-a-glance takeover signal — a
+        // task with a lastError (spawn failed, agent aborted, provider
+        // rejection) wants the orchestrator's attention, not a silent
+        // re-dispatch. Tooltip-style block: see Context under each line.
+        let line = `${task.metadata?.lastError ? "!" : " "}#${task.id} [${task.status}] [${task.type}] ${task.subject}`;
 
         if (task.owner) {
           line += ` (${task.owner})`;
+        }
+
+        // Surface the lastError inline so the LLM sees it without a second
+        // TaskGet call. Kept terse — the full message is in TaskGet's
+        // `Error:` line and metadata blob.
+        if (task.metadata?.lastError) {
+          line += ` — ${task.metadata.lastError}`;
         }
 
         // Only show non-completed blockers
@@ -818,6 +829,13 @@ Returns full task details:
         `Status: ${task.status}`,
         `Type: ${task.type}`,
       ];
+      // Surface the lastError as a top-level line, immediately after Type.
+      // This is the orchestrator's manual-takeover signal — visible
+      // without diving into JSON. The metadata blob below still includes
+      // it for older consumers.
+      if (task.metadata?.lastError) {
+        lines.push(`Error: ${task.metadata.lastError}`);
+      }
       if (task.owner) {
         lines.push(`Owner: ${task.owner}`);
       }
@@ -1224,7 +1242,14 @@ Set up task dependencies:
           launched.push(`#${taskId} → agent ${agentId}`);
         } catch (err: any) {
           debug(`spawn:error task=#${taskId}`, err);
-          store.update(taskId, { status: "pending" });
+          // Store the error so a follow-up TaskGet / TaskList surfaces it as
+          // the orchestrator's manual-takeover signal. Reverting status alone
+          // leaves the failure hidden inside metadata; surfacing it lets the
+          // orchestrator notice without re-reading the original TaskExecute output.
+          store.update(taskId, {
+            status: "pending",
+            metadata: { ...task.metadata, lastError: `spawn failed: ${err.message}` },
+          });
           results.push(`#${taskId}: spawn failed — ${err.message}`);
         }
       }

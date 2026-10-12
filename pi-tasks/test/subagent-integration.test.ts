@@ -584,6 +584,93 @@ describe("Completion listener", () => {
     const result = await mock.executeTool("TaskGet", { taskId: "1" });
     expect(result.content[0].text).toContain("Status: pending");
   });
+
+  // ---- Last-error visibility (orchestrator-side takeover signal) ----
+  //
+  // When a dispatched subagent fails (provider rejection, runtime abort,
+  // spawn RPC error), the orchestrator's manual-takeover protocol kicks
+  // in — but only if the failure state is observable. The store already
+  // captures `metadata.lastError`; the LLM-facing tools must surface it
+  // prominently so the orchestrator notices without digging through
+  // nested JSON. These tests pin that contract.
+
+  it("TaskGet exposes lastError as a top-level 'Error:' line, not just inside the metadata blob", async () => {
+    await mock.executeTool("TaskCreate", {
+      subject: "Aborted agent",
+      description: "...",
+      agentType: "general-purpose",
+    });
+    await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    mock.emitEvent("subagents:failed", { id: "agent-1", error: "aborted", status: "error" });
+
+    const result = await mock.executeTool("TaskGet", { taskId: "1" });
+    const text = result.content[0].text;
+    // Surfaced as its own line, immediately after Status / Type.
+    expect(text).toMatch(/Error: aborted/);
+    // Still present inside the metadata blob (so older consumers keep working).
+    expect(text).toContain('"lastError"');
+  });
+
+  it("TaskGet omits the Error: line when the task has no lastError", async () => {
+    await mock.executeTool("TaskCreate", {
+      subject: "Healthy task",
+      description: "...",
+    });
+
+    const result = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(result.content[0].text).not.toMatch(/Error:/);
+  });
+
+  it("TaskList marks tasks with lastError so the orchestrator sees the failure at a glance", async () => {
+    await mock.executeTool("TaskCreate", {
+      subject: "Will fail",
+      description: "...",
+      agentType: "general-purpose",
+    });
+    await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    mock.emitEvent("subagents:failed", { id: "agent-1", error: "aborted", status: "error" });
+
+    await mock.executeTool("TaskCreate", {
+      subject: "Healthy",
+      description: "...",
+    });
+
+    const result = await mock.executeTool("TaskList", {});
+    const text = result.content[0].text;
+    // The failing task gets a '!' marker prefix; the healthy one does not.
+    const failLine = text.split("\n").find((l: string) => l.includes("Will fail")) ?? "";
+    const okLine = text.split("\n").find((l: string) => l.includes("Healthy")) ?? "";
+    expect(failLine).toMatch(/!/);
+    expect(okLine).not.toMatch(/!/);
+  });
+
+  it("TaskExecute's spawn-failure path stores lastError so a follow-up TaskGet surfaces it", async () => {
+    // Re-install the subagents mock with a forced spawn error. The
+    // existing `rpc` was installed in beforeEach without spawnError;
+    // we tear it down and put a fresh one in place that rejects every
+    // spawn RPC (e.g. "Model not found: sonnet").
+    rpc.unsub();
+    rpc = installSubagentsMock(mock.pi, { spawnError: "Model not found: sonnet" });
+
+    await mock.executeTool("TaskCreate", {
+      subject: "Bad model",
+      description: "...",
+      agentType: "general-purpose",
+      type: "plan",
+    });
+    const exec = await mock.executeTool("TaskExecute", { task_ids: ["1"], model: "sonnet" });
+    // The Tool returns the spawn-failure message in the Skipped section.
+    expect(exec.content[0].text).toContain("spawn failed");
+
+    // Crucially, lastError is now on the task so a later TaskGet makes
+    // it observable without the LLM re-reading the original exec output.
+    const result = await mock.executeTool("TaskGet", { taskId: "1" });
+    const text = result.content[0].text;
+    expect(text).toMatch(/Error:/);
+    expect(text).toContain("Model not found: sonnet");
+    // Task reverts to pending so the orchestrator can retry / take over.
+    expect(text).toContain("Status: pending");
+  });
 });
 
 describe("Auto-cascade", () => {
