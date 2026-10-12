@@ -155,6 +155,29 @@ an `agentType` that the runtime spawns when unblocked.
 | `TaskOutput` | wait for an executed task's report. |
 | `TaskStop` | stop a running task. |
 
+#### pi-routines (6) — `@davecodes/pi-routines` (opt-in)
+
+Optional scheduled / event-driven routines extension. If installed
+(by `install.sh`), these six tools let the LLM manage routines that
+fire on `pulse` / `cron` / `oneoff` / `hook` / `api` / `github`
+triggers. Sages ships a `sages-board-watch` template (installed to
+`~/.pi/agent/extensions/routines/templates/`) that drives a 30s
+pulse to route out-of-turn task additions — covering the
+out-of-band awareness gap between user / `/tasks create` writes
+and the LLM's next turn. Enable with `/routine-install
+sages-board-watch` in a pi session, or use
+`/schedule every 30s watch the Sages board` for natural-language
+creation.
+
+| Tool | Use for |
+|---|---|
+| `routine_create` | define a new routine (trigger + prompt + options). |
+| `routine_list` | list active routines. |
+| `routine_delete` | remove a routine. |
+| `routine_run_now` | fire a routine immediately (skip its schedule). |
+| `routine_set_state` | persist a JSON state blob across ticks. |
+| `routine_get_state` | read the persisted state. |
+
 #### Subagent `max_turns` tiers
 
 `max_turns` is a **hard ceiling at `tier + 5`** (the runtime's `graceTurns`).

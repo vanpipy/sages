@@ -117,6 +117,28 @@ export const AFT_TOOLS: readonly string[] = [
 ];
 
 /**
+ * pi-routines (`@davecodes/pi-routines`) tools. Six tools, all optional —
+ * the Sages orchestrator allowlist includes them, but if pi-routines
+ * isn't installed the LLM simply sees the names and the runtime
+ * reports "tool not registered" when called. This graceful degradation
+ * matches the soft-mode contract: missing extensions don't break the
+ * session, they just lose capability.
+ *
+ * The Sages board-watch routine (bundled at
+ * `templates/sages-routines/sages-board-watch.json`, installed by
+ * `scripts/install.sh`) drives a periodic pulse that wakes the LLM to
+ * route out-of-turn task additions (case 2/3 from the awareness RFC).
+ */
+export const PI_ROUTINES_TOOLS: readonly string[] = [
+	"routine_create",
+	"routine_list",
+	"routine_delete",
+	"routine_run_now",
+	"routine_set_state",
+	"routine_get_state",
+];
+
+/**
  * Soft-mode reminder text. Fires once per session on the first side-effecting
  * tool call (bash / edit / write) to nudge the LLM toward the
  * pi-tasks-driven workflow when the active task list exceeds 2 items.
@@ -157,6 +179,7 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 			...SUBAGENT_TOOLS,
 			...AFT_TOOLS,
 			...BASELINE_TOOLS,
+			...PI_ROUTINES_TOOLS,
 		];
 		pi.setActiveTools(tools);
 		(pi as unknown as {

@@ -1,0 +1,8 @@
+{
+  "name": "sages-board-watch",
+  "description": "Periodic pulse: route Sages board intent tasks (case 2/3 awareness)",
+  "trigger": { "kind": "pulse", "interval": "30s" },
+  "prompt": "Check the Sages task board for unhandled intent tasks.\n\nFor each task on the board where type='intent' and metadata.converted is missing:\n  1. Call task_inspect(task_id) to confirm the routing field shape.\n  2. Decompose it into a `plan: TaskSpec[]` array (1-3 specs) — each spec needs at least `agentType: 'Developer' | 'Reviewer'`. Defaults: subject and description fall through to the intent's.\n  3. Call task_convert_intent(task_id, plan) to commit the decomposition. The function creates N plan tasks, wires their edges (blockedBy / blocks referencing pre-existing task IDs), and marks the intent as converted.\n  4. Call TaskExecute on the new plan task IDs to start the work.\n\nSkip:\n  - Tasks where type != 'intent' (they're not yours).\n  - Tasks where metadata.converted is set (already routed).\n  - Tasks where type='plan', status='in_progress', AND metadata.lastError is set — those were taken over manually; the soft-mode takeover protocol owns them. Do not re-dispatch.\n\nIf no unhandled intent tasks exist, output [~] (quiet mode suppresses this in chat).\n\nThis routine covers the case where the user (or another pi session) added intent tasks while the LLM was idle. Without this pulse, the LLM would only notice them at the next cadence reminder (up to 4 turns away). With it, every 30 seconds.",
+  "quiet": true,
+  "maxRunsPerDay": 2000
+}

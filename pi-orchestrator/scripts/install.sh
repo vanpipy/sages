@@ -31,6 +31,17 @@
 #   from the npm registry — no version pin (see header below):
 #     pi-mcp-adapter                  → npm:pi-mcp-adapter
 #     @cortexkit/aft-pi               → npm:@cortexkit/aft-pi
+#     @davecodes/pi-routines          → npm:@davecodes/pi-routines
+#                                       (scheduled / event-driven routines: pulse/cron/hook/api/github
+#                                        trigger kinds. Sages uses this for the board-watch periodic
+#                                        task-routing pulse — see post-install hint. Adds 6 LLM
+#                                        tools: routine_create / routine_list / routine_delete /
+#                                        routine_run_now / routine_set_state / routine_get_state.
+#                                        Enable board-watching in your first pi session:
+#                                          /routine 30s check the Sages board for new intent
+#                                            tasks and route them via task_convert_intent
+#                                        OR use a natural-language schedule:
+#                                          /schedule every 30s watch the Sages board
 #
 #   AFT (@cortexkit/aft-pi) — full install path baked into install.sh as
 #   of GC-2026-096. Three pieces, each soft-fail:
@@ -206,6 +217,26 @@ AFT_CONFIG="$HOME/.config/cortexkit/aft.jsonc"
 AFT_SENTINEL="SAGES_TEMPLATE_V1"
 AFT_NPM_PKG="npm:@cortexkit/aft-pi"
 AFT_NPM_DIR="$PI_DIR/agent/npm/node_modules/@cortexkit/aft-pi"
+
+# pi-routines (@davecodes/pi-routines) install info.
+#
+# Sages uses pi-routines for the periodic task-routing pulse (case 2/3
+# from the orchestrator awareness RFC: out-of-turn task creation). The
+# extension itself is unopinionated — Sages ships a board-watch prompt
+# that the user installs with one slash command after install:
+#   /routine 30s check the Sages board for new intent tasks and route them
+# OR via natural language:
+#   /schedule every 30s watch the Sages board
+#
+# Mirrors the AFT npm-peer install pattern (no @version suffix — install
+# always pulls latest from the npm registry; --force to roll).
+PI_ROUTINES_NPM_PKG="npm:@davecodes/pi-routines"
+PI_ROUTINES_NPM_DIR="$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines"
+# Sages board-watch template — installed to the user-customizable
+# templates dir. The user invokes /routine-install sages-board-watch
+# to activate. Bundled in the Sages repo so versions travel together.
+SAGES_ROUTINES_TEMPLATES_SRC="$SCRIPT_DIR/../templates/sages-routines"
+SAGES_ROUTINES_TEMPLATES_DEST="$HOME/.pi/agent/extensions/routines/templates"
 # Binary lives at ~/.local/bin/aft (mirrors codebase-memory-mcp at
 # ~/.local/bin/codebase-memory-mcp). On PATH so users can run
 # `aft --version` directly.
@@ -2050,6 +2081,148 @@ except Exception as e:
   echo "  @cortexkit/aft-pi uninstalled"
 }
 
+# ────────────────────────────────────────────────────────────
+# pi-routines (@davecodes/pi-routines): scheduled / event-driven
+# routines extension. Sages uses this for the periodic board-watch
+# pulse (case 2/3 awareness from the orchestrator awareness RFC).
+# Mirrors install_aft_pi_npm / uninstall_aft_pi_npm exactly — same
+# soft-fail semantics, same settings.json registration pattern.
+# ────────────────────────────────────────────────────────────
+
+is_pi_routines_installed() {
+  # Same auto-recovery invariant as is_aft_pi_npm_installed: both the
+  # settings.json registration AND the dest dir must exist. Substring
+  # match on `pi-routines` is safe here — npm scope is `@davecodes/`
+  # and Sages has no other `pi-routines*` package registered.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+
+  python3 -c "
+import json, os, sys
+try:
+    d = json.load(open('$settings'))
+    pkg = '$PI_ROUTINES_NPM_PKG'
+    if pkg in d.get('packages', []) and os.path.isdir('$PI_ROUTINES_NPM_DIR'):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_routines_npm() {
+  echo "==> Installing @davecodes/pi-routines npm peer..."
+  if is_pi_routines_installed && [[ "${FORCE:-false}" != true ]]; then
+    echo "  @davecodes/pi-routines already installed (use --force to reinstall)"
+    return 0
+  fi
+  if [[ "${FORCE:-false}" == true ]] && is_pi_routines_installed; then
+    echo "  Force-reinstall: removing previous @davecodes/pi-routines first"
+    uninstall_pi_routines_npm
+  fi
+  # Soft-fail when pi CLI is missing — mirrors install_aft_pi_npm.
+  # Without pi on PATH we have no way to know whether the user intends
+  # to use the npm-prefix install or a different path.
+  if ! command -v pi &>/dev/null; then
+    echo "  'pi' command not found; user must install manually"
+    return 0
+  fi
+  _clean_npm_prefix_dir "$PI_DIR/agent/npm"
+  local npm_spec="${PI_ROUTINES_NPM_PKG#npm:}"
+  if (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
+    npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$npm_spec" 2>&1 | tail -3); then
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json, re
+f, pkg = '$settings', '$PI_ROUTINES_NPM_PKG'
+PKG_PATTERN = re.compile(r'^(npm:@davecodes/pi-routines(@.+)?|.*/pi-routines)\$')
+try: d = json.load(open(f))
+except: d = {'packages': []}
+pkgs = [p for p in d.get('packages', []) if not PKG_PATTERN.match(p)]
+if pkg not in pkgs:
+    pkgs.append(pkg)
+d['packages'] = pkgs
+json.dump(d, open(f, 'w'), indent=2)
+print('  Registered', pkg)
+"
+  else
+    echo "  Warning: npm install failed; @davecodes/pi-routines won't be available until manually installed"
+    echo "  To retry: npm install --prefix $PI_DIR/agent/npm --ignore-scripts $npm_spec"
+  fi
+}
+
+uninstall_pi_routines_npm() {
+  # Strip any form (legacy version-less, pinned @version, or /path/...
+  # local-fork) from settings.json. Mirrors uninstall_aft_pi_npm.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json, re, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    PKG_PATTERN = re.compile(r'^(npm:@davecodes/pi-routines(@.+)?|.*/pi-routines)\$')
+    new_pkgs = [p for p in pkgs if not PKG_PATTERN.match(p)]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        json.dump(d, open(f, 'w'), indent=2)
+        print('  Removed @davecodes/pi-routines from settings.json')
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null || true
+
+  if [[ -d "$PI_ROUTINES_NPM_DIR" ]]; then
+    rm -rf "$PI_ROUTINES_NPM_DIR"
+    echo "  Removed $PI_ROUTINES_NPM_DIR"
+  fi
+
+  echo "  @davecodes/pi-routines uninstalled"
+}
+
+install_sages_routines_templates() {
+  # Sages ships a board-watch template so the user can enable the
+  # periodic task-routing pulse with a one-liner:
+  #   /routine-install sages-board-watch
+  # We COPY (not symlink) the template JSON into the routines
+  # templates dir — routines reads templates via fs.readdirSync at
+  # command invocation, not via the npm package, so a stale install
+  # would otherwise miss the Sages templates. Copy is idempotent: a
+  # newer source file overwrites an older dest.
+  if [[ ! -d "$SAGES_ROUTINES_TEMPLATES_SRC" ]]; then
+    echo "  Skipped: $SAGES_ROUTINES_TEMPLATES_SRC not found (no Sages templates this build)"
+    return 0
+  fi
+  mkdir -p "$SAGES_ROUTINES_TEMPLATES_DEST"
+  local copied=0
+  for src in "$SAGES_ROUTINES_TEMPLATES_SRC"/*.json; do
+    [[ ! -f "$src" ]] && continue
+    local name; name=$(basename "$src")
+    cp "$src" "$SAGES_ROUTINES_TEMPLATES_DEST/$name"
+    copied=$((copied + 1))
+  done
+  if [[ $copied -gt 0 ]]; then
+    echo "  Installed $copied Sages routine template(s) to $SAGES_ROUTINES_TEMPLATES_DEST"
+    echo "  Enable board-watching in your first pi session:"
+    echo "    /routine-install sages-board-watch"
+  fi
+}
+
+uninstall_sages_routines_templates() {
+  # Remove only Sages-owned template files; preserve any user-added
+  # templates. The .sages-owned marker is the filename prefix
+  # 'sages-' — anything else is left alone.
+  if [[ -d "$SAGES_ROUTINES_TEMPLATES_DEST" ]]; then
+    local removed=0
+    for f in "$SAGES_ROUTINES_TEMPLATES_DEST"/sages-*.json; do
+      [[ ! -f "$f" ]] && continue
+      rm -f "$f"
+      removed=$((removed + 1))
+    done
+    [[ $removed -gt 0 ]] && echo "  Removed $removed Sages routine template(s) from $SAGES_ROUTINES_TEMPLATES_DEST"
+  fi
+}
+
 install_aft_binary() {
   echo "==> Installing AFT binary..."
 
@@ -2254,6 +2427,12 @@ install() {
   install_aft_config || true
   install_aft_pi_npm || true
   install_aft_binary || true
+
+  # Install pi-routines (@davecodes/pi-routines) — periodic-task polling
+  # for the Sages orchestrator (case 2/3: out-of-turn task creation
+  # awareness). Two soft-fail steps: npm peer + Sages routine templates.
+  install_pi_routines_npm || true
+  install_sages_routines_templates || true
 
   # After ALL peer file copies are done, set up node_modules symlinks pointing
   # at the orchestrator's shared deps (idempotent — skipped if peers already
@@ -2462,6 +2641,11 @@ uninstall() {
   uninstall_aft_config || true
   uninstall_aft_pi_npm || true
   uninstall_aft_binary || true
+
+  # Uninstall pi-routines — reverse order from install: templates first,
+  # then the npm peer.
+  uninstall_sages_routines_templates || true
+  uninstall_pi_routines_npm || true
 
 
 

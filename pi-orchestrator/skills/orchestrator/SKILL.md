@@ -62,6 +62,7 @@ task description lists > 5 files to change, or when a prior Standard
 attempt aborted. Move down to **Light** only for narrowly-scoped reviews
 or single-line edits.
 | **Brainstorming slash command** | `/brainstorm [request]` is registered separately via `skills/brainstorming/SKILL.md`; the orchestrator's own registration machinery is limited to the session hooks + advisory handlers above. |
+| **pi-routines board-watch (opt-in)** | Sages bundles a `sages-board-watch` routine template (installed to `~/.pi/agent/extensions/routines/templates/`). After install.sh runs, enable with `/routine-install sages-board-watch` in a pi session. The routine fires every 30s, inspects the board for unhandled `intent` tasks, and routes them through `task_convert_intent` + `TaskExecute`. Closes the awareness gap for out-of-turn task creation (user `/tasks create` while LLM is idle, or other sessions writing to the same board). The orchestrator's `PI_ROUTINES_TOOLS` allowlist includes the six routine_* tools so the LLM can also manage routines inline. |
 
 ## What the orchestrator no longer does
 

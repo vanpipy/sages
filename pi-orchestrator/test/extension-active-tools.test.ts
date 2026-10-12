@@ -33,6 +33,7 @@ import {
 	SUBAGENT_TOOLS,
 	BASELINE_TOOLS,
 	PI_TASKS_TOOLS,
+	PI_ROUTINES_TOOLS,
 	AFT_TOOLS,
 } from "../src/extension.js";
 
@@ -244,9 +245,11 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 		for (const t of SUBAGENT_TOOLS) expect(tools).toContain(t);
 		// BASELINE family
 		for (const t of BASELINE_TOOLS) expect(tools).toContain(t);
-		// Total: 7 + 7 + 11 + 7 = 32, no duplicates
-		expect(tools.length).toBe(32);
-		expect(new Set(tools).size).toBe(32);
+		// PI_ROUTINES family (opt-in via install.sh; @davecodes/pi-routines)
+		for (const t of PI_ROUTINES_TOOLS) expect(tools).toContain(t);
+		// Total: 7 + 7 + 11 + 7 + 6 = 38, no duplicates
+		expect(tools.length).toBe(38);
+		expect(new Set(tools).size).toBe(38);
 	});
 });
 
@@ -319,8 +322,8 @@ describe("setActiveTools order — pi-tasks/AFT before BASELINE", () => {
 		expect(lastPiTasksIdx).toBeLessThan(firstBaselineIdx);
 	});
 
-	it("keeps the 32-entry total after reorder (no silent additions / removals — was 33 before goal-contract removal)", async () => {
+	it("keeps the 38-entry total after reorder (no silent additions / removals — was 33 before goal-contract removal, then 32 after subagent/pi-routines split)", async () => {
 		const tools = await captureTools();
-		expect(tools.length).toBe(32);
+		expect(tools.length).toBe(38);
 	});
 });
