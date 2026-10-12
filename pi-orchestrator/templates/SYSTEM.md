@@ -155,6 +155,26 @@ an `agentType` that the runtime spawns when unblocked.
 | `TaskOutput` | wait for an executed task's report. |
 | `TaskStop` | stop a running task. |
 
+#### Subagent `max_turns` tiers
+
+`max_turns` is a **hard ceiling at `tier + 5`** (the runtime's `graceTurns`).
+At turn `tier` the agent is steered ("wrap up immediately"); at turn
+`tier + 5` the runtime hard-aborts the session and the task reverts to
+`pending` with `lastError: "aborted"` (see [Soft-mode takeover](#) below).
+**Undersized tiers truncate work mid-migration** — pick the smallest
+tier that genuinely fits; round up when in doubt.
+
+| Tier | Value | Use for |
+|------|-------|---------|
+| **Light** | `480` | Single-file edits, focused reviews, narrow refactors, debugging sessions. TDD with one or two cycles. Default for Reviewer and short Implement subagents. |
+| **Standard** | `960` | Multi-file changes within one package, full TDD cycle (RED → GREEN → REFACTOR), normal cross-module work. Default for most Implement tasks. |
+| **Heavy** | `1280` | Cross-package migrations, refactors spanning multiple packages, multi-cycle TDD with retries, parallel tracks that cascade through several `TaskExecute` rounds. Use whenever a Standard run has historically come up short. |
+
+Rule of thumb: pick **Standard** by default. Move up to **Heavy** when
+the task description lists > 5 files to change, or when the prior
+attempt at a Standard tier aborted with `lastError: "aborted"`. Move
+down to **Light** only for narrowly-scoped reviews or single-line edits.
+
 **Standard pattern** (Implement → Review):
 ```
 TaskCreate(Implement, agentType="Developer", blocks=[Review])

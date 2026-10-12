@@ -38,6 +38,29 @@ The orchestrator is a consumer — it does not manage the task flow.
 | **`task_inspect(task_id)` tool** | Read type+status+agentType. The LLM's first call on every task. Routes to `task_convert_intent` (intent), `TaskExecute` (plan pending), `TaskOutput(block=true)` (plan in_progress), or `task_consume` (plan completed). Lighter than `TaskGet`. |
 | **`task_consume(task_id, include_transcript?)` tool** | Read a completed plan task in a structured way. Parses the Reviewer's 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and emits a verdict-tailored follow-up suggestion. Returns `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }`. Pure read — does not mutate the store. Intent tasks throw `not_plan` — call `task_convert_intent` first. |
 | **`task_convert_intent(intent_task_id, plan)` tool** | The orchestrator's unique intent → plan conversion operator. Reads an intent task (`type='intent'`), marks it converted (audit: `metadata.converted / metadata.converted_at`), creates a new plan task with `type='plan'`, `agentType` from the spec, and `metadata.source_intent` linking back to the intent. Refuses non-intent sources and already-converted intents. |
+
+## Subagent `max_turns` tiers
+
+`max_turns` is a **hard ceiling at `tier + 5`** — at turn `tier` the
+agent is steered ("wrap up immediately"); at turn `tier + 5` the
+runtime hard-aborts and `subagents:failed` fires with `status:
+"aborted"`. The orchestrator sees this as `lastError: "aborted"` on
+the reverted task (see the [last-error visibility] convention in the
+constitution).
+
+Pick the smallest tier that genuinely fits the work; round up when
+in doubt — truncating mid-migration is more costly than over-budgeting.
+
+| Tier | Value | Use for |
+|------|-------|---------|
+| **Light** | `480` | Single-file edits, focused reviews, narrow refactors, debugging sessions. TDD with one or two cycles. Default for Reviewer and short Implement subagents. |
+| **Standard** | `960` | Multi-file changes within one package, full TDD cycle (RED → GREEN → REFACTOR), normal cross-module work. Default for most Implement tasks. |
+| **Heavy** | `1280` | Cross-package migrations, refactors spanning multiple packages, multi-cycle TDD with retries, parallel tracks that cascade through several `TaskExecute` rounds. |
+
+Rule of thumb: **Standard** by default. Move up to **Heavy** when the
+task description lists > 5 files to change, or when a prior Standard
+attempt aborted. Move down to **Light** only for narrowly-scoped reviews
+or single-line edits.
 | **Brainstorming slash command** | `/brainstorm [request]` is registered separately via `skills/brainstorming/SKILL.md`; the orchestrator's own registration machinery is limited to the session hooks + advisory handlers above. |
 
 ## What the orchestrator no longer does

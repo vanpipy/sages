@@ -1178,7 +1178,19 @@ Set up task dependencies:
 - **task_ids**: Array of task IDs to execute
 - **additional_context**: Extra context appended to each agent's prompt
 - **model**: Model override for agents (e.g., "sonnet", "haiku")
-- **max_turns**: Maximum turns per agent`,
+- **max_turns**: Maximum turns per agent. The runtime hard-aborts at
+  \`max_turns + 5\` (grace window). Pick a tier:
+
+  | Tier | Value | When |
+  |------|-------|------|
+  | Light | \`480\` | Single-file edits, focused reviews, debugging, TDD with 1–2 cycles |
+  | Standard | \`960\` | Multi-file changes within one package, full RED→GREEN→REFACTOR |
+  | Heavy | \`1280\` | Cross-package migrations, multi-cycle TDD with retries, parallel cascading |
+
+  Default to \`960\` (Standard) unless the task description names > 5
+  files or the prior attempt aborted with \`lastError: "aborted"\`.
+  Truncating mid-migration is more costly than over-budgeting. Omit
+  the parameter to use the agent template's default (usually unlimited).`,
     promptGuidelines: [
       "Never use the Agent tool for tasks launched via TaskExecute — agents are already running.",
     ],
