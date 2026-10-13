@@ -125,9 +125,12 @@ export const AFT_TOOLS: readonly string[] = [
  * session, they just lose capability.
  *
  * The Sages board-watch routine (bundled at
- * `templates/sages-routines/sages-board-watch.json`, installed by
- * `scripts/install.sh`) drives a periodic pulse that wakes the LLM to
- * route out-of-turn task additions (case 2/3 from the awareness RFC).
+ * `templates/sages-routines/sages-board-watch.json`, installed AND
+ * activated by `scripts/install.sh` — the routine entry is written
+ * into `state.json` atomically as part of the install) drives a
+ * periodic pulse that wakes the LLM to route out-of-turn task
+ * additions (case 2/3 from the awareness RFC). To opt out:
+ * `/routine-stop sages-board-watch`.
  */
 export const PI_ROUTINES_TOOLS: readonly string[] = [
 	"routine_create",

@@ -233,10 +233,20 @@ AFT_NPM_DIR="$PI_DIR/agent/npm/node_modules/@cortexkit/aft-pi"
 PI_ROUTINES_NPM_PKG="npm:@davecodes/pi-routines"
 PI_ROUTINES_NPM_DIR="$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines"
 # Sages board-watch template — installed to the user-customizable
-# templates dir. The user invokes /routine-install sages-board-watch
-# to activate. Bundled in the Sages repo so versions travel together.
+# templates dir. Bundled in the Sages repo so versions travel together.
+# Activation is automatic: install.sh writes the routine entry into the
+# routines state.json (see install_sages_board_watch_routine below);
+# the user can `/routine-stop sages-board-watch` to disable, and
+# re-run install.sh to re-enable.
 SAGES_ROUTINES_TEMPLATES_SRC="$SCRIPT_DIR/../templates/sages-routines"
 SAGES_ROUTINES_TEMPLATES_DEST="$HOME/.pi/agent/extensions/routines/templates"
+# pi-routines' persisted store. Written atomically by the runtime at
+# 0o600 — install.sh mirrors that exact pattern when seeding the
+# sages-board-watch routine.
+SAGES_ROUTINES_STATE_FILE="$HOME/.pi/agent/extensions/routines/state.json"
+SAGES_BOARD_WATCH_ID="sages-board-watch"
+SAGES_BOARD_WATCH_INTERVAL_MS=30000
+SAGES_BOARD_WATCH_INTERVAL_HUMAN="30s"
 # Binary lives at ~/.local/bin/aft (mirrors codebase-memory-mcp at
 # ~/.local/bin/codebase-memory-mcp). On PATH so users can run
 # `aft --version` directly.
@@ -2181,14 +2191,15 @@ except Exception as e:
 }
 
 install_sages_routines_templates() {
-  # Sages ships a board-watch template so the user can enable the
-  # periodic task-routing pulse with a one-liner:
-  #   /routine-install sages-board-watch
-  # We COPY (not symlink) the template JSON into the routines
-  # templates dir — routines reads templates via fs.readdirSync at
-  # command invocation, not via the npm package, so a stale install
-  # would otherwise miss the Sages templates. Copy is idempotent: a
-  # newer source file overwrites an older dest.
+  # Sages ships a board-watch template AND activates it by default.
+  # We COPY (not symlink) the template JSON into the routines templates
+  # dir — routines reads templates via fs.readdirSync at command
+  # invocation, not via the npm package, so a stale install would
+  # otherwise miss the Sages templates. Copy is idempotent: a newer
+  # source file overwrites an older dest. After the copy, we seed the
+  # active routine entry into state.json (install_sages_board_watch_routine)
+  # so the 30s board-watch pulse is armed before the user's first
+  # pi session — see AGENTS.md and orchestrator SKILL.md for opt-out.
   if [[ ! -d "$SAGES_ROUTINES_TEMPLATES_SRC" ]]; then
     echo "  Skipped: $SAGES_ROUTINES_TEMPLATES_SRC not found (no Sages templates this build)"
     return 0
@@ -2203,15 +2214,137 @@ install_sages_routines_templates() {
   done
   if [[ $copied -gt 0 ]]; then
     echo "  Installed $copied Sages routine template(s) to $SAGES_ROUTINES_TEMPLATES_DEST"
-    echo "  Enable board-watching in your first pi session:"
-    echo "    /routine-install sages-board-watch"
   fi
+  # Activate the board-watch routine by default. Soft-fail: if the
+  # routines extension is not installed, the routine write is a no-op
+  # and the user can re-run install.sh once the extension is in place.
+  install_sages_board_watch_routine || true
+}
+
+install_sages_board_watch_routine() {
+  # Pre-seed the sages-board-watch pulse routine into pi-routines'
+  # state.json so the periodic task-routing pulse is active by
+  # default after install. The user can disable it with
+  #   /routine-stop sages-board-watch
+  # and re-enable by re-running install.sh (which re-creates the
+  # entry from the bundled template prompt).
+  #
+  # Force-overwrite semantics: if a sages-board-watch entry already
+  # exists, the Routine config is reset to the canonical default;
+  # the tickState (run history) is preserved across re-installs so
+  # historical runs survive a routine-config refresh. Other routines
+  # in state.json are left untouched.
+  #
+  # Atomic-write pattern mirrors pi-routines' own saveStore
+  # (store.ts:487-528): tmp file with random hex suffix, fs.rename,
+  # chmod 0o600, .bak copy for disaster recovery.
+  local template="$SAGES_ROUTINES_TEMPLATES_DEST/$SAGES_BOARD_WATCH_ID.json"
+  if [[ ! -f "$template" ]]; then
+    echo "  Skipped sages-board-watch activation: $template not found"
+    return 0
+  fi
+  local state_dir; state_dir="$(dirname "$SAGES_ROUTINES_STATE_FILE")"
+  mkdir -p "$state_dir"
+
+  python3 - "$SAGES_ROUTINES_STATE_FILE" "$template" "$SAGES_BOARD_WATCH_INTERVAL_MS" "$SAGES_BOARD_WATCH_INTERVAL_HUMAN" <<'PYEOF'
+import json, os, secrets, sys, time
+
+state_file, template_file, interval_ms, interval_human = sys.argv[1:5]
+
+with open(template_file, encoding="utf-8") as f:
+    template = json.load(f)
+
+# Load existing store; treat any failure (missing / corrupt) as empty.
+store = {"schemaVersion": 3, "routines": {}, "tickState": {}, "deferredHooks": []}
+if os.path.exists(state_file):
+    try:
+        with open(state_file, encoding="utf-8") as f:
+            existing = json.load(f)
+        if isinstance(existing, dict):
+            routines_in = existing.get("routines")
+            if isinstance(routines_in, dict):
+                store["routines"] = routines_in
+            ticks_in = existing.get("tickState")
+            if isinstance(ticks_in, dict):
+                store["tickState"] = ticks_in
+            hooks_in = existing.get("deferredHooks")
+            if isinstance(hooks_in, list):
+                store["deferredHooks"] = hooks_in
+        # Always pin to current schema; loadStore would otherwise treat
+        # a v1/v2 file as needing migration and we don't want to depend
+        # on that path being open during a fresh install.
+        store["schemaVersion"] = 3
+    except (OSError, ValueError):
+        pass
+
+# Preserve existing tickState across force-overwrite; only seed on first
+# creation. Run history is data, not config — re-installs should not
+# nuke it.
+existing_routine = store["routines"].get("sages-board-watch")
+preserved_tick = store["tickState"].get("sages-board-watch") if isinstance(existing_routine, dict) else None
+
+# Build the canonical Routine entry. Field-by-field (no spread) so
+# any drift in the template file cannot leak unknown keys that
+# sanitizeStore (src/store.ts:207-247) would silently drop.
+routine = {
+    "id": "sages-board-watch",
+    "name": "sages-board-watch",
+    "prompt": str(template.get("prompt", "")),
+    "triggers": [
+        {
+            "kind": "pulse",
+            "intervalMs": int(interval_ms),
+            "intervalHuman": str(interval_human),
+        }
+    ],
+    "context": "session",
+    "quiet": bool(template.get("quiet", True)),
+    "maxRunsPerDay": int(template.get("maxRunsPerDay", 2000)),
+    "createdAt": int(time.time() * 1000),
+}
+store["routines"]["sages-board-watch"] = routine
+
+if isinstance(preserved_tick, dict):
+    store["tickState"]["sages-board-watch"] = preserved_tick
+else:
+    store["tickState"]["sages-board-watch"] = {
+        "tickCount": 0,
+        "lastFiredAt": 0,
+        "lastFiredDateLocal": "",
+        "userState": {},
+    }
+
+# Atomic write: tmp with random hex suffix, then os.replace (atomic
+# rename on POSIX), then chmod 0o600, then .bak copy.
+hex_suffix = secrets.token_hex(4)
+tmp = f"{state_file}.tmp.{hex_suffix}"
+data = json.dumps(store, indent=2, sort_keys=True)
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+try:
+    os.write(fd, data.encode("utf-8"))
+finally:
+    os.close(fd)
+os.replace(tmp, state_file)
+os.chmod(state_file, 0o600)
+
+try:
+    import shutil
+    shutil.copyfile(state_file, f"{state_file}.bak")
+    os.chmod(f"{state_file}.bak", 0o600)
+except OSError:
+    pass
+
+print("  Activated routine: sages-board-watch (pulse 30s, maxRunsPerDay 2000)")
+PYEOF
 }
 
 uninstall_sages_routines_templates() {
-  # Remove only Sages-owned template files; preserve any user-added
-  # templates. The .sages-owned marker is the filename prefix
-  # 'sages-' — anything else is left alone.
+  # Remove Sages-owned template files AND the active routine entry
+  # from state.json. Other user-added templates and routines are
+  # preserved. Order matters: remove the routine first so a partial
+  # uninstall (one of the two steps failing) leaves a stale template
+  # rather than a stale routine pointing at a missing template.
+  uninstall_sages_board_watch_routine || true
   if [[ -d "$SAGES_ROUTINES_TEMPLATES_DEST" ]]; then
     local removed=0
     for f in "$SAGES_ROUTINES_TEMPLATES_DEST"/sages-*.json; do
@@ -2221,6 +2354,73 @@ uninstall_sages_routines_templates() {
     done
     [[ $removed -gt 0 ]] && echo "  Removed $removed Sages routine template(s) from $SAGES_ROUTINES_TEMPLATES_DEST"
   fi
+}
+
+uninstall_sages_board_watch_routine() {
+  # Remove only the sages-board-watch entry from state.json (and its
+  # tickState). Other routines in state.json are preserved. Leaves
+  # the file in place even if it becomes empty-shell — pi-routines
+  # handles a missing/empty state gracefully on next session_start.
+  if [[ ! -f "$SAGES_ROUTINES_STATE_FILE" ]]; then
+    return 0
+  fi
+
+  python3 - "$SAGES_ROUTINES_STATE_FILE" <<'PYEOF'
+import json, os, secrets, sys
+
+state_file = sys.argv[1]
+try:
+    with open(state_file, encoding="utf-8") as f:
+        store = json.load(f)
+except (OSError, ValueError):
+    sys.exit(0)
+
+if not isinstance(store, dict):
+    sys.exit(0)
+
+routines = store.get("routines")
+ticks = store.get("tickState")
+if not isinstance(routines, dict):
+    routines = {}
+if not isinstance(ticks, dict):
+    ticks = {}
+
+removed = False
+if "sages-board-watch" in routines:
+    del routines["sages-board-watch"]
+    removed = True
+if "sages-board-watch" in ticks:
+    del ticks["sages-board-watch"]
+
+if not removed:
+    sys.exit(0)
+
+store["routines"] = routines
+store["tickState"] = ticks
+if not isinstance(store.get("deferredHooks"), list):
+    store["deferredHooks"] = []
+store["schemaVersion"] = 3
+
+hex_suffix = secrets.token_hex(4)
+tmp = f"{state_file}.tmp.{hex_suffix}"
+data = json.dumps(store, indent=2, sort_keys=True)
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+try:
+    os.write(fd, data.encode("utf-8"))
+finally:
+    os.close(fd)
+os.replace(tmp, state_file)
+os.chmod(state_file, 0o600)
+
+try:
+    import shutil
+    shutil.copyfile(state_file, f"{state_file}.bak")
+    os.chmod(f"{state_file}.bak", 0o600)
+except OSError:
+    pass
+
+print("  Removed routine: sages-board-watch")
+PYEOF
 }
 
 install_aft_binary() {
