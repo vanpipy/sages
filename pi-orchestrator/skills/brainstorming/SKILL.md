@@ -203,7 +203,7 @@ Fix any issues inline. No need to re-review — just fix and move on.
 
 **Mode A — standalone (no orchestrator active)**: brainstorming is the **recommended first step** for any new feature/change. After approval, the user drives the implementation directly: raw `TaskCreate` × N + `TaskExecute` with `agentType` set to `"Developer"` (Implement) and `"Reviewer"` (Review). The main LLM is the Task Orchestrator (it alone calls `TaskCreate` / reads `TaskOutput`); `pi-tasks/` is the Task Board; `pi-subagents/` is the Task Executor spawned through the Board.
 
-**Mode B — auto-transition (when the orchestrator advisory is active)**: when design is approved, the LLM self-hands-off via raw `TaskCreate` × N (one task per phase, with `agentType` and the standard `blockedBy`/`blocks` edge set), or via the `orchestrate(plan)` shortcut for the standard 2-phase shape. The Task Orchestrator remains the sole writer and sole consumer of the Board throughout the transition; the orchestrator emits the once-per-session soft-mode reminder via `pi.appendEntry("system", ...)`; no orchestrator-owned tool mediates the transition.
+**Mode B — auto-transition (when the orchestrator is active)**: when design is approved, the LLM self-hands-off via raw `TaskCreate` × N (one task per phase, with `agentType` and the standard `blockedBy`/`blocks` edge set), or via the `orchestrate(plan)` shortcut for the standard 2-phase shape. The Task Orchestrator remains the sole writer and sole consumer of the Board throughout the transition; the orchestrator's once-per-session soft-mode reminder fires on the first side-effecting tool call; no orchestrator-owned tool mediates the transition.
 
 The role names (Task Board / Task Orchestrator / Task Executor) are
 descriptive shorthand — they don't appear in any package's own code,
@@ -239,7 +239,7 @@ When you anticipate visual questions (mockups, layouts, diagrams):
 ## Related Skills
 
 - **Grill-Me**: Standalone decision tree resolver (embedded in brainstorming)
-- **Orchestrator**: advisory pipeline (post-tool nudges); workflow is driven by the LLM via raw `TaskCreate` × N + `TaskExecute` (post chore/remove-goal-contract)
+- **Orchestrator**: soft-infrastructure layer (tool allowlist at `session_start`, constitution overlay at `before_agent_start`, once-per-session soft-mode reminder on first side-effecting call); workflow is driven by the LLM via raw `TaskCreate` × N + `TaskExecute` (post chore/remove-goal-contract + chore/remove-orchestrator-advisory)
 
 ## Example: Simple Feature
 
