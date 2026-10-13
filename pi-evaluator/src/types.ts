@@ -138,7 +138,8 @@ export interface TraceDecisionsValidation {
 // ---------------------------------------------------------------------------
 
 /**
- * Input to `check_workflow`. Orchestrator advisory + subagent advisory merged into a single structural check.
+ * Input to `check_workflow`. Single structural check that combines the
+ * orchestrator-side workflow shape with the subagent-side execution shape.
  *
  * - `run_verification_cmds`: default true. Set false for a fast dry-run
  *   that skips re-execution.
@@ -416,9 +417,8 @@ export type IsolationMode =
  * GC-2026-evaluator-drift-sweep: `dag_id` renamed to `goal_id` (post
  * GC-2026-path-B-field-renames). This is a local pi-evaluator type
  * with no external readers; the orchestrator emits `goal_id` in its
- * tool calls (see pi-orchestrator/src/orchestrator-advisory.ts:289),
- * so the type now matches the wire format. The pre-rename name
- * `dag_id` is preserved in the listener (extension.ts) as a
+ * tool calls, so the type now matches the wire format. The pre-rename
+ * name `dag_id` is preserved in the listener (extension.ts) as a
  * back-compat alias for test fixtures pre-dating the rename.
  */
 export interface ManagedWorktreeIsolation {

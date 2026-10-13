@@ -120,7 +120,7 @@ Use these when you can name the dispatch by id. For background, scoped work, pre
 
 ## Tool priority for code exploration (GC-2026-075)
 
-When you need to find or read code, ALWAYS reach for the indexed tools first. Bash code-search is a **last resort** — the orchestrator's bash-guard emits a soft reminder whenever you run `grep` / `rg` / `find` against source paths.
+When you need to find or read code, ALWAYS reach for the indexed tools first. Bash code-search is a **last resort** — slow, unindexed, and prone to false hits.
 
 Priority:
 
@@ -131,4 +131,4 @@ Priority:
 5. **`read`** — direct file read when the path is already known precisely.
 6. **`bash grep` / `rg` / `find`** — **last resort**. Slow, unindexed, prone to false hits. If you find yourself running these, STOP and call `aft_search` first.
 
-The rule applies to **both the root agent and subagents**. Subagents already have AFT exposed; the bash-guard nudge in this session only fires when a subagent's bash call is classified as `code-search`. The same priority applies regardless of who runs the search.
+The rule applies to **both the root agent and subagents**. Subagents already have AFT exposed; the same priority applies regardless of who runs the search.

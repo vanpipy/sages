@@ -39,11 +39,12 @@ import { readSession } from "../lib/jsonl-reader.ts";
 import type { Metric, MetricContext, MetricResult } from "./types.ts";
 
 /**
- * Tool family classification. Mirrors `orchestrator-advisory.ts`'s
- * `familyOf()` so the metric's per-family counts line up with what the
- * reminder sees. `other` = tool names the classifier doesn't recognize
- * (custom tools, vendor-specific, etc.) — these are excluded from the
- * denominator so they don't depress the adoption rate.
+ * Tool family classification. Used by the metric to bucket every
+ * `toolCall` block from session.jsonl into one of seven families so the
+ * per-family counts can be aggregated. `other` = tool names the
+ * classifier doesn't recognize (custom tools, vendor-specific, etc.) —
+ * these are excluded from the denominator so they don't depress the
+ * adoption rate.
  */
 export type ToolFamily =
 	| "aft"
