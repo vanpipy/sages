@@ -232,4 +232,27 @@ describe("task_convert_intent — intent audit", () => {
 			expect(store.get(id)?.metadata?.source_intent).toBe(intentId);
 		}
 	});
+
+	it("marks the intent as status='completed' after successful conversion", async () => {
+		const intentId = createIntent(scratch);
+
+		// Pre-condition: the freshly-created intent is pending.
+		{
+			const store = new TaskStore(orchestratorProjectTaskFile(scratch));
+			expect(store.get(intentId)?.status).toBe("pending");
+		}
+
+		await convert(scratch, intentId, [
+			{ agentType: "Developer" },
+			{ agentType: "Reviewer" },
+		]);
+
+		const store = new TaskStore(orchestratorProjectTaskFile(scratch));
+		const intent = store.get(intentId)!;
+		// The intent is terminal once the conversion has materialized plan tasks.
+		expect(intent.status).toBe("completed");
+		// The audit fields are unchanged by the status flip.
+		expect(intent.metadata?.converted).toBe(true);
+		expect(intent.type).toBe("intent");
+	});
 });

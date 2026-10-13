@@ -321,7 +321,13 @@ export async function taskConvertIntent(
 	// The intent task keeps its `type='intent'` on the Task field; only the
 	// audit fields land in metadata. We do NOT redundantly stamp
 	// `metadata.type='intent'` — task.type is the single source of truth.
+	// Once conversion succeeds the intent is terminal: it has been fully
+	// decomposed into plan tasks, so flip its status to `completed` so the
+	// board no longer shows a stale "pending intent" after routing. The
+	// metadata audit (`converted` / `converted_at`) and the type field are
+	// unchanged by this flip.
 	store.update(intent.id, {
+		status: "completed",
 		metadata: {
 			converted: true,
 			converted_at: convertedAt,
