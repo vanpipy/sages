@@ -17,12 +17,25 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { TaskStore } from "@sages/pi-tasks/task-store";
 import { orchestratorProjectTaskFile } from "@sages/pi-tasks/task-paths";
 import { ConvertIntentError, taskConvertIntent } from "../src/orchestrator-tool.js";
+
+/** Resolve the source-of-truth routine template (not the installed copy). */
+const ROUTINE_TEMPLATE = resolve(
+	dirname(fileURLToPath(import.meta.url)),
+	"../templates/sages-routines/sages-board-watch.json",
+);
+
+/** Load the routine prompt string from the source template. */
+function loadRoutinePrompt(): string {
+	const json = JSON.parse(readFileSync(ROUTINE_TEMPLATE, "utf8"));
+	return json.prompt as string;
+}
 
 /** Create an intent task directly via the store (the orchestrator's
  *  task_convert_intent reads from the same file-backed store). */
@@ -402,5 +415,27 @@ describe("task_convert_intent — board-watch routine contract", () => {
 		// the widget symptom the routine prompt guards against.
 		expect(intent.metadata?.converted).toBe(true);
 		expect(intent.status).toBe("pending");
+	});
+
+	it("routine prompt mandates TaskList on every tick — regression pin for the 'empty-then-skip' failure mode", () => {
+		// This test pins the prompt-level contract: the routine MUST instruct
+		// the LLM to call `TaskList` on every pulse tick, and MUST name the
+		// failure mode (returning [~] without re-checking) so the prompt can
+		// never silently drift back into the buggy shape that left an intent
+		// task sitting unhandled for 7+ minutes across 9 successful ticks.
+		const prompt = loadRoutinePrompt();
+
+		// 1. Must-call language, with the specific tool name, on every tick.
+		expect(prompt).toMatch(/every\s+(pulse\s+)?tick/i);
+		expect(prompt).toMatch(/MUST\s+call\s+`?TaskList`?/i);
+
+		// 2. The LLM must be told not to infer emptiness from a prior tick.
+		expect(prompt).toMatch(/not\s+(infer|assume)\s+emptiness|no[nt]?\s+infer|do\s+NOT\s+infer/i);
+
+		// 3. The specific failure mode must be named in the prompt itself,
+		//    so the contributor who edits the prompt cannot delete the
+		//    warning without seeing it.
+		expect(prompt).toMatch(/failure\s+modes?\s+to\s+avoid/i);
+		expect(prompt).toMatch(/Returning\s+\[~\]\s+without\s+calling/i);
 	});
 });
