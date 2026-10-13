@@ -256,3 +256,151 @@ describe("task_convert_intent — intent audit", () => {
 		expect(intent.type).toBe("intent");
 	});
 });
+describe("task_convert_intent — board-watch routine contract", () => {
+	// These tests pin the contract that the `sages-board-watch` routine
+	// (pi-orchestrator/templates/sages-routines/sages-board-watch.json)
+	// depends on. The bug we're guarding against: the routine falls back to
+	// raw `TaskUpdate` + `TaskCreate` when `task_convert_intent` is not in
+	// its tool surface, and a LLM that splits the conversion into two
+	// `TaskUpdate` calls (one for metadata, one for status) — or only
+	// stamps metadata without flipping status — leaves the intent task
+	// sitting at `status: "pending"` in the widget even after every
+	// derived plan completes. See AGENTS.md / Sages — Orchestrator
+	// Constitution, "Orchestrator manual takeover" + "Red lines".
+
+	let scratch: string;
+	beforeEach(() => {
+		scratch = mkdtempSync(join(tmpdir(), "pi-orch-convert-routine-"));
+	});
+
+	it("lands ALL three halves (status flip + audit metadata + plan tasks) in one call — board-watch golden path", async () => {
+		// The sages-board-watch routine expects the whole conversion to land
+		// atomically: status flips to 'completed', audit metadata is stamped
+		// in the same batch, AND the plan tasks are created. A regression in
+		// any of the three halves breaks the widget. This test pins all
+		// three in one assertion block so a partial fix is impossible to
+		// ship without the test going red.
+
+		const intentId = createIntent(scratch);
+
+		const out: any = await convert(scratch, intentId, [
+			{ agentType: "Developer" },
+			{ agentType: "Reviewer" },
+		]);
+
+		const store = new TaskStore(orchestratorProjectTaskFile(scratch));
+		const intent = store.get(intentId)!;
+
+		// Half 1 — status flipped to terminal in the same store.write.
+		expect(intent.status).toBe("completed");
+
+		// Half 2 — audit metadata stamped (types matter; see below).
+		// `task_convert_intent` writes `converted` (boolean) + `converted_at`
+		// (number, epoch ms). It does NOT write `converted_by` — that field
+		// is a routine-layer convention only, never asserted by the
+		// canonical contract. The sages-board-watch routine may add
+		// `converted_by: "sages-board-watch"` on top of the audit shape
+		// for observability, but it is not part of `task_convert_intent`'s
+		// guarantee.
+		expect(intent.metadata?.converted).toBe(true);
+		expect(typeof intent.metadata?.converted_at).toBe("number");
+		expect(typeof intent.metadata?.converted_at).not.toBe("string");
+		expect(intent.type).toBe("intent");
+
+		// Half 3 — plan tasks created and linked back to the intent.
+		expect(out.details.plan_task_ids).toHaveLength(2);
+		for (const id of out.details.plan_task_ids) {
+			const plan = store.get(id);
+			expect(plan?.type).toBe("plan");
+			expect(plan?.metadata?.source_intent).toBe(intentId);
+			expect(plan?.metadata?.agentType).toBeTruthy();
+		}
+
+		// Negative: the intent must NOT still look routable to a future
+		// routine tick. If `metadata.converted` was stamped as the string
+		// "true" (instead of the boolean `true`) — or worse, left undefined
+		// because of a partial store.write — this trip wires.
+		expect(intent.metadata?.converted).not.toBe("true");
+		expect(intent.metadata?.converted).not.toBe(undefined);
+		expect(intent.status).not.toBe("pending");
+	});
+
+	it("audit field types are strict: converted is the boolean true (not the string 'true'); converted_at is a number (not an ISO string)", () => {
+		// Regression test for the EXACT bug introduced in the
+		// sages-board-watch routine workaround: a raw `TaskUpdate`
+		// payload of `{metadata: {converted: true, converted_at: "2026-..."}}`
+		// stringified the boolean and changed the timestamp shape to an ISO
+		// string when it round-tripped through the JSON file. The
+		// `task_convert_intent` function avoids this by writing through
+		// the store directly with strongly-typed values; the routine must
+		// produce the same shape or downstream consumers break.
+
+		const intentId = createIntent(scratch);
+		const store = new TaskStore(orchestratorProjectTaskFile(scratch));
+
+		// Simulate the canonical-conversion end-state via store.update with
+		// the same shape `task_convert_intent` would write.
+		const convertedAtMs = Date.now();
+		store.update(intentId, {
+			status: "completed",
+			metadata: {
+				converted: true,
+				converted_at: convertedAtMs,
+				converted_by: "test-routine-contract",
+			},
+		});
+
+		const intent = store.get(intentId)!;
+		expect(intent.status).toBe("completed");
+
+		// Must be the boolean true — `toBe(true)` rejects the string "true".
+		expect(intent.metadata?.converted).toBe(true);
+		expect(typeof intent.metadata?.converted).toBe("boolean");
+
+		// Must be a number (epoch ms), not an ISO string. JSON.load
+		// round-trips numbers unchanged; an ISO string would survive too
+		// but downstream `eval_score`-style consumers expect a number for
+		// "is this route stale?" calculations.
+		expect(typeof intent.metadata?.converted_at).toBe("number");
+		expect(intent.metadata?.converted_at).toBe(convertedAtMs);
+	});
+
+	it("the audit-only workaround leaves the intent status='pending' (the bug; documents why the routine must flip status atomically)", () => {
+		// This test DOCUMENTS the original bug. With a raw `TaskUpdate`
+		// that only stamps metadata (no status flip), the intent's status
+		// field never moves from 'pending'. A future contributor who is
+		// tempted to "simplify" the sage-board-watch routine by skipping
+		// the status flip will see this test and learn exactly what
+		// regression they're signing up for.
+		//
+		// If a future enhancement teaches TaskStore to auto-flip
+		// `type='intent'` to 'completed' the moment `metadata.converted`
+		// becomes truthy (a reasonable server-side hardening), this test
+		// should be REPLACED by one that exercises the auto-flip path —
+		// do not just delete it.
+
+		const intentId = createIntent(scratch);
+		const store = new TaskStore(orchestratorProjectTaskFile(scratch));
+
+		// Pre-condition: the freshly-created intent is pending.
+		expect(store.get(intentId)?.status).toBe("pending");
+
+		// The EXACT sequence the original sage-board-watch workaround used
+		// (without the fix): TaskUpdate metadata only. No status.
+		store.update(intentId, {
+			metadata: {
+				converted: true,
+				converted_at: Date.now(),
+				converted_by: "test-routine-workaround",
+				plan_task_ids: ["2", "3"],
+			},
+		});
+
+		const intent = store.get(intentId)!;
+
+		// The audit stamps cleanly — but the status did NOT flip. This is
+		// the widget symptom the routine prompt guards against.
+		expect(intent.metadata?.converted).toBe(true);
+		expect(intent.status).toBe("pending");
+	});
+});
