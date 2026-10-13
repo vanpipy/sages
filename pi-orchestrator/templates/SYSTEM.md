@@ -164,10 +164,11 @@ triggers. Sages ships a `sages-board-watch` template (installed to
 `~/.pi/agent/extensions/routines/templates/`) that drives a 30s
 pulse to route out-of-turn task additions — covering the
 out-of-band awareness gap between user / `/tasks create` writes
-and the LLM's next turn. Enable with `/routine-install
-sages-board-watch` in a pi session, or use
-`/schedule every 30s watch the Sages board` for natural-language
-creation.
+and the LLM's next turn. `install.sh` activates the routine by
+default (writes its entry into `state.json` atomically), so no
+manual `/routine-install` step is needed. To opt out, run
+`/routine-stop sages-board-watch` in any pi session; re-running
+`install.sh` re-creates the entry.
 
 | Tool | Use for |
 |---|---|
