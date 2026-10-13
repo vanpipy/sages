@@ -2,8 +2,9 @@
 
 > Source: `pi-tasks/` (workspaces member by indirect dep; npm namespace
 > `@sages/pi-tasks`).
-> File count: 10 source files in `src/`, 22 test files in `test/`.
-> Line counts: `index.ts` 1431, `task-store.ts` ~395, `ui/task-widget.ts`
+> File count: 10 source files in `src/`, 20 `.test.ts` files in `test/`
+> (plus `setup.ts`, `global-setup.ts`, and `helpers/` which are not tests).
+> Line counts: `index.ts` 1431, `task-store.ts` ~405, `ui/task-widget.ts`
 > ~325.
 
 ## Purpose
@@ -23,7 +24,7 @@ decides; the board persists.
 
 ## Entry points
 
-Per `pi-tasks/package.json:13–17`:
+Per `pi-tasks/package.json:22–26`:
 
 ```jsonc
 "exports": {
@@ -33,14 +34,14 @@ Per `pi-tasks/package.json:13–17`:
 }
 ```
 
-Per `pi-tasks/package.json:42–44`, the `pi` manifest declares a single
+Per `pi-tasks/package.json:44–50`, the `pi` manifest declares a single
 extension at `./src/index.ts` and ships a media link. The package's
 default export (`pi-tasks/src/index.ts:1`) is the pi extension factory.
 
 The orchestrator imports two named entry points — `@sages/pi-tasks/task-store`
 (`pi-orchestrator/src/orchestrator-tool.ts:38`) and
 `@sages/pi-tasks/task-paths` (`pi-orchestrator/src/orchestrator-tool.ts:39`,
-`pi-orchestrator/src/brainstorming/index.ts:24`) — so it can share
+`pi-orchestrator/src/brainstorming/index.ts:48`) — so it can share
 the same `TaskStore` + path resolver the board itself uses.
 
 ## Key symbols
@@ -51,9 +52,10 @@ Top 10, ordered by importance:
    primitive. File-backed when constructed with an absolute path or
    list id (default home `~/.pi/tasks/<listId>.json`), in-memory when
    constructed without arguments. Owns its own file lock
-   (`acquireLock` / `releaseLock` at `task-store.ts:21–80`).
+   (`acquireLock` at `task-store.ts:31` / `releaseLock` at `:72` /
+   `isProcessRunning` at `:78`, all in the `:21–80` block).
    - `create(subject, description, activeForm?, metadata?, type="plan"): Task`
-       (`task-store.ts:187`)
+       (`task-store.ts:192`)
    - `get(id): Task | undefined` (`task-store.ts:215`)
    - `list(sortOrder="id"): Task[]` (`task-store.ts:221`)
    - `update(id, fields): { task, changedFields, warnings }`
@@ -94,7 +96,7 @@ Top 10, ordered by importance:
 4. **`AutoClearManager`** — `pi-tasks/src/auto-clear.ts:27`. Turn-based
    completion sweep. Two modes: `"on_task_complete"` (per-task linger)
    and `"on_list_complete"` (batch linger). `startNewBatch`
-   (`auto-clear.ts:91`) catches the freeze-after-finish case so a new
+   (`auto-clear.ts:84`) catches the freeze-after-finish case so a new
    run starts on a clean list.
 
 5. **`TaskWidget`** — `pi-tasks/src/ui/task-widget.ts`. The above-editor
@@ -148,12 +150,12 @@ for shell processes is at `types.ts:46`.
 
 From `pi-tasks/package.json`:
 
-- **peerDependencies** (`:18–22`): `@earendil-works/pi-coding-agent >=0.80.5`,
+- **peerDependencies** (`:16–20`): `@earendil-works/pi-coding-agent >=0.80.5`,
   `@earendil-works/pi-tui >=0.80.5`, `typebox *`. These are the host
   packages — pi itself + pi-tui (TUI primitives used by the widget) +
   TypeBox (tool parameter schemas).
 - **dependencies**: `none`.
-- **devDependencies** (`:37–43`): `@biomejs/biome ^2.4.13`,
+- **devDependencies** (`:36–42`): `@biomejs/biome ^2.4.13`,
   `@earendil-works/pi-coding-agent 0.84.2`, `@earendil-works/pi-tui 0.84.2`,
   `@types/node ^25`, `typescript ^6.0`, `vitest ^4.1.5`.
 
@@ -169,11 +171,11 @@ no reverse dependency.
 
 1. The LLM calls `TaskCreate` (`index.ts:628`). The factory reads
    `params.metadata`, stamps `agentType` when supplied, and calls
-   `store.create(..., type=params.type ?? "plan")` (`:706`).
-2. The LLM calls `TaskExecute` (`index.ts:1165`) on one or more task
-   ids. `index.ts:1215` validates each candidate: `status === "pending"`,
+   `store.create(..., type=params.type ?? "plan")` (`:699`).
+2. The LLM calls `TaskExecute` (`index.ts:1166`) on one or more task
+   ids. `index.ts:1216` validates each candidate: `status === "pending"`,
    `metadata.agentType` set, no open `blockedBy` deps.
-3. For each candidate, `index.ts:1243` calls `spawnSubagent` which goes
+3. For each candidate, `index.ts:1245` calls `spawnSubagent` which goes
    over `subagents:rpc:spawn` (`index.ts:213`). The RPC layer is
    implemented in `pi-subagents/src/cross-extension-rpc.ts:97` (the
    `registerRpcHandlers` export).
@@ -181,10 +183,11 @@ no reverse dependency.
    starts a detached pi session. The agent id is mapped to the task id
    in `agentTaskMap` (`index.ts:179`).
 5. When the subagent completes, the manager emits `subagents:completed`
-   or `subagents:failed` (`pi-subagents/src/index.ts:613–625`).
+   or `subagents:failed` (`pi-subagents/src/index.ts:579–581`, inside the
+   `onComplete` callback that begins at `:568`).
 6. The `subagents:completed` listener (`index.ts:303`) updates the
    task: `store.update(task.id, { status: "completed", metadata: { ...task.metadata, result } })`.
-   Then the auto-cascade block (`:284`) walks `store.list()` for tasks
+   Then the auto-cascade block (`:314`) walks `store.list()` for tasks
    that are now unblocked and have `metadata.agentType`, marking each
    `in_progress` and spawning the next subagent.
 7. The `widget.setActiveTask(task.id, false)` call stops the spinner
@@ -193,7 +196,7 @@ no reverse dependency.
 ### Soft-mode task-count threshold
 
 `index.ts:541` (`context` hook) consults
-`drainReminderForContext(cadence)` (`reminder-cadence.ts:85`). The
+`drainReminderForContext(cadence)` (`reminder-cadence.ts:84`). The
 reminder text is built by `buildSystemReminder(tasks)` (`index.ts:82`)
 and appended as a transient user message. `intervalFor` (`index.ts:65`)
 halves the interval to `ACTIVE_REMINDER_INTERVAL = 2` whenever any
@@ -203,11 +206,12 @@ dropping completed rows first.
 ### `/tasks` interactive command
 
 `index.ts:1296` registers the `tasks` slash command. `mainMenu`
-(`:1310`) lists `View all tasks`, `Create task`, optional
+(`:1304`) lists `View all tasks`, `Create task`, optional
 `Clear completed`, optional `Clear all`, `Settings`. `createTask`
-(`:1427`) writes a new task with `type='intent'` — every
-`/tasks` task is user-facing raw material until the orchestrator's
-`task_convert_intent` materializes it into plan tasks.
+(`:1411`, with `store.create(..., "intent")` at `:1423`) writes a new
+task with `type='intent'` — every `/tasks` task is user-facing raw
+material until the orchestrator's `task_convert_intent` materializes
+it into plan tasks.
 
 ### Shared list / file-backed mode
 
@@ -215,16 +219,16 @@ dropping completed rows first.
 non-empty argument (`task-store.ts:113`). `PI_TASKS=off` (env) yields
 in-memory mode regardless; `PI_TASKS=/abs/path.json` or
 `PI_TASKS=./relative.json` or `PI_TASKS=name` selects the named list
-mode. The `withLock` wrapper (`task-store.ts:139`) re-reads state on
+mode. The `withLock` wrapper (`task-store.ts:174`) re-reads state on
 every mutation, applies the closure, then writes atomically (`save`
-at `:127`). The lock file uses `<pid>:<uuid>` tokens so the staleness
-check (`isProcessRunning` at `:82`) does not delete a successor's
+at `:161`). The lock file uses `<pid>:<uuid>` tokens so the staleness
+check (`isProcessRunning` at `:78`) does not delete a successor's
 lock when the PID is unreadable in another namespace.
 
 ## Verification
 
 - `cd pi-tasks && bun run typecheck` (or `npm run typecheck`) — TS check.
-- `cd pi-tasks && bun test` — 22 vitest files (see `pi-tasks/test/`,
+- `cd pi-tasks && bun test` — 20 vitest files (see `pi-tasks/test/`,
   including `task-store.test.ts`, `subagent-integration.test.ts`,
   `auto-cascade.test.ts`, `stale-task-reminder.test.ts`,
   `task-paths.test.ts`, etc.).

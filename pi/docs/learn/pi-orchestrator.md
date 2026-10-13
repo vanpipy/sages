@@ -34,7 +34,7 @@ conversion on the write side (`task_convert_intent`).
 
 ## Entry points
 
-Per `pi-orchestrator/package.json:28–34`:
+Per `pi-orchestrator/package.json:18–26`:
 
 ```jsonc
 "pi": {
@@ -161,7 +161,7 @@ Top 10, ordered by importance:
    `pi-orchestrator/src/brainstorming/state.ts:39`. Drives the phase
    transitions: `exploring → clarifying → proposing → designing → approved/cancelled`.
    Valid transitions table at `:39`. `process(event)` dispatches on
-   the event union (`types.ts:264`). Helpers `isTerminalPhase` (`:346`)
+   the event union (`brainstorming/types.ts:264`). Helpers `isTerminalPhase` (`:346`)
    and `isActivePhase` (`:350`).
 
 10. **Template assets** —
@@ -182,19 +182,19 @@ Top 10, ordered by importance:
 
 From `pi-orchestrator/package.json`:
 
-- **peerDependencies** (`:38–43`):
+- **peerDependencies** (`:27–32`):
   `@earendil-works/pi-coding-agent *`,
   `@earendil-works/pi-ai *`,
   `@earendil-works/pi-tui *`,
   `typebox *`.
-- **dependencies** (`:46–50`):
+- **dependencies** (`:33–37`):
   `@sages/pi-subagents: file:../pi-subagents`,
   `@sages/pi-tasks: file:../pi-tasks`,
   `js-yaml ^5.2.0`.
   The orchestrator depends on both peer `pi-*` packages — they are
   the consumers of every shared symbol. `js-yaml` is declared but
   unused in the live code; left over from earlier code paths.
-- **devDependencies** (`:51–56`):
+- **devDependencies** (`:38–44`):
   `@types/node ^20.19.43`, `bun-types ^1.3.14`, `jiti ^2.7.0`,
   `simple-git ^4.0.2`, `typescript ^6.0.3`.
 
@@ -229,16 +229,16 @@ LLM flow when it sees an unhandled task:
 
 ### Intent → plan conversion
 
-`task_convert_intent` (`:230`):
+`task_convert_intent` (`:292`):
 
 1. Reads the intent (`store.get(params.task_id)`).
 2. Refuses on non-intent type or already-converted state
    (`ConvertIntentError`).
 3. Flips the intent's status to `"completed"` with
    `metadata.converted = true, converted_at = now`.
-4. Rejects empty `plan` arrays (`orchestrator-tool.ts:342`) before any
+4. Rejects empty `plan` arrays (`orchestrator-tool.ts:340`) before any
    task creation.
-5. For each `plan` entry, calls `store.create(...)` (`:294`) with
+5. For each `plan` entry, calls `store.create(...)` (`:356`) with
    `type: "plan"`, `metadata.source_intent = intent.id`, and the
    entry's `agentType` / `blockedBy` / `blocks` edges wired in.
 

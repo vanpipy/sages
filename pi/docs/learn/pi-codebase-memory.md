@@ -33,7 +33,7 @@ Linux kernel index) is installed by
 
 ## Entry points
 
-Per `pi-codebase-memory/package.json:21–26`:
+Per `pi-codebase-memory/package.json:27–34`:
 
 ```jsonc
 "pi": {
@@ -47,9 +47,9 @@ function `piCodebaseMemory(pi)` (`pi-codebase-memory/src/index.ts:80`),
 the only callable symbol in the package. There are no other module
 exports; everything lives in the lifecycle hook bodies.
 
-Files packaged for distribution (per `package.json:28–33`):
+Files packaged for distribution (per `pi-codebase-memory/package.json:35–40`):
 `src/`, `skills/`, `templates/`, `README.md`. Node engine
-`>=20` (`:34`).
+`>=20` (`:41–43`).
 
 ## Key symbols
 

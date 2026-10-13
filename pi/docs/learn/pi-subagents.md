@@ -32,7 +32,7 @@ and the `pi.extensions` install all flow through here.
 
 ## Entry points
 
-Per `pi-subagents/package.json:55–57`:
+Per `pi-subagents/package.json:51–57`:
 
 ```jsonc
 "pi": {
@@ -86,7 +86,7 @@ Top 10, ordered by importance:
      changed.
    - `getRecord(id)` / `listAgents()` / `abort(id)` / `abortAll()` /
      `dispose(pi)` — the rest of the public surface.
-   - The `startups` map (`:382`) and the `queue` array (`:399`) are
+   - The `startups` map (`:385`) and the `queue` array (`:409`) are
      the engine internals that make worktree-isolated spawns awaitable
      and slot-aware.
    - `isTopLevelAgent(record)` (`:122`) — the single source of truth
@@ -133,18 +133,20 @@ Top 10, ordered by importance:
 5. **`AgentManager` lifecycle callbacks** —
    `pi-subagents/src/index.ts:568` constructs the manager with 4
    callbacks that wire the host into the runtime:
-   - `onComplete` (`:613`): emits `subagents:completed` or
-     `subagents:failed`, persists `subagents:record` entry, drives
-     notification scheduling (group join vs. individual nudge).
-   - `onStart` (`:659`): emits `subagents:started`, refreshes the
-     widget / fleet list.
-   - `onCompact` (`:687`): emits `subagents:compacted`.
-   - `onUsage` (`:703`): every assistant `message_end` accumulates
+   - `onComplete` (`:568`): emits `subagents:completed` or
+     `subagents:failed` (at `:579–581`), persists `subagents:record`
+     entry, drives notification scheduling (group join vs. individual
+     nudge).
+   - `onStart` (`:614`): emits `subagents:started` (at `:625`),
+     refreshes the widget / fleet list.
+   - `onCompact` (`:630`): emits `subagents:compacted` (at `:633`).
+   - `onUsage` (`:641`): every assistant `message_end` accumulates
      into `record.lifetimeUsage` (used by `PendingUsagePool`).
    - The cross-package registry is held via
-     `Symbol.for("pi-subagents:manager")` (declared `:786`), claimed
-     only if free so child sessions don't overwrite the root slot
-     (`:794`).
+     `Symbol.for("pi-subagents:manager")` (declared `:659` as
+     `MANAGER_KEY`), claimed only if free so child sessions don't
+     overwrite the root slot (the `ownsManagerRegistry` guard at
+     `:747` checks the slot and writes only when free at `:748–750`).
 
 6. **`registerRpcHandlers`** —
    `pi-subagents/src/cross-extension-rpc.ts:97`. The RPC bridge
@@ -154,7 +156,7 @@ Top 10, ordered by importance:
    - `subagents:rpc:stop` → aborts a running agent.
    - `subagents:rpc:consume` → marks a settled agent's result as read
      (suppresses the completion notification).
-   - Reply envelope (`RpcReply<T>`, `:21`):
+   - Reply envelope (`RpcReply<T>`, `:28`):
      `{ success: true, data? } | { success: false, error }`. Version
      pin at `:33`.
 
@@ -165,7 +167,8 @@ Top 10, ordered by importance:
    navigable `Claude Code`-style dashboard. The widget is built in
    `pi-subagents/src/index.ts:1132` (via `getWidgetMode()` +
    `isShowCostEnabled()` + `isShowModelEnabled()`); the fleet at
-   `:1199` (with `isFleetViewEnabled()` + `getViewerMarkdown()`).
+   `:1138` (with `isFleetViewEnabled()` at `:1141` +
+   `getViewerMarkdown()` at `:433`).
 
 8. **`SubagentScheduler`** — `pi-subagents/src/schedule.ts:50`.
    Cron / interval / one-shot jobs for agents. Trigger sources:
@@ -275,18 +278,18 @@ From `pi-subagents/package.json`:
 
 1. The LLM calls the `Agent` tool
    (`pi-subagents/src/index.ts:1581`). The `execute` body resolves
-   the type via `resolveSpawnType` (`:1612`) and constructs a
+   the type via `resolveSpawnType` (`:1780`) and constructs a
    `createActivityTracker` (`:107`) for the spinner / token counts.
 2. `manager.spawn(pi, ctx, type, prompt, options)` returns the id
    synchronously. If `options.isolation === "worktree"`, the agent is
    queued and `awaitStartup(id)` (`:661`) waits for the worktree git
    call to complete.
-3. The `onStart` callback (`:659`) fires `pi.events.emit("subagents:started", { id, type, description })`.
+3. The `onStart` callback (`:614`) fires `pi.events.emit("subagents:started", { id, type, description })`.
 4. The agent runs. Each assistant `message_end` accumulates into
-   `record.lifetimeUsage` via `onUsage` (`:703`). The `PendingUsagePool`
+   `record.lifetimeUsage` via `onUsage` (`:641`). The `PendingUsagePool`
    (`:108` of `usage.ts`) drains into the next tool result when
    `reportUsage` is on (the `withUsageReporting` wrapper at `:2295`).
-5. The `onComplete` callback (`:613`) emits `subagents:completed`
+5. The `onComplete` callback (`:568`) emits `subagents:completed`
    (or `subagents:failed`), persists a `subagents:record` session
    entry, and routes the notification through `GroupJoinManager`
    (`group-join.ts`) so a smart-mode batch arrives as a single
@@ -326,15 +329,16 @@ through `startBackgroundResume` (`pi-subagents/src/index.ts:1278`).
 (`rpcCall`). The handler in `cross-extension-rpc.ts:97` resolves the
 `type`, calls `spawnTopLevel` (`pi-subagents/src/index.ts:698`),
 which delegates to `manager.spawn`. `consumeResult`
-(`pi-subagents/src/index.ts:820`) is the symmetric path pi-tasks's
+(`pi-subagents/src/index.ts:811`) is the symmetric path pi-tasks's
 `get_subagent_result` uses to suppress the duplicate completion
 notification.
 
 ### Settings bootstrap
 
-`applyAndEmitLoaded` (`pi-subagents/src/index.ts:1403`) reads
+`applyAndEmitLoaded` (defined in `pi-subagents/src/settings.ts:561`)
+is called from the `session_start` wiring to read
 `~/.pi/agent/subagents.json` and project `.pi/subagents.json`,
-merges them, and applies them via the appliers map (one entry per
+merge them, and apply them via the appliers map (one entry per
 subagent setting). Emits `subagents:settings_loaded`. Same shape on
 `saveAndEmitChanged` (`:578` of `settings.ts`) for writes.
 

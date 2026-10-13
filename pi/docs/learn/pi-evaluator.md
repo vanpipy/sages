@@ -29,13 +29,13 @@ once per session, and never toggles mid-session. Hot-switching via
 
 The evaluator is currently path-A-shaped (per `README.md`). Path B
 (the full signal-engine wiring into orchestrator events) is being
-developed; for now, the lazy self-cook path in `eval-score.ts:96`
+developed; for now, the lazy self-cook path in `eval-score.ts:100`
 runs `scoreWorkflow(workflowPath, coefficients, cwd)` on demand when
 `active_workflow_path` is set but `active_workflow` is null.
 
 ## Entry points
 
-Per `pi-evaluator/package.json:20–25`:
+Per `pi-evaluator/package.json:20–27`:
 
 ```jsonc
 "pi": {
@@ -46,7 +46,7 @@ Per `pi-evaluator/package.json:20–25`:
 
 The package's pi entry point is `src/extension.ts`, which exports
 `registerEvaluatorExtension` as default
-(`pi-evaluator/src/extension.ts:97`). `package.json:14` declares
+(`pi-evaluator/src/extension.ts:89`). `package.json:6` declares
 `"main": "src/extension.ts"` for non-pi consumers.
 
 The two reward-mode tools are registered by
@@ -58,22 +58,23 @@ The two reward-mode tools are registered by
 Top 10, ordered by importance:
 
 1. **`registerEvaluatorExtension`** (default export) —
-   `pi-evaluator/src/extension.ts:97`. Wires:
+   `pi-evaluator/src/extension.ts:89`. Wires:
    - `state = createEvalState()` (`state.ts:117`) — initial state
      with default coefficients loaded from
      `~/.pi/agent/evaluator-log/coefficients.json` (or built-in
      defaults).
-   - `registerEvalTools(pi, state, historical)` (`tools/index.ts:29`)
-     registers both `eval_score` and `eval_trend`.
-   - `pi.on("session_start", ...)` (`:107`) — reads
+   - `registerEvalTools(pi, state, historical)` (`tools/index.ts:29`,
+     inside the default export's body at `extension.ts:97`) registers
+     both `eval_score` and `eval_trend`.
+   - `pi.on("session_start", ...)` (`:100`) — reads
      `readSagesRewardMode()` (`settings.ts:63`) once, sets
      `state.mode = "on" | "off"`. Then `reloadCoefficients(state)`
      (`state.ts:134`) re-reads the user's coefficients file at
      session start so mid-session edits are honored on next session.
-   - `pi.on("before_agent_start", ...)` (`:117`) — appends
-     `REWARD_MODE_SYSTEM_PROMPT` (`prompts.ts:18`) to the system
+   - `pi.on("before_agent_start", ...)` (`:113`) — appends
+     `REWARD_MODE_SYSTEM_PROMPT` (`prompts.ts:16`) to the system
      prompt when `state.mode === "on"`.
-   - `pi.on("tool_call", ...)` (`:139`) — tracks active workflow for
+   - `pi.on("tool_call", ...)` (`:125`) — tracks active workflow for
      the lazy `eval-score` self-cook path. Only fires for the 4
      Sages orchestrator tool names
      (`goal_contract_create` / `dag_synthesize` / `task_dispatch`
@@ -82,17 +83,18 @@ Top 10, ordered by importance:
 
 2. **`makeEvalScoreTool`** — `pi-evaluator/src/tools/eval-score.ts:175`.
    The `eval_score` tool definition (TypeBox schema
-   `EvalScoreParams` at `:35`, lock-shaped output
-   `EvalScoreOutput` at `:42`). Backed by the pure
+   `EvalScoreParams` at `:41`, lock-shaped output
+   `EvalScoreOutput` at `:44`). Backed by the pure
    `computeEvalScore(state)` (`eval-score.ts:85`) which:
    - Returns `{ status: "blocked", intent: "reward mode is off…", ... }`
      when `state.mode === "off"`.
    - Lazy-cooks a workflow via
      `scoreWorkflow(state.active_workflow_path, state.coefficients, cwd)`
      when `state.active_workflow === null && active_workflow_path` is
-     set; caches the result back into `state.active_workflow`.
+     set (the `if (wf === null && ...)` self-cook begins at `:100`);
+     caches the result back into `state.active_workflow`.
    - Returns an all-zero dimensions map
-     (`emptyDimensions` at `:60`) when no workflow is active.
+     (`emptyDimensions` at `:65`) when no workflow is active.
    - Otherwise returns a defensive copy of the cached workflow's
      dimensions + total.
 
@@ -106,7 +108,7 @@ Top 10, ordered by importance:
 4. **`scoreWorkflow` / `scoreDimension` / `globalScore`** —
    `pi-evaluator/src/engine/scoring-engine.ts:88 / 63 / 106`. The
    pure scoring engine:
-   - `scoreWorkflow(workflowPath, coefficients, cwd)` (`:106`) iterates
+   - `scoreWorkflow(workflowPath, coefficients, cwd)` (`:88`) iterates
      the 5 dimensions (`DIMENSIONS` from
      `engine/coefficients-schema.ts:79`), calls `scoreDimension` on each.
    - `scoreDimension(signals, ctx)` (`:67`) runs each signal via
@@ -122,19 +124,19 @@ Top 10, ordered by importance:
 
 5. **`EvalState`** — `pi-evaluator/src/state.ts:74`. The mutable
    closure shared between event handlers and tool factories. Fields:
-   - `mode: "on" | "off"` (`:80`)
-   - `coefficients: CoefficientsConfig` (`:88`, loaded from
+   - `mode: "on" | "off"` (`:77`)
+   - `coefficients: CoefficientsConfig` (`:84`, loaded from
      `~/.pi/agent/evaluator-log/coefficients.json` via
      `engine/coefficients.ts:211`)
-   - `coefficients_warning?: VersionMismatchWarning` (`:93`)
-   - `active_workflow: WorkflowScoreState | null` (`:113`)
-   - `active_workflow_path?: string` (`:118`, set by
+   - `coefficients_warning?: VersionMismatchWarning` (`:91`)
+   - `active_workflow: WorkflowScoreState | null` (`:93`)
+   - `active_workflow_path?: string` (`:100`, set by
      `extension.ts:tool_call` for the 4 orchestrator tool names)
-   - `active_workflow_id?: string` (`:122`)
-   - `createEvalState()` (`:131`) is the constructor — loads
+   - `active_workflow_id?: string` (`:102`)
+   - `createEvalState()` (`:117`) is the constructor — loads
      coefficients and falls back to `DEFAULT_COEFFICIENTS`
      (`engine/coefficients-defaults.ts`).
-   - `reloadCoefficients(state)` (`:140`) re-loads on `session_start`;
+   - `reloadCoefficients(state)` (`:134`) re-loads on `session_start`;
      a malformed file falls back to defaults rather than crashing the
      session.
 
@@ -152,7 +154,8 @@ Top 10, ordered by importance:
    - `loadCoefficients()` (`:211`) and
      `loadCoefficientsAt(path)` (`:138`) parse the user's file,
      validating invariants (`validateInvariants` at `:83`) and
-     surfacing a `VersionMismatchWarning` when the file's `version`
+     surfacing a `VersionMismatchWarning` (the interface is at
+     `engine/coefficients.ts:53`) when the file's `version`
      differs from `pi-evaluator/package.json#version`.
    - `COEFFICIENTS_RELATIVE_PATH = "evaluator-log/coefficients.json"`
      (`:50`).
@@ -194,12 +197,12 @@ Top 10, ordered by importance:
 
 From `pi-evaluator/package.json`:
 
-- **peerDependencies** (`:26–30`):
+- **peerDependencies** (`:28–32`):
   `@earendil-works/pi-coding-agent *`,
   `@earendil-works/pi-ai *`,
   `@earendil-works/pi-tui *`.
 - **dependencies**: `none`.
-- **devDependencies** (`:32–36`):
+- **devDependencies** (`:34–39`):
   `typebox ^1.3.34`, `@types/bun latest`, `bun-types latest`,
   `typescript ^5.0.0`.
 
@@ -223,7 +226,7 @@ schemas and the host-extension wiring touch external packages.
 
 1. `session_start` sets `state.mode = "on"`, reloads coefficients.
 2. `before_agent_start` appends `REWARD_MODE_SYSTEM_PROMPT`
-   (`prompts.ts:18`) — instructs the LLM when to call the tools
+   (`prompts.ts:16`) — instructs the LLM when to call the tools
    (after DAG design, after key task reports, before finalizing).
 4. LLM calls `eval_score` → `computeEvalScore` finds
    `active_workflow === null && active_workflow_path === undefined`
@@ -252,9 +255,10 @@ schemas and the host-extension wiring touch external packages.
 
 When the user's `coefficients.json` has a different `version` than
 the package's `package.json#version`, `loadCoefficientsAt` returns a
-`VersionMismatchWarning` (`:138` of `engine/coefficients.ts`). That
-warning rides on the state as `state.coefficients_warning`
-(`state.ts:93`) and surfaces in the `eval_score` output as
+`VersionMismatchWarning` (the interface is at
+`engine/coefficients.ts:53`; the function at `:138` is what surfaces
+it). That warning rides on the state as `state.coefficients_warning`
+(`state.ts:91`) and surfaces in the `eval_score` output as
 `coefficients_warning: { file_version, package_version, note }`
 (`eval-score.ts:44` for the type, populated at `:93` in the blocked branch, `:127` in the lazy-fail branch, and `:139` in the empty-workflow branch). The user sees a single
 notification that their coefficients may describe a different
