@@ -240,6 +240,11 @@ PI_ROUTINES_NPM_DIR="$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines"
 # re-run install.sh to re-enable.
 SAGES_ROUTINES_TEMPLATES_SRC="$SCRIPT_DIR/../templates/sages-routines"
 SAGES_ROUTINES_TEMPLATES_DEST="$HOME/.pi/agent/extensions/routines/templates"
+# The npm package's bundled templates dir. /routine-install reads
+# from here (pi-routines/src/types.ts:466 → ../templates), so this is
+# the path that makes `/routine-install sages-board-watch` succeed.
+# Mirrors PI_ROUTINES_NPM_DIR but with `/templates` appended.
+SAGES_ROUTINES_TEMPLATES_NPM_DEST="$PI_ROUTINES_NPM_DIR/templates"
 # pi-routines' persisted store. Written atomically by the runtime at
 # 0o600 — install.sh mirrors that exact pattern when seeding the
 # sages-board-watch routine.
@@ -2192,28 +2197,41 @@ except Exception as e:
 
 install_sages_routines_templates() {
   # Sages ships a board-watch template AND activates it by default.
-  # We COPY (not symlink) the template JSON into the routines templates
-  # dir — routines reads templates via fs.readdirSync at command
-  # invocation, not via the npm package, so a stale install would
-  # otherwise miss the Sages templates. Copy is idempotent: a newer
-  # source file overwrites an older dest. After the copy, we seed the
-  # active routine entry into state.json (install_sages_board_watch_routine)
-  # so the 30s board-watch pulse is armed before the user's first
-  # pi session — see AGENTS.md and orchestrator SKILL.md for opt-out.
+  # We COPY the template JSON to TWO locations so both discovery paths
+  # work:
+  #
+  #   1. $SAGES_ROUTINES_TEMPLATES_DEST — the user-extensions dir, for
+  #      reference and any future consumer that reads there.
+  #   2. $SAGES_ROUTINES_TEMPLATES_NPM_DEST — the npm package's bundled
+  #      templates dir. /routine-install reads from here
+  #      (pi-routines/src/types.ts:466 → ../templates), so this is the
+  #      path that makes `/routine-install sages-board-watch` succeed.
+  #
+  # Copy is idempotent: a newer source file overwrites an older dest.
+  # The npm package dir may not exist yet (if install_pi_routines_npm
+  # hasn't run, or has been uninstalled) — in that case the npm copy
+  # is silently skipped; the extensions-dir copy still succeeds and
+  # the state.json write (install_sages_board_watch_routine below)
+  # still arms the watch for direct use.
   if [[ ! -d "$SAGES_ROUTINES_TEMPLATES_SRC" ]]; then
     echo "  Skipped: $SAGES_ROUTINES_TEMPLATES_SRC not found (no Sages templates this build)"
     return 0
   fi
   mkdir -p "$SAGES_ROUTINES_TEMPLATES_DEST"
-  local copied=0
+  local copied_ext=0 copied_npm=0
   for src in "$SAGES_ROUTINES_TEMPLATES_SRC"/*.json; do
     [[ ! -f "$src" ]] && continue
     local name; name=$(basename "$src")
-    cp "$src" "$SAGES_ROUTINES_TEMPLATES_DEST/$name"
-    copied=$((copied + 1))
+    cp "$src" "$SAGES_ROUTINES_TEMPLATES_DEST/$name" && copied_ext=$((copied_ext + 1))
+    if [[ -d "$SAGES_ROUTINES_TEMPLATES_NPM_DEST" ]]; then
+      cp "$src" "$SAGES_ROUTINES_TEMPLATES_NPM_DEST/$name" && copied_npm=$((copied_npm + 1))
+    fi
   done
-  if [[ $copied -gt 0 ]]; then
-    echo "  Installed $copied Sages routine template(s) to $SAGES_ROUTINES_TEMPLATES_DEST"
+  if [[ $copied_ext -gt 0 ]]; then
+    echo "  Installed $copied_ext Sages routine template(s) to $SAGES_ROUTINES_TEMPLATES_DEST"
+  fi
+  if [[ $copied_npm -gt 0 ]]; then
+    echo "  Installed $copied_npm Sages routine template(s) to $SAGES_ROUTINES_TEMPLATES_NPM_DEST"
   fi
   # Activate the board-watch routine by default. Soft-fail: if the
   # routines extension is not installed, the routine write is a no-op
