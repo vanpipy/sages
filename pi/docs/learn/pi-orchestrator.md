@@ -114,12 +114,20 @@ Top 10, ordered by importance:
 
 6. **`task_convert_intent`** — `pi-orchestrator/src/orchestrator-tool.ts:292`.
    The unique intent → plan converter. Reads an intent task, marks it
-   converted (audit: `metadata.converted / metadata.converted_at`,
-   flips `status: "completed"`), and creates N plan tasks wired from
-   `params.plan[]`. Refuses non-intent sources, already-converted
-   intents, empty plans. Errors: `ConvertIntentError(kind: "intent_not_found" | "not_intent" | "already_converted" | "empty_plan")`
-   (`orchestrator-tool.ts:273`). The plan tasks get
-   `metadata.source_intent = intent.id`.
+   converted (audit: `metadata.converted / converted_at / intent_shape
+   / rationale`, flips `status: "completed"`), and creates plan tasks
+   from a STRUCTURED plan object (`intent_shape` + `rationale` +
+   `phases[]`). Phase → agentType is mapped deterministically via
+   `PHASE_AGENT_TYPE` (review → Reviewer, all others → Developer) — the
+   LLM never types `agentType` directly. Runtime validation in
+   `phase-validation.ts` enforces per-shape phase count + ordering rules.
+   Refuses non-intent sources, already-converted intents, empty
+   `phases`, and plans that violate the shape rules. Errors:
+   `ConvertIntentError(kind: "intent_not_found" | "not_intent" |
+   "already_converted" | "empty_phases" | "shape_violation")`
+   (`orchestrator-tool.ts:317`). The plan tasks get
+   `metadata.source_intent`, `metadata.phase`, and `metadata.agentType`
+   auto-stamped.
 
 7. **`parseVerdict` / `suggestFollowUp`** —
    `pi-orchestrator/src/verdict.ts:40 / 55`. Pure functions over the

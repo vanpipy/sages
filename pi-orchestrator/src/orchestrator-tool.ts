@@ -1,30 +1,36 @@
 /**
- * orchestrator-tool.ts — the orchestrator's two LLM-facing tools.
+ * orchestrator-tool.ts — the orchestrator's three LLM-facing tools.
  *
  * The orchestrator is a CONSUMER of the task flow, not its manager.
- * It does only two things on the flow:
+ * It does three things on the flow:
  *
- *   1. READ — `task_consume(task_id, include_transcript?)` reads a
+ *   1. READ — `task_inspect(task_id)` returns routing-relevant fields
+ *      (type + status + agentType) so the LLM can route without a full
+ *      TaskGet.
+ *
+ *   2. READ — `task_consume(task_id, include_transcript?)` reads a
  *      completed plan task in a structured way. It does NOT mark the
  *      task consumed or otherwise mutate state. Parses the Reviewer's
  *      4-state verdict from the result text and returns it together
  *      with a verdict-tailored follow-up suggestion.
  *
- *   2. WRITE — `task_convert_intent(task_id, plan[])` is the
+ *   3. WRITE — `task_convert_intent(task_id, plan)` is the
  *      orchestrator's unique intent → plan conversion operator. Reads
- *      an intent task, marks it converted, and creates one or more
- *      plan tasks wired from the spec list. The caller (LLM) does the
- *      decomposition; the function just commits. Audit trail: intent's
- *      `metadata.converted / converted_at`, every new plan task's
- *      `metadata.source_intent`.
+ *      an intent task, marks it converted, and creates N plan tasks
+ *      wired from the structured plan. The caller (LLM) does the
+ *      planning — the schema forces a structured object (intent_shape +
+ *      rationale + phases[]) and runtime validation enforces per-shape
+ *      rules. See `phase-validation.ts` for the rules. Phase →
+ *      agentType is mapped deterministically (review → Reviewer, all
+ *      others → Developer) so the LLM cannot mis-assign roles.
  *
  * The orchestrator does NOT have an `orchestrate` tool, does NOT have
- *      a `task_create` tool, does NOT have `drain` / `findNextConsumable`
- *      / `awaitNextConsumable` tools. The LLM uses pi-tasks's existing
- *      `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` / `TaskOutput`
- *      / `TaskExecute` directly. The orchestrator's two tools add: verdict
- *      parsing on the read side, and intent → plan conversion on the
- *      write side (N plan tasks per intent in a single call).
+ * a `task_create` tool, does NOT have `drain` / `findNextConsumable`
+ * / `awaitNextConsumable` tools. The LLM uses pi-tasks's existing
+ * `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` / `TaskOutput`
+ * / `TaskExecute` directly. The orchestrator's three tools add: routing
+ * on the read side, verdict parsing on the read side, and structured
+ * intent → plan conversion on the write side.
  *
  * Both tools read/write the same TaskStore the board's own
  * `taskScope: "project"` mode uses — see
@@ -34,21 +40,37 @@
 
 import { Type, type Static } from "typebox";
 import type { ExtensionAPI, AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
-// Both tools share the board's storage layer (TaskStore) and the path
-// resolver. They do NOT own any state — they read + write through the
-// store and let the LLM drive the lifecycle via pi-tasks's existing
-// 7 tools.
 import { TaskStore, type TaskType } from "@sages/pi-tasks/task-store";
 import { orchestratorProjectTaskFile } from "@sages/pi-tasks/task-paths";
 import { parseVerdict, suggestFollowUp, type Verdict } from "./verdict.js";
+import {
+	PhaseValidationError,
+	type Phase,
+	validatePlanShape,
+	validateRationale,
+} from "./phase-validation.js";
 
 // Re-exported for downstream callers. The orchestrator's consumer
 // tools (`task_inspect`, `task_consume`, `task_convert_intent`) all
 // import `TaskType` from this module.
 export type { TaskType };
+export type { Phase };
 
 /** The two shipped agent types. */
 export type AgentType = "Developer" | "Reviewer";
+
+/**
+ * Phase → agentType mapping. Encoded once, never overridable.
+ * The LLM never types `agentType` directly — it picks a phase, and
+ * this map assigns the agent type at conversion time.
+ */
+export const PHASE_AGENT_TYPE: Record<Phase, AgentType> = {
+	investigate: "Developer",
+	design: "Developer",
+	implement: "Developer",
+	test: "Developer",
+	review: "Reviewer",
+};
 
 // ─── `task_inspect` — read just the routing-relevant fields ──────────────────
 
@@ -225,40 +247,106 @@ async function taskConsume(
 }
 
 // ─── `task_convert_intent` — the unique intent → plan operator ───────────
+//
+// SCHEMA-DRIVEN METHODOLOGY:
+// The plan is a STRUCTURED OBJECT, not a free-form array. The LLM MUST:
+//   1. Classify the intent into one of 6 shapes (intent_shape).
+//   2. Justify the shape choice in one sentence (rationale).
+//   3. Sequence ordered phases (phases[]) — each phase maps to exactly
+//      one agentType via PHASE_AGENT_TYPE (review → Reviewer, all others
+//      → Developer). The LLM never types agentType.
+//   4. Pass per-phase description (≥ 20 chars) — forces real acceptance
+//      criteria instead of inherited intent prose.
+//
+// Runtime validation in `phase-validation.ts` enforces shape-specific
+// rules (phase count bounds, first/last phase match, ≤ 1 review phase,
+// rationale length). Rejected plans throw ConvertIntentError with
+// `kind: "shape_violation"` and a message that names the violated rule
+// + lists the expected shape. The LLM can fix and retry.
 
 export const ConvertIntentParams = Type.Object({
 	task_id: Type.String({
 		description:
-			"The ID of the intent task to convert. The task must have type='intent' and not yet be converted (each intent converts once). Call task_inspect first to confirm the type — the parameter name is just `task_id` for consistency with task_inspect / task_consume; the routing is what makes it an intent.",
+			"The ID of the intent task to convert. Must have type='intent' and not yet be converted (each intent converts once). Call task_inspect first to confirm the type — the parameter name is just `task_id` for consistency with task_inspect / task_consume; the routing is what makes it an intent.",
 	}),
-	plan: Type.Array(
-		Type.Object({
-			subject: Type.Optional(
-				Type.String({
-					description:
-						"Subject for the new plan task. Defaults to the intent task's subject if omitted.",
+	plan: Type.Object(
+		{
+			intent_shape: Type.Union([
+				Type.Literal("trivial"),
+				Type.Literal("small"),
+				Type.Literal("standard"),
+				Type.Literal("investigate-then-fix"),
+				Type.Literal("multi-phase"),
+				Type.Literal("multi-track"),
+			], {
+				description:
+					"MUST classify the intent first — one of 6 shapes. Drives the expected phase count and Reviewer placement. " +
+					"The LLM should commit to a shape in its own response before calling this tool. " +
+					"Shapes: trivial = 1 phase (implement), no review. small / standard = 2 phases (implement, review). " +
+					"investigate-then-fix = 3+ phases (investigate first, implement next, review last). " +
+					"multi-phase = 3+ phases (design first, …, review last). " +
+					"multi-track = 2+ implement phases (no review; join via a SECOND intent once the parallel tracks complete).",
+			}),
+			rationale: Type.String({
+				description:
+					"MUST justify the chosen shape in one sentence (10–500 chars). " +
+					"Forces the LLM to plan before committing. Example: 'Multi-file within one package with a full RED → GREEN → REFACTOR cycle; one Reviewer at the end.'",
+				minLength: 10,
+				maxLength: 500,
+			}),
+			phases: Type.Array(
+				Type.Object({
+					phase: Type.Union([
+						Type.Literal("investigate"),
+						Type.Literal("design"),
+						Type.Literal("implement"),
+						Type.Literal("test"),
+						Type.Literal("review"),
+					], {
+						description:
+							"Phase for this spec. Maps deterministically to agentType via PHASE_AGENT_TYPE: " +
+							"review → Reviewer, all others → Developer. The LLM never types agentType directly.",
+					}),
+					subject: Type.String({
+						description: "Imperative, 1–80 chars. 'Implement /login endpoint'.",
+						minLength: 1,
+						maxLength: 80,
+					}),
+					description: Type.String({
+						description:
+							"MUST cover What / Where / Acceptance / Evidence. Minimum 20 chars forces real acceptance criteria — " +
+							"do not inherit the intent's description verbatim.",
+						minLength: 20,
+					}),
+					activeForm: Type.Optional(
+						Type.String({
+							description:
+								"Present continuous form for the widget spinner. 'Implementing /login endpoint'. Optional but recommended.",
+						}),
+					),
+					metadata: Type.Optional(
+						Type.Record(Type.String(), Type.Any(), {
+							description:
+								"Per-phase metadata for the dispatcher: goal_id, isolation, tdd, priority, tag, etc. " +
+								"source_intent + phase + agentType are stamped automatically by the function — do not duplicate them.",
+						}),
+					),
 				}),
-			),
-			description: Type.Optional(
-				Type.String({
+				{
+					minItems: 1,
+					maxItems: 12,
 					description:
-						"Description for the new plan task. Defaults to the intent task's description if omitted.",
-				}),
+						"Ordered phases. Phase count + ordering must match the declared intent_shape (see phase-validation.ts). " +
+						"Defaults to 0 if omitted, but that fails the empty-phases check immediately.",
+				},
 			),
-			agentType: Type.Union([
-				Type.Literal("Developer"),
-				Type.Literal("Reviewer"),
-			]),
-			activeForm: Type.Optional(Type.String()),
-			blockedBy: Type.Optional(
-				Type.Array(Type.String({ description: "Task IDs the new plan task depends on." })),
-			),
-			blocks: Type.Optional(
-				Type.Array(Type.String({ description: "Task IDs the new plan task will block." })),
-			),
-			metadata: Type.Optional(Type.Record(Type.String(), Type.Any())),
-		}),
-		{ description: "One or more plan task specs to materialize from the intent. The caller (LLM) does the decomposition; the function commits it. Each spec becomes one plan task; `agentType` is the only required field. Empty array is rejected — a conversion must produce at least one plan." },
+		},
+		{
+			description:
+				"Structured plan object. The LLM MUST classify intent_shape, justify with rationale, and sequence phases. " +
+				"Runtime validation in `phase-validation.ts` enforces shape-specific phase count + ordering. " +
+				"Phase → agentType is mapped deterministically via PHASE_AGENT_TYPE — the LLM never types agentType directly.",
+		},
 	),
 });
 export type ConvertIntentInput = Static<typeof ConvertIntentParams>;
@@ -266,6 +354,8 @@ export type ConvertIntentInput = Static<typeof ConvertIntentParams>;
 export interface ConvertIntentOutput {
 	plan_task_ids: string[];
 	intent_task_id: string;
+	intent_shape: string;
+	rationale: string;
 	converted_at: number;
 }
 
@@ -276,7 +366,8 @@ export class ConvertIntentError extends Error {
 			| "intent_not_found"
 			| "not_intent"
 			| "already_converted"
-			| "empty_plan",
+			| "shape_violation"
+			| "empty_phases",
 		message: string,
 	) {
 		super(message);
@@ -286,7 +377,8 @@ export class ConvertIntentError extends Error {
 
 /**
  * The orchestrator's unique intent → plan conversion. Read the intent,
- * verify state, create the plan, wire edges, mark the intent as
+ * verify state, validate the structured plan (shape + rationale +
+ * per-shape phase rules), create the plan tasks, mark the intent as
  * converted. One-way: an already-converted intent can't be re-converted.
  */
 export async function taskConvertIntent(
@@ -317,6 +409,30 @@ export async function taskConvertIntent(
 		);
 	}
 
+	// Reject empty phase arrays: a conversion with no plan tasks is a no-op
+	// that still flips the intent's `converted` flag — better caught at the
+	// boundary than after the audit lands.
+	if (params.plan.phases.length === 0) {
+		throw new ConvertIntentError(
+			"empty_phases",
+			`Intent task #${intent.id} would convert into zero plan tasks; pass at least one phase.`,
+		);
+	}
+
+	// Validate the structured plan. Both validators throw
+	// PhaseValidationError with a `rule` identifier and a clear message;
+	// wrap into ConvertIntentError("shape_violation", ...) so the LLM
+	// sees one error kind for all plan-shape failures.
+	try {
+		validateRationale(params.plan);
+		validatePlanShape(params.plan);
+	} catch (err) {
+		if (err instanceof PhaseValidationError) {
+			throw new ConvertIntentError("shape_violation", err.message);
+		}
+		throw err;
+	}
+
 	const convertedAt = Date.now();
 	// The intent task keeps its `type='intent'` on the Task field; only the
 	// audit fields land in metadata. We do NOT redundantly stamp
@@ -324,58 +440,47 @@ export async function taskConvertIntent(
 	// Once conversion succeeds the intent is terminal: it has been fully
 	// decomposed into plan tasks, so flip its status to `completed` so the
 	// board no longer shows a stale "pending intent" after routing. The
-	// metadata audit (`converted` / `converted_at`) and the type field are
-	// unchanged by this flip.
+	// metadata audit (`converted` / `converted_at` + `intent_shape` +
+	// `rationale`) and the type field are unchanged by this flip.
 	store.update(intent.id, {
 		status: "completed",
 		metadata: {
 			converted: true,
 			converted_at: convertedAt,
+			intent_shape: params.plan.intent_shape,
+			rationale: params.plan.rationale,
 		},
 	});
 
-	// Reject empty plans: a conversion with no plan tasks is a no-op that
-	// still flips the intent's `converted` flag — better caught at the
-	// boundary than after the audit lands.
-	if (params.plan.length === 0) {
-		throw new ConvertIntentError(
-			"empty_plan",
-			`Intent task #${intent.id} would convert into zero plan tasks; pass at least one plan spec.`,
-		);
-	}
-
-	// Create each plan task in order, wiring its edges. The caller (LLM)
-	// decomposes the intent; this function just commits.
+	// Create each plan task in order. agentType is derived from phase via
+	// PHASE_AGENT_TYPE — the LLM cannot mis-assign roles. source_intent +
+	// phase + agentType are stamped AFTER the user-provided metadata so
+	// they win on conflict (a user can't forge source_intent or downgrade
+	// a Reviewer to a Developer).
 	const planTaskIds: string[] = [];
-	for (const spec of params.plan) {
+	for (const ph of params.plan.phases) {
+		const agentType = PHASE_AGENT_TYPE[ph.phase];
 		const planMeta: Record<string, unknown> = {
-			agentType: spec.agentType,
+			...ph.metadata,
+			agentType,
 			source_intent: intent.id,
-			...spec.metadata,
+			phase: ph.phase,
 		};
 		const planTask = store.create(
-			spec.subject ?? intent.subject,
-			spec.description ?? intent.description,
-			spec.activeForm,
+			ph.subject,
+			ph.description,
+			ph.activeForm,
 			planMeta,
 			"plan",
 		);
-		if (spec.blocks) {
-			for (const target of spec.blocks) {
-				store.update(planTask.id, { addBlocks: [target] });
-			}
-		}
-		if (spec.blockedBy) {
-			for (const pred of spec.blockedBy) {
-				store.update(planTask.id, { addBlockedBy: [pred] });
-			}
-		}
 		planTaskIds.push(planTask.id);
 	}
 
 	const data: ConvertIntentOutput = {
 		plan_task_ids: planTaskIds,
 		intent_task_id: intent.id,
+		intent_shape: params.plan.intent_shape,
+		rationale: params.plan.rationale,
 		converted_at: convertedAt,
 	};
 	return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], details: data };
@@ -392,7 +497,9 @@ export async function taskConvertIntent(
  *     can route (intent → convert, plan-pending → execute,
  *     plan-completed → consume).
  *   - `task_consume(task_id, include_transcript?)` — read + parse
- *   - `task_convert_intent(task_id, plan)` — the unique converter
+ *   - `task_convert_intent(task_id, plan)` — the unique converter. The
+ *     plan is a STRUCTURED OBJECT (intent_shape + rationale + phases[]);
+ *     runtime validation in phase-validation.ts enforces per-shape rules.
  */
 export function registerOrchestratorTools(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -427,14 +534,19 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 		name: "task_convert_intent",
 		label: "task_convert_intent",
 		description:
-			"The orchestrator's unique intent → plan converter. " +
-			"Reads an intent task (type='intent'), marks it converted (audit: " +
-			"`metadata.converted / metadata.converted_at`), and creates a new plan task " +
-			"with `type='plan'`, `agentType` from the spec, and " +
-			"`metadata.source_intent` linking back to the intent. Refuses " +
-			"non-intent sources and already-converted intents. Use this for " +
-			"every intent task you see — until an intent is on the board, " +
-			"`task_consume` and TaskExecute won't pick it up.",
+			"The orchestrator's unique intent → plan converter. Reads an intent " +
+			"task (type='intent'), marks it converted (audit: metadata.converted / " +
+			"converted_at + intent_shape + rationale), and creates plan tasks from " +
+			"a STRUCTURED plan object (intent_shape + rationale + phases[]). The " +
+			"LLM MUST classify the intent shape, MUST justify the choice in " +
+			"rationale (10–500 chars), and MUST sequence ordered phases — the " +
+			"schema + runtime validation (phase-validation.ts) enforce shape-specific " +
+			"rules (phase count bounds, first/last phase match, ≤ 1 review phase). " +
+			"Phase → agentType is mapped deterministically via PHASE_AGENT_TYPE " +
+			"(review → Reviewer, all others → Developer). Refuses non-intent " +
+			"sources, already-converted intents, and plans that violate the " +
+			"shape rules. Use this for every intent task you see — until an " +
+			"intent is on the board, task_consume and TaskExecute won't pick it up.",
 		parameters: ConvertIntentParams,
 		execute: taskConvertIntent,
 	});
