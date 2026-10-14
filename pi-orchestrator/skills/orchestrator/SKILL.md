@@ -130,6 +130,113 @@ pause for user / move on).
 The orchestrator's `task_inspect` is the LLM's first call on every
 task — it sees the type without erroring, then routes explicitly.
 
+## Planning methodology — from intent to structured plan
+
+The schema (`task_convert_intent`) enforces the *output* — a structured
+plan object with `intent_shape`, `rationale`, `phases[]`. This section is
+the *input*: how the LLM gets from "intent subject + description" to a
+structured plan it can commit to. Apply these steps every time a new
+intent task arrives on the board (whether you noticed it via `TaskList`
+or the board-watch routine surfaced it).
+
+### The 5-step loop
+
+#### 1. Read the intent + scan context
+
+Pull the intent's subject and description (`task_inspect` if not already
+in hand). Look at the conversation history for: prior brainstorming
+(`/brainstorm` results), related plan tasks already on the board, file
+paths / symbols the user mentioned. The intent's description is the
+primary signal; everything else is supporting.
+
+#### 2. Classify — pick an `intent_shape`
+
+Apply the heuristics in order; the first one that fits wins.
+
+| If the intent matches... | Then classify as |
+|---|---|
+| One-line fix / doc tweak / config change / typo / rename | `trivial` |
+| Single file, one clear test, one TDD cycle | `small` |
+| Multi-file within one package, full RED → GREEN → REFACTOR. **Default when no other shape clearly applies.** | `standard` |
+| Unknown root cause, flaky test, "this should work but doesn't" | `investigate-then-fix` |
+| Design-first, new schema, new contract, staged rollout, downstream work depends on an upfront decision | `multi-phase` |
+| Multiple parallel workstreams that join for review (cross-package migration, multi-component feature) | `multi-track` |
+
+**Default**: when in doubt, `standard`. Most non-trivial work fits the
+Implement → Review pattern. Down-classify to `small` when the change is
+genuinely bounded to one file. Up-classify to `investigate-then-fix` is
+mandatory when the root cause isn't known.
+
+#### 3. Compose `rationale` (one sentence, 10–500 chars)
+
+The rationale is the LLM's commitment: "I picked this shape BECAUSE...".
+Examples by shape:
+
+- `trivial`: "One-line typo fix; trivial shape — no review needed."
+- `small`: "Single file with a clear failing test; one Reviewer at the end."
+- `standard`: "Multi-file within one package, full RED → GREEN → REFACTOR; one Reviewer at the end."
+- `investigate-then-fix`: "Flaky on CI, root cause unknown — investigate first, then fix."
+- `multi-phase`: "Staged rollout; design the new schema first, then implement + test."
+- `multi-track`: "Three packages migrating in parallel; Reviewer joins via a second intent."
+
+The schema enforces 10–500 chars. Aim for 1 sentence. Never just "TODO"
+or the intent's description verbatim.
+
+#### 4. Decompose `phases`
+
+For each shape, the canonical phase sequence (see the Shape catalog
+below for the full per-shape rules):
+
+| Shape | Phase sequence |
+|---|---|
+| `trivial` | `[implement]` |
+| `small` | `[implement, review]` |
+| `standard` | `[implement, review]` |
+| `investigate-then-fix` | `[investigate, implement, review]` (+ optional `test`) |
+| `multi-phase` | `[design, implement, test, review]` (+ optional middle phases) |
+| `multi-track` | `[implement, implement, ...]` (≥ 2 parallel tracks; review deferred) |
+
+Per-phase `description` MUST cover **What / Where / Acceptance / Evidence**:
+
+1. **What** — outcome, not steps.
+2. **Where** — file paths or symbols. Subagent starts cold.
+3. **Acceptance** — test command or user-visible signal that says "done".
+4. **Evidence** — what `metadata.result` should record. The Reviewer reads this.
+
+#### 5. Surface the plan, then commit
+
+Print the structured plan as a markdown block in the LLM's own response
+(the user's channel) so the user can see what was committed:
+
+```text
+Plan for #1 "Add /login endpoint":
+- intent_shape: standard
+- rationale: "Multi-file within one package, full RED → GREEN → REFACTOR; one Reviewer at the end."
+- phases:
+  - [implement] Implement /login endpoint — ...
+  - [review]    Review /login implementation — ...
+```
+
+Then call `task_convert_intent({ task_id, plan: { intent_shape, rationale, phases } })`.
+
+### When to `/brainstorm` instead
+
+The methodology above is for *clear* intents. If the intent matches any
+of these, **stop and run `/brainstorm [request]` first**:
+
+- Subject is vague or has multiple plausible interpretations ("improve the auth flow").
+- Scope is ambiguous (which packages? which files? which tests?).
+- The user hasn't decided on an approach and the choice between approaches has real cost (new schema vs. migration, single-repo vs. cross-repo, etc.).
+- The intent touches an area where brainstorming has previously surfaced open questions.
+
+The output of `/brainstorm` is a `DesignDoc` (intent spec, approach
+comparison, design sections). Once approved, the orchestrator converts
+the approved design into tasks — at that point this methodology applies
+to each intent the design produced.
+
+For everything else — clear requests, bounded changes, known root
+causes — apply the 5-step loop directly.
+
 ## Designing the plan — quick reference
 
 The methodology lives in the schema (`src/orchestrator-tool.ts` +

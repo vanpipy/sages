@@ -109,4 +109,37 @@ describe("orchestrator SKILL.md — plan quick reference", () => {
 		expect(respIdx).toBeLessThan(tplIdx);
 		expect(tplIdx).toBeLessThan(softIdx);
 	});
+
+	it("includes the 'Planning methodology — from intent to structured plan' section with all 5 steps", () => {
+		const md = load();
+		expect(md).toMatch(/^##\s+Planning methodology — from intent to structured plan$/m);
+
+		// The 5-step loop headings.
+		expect(md).toMatch(/^####\s+1\.\s+Read the intent/m);
+		expect(md).toMatch(/^####\s+2\.\s+Classify/m);
+		expect(md).toMatch(/^####\s+3\.\s+Compose/m);
+		expect(md).toMatch(/^####\s+4\.\s+Decompose/m);
+		expect(md).toMatch(/^####\s+5\.\s+Surface/m);
+
+		// Step 2 must include the shape-classification heuristics table
+		// covering all 6 intent_shapes.
+		const step2 = md.match(/^####\s+2\.\s+Classify[\s\S]+?(?=^####\s+3\.)/m);
+		expect(step2).not.toBeNull();
+		const step2Text = step2![0];
+		for (const shape of [
+			"trivial",
+			"small",
+			"standard",
+			"investigate-then-fix",
+			"multi-phase",
+			"multi-track",
+		]) {
+			expect(step2Text).toContain(shape);
+		}
+
+		// "When to /brainstorm instead" branch — guards against the
+		// methodology becoming a blanket rule that skips brainstorming.
+		expect(md).toMatch(/^###\s+When to `\/brainstorm` instead$/m);
+		expect(md).toMatch(/\/brainstorm\s+\[request\]/);
+	});
 });
