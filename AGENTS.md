@@ -54,19 +54,22 @@ evidence. Three guiding principles govern the work (soft mode — GC-2026-031):
 
 ## The orchestrator tool surface
 
-The orchestrator owns **two** LLM-facing tools, one per side of the
-sole-creator / sole-consumer role:
+The orchestrator owns **three** LLM-facing consumer tools:
 
 | Tool | Output | Use for |
 |---|---|---|
-| `orchestrate(plan)` | task DAG materialized in pi-tasks's shared store (`<ORCHESTRATOR_WORKDIR>/<projectKey(cwd)>/tasks/tasks.json`, resolved via `pi-tasks/src/task-paths.ts:orchestratorProjectTaskFile`) | Materialize a multi-phase plan as a DAG in one call. For each phase, a task is created with the chosen `agentType`; phase-level `blockedBy` references (by subject) are resolved to task IDs and wired into both ends of every edge. After this returns, `TaskExecute` on the first ready task drives the cascade. |
-| `task_consume(task_id, include_transcript?)` | structured payload: `{ id, subject, status, agentType, result, verdict?, consumed_at, follow_up_suggestion? }` | Read a completed task in a structured way. For Reviewer tasks, parses the 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and returns a verdict-tailored follow-up suggestion. Marks the task consumed in metadata. The task must be `completed`; if it's still `in_progress`, use `TaskOutput(task_id, block: true)` first. |
+| `task_inspect(task_id)` | `{ id, subject, type, status, agentType?, hasResult }` | Read just the routing-relevant fields of a task before deciding which follow-up tool to call. Lighter than `TaskGet` (no metadata dump). Routes: `type='intent'` → `task_convert_intent`; `type='plan' + pending` → `TaskExecute`; `type='plan' + in_progress` → `TaskOutput(block=true)`; `type='plan' + completed` → `task_consume`. |
+| `task_consume(task_id, include_transcript?)` | structured payload: `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }` | Read a completed `plan` task in a structured way. For Reviewer tasks, parses the 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and returns a verdict-tailored follow-up suggestion. Pure read — does NOT mutate the store. The task must be `completed`; if it's still `in_progress`, use `TaskOutput(task_id, block: true)` first. Intent tasks throw `not_plan` — call `task_convert_intent` first. |
+| `task_convert_intent(task_id, plan)` | structured payload: `{ plan_task_ids, intent_task_id, intent_shape, rationale, converted_at }` | The orchestrator's unique intent→plan converter. Reads an intent task (`type='intent'`), validates a STRUCTURED plan (`intent_shape` + `rationale` + `phases[]`) against per-shape rules in `src/phase-validation.ts`, marks the intent as converted in metadata, and creates the plan tasks. `agentType` is derived per phase via `PHASE_AGENT_TYPE` (review → Reviewer, all others → Developer) — the LLM never types `agentType` directly. Refuses empty phases, non-intent sources, already-converted intents, and plans that violate the shape rules. |
 
-For full per-step control the orchestrator uses the raw pi-tasks tools
-directly: `TaskCreate` × N + `TaskExecute`. Both paths produce the same
-DAG; `orchestrate` is the convenience wrapper. No orchestrator-owned
-file (goal contract, workflow rollup, audit state) is produced —
-`.pi/orchestrator/` carries only optional subagent evidence.
+The LLM can also drive the task flow directly via the raw pi-tasks
+tools: `TaskCreate` × N + `TaskExecute` for multi-step plans, or `TaskList`
+/ `TaskGet` for ad-hoc reads. Both paths produce the same DAG;
+`task_convert_intent` is the structured entry point for intent→plan
+conversion, raw `TaskCreate` is the unstructured fallback. No
+orchestrator-owned file (goal contract, workflow rollup, audit state)
+is produced — `.pi/orchestrator/` carries only optional subagent
+evidence.
 
 Load `pi-orchestrator/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 
@@ -107,20 +110,30 @@ standard dispatch surface.
 ## Institutional knowledge
 
 Sages accumulates durable artifacts as the orchestrator resolves work.
-The primary surface is **cookbook** entries that capture reusable
-recipes for repeated patterns.
+Two documentation surfaces exist today:
 
-### Cookbook
+### Per-package walkthrough
 
-`pi/docs/cookbook/` holds recipes for repeated workflows — patterns
-that came up across enough GCs to be worth a standalone write-up.
-Each entry follows a fixed shape: **Problem → Solution → Code →
-When to use → When NOT to use**. The format is rigid on purpose:
-it forces the writer to articulate the negative space (what the
-recipe is NOT for), which is the part new contributors get wrong
-most often.
+`pi/docs/learn/` holds a module-by-module tour of the Sages monorepo —
+`pi-orchestrator.md`, `pi-tasks.md`, `pi-subagents.md`,
+`pi-codebase-memory.md`, `pi-evaluator.md`, plus `root.md` and a
+`README.md` index. Each file is a self-contained overview (purpose,
+entry points, top symbols with verified file:line references,
+dependencies, runtime flows) verified against actual source. Use these
+as the code-shape contract — `AGENTS.md` and `README.md` describe the
+human + LLM contract, `pi/docs/learn/` describes the verified
+code-shape contract.
 
-*Currently empty after the 2026-08-24 reset — entries will populate
+### Cookbook (planned)
+
+The planned cookbook captures reusable recipes for repeated workflows —
+patterns that came up across enough GCs to be worth a standalone
+write-up. Each entry follows a fixed shape: **Problem → Solution →
+Code → When to use → When NOT to use**. The format is rigid on purpose:
+it forces the writer to articulate the negative space (what the recipe
+is NOT for), which is the part new contributors get wrong most often.
+
+*Not yet created after the 2026-08-24 reset — entries will populate
 as new GCs ship.*
 
 ## Workflow at a glance
@@ -128,12 +141,16 @@ as new GCs ship.*
 The orchestrator drives work through pi-tasks's DAG. Two equivalent
 paths:
 
-1. **One-shot DAG via `orchestrate(plan)`** — for the standard
-   Implement → Review shape, materialize both tasks in a single call.
+1. **Structured intent → plan via `task_convert_intent(plan)`** — for
+   the standard Implement → Review shape (and every other shape in the
+   catalog: `trivial`, `small`, `standard`, `investigate-then-fix`,
+   `multi-phase`, `multi-track`), validate a structured plan
+   (`intent_shape` + `rationale` + `phases[]`), then materialize all
+   plan tasks in a single call. Per-phase `agentType` is derived from
+   `phase` via `PHASE_AGENT_TYPE`.
 2. **Raw `TaskCreate` × N + `TaskExecute`** — for any non-standard
-   shape (multi-package coordination, parallel tracks, conditional
-   dependencies, fan-out / fan-in). The cascade in pi-tasks picks up
-   ready tasks automatically.
+   shape, or when the LLM prefers direct control. The cascade in
+   pi-tasks picks up ready tasks automatically.
 
 The Reviewer agent reads the Developer's `metadata.result` via the
 incoming `TaskOutput` and emits one of CLEAN / NEEDS_WORK /
@@ -155,12 +172,17 @@ data. Cascade across blocked tasks is unconditional (no
 - `pi-tasks/` task store (per-session / project) — task graph; source
   of truth for every task in flight.
 - `pi-orchestrator/src/extension.ts` — orchestrator entrypoint
-  (default export wires `installSessionHooks` + the `orchestrate` tool).
-  The orchestrator curates PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL /
-  AFT / BASELINE tool allowlists via `setActiveTools` at session_start.
-- `pi-orchestrator/src/orchestrator-tool.ts` — the `orchestrate(plan)`
-  tool: takes a multi-phase plan, materializes it as a DAG in
-  pi-tasks's shared store.
+  (default export wires `installSessionHooks` +
+  `registerOrchestratorTools`, which registers `task_inspect`,
+  `task_consume`, `task_convert_intent`). The orchestrator curates
+  PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL / PI_ROUTINES / AFT /
+  BASELINE tool allowlists via `setActiveTools` at session_start.
+- `pi-orchestrator/src/orchestrator-tool.ts` — the three LLM-facing
+  consumer tools (`task_inspect`, `task_consume`,
+  `task_convert_intent`) plus the `PHASE_AGENT_TYPE` map used by
+  `task_convert_intent` to derive `agentType` from `phase`.
+- `pi-orchestrator/src/phase-validation.ts` — runtime shape +
+  rationale + per-phase validation rules for `task_convert_intent`.
 - `pi-orchestrator/src/brainstorming/` — the `/brainstorm` slash
   command's 5-phase state machine (exploring → grilling → proposing →
   designing → approved).
@@ -195,11 +217,13 @@ recommendation mechanism is the **task-count threshold**:
 - If your active task list has **>2 items**, the recommended pattern
   is the pi-tasks workflow: `TaskCreate` × N (one per phase, with
   `agentType: "Developer"` for Implement and `agentType: "Reviewer"`
-  for Review) → `TaskExecute`. For the standard 2-phase shape, the
-  `orchestrate(plan)` tool collapses it into one call. Production
-  code edits dispatch `Developer` with managed-worktree isolation;
-  the TDD discipline, worktree isolation, and Reviewer evidence
-  trail all pay off at this scale.
+  for Review) → `TaskExecute`. For an intent-driven flow, the
+  `task_convert_intent(plan)` tool converts one intent task into N
+  plan tasks in one call (with shape-validated `intent_shape` +
+  `rationale` + `phases[]`). Production code edits dispatch
+  `Developer` with managed-worktree isolation; the TDD discipline,
+  worktree isolation, and Reviewer evidence trail all pay off at
+  this scale.
 - If your active task list has **≤2 items**, direct handling with
   `edit` / `write` / `bash` in the main session is also acceptable.
   No task graph is required.
@@ -261,8 +285,8 @@ subagent dispatch.
 
 1. **Subagent dispatch is RECOMMENDED for >2-item workflows.** When your
    active task list has more than two items, prefer the pi-tasks
-   workflow (`TaskCreate` × N + `TaskExecute`, optionally
-   `orchestrate(plan)` for the standard 2-phase shape) or dispatch
+   workflow (`TaskCreate` × N + `TaskExecute`, optionally via
+   `task_convert_intent(plan)` for the intent-driven flow) or dispatch
    `Developer` with managed-worktree isolation (for production code)
    or `isolation: "current-workspace"` + `tdd: "none"` (for meta-file
    edits). The main agent may handle ≤2 tasks directly with
