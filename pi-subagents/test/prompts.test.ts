@@ -41,7 +41,23 @@ describe("buildAgentPrompt", () => {
   });
 
   it("general-purpose uses append mode (parent twin)", () => {
-    const config = getDefaultConfig("Developer");
+    // Test the BUILD logic with an inline config (empty systemPrompt) so we
+    // verify the "empty systemPrompt ⇒ no <agent_instructions>" invariant
+    // independently of any default-agent content. The shipped Developer
+    // config now carries COMMIT_CONVENTIONS_SECTION in its systemPrompt, so
+    // it would never satisfy `not.toContain("<agent_instructions>")`.
+    const config: AgentConfig = {
+      name: "Developer",
+      description: "Developer",
+      builtinToolNames: [],
+      extensions: true,
+      skills: true,
+      systemPrompt: "",
+      promptMode: "append",
+      inheritContext: false,
+      runInBackground: false,
+      isolated: false,
+    };
     const parentPrompt = "You are a parent coding agent with full powers.";
     const prompt = buildAgentPrompt(config, "/workspace", env, parentPrompt);
     expect(prompt).toContain("parent coding agent with full powers");
