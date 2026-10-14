@@ -102,7 +102,7 @@ describe("orchestrator SKILL.md — plan quick reference", () => {
 		const md = load();
 		const respIdx = md.search(/^##\s+The LLM's responsibility$/m);
 		const tplIdx = md.search(/^##\s+Designing the plan — quick reference$/m);
-		const softIdx = md.search(/^##\s+Soft mode \(unchanged\)$/m);
+		const softIdx = md.search(/^##\s+Soft mode$/m);
 		expect(respIdx).toBeGreaterThan(-1);
 		expect(tplIdx).toBeGreaterThan(-1);
 		expect(softIdx).toBeGreaterThan(-1);

@@ -20,23 +20,23 @@ These role names (Task Board / Task Orchestrator / Task Executor) are
 descriptive shorthand; they appear in docs and conversation but not in
 the packages' own code.
 
-Post GC-2026-orchestrator-simplify + GC-2026-remove-workflow-run-prod +
-GC-2026-decompose-task-removed + **chore/remove-goal-contract** +
-**taskBoard-removed** the orchestrator owns exactly **three** LLM-facing
-tools: `task_inspect` (route by type/status), `task_consume` (read+parse
-verdict), and `task_convert_intent` (the unique intent→plan converter).
-The orchestrator is a consumer — it does not manage the task flow.
+The orchestrator owns exactly **three** LLM-facing tools:
+`task_inspect` (route by type/status), `task_consume` (read+parse verdict),
+and `task_convert_intent` (the unique intent→plan converter). It is a
+consumer of the task flow — it does not manage it.
 
 ## What the orchestrator does
 
 | Concern | Mechanism |
 |---|---|
-| **Tool allowlist at session_start** | `pi.setActiveTools([...PI_TASKS, ...SUBAGENT, ...AFT, ...BASELINE])`. None of those tools are owned by the orchestrator (they come from pi-subagents, pi-tasks, @cortexkit/aft-pi, pi-coding-agent itself); the orchestrator only curates the allowlist. |
+| **Tool allowlist at session_start** | `pi.setActiveTools([...PI_TASKS, ...SUBAGENT, ...AFT, ...BASELINE, ...PI_ROUTINES])`. None of those tools are owned by the orchestrator (they come from pi-subagents, pi-tasks, @cortexkit/aft-pi, pi-coding-agent itself, and `@davecodes/pi-routines`); the orchestrator only curates the allowlist. |
 | **Constitution overlay at before_agent_start** | Prepends `templates/SYSTEM.md` to the LLM's system prompt. The system prompt is the orchestrator's only persistent instruction surface. |
 | **Soft-mode reminder on first side-effecting call** | On the first `bash` / `edit` / `write` tool call per session, appends a reminder that recommends the pi-tasks workflow for active task lists of >2 items. Fires once per session; subsequent calls are silent. |
 | **`task_inspect(task_id)` tool** | Read type+status+agentType. The LLM's first call on every task. Routes to `task_convert_intent` (intent), `TaskExecute` (plan pending), `TaskOutput(block=true)` (plan in_progress), or `task_consume` (plan completed). Lighter than `TaskGet`. |
 | **`task_consume(task_id, include_transcript?)` tool** | Read a completed plan task in a structured way. Parses the Reviewer's 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and emits a verdict-tailored follow-up suggestion. Returns `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }`. Pure read — does not mutate the store. Intent tasks throw `not_plan` — call `task_convert_intent` first. |
 | **`task_convert_intent(task_id, plan)` tool** | The orchestrator's unique intent → plan conversion operator. Reads an intent task (`type='intent'`), marks it converted (audit: `metadata.converted / converted_at / intent_shape / rationale`), creates plan tasks with `type='plan'` and `metadata.source_intent` + `phase` + `agentType` linking each back to the intent. The plan is a STRUCTURED OBJECT (`intent_shape` + `rationale` + `phases[]`); runtime validation in [`src/phase-validation.ts`](../src/phase-validation.ts) enforces per-shape phase count + ordering rules. Phase → agentType is mapped deterministically via `PHASE_AGENT_TYPE` (review → Reviewer, all others → Developer) — the LLM never types `agentType` directly. Refuses empty `phases`, non-intent sources, already-converted intents, and plans that violate the shape rules. |
+| **Brainstorming slash command** | `/brainstorm [request]` is registered separately via `skills/brainstorming/SKILL.md`; the orchestrator's own registration machinery is limited to the session hooks + advisory handlers above. |
+| **pi-routines board-watch (default-on)** | Sages bundles a `sages-board-watch` routine template (installed to `~/.pi/agent/extensions/routines/templates/`). `install.sh` activates it by default — the routine entry is written into `state.json` atomically during install, so no manual `/routine-install` step is needed. The routine fires every 30s, inspects the board for unhandled `intent` tasks, and routes them through `task_convert_intent` + `TaskExecute`. Closes the awareness gap for out-of-turn task creation (user `/tasks create` while LLM is idle, or other sessions writing to the same board). To opt out, run `/routine-stop sages-board-watch` in any pi session; re-running `install.sh` re-creates the entry. The orchestrator's `PI_ROUTINES_TOOLS` allowlist includes the six routine_* tools so the LLM can also manage routines inline. |
 
 ## Subagent `max_turns` tiers
 
@@ -60,22 +60,6 @@ Rule of thumb: **Standard** by default. Move up to **Heavy** when the
 task description lists > 5 files to change, or when a prior Standard
 attempt aborted. Move down to **Light** only for narrowly-scoped reviews
 or single-line edits.
-| **Brainstorming slash command** | `/brainstorm [request]` is registered separately via `skills/brainstorming/SKILL.md`; the orchestrator's own registration machinery is limited to the session hooks + advisory handlers above. |
-| **pi-routines board-watch (default-on)** | Sages bundles a `sages-board-watch` routine template (installed to `~/.pi/agent/extensions/routines/templates/`). `install.sh` activates it by default — the routine entry is written into `state.json` atomically during install, so no manual `/routine-install` step is needed. The routine fires every 30s, inspects the board for unhandled `intent` tasks, and routes them through `task_convert_intent` + `TaskExecute`. Closes the awareness gap for out-of-turn task creation (user `/tasks create` while LLM is idle, or other sessions writing to the same board). To opt out, run `/routine-stop sages-board-watch` in any pi session; re-running `install.sh` re-creates the entry. The orchestrator's `PI_ROUTINES_TOOLS` allowlist includes the six routine_* tools so the LLM can also manage routines inline. |
-
-## What the orchestrator no longer does
-
-- It does **not** own `goal_contract_create`, `workflow_run`, or any other removed tool.
-  (Note: `decompose_task` was retired earlier; `orchestrate` is its
-  spiritual successor — same DAG-creation semantics, but driven by
-  a single tool call rather than an RPC event chain.)
-- It does **not** write any per-goal state file at the project root.
-  The previous `.pi/orchestrator/goal-*.yaml`,
-  `.pi/orchestrator/audit-state-*.yaml`, and `.pi/orchestrator/decompose-*.yaml`
-  files are retired (see chore/orchestrator-workdir-tmpdir + chore/remove-goal-contract).
-- It does **not** enforce any anti-patterns. The previous `goal_drift_detected`
-  rule (which required an active goal contract) is removed along with the
-  orchestrator-namespace ownership + loadGoalScope machinery.
 
 ## The LLM's responsibility
 
@@ -331,7 +315,7 @@ violated rule. The LLM MUST NOT submit them.
 - **Investigate-then-fix with no fix** — `investigate-then-fix` with no `implement` phase (the whole point is to fix something).
 - **Rationale too short / too long** — `< 10` chars or `> 500` chars (forces real justification, not "TODO" or a wall of text).
 
-## Soft mode (unchanged)
+## Soft mode
 
 > Nothing is mechanically blocked.
 > Pick the path that matches the work shape.
