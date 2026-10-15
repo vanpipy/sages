@@ -757,31 +757,3 @@ function parseAuditReport(
 // ---------------------------------------------------------------------------
 // Type-level validation helpers — kept tiny so they don't grow into a god-module.
 // ---------------------------------------------------------------------------
-
-/** Runtime guard for GoalArtifact: throws if required fields are missing. */
-export function assertGoalArtifact(value: unknown): asserts value is GoalArtifact {
-	if (!value || typeof value !== "object") {
-		throw new ArtifactReadError("not an object", "<goal>");
-	}
-	const v = value as Partial<GoalArtifact>;
-	if (typeof v.id !== "string" || v.id.length === 0) {
-		throw new ArtifactReadError("goal.id missing or empty", "<goal>");
-	}
-	if (!Array.isArray(v.success_criteria)) {
-		throw new ArtifactReadError("goal.success_criteria missing", `<goal:${v.id}>`);
-	}
-}
-
-/** Runtime guard for DagArtifact. */
-export function assertDagArtifact(value: unknown): asserts value is DagArtifact {
-	if (!value || typeof value !== "object") {
-		throw new ArtifactReadError("not an object", "<dag>");
-	}
-	const v = value as Partial<DagArtifact>;
-	if (typeof v.id !== "string" || v.id.length === 0) {
-		throw new ArtifactReadError("dag.id missing or empty", "<dag>");
-	}
-	if (!Array.isArray(v.tasks)) {
-		throw new ArtifactReadError("dag.tasks missing", `<dag:${v.id}>`);
-	}
-}

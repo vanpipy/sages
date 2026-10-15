@@ -23,14 +23,4 @@ CRITERION:
 EVIDENCE:
 {EVIDENCE}`;
 
-/** Build a Context-ready user message from a judge invocation. */
-export function buildJudgeUserMessage(input: {
-	criteria: string;
-	evidence: string;
-}): { role: "user"; content: string; timestamp: number } {
-	const prompt = JUDGE_SYSTEM_PROMPT.replace("{CRITERIA}", input.criteria).replace(
-		"{EVIDENCE}",
-		input.evidence,
-	);
-	return { role: "user", content: prompt, timestamp: Date.now() };
-}
+

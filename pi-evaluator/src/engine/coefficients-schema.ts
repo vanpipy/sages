@@ -77,7 +77,6 @@ export const DimensionConfigSchema = Type.Object({
 
 /** The five canonical dimensions. Listed explicitly so missing entries fail TypeBox. */
 export const DIMENSIONS = ["goal", "dag", "implement", "audit", "coordination"] as const;
-export type DimensionName = (typeof DIMENSIONS)[number];
 
 /**
  * Strict dimension_weights shape: every dimension must be present and
@@ -145,4 +144,3 @@ export type CoefficientsConfig = Static<typeof CoefficientsConfigSchema> & {
 };
 export type SignalConfig = Static<typeof SignalConfigSchema>;
 export type DimensionConfig = Static<typeof DimensionConfigSchema>;
-export type GlobalConfig = Static<typeof GlobalConfigSchema>;
