@@ -46,6 +46,7 @@ import { parseVerdict, suggestFollowUp, type Verdict } from "./verdict.js";
 import {
 	PhaseValidationError,
 	type Phase,
+	validateCumulativePhases,
 	validatePlanShape,
 	validateRationale,
 } from "./phase-validation.js";
@@ -366,6 +367,9 @@ export class ConvertIntentError extends Error {
 			| "intent_not_found"
 			| "not_intent"
 			| "already_converted"
+			| "already_planned"
+			| "not_planned"
+			| "already_closed"
 			| "shape_violation"
 			| "empty_phases",
 		message: string,
@@ -486,6 +490,423 @@ export async function taskConvertIntent(
 	return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], details: data };
 }
 
+// ─── Iterative intent → plan flow ───────────────────────────────────
+//
+// SCHEMA-DRIVEN, INCREMENTAL METHODOLOGY:
+//   The standard `task_convert_intent` is one-shot (intent → N plan
+//   tasks in a single store.write). That's fine for clear intents, but
+//   it locks the LLM into a `standard` (2-phase) minimum because the
+//   phase list is committed up-front. For complex goals that need 3+
+//   plan tasks — and for any goal where the implement phase discovers
+//   more work mid-flight — the LLM needs an iterative primitive.
+//
+//   Three additive tools enable the todowrite-first flow:
+//
+//     1. `task_plan_intent(intent_id, intent_shape, rationale)` —
+//        declare shape + rationale on the intent. Stamps
+//        `metadata.planning = { shape, rationale, phases_added: 0,
+//        plan_task_ids: [] }`. The intent stays `pending` (no plan
+//        tasks created). The LLM populates its own todowrite BEFORE
+//        calling this so it has committed to a shape.
+//
+//     2. `task_add_phase(intent_id, phase, subject, description,
+//        activeForm?, metadata?)` — materialize ONE plan task per
+//        call. Validates the running cumulative list against the
+//        declared shape (catches immediately-wrong adds at the
+//        boundary). Stamps `metadata.source_intent / phase / agentType
+//        / cumulative_phase_count` on the new plan task. Appends to
+//        `planning.plan_task_ids`, increments `planning.phases_added`.
+//
+//     3. `task_close_intent(intent_id)` — terminal audit stamp.
+//        Synthesizes a PlanShape from the accumulated phases + the
+//        original rationale and runs `validatePlanShape` to catch
+//        final-state issues (last-phase mismatch, min-count, etc.).
+//        Flips status to `completed`, stamps `converted /
+//        converted_at / plan_task_ids`. Once closed, the intent is
+//        terminal — no more adds, no re-close.
+//
+//   The 3 new tools are ADDITIVE: `task_convert_intent` keeps its
+//   atomic semantics. The two paths produce the same end state; the
+//   iterative path just lets the LLM commit to the plan incrementally.
+
+// ─── `task_plan_intent` — declare shape + rationale on the intent ─────
+
+export const PlanIntentParams = Type.Object({
+	task_id: Type.String({
+		description:
+			"The ID of the intent task to plan. Must have type='intent' and not yet be planned (each intent plans once).",
+	}),
+	plan: Type.Object({
+		intent_shape: Type.Union([
+			Type.Literal("trivial"),
+			Type.Literal("small"),
+			Type.Literal("standard"),
+			Type.Literal("investigate-then-fix"),
+			Type.Literal("multi-phase"),
+			Type.Literal("multi-track"),
+		], {
+			description:
+				"MUST classify the intent first — same shape catalog as task_convert_intent. " +
+				"Drives the per-add cumulative validation. Re-classify requires a fresh intent.",
+		}),
+		rationale: Type.String({
+			description:
+				"MUST justify the chosen shape in one sentence (10–500 chars). " +
+				"Same rationale contract as task_convert_intent.",
+			minLength: 10,
+			maxLength: 500,
+		}),
+	}, {
+		description:
+			"Structured plan object: intent_shape + rationale. " +
+			"Runtime validation enforces rationale length (10–500 chars).",
+	}),
+});
+export type PlanIntentInput = Static<typeof PlanIntentParams>;
+
+export interface PlanIntentOutput {
+	intent_task_id: string;
+	intent_shape: string;
+	rationale: string;
+	phases_added: number;
+	plan_task_ids: string[];
+	planned_at: number;
+}
+
+export async function taskPlanIntent(
+	toolCallId: string,
+	params: PlanIntentInput,
+	_signal: AbortSignal | undefined,
+	_onUpdate: AgentToolUpdateCallback<PlanIntentOutput | undefined> | undefined,
+	ctx: { cwd: string },
+): Promise<AgentToolResult<PlanIntentOutput | undefined>> {
+	const store = new TaskStore(orchestratorProjectTaskFile(ctx.cwd));
+	const intent = store.get(params.task_id);
+	if (!intent) {
+		throw new ConvertIntentError(
+			"intent_not_found",
+			`No intent task with ID #${params.task_id}.`,
+		);
+	}
+	if (intent.type !== "intent") {
+		throw new ConvertIntentError(
+			"not_intent",
+			`Task #${intent.id} is not an intent task (type=${intent.type}).`,
+		);
+	}
+	if (intent.metadata?.planning) {
+		throw new ConvertIntentError(
+			"already_planned",
+			`Intent task #${intent.id} was already planned at ${intent.metadata.planning.planned_at}. ` +
+				`Re-classify to a different shape requires a fresh intent task.`,
+		);
+	}
+
+	// Validate rationale length (10–500 chars).
+	try {
+		validateRationale({
+			intent_shape: params.plan.intent_shape,
+			rationale: params.plan.rationale,
+			phases: [],
+		});
+	} catch (err) {
+		if (err instanceof PhaseValidationError) {
+			throw new ConvertIntentError("shape_violation", err.message);
+		}
+		throw err;
+	}
+
+	const plannedAt = Date.now();
+	// Stamp the planning state on the intent. status stays `pending` —
+	// the close step is the only one that flips status.
+	store.update(intent.id, {
+		metadata: {
+			planning: {
+				shape: params.plan.intent_shape,
+				rationale: params.plan.rationale,
+				phases_added: 0,
+				plan_task_ids: [],
+				planned_at: plannedAt,
+				planned_by: "task_plan_intent",
+			},
+		},
+	});
+
+	const data: PlanIntentOutput = {
+		intent_task_id: intent.id,
+		intent_shape: params.plan.intent_shape,
+		rationale: params.plan.rationale,
+		phases_added: 0,
+		plan_task_ids: [],
+		planned_at: plannedAt,
+	};
+	return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], details: data };
+}
+
+// ─── `task_add_phase` — materialize one plan task per call ────────────
+
+export const AddPhaseParams = Type.Object({
+	intent_id: Type.String({
+		description:
+			"The ID of the intent task to add a phase to. Must be planned (task_plan_intent) and not yet closed (task_close_intent).",
+	}),
+	phase: Type.Object({
+		phase: Type.Union([
+			Type.Literal("investigate"),
+			Type.Literal("design"),
+			Type.Literal("implement"),
+			Type.Literal("test"),
+			Type.Literal("review"),
+		], {
+			description:
+				"Phase for this spec. Maps deterministically to agentType via PHASE_AGENT_TYPE.",
+		}),
+		subject: Type.String({
+			description: "Imperative, 1–80 chars. 'Implement /login endpoint'.",
+			minLength: 1,
+			maxLength: 80,
+		}),
+		description: Type.String({
+			description:
+				"MUST cover What / Where / Acceptance / Evidence. Minimum 20 chars forces real acceptance criteria.",
+			minLength: 20,
+		}),
+		activeForm: Type.Optional(Type.String({
+			description: "Present continuous form for the widget spinner. Optional.",
+		})),
+		metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), {
+			description:
+				"Per-phase metadata. agentType / phase / source_intent / cumulative_phase_count are auto-stamped — do not duplicate them.",
+		})),
+	}, {
+		description:
+			"Phase spec: phase + subject + description (+ optional activeForm / metadata). " +
+			"One spec per call. Multiple calls against the same intent accumulate phases in `metadata.planning.plan_task_ids`.",
+	}),
+});
+export type AddPhaseInput = Static<typeof AddPhaseParams>;
+
+export interface AddPhaseOutput {
+	plan_task_id: string;
+	intent_task_id: string;
+	cumulative_phase_count: number;
+}
+
+export async function taskAddPhase(
+	toolCallId: string,
+	params: AddPhaseInput,
+	_signal: AbortSignal | undefined,
+	_onUpdate: AgentToolUpdateCallback<AddPhaseOutput | undefined> | undefined,
+	ctx: { cwd: string },
+): Promise<AgentToolResult<AddPhaseOutput | undefined>> {
+	const store = new TaskStore(orchestratorProjectTaskFile(ctx.cwd));
+	const intent = store.get(params.intent_id);
+	if (!intent) {
+		throw new ConvertIntentError(
+			"intent_not_found",
+			`No intent task with ID #${params.intent_id}.`,
+		);
+	}
+	if (intent.type !== "intent") {
+		throw new ConvertIntentError(
+			"not_intent",
+			`Task #${intent.id} is not an intent task (type=${intent.type}).`,
+		);
+	}
+	if (!intent.metadata?.planning) {
+		throw new ConvertIntentError(
+			"not_planned",
+			`Intent task #${intent.id} is not yet planned; call task_plan_intent(intent_id) first.`,
+		);
+	}
+	if (intent.metadata?.converted || intent.status === "completed") {
+		throw new ConvertIntentError(
+			"already_closed",
+			`Intent task #${intent.id} is already closed; add a new intent for additional phases.`,
+		);
+	}
+
+	const planning = intent.metadata.planning as {
+		shape: string;
+		rationale: string;
+		phases_added: number;
+		plan_task_ids: string[];
+		phases?: Phase[];
+	};
+	// Track the running phase list directly on the intent (parallel to
+	// plan_task_ids). Falls back to reconstructing from plan tasks if
+	// the field is missing (back-compat for intents planned before this
+	// field was added).
+	const runningPhases: Phase[] = planning.phases
+		?? planning.plan_task_ids.map((id) => {
+				const t = store.get(id);
+				return t?.metadata?.phase as Phase;
+			}).filter((p): p is Phase => typeof p === "string");
+
+	// Per-add cumulative validation against `[...runningPhases, new]`.
+	// Catches immediately-wrong adds (cap-busting, wrong first phase,
+	// trivial-with-review, etc.) BEFORE the plan task is materialized.
+	const nextPhases = [...runningPhases, params.phase.phase] as Phase[];
+	try {
+		validateCumulativePhases(
+			planning.shape as Parameters<typeof validateCumulativePhases>[0],
+			nextPhases,
+		);
+	} catch (err) {
+		if (err instanceof PhaseValidationError) {
+			throw new ConvertIntentError("shape_violation", err.message);
+		}
+		throw err;
+	}
+
+	const agentType = PHASE_AGENT_TYPE[params.phase.phase];
+	const newCount = planning.phases_added + 1;
+	const planMeta: Record<string, unknown> = {
+		...(params.phase.metadata ?? {}),
+		agentType,
+		phase: params.phase.phase,
+		source_intent: intent.id,
+		cumulative_phase_count: newCount,
+	};
+	const planTask = store.create(
+		params.phase.subject,
+		params.phase.description,
+		params.phase.activeForm,
+		planMeta,
+		"plan",
+	);
+
+	// Update the intent's running state: append the new phase, the new
+	// plan task id, and increment the counter. status stays `pending`
+	// until task_close_intent runs.
+	const newPlanning = {
+		...planning,
+		phases_added: newCount,
+		plan_task_ids: [...planning.plan_task_ids, planTask.id],
+		phases: nextPhases,
+	};
+	store.update(intent.id, {
+		metadata: { planning: newPlanning },
+	});
+
+	const data: AddPhaseOutput = {
+		plan_task_id: planTask.id,
+		intent_task_id: intent.id,
+		cumulative_phase_count: newCount,
+	};
+	return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], details: data };
+}
+
+// ─── `task_close_intent` — terminal audit stamp ──────────────────────
+
+export const CloseIntentParams = Type.Object({
+	intent_id: Type.String({
+		description:
+			"The ID of the intent task to close. Must be planned (task_plan_intent) and not yet closed. " +
+			"Once closed, the intent is terminal.",
+	}),
+});
+export type CloseIntentInput = Static<typeof CloseIntentParams>;
+
+export interface CloseIntentOutput {
+	intent_task_id: string;
+	plan_task_ids: string[];
+	closed_at: number;
+}
+
+export async function taskCloseIntent(
+	toolCallId: string,
+	params: CloseIntentInput,
+	_signal: AbortSignal | undefined,
+	_onUpdate: AgentToolUpdateCallback<CloseIntentOutput | undefined> | undefined,
+	ctx: { cwd: string },
+): Promise<AgentToolResult<CloseIntentOutput | undefined>> {
+	const store = new TaskStore(orchestratorProjectTaskFile(ctx.cwd));
+	const intent = store.get(params.intent_id);
+	if (!intent) {
+		throw new ConvertIntentError(
+			"intent_not_found",
+			`No intent task with ID #${params.intent_id}.`,
+		);
+	}
+	if (intent.type !== "intent") {
+		throw new ConvertIntentError(
+			"not_intent",
+			`Task #${intent.id} is not an intent task (type=${intent.type}).`,
+		);
+	}
+	if (!intent.metadata?.planning) {
+		throw new ConvertIntentError(
+			"not_planned",
+			`Intent task #${intent.id} is not yet planned; call task_plan_intent(intent_id) before close.`,
+		);
+	}
+	if (intent.metadata?.converted || intent.status === "completed") {
+		throw new ConvertIntentError(
+			"already_closed",
+			`Intent task #${intent.id} is already closed.`,
+		);
+	}
+
+	const planning = intent.metadata.planning as {
+		shape: string;
+		rationale: string;
+		phases_added: number;
+		plan_task_ids: string[];
+		phases?: Phase[];
+	};
+	// Track the running phase list directly on the intent (parallel to
+	// plan_task_ids). Falls back to reconstructing from plan tasks if
+	// the field is missing (back-compat for intents planned before this
+	// field was added).
+	const accumulatedPhases: Phase[] = planning.phases
+		?? planning.plan_task_ids.map((id) => {
+				const t = store.get(id);
+				return t?.metadata?.phase as Phase;
+			}).filter((p): p is Phase => typeof p === "string");
+
+	// Final-state check: synthesize a PlanShape and run validatePlanShape
+	// to catch last-phase mismatch, min-count, ≥ 1 implement for
+	// investigate-then-fix, etc. The cumulative validator only catches
+	// immediately-wrong adds; this catches incomplete final states.
+	// `subject` / `description` are required by the type but unused by
+	// the validator (it only inspects `.phase`) — synthesize placeholders.
+	try {
+		validatePlanShape({
+			intent_shape: planning.shape as Parameters<typeof validatePlanShape>[0]["intent_shape"],
+			rationale: planning.rationale,
+			phases: accumulatedPhases.map((p) => ({
+				phase: p,
+				subject: "_",
+				description: "_",
+			})),
+		});
+	} catch (err) {
+		if (err instanceof PhaseValidationError) {
+			throw new ConvertIntentError("shape_violation", err.message);
+		}
+		throw err;
+	}
+
+	const closedAt = Date.now();
+	store.update(intent.id, {
+		status: "completed",
+		metadata: {
+			converted: true,
+			converted_at: closedAt,
+			converted_by: "task_close_intent",
+			plan_task_ids: planning.plan_task_ids,
+		},
+	});
+
+	const data: CloseIntentOutput = {
+		intent_task_id: intent.id,
+		plan_task_ids: planning.plan_task_ids,
+		closed_at: closedAt,
+	};
+	return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], details: data };
+}
+
 // ─── Registration ────────────────────────────────────────────────────────
 
 /**
@@ -534,7 +955,7 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 		name: "task_convert_intent",
 		label: "task_convert_intent",
 		description:
-			"The orchestrator's unique intent → plan converter. Reads an intent " +
+			"The orchestrator's atomic intent → plan converter. Reads an intent " +
 			"task (type='intent'), marks it converted (audit: metadata.converted / " +
 			"converted_at + intent_shape + rationale), and creates plan tasks from " +
 			"a STRUCTURED plan object (intent_shape + rationale + phases[]). The " +
@@ -545,9 +966,55 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 			"Phase → agentType is mapped deterministically via PHASE_AGENT_TYPE " +
 			"(review → Reviewer, all others → Developer). Refuses non-intent " +
 			"sources, already-converted intents, and plans that violate the " +
-			"shape rules. Use this for every intent task you see — until an " +
-			"intent is on the board, task_consume and TaskExecute won't pick it up.",
+			"shape rules. For complex goals (multi-phase / multi-track / " +
+			"investigate-then-fix) prefer the iterative flow: task_plan_intent + " +
+			"task_add_phase × N + task_close_intent, which lets you commit the " +
+			"plan one phase at a time and inflate the phase count for goals that " +
+			"need more than 2 plan tasks.",
 		parameters: ConvertIntentParams,
 		execute: taskConvertIntent,
+	});
+	pi.registerTool({
+		name: "task_plan_intent",
+		label: "task_plan_intent",
+		description:
+			"Todowrite-first intent flow, step 1: declare shape + rationale on the " +
+			"intent. Stamps `metadata.planning = { shape, rationale, phases_added, " +
+			"plan_task_ids, planned_at, planned_by }` on the intent. The intent " +
+			"stays `pending` (no plan tasks created yet). Re-classification requires " +
+			"a fresh intent. Use this BEFORE task_add_phase so the intent's " +
+			"declared shape drives per-add cumulative validation.",
+		parameters: PlanIntentParams,
+		execute: taskPlanIntent,
+	});
+	pi.registerTool({
+		name: "task_add_phase",
+		label: "task_add_phase",
+		description:
+			"Todowrite-first intent flow, step 2: materialize ONE plan task per " +
+			"call against a planned intent. Validates the running cumulative " +
+			"phase list against the declared shape (catches cap-busting, wrong " +
+			"first phase, trivial-with-review, multiple reviews at the boundary). " +
+			"Stamps `metadata.source_intent / phase / agentType / " +
+			"cumulative_phase_count` on the new plan task. Appends to the intent's " +
+			"`planning.plan_task_ids` and increments `planning.phases_added`. " +
+			"Call once per todowrite item. The intent stays `pending` until " +
+			"task_close_intent runs.",
+		parameters: AddPhaseParams,
+		execute: taskAddPhase,
+	});
+	pi.registerTool({
+		name: "task_close_intent",
+		label: "task_close_intent",
+		description:
+			"Todowrite-first intent flow, step 3 (terminal): flip the intent to " +
+			"`completed` and stamp the final audit metadata (`converted`, " +
+			"`converted_at`, `converted_by`, `plan_task_ids`). Synthesizes a " +
+			"PlanShape from the accumulated phases + the original rationale and " +
+			"runs validatePlanShape to catch final-state issues (last-phase " +
+			"mismatch, min-count, ≥ 1 implement for investigate-then-fix, etc.). " +
+			"Once closed, the intent is terminal — no more adds, no re-close.",
+		parameters: CloseIntentParams,
+		execute: taskCloseIntent,
 	});
 }

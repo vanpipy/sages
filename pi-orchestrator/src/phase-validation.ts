@@ -114,6 +114,115 @@ export function validateRationale(plan: PlanShape): void {
 }
 
 /**
+ * Validate the running list of phases against a DECLARED intent_shape.
+ * Used by `task_add_phase` for per-add checks (catches immediately-wrong
+ * adds at the boundary, before a plan task is materialized).
+ *
+ * This is more permissive than `validatePlanShape` — it only catches
+ * adds that are wrong RIGHT NOW. Incomplete states (e.g. a `standard`
+ * intent with 1 implement phase) are accepted; the close-time
+ * validator (`validatePlanShape` on the accumulated list) catches the
+ * final-state issues (last-phase mismatch, min-count, etc.).
+ *
+ * Per-shape rules enforced here:
+ *   - empty: rejected (caller must add at least one phase).
+ *   - cap: phases.length > max → `phase_count_out_of_bounds`.
+ *   - first phase: must match `EXPECTED_FIRST_PHASE[shape]`
+ *     (skipped for shapes with no first-phase requirement).
+ *   - trivial: must not include a `review` phase.
+ *   - at most one `review` phase across the running list.
+ *   - multi-track: at length ≥ 2, ALL phases must be `implement`
+ *     (defer the Reviewer to a second intent).
+ *
+ * Caller wraps in ConvertIntentError("shape_violation", err.message).
+ */
+export function validateCumulativePhases(
+	shape: IntentShape,
+	accumulated: ReadonlyArray<Phase>,
+): void {
+	if (accumulated.length === 0) {
+		throw new PhaseValidationError(
+			"empty_phases",
+			`Cumulative phase list is empty; the running list must contain at least one phase.`,
+		);
+	}
+
+	const { min, max } = EXPECTED_PHASE_COUNT[shape];
+	if (accumulated.length > max) {
+		throw new PhaseValidationError(
+			"phase_count_out_of_bounds",
+			`Intent shape '${shape}' allows ≤ ${max} phases; got ${accumulated.length}. ` +
+				`Close the intent or reclassify to a shape with a higher cap.`,
+		);
+	}
+
+	// Trivial MUST NOT include a review phase. Check BEFORE the
+	// first-phase rule so the LLM sees the most actionable error.
+	if (shape === "trivial" && accumulated.includes("review")) {
+		throw new PhaseValidationError(
+			"trivial_shape_has_review",
+			`Intent shape 'trivial' MUST NOT include a review phase; trivial edits skip the Reviewer. ` +
+				`Re-classify as 'small' / 'standard' if a Reviewer is needed.`,
+		);
+	}
+
+	// At most one review phase across the running list.
+	const reviewCount = accumulated.filter((p) => p === "review").length;
+	if (reviewCount > 1) {
+		throw new PhaseValidationError(
+			"multiple_review_phases",
+			`Cumulative list contains multiple review phases (${reviewCount}); at most one review phase is allowed per intent. ` +
+				`For multi-track Reviewers, convert a SECOND intent for the join.`,
+		);
+	}
+
+	// First phase matches the shape's expected entry point.
+	const expectedFirst = EXPECTED_FIRST_PHASE[shape];
+	if (expectedFirst !== "none" && accumulated[0] !== expectedFirst) {
+		throw new PhaseValidationError(
+			"first_phase_mismatch",
+			`Intent shape '${shape}' requires first phase '${expectedFirst}'; got '${accumulated[0]}'.`,
+		);
+	}
+
+	// Last phase check: when the running list reaches the shape's
+	// MAX count, the plan is "complete" (no more adds allowed) and the
+	// last phase must match the shape's expected exit. Catches
+	// "completed a plan wrong" at the moment of completion.
+	//   - For min==max shapes (trivial / small / standard) this fires
+	//     as soon as the list is at the cap — equivalent to "complete".
+	//   - For min<max shapes (investigate-then-fix / multi-phase) this
+	//     fires only at the cap; below the cap the user may still add
+	//     more phases, so last-phase is not yet determined.
+	//   - multi-track has no last-phase requirement (Reviewer is
+	//     deferred to a second intent).
+	const expectedLast = EXPECTED_LAST_PHASE[shape];
+	if (expectedLast !== "none" && accumulated.length === max) {
+		const last = accumulated[accumulated.length - 1];
+		if (last !== expectedLast) {
+			throw new PhaseValidationError(
+				"last_phase_mismatch",
+				`Intent shape '${shape}' requires last phase '${expectedLast}'; got '${last}'.`,
+			);
+		}
+	}
+
+	// Multi-track: at length ≥ 2, every phase must be `implement`.
+	// (Single-implement is allowed by the cumulative validator; the
+	// close-time check rejects it as not parallel.)
+	if (shape === "multi-track" && accumulated.length >= 2) {
+		const allImplement = accumulated.every((p) => p === "implement");
+		if (!allImplement) {
+			throw new PhaseValidationError(
+				"multi_track_too_few_implements",
+				`Intent shape 'multi-track' requires ALL phases to be 'implement' (parallel tracks); ` +
+					`got [${accumulated.join(", ")}].`,
+			);
+		}
+	}
+}
+
+/**
  * Validate that a structured plan obeys its declared intent_shape's
  * phase count + ordering rules. Throws PhaseValidationError with a
  * clear `rule` + `message` on violation.

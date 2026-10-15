@@ -100,18 +100,22 @@ describe("GC-2026-073 smoke: orchestrator extension.ts default export", () => {
 		expect(typeof ext.default).toBe("function");
 		ext.default(pi as any);
 		const toolNames = [...pi.tools.keys()].sort();
-		// The orchestrator owns three LLM-facing tools:
-		//   - task_inspect(task_id) — read type + status + agentType (LLM's
-		//     first call on every task; the LLM invokes this to inspect)
-		//   - task_consume(task_id) — read + parse verdict (consumption side)
-		//   - task_convert_intent(task_id, plan) — the unique
-		//     intent→plan converter (write side, one-time action)
+		// The orchestrator owns six LLM-facing tools (post-GC-2026-iterative-intent-plan):
+		//   - task_inspect(task_id) — read type + status + agentType
+		//   - task_consume(task_id) — read + parse verdict
+		//   - task_convert_intent(task_id, plan) — atomic one-shot converter
+		//   - task_plan_intent(task_id, plan) — todowrite-first step 1
+		//   - task_add_phase(intent_id, phase) — todowrite-first step 2
+		//   - task_close_intent(intent_id) — todowrite-first step 3 (terminal)
 		// The orchestrator does NOT have orchestrate or task_create — it
 		// consumes and adds tasks via pi-tasks's existing 7 tools directly.
 		expect(toolNames).toEqual([
+			"task_add_phase",
+			"task_close_intent",
 			"task_consume",
 			"task_convert_intent",
 			"task_inspect",
+			"task_plan_intent",
 		]);
 	});
 
