@@ -146,8 +146,9 @@ Top 10, ordered by importance:
    across the codebase.
 
 8. **Brainstorming slash command pipeline** —
-   `pi-orchestrator/src/brainstorming/index.ts`. The exported surface
-   from `pi-orchestrator/src/index.ts`. Top entries:
+   `pi-orchestrator/src/brainstorming/index.ts`. Re-exported through
+   `pi-orchestrator/src/index.ts:13-31`; defined in
+   `pi-orchestrator/src/brainstorming/index.ts`. Top entries:
    - `startBrainstorm(cwd, request?)` (`:425`): discover project
      context, emit the initial "exploring" message.
    - `processClarifyingPhase` (`:446`): build the 4 clarifying

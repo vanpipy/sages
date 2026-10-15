@@ -255,15 +255,15 @@ Supporting modules worth knowing about:
 
 From `pi-subagents/package.json`:
 
-- **peerDependencies** (`:18–22`):
+- **peerDependencies** (`:15–20`):
   `@earendil-works/pi-ai >=1.1.0`,
   `@earendil-works/pi-coding-agent >=1.1.0`,
   `@earendil-works/pi-tui >=1.1.0`,
   `typebox *`.
-- **dependencies** (`:24–27`):
+- **dependencies** (`:21–24`):
   `croner ^10.0.1` (cron parsing for the scheduler),
   `nanoid ^5.1.16` (id generation for records + transient handles).
-- **devDependencies** (`:29–42`):
+- **devDependencies** (`:39–50`):
   `@biomejs/biome ^2.4.14`, `@earendil-works/pi-ai 1.1.0`,
   `@earendil-works/pi-coding-agent 1.1.0`,
   `@earendil-works/pi-tui 1.1.0`,

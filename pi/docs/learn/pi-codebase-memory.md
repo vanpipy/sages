@@ -104,14 +104,14 @@ are file-private.
 
 From `pi-codebase-memory/package.json`:
 
-- **peerDependencies** (`:36–40`):
+- **peerDependencies** (`:44–48`):
   `@earendil-works/pi-coding-agent *`,
   `@earendil-works/pi-ai *`,
   `@earendil-works/pi-tui *`.
 - **dependencies**: `none`. The package is intentionally dependency-
   free at runtime — only `node:fs`, `node:os`, `node:path`,
   `node:child_process` from the standard library.
-- **devDependencies** (`:42–45`):
+- **devDependencies** (`:50–53`):
   `@types/node ^20.10.0`, `typescript ^6.0.3`.
 
 The `mcp` proxy tool is supplied by the peer extension
@@ -178,6 +178,13 @@ Per `README.md:81–86` and the `templates/mcp.json`:
 
 Graph queries are read-only except for `index_*` / `manage_adr`,
 which write to `.pi-codebase.json` only.
+
+## Discrepancy watch
+
+- Source header at `src/index.ts:6` claims "all 15 tools" — the
+  actual curated set in `templates/mcp.json#directTools` is 14
+  entries; this doc's "Promote 14 MCP tools" claim and the README's
+  "First-class tools (14)" table match. The source comment is stale.
 
 ## Verification
 

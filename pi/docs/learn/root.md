@@ -113,7 +113,7 @@ The most important LLM-facing doc in the repo. Sections:
 - **Red lines** (`AGENTS.md:284–318`): 9 hard "never" rules — no
   `isolation: "worktree"`, no `--no-verify`, no unregistered subagent
   type, no self-declared workflow `PASS`, etc.
-- **Deep references** (`AGENTS.md:319–323`): pointers to the
+- **Deep references** (`AGENTS.md:319–324`): pointers to the
   orchestrator skill, agent-tool description, brainstorming skill,
   and system prompt.
 
