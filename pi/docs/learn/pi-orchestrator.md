@@ -18,19 +18,24 @@ The orchestrator is the LLM's session shell. It does three things:
 3. **Fire the once-per-session soft-mode reminder** on the first side-
    effecting tool call (`extension.ts:209`).
 
-On top of that shell, it registers three LLM-facing consumer tools
-(`task_inspect`, `task_consume`, `task_convert_intent`) that the
-orchestrator's LLM uses to read and shape the board, and ships a
-`/brainstorm` slash command whose 5-phase state machine drives
-design-doc generation.
+On top of that shell, it registers six LLM-facing consumer tools
+(post `GC-2026-iterative-intent-plan`): two read-side
+(`task_inspect`, `task_consume`) and four intent→plan conversion
+tools (atomic `task_convert_intent` plus the iterative
+todowrite-first primitives `task_plan_intent` + `task_add_phase` +
+`task_close_intent`). The orchestrator's LLM uses these to read and
+shape the board. Also shipped: a `/brainstorm` slash command whose
+5-phase state machine drives design-doc generation.
 
 The orchestrator is a **consumer** of the task flow, not its manager.
 Per the file header at `orchestrator-tool.ts:1–39`, it adds tasks via
 pi-tasks's `TaskCreate` (with `type` set to `"intent"` or `"plan"`),
 reads via `TaskList` / `TaskGet`, dispatches via `TaskExecute`. Its
-three tools add: routing hints on the read side (`task_inspect`),
-verdict parsing on the read side (`task_consume`), and intent → plan
-conversion on the write side (`task_convert_intent`).
+six tools add: routing hints on the read side (`task_inspect`),
+verdict parsing on the read side (`task_consume`), atomic
+intent → plan conversion on the write side (`task_convert_intent`),
+and the iterative todowrite-first flow (`task_plan_intent` →
+`task_add_phase` × N → `task_close_intent`).
 
 ## Entry points
 
@@ -235,7 +240,9 @@ LLM flow when it sees an unhandled task:
 
 1. `task_inspect(task_id)` → `{ id, type, status, agentType, hasResult }`.
 2. LLM branches on `type`:
-   - `intent` → `task_convert_intent(task_id, plan)` (`:384`).
+   - `intent` + `pending` (no `metadata.planning`) → `task_plan_intent(task_id, plan)` (iterative step 1) or `task_convert_intent(task_id, plan)` (atomic one-shot, `:384`).
+   - `intent` + `pending` (has `metadata.planning`) → `task_add_phase(intent_id, phase)` (iterative step 2) or `task_close_intent(intent_id)` (iterative step 3, terminal).
+   - `intent` + `completed` (has `metadata.converted`) → terminal; no further action.
    - `plan` + `pending` → `TaskExecute([task_id])` (in pi-tasks).
    - `plan` + `in_progress` → `TaskOutput(task_id, block=true)`.
    - `plan` + `completed` → `task_consume(task_id)`.
@@ -290,15 +297,14 @@ materializes it into plan tasks via raw `TaskCreate × N + TaskExecute`.
 
 ## Discrepancy watch
 
-- `templates/SYSTEM.md:32-218` and `templates/SYSTEM.md:274` describe an
-  `orchestrate(plan)` convenience tool. The current code does NOT
-  register that tool — it has been replaced by the three-tool surface
-  (`task_inspect` / `task_consume` / `task_convert_intent`)
-  implemented in `orchestrator-tool.ts`. `AGENTS.md` was updated to
-  drop the `orchestrate` reference, but `templates/SYSTEM.md` (loaded
-  on every `before_agent_start` at `extension.ts:194`) still ships the
-  old text. Treat any `orchestrate(plan)` mention in the template as
-  historical text that points at `task_convert_intent` semantically.
+- The root-level `system prompt` in `templates/SYSTEM.md` was updated in
+  this commit to reflect the six-tool surface (post
+  `GC-2026-iterative-intent-plan`). The Identity section's "one LLM-facing
+  tool" claim was historically about an `orchestrate(plan)` convenience
+  tool that was retired; the current surface is
+  `task_inspect` / `task_consume` / `task_convert_intent` (atomic) /
+  `task_plan_intent` (iterative step 1) / `task_add_phase` (iterative
+  step 2) / `task_close_intent` (iterative step 3).
 - The `SUBAGENT_CONTROL_TOOLS` constant names 4 tools
   (`subagent_status` / `subagent_steer` / `subagent_abort` /
   `subagent_resume`) documented in `templates/SYSTEM.md`, but no
@@ -310,6 +316,15 @@ materializes it into plan tasks via raw `TaskCreate × N + TaskExecute`.
   `steer_subagent`). Treat those
   four names as docs-only placeholders — they are referenced in the
   install scripts and templates, not in any registered handler.
+- Documentation drift: project `AGENTS.md` documents an isolation
+  object form `{ goal_id, task_id, mode }` for the Agent tool, but the
+  actual runtime type in `pi-subagents/src/types.ts:28` is
+  `IsolationMode = "worktree" | "off"`. The object form never existed
+  in the runtime; production work that needs isolation should use
+  `isolation: "worktree"` (the actual enum). The `TaskExecute` path in
+  `pi-tasks/src/index.ts:326-330` does NOT propagate `metadata.isolation`
+  through to the spawn options; for managed-worktree dispatch, use the
+  `Agent` tool directly.
 
 ## Verification
 

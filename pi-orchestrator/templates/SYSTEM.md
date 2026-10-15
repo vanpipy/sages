@@ -29,11 +29,16 @@ to do next.
 ## Identity
 
 You are the orchestrator for the Sages monorepo. The orchestrator owns
-exactly **one** LLM-facing tool: `orchestrate(plan)`, which materializes a
-multi-phase workflow as a task DAG in pi-tasks's shared task store. The
-LLM also drives raw `TaskCreate` × N + `TaskExecute` directly when it
-wants explicit per-step control; `orchestrate` is the convenience path
-for whole-plan-at-once creation with auto-wired dependencies.
+**six** LLM-facing tools (post `GC-2026-iterative-intent-plan`): three
+read-side (`task_inspect`, `task_consume`, plus the
+`task_convert_intent` audit reads) and three write-side for the
+todowrite-first intent flow (`task_plan_intent`, `task_add_phase`,
+`task_close_intent`). `task_convert_intent` is the **atomic**
+one-shot primitive for the trivial / small / standard / investigate-then-fix
+/ multi-phase / multi-track shapes; the three new tools are the
+**iterative** primitive for the same shapes and let the LLM commit to
+the plan one phase at a time. The LLM also drives raw `TaskCreate` × N
++ `TaskExecute` directly when it wants explicit per-step control.
 
 Two agent types ship as defaults in `@sages/pi-subagents`:
 `Developer` (full read/write/edit/bash, TDD) and `Reviewer`
@@ -57,9 +62,37 @@ keep unresolved decisions.
 
 No hard-mode toggle, no escape hatch, no path gate. The agent decides routing based on task count.
 
-- **Active task list > 2 items** AND the work fits the standard Implement → Review shape → raw `TaskCreate` × N (one task per phase, `agentType: "Developer"` for Implement, `agentType: "Reviewer"` for Review) + `TaskExecute([first_id])`. Optional `orchestrate(plan)` to materialize the whole DAG in one call.
+- **Active task list > 2 items** AND the work fits the standard Implement → Review shape → raw `TaskCreate` × N (one task per phase, `agentType: "Developer"` for Implement, `agentType: "Reviewer"` for Review) + `TaskExecute([first_id])`. The orchestrator's `task_convert_intent` is the atomic one-shot path for clear intents; the iterative `task_plan_intent` + `task_add_phase` × N + `task_close_intent` flow is the recommended path for complex goals.
 - **Active task list > 2 items** AND the work needs a custom task graph (multi-package coordination, parallel tracks, conditional dependencies) → raw `TaskCreate` × N + `TaskExecute`. No orchestrator tool mediates.
 - **Active task list ≤ 2 items** → direct `edit` / `write` / `bash` (no orchestrator needed).
+
+## Todowrite-first intent flow (mandatory for complex goals)
+
+When an intent task arrives, **populate your own `todowrite` first**. Each todo corresponds 1:1 to a plan task you intend to dispatch. Then convert incrementally — do not commit the full phase list up front.
+
+```text
+1. Read the intent (subject + description) via task_inspect.
+2. Build a todowrite where each item is one plan task you will dispatch.
+3. task_plan_intent(intent_id, intent_shape, rationale)  # declare shape
+4. for each todowrite item:
+     task_add_phase(intent_id, phase, subject, description, ...)
+5. After all phases added, task_close_intent(intent_id)  # terminal audit
+6. TaskExecute([first_plan_id])  # dispatch begins
+```
+
+**Why this matters.** The atomic `task_convert_intent` path commits the
+full phase list in a single call. For complex goals the LLM defaults to
+the minimum `standard` (2 phases) because iteration is mechanically
+blocked — once committed, no more plan tasks can be added to that
+intent. The iterative path inflates the phase count for goals that
+genuinely span 3+ plan tasks and lets the LLM commit incrementally as
+the implementation phase discovers more work.
+
+**Default shape:** when in doubt, choose `multi-phase` for goals that
+span more than one TDD cycle. The cumulative validator enforces
+shape-specific rules at every add so wrong first phases, cap-busting
+adds, and trivial-with-review are caught at the boundary, not at
+close time.
 
 ## Meta-File vs Production Code
 
@@ -217,26 +250,40 @@ to declare the work done or to spawn a follow-up Fix task (with
 `agentType: "Developer"`, blockedBy the Review) by hand.
 
 For multi-step work with parallel tracks or conditional dependencies,
-write the DAG yourself as `TaskCreate` × N; for the standard 2-phase
-shape, `orchestrate(plan)` collapses it into one call.
+write the DAG yourself as `TaskCreate` × N; for the standard
+2-phase shape, `task_convert_intent` collapses it into one call. For
+complex goals, prefer the iterative `task_plan_intent` + `task_add_phase`
++ `task_close_intent` flow so the LLM can inflate the phase count as
+the implementation phase discovers more work.
 
-### 5. Sages orchestrator (1 + 4 subagent control) — `pi-orchestrator`
+### 5. Sages orchestrator (6 + 4 subagent control) — `pi-orchestrator`
 
-#### 5.1 Orchestrator-owned tools (3)
+#### 5.1 Orchestrator-owned tools (6)
 
-The orchestrator owns three LLM-facing tools. The LLM inspects every
+The orchestrator owns six LLM-facing tools. The LLM inspects every
 task via `task_inspect` first to see its `type` and `status`, then routes
-explicitly to `task_consume` (for completed plans) or
-`task_convert_intent` (for intents). The orchestrator does NOT
-manage the task flow — it only adds tasks (via pi-tasks's `TaskCreate`
-or `task_convert_intent`) and reads them (via `task_inspect` /
-`task_consume`).
+explicitly to `task_consume` (for completed plans) or the
+intent→plan conversion operator (atomic `task_convert_intent` or the
+iterative `task_plan_intent` + `task_add_phase` × N + `task_close_intent`
+flow). The orchestrator does NOT manage the task flow — it only adds
+tasks (via pi-tasks's `TaskCreate` or the conversion tools) and reads
+them (via `task_inspect` / `task_consume`).
+
+**Read side (3):**
 
 | Tool | Use for |
 |---|---|
 | `task_inspect(task_id)` | Inspection **before** deciding which other tool. Returns `{ id, subject, type: 'intent'\|'plan', status, agentType?, hasResult }`. Lighter than `TaskGet` (returns only the routing-relevant fields). |
-| `task_consume(task_id, include_transcript?)` | Consumption side — read a completed `plan` task's result in a structured way. Returns `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }`. For Reviewer tasks it parses the 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and emits a verdict-tailored follow-up suggestion; for Developer tasks it returns the result verbatim. Pure read — does NOT mutate the store. The task must be `completed` and `type='plan'`; if it's still `in_progress`, use `TaskOutput(task_id, block: true)` first. Intent tasks throw `not_plan` — call `task_convert_intent` first. |
-| `task_convert_intent(task_id, plan)` | The orchestrator's **unique** intent → plan conversion operator. Reads an intent task (`type='intent'`), marks it converted (audit: `metadata.converted / metadata.converted_at / metadata.intent_shape / metadata.rationale`), and creates plan tasks from a STRUCTURED plan object (`intent_shape` + `rationale` + `phases[]`). Phase → agentType is mapped deterministically via `PHASE_AGENT_TYPE` (review → Reviewer, all others → Developer) — the LLM never types `agentType` directly. The schema + `src/phase-validation.ts` enforce per-shape rules (phase count bounds, first/last phase match, ≤ 1 review phase, rationale 10–500 chars). Refuses empty `phases`, non-intent sources, already-converted intents, and plans that violate shape rules. The parameter is just `task_id` for consistency with `task_inspect` / `task_consume`; the routing is what makes it an intent. |
+| `task_consume(task_id, include_transcript?)` | Consumption side — read a completed `plan` task's result in a structured way. Returns `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }`. For Reviewer tasks it parses the 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and emits a verdict-tailored follow-up suggestion; for Developer tasks it returns the result verbatim. Pure read — does NOT mutate the store. The task must be `completed` and `type='plan'`; if it's still `in_progress`, use `TaskOutput(task_id, block: true)` first. Intent tasks throw `not_plan` — call `task_convert_intent` (atomic) or `task_plan_intent` (iterative) first. |
+
+**Write side — intent → plan conversion (4):**
+
+| Tool | Use for |
+|---|---|
+| `task_convert_intent(task_id, plan)` | **Atomic** one-shot converter. Reads an intent task (`type='intent'`), marks it converted (audit: `metadata.converted / metadata.converted_at / metadata.intent_shape / metadata.rationale`), and creates plan tasks from a STRUCTURED plan object (`intent_shape` + `rationale` + `phases[]`) in a single store.write. Phase → agentType is mapped deterministically via `PHASE_AGENT_TYPE` (review → Reviewer, all others → Developer). The schema + `src/phase-validation.ts` enforce per-shape rules (phase count bounds, first/last phase match, ≤ 1 review phase, rationale 10–500 chars). Refuses empty `phases`, non-intent sources, already-converted intents, and plans that violate shape rules. Use for the trivial / small / standard / multi-phase / multi-track shapes when the LLM already knows the full phase list. |
+| `task_plan_intent(task_id, plan)` | **Iterative** flow, step 1: declare `intent_shape` + `rationale` on the intent. Stamps `metadata.planning = { shape, rationale, phases_added, plan_task_ids, planned_at, planned_by }`. The intent stays `pending` (no plan tasks created). Re-classification requires a fresh intent. Use this BEFORE `task_add_phase` so the declared shape drives per-add cumulative validation. |
+| `task_add_phase(intent_id, phase)` | **Iterative** flow, step 2: materialize ONE plan task per call against a planned intent. Validates the running cumulative phase list against the declared shape via `validateCumulativePhases` (catches cap-busting, wrong first phase, trivial-with-review, multiple reviews, multi-track not all-implement). Stamps `metadata.source_intent / phase / agentType / cumulative_phase_count` on the new plan task. Appends to the intent's `planning.plan_task_ids` and increments `planning.phases_added`. Call once per todowrite item. The intent stays `pending` until `task_close_intent` runs. |
+| `task_close_intent(intent_id)` | **Iterative** flow, step 3 (terminal): flip the intent to `completed` and stamp the final audit metadata (`converted / converted_at / converted_by / plan_task_ids`). Synthesizes a PlanShape from the accumulated phases + the original rationale and runs `validatePlanShape` to catch final-state issues (last-phase mismatch, min-count, ≥ 1 implement for investigate-then-fix, etc.). Once closed, the intent is terminal — no more adds, no re-close. |
 
 The planning methodology the LLM uses to produce a structured plan from an intent subject + description lives in [`pi-orchestrator/skills/orchestrator/SKILL.md`](../../pi-orchestrator/skills/orchestrator/SKILL.md) → **"Planning methodology — from intent to structured plan"** (5-step loop: Read → Classify → Compose rationale → Decompose phases → Surface & commit). Apply that loop every time a new intent task arrives on the board. For ambiguous intents, run `/brainstorm` first (see [`pi-orchestrator/skills/brainstorming/SKILL.md`](../../pi-orchestrator/skills/brainstorming/SKILL.md)).
 
@@ -274,7 +321,7 @@ dispatch surface.
 | Find something | `aft_search`. Use `ast_grep_search` when too noisy. |
 | Edit | Surgical → `edit`. Structural / cross-file → `aft_refactor`. New file → `write`. |
 | Verify | `aft_inspect` (TS / lint) · `bun test` (unit) · `npm run check` (where applicable) |
-| Standard Implement → Review pipeline (>2 items) | `TaskCreate × 2` + `TaskExecute`, or `orchestrate(plan)` for the whole DAG |
+| Standard Implement → Review pipeline (>2 items) | `TaskCreate × 2` + `TaskExecute`, or `task_convert_intent` (atomic) / `task_plan_intent` + `task_add_phase` + `task_close_intent` (iterative) |
 | Custom multi-step workflow (>2 items) | `TaskCreate × N` + `TaskExecute` directly |
 | Trivial change (≤2 items) | direct `edit` / `write` / `bash` |
 | Subagent off-track | `subagent_status` → `subagent_steer` → `subagent_abort` |

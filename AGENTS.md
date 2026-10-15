@@ -54,22 +54,39 @@ evidence. Three guiding principles govern the work (soft mode — GC-2026-031):
 
 ## The orchestrator tool surface
 
-The orchestrator owns **three** LLM-facing consumer tools:
+The orchestrator owns **six** LLM-facing consumer tools (post
+`GC-2026-iterative-intent-plan`): two read-side and four
+intent→plan conversion tools (one atomic + three iterative).
+
+**Read side (2):**
 
 | Tool | Output | Use for |
 |---|---|---|
-| `task_inspect(task_id)` | `{ id, subject, type, status, agentType?, hasResult }` | Read just the routing-relevant fields of a task before deciding which follow-up tool to call. Lighter than `TaskGet` (no metadata dump). Routes: `type='intent'` → `task_convert_intent`; `type='plan' + pending` → `TaskExecute`; `type='plan' + in_progress` → `TaskOutput(block=true)`; `type='plan' + completed` → `task_consume`. |
-| `task_consume(task_id, include_transcript?)` | structured payload: `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }` | Read a completed `plan` task in a structured way. For Reviewer tasks, parses the 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and returns a verdict-tailored follow-up suggestion. Pure read — does NOT mutate the store. The task must be `completed`; if it's still `in_progress`, use `TaskOutput(task_id, block: true)` first. Intent tasks throw `not_plan` — call `task_convert_intent` first. |
-| `task_convert_intent(task_id, plan)` | structured payload: `{ plan_task_ids, intent_task_id, intent_shape, rationale, converted_at }` | The orchestrator's unique intent→plan converter. Reads an intent task (`type='intent'`), validates a STRUCTURED plan (`intent_shape` + `rationale` + `phases[]`) against per-shape rules in `src/phase-validation.ts`, marks the intent as converted in metadata, and creates the plan tasks. `agentType` is derived per phase via `PHASE_AGENT_TYPE` (review → Reviewer, all others → Developer) — the LLM never types `agentType` directly. Refuses empty phases, non-intent sources, already-converted intents, and plans that violate the shape rules. |
+| `task_inspect(task_id)` | `{ id, subject, type, status, agentType?, hasResult }` | Read just the routing-relevant fields of a task before deciding which follow-up tool to call. Lighter than `TaskGet` (no metadata dump). Routes: `type='intent' + status='pending'` → `task_plan_intent` (iterative) or `task_convert_intent` (atomic); `type='intent' + status='planned'` → `task_add_phase`; `type='plan' + pending` → `TaskExecute`; `type='plan' + in_progress` → `TaskOutput(block=true)`; `type='plan' + completed` → `task_consume`. |
+| `task_consume(task_id, include_transcript?)` | structured payload: `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }` | Read a completed `plan` task in a structured way. For Reviewer tasks, parses the 4-state verdict (`CLEAN` / `NEEDS_WORK` / `NEEDS_REDESIGN` / `NEEDS_CLARIFICATION`) from the result text and returns a verdict-tailored follow-up suggestion. Pure read — does NOT mutate the store. The task must be `completed`; if it's still `in_progress`, use `TaskOutput(task_id, block: true)` first. Intent tasks throw `not_plan` — call `task_convert_intent` (atomic) or `task_plan_intent` (iterative) first. |
+
+**Intent→plan conversion, atomic (1):**
+
+| Tool | Output | Use for |
+|---|---|---|
+| `task_convert_intent(task_id, plan)` | structured payload: `{ plan_task_ids, intent_task_id, intent_shape, rationale, converted_at }` | The orchestrator's **atomic** intent→plan converter. Reads an intent task (`type='intent'`), validates a STRUCTURED plan (`intent_shape` + `rationale` + `phases[]`) against per-shape rules in `src/phase-validation.ts`, marks the intent as converted in metadata, and creates the plan tasks in a single store.write batch. `agentType` is derived per phase via `PHASE_AGENT_TYPE` (review → Reviewer, all others → Developer) — the LLM never types `agentType` directly. Refuses empty phases, non-intent sources, already-converted intents, and plans that violate the shape rules. Use this when the LLM already knows the full phase list (e.g., trivial / small / standard with one or two plan tasks). |
+
+**Intent→plan conversion, iterative (3) — todowrite-first flow:**
+
+| Tool | Output | Use for |
+|---|---|---|
+| `task_plan_intent(task_id, plan)` | structured payload: `{ intent_task_id, intent_shape, rationale, phases_added, plan_task_ids, planned_at }` | **Step 1 of the iterative flow.** Declare `intent_shape` + `rationale` on the intent. Stamps `metadata.planning = { shape, rationale, phases_added, plan_task_ids, planned_at, planned_by }` on the intent. The intent stays `pending` (no plan tasks created). Re-classification requires a fresh intent. Use this BEFORE `task_add_phase` so the declared shape drives per-add cumulative validation. |
+| `task_add_phase(intent_id, phase)` | structured payload: `{ plan_task_id, intent_task_id, cumulative_phase_count }` | **Step 2 of the iterative flow.** Materialize ONE plan task per call against a planned intent. Validates the running cumulative phase list against the declared shape via `validateCumulativePhases` (catches cap-busting, wrong first phase, trivial-with-review, multiple reviews, multi-track not all-implement). Stamps `metadata.source_intent / phase / agentType / cumulative_phase_count` on the new plan task. Call once per todowrite item. The intent stays `pending` until `task_close_intent` runs. |
+| `task_close_intent(intent_id)` | structured payload: `{ intent_task_id, plan_task_ids, closed_at }` | **Step 3 of the iterative flow (terminal).** Flip the intent to `completed` and stamp the final audit metadata (`converted / converted_at / converted_by / plan_task_ids`). Synthesizes a PlanShape from the accumulated phases + the original rationale and runs `validatePlanShape` to catch final-state issues (last-phase mismatch, min-count, ≥ 1 implement for investigate-then-fix, etc.). Once closed, the intent is terminal — no more adds, no re-close. |
 
 The LLM can also drive the task flow directly via the raw pi-tasks
 tools: `TaskCreate` × N + `TaskExecute` for multi-step plans, or `TaskList`
 / `TaskGet` for ad-hoc reads. Both paths produce the same DAG;
-`task_convert_intent` is the structured entry point for intent→plan
-conversion, raw `TaskCreate` is the unstructured fallback. No
-orchestrator-owned file (goal contract, workflow rollup, audit state)
-is produced — `.pi/orchestrator/` carries only optional subagent
-evidence.
+`task_convert_intent` and the iterative trio are the structured entry
+points for intent→plan conversion, raw `TaskCreate` is the
+unstructured fallback. No orchestrator-owned file (goal contract,
+workflow rollup, audit state) is produced — `.pi/orchestrator/`
+carries only optional subagent evidence.
 
 Load `pi-orchestrator/skills/orchestrator/SKILL.md` for the step-by-step workflow.
 

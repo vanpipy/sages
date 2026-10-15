@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: "Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the orchestrator constitution), and tool_call (once-per-session soft-mode reminder). Owns three LLM-facing tools: `task_inspect` (read type+status+agentType so the LLM can route), `task_consume` (read+parse verdict for completed plan tasks), and `task_convert_intent` (the unique intent→plan converter with a STRUCTURED plan schema — intent_shape + rationale + phases[]). The LLM adds tasks via pi-tasks's `TaskCreate` (with `type` set to 'intent' or 'plan') and dispatches via `TaskExecute`. The orchestrator does not manage the task flow — it only reads and adds; convertIntent is its only state-changing write, and only within the intent→plan conversion path."
+description: "Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the orchestrator constitution), and tool_call (once-per-session soft-mode reminder). Owns six LLM-facing tools: `task_inspect` (read type+status+agentType so the LLM can route), `task_consume` (read+parse verdict for completed plan tasks), `task_convert_intent` (the atomic intent→plan converter with a STRUCTURED plan schema — intent_shape + rationale + phases[]), and the iterative todowrite-first primitives `task_plan_intent` + `task_add_phase` + `task_close_intent`. The LLM adds tasks via pi-tasks's `TaskCreate` (with `type` set to 'intent' or 'plan') and dispatches via `TaskExecute`. The orchestrator does not manage the task flow — it only reads and adds; the four intent→plan conversion tools are its only state-changing writes, and only within the intent→plan conversion path."
 ---
 
 # Orchestrator — Soft Infrastructure
@@ -20,9 +20,11 @@ These role names (Task Board / Task Orchestrator / Task Executor) are
 descriptive shorthand; they appear in docs and conversation but not in
 the packages' own code.
 
-The orchestrator owns exactly **three** LLM-facing tools:
-`task_inspect` (route by type/status), `task_consume` (read+parse verdict),
-and `task_convert_intent` (the unique intent→plan converter). It is a
+The orchestrator owns exactly **six** LLM-facing tools:
+`task_inspect` (route by type/status), `task_consume` (read+parse
+verdict), and **four** intent→plan conversion tools: `task_convert_intent`
+(atomic one-shot) plus the iterative flow `task_plan_intent` +
+`task_add_phase` + `task_close_intent`. The orchestrator is a
 consumer of the task flow — it does not manage it.
 
 ## What the orchestrator does
@@ -64,33 +66,39 @@ or single-line edits.
 ## The LLM's responsibility
 
 Multi-stage work is the LLM's job. The canonical flow is
-**inspect → route**:
+**inspect → todowrite → iterate**. For clear intents that fit a single
+shape with a known phase list, the atomic `task_convert_intent` path is
+fine. For complex goals (3+ plan tasks, mid-implementation discoveries,
+parallel tracks), use the **iterative** todowrite-first flow:
 
 ```text
 // 1. /tasks create "Add /login endpoint" — user-facing intent task appears
 2.   TaskList → [{ id: 1, subject: "Add /login endpoint", type: "intent" }]
 3.   task_inspect({ task_id: 1 })
-     → { id: 1, type: "intent", status: "pending", ... }
-4.   // LLM MUST commit to a plan before calling the tool — surface the
-     // sketch in its own response so the user can see the methodology:
-     //   a. Classify intent_shape (trivial | small | standard |
-     //      investigate-then-fix | multi-phase | multi-track).
-     //   b. Justify the shape in rationale (one sentence, 10–500 chars).
-     //   c. Sequence ordered phases[] (each phase maps to agentType via
-     //      PHASE_AGENT_TYPE — review → Reviewer, all others → Developer).
-5.   task_convert_intent({
-       task_id: 1,
-       plan: {
-         intent_shape: "standard",
-         rationale: "Multi-file within one package with a full RED→GREEN→REFACTOR cycle; one Reviewer at the end.",
-         phases: [
-           { phase: "implement", subject: "Implement /login endpoint", description: "..." },
-           { phase: "review",    subject: "Review /login implementation", description: "..." },
-         ],
-       },
-     })
-   → plan tasks created in order, intent #1 marked converted
-6.   TaskExecute([first_id])  // dispatches the first plan task
+      → { id: 1, type: "intent", status: "pending", ... }
+// 4. LLM populates its own todowrite (the planning scratch):
+//    - [in_progress] Read intent + scan context
+//    - [pending]     task_plan_intent(1, "standard", "...")
+//    - [pending]     task_add_phase(1, implement, "Implement /login", "...")
+//    - [pending]     task_add_phase(1, review,    "Review /login",   "...")
+//    - [pending]     task_close_intent(1)
+//    - [pending]     TaskExecute([implement_id])
+// 5. LLM MUST commit to a shape before task_plan_intent — surface the
+//    sketch in its own response so the user can see the methodology:
+//      a. Classify intent_shape (trivial | small | standard |
+//         investigate-then-fix | multi-phase | multi-track).
+//      b. Justify the shape in rationale (one sentence, 10–500 chars).
+//      c. For COMPLEX goals (3+ plan tasks, mid-flight discoveries),
+//         prefer the iterative flow over the atomic one-shot.
+6.   task_plan_intent({ task_id: 1, plan: { intent_shape: "standard", rationale: "..." } })
+    → intent stays pending; metadata.planning.{shape, rationale, phases_added, plan_task_ids} stamped
+7.   task_add_phase({ intent_id: 1, phase: { phase: "implement", subject: "...", description: "..." } })
+    → one plan task created with metadata.{source_intent, phase, agentType, cumulative_phase_count}
+8.   task_add_phase({ intent_id: 1, phase: { phase: "review",    subject: "...", description: "..." } })
+    → second plan task created
+9.   task_close_intent({ intent_id: 1 })
+    → intent flipped to completed; full audit metadata stamped
+10.  TaskExecute([implement_id])  // dispatches the first plan task
 ```
 
 The plan schema + runtime validation enforce the methodology: shape

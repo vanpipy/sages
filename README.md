@@ -4,12 +4,14 @@ Three-layer multi-agent workflow system for [pi](https://pi.dev):
 
 | Layer | Package | Job |
 |---|---|---|
-| **Planning** | `pi-orchestrator` | Three LLM-facing consumer tools (`task_inspect` reads routing fields, `task_consume` reads + parses verdicts, `task_convert_intent` is the unique intent→plan converter); session hooks curate the tool allowlist + prepend a constitution + fire the once-per-session soft-mode reminder; `/brainstorm` slash command drives the 5-phase design flow |
+| **Planning** | `pi-orchestrator` | Six LLM-facing consumer tools (post `GC-2026-iterative-intent-plan`): two read-side (`task_inspect` reads routing fields, `task_consume` reads + parses verdicts) and four intent→plan conversion tools — the atomic one-shot `task_convert_intent` plus the iterative todowrite-first primitives `task_plan_intent` + `task_add_phase` + `task_close_intent`; session hooks curate the tool allowlist + prepend a constitution + fire the once-per-session soft-mode reminder; `/brainstorm` slash command drives the 5-phase design flow |
 | **Tracking** | `pi-tasks` | Holds the DAG (file-backed `TaskStore` with locking); drives cascade via `TaskExecute`; renders the persistent task widget above the editor; injects system-reminder nudges |
 | **Executing** | `pi-subagents` | Spawns agents as detached pi sessions; `AgentManager` manages two concurrency pools (foreground / background), optional git-worktree isolation, mid-run steering, result collection; ships the script-based workflow runtime (`SubagentWorkflow`) |
 
-The orchestrator owns **three** LLM-facing consumer tools (`task_inspect`,
-`task_consume`, `task_convert_intent`). It also owns four subagent-control
+The orchestrator owns **six** LLM-facing consumer tools (`task_inspect`,
+`task_consume`, `task_convert_intent` for atomic one-shot conversion,
+plus the iterative `task_plan_intent` + `task_add_phase` +
+`task_close_intent` for the todowrite-first flow). It also owns four subagent-control
 tools (`subagent_status`, `subagent_steer`, `subagent_abort`,
 `subagent_resume`) that reach the same `AgentManager` singleton that
 powers the `Agent` tool. The orchestrator curates the tool allowlist at
@@ -56,8 +58,9 @@ LLM in main session reads TaskOutput, decides next step
 
 Under soft mode the main agent has full tool access (`edit` / `write` /
 `apply_patch`, plus unrestricted `bash`). Nothing is mechanically blocked.
-Sages owns three orchestrator consumer tools (`task_inspect`,
-`task_consume`, `task_convert_intent`) and four subagent-control tools;
+Sages owns six orchestrator consumer tools (`task_inspect`,
+`task_consume`, the atomic `task_convert_intent`, and the iterative
+`task_plan_intent` + `task_add_phase` + `task_close_intent`) and four subagent-control tools;
 it nudges the main agent toward `TaskCreate × N` + `TaskExecute` when
 the active todowrite has more than 2 items, but never blocks.
 
@@ -84,7 +87,7 @@ main LLM reads it via `TaskOutput` and decides next step.
 
 | Package | Purpose |
 |---|---|
-| `pi-orchestrator/` | Planning layer: three LLM-facing consumer tools (`task_inspect` / `task_consume` / `task_convert_intent`) + 4 subagent-control tools; session hooks (`session_start` `setActiveTools`, `before_agent_start` prompt overlay, `tool_call` soft-mode reminder); `/brainstorm` slash command |
+| `pi-orchestrator/` | Planning layer: six LLM-facing consumer tools (2 read + 4 conversion: `task_inspect` / `task_consume` + atomic `task_convert_intent` + iterative `task_plan_intent` / `task_add_phase` / `task_close_intent`) + 4 subagent-control tools; session hooks (`session_start` `setActiveTools`, `before_agent_start` prompt overlay, `tool_call` soft-mode reminder); `/brainstorm` slash command |
 | `pi-tasks/` | Tracking layer: TaskStore with file locking + the persistent task widget + system-reminder cadence; 7 tools (`TaskCreate`/`TaskList`/`TaskGet`/`TaskUpdate`/`TaskOutput`/`TaskStop`/`TaskExecute`) |
 | `pi-subagents/` | Executing layer: `AgentManager` (concurrency pools, lifecycle, worktree isolation, mid-run control); ships `Developer` + `Reviewer` as built-in defaults; script-based workflow runtime under `src/workflow/`; cross-extension RPC bridge to pi-tasks |
 | `pi-codebase-memory/` | Code knowledge graph MCP server |
@@ -118,6 +121,7 @@ workflow via a goal-contract + workflow-runner pair. After the
 2026-10-01 sweep (`chore/remove-goal-contract`,
 `GC-2026-remove-workflow-run-prod`, `GC-2026-decompose-task-removed`,
 and the follow-up `chore/orchestrator-simplify`) the orchestrator owns
-three consumer tools (`task_inspect`, `task_consume`,
-`task_convert_intent`); workflow logic lives in pi-tasks (the cascade)
+six consumer tools (`task_inspect`, `task_consume`,
+`task_convert_intent`, `task_plan_intent`, `task_add_phase`,
+`task_close_intent`); workflow logic lives in pi-tasks (the cascade)
 and pi-subagents (`AgentManager`), not in the orchestrator.
