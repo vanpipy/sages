@@ -54,8 +54,8 @@ Top 10, ordered by importance:
    constructed without arguments. Owns its own file lock
    (`acquireLock` at `task-store.ts:31` / `releaseLock` at `:72` /
    `isProcessRunning` at `:78`, all in the `:21–80` block).
-   - `create(subject, description, activeForm?, metadata?, type="plan"): Task`
-       (`task-store.ts:192`)
+    - `create(subject, description, activeForm?, metadata?, type="plan"): Task`
+        (`task-store.ts:187`)
    - `get(id): Task | undefined` (`task-store.ts:215`)
    - `list(sortOrder="id"): Task[]` (`task-store.ts:221`)
    - `update(id, fields): { task, changedFields, warnings }`

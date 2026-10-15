@@ -15,7 +15,7 @@ source.
 
 | Doc | What it covers |
 |---|---|
-| [`root.md`](./root.md) | Top-level entries: `README.md`, `AGENTS.md`, `package.json`, `taskFeeding.md`, hooks. The runtime diagram, the layered packages, and the soft-mode contract at a glance. |
+| [`root.md`](./root.md) | Top-level entries: `README.md`, `AGENTS.md`, `package.json`, hooks. The runtime diagram, the layered packages, and the soft-mode contract at a glance. |
 | [`pi-tasks.md`](./pi-tasks.md) | Task Board (tracking layer). File-backed `TaskStore` with locking, the 7 LLM-facing `Task*` tools, the `subagents:rpc:spawn` consumer, the above-editor widget, system-reminder cadence. |
 | [`pi-orchestrator.md`](./pi-orchestrator.md) | Task Orchestrator (planning layer). Session hooks (`setActiveTools` / `SYSTEM.md` / once-per-session soft-mode reminder), the 3 consumer tools (`task_inspect` / `task_consume` / `task_convert_intent`), verdict parsing, the 5-phase `/brainstorm` state machine. |
 | [`pi-subagents.md`](./pi-subagents.md) | Task Executor (executing layer). `AgentManager` with two concurrency pools, the `subagents:rpc:spawn` RPC bridge, the `Developer` / `Reviewer` built-in defaults, the agent widget + fleet list, the `SubagentScheduler`, the scripted workflow runtime, worktree isolation. |

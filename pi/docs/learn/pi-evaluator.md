@@ -79,7 +79,9 @@ Top 10, ordered by importance:
      Sages orchestrator tool names
      (`goal_contract_create` / `dag_synthesize` / `task_dispatch`
      / `orchestrator_audit` — see `ORCHESTRATOR_TOOL_NAMES` at
-     `extension.ts:37`).
+     `extension.ts:37`); the listener body (`extension.ts:131`) calls
+     `extractWorkflowId(toolName, input)` (`extension.ts:63`) and
+     writes `state.active_workflow_path` + `state.active_workflow_id`.
 
 2. **`makeEvalScoreTool`** — `pi-evaluator/src/tools/eval-score.ts:175`.
    The `eval_score` tool definition (TypeBox schema
@@ -111,13 +113,13 @@ Top 10, ordered by importance:
    - `scoreWorkflow(workflowPath, coefficients, cwd)` (`:88`) iterates
      the 5 dimensions (`DIMENSIONS` from
      `engine/coefficients-schema.ts:79`), calls `scoreDimension` on each.
-   - `scoreDimension(signals, ctx)` (`:67`) runs each signal via
-     `computeSignalValue` (from `signals/metric-runner.ts`), applies
-     `norm` + `direction` (`NORM_TABLE` / `DIRECTION_TABLE` at
-     `:21` / `:30`), accumulates weighted sums, returns
+   - `scoreDimension(signals, ctx)` (declared at `:63`) runs each signal via
+     `computeSignalValue` (from `signals/metric-runner.ts`, `:28`), applies
+     `norm` + `direction` (`NORM_TABLE` at scoring-engine.ts:27,
+     `DIRECTION_TABLE` at `:38`), accumulates weighted sums, returns
      `{ score: 0–100, evidence: EvidenceRef[] }`. `data_missing`
      signals are excluded from the sum.
-   - `globalScore(dims, coefficients)` (`:122`) sums
+   - `globalScore(dims, coefficients)` (`:106`) sums
      `dims.X.score * weights.X` weighted by
      `coefficients.global.dimension_weights`, returns 0 when total
      weight is 0.

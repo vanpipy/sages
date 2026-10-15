@@ -25,7 +25,7 @@ orchestrator's LLM uses to read and shape the board, and ships a
 design-doc generation.
 
 The orchestrator is a **consumer** of the task flow, not its manager.
-Per the file header at `orchestrator-tool.ts:5–17`, it adds tasks via
+Per the file header at `orchestrator-tool.ts:1–39`, it adds tasks via
 pi-tasks's `TaskCreate` (with `type` set to `"intent"` or `"plan"`),
 reads via `TaskList` / `TaskGet`, dispatches via `TaskExecute`. Its
 three tools add: routing hints on the read side (`task_inspect`),
@@ -69,7 +69,7 @@ Top 10, ordered by importance:
 1. **`installSessionHooks`** — `pi-orchestrator/src/extension.ts:177`.
    The three lifecycle hooks:
    - `session_start` (`extension.ts:179`): the array body starts at
-     `:181` — `pi.setActiveTools([...PI_TASKS_TOOLS, ...SUBAGENT_TOOLS, ...AFT_TOOLS, ...BASELINE_TOOLS, ...PI_ROUTINES_TOOLS])`,
+     `:180` — `pi.setActiveTools([...PI_TASKS_TOOLS, ...SUBAGENT_TOOLS, ...AFT_TOOLS, ...BASELINE_TOOLS, ...PI_ROUTINES_TOOLS])`,
      plus an optional status notification.
    - `before_agent_start` (`extension.ts:194`): prepends
      `templates/SYSTEM.md` to the LLM's system prompt.
@@ -79,7 +79,7 @@ Top 10, ordered by importance:
 
 2. **`registerOrchestratorExtension`** (default export) —
    `pi-orchestrator/src/extension.ts:236`. Wires `installSessionHooks`
-   + `registerOrchestratorTools` (`orchestrator-tool.ts:397`).
+   + `registerOrchestratorTools` (`orchestrator-tool.ts:504`).
 
 3. **Tool allowlist constants** — `pi-orchestrator/src/extension.ts`.
    - `PI_SUBAGENT_TOOLS` (`:41`): `["Agent", "get_subagent_result", "steer_subagent"]`.
@@ -96,23 +96,26 @@ Top 10, ordered by importance:
      `@davecodes/pi-routines` (opt-in; missing extension degrades
      gracefully).
 
-4. **`task_inspect`** — `pi-orchestrator/src/orchestrator-tool.ts:94`.
+4. **`task_inspect`** — `pi-orchestrator/src/orchestrator-tool.ts:116`
+   (function) / registered at `:505`.
    Read just the routing-relevant fields of a task:
    `id`, `subject`, `type`, `status`, `agentType`, `hasResult`.
    Lets the orchestrator's LLM route on the result
    (`type='intent'` → `task_convert_intent`, `plan + pending` →
    `TaskExecute`, `plan + completed` → `task_consume`).
-   `InspectParams` / `InspectOutput` are declared at
-   `orchestrator-tool.ts:55` / `:66`.
+   `InspectParams` is declared at `orchestrator-tool.ts:77`,
+   `InspectOutput` at `:88`, `TaskInspectError` at `:98`.
 
-5. **`task_consume`** — `pi-orchestrator/src/orchestrator-tool.ts:173`.
+5. **`task_consume`** — `pi-orchestrator/src/orchestrator-tool.ts:195`
+   (function) / registered at `:518`.
    Read a completed plan task's result. Returns
    `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }`.
    Pure read — does NOT mutate the store. Errors:
    `TaskConsumeError(kind: "not_found" | "not_completed" | "not_plan")`
-   (`orchestrator-tool.ts:158`).
+   (`orchestrator-tool.ts:180`).
 
-6. **`task_convert_intent`** — `pi-orchestrator/src/orchestrator-tool.ts:292`.
+6. **`task_convert_intent`** — `pi-orchestrator/src/orchestrator-tool.ts:384`
+   (function) / registered at `:533`.
    The unique intent → plan converter. Reads an intent task, marks it
    converted (audit: `metadata.converted / converted_at / intent_shape
    / rationale`, flips `status: "completed"`), and creates plan tasks
@@ -125,7 +128,7 @@ Top 10, ordered by importance:
    `phases`, and plans that violate the shape rules. Errors:
    `ConvertIntentError(kind: "intent_not_found" | "not_intent" |
    "already_converted" | "empty_phases" | "shape_violation")`
-   (`orchestrator-tool.ts:317`). The plan tasks get
+   (`orchestrator-tool.ts:363`). The plan tasks get
    `metadata.source_intent`, `metadata.phase`, and `metadata.agentType`
    auto-stamped.
 
@@ -212,7 +215,7 @@ From `pi-orchestrator/package.json`:
 
 1. `registerOrchestratorExtension` (default export) wires three things:
    - `installSessionHooks(pi)` (`extension.ts:177`) installs the 3 hooks.
-   - `registerOrchestratorTools(pi)` (`orchestrator-tool.ts:397`) registers
+   - `registerOrchestratorTools(pi)` (`orchestrator-tool.ts:504`) registers
      the 3 LLM-facing tools on the host.
 2. The `session_start` hook calls `setActiveTools([...])` with the
    curated allowlist. The LLM now sees only the tools that belong to
@@ -230,23 +233,23 @@ LLM flow when it sees an unhandled task:
 
 1. `task_inspect(task_id)` → `{ id, type, status, agentType, hasResult }`.
 2. LLM branches on `type`:
-   - `intent` → `task_convert_intent(task_id, plan)` (`:230`).
+   - `intent` → `task_convert_intent(task_id, plan)` (`:384`).
    - `plan` + `pending` → `TaskExecute([task_id])` (in pi-tasks).
    - `plan` + `in_progress` → `TaskOutput(task_id, block=true)`.
    - `plan` + `completed` → `task_consume(task_id)`.
 
 ### Intent → plan conversion
 
-`task_convert_intent` (`:292`):
+`task_convert_intent` (`:384`):
 
 1. Reads the intent (`store.get(params.task_id)`).
 2. Refuses on non-intent type or already-converted state
    (`ConvertIntentError`).
 3. Flips the intent's status to `"completed"` with
    `metadata.converted = true, converted_at = now`.
-4. Rejects empty `plan` arrays (`orchestrator-tool.ts:340`) before any
+4. Rejects empty `plan` arrays (`orchestrator-tool.ts:415`) before any
    task creation.
-5. For each `plan` entry, calls `store.create(...)` (`:356`) with
+5. For each `plan` entry, calls `store.create(...)` (`:469`) with
    `type: "plan"`, `metadata.source_intent = intent.id`, and the
    entry's `agentType` / `blockedBy` / `blocks` edges wired in.
 
@@ -258,8 +261,8 @@ LLM flow when it sees an unhandled task:
 2. Refuses on `type === "intent"` (`not_plan` error) or
    `status !== "completed"` (`not_completed` error).
 3. Reads `metadata.result`; if the task's `agentType === "Reviewer"`,
-   calls `parseVerdict(result)` (`:40`) and `suggestFollowUp(verdict)`
-   (`:55`) from `verdict.ts`.
+   calls `parseVerdict(result)` (`verdict.ts:40`) and
+   `suggestFollowUp(verdict)` (`verdict.ts:55`) from `verdict.ts`.
 4. Returns a structured envelope the LLM can act on.
 
 ### Brainstorming 5-phase flow
@@ -285,21 +288,24 @@ materializes it into plan tasks via raw `TaskCreate × N + TaskExecute`.
 
 ## Discrepancy watch
 
-- The repo's `AGENTS.md:53–86`, `README.md:5–9`, and
-  `templates/agent-tool-description.md` describe an `orchestrate(plan)`
-  tool. The current code does NOT register that tool — it has been
-  replaced by the three-tool surface
+- `templates/SYSTEM.md:32-218` and `templates/SYSTEM.md:274` describe an
+  `orchestrate(plan)` convenience tool. The current code does NOT
+  register that tool — it has been replaced by the three-tool surface
   (`task_inspect` / `task_consume` / `task_convert_intent`)
-  implemented in `orchestrator-tool.ts`.
+  implemented in `orchestrator-tool.ts`. `AGENTS.md` was updated to
+  drop the `orchestrate` reference, but `templates/SYSTEM.md` (loaded
+  on every `before_agent_start` at `extension.ts:194`) still ships the
+  old text. Treat any `orchestrate(plan)` mention in the template as
+  historical text that points at `task_convert_intent` semantically.
 - The `SUBAGENT_CONTROL_TOOLS` constant names 4 tools
   (`subagent_status` / `subagent_steer` / `subagent_abort` /
-  `subagent_resume`) documented in `templates/agent-tool-description.md:114–117`
-  and `templates/SYSTEM.md:244–247`, but no source file in this repo
-  registers those names — they are not in `pi-subagents/src/index.ts`
-  either. The orchestrator's `setActiveTools` therefore passes them
-  through `pi` filtering, which silently drops unknown names. Live
-  behavior: the runtime sees only the 3 subagents tools
-  (`Agent` / `get_subagent_result` / `steer_subagent`). Treat those
+  `subagent_resume`) documented in `templates/SYSTEM.md`, but no
+  source file in this repo registers those names — they are not in
+  `pi-subagents/src/index.ts` either. The orchestrator's
+  `setActiveTools` therefore passes them through `pi` filtering, which
+  silently drops unknown names. Live behavior: the runtime sees only
+  the 3 subagents tools (`Agent` / `get_subagent_result` /
+  `steer_subagent`). Treat those
   four names as docs-only placeholders — they are referenced in the
   install scripts and templates, not in any registered handler.
 

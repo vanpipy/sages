@@ -32,7 +32,6 @@ to behave as advertised unless the LLM honors the soft-mode rules in
 | `package.json` | The monorepo root manifest (`@sages/sages`, private, workspaces). |
 | `package-lock.json` | npm lockfile. (The workspace packages also ship a `bun.lock`; npm/yarn coexist.) |
 | `bun.lock` | Bun lockfile used by the orchestrator's `bun run typecheck` / `bun test` gates. |
-| `taskFeeding.md` | Free-form notes on the `task-feeder` flow (background task creation + auto-spawn), kept at the root for the LLM that drives user `/tasks create "<subject>"` style flows. |
 | `.gitignore` | Standard ignores (`node_modules/`, `dist/`, `.pi/`, etc.). |
 | `.husky/` | Git hooks; `husky install` is wired via the root `prepare` script. |
 | `.pi/` | Per-workspace orchestrator runtime state (session artifacts). Not committed (`.gitignore`). |
@@ -74,18 +73,18 @@ to behave as advertised unless the LLM honors the soft-mode rules in
 - **Layer table** (`README.md:5–9`): three rows mapping
   `pi-orchestrator` → Planning, `pi-tasks` → Tracking, `pi-subagents` →
   Executing.
-- **Runtime diagram** (`README.md:19–53`): the `## How it works`
+- **Runtime diagram** (`README.md:20–54`): the `## How it works`
   section — ASCII art of the LLM → `TaskCreate` × N → `TaskStore` →
   `TaskExecute` → cross-extension RPC → `AgentManager` → detached pi
   session → result event → LLM loop.
-- **Soft mode policy** (`README.md:54–62`): the
+- **Soft mode policy** (`README.md:55–63`): the
   `### Soft mode policy (GC-2026-031)` subsection — restates
   GC-2026-031: the orchestrator curates a tool allowlist but never
   blocks commands.
-- **Quick start** (`README.md:63–79`): the `## Quick start` section —
+- **Quick start** (`README.md:64–82`): the `## Quick start` section —
   the `install.sh` one-liner and the `TaskCreate × N + TaskExecute`
   workflow.
-- **Repository layout** (`README.md:80–89`): the
+- **Repository layout** (`README.md:83–92`): the
   `## Repository layout` table — one row per package, naming the
   orchestrator's tool surface and the standard tasks / subagents
   shapes.
@@ -94,60 +93,39 @@ to behave as advertised unless the LLM honors the soft-mode rules in
 
 The most important LLM-facing doc in the repo. Sections:
 
-- **The three packages and their roles** (`AGENTS.md:7–26`): table
+- **The three packages and their roles** (`AGENTS.md:7–27`): table
   naming the Task Board / Task Orchestrator / Task Executor
   shorthands; declares the sole-creator / sole-consumer boundary
   (`only the Task Orchestrator calls TaskCreate`).
-- **What you are** (`AGENTS.md:28–53`): the three guiding principles —
+- **What you are** (`AGENTS.md:28–54`): the three guiding principles —
   soft-mode, managed-worktree dispatch for production code, current-
   workspace dispatch for meta-files.
-- **The orchestrator tool surface** (`AGENTS.md:55–71`): documents
-  `task_inspect` / `task_consume` / `task_convert_intent` (note: this
-  doc was updated mid-stream; the README still refers to a single
-  `orchestrate` tool that the orchestrator no longer ships — see
-  [`pi-orchestrator.md`](./pi-orchestrator.md) for what the code
-  actually registers).
-- **The shipped subagent types** (`AGENTS.md:73–92`): `Developer` and
-  `Reviewer` as the two built-in defaults from `@s/default-agents.ts`.
-- **Profiles** (`AGENTS.md:94–105`): documents GC-2026-073 — the
+- **The orchestrator tool surface** (`AGENTS.md:55–72`): documents
+  `task_inspect` / `task_consume` / `task_convert_intent`.
+- **The shipped subagent types** (`AGENTS.md:76–96`): `Developer` and
+  `Reviewer` as the two built-in defaults from
+  `pi-subagents/src/default-agents.ts`.
+- **Profiles** (`AGENTS.md:97–109`): documents GC-2026-073 — the
   conductor/profile mechanism is gone; the orchestrator's
   `extension.ts` absorbs the three hooks directly.
-- **Soft mode and the task-count threshold** (`AGENTS.md:190–216`):
+- **Soft mode and the task-count threshold** (`AGENTS.md:212–240`):
   the once-per-session reminder fired by `extension.ts:tool_call`.
-- **Red lines** (`AGENTS.md:260–294`): 9 hard "never" rules — no
+- **Red lines** (`AGENTS.md:284–318`): 9 hard "never" rules — no
   `isolation: "worktree"`, no `--no-verify`, no unregistered subagent
   type, no self-declared workflow `PASS`, etc.
-- **Deep references** (`AGENTS.md:295–299`): pointers to the
+- **Deep references** (`AGENTS.md:319–323`): pointers to the
   orchestrator skill, agent-tool description, brainstorming skill,
   and system prompt.
 
-## `taskFeeding.md` — operational notes (413 lines)
-
-Free-form notes on the user-task feeding flow:
-
-- `/tasks create "<subject>"` slash command (implemented in
-  `pi-tasks/src/index.ts:1296`) marks every user-created task as
-  `type='intent'`.
-- The `task-feeder` (GC-2026-108 + GC-2026-113) watches for
-  unconverted intent tasks and auto-spawns them. Cascade IS gated:
-  the gate is `cfg.autoCascade` at `pi-tasks/src/index.ts:315`
-  (`if ((cfg.autoCascade ?? false) && cascadeConfig && latestCtx) { ... }`).
-  When `autoCascade: false` (the default), the orchestrator's
-  `TaskExecute` is the sole cascade driver; when `true`, the board
-  itself fans out unblocked dependents with `agentType` set.
-  Design note: `taskFeeding.md:212` ("When `autoCascade: true`...").
-- References the `sages-board-watch.json` routine template under
-  `pi-orchestrator/templates/sages-routines/` (a 30s pulse that calls
-  `TaskList` and converts intent tasks).
-
 ## How the pieces fit (runtime)
 
-The high-level runtime loop, per `README.md:19–53`:
+The high-level runtime loop, per `README.md:20–54`:
 
 1. The LLM in the main session calls `TaskCreate × N` (one per phase,
    with `agentType` set) and `TaskExecute` on the first ready task.
-   For the standard 2-phase shape, the LLM may use the
-   `orchestrate(plan)` convenience tool (`pi-orchestrator`).
+   For intent-driven workflows, the LLM may use the
+   `task_convert_intent(task_id, plan)` structured intent-to-plan
+   converter (see [`pi-orchestrator.md`](./pi-orchestrator.md)).
 2. `pi-tasks` writes to a file-backed `TaskStore` at
    `${ORCHESTRATOR_WORKDIR}/${projectKey(cwd)}/tasks/tasks.json` (see
    [`pi-tasks.md`](./pi-tasks.md#key-symbols)). Cascade fires on

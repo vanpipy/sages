@@ -99,21 +99,20 @@ Top 10, ordered by importance:
      registered at `:2302`), `SubagentWorkflow` (`:2408` /
      registered at `:2582`), `get_subagent_result` (`:2732` /
      `:2733`), `steer_subagent` (`:2821` / `:2822`).
-   - 1 message renderer (`subagent-notification`, `:308`) for the
-     Claude-Code-style `<task-notification>` cards.
+    - 1 message renderer (`subagent-notification`, `:308`) for the
+      Claude-Code-style `<task-notification>` cards.
    - 1 entry renderer for workflow runs (`:378`).
    - 1 CLI flag (`WORKFLOW_FILE_FLAG`, `:384`).
    - 1 slash command (`/agents`, `:3968`).
-   - The `AgentManager` singleton (`:613`), assigned to
-     `Symbol.for("pi-subagents:manager")` for cross-package access.
+    - The `AgentManager` singleton (constructed at `:568` in the
+      default export body), assigned to
+      `Symbol.for("pi-subagents:manager")` for cross-package access.
    - The `registerRpcHandlers` call (`:799`) — the bridge pi-tasks's
      `TaskExecute` reaches.
 
-3. **`DEFAULT_AGENTS`** — `pi-subagents/src/default-agents.ts:9`. The
-   two built-in agent configs (`Developer`, `Reviewer`). Both have
-   `extensions: true, skills: true, systemPrompt: "", promptMode:
-   "append", isDefault: true`. The canonical names are exported as
-   `DEFAULT_AGENT_NAMES = ["Developer", "Reviewer"]`
+3. **`DEFAULT_AGENTS`** — `pi-subagents/src/default-agents.ts:22`. The
+   two built-in agent configs (`Developer`, `Reviewer`). The canonical
+   names are exported as `DEFAULT_AGENT_NAMES = ["Developer", "Reviewer"]`
    (`pi-subagents/src/types.ts:15`). The orchestrator's `task_consume`
    and the Reviewer prompt both reference these names.
 
