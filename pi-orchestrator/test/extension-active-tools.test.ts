@@ -245,7 +245,7 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 		for (const t of SUBAGENT_TOOLS) expect(tools).toContain(t);
 		// BASELINE family
 		for (const t of BASELINE_TOOLS) expect(tools).toContain(t);
-		// PI_ROUTINES family (opt-in via install.sh; @davecodes/pi-routines)
+		// PI_ROUTINES family (opt-in via install.sh; sage pi-routines peer)
 		for (const t of PI_ROUTINES_TOOLS) expect(tools).toContain(t);
 		// Total: 7 + 7 + 11 + 7 + 6 = 38, no duplicates
 		expect(tools.length).toBe(38);

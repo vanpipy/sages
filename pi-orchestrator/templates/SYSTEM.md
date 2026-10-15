@@ -155,20 +155,23 @@ an `agentType` that the runtime spawns when unblocked.
 | `TaskOutput` | wait for an executed task's report. |
 | `TaskStop` | stop a running task. |
 
-#### pi-routines (6) — `@davecodes/pi-routines` (opt-in)
+#### pi-routines (6) — `pi-routines` (opt-in)
 
 Optional scheduled / event-driven routines extension. If installed
 (by `install.sh`), these six tools let the LLM manage routines that
 fire on `pulse` / `cron` / `oneoff` / `hook` / `api` / `github`
-triggers. Sages ships a `sages-board-watch` template (installed to
-`~/.pi/agent/extensions/routines/templates/`) that drives a 30s
-pulse to route out-of-turn task additions — covering the
-out-of-band awareness gap between user / `/tasks create` writes
-and the LLM's next turn. `install.sh` activates the routine by
-default (writes its entry into `state.json` atomically), so no
-manual `/routine-install` step is needed. To opt out, run
-`/routine-stop sages-board-watch` in any pi session; re-running
-`install.sh` re-creates the entry.
+triggers. `pi-routines` is a SAGES sage workspace peer
+(./pi-routines/, fork of `@davecodes/pi-routines@0.6.0`; install.sh
+file-copies it to `~/.pi/packages/pi-routines/` rather than installing
+from npm). Sages ships a `sages-board-watch` template (installed to
+both `~/.pi/agent/extensions/routines/templates/` and the pi-routines
+peer's `templates/` dir) that drives a 30s pulse to route out-of-turn
+task additions — covering the out-of-band awareness gap between user
+/ `/tasks create` writes and the LLM's next turn. `install.sh`
+activates the routine by default (writes its entry into `state.json`
+atomically), so no manual `/routine-install` step is needed. To opt
+out, run `/routine-stop sages-board-watch` in any pi session;
+re-running `install.sh` re-creates the entry.
 
 | Tool | Use for |
 |---|---|

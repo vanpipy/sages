@@ -93,8 +93,9 @@ Top 10, ordered by importance:
    - `PI_TASKS_TOOLS` (`:91`): the 7 `Task*` tools from `@sages/pi-tasks`.
    - `AFT_TOOLS` (`:105`): the 11 AFT tools from `@cortexkit/aft-pi`.
    - `PI_ROUTINES_TOOLS` (`:135`): the 6 routines tools from
-     `@davecodes/pi-routines` (opt-in; missing extension degrades
-     gracefully).
+     `pi-routines` (SAGES sage peer / fork of
+     `@davecodes/pi-routines@0.6.0`; opt-in; missing extension
+     degrades gracefully).
 
 4. **`task_inspect`** — `pi-orchestrator/src/orchestrator-tool.ts:116`
    (function) / registered at `:505`.
