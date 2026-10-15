@@ -29,7 +29,7 @@ consumer of the task flow — it does not manage it.
 
 | Concern | Mechanism |
 |---|---|
-| **Tool allowlist at session_start** | `pi.setActiveTools([...PI_TASKS, ...SUBAGENT, ...AFT, ...BASELINE, ...PI_ROUTINES])`. None of those tools are owned by the orchestrator (they come from pi-subagents, pi-tasks, @cortexkit/aft-pi, pi-coding-agent itself, and `pi-routines` [SAGES sage peer / fork of `@davecodes/pi-routines@0.6.0`]); the orchestrator only curates the allowlist. |
+| **Tool allowlist at session_start** | `pi.setActiveTools([...PI_TASKS, ...SUBAGENT, ...AFT, ...BASELINE, ...PI_ROUTINES])`. None of those tools are owned by the orchestrator (they come from pi-subagents, pi-tasks, @cortexkit/aft-pi, pi-coding-agent itself, and `pi-routines` [SAGES sage peer; see `pi-routines/SAGES-FORK.md` for fork lineage]); the orchestrator only curates the allowlist. |
 | **Constitution overlay at before_agent_start** | Prepends `templates/SYSTEM.md` to the LLM's system prompt. The system prompt is the orchestrator's only persistent instruction surface. |
 | **Soft-mode reminder on first side-effecting call** | On the first `bash` / `edit` / `write` tool call per session, appends a reminder that recommends the pi-tasks workflow for active task lists of >2 items. Fires once per session; subsequent calls are silent. |
 | **`task_inspect(task_id)` tool** | Read type+status+agentType. The LLM's first call on every task. Routes to `task_convert_intent` (intent), `TaskExecute` (plan pending), `TaskOutput(block=true)` (plan in_progress), or `task_consume` (plan completed). Lighter than `TaskGet`. |

@@ -60,7 +60,9 @@ function buildSandbox(): string {
 	);
 
 	// Symlink the four peer dirs so install.sh's sanity check passes.
-	const peers = ["pi-codebase-memory", "pi-subagents", "pi-evaluator", "pi-tasks"];
+	// pi-routines was added in the pi-routines-fork-2026-Q1 GC; its
+	// inclusion here mirrors install-sages-routines-templates.test.ts.
+	const peers = ["pi-codebase-memory", "pi-subagents", "pi-evaluator", "pi-tasks", "pi-routines"];
 	for (const peer of peers) {
 		const linkPath = join(sandbox, peer);
 		const realPath = join(REPO_ROOT, peer);

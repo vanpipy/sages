@@ -10,7 +10,7 @@
 # before_agent_start, tool_call hooks). The orchestrator is now the
 # sole entrypoint package; this script installs it plus all peers.
 #
-#   Local-peer (file-copy) extensions — all four are sourced from the
+#   Local-peer (file-copy) extensions — all six are sourced from the
 #   local sages repo (the parent directory of
 #   pi-orchestrator/scripts/install.sh). No `git clone`, no remote
 #   ref pin: install.sh reads the source files from its own containing
@@ -26,30 +26,22 @@
 #                              flow. Pre-chore/remove-goal-contract the orchestrator also
 #                              consumed it for decompose_task chains; post that commit the
 #                              only consumer is the LLM's own TaskCreate usage.
+#     pi-routines          → ~/.pi/packages/pi-routines  (SAGES sage peer; see
+#                              pi-routines/SAGES-FORK.md for fork lineage and
+#                              upstream attribution to @davecodes/pi-routines@0.6.0;
+#                              GC-2026-pi-routines-fork-2026-Q1)
+#                              Scheduled / event-driven routines extension. Sages uses
+#                              this for the board-watch periodic task-routing pulse.
+#                              Adds 6 LLM tools (routine_create / list / delete /
+#                              run_now / set_state / resume) and ships a
+#                              `sages-board-watch` routine template that is activated
+#                              by default at install — no manual /routine-install step
+#                              is needed.
 #
 #   npm-installed extensions (--prefix ~/.pi/agent/npm), latest
 #   from the npm registry — no version pin (see header below):
 #     pi-mcp-adapter                  → npm:pi-mcp-adapter
 #     @cortexkit/aft-pi               → npm:@cortexkit/aft-pi
-#
-#   sage workspace peers (file-copied from $LOCAL_REPO_ROOT/<peer>/,
-#   bun install to populate node_modules, registered in settings.json):
-#     pi-routines                     → ./pi-routines/  (Sages fork of
-#                                       @davecodes/pi-routines@0.6.0;
-#                                       pi-routines-fork-2026-Q1)
-#                                       Scheduled / event-driven routines:
-#                                       pulse/cron/hook/api/github trigger
-#                                       kinds. Sages uses this for the
-#                                       board-watch periodic task-routing
-#                                       pulse — see post-install hint.
-#                                       Adds 6 LLM tools: routine_create /
-#                                       routine_list / routine_delete /
-#                                       routine_run_now / routine_set_state
-#                                       / routine_resume. The
-#                                       sages-board-watch routine is
-#                                       activated by default at install,
-#                                       so no manual /routine-install
-#                                       step is needed.
 #
 #   AFT (@cortexkit/aft-pi) — full install path baked into install.sh as
 #   of GC-2026-096. Three pieces, each soft-fail:
@@ -101,9 +93,10 @@ LOCAL_REPO_ROOT="${LOCAL_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 if [[ ! -d "$LOCAL_REPO_ROOT/pi-orchestrator" \
    || ! -d "$LOCAL_REPO_ROOT/pi-codebase-memory" \
    || ! -d "$LOCAL_REPO_ROOT/pi-subagents" \
-   || ! -d "$LOCAL_REPO_ROOT/pi-evaluator" ]]; then
+   || ! -d "$LOCAL_REPO_ROOT/pi-evaluator" \
+   || ! -d "$LOCAL_REPO_ROOT/pi-routines" ]]; then
   echo "Error: LOCAL_REPO_ROOT sanity check failed" >&2
-  echo "  Expected: <repo>/{pi-orchestrator,pi-codebase-memory,pi-subagents,pi-evaluator}/" >&2
+  echo "  Expected: <repo>/{pi-orchestrator,pi-codebase-memory,pi-subagents,pi-evaluator,pi-routines}/" >&2
   echo "  Got: $LOCAL_REPO_ROOT" >&2
   echo "  install.sh must live at <repo>/pi-orchestrator/scripts/install.sh" >&2
   exit 1
@@ -2108,17 +2101,16 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
-# pi-routines (sage peer, fork of @davecodes/pi-routines@0.6.0):
+# pi-routines (sage peer — fork of @davecodes/pi-routines@0.6.0;
+# see pi-routines/SAGES-FORK.md for lineage and divergence list):
 # scheduled / event-driven routines extension. Sages uses this for
 # the periodic board-watch pulse (case 2/3 awareness from the
 # orchestrator awareness RFC).
 #
-# Sages pi-routines-fork-2026-Q1 GC: pi-routines is a SAGES WORKSPACE
-# PEER (./pi-routines/ alongside pi-orchestrator/, pi-subagents/, etc.)
-# rather than an npm dependency. The install pattern matches
-# install_pi_subagents / install_pi_evaluator / install_pi_tasks —
-# file-copy from $LOCAL_REPO_ROOT/pi-routines to $PI_ROUTINES_DEST_DIR,
-# then bun install to populate node_modules, then register the path
+# Install pattern matches install_pi_subagents /
+# install_pi_evaluator / install_pi_tasks — file-copy from
+# $LOCAL_REPO_ROOT/pi-routines to $PI_ROUTINES_DEST_DIR, then
+# bun install to populate node_modules, then register the path
 # in settings.json so the pi runtime can load the extension.
 # ────────────────────────────────────────────────────────────
 
@@ -2666,14 +2658,14 @@ install() {
   # the orchestrator's `file:../pi-tasks` dep can resolve during bun install.
   install_pi_tasks || exit 1
 
-  # Install pi-routines (sage peer, fork of @davecodes/pi-routines@0.6.0) —
-  # scheduled / event-driven routines extension used by the Sages
-  # orchestrator for the periodic board-watch pulse (case 2/3: out-of-turn
-  # task creation awareness). Sages pi-routines-fork-2026-Q1 GC: file-copy
-  # from $LOCAL_REPO_ROOT/pi-routines rather than npm. pi-routines is not a
-  # file: dep of pi-orchestrator/package.json so it doesn't need to land
-  # before install_orchestrator_files — but we install it with the other
-  # sage peers for grouping.
+  # Install pi-routines (sage peer — see pi-routines/SAGES-FORK.md for
+  # fork lineage) — scheduled / event-driven routines extension used by
+  # the Sages orchestrator for the periodic board-watch pulse (case 2/3:
+  # out-of-turn task creation awareness). File-copied from
+  # $LOCAL_REPO_ROOT/pi-routines rather than installed from npm.
+  # pi-routines is not a file: dep of pi-orchestrator/package.json so it
+  # doesn't need to land before install_orchestrator_files — but we
+  # install it with the other sage peers for grouping.
   install_pi_routines || exit 1
 
   # Install codebase-memory-mcp binary (~50MB download from GitHub releases)

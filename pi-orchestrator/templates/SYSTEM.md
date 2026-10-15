@@ -160,10 +160,10 @@ an `agentType` that the runtime spawns when unblocked.
 Optional scheduled / event-driven routines extension. If installed
 (by `install.sh`), these six tools let the LLM manage routines that
 fire on `pulse` / `cron` / `oneoff` / `hook` / `api` / `github`
-triggers. `pi-routines` is a SAGES sage workspace peer
-(./pi-routines/, fork of `@davecodes/pi-routines@0.6.0`; install.sh
-file-copies it to `~/.pi/packages/pi-routines/` rather than installing
-from npm). Sages ships a `sages-board-watch` template (installed to
+triggers. `pi-routines` is a SAGES sage peer (file-copied from
+./pi-routines/ to `~/.pi/packages/pi-routines/` by install.sh; see
+`pi-routines/SAGES-FORK.md` for fork lineage). Sages ships a
+`sages-board-watch` template (installed to
 both `~/.pi/agent/extensions/routines/templates/` and the pi-routines
 peer's `templates/` dir) that drives a 30s pulse to route out-of-turn
 task additions — covering the out-of-band awareness gap between user
