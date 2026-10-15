@@ -2597,7 +2597,7 @@ uninstall_aft_binary() {
 # Mode 1: full install (default)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + 4-agent subagent pipeline..."
+  echo "==> Installing pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + pi-routines..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -2883,7 +2883,7 @@ install_sync_only() {
 # Uninstall (removes both orchestrator and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + 4-agent subagent pipeline..."
+  echo "==> Uninstalling pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + pi-routines..."
 
   # Remove orchestrator
   if [[ -d "$PKG_DIR" ]]; then
