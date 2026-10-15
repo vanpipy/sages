@@ -1,6 +1,6 @@
 {
-  "name": "pi-routines",
-  "version": "0.6.0",
+  "name": "@sages/pi-routines",
+  "version": "0.1.0",
   "type": "module",
   "files": [
     "extensions/",
