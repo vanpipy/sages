@@ -126,17 +126,6 @@ export interface Approach {
   implementationHints?: string;
 }
 
-export interface ApproachComparison {
-  /** All proposed approaches */
-  approaches: Approach[];
-  /** Recommended approach index */
-  recommendedIndex: number;
-  /** Comparison criteria */
-  criteria: string[];
-  /** Comparison matrix */
-  matrix: boolean[][];
-}
-
 // ============================================================================
 // Design Section Types
 // ============================================================================
@@ -277,28 +266,4 @@ export type BrainstormEvent =
   | { type: "DEFER_TRANSITION" }
   | { type: "CANCEL" };
 
-// ============================================================================
-// Tool Definition
-// ============================================================================
 
-export const BRAINSTORM_TOOL = {
-  name: "brainstorm",
-  description: "Explore user intent, propose approaches, and design before implementation",
-  parameters: {
-    type: "object",
-    properties: {
-      request: {
-        type: "string",
-        description: "Optional initial request or topic to brainstorm",
-      },
-      context: {
-        type: "string",
-        description: "Optional project path (defaults to current workspace)",
-      },
-    },
-  },
-};
-
-export default {
-  BRAINSTORM_TOOL,
-};

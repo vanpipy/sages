@@ -333,22 +333,4 @@ export class BrainstormStateMachine {
 // Factory Functions
 // ============================================================================
 
-export function createBrainstormContext(cwd: string, request?: string): BrainstormContext {
-  return {
-    cwd,
-    request: request || '',
-    phase: 'exploring',
-    questionsAsked: 0,
-    revisionCount: 0,
-  };
-}
-
-export function isTerminalPhase(phase: BrainstormPhase): boolean {
-  return phase === 'approved' || phase === 'rejected' || phase === 'cancelled';
-}
-
-export function isActivePhase(phase: BrainstormPhase): boolean {
-  return !isTerminalPhase(phase);
-}
-
 export default BrainstormStateMachine;

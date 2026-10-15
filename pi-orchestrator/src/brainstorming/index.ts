@@ -11,7 +11,7 @@ import { join, basename, dirname } from "node:path";
 // `<tmpdir>/sages-orchestrator`, keyed by `projectKey(cwd)`), so designs
 // land next to the task store — see `pi-tasks/src/task-paths.ts`.
 import { orchestratorDesignsDir } from "@sages/pi-tasks/task-paths";
-import { BrainstormStateMachine, isTerminalPhase, isActivePhase } from "./state";
+import { BrainstormStateMachine } from "./state";
 import type {
   BrainstormParams,
   BrainstormResult,
@@ -682,21 +682,4 @@ export function createOrchestratorContext(
   };
 }
 
-// ============================================================================
-// Tool Definition (for pi agent)
-// ============================================================================
 
-export const BRAINSTORM_TOOL = {
-  name: "brainstorm",
-  description: "Explore user intent, propose approaches, and design before implementation",
-  parameters: {
-    type: "object",
-    properties: {
-      request: {
-        type: "string",
-        description: "Optional initial request or topic to brainstorm",
-      },
-    },
-    required: [],
-  },
-};
