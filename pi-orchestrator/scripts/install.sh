@@ -31,17 +31,25 @@
 #   from the npm registry — no version pin (see header below):
 #     pi-mcp-adapter                  → npm:pi-mcp-adapter
 #     @cortexkit/aft-pi               → npm:@cortexkit/aft-pi
-#     @davecodes/pi-routines          → npm:@davecodes/pi-routines
-#                                       (scheduled / event-driven routines: pulse/cron/hook/api/github
-#                                        trigger kinds. Sages uses this for the board-watch periodic
-#                                        task-routing pulse — see post-install hint. Adds 6 LLM
-#                                        tools: routine_create / routine_list / routine_delete /
-#                                        routine_run_now / routine_set_state / routine_get_state.
-#                                        Enable board-watching in your first pi session:
-#                                          /routine 30s check the Sages board for new intent
-#                                            tasks and route them via task_convert_intent
-#                                        OR use a natural-language schedule:
-#                                          /schedule every 30s watch the Sages board
+#
+#   sage workspace peers (file-copied from $LOCAL_REPO_ROOT/<peer>/,
+#   bun install to populate node_modules, registered in settings.json):
+#     pi-routines                     → ./pi-routines/  (Sages fork of
+#                                       @davecodes/pi-routines@0.6.0;
+#                                       pi-routines-fork-2026-Q1)
+#                                       Scheduled / event-driven routines:
+#                                       pulse/cron/hook/api/github trigger
+#                                       kinds. Sages uses this for the
+#                                       board-watch periodic task-routing
+#                                       pulse — see post-install hint.
+#                                       Adds 6 LLM tools: routine_create /
+#                                       routine_list / routine_delete /
+#                                       routine_run_now / routine_set_state
+#                                       / routine_resume. The
+#                                       sages-board-watch routine is
+#                                       activated by default at install,
+#                                       so no manual /routine-install
+#                                       step is needed.
 #
 #   AFT (@cortexkit/aft-pi) — full install path baked into install.sh as
 #   of GC-2026-096. Three pieces, each soft-fail:
@@ -218,20 +226,21 @@ AFT_SENTINEL="SAGES_TEMPLATE_V1"
 AFT_NPM_PKG="npm:@cortexkit/aft-pi"
 AFT_NPM_DIR="$PI_DIR/agent/npm/node_modules/@cortexkit/aft-pi"
 
-# pi-routines (@davecodes/pi-routines) install info.
+# pi-routines install info (sage peer, file-copied from $LOCAL_REPO_ROOT/pi-routines).
+#
+# Sages pi-routines-fork-2026-Q1 GC: pi-routines is a SAGES WORKSPACE
+# PEER (./pi-routines/ alongside pi-orchestrator/, pi-subagents/, etc.)
+# rather than an npm dependency. install.sh deploys it via the same
+# file-copy install pattern as pi-subagents / pi-evaluator / pi-tasks.
 #
 # Sages uses pi-routines for the periodic task-routing pulse (case 2/3
 # from the orchestrator awareness RFC: out-of-turn task creation). The
 # extension itself is unopinionated — Sages ships a board-watch prompt
-# that the user installs with one slash command after install:
-#   /routine 30s check the Sages board for new intent tasks and route them
-# OR via natural language:
-#   /schedule every 30s watch the Sages board
-#
-# Mirrors the AFT npm-peer install pattern (no @version suffix — install
-# always pulls latest from the npm registry; --force to roll).
-PI_ROUTINES_NPM_PKG="npm:@davecodes/pi-routines"
-PI_ROUTINES_NPM_DIR="$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines"
+# that activates by default at install (see
+# install_sages_board_watch_routine below).
+PI_ROUTINES_SRC_REL="pi-routines"
+PI_ROUTINES_DEST_DIR="$PI_DIR/packages/pi-routines"
+PI_ROUTINES_PKG="$PI_ROUTINES_DEST_DIR"
 # Sages board-watch template — installed to the user-customizable
 # templates dir. Bundled in the Sages repo so versions travel together.
 # Activation is automatic: install.sh writes the routine entry into the
@@ -240,11 +249,13 @@ PI_ROUTINES_NPM_DIR="$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines"
 # re-run install.sh to re-enable.
 SAGES_ROUTINES_TEMPLATES_SRC="$SCRIPT_DIR/../templates/sages-routines"
 SAGES_ROUTINES_TEMPLATES_DEST="$HOME/.pi/agent/extensions/routines/templates"
-# The npm package's bundled templates dir. /routine-install reads
-# from here (pi-routines/src/types.ts:466 → ../templates), so this is
-# the path that makes `/routine-install sages-board-watch` succeed.
-# Mirrors PI_ROUTINES_NPM_DIR but with `/templates` appended.
-SAGES_ROUTINES_TEMPLATES_NPM_DEST="$PI_ROUTINES_NPM_DIR/templates"
+# The local pi-routines peer's bundled templates dir. /routine-install
+# reads from here (pi-routines/src/types.ts:501 →
+# fileURLToPath(new URL("../templates", import.meta.url))), so this
+# is the path that makes `/routine-install sages-board-watch` succeed
+# once pi-routines is installed to $PI_ROUTINES_DEST_DIR.
+# Mirrors PI_ROUTINES_DEST_DIR but with `/templates` appended.
+SAGES_ROUTINES_TEMPLATES_PKG_DEST="$PI_ROUTINES_DEST_DIR/templates"
 # pi-routines' persisted store. Written atomically by the runtime at
 # 0o600 — install.sh mirrors that exact pattern when seeding the
 # sages-board-watch routine.
@@ -2097,18 +2108,26 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
-# pi-routines (@davecodes/pi-routines): scheduled / event-driven
-# routines extension. Sages uses this for the periodic board-watch
-# pulse (case 2/3 awareness from the orchestrator awareness RFC).
-# Mirrors install_aft_pi_npm / uninstall_aft_pi_npm exactly — same
-# soft-fail semantics, same settings.json registration pattern.
+# pi-routines (sage peer, fork of @davecodes/pi-routines@0.6.0):
+# scheduled / event-driven routines extension. Sages uses this for
+# the periodic board-watch pulse (case 2/3 awareness from the
+# orchestrator awareness RFC).
+#
+# Sages pi-routines-fork-2026-Q1 GC: pi-routines is a SAGES WORKSPACE
+# PEER (./pi-routines/ alongside pi-orchestrator/, pi-subagents/, etc.)
+# rather than an npm dependency. The install pattern matches
+# install_pi_subagents / install_pi_evaluator / install_pi_tasks —
+# file-copy from $LOCAL_REPO_ROOT/pi-routines to $PI_ROUTINES_DEST_DIR,
+# then bun install to populate node_modules, then register the path
+# in settings.json so the pi runtime can load the extension.
 # ────────────────────────────────────────────────────────────
 
 is_pi_routines_installed() {
-  # Same auto-recovery invariant as is_aft_pi_npm_installed: both the
+  # Same auto-recovery invariant as is_pi_subagents_installed: both the
   # settings.json registration AND the dest dir must exist. Substring
-  # match on `pi-routines` is safe here — npm scope is `@davecodes/`
-  # and Sages has no other `pi-routines*` package registered.
+  # match on `pi-routines` is safe here — Sages has no other
+  # `pi-routines*` package registered, so the destination path
+  # uniquely identifies the install.
   local settings="$PI_DIR/agent/settings.json"
   [[ ! -f "$settings" ]] && return 1
 
@@ -2116,8 +2135,8 @@ is_pi_routines_installed() {
 import json, os, sys
 try:
     d = json.load(open('$settings'))
-    pkg = '$PI_ROUTINES_NPM_PKG'
-    if pkg in d.get('packages', []) and os.path.isdir('$PI_ROUTINES_NPM_DIR'):
+    pkg = '$PI_ROUTINES_PKG'
+    if pkg in d.get('packages', []) and os.path.isdir(pkg):
         sys.exit(0)
     sys.exit(1)
 except Exception:
@@ -2125,52 +2144,74 @@ except Exception:
 " 2>/dev/null
 }
 
-install_pi_routines_npm() {
-  echo "==> Installing @davecodes/pi-routines npm peer..."
-  if is_pi_routines_installed && [[ "${FORCE:-false}" != true ]]; then
-    echo "  @davecodes/pi-routines already installed (use --force to reinstall)"
+install_pi_routines_files() {
+  # File-copy the sage peer from $LOCAL_REPO_ROOT/pi-routines/ to
+  # $PI_ROUTINES_DEST_DIR, then bun install to populate node_modules.
+  # Mirrors install_pi_subagents_files / install_pi_evaluator_files
+  # exactly — sage peer file-copy install pattern.
+  local src_root="$LOCAL_REPO_ROOT/$PI_ROUTINES_SRC_REL"
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in local sages repo, skipping pi-routines files"
     return 0
-  fi
-  if [[ "${FORCE:-false}" == true ]] && is_pi_routines_installed; then
-    echo "  Force-reinstall: removing previous @davecodes/pi-routines first"
-    uninstall_pi_routines_npm
-  fi
-  # Soft-fail when pi CLI is missing — mirrors install_aft_pi_npm.
-  # Without pi on PATH we have no way to know whether the user intends
-  # to use the npm-prefix install or a different path.
-  if ! command -v pi &>/dev/null; then
-    echo "  'pi' command not found; user must install manually"
-    return 0
-  fi
-  _clean_npm_prefix_dir "$PI_DIR/agent/npm"
-  local npm_spec="${PI_ROUTINES_NPM_PKG#npm:}"
-  if (cd "${LOCAL_REPO_ROOT:-/tmp}" && \
-    npm install --prefix "$PI_DIR/agent/npm" --legacy-peer-deps --ignore-scripts "$npm_spec" 2>&1 | tail -3); then
-    local settings="$PI_DIR/agent/settings.json"
-    mkdir -p "$(dirname "$settings")"
-    [[ -f "$settings" ]] || echo '{"packages": []}' > "$settings"
-    python3 -c "
-import json, re
-f, pkg = '$settings', '$PI_ROUTINES_NPM_PKG'
-PKG_PATTERN = re.compile(r'^(npm:@davecodes/pi-routines(@.+)?|.*/pi-routines)\$')
-try: d = json.load(open(f))
-except: d = {'packages': []}
-pkgs = [p for p in d.get('packages', []) if not PKG_PATTERN.match(p)]
-if pkg not in pkgs:
-    pkgs.append(pkg)
-d['packages'] = pkgs
-json.dump(d, open(f, 'w'), indent=2)
-print('  Registered', pkg)
-"
+  }
+  if [[ -d "$PI_ROUTINES_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-routines files (exists, use --force)"
   else
-    echo "  Warning: npm install failed; @davecodes/pi-routines won't be available until manually installed"
-    echo "  To retry: npm install --prefix $PI_DIR/agent/npm --ignore-scripts $npm_spec"
+    rm -rf "$PI_ROUTINES_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_ROUTINES_DEST_DIR"
+    echo "  Installed pi-routines files to $PI_ROUTINES_DEST_DIR"
+  fi
+
+  if [[ -f "$PI_ROUTINES_DEST_DIR/package.json" ]] && command -v bun &>/dev/null; then
+    # pi-routines ships with a pnpm-lock.yaml; bun install resolves it
+    # and populates node_modules with the runtime deps (nanoid +
+    # typebox). The peer deps (@earendil-works/pi-coding-agent +
+    # pi-tui) are provided by the host pi runtime and don't need
+    # explicit install in this dir.
+    if ! (cd "$PI_ROUTINES_DEST_DIR" && bun install 2>&1 | tail -10); then
+      echo "  ERROR: pi-routines bun install failed"
+      echo "  Run 'cd $PI_ROUTINES_DEST_DIR && bun install' manually to diagnose"
+      return 1
+    fi
   fi
 }
 
-uninstall_pi_routines_npm() {
-  # Strip any form (legacy version-less, pinned @version, or /path/...
-  # local-fork) from settings.json. Mirrors uninstall_aft_pi_npm.
+install_pi_routines() {
+  echo "==> Installing pi-routines..."
+  # File-copy from $LOCAL_REPO_ROOT first so settings.json points at a
+  # populated dir; otherwise the is_*_installed guard below would
+  # short-circuit on a missing dest and leave a registration-only entry.
+  if ! install_pi_routines_files; then
+    echo "  Error: install_pi_routines_files failed, aborting"
+    return 1
+  fi
+  if is_pi_routines_installed; then
+    echo "  pi-routines already registered in settings.json"
+  else
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_ROUTINES_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+  fi
+  echo "  pi-routines installed"
+}
+
+uninstall_pi_routines() {
+  echo "==> Uninstalling pi-routines..."
+
+  # 1) Strip both forms from settings.json (sage-peer path AND any
+  # legacy npm:@davecodes/pi-routines entry left over from
+  # pre-pi-routines-fork-2026-Q1 installs).
   local settings="$PI_DIR/agent/settings.json"
   [[ -f "$settings" ]] && python3 -c "
 import json, re, sys
@@ -2182,17 +2223,25 @@ try:
     if len(new_pkgs) != len(pkgs):
         d['packages'] = new_pkgs
         json.dump(d, open(f, 'w'), indent=2)
-        print('  Removed @davecodes/pi-routines from settings.json')
+        print('  Removed pi-routines entries from settings.json')
 except Exception as e:
-    sys.exit(1)
+    print('  Warning:', e, file=sys.stderr)
 " 2>/dev/null || true
 
-  if [[ -d "$PI_ROUTINES_NPM_DIR" ]]; then
-    rm -rf "$PI_ROUTINES_NPM_DIR"
-    echo "  Removed $PI_ROUTINES_NPM_DIR"
+  # 2) Remove the package directory if it exists.
+  if [[ -d "$PI_ROUTINES_DEST_DIR" ]]; then
+    rm -rf "$PI_ROUTINES_DEST_DIR"
+    echo "  Removed $PI_ROUTINES_DEST_DIR"
   fi
 
-  echo "  @davecodes/pi-routines uninstalled"
+  # 3) Remove the legacy npm install dir if present (cleanup for
+  # users upgrading from pre-pi-routines-fork-2026-Q1 installs).
+  if [[ -d "$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines" ]]; then
+    rm -rf "$PI_DIR/agent/npm/node_modules/@davecodes/pi-routines"
+    echo "  Removed legacy npm:@davecodes/pi-routines dir"
+  fi
+
+  echo "  pi-routines uninstalled"
 }
 
 install_sages_routines_templates() {
@@ -2202,14 +2251,16 @@ install_sages_routines_templates() {
   #
   #   1. $SAGES_ROUTINES_TEMPLATES_DEST — the user-extensions dir, for
   #      reference and any future consumer that reads there.
-  #   2. $SAGES_ROUTINES_TEMPLATES_NPM_DEST — the npm package's bundled
-  #      templates dir. /routine-install reads from here
-  #      (pi-routines/src/types.ts:466 → ../templates), so this is the
-  #      path that makes `/routine-install sages-board-watch` succeed.
+  #   2. $SAGES_ROUTINES_TEMPLATES_PKG_DEST — the local pi-routines sage
+  #      peer's bundled templates dir. /routine-install reads from here
+  #      (pi-routines/src/types.ts:501 →
+  #      fileURLToPath(new URL("../templates", import.meta.url))), so
+  #      this is the path that makes `/routine-install
+  #      sages-board-watch` succeed.
   #
   # Copy is idempotent: a newer source file overwrites an older dest.
-  # The npm package dir may not exist yet (if install_pi_routines_npm
-  # hasn't run, or has been uninstalled) — in that case the npm copy
+  # The peer package dir may not exist yet (if install_pi_routines
+  # hasn't run, or has been uninstalled) — in that case the peer copy
   # is silently skipped; the extensions-dir copy still succeeds and
   # the state.json write (install_sages_board_watch_routine below)
   # still arms the watch for direct use.
@@ -2218,20 +2269,20 @@ install_sages_routines_templates() {
     return 0
   fi
   mkdir -p "$SAGES_ROUTINES_TEMPLATES_DEST"
-  local copied_ext=0 copied_npm=0
+  local copied_ext=0 copied_pkg=0
   for src in "$SAGES_ROUTINES_TEMPLATES_SRC"/*.json; do
     [[ ! -f "$src" ]] && continue
     local name; name=$(basename "$src")
     cp "$src" "$SAGES_ROUTINES_TEMPLATES_DEST/$name" && copied_ext=$((copied_ext + 1))
-    if [[ -d "$SAGES_ROUTINES_TEMPLATES_NPM_DEST" ]]; then
-      cp "$src" "$SAGES_ROUTINES_TEMPLATES_NPM_DEST/$name" && copied_npm=$((copied_npm + 1))
+    if [[ -d "$SAGES_ROUTINES_TEMPLATES_PKG_DEST" ]]; then
+      cp "$src" "$SAGES_ROUTINES_TEMPLATES_PKG_DEST/$name" && copied_pkg=$((copied_pkg + 1))
     fi
   done
   if [[ $copied_ext -gt 0 ]]; then
     echo "  Installed $copied_ext Sages routine template(s) to $SAGES_ROUTINES_TEMPLATES_DEST"
   fi
-  if [[ $copied_npm -gt 0 ]]; then
-    echo "  Installed $copied_npm Sages routine template(s) to $SAGES_ROUTINES_TEMPLATES_NPM_DEST"
+  if [[ $copied_pkg -gt 0 ]]; then
+    echo "  Installed $copied_pkg Sages routine template(s) to $SAGES_ROUTINES_TEMPLATES_PKG_DEST"
   fi
   # Activate the board-watch routine by default. Soft-fail: if the
   # routines extension is not installed, the routine write is a no-op
@@ -2615,6 +2666,16 @@ install() {
   # the orchestrator's `file:../pi-tasks` dep can resolve during bun install.
   install_pi_tasks || exit 1
 
+  # Install pi-routines (sage peer, fork of @davecodes/pi-routines@0.6.0) —
+  # scheduled / event-driven routines extension used by the Sages
+  # orchestrator for the periodic board-watch pulse (case 2/3: out-of-turn
+  # task creation awareness). Sages pi-routines-fork-2026-Q1 GC: file-copy
+  # from $LOCAL_REPO_ROOT/pi-routines rather than npm. pi-routines is not a
+  # file: dep of pi-orchestrator/package.json so it doesn't need to land
+  # before install_orchestrator_files — but we install it with the other
+  # sage peers for grouping.
+  install_pi_routines || exit 1
+
   # Install codebase-memory-mcp binary (~50MB download from GitHub releases)
   install_codebase_memory_mcp_binary || {
     echo "  Note: codebase-memory-mcp binary install failed."
@@ -2646,10 +2707,10 @@ install() {
   install_aft_pi_npm || true
   install_aft_binary || true
 
-  # Install pi-routines (@davecodes/pi-routines) — periodic-task polling
-  # for the Sages orchestrator (case 2/3: out-of-turn task creation
-  # awareness). Two soft-fail steps: npm peer + Sages routine templates.
-  install_pi_routines_npm || true
+  # Activate the Sages sages-board-watch routine on the now-installed
+  # pi-routines peer. Soft-fail: if templates dir is missing or the
+  # routines extension isn't fully wired, the user can re-run
+  # install.sh once the dependency is in place.
   install_sages_routines_templates || true
 
   # After ALL peer file copies are done, set up node_modules symlinks pointing
@@ -2861,9 +2922,9 @@ uninstall() {
   uninstall_aft_binary || true
 
   # Uninstall pi-routines — reverse order from install: templates first,
-  # then the npm peer.
+  # then the sage peer.
   uninstall_sages_routines_templates || true
-  uninstall_pi_routines_npm || true
+  uninstall_pi_routines || true
 
 
 

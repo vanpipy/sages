@@ -1,17 +1,27 @@
 /**
  * install-sages-routines-templates.test.ts — pins the fix that copies
  * the Sages routine template to BOTH the user-extensions dir AND the
- * npm package's bundled templates dir.
+ * local pi-routines sage peer's templates dir.
  *
  * Background (regression): `/routine-install sages-board-watch` used to
  * fail with "Template not found" because install.sh was copying the
  * template only to `$HOME/.pi/agent/extensions/routines/templates/`,
- * but `pi-routines` reads templates from the npm package's bundled
- * dir at `$PI_ROUTINES_NPM_DIR/templates` (pi-routines
- * /src/types.ts:466 → `../templates`). The fix: install_sages_routines_templates
- * now copies to BOTH locations, so `/routine-install sages-board-watch`
- * works AND the state.json seed in install_sages_board_watch_routine
- * still arms the watch by default.
+ * but `pi-routines` reads templates from its own source dir's bundled
+ * location at `<pi-routines>/templates` (resolves via
+ * `import.meta.url` in `src/types.ts` → `../templates`). The fix:
+ * install_sages_routines_templates copies to BOTH locations, so
+ * `/routine-install sages-board-watch` works AND the state.json seed
+ * in install_sages_board_watch_routine still arms the watch by default.
+ *
+ * Post-fork (Sages pi-routines-fork-2026-Q1 GC): pi-routines is a
+ * SAGES WORKSPACE PEER rather than an npm dependency. The "package's
+ * bundled templates dir" is now `$PI_ROUTINES_DEST_DIR/templates` (the
+ * file-copy install target at `~/.pi/packages/pi-routines/templates`),
+ * NOT the historical `$PI_ROUTINES_NPM_DIR/templates` (`npm:@davecodes/
+ * pi-routines/templates`). The dual-copy contract is preserved because
+ * pi-routines reads templates via `import.meta.url` regardless of the
+ * install path — the templates dir just needs to coexist with the
+ * installed source tree.
  *
  * Pins:
  *   1. STATIC — the function + both destination constants exist in
@@ -47,12 +57,14 @@ function buildSandbox(): string {
 	const sandbox = mkdtempSync(join(tmpdir(), "pi-orch-sages-routines-"));
 	// Fake HOME (for $SAGES_ROUTINES_TEMPLATES_DEST).
 	mkdirSync(join(sandbox, "home", "fakeuser"), { recursive: true });
-	// Fake PI_DIR + the npm package's templates dir
-	// ($PI_ROUTINES_NPM_DIR/templates).
-	mkdirSync(
-		join(sandbox, "pi", "agent", "npm", "node_modules", "@davecodes", "pi-routines", "templates"),
-		{ recursive: true },
-	);
+	// Fake PI_DIR + the local sage peer package's templates dir
+	// ($PI_ROUTINES_DEST_DIR/templates). Post-fork the pi-routines
+	// extension lives at ~/.pi/packages/pi-routines (file-copy
+	// install of the ./pi-routines/ sage workspace peer), so
+	// `routine-install` reads templates from <peer>/templates.
+	mkdirSync(join(sandbox, "pi", "packages", "pi-routines", "templates"), {
+		recursive: true,
+	});
 	// Fake Sages source tree: $SCRIPT_DIR/../templates/sages-routines.
 	mkdirSync(join(sandbox, "pi-orchestrator", "scripts"), { recursive: true });
 	mkdirSync(join(sandbox, "pi-orchestrator", "templates", "sages-routines"), { recursive: true });
@@ -77,7 +89,7 @@ function buildSandbox(): string {
 	});
 	// Symlink the peer dirs so install.sh's sanity checks pass
 	// (matches the pattern in install-aft-functions.test.ts).
-	for (const peer of ["pi-codebase-memory", "pi-subagents", "pi-evaluator"]) {
+	for (const peer of ["pi-codebase-memory", "pi-subagents", "pi-evaluator", "pi-routines"]) {
 		const realPath = join(REPO_ROOT, peer);
 		const linkPath = join(sandbox, peer);
 		if (existsSync(realPath)) {
@@ -149,12 +161,14 @@ describe("install.sh: Sages routines-templates constants", () => {
 		expect(src).toMatch(/^\s*SAGES_ROUTINES_TEMPLATES_DEST=/m);
 	});
 
-	it("declares SAGES_ROUTINES_TEMPLATES_NPM_DEST (the fix — npm package templates dir)", () => {
-		expect(src).toMatch(/^\s*SAGES_ROUTINES_TEMPLATES_NPM_DEST=/m);
+	it("declares SAGES_ROUTINES_TEMPLATES_PKG_DEST (the local pi-routines peer templates dir)", () => {
+		expect(src).toMatch(/^\s*SAGES_ROUTINES_TEMPLATES_PKG_DEST=/m);
 	});
 
-	it("SAGES_ROUTINES_TEMPLATES_NPM_DEST is derived from PI_ROUTINES_NPM_DIR + /templates", () => {
-		expect(src).toMatch(/SAGES_ROUTINES_TEMPLATES_NPM_DEST=.*PI_ROUTINES_NPM_DIR.*templates/);
+	it("SAGES_ROUTINES_TEMPLATES_PKG_DEST is derived from PI_ROUTINES_DEST_DIR + /templates", () => {
+		expect(src).toMatch(
+			/SAGES_ROUTINES_TEMPLATES_PKG_DEST=.*PI_ROUTINES_DEST_DIR.*templates/,
+		);
 	});
 });
 
@@ -174,22 +188,22 @@ describe("install.sh: install_sages_routines_templates function", () => {
 	it("the function references BOTH destination constants (the fix)", () => {
 		const body = fnBody();
 		expect(body).toContain("SAGES_ROUTINES_TEMPLATES_DEST");
-		expect(body).toContain("SAGES_ROUTINES_TEMPLATES_NPM_DEST");
+		expect(body).toContain("SAGES_ROUTINES_TEMPLATES_PKG_DEST");
 	});
 
-	it("the function copies to the npm templates dir (cp ... SAGES_ROUTINES_TEMPLATES_NPM_DEST)", () => {
+	it("the function copies to the local pi-routines peer's templates dir (cp ... SAGES_ROUTINES_TEMPLATES_PKG_DEST)", () => {
 		const body = fnBody();
-		expect(body).toMatch(/cp\s+"\$src"\s+"\$SAGES_ROUTINES_TEMPLATES_NPM_DEST/);
+		expect(body).toMatch(/cp\s+"\$src"\s+"\$SAGES_ROUTINES_TEMPLATES_PKG_DEST/);
 	});
 
-	it("the function tolerates a missing npm package dir (test -d before copy)", () => {
+	it("the function tolerates a missing peer package dir (test -d before copy)", () => {
 		const body = fnBody();
-		expect(body).toMatch(/\[\[\s+-d\s+"\$SAGES_ROUTINES_TEMPLATES_NPM_DEST"\s+\]\]/);
+		expect(body).toMatch(/\[\[\s+-d\s+"\$SAGES_ROUTINES_TEMPLATES_PKG_DEST"\s+\]\]/);
 	});
 
 	it("the stale 'not via the npm package' comment is gone", () => {
 		// The fix: the comment claiming routines reads from the extensions
-		// dir (NOT via the npm package) was wrong. The corrected comment
+		// dir (NOT via the package) was wrong. The corrected comment
 		// should describe the dual-destination copy.
 		const body = fnBody();
 		expect(body).not.toMatch(/not via the npm package/);
@@ -213,18 +227,18 @@ fi
 		expect(result.stdout).toContain("OK_EXT");
 	});
 
-	it("copies the template to the npm package's templates dir (the fix)", () => {
+	it("copies the template to the local pi-routines peer's templates dir (the fix)", () => {
 		const result = runInSandbox(`
 install_sages_routines_templates
-if [[ -f "$SAGES_ROUTINES_TEMPLATES_NPM_DEST/sages-board-watch.json" ]]; then
-  echo OK_NPM
+if [[ -f "$SAGES_ROUTINES_TEMPLATES_PKG_DEST/sages-board-watch.json" ]]; then
+  echo OK_PKG
 else
-  echo MISSING_NPM >&2
+  echo MISSING_PKG >&2
   exit 1
 fi
 `);
 		expect(result.status).toBe(0);
-		expect(result.stdout).toContain("OK_NPM");
+		expect(result.stdout).toContain("OK_PKG");
 	});
 
 	it("is idempotent (second run still leaves both files in place)", () => {
@@ -232,19 +246,19 @@ fi
 install_sages_routines_templates
 install_sages_routines_templates
 [[ -f "$SAGES_ROUTINES_TEMPLATES_DEST/sages-board-watch.json" ]] && echo OK_EXT || { echo MISSING_EXT >&2; exit 1; }
-[[ -f "$SAGES_ROUTINES_TEMPLATES_NPM_DEST/sages-board-watch.json" ]] && echo OK_NPM || { echo MISSING_NPM >&2; exit 1; }
+[[ -f "$SAGES_ROUTINES_TEMPLATES_PKG_DEST/sages-board-watch.json" ]] && echo OK_PKG || { echo MISSING_PKG >&2; exit 1; }
 `);
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain("OK_EXT");
-		expect(result.stdout).toContain("OK_NPM");
+		expect(result.stdout).toContain("OK_PKG");
 	});
 
-	it("survives a missing npm package dir (extensions copy still works)", () => {
+	it("survives a missing peer package dir (extensions copy still works)", () => {
 		const result = runInSandbox(`
-# Simulate the case where pi-routines isn't installed yet: the npm
+# Simulate the case where pi-routines isn't installed yet: the peer
 # package dir doesn't exist. The function should still copy to the
 # extensions dir without erroring.
-rm -rf "$PI_ROUTINES_NPM_DIR"
+rm -rf "$PI_ROUTINES_DEST_DIR"
 install_sages_routines_templates
 [[ -f "$SAGES_ROUTINES_TEMPLATES_DEST/sages-board-watch.json" ]] && echo OK_EXT || { echo MISSING_EXT >&2; exit 1; }
 `);

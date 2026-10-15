@@ -117,12 +117,12 @@ export const AFT_TOOLS: readonly string[] = [
 ];
 
 /**
- * pi-routines (`@davecodes/pi-routines`) tools. Six tools, all optional —
- * the Sages orchestrator allowlist includes them, but if pi-routines
- * isn't installed the LLM simply sees the names and the runtime
- * reports "tool not registered" when called. This graceful degradation
- * matches the soft-mode contract: missing extensions don't break the
- * session, they just lose capability.
+ * pi-routines (SAGES sage peer, fork of `@davecodes/pi-routines@0.6.0`)
+ * tools. Six tools, all optional — the Sages orchestrator allowlist
+ * includes them, but if pi-routines isn't installed the LLM simply
+ * sees the names and the runtime reports "tool not registered" when
+ * called. This graceful degradation matches the soft-mode contract:
+ * missing extensions don't break the session, they just lose capability.
  *
  * The Sages board-watch routine (bundled at
  * `templates/sages-routines/sages-board-watch.json`, installed AND
