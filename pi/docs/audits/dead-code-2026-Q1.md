@@ -393,3 +393,104 @@ Total: 13 commits, ~64 lines deleted, all HIGH or MEDIUM, all in
 production source under `pi-*/`. Zero production-code risk; one
 documentation tweak in `pi/docs/learn/pi-orchestrator.md` per the
 MEDIUM bundle.
+
+## 6. Clean phase report (2026 Q1, post-investigation)
+
+> **Phase:** Clean (HIGH-risk deletions only).
+> **Ref:** sages-board-watch intent #4; follows review task #7 (CLEAN).
+> **Scope:** every HIGH-risk item from §3. MEDIUM items are surfaced
+> in §7 — needs explicit user opt-in before further deletion.
+
+### 6.1 Commits landed
+
+Per-package commits (`main` ahead of `origin/main` at the time of writing):
+
+| Package | Commit | Subject | Lines deleted |
+|---|---|---|---:|
+| pi-tasks | `6324eb9` | `chore(tasks): drop unused MockPi type alias` | -2 |
+| pi-subagents | `397d5e9` | `chore(subagents): drop unused RpcReply type, DEFAULT_AGENT_NAMES, WORKFLOW_TICK_MS` | -15 |
+| pi-evaluator | `4fc84a6` | `chore(evaluator): drop unused DimensionName/GlobalConfig types and dead helpers` | -41 |
+| pi-orchestrator | `7c24281` | `chore(orchestrator): drop unused brainstorming helpers (HIGH items only)` | -71 |
+
+Total: 4 commits, 129 lines deleted across 10 source files; 1
+insertion (an import statement tidy-up in `pi-orchestrator/src/brainstorming/index.ts:14`).
+
+### 6.2 Verification gates
+
+`bun run typecheck` and `bun test` ran after each commit against the
+matching package's lockfile:
+
+| Package | typecheck | tests | vs. baseline |
+|---|---|---|---|
+| pi-tasks | clean | 269 pass / 27 fail / 7 errors | identical to baseline |
+| pi-subagents | 7 pre-existing errors (unchanged) | 1012 pass / 322 fail / 58 errors | identical to baseline |
+| pi-evaluator | 1 pre-existing error (unchanged) | 256 pass / 0 fail | identical to baseline |
+| pi-orchestrator | clean | 242 pass / 0 fail | identical to baseline |
+
+The pre-existing typecheck and test failures are unrelated to this
+audit: `pi-subagents` reports upstream-package drift
+(`@earendil-works/pi-coding-agent`/`pi-tui` type changes), `pi-evaluator`
+has one test fixture type mismatch (`dag_id` on `ManagedWorktreeIsolation`),
+and `pi-tasks`'s `projectKey`/`orchestratorWorkdir` suite fails on the
+pre-delete baseline. None of the deleted symbols appeared in any
+failing test. **No test failure was caused by a deletion.**
+
+### 6.3 `.pi/` exclusion check
+
+```text
+$ git diff origin/main..HEAD --name-only | grep '^\.pi/'
+(none)
+```
+
+### 6.4 AFT re-scan (post-cleanup baseline)
+
+A follow-up `aft_inspect` on the affected packages will surface fresh
+hits (dead-code drift is continuous; 0 is not a stable equilibrium).
+The next dead-code audit — or a release-time pre-merge check — should
+re-run §1.1 §1.3 against the now-smaller files. The four commits
+above are the audit's normal close-out, not a guarantee that the
+remaining `aft_inspect` output is empty.
+
+## 7. Hold list — needs user opt-in before deletion
+
+These items survived review (audit §3.3, MEDIUM risk) and were NOT
+deleted in this Clean pass. They are re-exported through
+`pi-orchestrator/src/index.ts:14-19` as part of the
+`@sages/pi-orchestrator` public surface, and are documented in
+`pi/docs/learn/pi-orchestrator.md:152-164, 275-285` as the runtime
+phase pipeline of the `/brainstorm` slash command. Deletion requires:
+
+1. Removing the five `export` declarations from
+   `pi-orchestrator/src/brainstorming/index.ts` (lines 425, 446, 473,
+   506, 530 in the pre-cleanup version).
+2. Removing the matching re-export entries at
+   `pi-orchestrator/src/index.ts:14-18`.
+3. Updating `pi/docs/learn/pi-orchestrator.md` §8 entry list to drop
+   the symbols and adjust the brainstorming pipeline description
+   (lines 152-164, 275-285 in the pre-cleanup version).
+
+The pre-cleanup function signatures:
+
+| File:line | Symbol | Signature | Re-export at |
+|---|---|---|---|
+| `brainstorming/index.ts:425` | `startBrainstorm` | `(cwd: string, request?: string) => BrainstormResponse` | `src/index.ts:14` |
+| `brainstorming/index.ts:446` | `processClarifyingPhase` | `(stateMachine, request, projectContext) => BrainstormResponse` | `src/index.ts:15` |
+| `brainstorming/index.ts:473` | `processProposingPhase` | `(stateMachine, request, intent, projectContext) => BrainstormResponse` | `src/index.ts:16` |
+| `brainstorming/index.ts:506` | `processDesigningPhase` | `(stateMachine, request, selectedApproach, projectContext) => BrainstormResponse` | `src/index.ts:17` |
+| `brainstorming/index.ts:530` | `finalizeDesign` | `(cwd, request, sections, approach) => BrainstormResponse` | `src/index.ts:18` |
+
+**Recommended next step:** the orchestrator surfaces a NEEDS_CLARIFICATION
+pause asking the user to confirm whether the `/brainstorm` slash command
+is a markdown guide the LLM follows conversationally (then delete) or
+whether a future SKILL rewrite will invoke these functions programmatically
+(then keep). The audit's §4 item 1 elaborates the trade-off.
+
+## 8. Doc references left stale by HIGH deletions
+
+`pi/docs/learn/pi-evaluator.md:193` and `pi/docs/learn/pi-subagents.md:115,158`
+still cite the deleted symbols' file:line positions (e.g. `RpcReply<T>, :28`,
+`DEFAULT_AGENT_NAMES = ["Developer", "Reviewer"]`, `assertGoalArtifact (:762)`).
+The audit's reviewer verdict did NOT require HIGH-bundle doc updates
+(the docs were description, not code-shape contract), so these were
+left for a follow-up. A separate docs cleanup can fold them into a
+later pass alongside the MEDIUM-bundle doc edits in §7.
