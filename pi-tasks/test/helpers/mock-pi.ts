@@ -85,8 +85,6 @@ export function mockPi() {
   };
 }
 
-export type MockPi = ReturnType<typeof mockPi>;
-
 /** Minimal mock ExtensionContext. */
 export function mockCtx(cwd = process.cwd()) {
   return {
