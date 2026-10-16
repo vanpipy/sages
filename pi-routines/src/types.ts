@@ -205,6 +205,32 @@ export interface RoutineTickState {
 	runsTodayDate?: string;
 	/** Per-hook-trigger local date for `once: "daily"` semantics. */
 	hookOnceDaily?: Record<string, string>;
+	/**
+	 * Number of consecutive runs whose response was effectively silent —
+	 * i.e. `status === "silent"`, or `status === "success"` whose snippet
+	 * is the `[~]` token (or its `[~` truncated form). Reset to 0 on a
+	 * non-quiet `"success"`. Read by {@link computePulseIntervalMs} to
+	 * adaptively lengthen pulse intervals when the board stays empty,
+	 * capping token burn on routines like `sages-board-watch` whose prompt
+	 * is heavy but whose work is rare. Optional for back-compat; missing /
+	 * undefined is treated as 0.
+	 */
+	consecutiveSilentTicks?: number;
+	/**
+	 * Number of consecutive runs that ended in `status: "error"`. The
+	 * typical error case is a missing tool in the routine's session
+	 * surface (e.g. `sages-board-watch` running in a context that lacks
+	 * `TaskList` / `TaskUpdate` / `TaskCreate`): the LLM attempts the
+	 * tool, the runtime rejects it, and the run lands as an error. Reset
+	 * to 0 on any `"success"` or `"silent"` outcome (a successful turn
+	 * proves the tool surface is present and the error was transient).
+	 * Read by {@link computePulseIntervalMs} alongside
+	 * {@link consecutiveSilentTicks} to engage backoff on missing-tool
+	 * sessions, capping token burn on routines whose prompt is heavy but
+	 * whose environment is unable to execute it. Optional for back-compat;
+	 * missing / undefined is treated as 0.
+	 */
+	consecutiveErrorTicks?: number;
 }
 
 /**
@@ -484,6 +510,37 @@ export const MAX_DEFERRED_TRANSCRIPT_BYTES = 8192;
 
 /** Min poll interval for github triggers (rate-limit safety floor). */
 export const MIN_GITHUB_POLL_MS = 60_000;
+
+/**
+ * Adaptive backoff for pulse triggers when the routine keeps returning
+ * the silent token ([~]). The board-watch "sucked" bug:
+ *   - Empty board + heavy prompt (3.4KB / ~1154 tokens)
+ *   - Long provider stalls (one observed fire: 431.8s, during which 14
+ *     "routine already queued" skip records accumulated at 30s cadence)
+ *   - Persisted state can be stale relative to the template (the running
+ *     routine's intervalMs can pre-date a template edit; the prior fix
+ *     "fix: increase 30s to 120s for the sages-board-watch" only changed
+ *     the template, leaving installed state at 30s)
+ * drove a fix that lets the runtime learn from observed outcomes. After
+ * {@link BACKOFF_THRESHOLD} consecutive silent fires, the effective
+ * interval is multiplied by {@link BACKOFF_FACTOR} per additional silent
+ * tick, capped at {@link BACKOFF_MAX_MULTIPLIER} (multiplicative cap) and
+ * {@link BACKOFF_MAX_INTERVAL_MS} (absolute cap). A non-quiet `"success"`
+ * resets the counter and the next effective interval reverts to the
+ * trigger's original `intervalMs`.
+ */
+
+/** Consecutive silent fires tolerated before backoff engages. */
+export const BACKOFF_THRESHOLD = 2;
+
+/** Multiplier applied per consecutive silent tick past the threshold. */
+export const BACKOFF_FACTOR = 2;
+
+/** Multiplicative cap (before the absolute cap). 32× → 30s→30s becomes 16 min. */
+export const BACKOFF_MAX_MULTIPLIER = 32;
+
+/** Absolute interval cap. 10 minutes between fires once fully backed off. */
+export const BACKOFF_MAX_INTERVAL_MS = 10 * 60 * 1000;
 
 /** Default github poll interval when caller omits it. */
 export const DEFAULT_GITHUB_POLL_MS = 120_000;

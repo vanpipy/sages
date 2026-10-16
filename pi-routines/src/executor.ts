@@ -33,7 +33,7 @@ import type {
 	RoutineTickState,
 	RoutineTrigger,
 } from "./types.ts";
-import { MAX_RUN_HISTORY, MAX_USER_STATE_BYTES } from "./types.ts";
+import { MAX_RUN_HISTORY, MAX_USER_STATE_BYTES, SILENT_TOKEN } from "./types.ts";
 
 /** Build the full prompt string that will be injected into the session. */
 export function buildPrompt(
@@ -291,8 +291,75 @@ export function recordRun(
 	runs.push(run);
 	while (runs.length > MAX_RUN_HISTORY) runs.shift();
 	ts.runs = runs;
+	updateSilentCounter(ts, run);
+	updateErrorCounter(ts, run);
 	// Fire-and-forget save — saveStore is best-effort and never throws.
 	void saveStore(store, runtime.storeGeneration);
+}
+
+/**
+ * Update {@link RoutineTickState.consecutiveSilentTicks} based on the
+ * outcome of one fire. Used by {@link computePulseIntervalMs} (in
+ * scheduler.ts) to adaptively lengthen pulse intervals when the routine
+ * keeps returning the silent token, capping token burn on routines like
+ * `sages-board-watch` whose prompt is heavy but whose work is rare.
+ *
+ * Rules:
+ *   - `status === "silent"`                       → bump (LLM emitted "[~]")
+ *   - `status === "success"` + snippet is [~]     → bump
+ *   - `status === "success"` + any other snippet  → reset to 0
+ *   - `status === "error"` / `"skipped"`          → leave untouched
+ *
+ * The success-with-[~] case exists because the suppressor only sets
+ * `status: "silent"` on exact equality of `text.trim() === "[~]"`.
+ * Responses like `"[~] but actually..."` land as `status: "success"`
+ * with snippet `"[~] but actually..."`; we still recognise those as
+ * quiet because the leading token signals "nothing to report".
+ */
+function updateSilentCounter(ts: RoutineTickState, run: RoutineRun): void {
+	if (run.status === "silent") {
+		ts.consecutiveSilentTicks = (ts.consecutiveSilentTicks ?? 0) + 1;
+		return;
+	}
+	if (run.status === "success") {
+		const trimmed = run.snippet.trimStart();
+		if (trimmed === SILENT_TOKEN || trimmed.startsWith("[~]") || trimmed === "[~") {
+			ts.consecutiveSilentTicks = (ts.consecutiveSilentTicks ?? 0) + 1;
+		} else {
+			ts.consecutiveSilentTicks = 0;
+		}
+	}
+	// error / skipped: leave the counter alone so transient failures
+	// don't reset a legitimate quiet streak.
+}
+
+/**
+ * Update {@link RoutineTickState.consecutiveErrorTicks} based on the
+ * outcome of one fire. Mirrors {@link updateSilentCounter} for the
+ * missing-tool case: a session that lacks the required tools (e.g.
+ * `sages-board-watch` without `TaskList` in the routine's tool surface)
+ * produces `status: "error"` runs indefinitely, and without engaging
+ * backoff the routine burns provider tokens at the trigger interval
+ * even though it cannot do useful work.
+ *
+ * Rules:
+ *   - `status === "error"`                              → bump
+ *   - `status === "success"` / `"silent"`              → reset to 0
+ *   - `status === "skipped"`                            → leave untouched
+ *
+ * The success/silent reset is symmetric with the silent counter's
+ * success-reset: a successful turn proves the tool surface works, so
+ * any error streak from before must be transient.
+ */
+function updateErrorCounter(ts: RoutineTickState, run: RoutineRun): void {
+	if (run.status === "error") {
+		ts.consecutiveErrorTicks = (ts.consecutiveErrorTicks ?? 0) + 1;
+		return;
+	}
+	if (run.status === "success" || run.status === "silent") {
+		ts.consecutiveErrorTicks = 0;
+	}
+	// skipped: leave alone.
 }
 
 /** Record an automatic fire that was dropped before opening an LLM turn. */
