@@ -34,8 +34,22 @@ import { armGithubPoller } from "./github-poller.ts";
 import * as guard from "./guard.ts";
 import { nextCronFire, parseOneOff } from "./parser.ts";
 import { saveStore } from "./store.ts";
-import type { Routine, RoutineQueueEntry, RoutineRuntimeState, RoutineTrigger } from "./types.ts";
-import { MAX_QUEUE_DEPTH, MAX_QUEUED_FIRE_AGE_MS, MULTI_TRIGGER_COLLAPSE_MS } from "./types.ts";
+import type {
+	Routine,
+	RoutineQueueEntry,
+	RoutineRuntimeState,
+	RoutineTickState,
+	RoutineTrigger,
+} from "./types.ts";
+import {
+	BACKOFF_FACTOR,
+	BACKOFF_MAX_INTERVAL_MS,
+	BACKOFF_MAX_MULTIPLIER,
+	BACKOFF_THRESHOLD,
+	MAX_QUEUE_DEPTH,
+	MAX_QUEUED_FIRE_AGE_MS,
+	MULTI_TRIGGER_COLLAPSE_MS,
+} from "./types.ts";
 
 const STALE_CTX_MARKER = "Extension context no longer active";
 
@@ -57,6 +71,38 @@ export function startScheduler(
 
 /** Map of routineId → epoch ms of last enqueue, for multi-trigger dedup. */
 const lastEnqueueAt = new WeakMap<RoutineRuntimeState, Map<string, number>>();
+
+/**
+ * Compute the effective next-arm delay for a pulse trigger.
+ *
+ * Returns `trigger.intervalMs` unchanged while the silent-tick counter is
+ * strictly below {@link BACKOFF_THRESHOLD}, then doubles per silent tick
+ * (`BACKOFF_FACTOR ^ (n - threshold + 1)`):
+ *   - counter <  threshold: 1× interval
+ *   - counter == threshold: 2× interval     (BACKOFF_FACTOR^1)
+ *   - counter == threshold+1: 4× interval
+ *   - …
+ * capped by {@link BACKOFF_MAX_MULTIPLIER} (multiplicative ceiling) and
+ * {@link BACKOFF_MAX_INTERVAL_MS} (absolute ceiling).
+ *
+ * The arm path uses chained `setTimeout` (not `setInterval`) so the next
+ * delay is re-evaluated from the *current* tick state after every fire,
+ * letting backoff engage immediately after a quiet streak. See
+ * `armTrigger`'s `case "pulse"` branch.
+ */
+export function computePulseIntervalMs(
+	trigger: PulseTriggerLike,
+	tick: RoutineTickState | undefined,
+): number {
+	const silent = tick?.consecutiveSilentTicks ?? 0;
+	if (silent < BACKOFF_THRESHOLD) return trigger.intervalMs;
+	const exponent = silent - BACKOFF_THRESHOLD + 1;
+	const multiplier = Math.min(BACKOFF_MAX_MULTIPLIER, BACKOFF_FACTOR ** exponent);
+	return Math.min(trigger.intervalMs * multiplier, BACKOFF_MAX_INTERVAL_MS);
+}
+
+/** Structural subset of {@link PulseTrigger} for {@link computePulseIntervalMs}. */
+type PulseTriggerLike = { intervalMs: number };
 
 function getEnqueueMap(runtime: RoutineRuntimeState): Map<string, number> {
 	let m = lastEnqueueAt.get(runtime);
@@ -219,8 +265,30 @@ function armTrigger(
 	const onFire = () => onTriggerFire(routine, triggerIndex, runtime, pi, getCtx);
 
 	switch (trigger.kind) {
-		case "pulse":
-			return setInterval(onFire, trigger.intervalMs);
+		case "pulse": {
+			// Chained setTimeout (not setInterval) so the next delay
+			// reflects the *current* backoff state — see
+			// `computePulseIntervalMs`. The arm re-evaluates after every
+			// fire, allowing adaptive backoff to engage as soon as the
+			// silent-tick counter crosses the threshold.
+			const armPulse = (): ReturnType<typeof setInterval> | null => {
+				const live = runtime.store.routines[routine.id];
+				if (!live) return null;
+				if (live.paused) return null;
+				const tick = runtime.store.tickState[routine.id];
+				const delayMs = computePulseIntervalMs(trigger, tick);
+				const h = setTimeout(() => {
+					onFire();
+					const arr = runtime.timers.get(routine.id);
+					if (arr) armPulse();
+				}, delayMs);
+				const ret = h as unknown as ReturnType<typeof setInterval>;
+				const arr = runtime.timers.get(routine.id);
+				if (arr) arr[triggerIndex] = ret;
+				return ret;
+			};
+			return armPulse();
+		}
 		case "cron": {
 			const arm = () => {
 				try {
@@ -365,6 +433,22 @@ export function enqueueTriggerFire(
 		return;
 	}
 	enq.set(routine.id, now);
+
+	// Tick-acquire fallback: when a previous fire for THIS routine is
+	// still in flight (runtime.pendingRun holds the lock), drop this tick
+	// with a more specific reason than "routine already queued". The
+	// runtime does not retry in this tick — the chained pulse arm will
+	// schedule the next attempt after the in-flight fire completes.
+	if (runtime.pendingRun?.routineId === routine.id) {
+		recordSkippedFire(
+			runtime,
+			runtime.store,
+			live,
+			{ index: triggerIndex, kind: trigger.kind },
+			"lock held: previous fire still in flight",
+		);
+		return;
+	}
 
 	if (queueHasRoutine(runtime, routine.id)) {
 		recordSkippedFire(
