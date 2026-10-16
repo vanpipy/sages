@@ -216,6 +216,21 @@ export interface RoutineTickState {
 	 * undefined is treated as 0.
 	 */
 	consecutiveSilentTicks?: number;
+	/**
+	 * Number of consecutive runs that ended in `status: "error"`. The
+	 * typical error case is a missing tool in the routine's session
+	 * surface (e.g. `sages-board-watch` running in a context that lacks
+	 * `TaskList` / `TaskUpdate` / `TaskCreate`): the LLM attempts the
+	 * tool, the runtime rejects it, and the run lands as an error. Reset
+	 * to 0 on any `"success"` or `"silent"` outcome (a successful turn
+	 * proves the tool surface is present and the error was transient).
+	 * Read by {@link computePulseIntervalMs} alongside
+	 * {@link consecutiveSilentTicks} to engage backoff on missing-tool
+	 * sessions, capping token burn on routines whose prompt is heavy but
+	 * whose environment is unable to execute it. Optional for back-compat;
+	 * missing / undefined is treated as 0.
+	 */
+	consecutiveErrorTicks?: number;
 }
 
 /**

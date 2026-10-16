@@ -462,3 +462,230 @@ describe("board-watch adaptive backoff (the 'sucked' fix)", () => {
 		});
 	});
 });
+
+// --------------------------------------------------------------------------- //
+// No-tools fallback — when a routine's session lacks the required tools
+// (e.g. sages-board-watch without TaskList / TaskUpdate / TaskCreate in its
+// tool surface), every LLM turn attempts a tool call that the runtime
+// rejects, landing the run with `status: "error"`. Without engaging
+// backoff, the routine would burn ~trigger.intervalMs provider tokens
+// indefinitely on a session that can never succeed.
+//
+// The fix mirrors the silent-counter pattern: a parallel
+// `consecutiveErrorTicks` counter on `RoutineTickState` that
+// `recordRun` bumps on `status: "error"` and resets on any
+// `status: "success"` or `status: "silent"`. `computePulseIntervalMs`
+// uses `max(silent, errored)` as the effective streak so either kind
+// of non-progress engages the same exponential backoff.
+// --------------------------------------------------------------------------- //
+
+describe("board-watch no-tools fallback (status: error → backoff)", () => {
+	describe("recordRun — consecutiveErrorTicks accounting", () => {
+		it("bumps consecutiveErrorTicks on status='error' runs", () => {
+			const runtime = makeRuntime();
+			runtime.store.tickState["sages-board-watch"] = {
+				tickCount: 0,
+				lastFiredAt: 0,
+				lastFiredDateLocal: "",
+				userState: {},
+			};
+			recordRun(runtime, runtime.store, {
+				id: "r1",
+				routineId: "sages-board-watch",
+				startedAt: 0,
+				endedAt: 0,
+				durationMs: 0,
+				status: "error",
+				triggerIndex: 0,
+				triggerKind: "pulse",
+				snippet: "Tool 'TaskList' not available in this session",
+			});
+			assert.equal(runtime.store.tickState["sages-board-watch"].consecutiveErrorTicks, 1);
+		});
+
+		it("resets consecutiveErrorTicks to 0 on a 'success' run", () => {
+			const runtime = makeRuntime();
+			runtime.store.tickState["sages-board-watch"] = {
+				tickCount: 0,
+				lastFiredAt: 0,
+				lastFiredDateLocal: "",
+				userState: {},
+				consecutiveErrorTicks: 7,
+			};
+			recordRun(runtime, runtime.store, {
+				id: "r1",
+				routineId: "sages-board-watch",
+				startedAt: 0,
+				endedAt: 0,
+				durationMs: 0,
+				status: "success",
+				triggerIndex: 0,
+				triggerKind: "pulse",
+				snippet: "converted intent 5 into plan tasks 7, 8",
+			});
+			assert.equal(runtime.store.tickState["sages-board-watch"].consecutiveErrorTicks, 0);
+		});
+
+		it("resets consecutiveErrorTicks to 0 on a 'silent' run (tool surface works, just no work)", () => {
+			const runtime = makeRuntime();
+			runtime.store.tickState["sages-board-watch"] = {
+				tickCount: 0,
+				lastFiredAt: 0,
+				lastFiredDateLocal: "",
+				userState: {},
+				consecutiveErrorTicks: 4,
+			};
+			recordRun(runtime, runtime.store, {
+				id: "r1",
+				routineId: "sages-board-watch",
+				startedAt: 0,
+				endedAt: 0,
+				durationMs: 0,
+				status: "silent",
+				triggerIndex: 0,
+				triggerKind: "pulse",
+				snippet: SILENT_TOKEN,
+			});
+			assert.equal(runtime.store.tickState["sages-board-watch"].consecutiveErrorTicks, 0);
+		});
+
+		it("leaves consecutiveErrorTicks untouched on 'skipped' runs", () => {
+			const runtime = makeRuntime();
+			runtime.store.tickState["sages-board-watch"] = {
+				tickCount: 0,
+				lastFiredAt: 0,
+				lastFiredDateLocal: "",
+				userState: {},
+				consecutiveErrorTicks: 4,
+			};
+			recordRun(runtime, runtime.store, {
+				id: "r1",
+				routineId: "sages-board-watch",
+				startedAt: 0,
+				endedAt: 0,
+				durationMs: 0,
+				status: "skipped",
+				triggerIndex: 0,
+				triggerKind: "pulse",
+				snippet: "daily cap reached",
+				skipReason: "daily cap reached",
+			});
+			assert.equal(runtime.store.tickState["sages-board-watch"].consecutiveErrorTicks, 4);
+		});
+
+		it("leaves consecutiveSilentTicks untouched when only consecutiveErrorTicks is non-zero (and vice versa)", () => {
+			// The two counters track independent streaks; bumping one must
+			// not reset the other, so a long silent streak followed by an
+			// error streak still keeps the silent history.
+			const runtime = makeRuntime();
+			runtime.store.tickState["sages-board-watch"] = {
+				tickCount: 0,
+				lastFiredAt: 0,
+				lastFiredDateLocal: "",
+				userState: {},
+				consecutiveSilentTicks: 9,
+			};
+			recordRun(runtime, runtime.store, {
+				id: "r1",
+				routineId: "sages-board-watch",
+				startedAt: 0,
+				endedAt: 0,
+				durationMs: 0,
+				status: "error",
+				triggerIndex: 0,
+				triggerKind: "pulse",
+				snippet: "no tools",
+			});
+			assert.equal(runtime.store.tickState["sages-board-watch"].consecutiveSilentTicks, 9);
+			assert.equal(runtime.store.tickState["sages-board-watch"].consecutiveErrorTicks, 1);
+		});
+	});
+
+	describe("computePulseIntervalMs — error streak engages backoff", () => {
+		it("returns the trigger interval while the error counter is below the threshold", () => {
+			for (let n = 0; n < BACKOFF_THRESHOLD; n++) {
+				assert.equal(
+					computePulseIntervalMs(makePulseTrigger(30_000), { consecutiveErrorTicks: n }),
+					30_000,
+					`error counter ${n} (below threshold ${BACKOFF_THRESHOLD}) must not back off`,
+				);
+			}
+		});
+
+		it("doubles the interval for each consecutive error tick past the threshold", () => {
+			const trigger = makePulseTrigger(30_000);
+			for (let n = BACKOFF_THRESHOLD; n <= BACKOFF_THRESHOLD + 3; n++) {
+				const expected = Math.min(
+					trigger.intervalMs * BACKOFF_FACTOR ** (n - BACKOFF_THRESHOLD + 1),
+					BACKOFF_MAX_INTERVAL_MS,
+				);
+				const got = computePulseIntervalMs(trigger, { consecutiveErrorTicks: n });
+				assert.equal(got, expected, `error counter ${n}`);
+			}
+		});
+
+		it("uses max(silent, errored) so either streak engages the same backoff", () => {
+			const trigger = makePulseTrigger(30_000);
+			// Both below threshold → flat.
+			assert.equal(
+				computePulseIntervalMs(trigger, {
+					consecutiveSilentTicks: 1,
+					consecutiveErrorTicks: 1,
+				}),
+				30_000,
+			);
+			// Only error past threshold → backoff at the same rate as silent.
+			const silent = computePulseIntervalMs(trigger, { consecutiveSilentTicks: 3 });
+			const error = computePulseIntervalMs(trigger, { consecutiveErrorTicks: 3 });
+			assert.equal(error, silent);
+			// Mixed: max wins.
+			const mixed = computePulseIntervalMs(trigger, {
+				consecutiveSilentTicks: 2,
+				consecutiveErrorTicks: 5,
+			});
+			const maxEither = computePulseIntervalMs(trigger, { consecutiveErrorTicks: 5 });
+			assert.equal(mixed, maxEither);
+		});
+	});
+
+	describe("regression — missing tools engage backoff", () => {
+		it("after 5 consecutive error fires the effective interval exceeds 2× the trigger interval", () => {
+			// Reproduces the unfixed behaviour: a routine in a session that
+			// lacks the required tools keeps getting status='error' runs.
+			// The unfixed runtime's computePulseIntervalMs ignores error
+			// streaks entirely, so the next arm always uses the original
+			// intervalMs. Under the fix, 5 error fires land us past
+			// BACKOFF_THRESHOLD (2) and the interval is at least
+			// BACKOFF_FACTOR (=2) × the original.
+			const trigger = makePulseTrigger(30_000);
+			let ts: { consecutiveErrorTicks?: number; consecutiveSilentTicks?: number } | undefined;
+			for (let i = 0; i < 5; i++) {
+				const runtime = makeRuntime();
+				runtime.store.tickState["sages-board-watch"] = {
+					tickCount: 0,
+					lastFiredAt: 0,
+					lastFiredDateLocal: "",
+					userState: {},
+					consecutiveErrorTicks: ts?.consecutiveErrorTicks ?? 0,
+				};
+				recordRun(runtime, runtime.store, {
+					id: `r${i}`,
+					routineId: "sages-board-watch",
+					startedAt: 0,
+					endedAt: 0,
+					durationMs: 0,
+					status: "error",
+					triggerIndex: 0,
+					triggerKind: "pulse",
+					snippet: "Tool 'TaskList' not available",
+				});
+				ts = runtime.store.tickState["sages-board-watch"];
+			}
+			const finalInterval = computePulseIntervalMs(trigger, ts);
+			assert.ok(
+				finalInterval > trigger.intervalMs * 2,
+				`expected effective interval > 2× trigger after 5 error fires, got ${finalInterval}ms`,
+			);
+		});
+	});
+});

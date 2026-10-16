@@ -95,8 +95,13 @@ export function computePulseIntervalMs(
 	tick: RoutineTickState | undefined,
 ): number {
 	const silent = tick?.consecutiveSilentTicks ?? 0;
-	if (silent < BACKOFF_THRESHOLD) return trigger.intervalMs;
-	const exponent = silent - BACKOFF_THRESHOLD + 1;
+	const errored = tick?.consecutiveErrorTicks ?? 0;
+	// Either counter engaging means "no progress" — use the larger of the
+	// two so a missing-tool streak (error-only) backs off the same way
+	// an empty-board streak (silent-only) does.
+	const streak = Math.max(silent, errored);
+	if (streak < BACKOFF_THRESHOLD) return trigger.intervalMs;
+	const exponent = streak - BACKOFF_THRESHOLD + 1;
 	const multiplier = Math.min(BACKOFF_MAX_MULTIPLIER, BACKOFF_FACTOR ** exponent);
 	return Math.min(trigger.intervalMs * multiplier, BACKOFF_MAX_INTERVAL_MS);
 }

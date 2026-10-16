@@ -103,21 +103,36 @@ routine's LLM doesn't mistake the fire time for its scheduled slot.
 
 If the routine's prompt references tools (`TaskList`, `TaskCreate`,
 `TaskUpdate`, `task_convert_intent`) that are not in the session's tool
-surface, the LLM's response degenerates into either a tool-call error
-(which lands as `status: "error"` and leaves the silent counter alone)
-or a `"[~]"` best-effort fallback (which is what adaptive backoff keys
-on).
+surface, the LLM's response degenerates into a tool-call error on
+every fire. The runtime cannot directly probe the LLM's tool surface,
+so it observes the symptom (every fire lands as `status: "error"`) and
+engages the same backoff math as the silent-counter case.
 
-The runtime cannot directly probe the LLM's tool surface, so the
-**observed contract** is:
+Mechanism (parallel to the empty-board fallback):
 
-- A successful first fire that routes an intent = "tools work, fire
-  on schedule".
-- Consecutive silent fires = "nothing to do or tools missing" — either
-  way, back off.
+- `recordRun` (in `src/executor.ts`) bumps
+  `tickState.consecutiveErrorTicks` on `status === "error"`. It
+  resets the counter on any `status: "success"` or
+  `status: "silent"` outcome (a successful turn proves the tool
+  surface is present, so any error streak from before was transient).
+  Skipped runs leave the counter alone.
+- `computePulseIntervalMs` reads **both** counters and uses
+  `max(consecutiveSilentTicks, consecutiveErrorTicks)` as the
+  effective streak, so either kind of non-progress engages the same
+  exponential backoff. A long silent streak followed by an error
+  streak still keeps the silent history; the two counters track
+  independent streaks so a single error in a quiet run doesn't reset
+  the quiet counter (and vice versa).
+- The pulse arm uses **chained `setTimeout`** (same as the
+  empty-board case) so the next delay is re-evaluated after every
+  fire, letting error-driven backoff engage immediately on a
+  session that just lost access to a required tool.
 
-Pinning test:
-`tests/board-watch-backoff.test.ts` → "computePulseIntervalMs — unit".
+Pinning tests:
+- `tests/board-watch-backoff.test.ts` →
+  "computePulseIntervalMs — error streak engages backoff" (3 tests).
+- `tests/board-watch-backoff.test.ts` →
+  "regression — missing tools engage backoff" (1 test).
 
 ---
 
@@ -160,7 +175,7 @@ The template still carries:
 ## Acceptance
 
 - `cd ~/.pi/packages/pi-routines && bun test` is green
-  (20 pass, 0 fail).
+  (29 pass, 0 fail).
 - `npx tsc --noEmit` is clean.
 - `npx biome check .` is clean (only pre-existing schema-bumps
   warnings).

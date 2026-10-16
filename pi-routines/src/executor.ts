@@ -292,6 +292,7 @@ export function recordRun(
 	while (runs.length > MAX_RUN_HISTORY) runs.shift();
 	ts.runs = runs;
 	updateSilentCounter(ts, run);
+	updateErrorCounter(ts, run);
 	// Fire-and-forget save — saveStore is best-effort and never throws.
 	void saveStore(store, runtime.storeGeneration);
 }
@@ -330,6 +331,35 @@ function updateSilentCounter(ts: RoutineTickState, run: RoutineRun): void {
 	}
 	// error / skipped: leave the counter alone so transient failures
 	// don't reset a legitimate quiet streak.
+}
+
+/**
+ * Update {@link RoutineTickState.consecutiveErrorTicks} based on the
+ * outcome of one fire. Mirrors {@link updateSilentCounter} for the
+ * missing-tool case: a session that lacks the required tools (e.g.
+ * `sages-board-watch` without `TaskList` in the routine's tool surface)
+ * produces `status: "error"` runs indefinitely, and without engaging
+ * backoff the routine burns provider tokens at the trigger interval
+ * even though it cannot do useful work.
+ *
+ * Rules:
+ *   - `status === "error"`                              → bump
+ *   - `status === "success"` / `"silent"`              → reset to 0
+ *   - `status === "skipped"`                            → leave untouched
+ *
+ * The success/silent reset is symmetric with the silent counter's
+ * success-reset: a successful turn proves the tool surface works, so
+ * any error streak from before must be transient.
+ */
+function updateErrorCounter(ts: RoutineTickState, run: RoutineRun): void {
+	if (run.status === "error") {
+		ts.consecutiveErrorTicks = (ts.consecutiveErrorTicks ?? 0) + 1;
+		return;
+	}
+	if (run.status === "success" || run.status === "silent") {
+		ts.consecutiveErrorTicks = 0;
+	}
+	// skipped: leave alone.
 }
 
 /** Record an automatic fire that was dropped before opening an LLM turn. */
