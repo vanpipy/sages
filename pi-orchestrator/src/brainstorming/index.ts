@@ -540,7 +540,8 @@ export function finalizeDesign(
     message: `Design document written to: \`${designPath}\`\n\n` +
       `**Next Steps:**\n` +
       `- Review the design document\n` +
-      `- To start implementation, use: \`/orchestrate <plan-name>\`\n` +
+      `- To start implementation, drive raw \`TaskCreate\` × N + \`TaskExecute\` directly\n` +
+      `- For the standard 2-phase shape on an intent task, call \`task_convert_intent\` to materialize plan tasks in one call\n` +
       `- Or say "proceed with implementation" to auto-transition`,
     designPath,
   };

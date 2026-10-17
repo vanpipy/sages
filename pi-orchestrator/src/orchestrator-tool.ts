@@ -47,6 +47,7 @@ import {
 	PhaseValidationError,
 	type Phase,
 	validateCumulativePhases,
+	validateFinalShape,
 	validatePlanShape,
 	validateRationale,
 } from "./phase-validation.js";
@@ -518,10 +519,11 @@ export async function taskConvertIntent(
 //        `planning.plan_task_ids`, increments `planning.phases_added`.
 //
 //     3. `task_close_intent(intent_id)` — terminal audit stamp.
-//        Synthesizes a PlanShape from the accumulated phases + the
-//        original rationale and runs `validatePlanShape` to catch
-//        final-state issues (last-phase mismatch, min-count, etc.).
-//        Flips status to `completed`, stamps `converted /
+//        Runs `validateFinalShape` (the primitive-Phase[] counterpart
+//        to `validatePlanShape`) against the accumulated phases +
+//        original rationale to catch final-state issues (last-phase
+//        mismatch, min-count, etc.). Flips status to `completed`, stamps
+//        `converted /
 //        converted_at / plan_task_ids`. Once closed, the intent is
 //        terminal — no more adds, no re-close.
 //
@@ -865,22 +867,21 @@ export async function taskCloseIntent(
 				return t?.metadata?.phase as Phase;
 			}).filter((p): p is Phase => typeof p === "string");
 
-	// Final-state check: synthesize a PlanShape and run validatePlanShape
-	// to catch last-phase mismatch, min-count, ≥ 1 implement for
-	// investigate-then-fix, etc. The cumulative validator only catches
-	// immediately-wrong adds; this catches incomplete final states.
-	// `subject` / `description` are required by the type but unused by
-	// the validator (it only inspects `.phase`) — synthesize placeholders.
+	// Final-state check: validate the accumulated phase list against the
+	// declared shape. `validateFinalShape` accepts the primitive `Phase[]`
+	// directly so we don't need to synthesise `subject` / `description`
+	// placeholders to satisfy the structured `PlanShape` type (only
+	// `.phase` is used by the validator; the placeholders were a
+	// type-system workaround, now replaced). The cumulative validator
+	// only catches immediately-wrong adds; this catches incomplete
+	// final states (last-phase mismatch, min-count, ≥ 1 implement for
+	// investigate-then-fix, etc.).
 	try {
-		validatePlanShape({
-			intent_shape: planning.shape as Parameters<typeof validatePlanShape>[0]["intent_shape"],
-			rationale: planning.rationale,
-			phases: accumulatedPhases.map((p) => ({
-				phase: p,
-				subject: "_",
-				description: "_",
-			})),
-		});
+		validateFinalShape(
+			planning.shape as Parameters<typeof validateFinalShape>[0],
+			accumulatedPhases,
+			planning.rationale,
+		);
 	} catch (err) {
 		if (err instanceof PhaseValidationError) {
 			throw new ConvertIntentError("shape_violation", err.message);
@@ -1009,11 +1010,11 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 		description:
 			"Todowrite-first intent flow, step 3 (terminal): flip the intent to " +
 			"`completed` and stamp the final audit metadata (`converted`, " +
-			"`converted_at`, `converted_by`, `plan_task_ids`). Synthesizes a " +
-			"PlanShape from the accumulated phases + the original rationale and " +
-			"runs validatePlanShape to catch final-state issues (last-phase " +
-			"mismatch, min-count, ≥ 1 implement for investigate-then-fix, etc.). " +
-			"Once closed, the intent is terminal — no more adds, no re-close.",
+			"`converted_at`, `converted_by`, `plan_task_ids`). Runs " +
+			"`validateFinalShape` against the accumulated phases + original " +
+			"rationale to catch final-state issues (last-phase mismatch, " +
+			"min-count, ≥ 1 implement for investigate-then-fix, etc.). Once " +
+			"closed, the intent is terminal — no more adds, no re-close.",
 		parameters: CloseIntentParams,
 		execute: taskCloseIntent,
 	});

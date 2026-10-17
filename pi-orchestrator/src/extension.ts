@@ -3,9 +3,11 @@
  *
  * Post the orchestrator-simplify + remove-workflow-run-prod +
  * decompose-task-removed + remove-goal-contract + remove-orchestrator-advisory
- * + drop-failure-catalog cascades the package owns exactly one
- * LLM-facing tool (`orchestrate`, see `./orchestrator-tool.ts`) and a
- * thin session-hook layer + a brainstorming slash command:
+ * + drop-failure-catalog + iterative-intent-plan cascades the package
+ * owns six LLM-facing tools (`task_inspect`, `task_consume`,
+ * `task_convert_intent`, `task_plan_intent`, `task_add_phase`,
+ * `task_close_intent` — see `./orchestrator-tool.ts`) and a thin
+ * session-hook layer + a brainstorming slash command:
  *
  *   - session_start: `pi.setActiveTools([...])` gates which tools the
  *     LLM can see (PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL / AFT /
@@ -19,10 +21,14 @@
  *     `skills/brainstorming/SKILL.md`).
  *
  * The orchestrator exports a curated tool allowlist + soft-mode reminder
- * + system-prompt overlay + the `orchestrate` convenience tool. The LLM
+ * + system-prompt overlay + the six consumer tools above. The LLM
  * can drive any multi-stage work via raw `TaskCreate` × N +
- * `TaskExecute` directly; `orchestrate` collapses the standard
- * 2-phase (Implement + Review) shape into one call.
+ * `TaskExecute` directly; for the standard 2-phase (Implement + Review)
+ * intent task the structured `task_convert_intent(plan)` collapses the
+ * `TaskCreate` × N into one call (with shape-validated `intent_shape` +
+ * `rationale` + `phases[]`), and the iterative
+ * `task_plan_intent` + `task_add_phase` × N + `task_close_intent`
+ * triplet does the same one-phase-at-a-time.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -153,10 +159,15 @@ const SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — workflow pipeline recommend
 > i.e. above the **task-count threshold**), consider driving it through
 > the pi-tasks workflow: raw \`TaskCreate\` × N (one per phase: Developer
 > for Implement, Reviewer for Review) → \`TaskExecute\`. For the
-> standard 2-phase shape, the \`orchestrate(plan)\` tool collapses both
-> \`TaskCreate\` calls into one. For ≤2 tasks (below the task-count
-> threshold), direct handling is acceptable. This is a recommendation
-> — the agent decides. No commands are blocked.
+> standard 2-phase shape on an intent task, the
+> \`task_convert_intent(plan)\` tool collapses both \`TaskCreate\` calls
+> into one (with shape-validated \`intent_shape\` + \`rationale\` +
+> \`phases[]\`). For complex goals (multi-phase / multi-track /
+> investigate-then-fix) prefer the iterative flow:
+> \`task_plan_intent\` + \`task_add_phase\` × N + \`task_close_intent\`,
+> which lets you commit the plan one phase at a time. For ≤2 tasks
+> (below the task-count threshold), direct handling is acceptable.
+> This is a recommendation — the agent decides. No commands are blocked.
 `;
 
 /**
@@ -223,16 +234,19 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 /**
  * Default pi extension entrypoint. Wires the three session hooks:
  * session_start / before_agent_start / tool_call. Also registers the
- * orchestrator's two LLM-facing tools (`task_consume`,
- * `task_convert_intent`).
+ * orchestrator's six LLM-facing consumer tools (`task_inspect`,
+ * `task_consume`, `task_convert_intent`, `task_plan_intent`,
+ * `task_add_phase`, `task_close_intent`).
  *
  * The orchestrator is a consumer of the task flow, not its manager —
  * it adds tasks via pi-tasks's `TaskCreate` (with `type` set to
  * "intent" or "plan"), reads via `TaskList` / `TaskGet`, and dispatches
- * via `TaskExecute`. The orchestrator's two tools add: verdict parsing
- * on the read side, and intent → plan conversion on the write side
- * (`task_convert_intent` accepts a `plan[]` array so a single intent
- * can be committed as N plan tasks in one call).
+ * via `TaskExecute`. The orchestrator's six tools add: routing on the
+ * read side (`task_inspect`), verdict parsing on completion
+ * (`task_consume`), and intent → plan conversion on the write side
+ * (`task_convert_intent` atomic + the `task_plan_intent` /
+ * `task_add_phase` / `task_close_intent` iterative trio that lets the
+ * LLM commit one phase at a time).
  */
 export default function registerOrchestratorExtension(pi: ExtensionAPI): void {
 	installSessionHooks(pi);
