@@ -6,8 +6,10 @@ import {
   createCadenceState,
   drainReminderForContext,
   evaluateToolResult,
+  markWakeUpScheduled,
   onTurnStart,
   resetCadenceState,
+  shouldFireIdleWakeUp,
 } from "../src/reminder-cadence.js";
 
 const TASK_TOOL_NAMES = new Set([
@@ -121,6 +123,69 @@ describe("reminder cadence (pure)", () => {
       lastTaskToolUseTurn: 0,
       reminderInjectedThisCycle: false,
       reminderDue: false,
+      lastWakeUpTurn: -1,
+    });
+  });
+
+  // ── Idle wake-up decision ──
+  // The wake-up closes the gap the reminder cadence can't: an idle LLM
+  // (`end_turn`, no next LLM call) never sees the queued reminder, so the
+  // board stays in_progress while the LLM waits for a wake-up that never
+  // arrives. `shouldFireIdleWakeUp` is the gate that decides whether to
+  // schedule a `sendUserMessage` follow-up.
+
+  describe("shouldFireIdleWakeUp", () => {
+    it("returns false when neither in_progress nor ready-pending work exists", () => {
+      advanceTurns(5);
+      expect(shouldFireIdleWakeUp(state, false, false, { wakeUpDebounceTurns: 6 }))
+        .toEqual({ shouldWakeUp: false });
+    });
+
+    it("returns true on the first eligible turn when in_progress work exists", () => {
+      advanceTurns(2);
+      expect(shouldFireIdleWakeUp(state, true, false, { wakeUpDebounceTurns: 6 }))
+        .toEqual({ shouldWakeUp: true });
+    });
+
+    it("returns true when pending tasks are ready to dispatch even with no in_progress", () => {
+      advanceTurns(2);
+      expect(shouldFireIdleWakeUp(state, false, true, { wakeUpDebounceTurns: 6 }))
+        .toEqual({ shouldWakeUp: true });
+    });
+
+    it("returns false inside the debounce window after the last wake-up", () => {
+      advanceTurns(5);
+      markWakeUpScheduled(state); // lastWakeUpTurn = 5
+      // Still inside the debounce window.
+      expect(shouldFireIdleWakeUp(state, true, true, { wakeUpDebounceTurns: 6 }))
+        .toEqual({ shouldWakeUp: false });
+
+      // Just past the window.
+      advanceTurns(6);
+      expect(shouldFireIdleWakeUp(state, true, true, { wakeUpDebounceTurns: 6 }))
+        .toEqual({ shouldWakeUp: true });
+    });
+
+    it("returns true immediately after reset (lastWakeUpTurn = -1)", () => {
+      resetCadenceState(state);
+      advanceTurns(1);
+      expect(shouldFireIdleWakeUp(state, true, false, { wakeUpDebounceTurns: 6 }))
+        .toEqual({ shouldWakeUp: true });
+    });
+  });
+
+  describe("markWakeUpScheduled", () => {
+    it("stamps lastWakeUpTurn with the current turn", () => {
+      advanceTurns(7);
+      markWakeUpScheduled(state);
+      expect(state.lastWakeUpTurn).toBe(7);
+    });
+
+    it("is idempotent across repeated calls in the same turn", () => {
+      advanceTurns(3);
+      markWakeUpScheduled(state);
+      markWakeUpScheduled(state);
+      expect(state.lastWakeUpTurn).toBe(3);
     });
   });
 });

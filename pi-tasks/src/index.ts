@@ -25,8 +25,10 @@ import {
   createCadenceState,
   drainReminderForContext,
   evaluateToolResult,
+  markWakeUpScheduled,
   onTurnStart,
   resetCadenceState,
+  shouldFireIdleWakeUp,
 } from "./reminder-cadence.js";
 import { resolveTaskGlyphs } from "./task-glyphs.js";
 import { reclaimGlobalSessionTasksDir, orchestratorProjectTaskFile, sessionTaskFile } from "./task-paths.js";
@@ -68,6 +70,48 @@ function intervalFor(tasks: Task[]): number {
 
 /** How many turns completed tasks linger before auto-clearing. */
 const AUTO_CLEAR_DELAY = 4;
+
+/**
+ * How many turns before an idle wake-up is eligible to re-fire. The reminder
+ * cadence lives on turn gaps measured in TENS of seconds — a fresh reminder
+ * appears on the next LLM call, and the LLM acts on it inside that call.
+ * The wake-up path re-engages the LLM itself, so it has to leave a longer
+ * cooling-off window: long enough that the LLM has a real chance to make
+ * progress before being nudged again, short enough that a stuck session
+ * doesn't sit idle for a full minute per cycle.
+ *
+ * 6 turns @ ~5–10 s/turn ≈ 30–60 s, which is the order of magnitude the
+ * `sages-board-watch` routine's 30–120 s pulse operates on. The two
+ * mechanisms don't fight: the routine routes *new* intent tasks; the wake-up
+ * routes *existing* in_progress work.
+ */
+const IDLE_WAKE_UP_DEBOUNCE_TURNS = 6;
+
+/**
+ * Real-time debounce on top of the turn-count gate. Defends against a
+ * pathological loop where every turn ends with an idle wake-up firing before
+ * the LLM can act on the prior one. With the debounce above 0, the timer
+ * collapses any cluster of `turn_end` events that arrive faster than the
+ * host can drain them — the wake-up is then decided once, when the cluster
+ * settles.
+ *
+ * Held on a `WakeUpConfig` object so tests can shorten the wait without
+ * exposing a mutable global — `setIdleWakeUpDebounceMs` swaps the whole
+ * config in one call. Six tests at 5 s each would add 30 s of wall-clock
+ * to the suite; with a 50 ms debounce the whole file runs in well under a
+ * second.
+ */
+interface WakeUpConfig {
+  /** Wall-clock debounce before the queued wake-up actually fires. */
+  debounceMs: number;
+}
+
+const wakeUpConfig: WakeUpConfig = { debounceMs: 5_000 };
+
+/** Test hook: shorten the wall-clock debounce so unit tests don't sit idle for 5 s. */
+export function setIdleWakeUpDebounceMs(ms: number): void {
+  wakeUpConfig.debounceMs = ms;
+}
 
 /** Neutralize a task field for the echo: collapse newlines and strip reminder tags. */
 function sanitizeField(value: string): string {
@@ -478,10 +522,14 @@ export default function (pi: ExtensionAPI) {
     autoClear.onRunEnded();
   });
 
-  // ── Token usage tracking + stale-task detection ──
+  // ── Token usage tracking + stale-task detection + idle wake-up ──
   // Feed per-turn token counts from assistant messages into the widget.
   // Also detect when the agent has stopped referencing tasks but left
   // them in_progress — schedule a reminder for the next LLM call.
+  // And detect when the LLM went idle (`end_turn`, no tool calls) while the
+  // task list still has work — schedule a wake-up that re-engages the LLM
+  // itself, because the reminder cadence only fires on the NEXT LLM call and
+  // an idle LLM has no next call.
   pi.on("turn_end", async (event) => {
     const msg = event.message as any;
     if (msg?.role === "assistant" && msg.usage) {
@@ -498,7 +546,104 @@ export default function (pi: ExtensionAPI) {
         cadence.reminderDue = true;
       }
     }
+
+    scheduleIdleWakeUpIfApplicable(event);
   });
+
+  // ── Idle wake-up ──
+  //
+  // The reminder cadence injects a `<system-reminder>` into the next LLM
+  // call — but when the LLM went idle (`end_turn`, no tool calls), there is
+  // no next call, and the reminder sits in `reminderDue = true` forever.
+  // The orchestrator stays idle waiting for a wake-up that never comes,
+  // while the board still has work in it.
+  //
+  // The wake-up closes that gap: when the LLM ends a turn with no tool
+  // calls and the board still has work it can do (in_progress without a
+  // live subagent, OR pending task with all blockers met and an `agentType`
+  // ready for dispatch), schedule a follow-up message via `sendUserMessage`.
+  // That re-engages the LLM, which then sees the board on its next turn and
+  // either dispatches the next task or reads the in_progress result.
+  //
+  // Debounce: two layers. The turn-count gate (`IDLE_WAKE_UP_DEBOUNCE_TURNS`,
+  // enforced inside `shouldFireIdleWakeUp`) prevents a wake-up from being
+  // scheduled on every turn_end — once one fires, the LLM has to make
+  // progress before another is eligible. The real-time timer
+  // (`IDLE_WAKE_UP_DEBOUNCE_MS`) collapses bursts of `turn_end` events that
+  // arrive faster than the host can drain them.
+  let wakeUpTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** True if any task is unfinished in a way that warrants re-engagement. */
+  function hasUnfinishedWork(): boolean {
+    const tasks = store.list();
+    return tasks.some(t => {
+      if (t.status === "in_progress") {
+        // Orphan: an in_progress task whose agent has died, never had one
+        // (orchestrator manual work / takeover), or whose `agentId` is no
+        // longer registered in `agentTaskMap`. Either way, no subagent will
+        // ever emit a completion event for it — the only wake-up is this one.
+        const agentId = t.metadata?.agentId;
+        return !agentId || typeof agentId !== "string" || !agentTaskMap.has(agentId);
+      }
+      if (t.status === "pending") {
+        // Ready-to-dispatch: a pending task with an `agentType` and every
+        // blocker completed. The cascade is supposed to fire on its own, but
+        // autoCascade is off by default — those tasks wait for the
+        // orchestrator's manual dispatch until something wakes it.
+        if (!t.metadata?.agentType) return false;
+        return t.blockedBy.every(id => store.get(id)?.status === "completed");
+      }
+      return false;
+    });
+  }
+
+  /** Schedule a wake-up — turn-count debounced — for the next debounce window. */
+  function scheduleIdleWakeUpIfApplicable(event: unknown): void {
+    // Was this turn a real idle boundary, or just one tool call mid-stream?
+    // The LLM emits `turn_end` for *every* assistant message, including the
+    // ones inside an ongoing tool-call chain. We only want to wake up after
+    // the LLM has actually stopped — i.e., when the response carried no
+    // tool call. A turn with at least one `toolCall`/`toolUse` block means
+    // the LLM is mid-work and the next turn boundary will arrive on its
+    // own; we wait for that one.
+    const msg = (event as { message?: any }).message;
+    const hadToolCalls = Array.isArray(msg?.content)
+      && msg.content.some((c: any) => c.type === "toolCall" || c.type === "toolUse");
+    if (hadToolCalls) return;
+
+    if (!hasUnfinishedWork()) return;
+
+    const decision = shouldFireIdleWakeUp(
+      cadence,
+      store.list().some(t => t.status === "in_progress"),
+      store.list().some(t =>
+        t.status === "pending"
+        && t.metadata?.agentType
+        && t.blockedBy.every(id => store.get(id)?.status === "completed"),
+      ),
+      { wakeUpDebounceTurns: IDLE_WAKE_UP_DEBOUNCE_TURNS },
+    );
+    if (!decision.shouldWakeUp) return;
+
+    // Mark the wake-up as scheduled NOW, before the timer fires, so a
+    // second `turn_end` arriving inside the debounce window sees the gate
+    // closed and skips. Without this, every consecutive turn_end would
+    // re-arm a new timer and the wake-up would never settle.
+    markWakeUpScheduled(cadence);
+
+    if (wakeUpTimer) return;
+    wakeUpTimer = setTimeout(() => {
+      wakeUpTimer = null;
+      // Re-check the board one last time. The LLM might have done something
+      // useful in the meantime (cascaded, dispatched, retried), and we don't
+      // want a stale wake-up firing on top of fresh progress.
+      if (!hasUnfinishedWork()) return;
+      pi.sendUserMessage(
+        buildSystemReminder(store.list()),
+        { deliverAs: "followUp" },
+      );
+    }, wakeUpConfig.debounceMs);
+  }
 
   // ── System-reminder injection ──
   //
@@ -577,6 +722,13 @@ export default function (pi: ExtensionAPI) {
       agentTaskMap.clear();
       resetCadenceState(cadence);
       autoClear.reset();
+      // A session switch carries the previous session's wake-up timer into a
+      // list it no longer owns. Clear it so the new session starts with a
+      // blank wake-up gate.
+      if (wakeUpTimer) {
+        clearTimeout(wakeUpTimer);
+        wakeUpTimer = null;
+      }
       // Memory mode has no file to switch — clear tasks explicitly on /new.
       if (reason === "new" && taskScope === "memory") {
         store.clearAll();

@@ -12,6 +12,17 @@ export interface CadenceState {
   lastTaskToolUseTurn: number;
   reminderInjectedThisCycle: boolean;
   reminderDue: boolean;
+  /**
+   * Turn on which a wake-up was last scheduled. Lets the wake-up decision
+   * debounce across consecutive turn_ends — firing every turn would race the
+   * LLM, which would just see a fresh "you have unfinished work" message on
+   * top of the one it just acted on.
+   *
+   * `-1` means "never fired", so the first eligible turn_end always wakes up.
+   * Lives on `CadenceState` so it survives the same reset points (session
+   * switch) that reset the reminder cadence.
+   */
+  lastWakeUpTurn: number;
 }
 
 export interface CadenceConfig {
@@ -27,6 +38,7 @@ export function createCadenceState(): CadenceState {
     lastTaskToolUseTurn: 0,
     reminderInjectedThisCycle: false,
     reminderDue: false,
+    lastWakeUpTurn: -1,
   };
 }
 
@@ -35,6 +47,7 @@ export function resetCadenceState(state: CadenceState): void {
   state.lastTaskToolUseTurn = 0;
   state.reminderInjectedThisCycle = false;
   state.reminderDue = false;
+  state.lastWakeUpTurn = -1;
 }
 
 /** Increment the turn counter at `turn_start`. */
@@ -87,4 +100,52 @@ export function drainReminderForContext(state: CadenceState): boolean {
   state.reminderInjectedThisCycle = true;
   state.lastTaskToolUseTurn = state.currentTurn;
   return true;
+}
+
+export interface IdleWakeUpDecision {
+  /** True when caller should schedule a wake-up message after a debounce. */
+  shouldWakeUp: boolean;
+}
+
+/**
+ * Decide whether to schedule an idle wake-up. The reminder cadence already
+ * injects a system-reminder into the NEXT LLM call — but if the LLM went
+ * idle (`end_turn`, no tool calls), there is no next call, so the reminder
+ * sits in `reminderDue = true` forever. The wake-up path re-engages the LLM
+ * itself by sending a follow-up user message via the host.
+ *
+ * The wake-up MUST be debounced: a wake-up that fires every turn would race
+ * the LLM's response, double the cost, and never let the LLM settle. The
+ * debounce key is `state.lastWakeUpTurn` — separated by at least
+ * `wakeUpDebounceTurns` turns from the last wake-up.
+ *
+ * The decision is pure: callers feed in the observed task list shape. The
+ * in_progress-vs-pending split matters because in_progress work is what a
+ * subagent is *running*, and the subagent's completion will fire its own
+ * wake-up; pending work is what the orchestrator still owes a manual dispatch
+ * for.
+ */
+export function shouldFireIdleWakeUp(
+  state: CadenceState,
+  hasInProgress: boolean,
+  hasReadyPending: boolean,
+  config: { wakeUpDebounceTurns: number },
+): IdleWakeUpDecision {
+  // Nothing to re-engage for.
+  if (!hasInProgress && !hasReadyPending) return { shouldWakeUp: false };
+
+  // Never fired before — always eligible.
+  if (state.lastWakeUpTurn < 0) return { shouldWakeUp: true };
+
+  // Already woke up recently — let the LLM act on the prior wake-up first.
+  if (state.currentTurn - state.lastWakeUpTurn < config.wakeUpDebounceTurns) {
+    return { shouldWakeUp: false };
+  }
+
+  return { shouldWakeUp: true };
+}
+
+/** Record that a wake-up was scheduled for the current turn. Mutates `state`. */
+export function markWakeUpScheduled(state: CadenceState): void {
+  state.lastWakeUpTurn = state.currentTurn;
 }
