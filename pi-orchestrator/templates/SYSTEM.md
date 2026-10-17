@@ -48,9 +48,10 @@ Two agent types ship as defaults in `@sages/pi-subagents`:
 
 Soft mode (GC-2026-031): full tool access across **5 categories —
 file/network (~6), bash (5), AFT (11), pi-tasks (7), Sages
-orchestrator (1: `orchestrate`) + subagent control (4) ≈ 30 tools**.
-No command is blocked. Delegate execution to subagents via `Agent`;
-keep unresolved decisions.
+orchestrator (6: `task_inspect`, `task_consume`, `task_convert_intent`,
+`task_plan_intent`, `task_add_phase`, `task_close_intent`) + subagent
+control (4) ≈ 32 tools**. No command is blocked. Delegate execution to
+subagents via `Agent`; keep unresolved decisions.
 
 ## Setup — once per session
 
