@@ -227,16 +227,55 @@ export function validateCumulativePhases(
  * phase count + ordering rules. Throws PhaseValidationError with a
  * clear `rule` + `message` on violation.
  *
+ * Thin wrapper over {@link validateFinalShape} so callers that hold a
+ * raw `Phase[]` + rationale (e.g., `task_close_intent`'s accumulated
+ * phase list) can reuse the same rule set without synthesising
+ * `subject`/`description` placeholders to satisfy the structured
+ * `PlanShape` type.
+ *
  * Caller wraps in ConvertIntentError("shape_violation", err.message).
  */
 export function validatePlanShape(plan: PlanShape): void {
-	const { intent_shape: shape, phases } = plan;
+	const phases: Phase[] = plan.phases.map((p) => p.phase);
+	validateFinalShape(plan.intent_shape, phases, plan.rationale);
+}
+
+/**
+ * Validate a DECLARED intent_shape against a primitive `Phase[]` +
+ * rationale — the shape of the data `task_close_intent` actually holds
+ * (the accumulated list on `metadata.planning.phases` plus the
+ * rationale stamped at `task_plan_intent` time).
+ *
+ * Same rule set as {@link validatePlanShape} (delegated above). Rules
+ * fire in the same order so error messages stay stable across the two
+ * paths:
+ *
+ *   1. trivial-with-review (`trivial_shape_has_review`)
+ *   2. multi-track implement-count (`multi_track_too_few_implements`)
+ *   3. investigate-then-fix implement-count
+ *      (`investigate_then_fix_no_implement`)
+ *   4. multiple reviews (`multiple_review_phases`)
+ *   5. phase count bounds (`phase_count_out_of_bounds`)
+ *   6. first-phase (`first_phase_mismatch`)
+ *   7. last-phase (`last_phase_mismatch`)
+ *
+ * Rationale length is delegated to {@link validateRationale} so the
+ * `RATIONALE_MIN_LENGTH` / `RATIONALE_MAX_LENGTH` constants stay the
+ * single source of truth.
+ */
+export function validateFinalShape(
+	shape: IntentShape,
+	phases: ReadonlyArray<Phase>,
+	rationale: string,
+): void {
+	// Rationale length (delegated — single source of truth for bounds).
+	validateRationale({ intent_shape: shape, rationale, phases: [] } as PlanShape);
 
 	// Rule: trivial shape MUST NOT include a review phase. Check BEFORE the
 	// generic count rule so the LLM gets the most actionable message
 	// (the count rule would otherwise fire first with a less-specific
 	// error).
-	if (shape === "trivial" && phases.some((p) => p.phase === "review")) {
+	if (shape === "trivial" && phases.includes("review")) {
 		throw new PhaseValidationError(
 			"trivial_shape_has_review",
 			`Intent shape 'trivial' MUST NOT include a review phase; trivial edits skip the Reviewer. ` +
@@ -248,7 +287,7 @@ export function validatePlanShape(plan: PlanShape): void {
 	// parallel — reclassify as 'small' or 'standard'). Check BEFORE the
 	// generic count rule so the LLM sees the actual constraint.
 	if (shape === "multi-track") {
-		const implementCount = phases.filter((p) => p.phase === "implement").length;
+		const implementCount = phases.filter((p) => p === "implement").length;
 		if (implementCount < 2) {
 			throw new PhaseValidationError(
 				"multi_track_too_few_implements",
@@ -260,7 +299,7 @@ export function validatePlanShape(plan: PlanShape): void {
 
 	// Rule: investigate-then-fix MUST have ≥ 1 implement phase (the fix).
 	if (shape === "investigate-then-fix") {
-		const implementCount = phases.filter((p) => p.phase === "implement").length;
+		const implementCount = phases.filter((p) => p === "implement").length;
 		if (implementCount < 1) {
 			throw new PhaseValidationError(
 				"investigate_then_fix_no_implement",
@@ -274,7 +313,7 @@ export function validatePlanShape(plan: PlanShape): void {
 	// without a reason" anti-pattern, plus the "no review at all on
 	// production code" rule which the shape's last-phase requirement
 	// picks up implicitly.)
-	const reviewCount = phases.filter((p) => p.phase === "review").length;
+	const reviewCount = phases.filter((p) => p === "review").length;
 	if (reviewCount > 1) {
 		throw new PhaseValidationError(
 			"multiple_review_phases",
@@ -297,20 +336,20 @@ export function validatePlanShape(plan: PlanShape): void {
 
 	// Rule: first phase matches the shape's expected entry point.
 	const expectedFirst = EXPECTED_FIRST_PHASE[shape];
-	if (expectedFirst !== "none" && phases[0].phase !== expectedFirst) {
+	if (expectedFirst !== "none" && phases[0] !== expectedFirst) {
 		throw new PhaseValidationError(
 			"first_phase_mismatch",
-			`Intent shape '${shape}' requires first phase '${expectedFirst}'; got '${phases[0].phase}'.`,
+			`Intent shape '${shape}' requires first phase '${expectedFirst}'; got '${phases[0]}'.`,
 		);
 	}
 
 	// Rule: last phase matches. multi-track defers review to a second
 	// intent (the join), so it has no last-phase requirement.
 	const expectedLast = EXPECTED_LAST_PHASE[shape];
-	if (expectedLast !== "none" && phases[phases.length - 1].phase !== expectedLast) {
+	if (expectedLast !== "none" && phases[phases.length - 1] !== expectedLast) {
 		throw new PhaseValidationError(
 			"last_phase_mismatch",
-			`Intent shape '${shape}' requires last phase '${expectedLast}'; got '${phases[phases.length - 1].phase}'. ` +
+			`Intent shape '${shape}' requires last phase '${expectedLast}'; got '${phases[phases.length - 1]}'. ` +
 				(shape === "multi-track"
 					? `For multi-track, defer the Reviewer to a second intent once the parallel tracks complete.`
 					: ``),
