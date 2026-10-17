@@ -39,8 +39,21 @@ const VERDICTS: readonly Verdict[] = [
  */
 export function parseVerdict(result: string): Verdict | undefined {
 	const tokens = "(CLEAN|NEEDS_WORK|NEEDS_REDESIGN|NEEDS_CLARIFICATION)";
-	const prefixedRe = new RegExp(`\\bverdict\\s*[:=]\\s*\\*?\\*?${tokens}\\b`, "i");
-	const standaloneRe = new RegExp(`^\\s*\\*?\\*?${tokens}\\b\\s*$`, "im");
+	// The Reviewer commonly wraps the verdict in markdown emphasis
+	// (`**Verdict:** TOKEN`, `**TOKEN**`, `**verdict: TOKEN**`); each
+	// keyword can be wrapped independently so we allow zero, one, or two
+	// asterisks before AND after every keyword (`\*{0,2}`). The
+	// post-separator block (`\s*[:=][\s*]*`) tolerates zero or more
+	// `*` / whitespace between the separator and the token so
+	// `verdict:**TOKEN` and `verdict: **TOKEN` both match.
+	const prefixedRe = new RegExp(
+		`\\*{0,2}\\bverdict\\b\\s*[:=][\\s*]*${tokens}\\*{0,2}\\b`,
+		"i",
+	);
+	const standaloneRe = new RegExp(
+		`^\\s*\\*{0,2}${tokens}\\*{0,2}\\s*$`,
+		"im",
+	);
 	const match = result.match(prefixedRe) ?? result.match(standaloneRe);
 	if (!match) return undefined;
 	const upper = match[1].toUpperCase();

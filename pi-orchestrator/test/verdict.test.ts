@@ -46,6 +46,43 @@ describe("parseVerdict", () => {
 		expect(parseVerdict("The code is clean.")).toBeUndefined();
 		expect(parseVerdict("Let me work on this.")).toBeUndefined();
 	});
+
+	// ─── Markdown-emphasis forms (Reviewer's most common output style) ──
+	// The Reviewer agent commonly writes the verdict as **Verdict:** TOKEN
+	// (bold prefix and trailing bold per the project's Markdown conventions).
+	// The regex must accept `**` on either side of `verdict` / the token.
+
+	it("accepts **verdict:** + value with bold emphasis on the prefix", () => {
+		// Canonical markdown: bold prefix and trailing bold.
+		expect(parseVerdict("Issue in tests.\n**Verdict:** NEEDS_WORK\n")).toBe("NEEDS_WORK");
+		expect(parseVerdict("**Verdict:** CLEAN")).toBe("CLEAN");
+	});
+
+	it("accepts **TOKEN** standalone on its own line (trailing bold)", () => {
+		// Reviewer standard form: verdict on its own bold line.
+		expect(parseVerdict("All checks pass.\n**CLEAN**\n")).toBe("CLEAN");
+		expect(parseVerdict("**NEEDS_WORK**")).toBe("NEEDS_WORK");
+		expect(parseVerdict("**NEEDS_REDESIGN**\n")).toBe("NEEDS_REDESIGN");
+		expect(parseVerdict("**NEEDS_CLARIFICATION**")).toBe("NEEDS_CLARIFICATION");
+	});
+
+	it("accepts **verdict: TOKEN** with emphasis wrapping the whole line", () => {
+		// Bold can wrap both the prefix and the value together.
+		expect(parseVerdict("**verdict: NEEDS_WORK**")).toBe("NEEDS_WORK");
+		expect(parseVerdict("**Verdict: CLEAN**")).toBe("CLEAN");
+	});
+
+	it("accepts trailing ** emphasis with no whitespace (verdict:**TOKEN)", () => {
+		// Tight form (no space after the trailing colon).
+		expect(parseVerdict("verdict:**CLEAN**")).toBe("CLEAN");
+	});
+
+	it("rejects emphasis that isn't a verdict token (false-positive guard)", () => {
+		// `**important**` and `**VERY_CLEAN**` look like bolded verdict
+		// tokens but ARE NOT in the 4-state set — they must not match.
+		expect(parseVerdict("**important**")).toBeUndefined();
+		expect(parseVerdict("**VERY_CLEAN**")).toBeUndefined();
+	});
 });
 
 describe("suggestFollowUp", () => {
