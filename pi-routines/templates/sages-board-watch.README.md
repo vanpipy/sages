@@ -172,6 +172,14 @@ The template still carries:
 
 ---
 
+## Sidebar alternative
+
+If `pi-sidebar-sages` (the Sages fork of `jrimmer/pi-sidebar`) is installed, its Tasks panel renders the same board state passively in the sidebar overlay — without a chat-polluting pulse routine. The orchestrator's `install.sh` detects the sidebar and skips routine activation in that case.
+
+To use the sidebar instead, install the fork (see its README), then run `/routine-stop sages-board-watch` in any pi session.
+
+If the sidebar is present and the routine is also active, both work in parallel: the sidebar is the awareness surface, the routine is the auto-dispatch surface.
+
 ## Acceptance
 
 - `cd ~/.pi/packages/pi-routines && bun test` is green

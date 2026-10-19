@@ -807,6 +807,51 @@ except Exception as e:
 }
 
 # ────────────────────────────────────────────────────────────
+# sidebar_installed — detect pi-sidebar-sages (or upstream pi-sidebar)
+#
+# install_sages_board_watch_routine used to be unconditionally
+# auto-activated by `install.sh`. The new pi-sidebar-sages Tasks panel
+# (fork of jrimmer/pi-sidebar) renders the same board state in a
+# passive sidebar overlay without a chat-polluting pulse, so
+# installing both is redundant. This helper lets the routine become a
+# FALLBACK (activated only when no sidebar is present) rather than the
+# default. The user can still force-on with the sidebar installed by
+# running `/routine-create sages-board-watch` in any pi session.
+#
+# Detection probes — any single match means "sidebar present":
+#   1. Local-peer package dirs at $PI_DIR/packages/<name>/ (sage-peer
+#      install path; install.sh deploys peers there).
+#   2. npm-installed copy at $PI_DIR/agent/npm/node_modules/<name>/
+#      (covers upstream npm:pi-sidebar installs).
+#   3. `pi list` output — covers any user-registered variant under any
+#      path. The substring match is anchored with `(^|/)` and `(/|$)`
+#      so unrelated names like `pi-sidebar-themes` do NOT false-positive.
+#
+# Returns 0 if any sidebar is present (skip the routine), 1 if absent
+# (auto-activate the routine). Caller pattern:
+#   if sidebar_installed; then skip; fi
+# ────────────────────────────────────────────────────────────
+
+sidebar_installed() {
+  local name
+  for name in pi-sidebar-sages pi-sidebar; do
+    [[ -d "$PI_DIR/packages/$name" ]] && return 0
+    [[ -d "$PI_DIR/agent/npm/node_modules/$name" ]] && return 0
+  done
+  # Probe `pi list` last — covers any user-registered variant under
+  # arbitrary paths or from project settings. Soft-fail: if `pi` is not
+  # on PATH or `pi list` errors out, treat as "sidebar not present" so
+  # the routine is activated (preserves the original unconditional
+  # behavior as the safe default).
+  if command -v pi >/dev/null 2>&1; then
+    if pi list 2>/dev/null | grep -qE '(^|/)pi-sidebar(-sages)?(/|$)'; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# ────────────────────────────────────────────────────────────
 # Shared: copy pi-orchestrator files from the local sages repo
 # ────────────────────────────────────────────────────────────
 
@@ -2283,6 +2328,18 @@ install_sages_routines_templates() {
 }
 
 install_sages_board_watch_routine() {
+  # Fallback behavior — when pi-sidebar-sages (or upstream pi-sidebar)
+  # is installed, the sidebar's Tasks panel renders the same board
+  # state in a passive overlay without chat pollution. Activating
+  # sages-board-watch on top is redundant (the routine still works —
+  # it routes via task_convert_intent + TaskExecute — but the sidebar
+  # already gives the user passive awareness). Skip the auto-activation
+  # in that case; the user can force the routine on later with
+  # `/routine-create sages-board-watch` in any pi session.
+  if sidebar_installed; then
+    echo "  pi-sidebar-sages detected; skipping sages-board-watch routine activation (sidebar provides passive board awareness)"
+    return 0
+  fi
   # Pre-seed the sages-board-watch pulse routine into pi-routines'
   # state.json so the periodic task-routing pulse is active by
   # default after install. The user can disable it with
