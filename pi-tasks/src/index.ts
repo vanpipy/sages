@@ -354,6 +354,27 @@ export default function (pi: ExtensionAPI) {
 
     store.update(task.id, { status: "completed", metadata: { ...task.metadata, result } });
     widget.setActiveTask(task.id, false);
+    // Sidebar emit: append a 'log' row the moment the task flips to
+    // completed. The fork's `registerSidebarEventTool` routes this into
+    // `state.eventLog` (FIFO-evicted at SIDEBAR_EVENT_LOG_MAX = 50).
+    try {
+      pi.events.emit("sidebar:event", {
+        action: "log",
+        target: `task-${task.id}`,
+        data: {
+          status: "completed",
+          // durationMs is best-effort: the listener doesn't track
+          // start time, so consumers should treat it as a hint.
+          durationMs: typeof task.metadata?.started_at === "number"
+            ? Date.now() - (task.metadata.started_at as number)
+            : undefined,
+          tokens: task.metadata?.tokens,
+        },
+        ts: Date.now(),
+      });
+    } catch {
+      // Defensive: the sidebar fork is optional.
+    }
 
     // Auto-cascade: find unblocked dependents with agentType
     if ((cfg.autoCascade ?? false) && cascadeConfig && latestCtx) {
@@ -1404,6 +1425,25 @@ Set up task dependencies:
           store.update(taskId, { owner: agentId, metadata: { ...task.metadata, agentId } });
           widget.setActiveTask(taskId);
           launched.push(`#${taskId} → agent ${agentId}`);
+          // Sidebar emit: highlight the task the moment its subagent is
+          // spawned. The fork's `registerSidebarEventTool` routes
+          // `action: 'highlight'` to `state.highlightedId`. Subject +
+          // activeForm ride along so the sidebar can show the human-readable
+          // title without re-querying the store.
+          try {
+            pi.events.emit("sidebar:event", {
+              action: "highlight",
+              target: `task-${taskId}`,
+              data: {
+                agentType: task.metadata.agentType,
+                subject: task.subject,
+                activeForm: task.activeForm,
+              },
+              ts: Date.now(),
+            });
+          } catch {
+            // Defensive: the sidebar fork is optional.
+          }
         } catch (err: any) {
           debug(`spawn:error task=#${taskId}`, err);
           // Store the error so a follow-up TaskGet / TaskList surfaces it as

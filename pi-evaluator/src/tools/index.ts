@@ -31,10 +31,23 @@ export function registerEvalTools(
 	state: EvalState,
 	historical: HistoricalReport[] = [],
 ): void {
-	pi.registerTool(makeEvalScoreTool(state));
+	// Sidebar emitter: `eval_score` writes a 'log' row to the sidebar's
+	// event log on every compute. The fork's `registerSidebarEventTool`
+	// (extensions/sidebar/sidebar-event-tool.ts) routes 'log' to
+	// `state.eventLog` (FIFO at SIDEBAR_EVENT_LOG_MAX = 50). Wrapped in
+	// a closure that swallows listener errors so a misbehaving sidebar
+	// can't break the evaluator.
+	const emitSidebarEvent: import("./eval-score.ts").SidebarEmitter = (payload) => {
+		try {
+			pi.events.emit("sidebar:event", payload);
+		} catch {
+			// Defensive.
+		}
+	};
+	pi.registerTool(makeEvalScoreTool(state, emitSidebarEvent));
 	pi.registerTool(makeEvalTrendTool(state, historical));
 }
 
 // Re-exports for callers (extension.ts) that want both tools' types.
-export { makeEvalScoreTool, type EvalScoreOutput } from "./eval-score.ts";
+export { makeEvalScoreTool, type EvalScoreOutput, type SidebarEmitter } from "./eval-score.ts";
 export { makeEvalTrendTool, type EvalTrendOutput, type HistoricalReport } from "./eval-trend.ts";

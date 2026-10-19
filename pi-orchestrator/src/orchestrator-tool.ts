@@ -911,6 +911,26 @@ export async function taskCloseIntent(
 // ─── Registration ────────────────────────────────────────────────────────
 
 /**
+ * Emit a sidebar:event to the bus, swallowing any handler errors so a
+ * misbehaving subscriber (or a missing `pi.events` in tests that don't
+ * pre-stub it) cannot break the orchestrator's tool path. The contract
+ * matches `extensions/sidebar/sidebar-event-tool.ts` in the fork —
+ * `{ action, target?, data?, ts }`. See `orchestrator-sidebar-emit.test.ts`.
+ */
+function emitSidebarEvent(
+	pi: ExtensionAPI,
+	channel: "sidebar:event",
+	payload: { action: string; target?: string; data?: unknown; ts: number },
+): void {
+	try {
+		pi.events.emit(channel, payload);
+	} catch {
+		// Defensive: the sidebar fork is optional. Never let a sidebar
+		// listener throw propagate into the orchestrator's tool path.
+	}
+}
+
+/**
  * Register the orchestrator's three LLM-facing tools on the given pi
  * extension (in addition to pi-tasks's 7 tools, which are separately
  * registered by pi-tasks itself):
@@ -922,6 +942,16 @@ export async function taskCloseIntent(
  *   - `task_convert_intent(task_id, plan)` — the unique converter. The
  *     plan is a STRUCTURED OBJECT (intent_shape + rationale + phases[]);
  *     runtime validation in phase-validation.ts enforces per-shape rules.
+ *
+ * Each registered tool wraps the underlying pure function so that, on
+ * success, a `sidebar:event` is emitted on `pi.events`:
+ *   - `task_convert_intent` → `action: 'highlight'` over the intent
+ *   - `task_consume` on a Reviewer → `action: 'log'` over the plan task
+ *
+ * The emits are the orchestrator's contribution to the sidebar's
+ * reverse-channel wiring; the fork's `registerSidebarEventTool`
+ * (extensions/sidebar/sidebar-event-tool.ts) already routes the
+ * matching actions to `state.highlightedId` and `state.eventLog`.
  */
 export function registerOrchestratorTools(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -949,7 +979,29 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 			"if it's still running, use TaskOutput(task_id, block=true) first. " +
 			"Intent tasks throw `not_plan` — use task_convert_intent to convert first.",
 		parameters: ConsumeParams,
-		execute: taskConsume,
+		execute: async (
+			toolCallId: string,
+			params: ConsumeInput,
+			signal: AbortSignal | undefined,
+			onUpdate: AgentToolUpdateCallback<ConsumeOutput | undefined> | undefined,
+			ctx: { cwd: string },
+		) => {
+			const result = await taskConsume(toolCallId, params, signal, onUpdate, ctx);
+			// Sidebar emit: surface Reviewer verdicts on the sidebar's event
+			// log. Developer completions carry no verdict so we skip them
+			// (the implementation phase lands a 'completed' row via pi-tasks's
+			// own subagent:completed listener, not here).
+			const data = result.details as ConsumeOutput | undefined;
+			if (data && data.verdict) {
+				emitSidebarEvent(pi, "sidebar:event", {
+					action: "log",
+					target: `task-${data.id}`,
+					data: { verdict: data.verdict, agentType: data.agentType },
+					ts: Date.now(),
+				});
+			}
+			return result;
+		},
 	});
 
 	pi.registerTool({
@@ -973,7 +1025,35 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 			"plan one phase at a time and inflate the phase count for goals that " +
 			"need more than 2 plan tasks.",
 		parameters: ConvertIntentParams,
-		execute: taskConvertIntent,
+		execute: async (
+			toolCallId: string,
+			params: ConvertIntentInput,
+			signal: AbortSignal | undefined,
+			onUpdate: AgentToolUpdateCallback<ConvertIntentOutput | undefined> | undefined,
+			ctx: { cwd: string },
+		) => {
+			const result = await taskConvertIntent(
+				toolCallId,
+				params,
+				signal,
+				onUpdate,
+				ctx,
+			);
+			const data = result.details as ConvertIntentOutput | undefined;
+			if (data) {
+				emitSidebarEvent(pi, "sidebar:event", {
+					action: "highlight",
+					target: `intent-${data.intent_task_id}`,
+					data: {
+						shape: data.intent_shape,
+						phaseCount: data.plan_task_ids.length,
+						planTaskIds: data.plan_task_ids,
+					},
+					ts: Date.now(),
+				});
+			}
+			return result;
+		},
 	});
 	pi.registerTool({
 		name: "task_plan_intent",
