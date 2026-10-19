@@ -21,6 +21,7 @@ source.
 | [`pi-subagents.md`](./pi-subagents.md) | Task Executor (executing layer). `AgentManager` with two concurrency pools, the `subagents:rpc:spawn` RPC bridge, the `Developer` / `Reviewer` built-in defaults, the agent widget + fleet list, the `SubagentScheduler`, the scripted workflow runtime, worktree isolation. |
 | [`pi-codebase-memory.md`](./pi-codebase-memory.md) | Code-intelligence MCP bridge. The curated `mcp.json`, the 14 first-class MCP tools, the Sages-workspace detection, the `session_start` lifecycle hook. |
 | [`pi-evaluator.md`](./pi-evaluator.md) | Opt-in reward-mode evaluator. `eval_score` / `eval_trend` tools, the 5-dimension scoring engine, the YAML / JSONL artifact readers, the coefficients config. |
+| [`pi-sidebar-sages.md`](./pi-sidebar-sages.md) | Cross-cutting sidebar reverse-channel wiring. The 5 `sidebar:event` emit sites across `pi-orchestrator` (`task_convert_intent`, `task_consume`), `pi-tasks` (`TaskExecute` spawn, `subagents:completed` listener), and `pi-evaluator` (`makeEvalScoreTool`). Documented from the Sages side; the listener side lives in the fork at `/home/leroy/Project/pi-sidebar-sages/extensions/sidebar/sidebar-event-tool.ts`. |
 
 ## How to read these docs
 
