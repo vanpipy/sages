@@ -37,6 +37,22 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Dimension } from "../types.ts";
 import { createEvalState, type DimensionScore, type EvalState, type EvidenceRef } from "../state.ts";
 
+/**
+ * Sidebar emitter — matches the contract on the listener side
+ * (extensions/sidebar/sidebar-event-tool.ts in the fork). The
+ * orchestrator thread that wires `registerEvalTools` passes a callback
+ * bound to `pi.events.emit("sidebar:event", …)`. Wrapped in a
+ * try/catch so a failing bus never breaks the tool path.
+ *
+ * Tests pass a recording callback so they can assert the payload.
+ */
+export type SidebarEmitter = (payload: {
+	action: string;
+	target?: string;
+	data?: unknown;
+	ts: number;
+}) => void;
+
 /** Empty parameter schema — this tool takes no input. */
 export const EvalScoreParams = Type.Object({});
 
@@ -171,8 +187,18 @@ export async function computeEvalScore(state: EvalState): Promise<EvalScoreOutpu
  *
  * The tool takes no parameters. Its `description` follows the GC-2026-019
  * 3-layer LLM-hint contract (tool description + skill file + system prompt).
+ *
+ * `emit` is optional — when present, the tool emits a sidebar log row
+ * after computing the score. The shape: `{ action: 'log', target:
+ * 'evaluator', data: { score, dimensions }, ts }`. The sidebar fork
+ * (`extensions/sidebar/sidebar-event-tool.ts`) already routes this to
+ * `state.eventLog`. When `emit` is absent the tool is silent on the
+ * sidebar channel — useful for unit tests that don't care about it.
  */
-export function makeEvalScoreTool(state: EvalState): ToolDefinition<typeof EvalScoreParams> {
+export function makeEvalScoreTool(
+	state: EvalState,
+	emit?: SidebarEmitter,
+): ToolDefinition<typeof EvalScoreParams> {
 	const description = [
 		"Return the running score and 5-dimension breakdown (goal, dag, implement, audit, coordination)",
 		"for the currently active Sages workflow. Call with no arguments.",
@@ -191,6 +217,27 @@ export function makeEvalScoreTool(state: EvalState): ToolDefinition<typeof EvalS
 		parameters: EvalScoreParams,
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			const data = await computeEvalScore(stateRef);
+			if (emit) {
+				// Project to per-dimension scores only — the sidebar badge
+				// surface doesn't need the evidence arrays, only the score.
+				const dimensions: Record<Dimension, number> = {
+					goal: data.dimensions.goal.score,
+					dag: data.dimensions.dag.score,
+					implement: data.dimensions.implement.score,
+					audit: data.dimensions.audit.score,
+					coordination: data.dimensions.coordination.score,
+				};
+				try {
+					emit({
+						action: "log",
+						target: "evaluator",
+						data: { score: data.total_score, dimensions },
+						ts: Date.now(),
+					});
+				} catch {
+					// Defensive: never let a sidebar listener throw propagate.
+				}
+			}
 			return {
 				content: [{ type: "text", text: JSON.stringify(data) }],
 				details: data,
