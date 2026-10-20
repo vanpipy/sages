@@ -10,7 +10,7 @@
 # before_agent_start, tool_call hooks). The orchestrator is now the
 # sole entrypoint package; this script installs it plus all peers.
 #
-#   Local-peer (file-copy) extensions — all six are sourced from the
+#   Local-peer (file-copy) extensions — all seven are sourced from the
 #   local sages repo (the parent directory of
 #   pi-orchestrator/scripts/install.sh). No `git clone`, no remote
 #   ref pin: install.sh reads the source files from its own containing
@@ -37,6 +37,18 @@
 #                              `sages-board-watch` routine template that is activated
 #                              by default at install — no manual /routine-install step
 #                              is needed.
+#     pi-sidebar-sages     → ~/.pi/packages/pi-sidebar-sages  (SAGES sage peer;
+#                              see pi-sidebar/SAGES-FORK.md for fork lineage and
+#                              upstream attribution to jrimmer/pi-sidebar, BSD-3-Clause
+#                              (c) 2026 Jason Rimmer)
+#                              Floating right sidebar overlay. Adds a Tasks panel
+#                              that renders the Sages task board passively (no chat
+#                              pollution) plus the bidirectional `sidebar:event`
+#                              channel: the orchestrator / pi-tasks / pi-evaluator
+#                              emit `sidebar:event` at five lifecycle points and
+#                              `ctrl+shift+t` injects a system note back. The dest
+#                              dir keeps the `-sages` suffix so it does not collide
+#                              with an upstream `pi-sidebar` install — both can coexist.
 #
 #   npm-installed extensions (--prefix ~/.pi/agent/npm), latest
 #   from the npm registry — no version pin (see header below):
@@ -94,9 +106,10 @@ if [[ ! -d "$LOCAL_REPO_ROOT/pi-orchestrator" \
    || ! -d "$LOCAL_REPO_ROOT/pi-codebase-memory" \
    || ! -d "$LOCAL_REPO_ROOT/pi-subagents" \
    || ! -d "$LOCAL_REPO_ROOT/pi-evaluator" \
-   || ! -d "$LOCAL_REPO_ROOT/pi-routines" ]]; then
+   || ! -d "$LOCAL_REPO_ROOT/pi-routines" \
+   || ! -d "$LOCAL_REPO_ROOT/pi-sidebar" ]]; then
   echo "Error: LOCAL_REPO_ROOT sanity check failed" >&2
-  echo "  Expected: <repo>/{pi-orchestrator,pi-codebase-memory,pi-subagents,pi-evaluator,pi-routines}/" >&2
+  echo "  Expected: <repo>/{pi-orchestrator,pi-codebase-memory,pi-subagents,pi-evaluator,pi-routines,pi-sidebar}/" >&2
   echo "  Got: $LOCAL_REPO_ROOT" >&2
   echo "  install.sh must live at <repo>/pi-orchestrator/scripts/install.sh" >&2
   exit 1
@@ -198,6 +211,31 @@ PI_EVALUATOR_PKG="$PI_EVALUATOR_DEST_DIR"
 PI_TASKS_SRC_REL="pi-tasks"
 PI_TASKS_DEST_DIR="$PI_DIR/packages/pi-tasks"
 PI_TASKS_PKG="$PI_TASKS_DEST_DIR"
+
+# pi-sidebar package info (sage peer, deployed by file-copy)
+# pi-sidebar is the Sages fork of jrimmer/pi-sidebar — the floating right
+# sidebar overlay. The fork adds a Tasks panel that renders the Sages task
+# board passively (no chat pollution) plus a bidirectional `sidebar:event`
+# channel: the orchestrator / pi-tasks / pi-evaluator emit `sidebar:event`
+# at five lifecycle points, and `ctrl+shift+t` injects a system note back.
+#
+# The DEST_DIR keeps the `-sages` suffix so it does not collide with an
+# upstream `pi-sidebar` install at ~/.pi/packages/pi-sidebar. Users who
+# also want upstream's package can have both.
+#
+# Unlike pi-tasks, pi-sidebar ships NO `dependencies` — its three
+# peerDependencies (@earendil-works/pi-coding-agent, pi-tui, typebox)
+# are all provided by the host pi runtime, which aliases them at
+# extension-load time (same invariant verify_critical_tasks_deps
+# documents). So install_pi_sidebar_files does NOT run `bun install`:
+# there is nothing to materialize and a local copy would shadow the
+# host's aliased modules.
+#
+# See pi/docs/learn/pi-sidebar-sages.md for the integration walkthrough
+# and pi-sidebar/SAGES-FORK.md for fork lineage.
+PI_SIDEBAR_SRC_REL="pi-sidebar"
+PI_SIDEBAR_DEST_DIR="$PI_DIR/packages/pi-sidebar-sages"
+PI_SIDEBAR_PKG="$PI_SIDEBAR_DEST_DIR"
 
 # AFT (@cortexkit/aft-pi) install info — GC-2026-096.
 #
@@ -1050,7 +1088,8 @@ prune_stale_package_entries() {
       "$PI_SUBAGENTS_DEST_DIR" \
       "$PI_EVALUATOR_DEST_DIR" \
       "$PI_CODEBASE_MEMORY_DEST_DIR" \
-      "$PI_TASKS_DEST_DIR"; do
+      "$PI_TASKS_DEST_DIR" \
+      "$PI_SIDEBAR_DEST_DIR"; do
     managed_paths+="|${p}"
   done
 
@@ -1309,6 +1348,13 @@ install_orchestrator_files() {
 # $LOCAL_REPO_ROOT (no clone staging dir involved), so there is no longer a
 # risk of copying stale relative-path symlinks into $PI_DIR/packages/.
 setup_peer_node_modules_symlinks() {
+  # pi-sidebar is deliberately NOT in this loop. It has no source-level
+  # import of a shared dep (grep for `from "@earendil-works/` and
+  # `from "typebox"` in pi-sidebar/extensions/**.ts finds only host
+  # peerDependencies, all aliased by the pi extension loader), and its
+  # own typecheck/test toolchain (vitest + tsc) is dev-only and runs
+  # from the repo checkout, never from the deployed copy. A
+  # node_modules symlink here would shadow the host's aliased modules.
   for peer in pi-codebase-memory pi-subagents pi-evaluator; do
     local peer_dir="$PI_DIR/packages/$peer"
     [[ ! -d "$peer_dir" ]] && continue
@@ -1339,6 +1385,11 @@ setup_peer_node_modules_symlinks() {
 # setup_peer_node_modules_symlinks in install() so a fresh `bun install`
 # inside install_orchestrator_files cannot wipe the symlink.
 setup_orchestrator_peer_symlinks() {
+  # pi-sidebar is deliberately NOT in this loop either: nothing under
+  # pi-orchestrator/src (or any other peer) imports `@sages/pi-sidebar`,
+  # so there is no reverse-direction resolution to satisfy. The
+  # sidebar talks to Sages over the pi event bus (`sidebar:event`),
+  # not over module imports.
   for peer in pi-subagents pi-codebase-memory pi-evaluator pi-tasks; do
     local peer_dir="$PI_DIR/packages/$peer"
     [[ ! -d "$peer_dir" ]] && continue  # user opted out (--orchestrator-only)
@@ -1763,6 +1814,143 @@ except Exception as e:
   fi
 
   echo "  pi-tasks uninstalled"
+}
+
+# ──────────────────────────────────────────────────────────────────
+# pi-sidebar — floating right sidebar overlay (sage peer)
+#
+# pi-sidebar is the Sages fork of jrimmer/pi-sidebar (BSD-3-Clause,
+# Copyright (c) 2026 Jason Rimmer — see pi-sidebar/SAGES-FORK.md for
+# lineage). It adds two Sages-specific surfaces on top of the upstream
+# overlay:
+#   1. A Tasks panel that renders the Sages task board passively, so
+#      board awareness needs no chat-polluting pulse routine. That is why
+#      install_sages_routines_templates demotes `sages-board-watch` to a
+#      fallback when sidebar_installed returns true.
+#   2. The bidirectional `sidebar:event` channel. SAGES-side emitters
+#      (pi-orchestrator, pi-tasks, pi-evaluator) publish on the pi event
+#      bus; the fork-side listener
+#      (pi-sidebar/extensions/sidebar/sidebar-event-tool.ts) mutates
+#      SidebarState and calls requestRender. Five emit sites total — see
+#      pi/docs/learn/pi-sidebar-sages.md.
+#
+# Installed from $LOCAL_REPO_ROOT/pi-sidebar to
+# $PI_DIR/packages/pi-sidebar-sages. The `-sages` suffix on the dest dir
+# is deliberate: it keeps the Sages fork from colliding with an upstream
+# `pi-sidebar` install, so a user can have both. Nothing here touches
+# ~/.pi/tasks/ — the sidebar only READS the board.
+#
+# No `bun install`: pi-sidebar declares no `dependencies`, only
+# peerDependencies that the host pi runtime aliases at extension-load
+# time. See the PI_SIDEBAR_* block for the full rationale.
+# ──────────────────────────────────────────────────────────────────
+
+is_pi_sidebar_installed() {
+  local settings="$PI_DIR/agent/settings.json"
+  [[ ! -f "$settings" ]] && return 1
+  python3 -c "
+import json, os, sys
+try:
+    d = json.load(open('$settings'))
+    pkg = '$PI_SIDEBAR_PKG'
+    if pkg in d.get('packages', []) and os.path.isdir(pkg):
+        sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+install_pi_sidebar_files() {
+  local src_root="$LOCAL_REPO_ROOT/$PI_SIDEBAR_SRC_REL"
+  [[ ! -d "$src_root" ]] && {
+    echo "  Warning: $src_root not found in local sages repo, skipping pi-sidebar files"
+    return 0
+  }
+  if [[ -d "$PI_SIDEBAR_DEST_DIR" && "${FORCE:-false}" != true ]]; then
+    echo "  Skipping pi-sidebar files (exists, use --force)"
+  else
+    rm -rf "$PI_SIDEBAR_DEST_DIR"
+    mkdir -p "$PI_DIR/packages"
+    cp -r "$src_root" "$PI_SIDEBAR_DEST_DIR"
+    # The repo checkout carries node_modules/ only if the developer ran
+    # a local install; never deploy it (the host provides the deps).
+    rm -rf "$PI_SIDEBAR_DEST_DIR/node_modules"
+    echo "  Installed pi-sidebar files to $PI_SIDEBAR_DEST_DIR"
+  fi
+}
+
+install_pi_sidebar() {
+  echo "==> Installing pi-sidebar (Sages fork of jrimmer/pi-sidebar)..."
+  # File-copy BEFORE the is_*_installed guard so settings.json never
+  # points at a dir that does not exist (same invariant as
+  # install_pi_routines).
+  if ! install_pi_sidebar_files; then
+    echo "  Error: install_pi_sidebar_files failed, aborting"
+    return 1
+  fi
+  if is_pi_sidebar_installed; then
+    echo "  pi-sidebar already registered in settings.json"
+  else
+    local settings="$PI_DIR/agent/settings.json"
+    mkdir -p "$(dirname "$settings")"
+    [[ ! -f "$settings" ]] && echo '{"packages": []}' > "$settings"
+    python3 -c "
+import json
+f, pkg = '$settings', '$PI_SIDEBAR_PKG'
+try: d = json.load(open(f))
+except: d = {'packages': []}
+if pkg not in d.get('packages', []):
+    d['packages'] = d.get('packages', []) + [pkg]
+    json.dump(d, open(f, 'w'), indent=2)
+    print('  Registered', pkg)
+"
+  fi
+  echo "  pi-sidebar installed"
+}
+
+uninstall_pi_sidebar() {
+  echo "==> Uninstalling pi-sidebar..."
+
+  # Strip ONLY the Sages-fork registration. Upstream `pi-sidebar`
+  # (npm:pi-sidebar or a plain `*/pi-sidebar` path) is NOT ours to
+  # remove — the whole point of the `-sages` dest suffix is that the
+  # two coexist. Match the dest dir basename exactly, plus the npm
+  # tarball form of this fork if one was ever installed directly.
+  local settings="$PI_DIR/agent/settings.json"
+  [[ -f "$settings" ]] && python3 -c "
+import json, re, sys
+try:
+    d = json.load(open('$settings'))
+    pkgs = d.get('packages', [])
+    # Matches '.../pi-sidebar-sages' and 'npm:pi-sidebar-sages@<ver>',
+    # never a bare 'pi-sidebar' / '.../pi-sidebar' entry.
+    PKG_PATTERN = re.compile(r'^(npm:pi-sidebar-sages(@.+)?|.*/pi-sidebar-sages)\$')
+    new_pkgs = [p for p in pkgs if not PKG_PATTERN.match(p)]
+    if len(new_pkgs) != len(pkgs):
+        d['packages'] = new_pkgs
+        # Bind f explicitly. The pi-routines block above references an
+        # undefined f in its json.dump call; the resulting NameError is
+        # swallowed by the except clause plus 2>/dev/null, so that
+        # uninstall silently leaves the settings entry behind. Do not
+        # copy that. (Also: never put backticks in this string — bash
+        # runs them as command substitution before python3 sees them.)
+        f = '$settings'
+        json.dump(d, open(f, 'w'), indent=2)
+        print('  Removed pi-sidebar-sages entries from settings.json')
+except Exception as e:
+    print('  Warning:', e, file=sys.stderr)
+" 2>/dev/null || true
+
+  # Remove the deployed package directory. The user's task board under
+  # ~/.pi/tasks/ is deliberately left alone — it is pi-tasks data, not
+  # sidebar data, and this fork only reads it.
+  if [[ -d "$PI_SIDEBAR_DEST_DIR" ]]; then
+    rm -rf "$PI_SIDEBAR_DEST_DIR"
+    echo "  Removed $PI_SIDEBAR_DEST_DIR"
+  fi
+
+  echo "  pi-sidebar uninstalled"
 }
 
 # ──────────────────────────────────────────────────────────────────
@@ -2654,7 +2842,7 @@ uninstall_aft_binary() {
 # Mode 1: full install (default)
 # ────────────────────────────────────────────────────────────
 install() {
-  echo "==> Installing pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + pi-routines..."
+  echo "==> Installing pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + pi-routines + pi-sidebar..."
 
   # Pre-flight checks
   install_pi_if_needed
@@ -2724,6 +2912,16 @@ install() {
   # doesn't need to land before install_orchestrator_files — but we
   # install it with the other sage peers for grouping.
   install_pi_routines || exit 1
+
+  # Install pi-sidebar (sage peer — see pi-sidebar/SAGES-FORK.md for
+  # fork lineage and pi/docs/learn/pi-sidebar-sages.md for the
+  # sidebar:event wiring). File-copied from $LOCAL_REPO_ROOT/pi-sidebar
+  # to $PI_DIR/packages/pi-sidebar-sages. Neither a file: dep of
+  # pi-orchestrator/package.json nor an @sages/* import from any peer,
+  # so it needs no ordering constraint and no symlink in either peer
+  # symlink loop — but it must land before install_sages_routines_templates
+  # so the board-watch routine is correctly demoted to a fallback.
+  install_pi_sidebar || exit 1
 
   # Install codebase-memory-mcp binary (~50MB download from GitHub releases)
   install_codebase_memory_mcp_binary || {
@@ -2940,7 +3138,7 @@ install_sync_only() {
 # Uninstall (removes both orchestrator and pi-codebase-memory)
 # ────────────────────────────────────────────────────────────
 uninstall() {
-  echo "==> Uninstalling pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + pi-routines..."
+  echo "==> Uninstalling pi-orchestrator + pi-codebase-memory + pi-mcp-adapter + pi-subagents + pi-evaluator + pi-tasks + pi-routines + pi-sidebar..."
 
   # Remove orchestrator
   if [[ -d "$PKG_DIR" ]]; then
@@ -2986,6 +3184,11 @@ uninstall() {
   # Uninstall pi-tasks (workflow engine) — GC-2026-install-pi-tasks
   uninstall_pi_tasks
 
+  # Uninstall pi-sidebar (Sages fork of jrimmer/pi-sidebar). Reverse
+  # order from install: the sidebar reads the board but owns no state,
+  # so it can go after pi-tasks without data loss.
+  uninstall_pi_sidebar || true
+
   # Uninstall agent-tool-description.md override + subagents.json setting.
   uninstall_agent_tool_description
   uninstall_subagents_config
@@ -3008,6 +3211,10 @@ main() {
         # writes to the same prefix the rest of the script targets.
         PI_TASKS_DEST_DIR="$PI_DIR/packages/pi-tasks"
         PI_TASKS_PKG="$PI_TASKS_DEST_DIR"
+        # Same lockstep requirement for the pi-sidebar peer (registered
+        # in settings.json under $PI_SIDEBAR_PKG).
+        PI_SIDEBAR_DEST_DIR="$PI_DIR/packages/pi-sidebar-sages"
+        PI_SIDEBAR_PKG="$PI_SIDEBAR_DEST_DIR"
         shift 2
         ;;
       --force) FORCE=true; shift ;;

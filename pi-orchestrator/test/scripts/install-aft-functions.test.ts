@@ -119,7 +119,9 @@ function buildSandbox(): string {
 	// Symlink the four peer dirs so install.sh's sanity check passes.
 	// pi-routines was added in the pi-routines-fork-2026-Q1 GC; its
 	// inclusion here mirrors install-sages-routines-templates.test.ts.
-	const peers = ["pi-codebase-memory", "pi-subagents", "pi-evaluator", "pi-routines"];
+	// pi-sidebar was added when it was vendored as a sage peer (the
+	// LOCAL_REPO_ROOT sanity check now requires it alongside the others).
+	const peers = ["pi-codebase-memory", "pi-subagents", "pi-evaluator", "pi-routines", "pi-sidebar"];
 	for (const peer of peers) {
 		const linkPath = join(sandbox, peer);
 		const realPath = join(REPO_ROOT, peer);

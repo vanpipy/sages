@@ -89,7 +89,9 @@ function buildSandbox(): string {
 	});
 	// Symlink the peer dirs so install.sh's sanity checks pass
 	// (matches the pattern in install-aft-functions.test.ts).
-	for (const peer of ["pi-codebase-memory", "pi-subagents", "pi-evaluator", "pi-routines"]) {
+	// pi-sidebar was added when it was vendored as a sage peer (the
+	// LOCAL_REPO_ROOT sanity check now requires it alongside the others).
+	for (const peer of ["pi-codebase-memory", "pi-subagents", "pi-evaluator", "pi-routines", "pi-sidebar"]) {
 		const realPath = join(REPO_ROOT, peer);
 		const linkPath = join(sandbox, peer);
 		if (existsSync(realPath)) {

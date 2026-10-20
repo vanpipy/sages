@@ -92,6 +92,7 @@ main LLM reads it via `TaskOutput` and decides next step.
 | `pi-subagents/` | Executing layer: `AgentManager` (concurrency pools, lifecycle, worktree isolation, mid-run control); ships `Developer` + `Reviewer` as built-in defaults; script-based workflow runtime under `src/workflow/`; cross-extension RPC bridge to pi-tasks |
 | `pi-codebase-memory/` | Code knowledge graph MCP server |
 | `pi-evaluator/` | Evaluation metrics for cost, security, and text quality (currently path-A-shaped — see GC-2026-evaluator-path-B follow-up) |
+| `pi-sidebar/` | Sidebar peer (sage fork of [jrimmer/pi-sidebar](https://github.com/jrimmer/pi-sidebar)): floating right overlay + a Tasks panel that renders the Sages task board passively, plus the bidirectional `sidebar:event` channel the orchestrator emits into. Upstream author attribution and BSD-3-Clause LICENSE preserved. |
 
 ## Where to learn more
 

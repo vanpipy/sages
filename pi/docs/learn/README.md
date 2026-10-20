@@ -21,6 +21,7 @@ source.
 | [`pi-subagents.md`](./pi-subagents.md) | Task Executor (executing layer). `AgentManager` with two concurrency pools, the `subagents:rpc:spawn` RPC bridge, the `Developer` / `Reviewer` built-in defaults, the agent widget + fleet list, the `SubagentScheduler`, the scripted workflow runtime, worktree isolation. |
 | [`pi-codebase-memory.md`](./pi-codebase-memory.md) | Code-intelligence MCP bridge. The curated `mcp.json`, the 14 first-class MCP tools, the Sages-workspace detection, the `session_start` lifecycle hook. |
 | [`pi-evaluator.md`](./pi-evaluator.md) | Opt-in reward-mode evaluator. `eval_score` / `eval_trend` tools, the 5-dimension scoring engine, the YAML / JSONL artifact readers, the coefficients config. |
+| [`pi-sidebar-sages.md`](./pi-sidebar-sages.md) | Sidebar peer + reverse channel. The 5 `sidebar:event` emit sites across pi-orchestrator / pi-tasks / pi-evaluator, the listener in `pi-sidebar/`, and the sage-peer packaging (vendored, not a bun workspace, `-sages` deploy suffix). |
 
 ## How to read these docs
 
@@ -35,6 +36,10 @@ source.
    opt-in companions.** Both are off by default; both follow the same
    pattern (peer `pi-*` deps + lifecycle hooks + a curated set of
    LLM-facing tools).
+4. **Read `pi-sidebar-sages.md` for the visual surface.** It is the
+   one doc whose package is vendored rather than a bun workspace
+   member, and it documents the cross-package `sidebar:event`
+   contract.
 
 ## File:line references
 

@@ -14,7 +14,7 @@ that scores a workflow across five dimensions. The repo root contains
 the workspace manifest, two human-facing operational guides
 (`README.md` / `AGENTS.md`), the MIT license, git hooks, and the
 `pi-codebase-memory` / `pi-evaluator` / `pi-orchestrator` / `pi-subagents` /
-`pi-tasks` packages.
+`pi-tasks` packages, plus the vendored `pi-sidebar` peer.
 
 The top-level `README.md` is the human-facing entry point; the
 top-level `AGENTS.md` is the operational contract an LLM reads at session
@@ -65,6 +65,12 @@ to behave as advertised unless the LLM honors the soft-mode rules in
   registered as workspaces share the hoisted `node_modules/`.
 - The only top-level scripts delegate into `pi-orchestrator`. There is
   no top-level `test`, no top-level `lint`, no top-level `build`.
+- `pi-sidebar` is a vendored peer on the same non-workspace footing as
+  `pi-tasks`: `pi-orchestrator/scripts/install.sh` file-copies it to
+  `~/.pi/packages/pi-sidebar-sages`, it keeps its own vitest + tsc
+  toolchain (`cd pi-sidebar && npm run verify`), and it carries
+  upstream's BSD-3-Clause license rather than the repo-root MIT. See
+  [`pi-sidebar-sages.md`](./pi-sidebar-sages.md).
 - `husky` is a dev dependency and its `prepare` script wires the
   pre-commit hook (`orchestrator:typecheck` + `orchestrator:test`).
 

@@ -1,0 +1,620 @@
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+	KeybindingsManager,
+	SessionShutdownEvent,
+	SessionStartEvent,
+	TurnEndEvent,
+	TurnStartEvent,
+} from "@earendil-works/pi-coding-agent";
+import type { Component, OverlayHandle, TUI } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
+import { renderContextSection } from "./sidebar/sections/context.js";
+import { renderGitSection } from "./sidebar/sections/git.js";
+import { renderHintSection } from "./sidebar/sections/hint.js";
+import { renderLocationSection } from "./sidebar/sections/location.js";
+import { renderModelSection } from "./sidebar/sections/model.js";
+import {
+	emptyTasksState,
+	loadTasksState,
+	renderTasksSection,
+} from "./sidebar/sections/tasks.js";
+import type {
+	GitState,
+	SidebarRenderOptions,
+	SidebarSectionContext,
+	SidebarState,
+	Theme,
+} from "./sidebar/types.js";
+import {
+	envBool,
+	envInt,
+	envSignedInt,
+	padAnsi,
+	parseNumstat,
+	parseShortstat,
+	shouldHideSidebar,
+} from "./sidebar/utils.js";
+import { registerSidebarEventTool } from "./sidebar/sidebar-event-tool.js";
+
+export type { GitState, SidebarState, Task, TaskRow, TasksState } from "./sidebar/types.js";
+export {
+	countTasks,
+	emptyTasksState,
+	loadTasksState,
+	orchestratorWorkdir,
+	parseTasksJson,
+	projectKey,
+	renderTasksSection,
+	resolveTasksSource,
+	toTaskRows,
+} from "./sidebar/sections/tasks.js";
+export {
+	envBool,
+	envInt,
+	envSignedInt,
+	formatFileLine,
+	fmtNumber,
+	padAnsi,
+	parseNumstat,
+	parseShortstat,
+	shouldHideSidebar,
+} from "./sidebar/utils.js";
+
+const DEFAULT_GIT: GitState = {
+	insideRepo: false,
+	files: [],
+	insertions: 0,
+	deletions: 0,
+	changedFiles: 0,
+};
+
+const COLLAPSED_SIDEBAR_WIDTH = 2;
+
+const SIDEBAR_SECTIONS: Array<(section: SidebarSectionContext) => void> = [
+	renderModelSection,
+	renderContextSection,
+	renderGitSection,
+	renderTasksSection,
+	renderLocationSection,
+	renderHintSection,
+];
+
+export function sidebarOverlayWidth(
+	state: Pick<SidebarState, "collapsed" | "fullHeight">,
+	width: number,
+	buffer: number,
+): number {
+	return state.collapsed
+		? COLLAPSED_SIDEBAR_WIDTH
+		: width + (state.fullHeight ? buffer : 0);
+}
+
+export function setSidebarCollapsed(
+	state: Pick<SidebarState, "enabled" | "collapsed">,
+	collapsed: boolean,
+): void {
+	state.enabled = true;
+	state.collapsed = collapsed;
+}
+
+export function toggleSidebarCollapsed(
+	state: Pick<SidebarState, "enabled" | "collapsed">,
+): void {
+	if (!state.enabled) {
+		setSidebarCollapsed(state, false);
+		return;
+	}
+	setSidebarCollapsed(state, !state.collapsed);
+}
+
+export class SidebarComponent implements Component {
+	constructor(
+		private readonly getContext: () => ExtensionContext | undefined,
+		private readonly state: SidebarState,
+		private readonly theme: Theme,
+		private readonly options: SidebarRenderOptions,
+		/**
+		 * Reverse-channel hook the Tasks section calls when the user
+		 * selects a row. The plugin wires this to
+		 * `pi.appendEntry("system", "Sidebar: user selected task #N — …")`.
+		 * Defaults to a no-op so existing callers (tests + the README
+		 * quickstart) keep working without changes.
+		 */
+		private readonly selectTask: (
+			taskId: string,
+			subject: string,
+		) => void = () => {},
+	) {}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		if (this.state.collapsed) return this.renderCollapsed(width);
+
+		const ctx = this.getContext();
+		const buffer = this.state.fullHeight ? this.options.buffer : 0;
+		const contentWidth = Math.max(8, width - buffer);
+		const innerWidth = Math.max(8, contentWidth - 3);
+		const lines: string[] = [];
+		const add = (line = "") => {
+			const gutter = buffer > 0 ? " ".repeat(buffer) : "";
+			const bordered = gutter + this.theme.fg("borderMuted", "│ ") + line;
+			lines.push(padAnsi(truncateToWidth(bordered, width, ""), width));
+		};
+		const heading = (label: string) => {
+			add();
+			add(this.theme.fg("text", this.theme.bold(label)));
+		};
+		const section: SidebarSectionContext = {
+			ctx,
+			state: this.state,
+			theme: this.theme,
+			innerWidth,
+			add,
+			heading,
+			muted: (s: string) => this.theme.fg("muted", s),
+			dim: (s: string) => this.theme.fg("dim", s),
+			options: this.options,
+			selectTask: this.selectTask,
+		};
+
+		const verticalPadding = this.state.fullHeight
+			? 0
+			: this.options.verticalPadding;
+		for (let i = 0; i < verticalPadding; i++) add();
+		for (const renderSection of SIDEBAR_SECTIONS) renderSection(section);
+		for (let i = 0; i < verticalPadding; i++) add();
+		if (this.state.fullHeight) {
+			while (lines.length < this.options.fillRows) add();
+		}
+		return lines;
+	}
+
+	private renderCollapsed(width: number): string[] {
+		const rail = (label = "") => {
+			const markerText = label ? "◀│" : " │";
+			const marker = this.theme.fg(
+				label ? "accent" : "borderMuted",
+				markerText,
+			);
+			const line = " ".repeat(Math.max(0, width - markerText.length)) + marker;
+			return padAnsi(truncateToWidth(line, width, ""), width);
+		};
+		if (this.state.fullHeight) {
+			const lines = Array.from({ length: this.options.fillRows }, () => rail());
+			if (lines.length > 1) lines[1] = rail("restore");
+			return lines;
+		}
+		return [rail(), rail("restore"), rail()];
+	}
+}
+
+export function piTitle(ctx: ExtensionContext): string {
+	const sessionName = (
+		ctx.sessionManager as unknown as {
+			getSessionName?: () => string | undefined;
+		}
+	).getSessionName?.();
+	return sessionName ?? "Pi Session";
+}
+
+export default function sidebarPlugin(pi: ExtensionAPI) {
+	const sidebarWidth = envInt("PI_SIDEBAR_WIDTH", 34);
+	const sidebarBuffer = envInt("PI_SIDEBAR_BUFFER", 1);
+	const sidebarFillRows = envInt("PI_SIDEBAR_FILL_ROWS", 200);
+	const sidebarVerticalPadding = Math.max(
+		0,
+		envSignedInt("PI_SIDEBAR_VERTICAL_PADDING", 1),
+	);
+	const minTermWidth = envInt("PI_SIDEBAR_MIN_TERM_WIDTH", 110);
+	const refreshMs = envInt("PI_SIDEBAR_REFRESH_MS", 5000);
+	const maxFiles = envInt(
+		"PI_SIDEBAR_GIT_LINES",
+		envInt("PI_SIDEBAR_MAX_FILES", 12),
+	);
+	const autohideWorking = envBool("PI_SIDEBAR_AUTOHIDE_WORKING", true);
+	const floatingOffsetY = envSignedInt("PI_SIDEBAR_OFFSET_Y", -6);
+	const tasksEnabled = envBool("PI_SIDEBAR_TASKS", true);
+	const tasksMaxRows = Math.max(1, envInt("PI_SIDEBAR_TASKS_MAX", 10));
+
+	/**
+	 * Reverse-channel: inject a system note referencing the picked task.
+	 * Bound to the global `ctrl+shift+t` shortcut (see below). The
+	 * TUI's non-capturing overlay can't natively focus rows, so we
+	 * pick the "first selectable" — first in_progress, else first
+	 * pending/blocked/intent — and emit the note for that one.
+	 */
+	function pickTopTaskId(): { id: string; subject: string } | null {
+		const rows = state.tasks.rows;
+		const priority = ["in_progress", "intent", "pending", "blocked"];
+		for (const want of priority) {
+			const found = rows.find((r) => r.status === want);
+			if (found) return { id: found.id, subject: found.subject };
+		}
+		// Fall back to the first row of any status (e.g., completed).
+		const first = rows[0];
+		if (first) return { id: first.id, subject: first.subject };
+		return null;
+	}
+
+	/**
+	 * `selectTask(taskId, subject)` is the wire shape the Tasks section
+	 * renderer exposes via `SidebarSectionContext.selectTask`. Calling it
+	 * appends a system note the next LLM turn will see. We bind it here
+	 * (where `pi` is in scope) and forward it to the component constructor.
+	 */
+	function selectTask(taskId: string, subject: string): void {
+		const note = `Sidebar: user selected task #${taskId} — ${subject}`;
+		try {
+			pi.appendEntry("system", note);
+		} catch {
+			/* appendEntry may not be wired in older pi hosts — silent. */
+		}
+	}
+
+	const state: SidebarState = {
+		enabled: envBool("PI_SIDEBAR_ENABLED", true),
+		collapsed: false,
+		gitDetail: envBool("PI_SIDEBAR_GIT_DETAIL", true),
+		fullHeight: envBool("PI_SIDEBAR_FULL_HEIGHT", false),
+		git: DEFAULT_GIT,
+		turnCount: 0,
+		isStreaming: false,
+		tasks: { ...emptyTasksState(), enabled: tasksEnabled },
+		badges: [],
+		eventLog: [],
+	};
+
+	let currentCtx: ExtensionContext | undefined;
+	let overlayHandle: OverlayHandle | undefined;
+	let component: SidebarComponent | undefined;
+	let tuiRef: TUI | undefined;
+	let refreshTimer: ReturnType<typeof setInterval> | undefined;
+	let refreshing = false;
+	let refreshingTasks = false;
+
+	function requestRender() {
+		component?.invalidate();
+		tuiRef?.requestRender();
+	}
+
+	// LLM-facing `sidebar_event` tool + `sidebar:event` listener. Registered
+	// eagerly so the channel is hot before `session_start` fires.
+	registerSidebarEventTool(
+		pi,
+		() => currentCtx,
+		() => state,
+		requestRender,
+	);
+
+	function applyVisibility() {
+		overlayHandle?.setHidden(shouldHideSidebar(state, autohideWorking));
+		requestRender();
+	}
+
+	function currentSidebarOverlayWidth(): number {
+		return sidebarOverlayWidth(state, sidebarWidth, sidebarBuffer);
+	}
+
+	async function refreshGit(ctx: ExtensionContext | undefined = currentCtx) {
+		if (!ctx || refreshing) return;
+		refreshing = true;
+		try {
+			const inside = await pi.exec(
+				"git",
+				["rev-parse", "--is-inside-work-tree"],
+				{ cwd: ctx.cwd, timeout: 1500 },
+			);
+			if (inside.code !== 0 || inside.stdout.trim() !== "true") {
+				state.git = { ...DEFAULT_GIT, error: "not a git repo" };
+				return;
+			}
+
+			const [branchRes, statRes, statusRes, numstatRes] = await Promise.all([
+				pi.exec("git", ["branch", "--show-current"], {
+					cwd: ctx.cwd,
+					timeout: 1500,
+				}),
+				pi.exec("git", ["diff", "--shortstat"], {
+					cwd: ctx.cwd,
+					timeout: 1500,
+				}),
+				pi.exec("git", ["status", "--porcelain=v1"], {
+					cwd: ctx.cwd,
+					timeout: 1500,
+				}),
+				pi.exec("git", ["diff", "--numstat", "HEAD", "--"], {
+					cwd: ctx.cwd,
+					timeout: 1500,
+				}),
+			]);
+
+			let branch = branchRes.stdout.trim();
+			if (!branch) {
+				const head = await pi.exec("git", ["rev-parse", "--short", "HEAD"], {
+					cwd: ctx.cwd,
+					timeout: 1500,
+				});
+				branch = head.stdout.trim();
+			}
+
+			const deltas = parseNumstat(
+				numstatRes.code === 0 ? numstatRes.stdout : "",
+			);
+			const files = statusRes.stdout
+				.split("\n")
+				.map((line: string) => line.trimEnd())
+				.filter(Boolean)
+				.map((line: string) => {
+					const code = line.slice(0, 2).trim() || "M";
+					const path = line.slice(3).trim();
+					return {
+						code,
+						path,
+						delta: deltas.get(path) ?? (code.includes("?") ? "new" : undefined),
+					};
+				});
+
+			const stats = parseShortstat(statRes.stdout.trim());
+			state.git = {
+				insideRepo: true,
+				branch,
+				files,
+				changedFiles: stats.changedFiles || files.length,
+				insertions: stats.insertions,
+				deletions: stats.deletions,
+			};
+			state.lastGitRefresh = Date.now();
+		} catch (error) {
+			state.git = {
+				...DEFAULT_GIT,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		} finally {
+			refreshing = false;
+			requestRender();
+		}
+	}
+
+	async function refreshTasks(ctx: ExtensionContext | undefined = currentCtx) {
+		if (!tasksEnabled || refreshingTasks) return;
+		refreshingTasks = true;
+		try {
+			const cwd = ctx?.cwd ?? process.cwd();
+			const sessionId =
+				(ctx as unknown as { sessionId?: string })?.sessionId ??
+				(ctx?.sessionManager as unknown as { sessionId?: string })?.sessionId;
+			const next = loadTasksState(cwd, {
+				sessionId: typeof sessionId === "string" ? sessionId : undefined,
+				maxRows: tasksMaxRows,
+			});
+			state.tasks = { ...next, enabled: tasksEnabled };
+			state.lastTasksRefresh = Date.now();
+		} catch (error) {
+			state.tasks = {
+				...emptyTasksState(),
+				enabled: tasksEnabled,
+				available: false,
+				source: error instanceof Error ? error.message : String(error),
+			};
+		} finally {
+			refreshingTasks = false;
+			requestRender();
+		}
+	}
+
+	function startSidebar(ctx: ExtensionContext) {
+		if (!ctx.hasUI || component) return;
+		currentCtx = ctx;
+		void refreshGit(ctx);
+		void refreshTasks(ctx);
+		void ctx.ui.custom<void>(
+			(
+				tui: TUI,
+				theme: Theme,
+				_keybindings: KeybindingsManager,
+				done: (result: void) => void,
+			) => {
+				tuiRef = tui;
+				component = new SidebarComponent(() => currentCtx, state, theme, {
+					maxFiles,
+					buffer: sidebarBuffer,
+					fillRows: sidebarFillRows,
+					verticalPadding: sidebarVerticalPadding,
+					getThinkingLevel: () => pi.getThinkingLevel?.(),
+					tasks: { maxRows: tasksMaxRows },
+				}, selectTask);
+				refreshTimer = setInterval(() => {
+					void refreshGit();
+					void refreshTasks();
+				}, refreshMs);
+				return {
+					dispose() {
+						if (refreshTimer) clearInterval(refreshTimer);
+						refreshTimer = undefined;
+						component = undefined;
+						tuiRef = undefined;
+						done();
+					},
+					render: (width: number) => component?.render(width) ?? [],
+					invalidate: () => component?.invalidate(),
+				};
+			},
+			{
+				overlay: true,
+				overlayOptions: {
+					get anchor() {
+						return state.fullHeight
+							? ("top-right" as const)
+							: ("right-center" as const);
+					},
+					get width() {
+						return currentSidebarOverlayWidth();
+					},
+					maxHeight: "100%",
+					get margin() {
+						return state.fullHeight
+							? { top: 0, right: 0, bottom: 0 }
+							: { right: 0 };
+					},
+					get offsetY() {
+						return state.fullHeight ? 0 : floatingOffsetY;
+					},
+					nonCapturing: true,
+					visible: (termWidth: number) => termWidth >= minTermWidth,
+				},
+				onHandle: (handle: OverlayHandle) => {
+					overlayHandle = handle;
+					handle.unfocus();
+					applyVisibility();
+				},
+			},
+		);
+	}
+
+	pi.on(
+		"session_start",
+		async (_event: SessionStartEvent, ctx: ExtensionContext) => {
+			currentCtx = ctx;
+			startSidebar(ctx);
+		},
+	);
+
+	pi.on(
+		"session_shutdown",
+		async (_event: SessionShutdownEvent, _ctx: ExtensionContext) => {
+			overlayHandle?.hide();
+			overlayHandle = undefined;
+		},
+	);
+
+	pi.on("turn_start", async (_event: TurnStartEvent, ctx: ExtensionContext) => {
+		currentCtx = ctx;
+		state.turnCount++;
+		state.isStreaming = true;
+		applyVisibility();
+	});
+
+	pi.on("turn_end", async (_event: TurnEndEvent, ctx: ExtensionContext) => {
+		currentCtx = ctx;
+		state.isStreaming = false;
+		void refreshGit(ctx);
+		void refreshTasks(ctx);
+		applyVisibility();
+	});
+
+	pi.on(
+		"tool_execution_start",
+		async (event: { toolName: string }, ctx: ExtensionContext) => {
+			currentCtx = ctx;
+			state.lastTool = event.toolName;
+			requestRender();
+		},
+	);
+
+	pi.on("model_select", async (_event: unknown, ctx: ExtensionContext) => {
+		currentCtx = ctx;
+		requestRender();
+	});
+
+	pi.registerCommand("sidebar", {
+		description:
+			"Toggle or configure the pi sidebar: /sidebar [collapse|expand|on|off|status|full|floating]",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			currentCtx = ctx;
+			startSidebar(ctx);
+			const action = args.trim().toLowerCase() || "toggle";
+			if (action === "on") setSidebarCollapsed(state, false);
+			else if (action === "off") state.enabled = false;
+			else if (action === "collapse" || action === "collapsed")
+				setSidebarCollapsed(state, true);
+			else if (action === "expand" || action === "expanded")
+				setSidebarCollapsed(state, false);
+			else if (action === "full" || action === "full-height")
+				state.fullHeight = true;
+			else if (action === "floating" || action === "window")
+				state.fullHeight = false;
+			else if (action === "status") {
+				ctx.ui.notify(
+					`Sidebar is ${state.enabled ? "on" : "off"}; ${state.collapsed ? "collapsed" : "expanded"}; layout is ${state.fullHeight ? "full-height" : "floating"}; autohide while working is ${autohideWorking ? "on" : "off"}; git detail is ${state.gitDetail ? "on" : "off"}; tasks section is ${tasksEnabled ? `on (max ${tasksMaxRows} rows)` : "off"}.`,
+					"info",
+				);
+				return;
+			} else if (action === "toggle") toggleSidebarCollapsed(state);
+			else {
+				ctx.ui.notify(`Unknown sidebar option: ${action}`, "warning");
+				return;
+			}
+			applyVisibility();
+			ctx.ui.notify(
+				`Sidebar ${state.enabled ? (state.collapsed ? "collapsed" : "enabled") : "hidden"}`,
+				"info",
+			);
+		},
+	});
+
+	pi.registerCommand("sidebar-refresh", {
+		description: "Refresh sidebar git/status data",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			currentCtx = ctx;
+			await refreshGit(ctx);
+			ctx.ui.notify("Sidebar refreshed", "info");
+		},
+	});
+
+	pi.registerCommand("sidebar-refresh-tasks", {
+		description: "Refresh sidebar tasks section",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			currentCtx = ctx;
+			await refreshTasks(ctx);
+			ctx.ui.notify("Sidebar tasks refreshed", "info");
+		},
+	});
+
+	pi.registerCommand("sidebar-git-detail", {
+		description: "Toggle detailed changed-file list in the sidebar",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			state.gitDetail = !state.gitDetail;
+			requestRender();
+			ctx.ui.notify(
+				`Sidebar git detail ${state.gitDetail ? "enabled" : "reduced"}`,
+				"info",
+			);
+		},
+	});
+
+	pi.registerShortcut("ctrl+shift+s", {
+		description: "Collapse or expand pi sidebar",
+		handler: async (ctx: ExtensionContext) => {
+			currentCtx = ctx;
+			startSidebar(ctx);
+			toggleSidebarCollapsed(state);
+			applyVisibility();
+		},
+	});
+
+	/**
+	 * Reverse-channel: pick the top task (in_progress first, then
+	 * intent, then pending, then blocked) and inject a system note for
+	 * it. The TUI's non-capturing overlay can't natively focus rows, so
+	 * this shortcut is the bridge: the user picks "the highlighted task"
+	 * by pressing `ctrl+shift+t` and the next LLM turn sees
+	 * `Sidebar: user selected task #N — <subject>` in its system notes.
+	 */
+	pi.registerShortcut("ctrl+shift+t", {
+		description:
+			"Select the top Sages task in the sidebar and inject a system note for the next LLM turn",
+		handler: async (ctx: ExtensionContext) => {
+			currentCtx = ctx;
+			const picked = pickTopTaskId();
+			if (!picked) {
+				ctx.ui.notify("No Sages task to select.", "info");
+				return;
+			}
+			selectTask(picked.id, picked.subject);
+			ctx.ui.notify(`Sidebar: selected task #${picked.id}`, "info");
+		},
+	});
+}

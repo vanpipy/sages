@@ -338,4 +338,5 @@ subagent dispatch.
 - **Subagent dispatch + Agent tool description:** `pi-orchestrator/templates/agent-tool-description.md`
 - **Workflow:** `pi-orchestrator/skills/orchestrator/SKILL.md`
 - **Brainstorming:** `pi-orchestrator/skills/brainstorming/SKILL.md`
+- **Sidebar integration:** `pi/docs/learn/pi-sidebar-sages.md` — the `sidebar:event` emit points in the orchestrator / pi-tasks / pi-evaluator and the listener side in `pi-sidebar/extensions/sidebar/sidebar-event-tool.ts`.
 - **Installed system prompt:** `pi-orchestrator/templates/SYSTEM.md`

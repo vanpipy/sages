@@ -1,0 +1,11 @@
+node_modules/
+.pi-lens/
+autoresearch.jsonl
+autoresearch.ideas.md
+*.tgz
+
+# Fork-lineage notes for contributors, not runtime. Already excluded by the
+# package.json "files" allowlist; listed here so the intent survives if that
+# allowlist is ever relaxed. Matches the pi-tasks/.npmignore precedent
+# (AGENTS.md / CLAUDE.md excluded for the same reason).
+SAGES-FORK.md
