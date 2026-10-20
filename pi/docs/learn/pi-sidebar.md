@@ -482,13 +482,59 @@ TUI is never modified. `startSidebar` (`sidebar.ts:398`) calls
 | `margin` | `fullHeight ? { top: 0, right: 0, bottom: 0 } : { right: 0 }` (`:446–450`) | Floating mode keeps a right margin so the panel breathes; full-height pins flush. |
 | `offsetY` | `fullHeight ? 0 : PI_SIDEBAR_OFFSET_Y` (`:451–453`) | Default `-6` rows, so the floating panel rides above the editor's input box. |
 | `nonCapturing` | `true` (`:454`) | The overlay never steals keyboard or mouse input from the editor. This is what forces the `ctrl+shift+t` reverse channel instead of in-panel navigation. |
-| `visible` | `(termWidth) => termWidth >= minTermWidth` (`:455`) | Default threshold `110`. Below it the overlay is not shown at all. |
+| `visible` | `(termWidth, termHeight) => …` — a space-aware floor (`:455`) | Three gates, in order: an **opt-in** hard width gate, a shrink-to-fit width floor, and a reserve-aware height floor. See [the floor, in order](#the-visible-floor-in-order). |
 
 Every one of these is a getter rather than a plain value, which is
 the mechanism behind live re-configuration: `/sidebar full`,
 `/sidebar collapse`, and `ctrl+shift+s` mutate `SidebarState` and call
 `applyVisibility()`, and the next host frame reads the new values —
 no overlay teardown, no remount, no state loss.
+
+### The `visible` floor, in order
+
+`visible` is no longer a single hard threshold. It applies three gates,
+cheapest first, and only hides once the panel is genuinely unreadable:
+
+1. **Opt-in hard width gate.** `PI_SIDEBAR_MIN_TERM_WIDTH`, default
+   **`0` = disabled**. Set it to `110` (or anything else) to opt back
+   into the old kill-switch. The default is off because a tmux 50/50
+   vertical split halves a 200-col window to ~100, and the old default
+   of `110` hid the panel there with no fallback at all.
+2. **Absolute height gate.** `PI_SIDEBAR_MIN_TERM_HEIGHT` (default
+   `12`); below that the panel is hidden outright.
+3. **Shrink-to-fit width floor.** The panel renders whenever
+   `termWidth >= min(panelWidth, minPanelWidth)` — where
+   `minPanelWidth` is `PI_SIDEBAR_MIN_PANEL_WIDTH` (default `20`,
+   roughly a 2-char border + 1 gutter + 17 of content). The host's
+   `TUI.resolveOverlayLayout` already clamps an oversized overlay
+   (`width = Math.max(1, Math.min(width, availWidth))`), so the correct
+   move on a narrow pane is to let the host clamp and only hide when
+   even the narrowest legible panel will not fit.
+4. **Reserve-aware height floor.**
+   `termHeight - (floating ? bottomReserve : 0) >= minContentRows`, where
+   `minContentRows` is `PI_SIDEBAR_MIN_CONTENT_ROWS` (default `4`).
+   Subtracting the reserve matters: a 13-row floating window with
+   `bottomReserve=10` has 3 usable rows, which is below the minimum, so
+   the panel hides. Full-height drops the reserve and stays usable down
+   to `minContentRows` raw rows.
+
+All of these are resolved by **`placementConfigFromEnv(env?)`**, which
+is the single place the shipped `PI_SIDEBAR_*` placement defaults live.
+It takes an optional environment bag (defaulting to `process.env`) so
+the defaults can be asserted in tests without mutating the process
+environment — the reads used to sit inside the `sidebarPlugin` closure,
+which made them untestable and let the `110` default regress silently.
+
+The same module also owns **`syncOverlayOptions(target, state, config)`**,
+which rewrites every layout field on an `OverlayOptions` object **in
+place** and returns the same reference. The host resolves the
+`overlayOptions` thunk once on mount and then re-reads the stored
+object's fields on every layout pass, so returning a fresh object would
+leave a stale overlay after `/sidebar collapse` or `/sidebar full`.
+`sidebarOverlayOptions` (build) and `sidebarRequiredWidth` (the width
+floor alone) are the other two public pieces of that contract.
+
+### `onHandle` and shutdown
 
 `onHandle` (`:457–461`) stores the handle, calls `handle.unfocus()`
 (`:459`) so the panel cannot steal editor focus on session open, then
@@ -532,9 +578,12 @@ This is not fixable inside the extension. A reflowing sidebar needs
 the pi TUI to expose first-class **window regions** — the host would
 have to reserve columns and shrink its own layout accordingly — and
 that primitive does not exist. Until it does, the fork's compromise is
-the combination documented above: overlay rather than reserve, and hide
-entirely below `PI_SIDEBAR_MIN_TERM_WIDTH` rather than steal columns
-at every width. The upstream fork documents the intended native
+the combination documented above: overlay rather than reserve, and
+shrink-to-fit down to `PI_SIDEBAR_MIN_PANEL_WIDTH` before hiding — the
+host already clamps the panel to the available width, so hiding at an
+arbitrary terminal-width threshold only made the panel disappear in
+splits where it was still legible. The upstream fork documents the
+intended native
 window-region design in its `docs/architecture/native-tui-window-future.md`
 (in the standalone `~/Project/pi-sidebar-sages/` repo — see
 [Fork lineage](#fork-lineage)).
@@ -542,8 +591,12 @@ window-region design in its `docs/architecture/native-tui-window-future.md`
 ## Environment variables
 
 Every `PI_SIDEBAR_*` variable the package reads. All are read **once**
-at `sidebarPlugin` entry (`sidebar.ts:195–211` and `:249–252`), except
-where noted.
+at `sidebarPlugin` entry, except where noted. The placement family
+(`WIDTH`, `BUFFER`, `INSET_RIGHT`, `BOTTOM_RESERVE`, `MAX_HEIGHT`,
+`OFFSET_Y`, and the four `MIN_*` floors) is resolved together by
+`placementConfigFromEnv()` in `sidebar.ts`, which the plugin calls once
+to build the `SidebarPlacementConfig`; its `Read at` entries below
+name that function rather than a line number.
 
 | Variable | Default | Read at | Parser | Effect |
 |---|---|---|---|---|
@@ -552,27 +605,44 @@ where noted.
 | `PI_SIDEBAR_BUFFER` | `1` | `:196` | `envInt` | Gutter added to the width in full-height mode; also the left indent of every row (`:133–134`). |
 | `PI_SIDEBAR_FILL_ROWS` | `200` | `:197` | `envInt` | Blank rows appended in full-height mode to reach a full column (`:160–162`). |
 | `PI_SIDEBAR_VERTICAL_PADDING` | `1` | `:200` | `envSignedInt` | Blank rows above and below the content in floating mode. Clamped `>= 0` at `:198–201`; negative values are ignored by the clamp, not by the parser. |
-| `PI_SIDEBAR_MIN_TERM_WIDTH` | `110` | `:202` | `envInt` | Threshold for `overlayOptions.visible`. Below it the overlay is hidden. |
+| `PI_SIDEBAR_MIN_TERM_WIDTH` | `0` | `placementConfigFromEnv` | `envIntClamped` | **Opt-in** hard width gate. `0` (the default) means no hard gate — the panel shrink-to-fits instead. Set `110` to restore the old kill-switch. `envIntClamped` rather than `envInt` so an explicit `0` survives instead of reading as unset. |
+| `PI_SIDEBAR_MIN_TERM_HEIGHT` | `12` | `placementConfigFromEnv` | `envIntClamped` | Absolute height floor. Below this many rows the panel hides, regardless of layout. Set `0` to disable the gate. |
+| `PI_SIDEBAR_MIN_PANEL_WIDTH` | `20` | `placementConfigFromEnv` | `envIntClamped` | Narrowest legible panel (2-char border + 1 gutter + 17 of content). The shrink-to-fit floor: below it the panel is unreadable, so `visible` hides. |
+| `PI_SIDEBAR_MIN_CONTENT_ROWS` | `4` | `placementConfigFromEnv` | `envIntClamped` | Minimum usable content rows, taken AFTER the floating `bottomReserve` is subtracted. Below it the panel would collide with the composer, so `visible` hides. |
+| `PI_SIDEBAR_INSET_RIGHT` | `0` | `placementConfigFromEnv` | `envInt` | Columns of breathing room from the right edge (floating layout only). |
+| `PI_SIDEBAR_BOTTOM_RESERVE` | `10` | `placementConfigFromEnv` | `envInt` | Rows reserved at the bottom for the composer (floating layout only). Full-height drops it, and its value feeds `PI_SIDEBAR_MIN_CONTENT_ROWS`. |
+| `PI_SIDEBAR_MAX_HEIGHT` | `60%` | `placementConfigFromEnv` | `envSize` | Height cap in the floating layout — rows or a `"NN%"` share. Full-height overrides it with `100%`. |
 | `PI_SIDEBAR_REFRESH_MS` | `5000` | `:203` | `envInt` | `setInterval` cadence for `refreshGit` + `refreshTasks`. |
 | `PI_SIDEBAR_GIT_LINES` | `12` | `:205` | `envInt` | Cap on per-file rows in the Git section. Takes precedence when set. |
 | `PI_SIDEBAR_MAX_FILES` | `12` | `:206` | `envInt` | Fallback cap, used as the default argument of `PI_SIDEBAR_GIT_LINES` (`:204–207`). Same effect when `GIT_LINES` is unset. |
 | `PI_SIDEBAR_AUTOHIDE_WORKING` | `true` | `:208` | `envBool` | Hides the panel while a model turn is in flight. |
-| `PI_SIDEBAR_OFFSET_Y` | `-6` | `:209` | `envSignedInt` | Vertical offset of the floating panel, in rows. |
+| `PI_SIDEBAR_OFFSET_Y` | `0` | `placementConfigFromEnv` | `envSignedInt` | Vertical offset of the panel from the anchor, in rows. Defaults to `0` because the panel is top-right anchored — a default nudge would only fight the anchor, and the host clamps a negative offset back to row 0. |
 | `PI_SIDEBAR_TASKS` | `true` | `:210` | `envBool` | Enables the Tasks section. `false` short-circuits `refreshTasks` (`:372`) and `renderTasksSection` (`:414`). |
 | `PI_SIDEBAR_TASKS_MAX` | `10` | `:211` | `envInt` | Max rendered task rows. Clamped to `>= 1` at `:211`. |
 | `PI_SIDEBAR_FULL_HEIGHT` | `false` | `:252` | `envBool` | Initial layout. `/sidebar full` / `/sidebar floating` flip it at runtime. |
 | `PI_SIDEBAR_GIT_DETAIL` | `true` | `:251` | `envBool` | Initial per-file detail. `false` caps rows at `min(5, maxFiles)`. `/sidebar-git-detail` flips it at runtime. |
 
-The three parsers (`utils.ts:4`, `:10`, `:15`) are worth knowing
+The four parsers (`utils.ts`) are worth knowing
 because their edge cases are not all the same:
 
-- `envBool` (`:4`) treats `""` as unset, and `0` / `false` / `no` /
+- `envBool` treats `""` as unset, and `0` / `false` / `no` /
   `off` (case-insensitive) as false. **Any other** value is true, so
   `PI_SIDEBAR_TASKS=maybe` enables it.
-- `envInt` (`:10`) requires a **positive** value — a parsed `0` or
+- `envInt` requires a **positive** value — a parsed `0` or
   negative number falls back to the default, as does unparseable input.
-- `envSignedInt` (`:15`) accepts any finite value, negatives included,
+- `envIntClamped` accepts `0` (and clamps negatives up to a floor,
+  default `0`) while still falling back on malformed input. Use it for
+  any knob that may legitimately be `0` — notably
+  `PI_SIDEBAR_MIN_TERM_WIDTH`, where `0` means "no hard gate". Using
+  `envInt` there would silently turn an explicit `0` back into the
+  default.
+- `envSignedInt` accepts any finite value, negatives included,
   which is what `PI_SIDEBAR_OFFSET_Y` needs.
+
+Every parser takes an optional trailing `env` bag defaulting to
+`process.env`. `placementConfigFromEnv` uses that seam to resolve a
+caller-supplied environment, which is how the placement defaults are
+tested without mutating process-wide state.
 
 One non-`PI_SIDEBAR_*` variable matters:
 

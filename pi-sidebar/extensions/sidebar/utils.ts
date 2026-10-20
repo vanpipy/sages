@@ -2,8 +2,20 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { OverlayOptions, SizeValue } from "@earendil-works/pi-tui";
 import type { GitState } from "./types.js";
 
-export function envBool(name: string, fallback: boolean): boolean {
-	const value = process.env[name];
+/**
+ * Every parser below takes an optional trailing `env` bag that defaults
+ * to `process.env`. That default keeps the existing call sites (and the
+ * existing tests) working unchanged, while letting `placementConfigFromEnv`
+ * resolve a caller-supplied environment instead of reaching for the
+ * process-wide one — so placement defaults can be asserted without
+ * mutating `process.env`.
+ */
+export function envBool(
+	name: string,
+	fallback: boolean,
+	env: NodeJS.ProcessEnv = process.env,
+): boolean {
+	const value = env[name];
 	if (value === undefined || value === "") return fallback;
 	return !["0", "false", "no", "off"].includes(value.toLowerCase());
 }
@@ -20,8 +32,12 @@ export function envBool(name: string, fallback: boolean): boolean {
  * integers, `>100%` — fall back rather than clamp silently, so a typo
  * in a dotfile surfaces as the default instead of an invisible panel.
  */
-export function envSize(name: string, fallback: SizeValue): SizeValue {
-	const raw = process.env[name];
+export function envSize(
+	name: string,
+	fallback: SizeValue,
+	env: NodeJS.ProcessEnv = process.env,
+): SizeValue {
+	const raw = env[name];
 	if (raw === undefined || raw.trim() === "") return fallback;
 	const value = raw.trim();
 	const percent = value.match(/^(\d+(?:\.\d+)?)%$/);
@@ -39,8 +55,12 @@ export function envSize(name: string, fallback: SizeValue): SizeValue {
 	return rows;
 }
 
-export function envInt(name: string, fallback: number): number {
-	const value = Number.parseInt(process.env[name] ?? "", 10);
+export function envInt(
+	name: string,
+	fallback: number,
+	env: NodeJS.ProcessEnv = process.env,
+): number {
+	const value = Number.parseInt(env[name] ?? "", 10);
 	return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
@@ -54,16 +74,21 @@ export function envIntClamped(
 	name: string,
 	fallback: number,
 	min = 0,
+	env: NodeJS.ProcessEnv = process.env,
 ): number {
-	const raw = process.env[name];
+	const raw = env[name];
 	if (raw === undefined || raw.trim() === "") return fallback;
 	const value = Number.parseInt(raw, 10);
 	if (!Number.isFinite(value)) return fallback;
 	return Math.max(min, value);
 }
 
-export function envSignedInt(name: string, fallback: number): number {
-	const value = Number.parseInt(process.env[name] ?? "", 10);
+export function envSignedInt(
+	name: string,
+	fallback: number,
+	env: NodeJS.ProcessEnv = process.env,
+): number {
+	const value = Number.parseInt(env[name] ?? "", 10);
 	return Number.isFinite(value) ? value : fallback;
 }
 

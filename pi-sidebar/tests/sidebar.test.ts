@@ -11,6 +11,7 @@ import {
 	envIntClamped,
 	envSignedInt,
 	envSize,
+	placementConfigFromEnv,
 	sidebarOverlayOptions,
 	syncOverlayOptions,
 	type SidebarPlacementConfig,
@@ -476,9 +477,17 @@ describe("overlay placement", () => {
 		offsetY: 0,
 		// The hard term-width gate is opt-in: leaving it at 0 disables it.
 		// A tmux vertical split halves a 200-col window to ~100, so the old
-		// default of 110 made the panel vanish with no fallback. The host
-		// already clamps oversized panels (tui.js:470), so the right move is
-		// shrink-to-fit rather than hide.
+		// default of 110 made the panel vanish with no fallback. The host's
+		// `TUI.resolveOverlayLayout` clamps an oversized overlay with
+		// `width = Math.max(1, Math.min(width, availWidth))` — verified in
+		// pi-tui 1.3.0 (`dist/tui.js:856`). pi-sidebar's peerDependency on
+		// pi-tui is `"*"`, so that line moves with the installed host (the
+		// same clamp sits at L470 / L699 / L847 / L856 across v0.73.1 /
+		// v0.84.2 / v1.1.0 / v1.3.0) — cite the symbol, not the line.
+		//
+		// These fixtures are test-chosen on purpose, to exercise the RULES
+		// in isolation. The defaults that actually ship are asserted
+		// separately in `describe("placement defaults from env")`.
 		minTermWidth: 0,
 		minTermHeight: 12,
 		minPanelWidth: 20,
@@ -595,6 +604,16 @@ describe("overlay placement", () => {
 		expect(visible({ collapsed: false, fullHeight: false }, 8, 60)).toBe(false);
 	});
 
+	it("hides below the absolute height floor, independent of the reserve", () => {
+		// `minTermHeight` is the ABSOLUTE floor and is checked before any
+		// reserve arithmetic. Full-height drops `bottomReserve` to 0, so
+		// these two heights isolate the absolute floor from the
+		// reserve-aware content floor exercised by the floating pair in
+		// the next test. Nothing else in the config changes.
+		expect(visible({ collapsed: false, fullHeight: true }, 200, 6)).toBe(false);
+		expect(visible({ collapsed: false, fullHeight: true }, 200, 12)).toBe(true);
+	});
+
 	it("reserves composer rows in the floating height floor", () => {
 		// Floating layout reserves bottomReserve rows for the composer, so
 		// the height floor is taken AFTER subtracting that reserve. With
@@ -629,6 +648,92 @@ describe("overlay placement", () => {
 	});
 });
 
+describe("placement defaults from env", () => {
+	// These assert the DEFAULTS THAT ACTUALLY SHIP, not a fixture the
+	// test picked for itself. Before `placementConfigFromEnv` existed
+	// the env reads lived inside the `sidebarPlugin` closure, so every
+	// placement test handed `sidebarOverlayOptions` a config it built
+	// itself — which meant restoring the pre-fix `minTermWidth` default
+	// of `110` left the entire suite green while shipping the exact
+	// tmux-split bug the shrink-to-fit rule exists to prevent.
+	//
+	// `env` is passed in explicitly rather than by mutating `process.env`,
+	// so these stay hermetic and order-independent.
+	const EMPTY: NodeJS.ProcessEnv = {};
+
+	it("ships the hard term-width gate DISABLED", () => {
+		// THE regression test. `110` here would hide the panel in every
+		// tmux 50/50 vertical split — the pre-fix bug. This assertion is
+		// what now makes that revert fail loudly.
+		expect(placementConfigFromEnv(EMPTY).minTermWidth).toBe(0);
+	});
+
+	it("pins every remaining shipped default", () => {
+		expect(placementConfigFromEnv(EMPTY)).toEqual({
+			width: 34,
+			buffer: 1,
+			insetRight: 0,
+			bottomReserve: 10,
+			maxHeight: "60%",
+			offsetY: 0,
+			minTermWidth: 0,
+			minTermHeight: 12,
+			minPanelWidth: 20,
+			minContentRows: 4,
+		});
+	});
+
+	it("lets the term-width gate be opted into explicitly", () => {
+		expect(
+			placementConfigFromEnv({ PI_SIDEBAR_MIN_TERM_WIDTH: "110" })
+				.minTermWidth,
+		).toBe(110);
+		// `0` must survive as a real value rather than falling back —
+		// this is why the knob uses `envIntClamped` and not `envInt`,
+		// which reads "0" as unset and hands back the fallback.
+		expect(placementConfigFromEnv({ PI_SIDEBAR_MIN_TERM_WIDTH: "0" }).minTermWidth)
+			.toBe(0);
+	});
+
+	it("reads the shrink-to-fit floors", () => {
+		expect(
+			placementConfigFromEnv({ PI_SIDEBAR_MIN_PANEL_WIDTH: "28" })
+				.minPanelWidth,
+		).toBe(28);
+		expect(
+			placementConfigFromEnv({ PI_SIDEBAR_MIN_CONTENT_ROWS: "8" })
+				.minContentRows,
+		).toBe(8);
+	});
+
+	it("lets the absolute height floor be neutralized", () => {
+		// `0` means "no absolute floor at all"; the reserve-aware content
+		// floor still applies afterwards, so this cannot resurrect the
+		// floating-layout hide on its own.
+		expect(
+			placementConfigFromEnv({ PI_SIDEBAR_MIN_TERM_HEIGHT: "0" }).minTermHeight,
+		).toBe(0);
+	});
+
+	it("keeps the panel visible on a tmux-split pane end to end", () => {
+		// The end-to-end version of the headline claim: the SHIPPED
+		// defaults, run through the real `visible` callback, must
+		// reproduce the behavior the fixture-based tests above cannot
+		// catch. 100 cols is a 200-col window in a 50/50 tmux split;
+		// 19 cols is under `minPanelWidth` and still genuinely unreadable.
+		const shipped = placementConfigFromEnv(EMPTY);
+		const floating = sidebarOverlayOptions(
+			{ collapsed: false, fullHeight: false },
+			shipped,
+		);
+		if (typeof floating.visible !== "function") {
+			throw new Error("visible is not a function");
+		}
+		expect(floating.visible(100, 60)).toBe(true);
+		expect(floating.visible(19, 60)).toBe(false);
+	});
+});
+
 describe("live overlay options", () => {
 	const config: SidebarPlacementConfig = {
 		width: 34,
@@ -643,12 +748,17 @@ describe("live overlay options", () => {
 		minContentRows: 4,
 	};
 
-	// The pi-tui host evaluates the `overlayOptions` thunk ONCE on mount
-	// (interactive-mode.js:1854) and stores the returned object BY
-	// REFERENCE. Toggling `state.collapsed` / `state.fullHeight` later
-	// must therefore mutate the stored object — not return a new one —
-	// because the host re-reads fields from that snapshot on every layout
-	// pass but never re-invokes the thunk.
+	// The pi-coding-agent host evaluates the `overlayOptions` thunk ONCE
+	// on mount — in `InteractiveMode`'s custom-widget overlay setup, which
+	// builds `resolveOptions()` and calls
+	// `this.ui.showOverlay(component, resolveOptions())` (verified in
+	// pi-coding-agent 1.3.0, `dist/modes/interactive/interactive-mode.js:2363-2374`;
+	// the call shape is stable, the line range drifts per release) — and
+	// stores the returned object BY REFERENCE. Toggling
+	// `state.collapsed` / `state.fullHeight` later must therefore mutate
+	// the stored object — not return a new one — because pi-tui re-reads
+	// fields from that snapshot on every layout pass but never re-invokes
+	// the thunk.
 	it("mutates the stored options in place when collapsed flips", () => {
 		const initial = sidebarOverlayOptions(
 			{ collapsed: false, fullHeight: false },
