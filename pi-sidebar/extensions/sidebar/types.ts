@@ -92,11 +92,17 @@ export type SidebarState = {
 	lastGitRefresh?: number;
 	lastTasksRefresh?: number;
 	/**
-	 * Powers `PI_SIDEBAR_AUTOHIDE_WORKING` via `shouldHideSidebar`
+	 * Feeds `PI_SIDEBAR_AUTOHIDE_WORKING` via `shouldHideSidebar`
 	 * (`extensions/sidebar/utils.ts`). Flipped by the `turn_start` /
 	 * `turn_end` handlers in `extensions/sidebar.ts`. The Model section
 	 * used to be the only visible consumer before the trim; the field
 	 * survives because the autohide contract still needs it.
+	 *
+	 * Note pi's `turn_end` lands only after the whole tool batch
+	 * returns, so this stays `true` across bash calls and subagent
+	 * spawns — not just token streaming. `PI_SIDEBAR_AUTOHIDE_WORKING`
+	 * therefore ships OFF (see `autohideWorkingFromEnv`); with it on,
+	 * the panel would hide for the entire working turn.
 	 */
 	isStreaming: boolean;
 	tasks: TasksState;

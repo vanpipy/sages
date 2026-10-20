@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
 	SidebarComponent,
+	autohideWorkingFromEnv,
 	countTasks,
 	envBool,
 	envInt,
@@ -731,6 +732,49 @@ describe("placement defaults from env", () => {
 		}
 		expect(floating.visible(100, 60)).toBe(true);
 		expect(floating.visible(19, 60)).toBe(false);
+	});
+});
+
+describe("autohide default from env", () => {
+	// Same reasoning as `placement defaults from env`: assert the DEFAULT
+	// THAT ACTUALLY SHIPS. The autohide read used to live inside the
+	// `sidebarPlugin` closure, so no test could see it — which is how the
+	// panel shipped with autohide ON and vanished for the entire duration
+	// of every working turn. `env` is passed explicitly, never by mutating
+	// `process.env`.
+	const EMPTY: NodeJS.ProcessEnv = {};
+
+	it("ships with autohide DISABLED so the panel stays up while working", () => {
+		// THE regression test. `true` here is the pre-fix default, which
+		// hid the panel for the whole turn: pi emits `turn_end` only after
+		// the entire tool batch returns (pi-agent-core `agent-loop.js`:
+		// turn_start:113 → streamAssistantResponse:141 →
+		// executeToolCalls:165 → turn_end:180), so subagent spawns and long
+		// bash calls were all invisible. That is backwards for the Tasks
+		// panel, whose whole purpose is passive board awareness DURING work.
+		expect(autohideWorkingFromEnv(EMPTY)).toBe(false);
+	});
+
+	it("keeps the panel visible while streaming with the shipped default", () => {
+		// End-to-end through the real predicate, not a hand-built fixture.
+		expect(
+			shouldHideSidebar({ enabled: true, isStreaming: true }, autohideWorkingFromEnv(EMPTY)),
+		).toBe(false);
+	});
+
+	it("still lets autohide be opted into explicitly", () => {
+		for (const v of ["1", "true", "yes", "on"]) {
+			expect(autohideWorkingFromEnv({ PI_SIDEBAR_AUTOHIDE_WORKING: v })).toBe(true);
+		}
+		for (const v of ["0", "false", "no", "off"]) {
+			expect(autohideWorkingFromEnv({ PI_SIDEBAR_AUTOHIDE_WORKING: v })).toBe(false);
+		}
+	});
+
+	it("still honors /sidebar off — disabling autohide must not un-hide a panel the user turned off", () => {
+		expect(
+			shouldHideSidebar({ enabled: false, isStreaming: false }, autohideWorkingFromEnv(EMPTY)),
+		).toBe(true);
 	});
 });
 

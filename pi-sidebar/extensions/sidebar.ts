@@ -154,6 +154,39 @@ export type SidebarPlacementConfig = {
 };
 
 /**
+ * Resolve the autohide-while-working knob — the shipped default lives
+ * here so it can be asserted.
+ *
+ * The default is `false` (panel stays up while the agent works). It used
+ * to be `true`, and that was backwards for this package's own purpose:
+ * `shouldHideSidebar` hides the panel whenever `state.isStreaming`, and
+ * pi keeps `isStreaming` true across the ENTIRE turn, not just token
+ * streaming. A turn spans `turn_start` → model streaming → the whole
+ * tool batch → `turn_end`, with `turn_end` emitted only after every tool
+ * call returns (pi-agent-core `dist/agent-loop.js`: 113 / 141 / 165 /
+ * 180). So bash calls, file reads and subagent spawns were all invisible,
+ * and the panel was visible only while the agent was idle — precisely
+ * when there is nothing on the board to look at.
+ *
+ * Hoisted out of the `sidebarPlugin` closure for the same reason as
+ * `placementConfigFromEnv`: a read buried in a closure cannot be tested,
+ * which is how the panel shipped autohiding for a long time unnoticed.
+ *
+ * `env` defaults to `process.env`; tests pass an explicit bag rather than
+ * mutating `process.env`. The opt-in is still honored, so anyone who
+ * wants the old behavior sets `PI_SIDEBAR_AUTOHIDE_WORKING=1`.
+ *
+ * Note this is independent of `/sidebar off`, which sets
+ * `state.enabled = false` and is handled separately by
+ * `shouldHideSidebar`.
+ */
+export function autohideWorkingFromEnv(
+	env: NodeJS.ProcessEnv = process.env,
+): boolean {
+	return envBool("PI_SIDEBAR_AUTOHIDE_WORKING", false, env);
+}
+
+/**
  * Build the placement config from the environment — the single place
  * the shipped `PI_SIDEBAR_*` placement defaults live.
  *
@@ -438,7 +471,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		"PI_SIDEBAR_GIT_LINES",
 		envInt("PI_SIDEBAR_MAX_FILES", 12),
 	);
-	const autohideWorking = envBool("PI_SIDEBAR_AUTOHIDE_WORKING", true);
+	const autohideWorking = autohideWorkingFromEnv();
 	const tasksEnabled = envBool("PI_SIDEBAR_TASKS", true);
 	const tasksMaxRows = Math.max(1, envInt("PI_SIDEBAR_TASKS_MAX", 10));
 
