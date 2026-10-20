@@ -9,6 +9,9 @@ import {
 	envBool,
 	envInt,
 	envSignedInt,
+	envSize,
+	sidebarOverlayOptions,
+	type SidebarPlacementConfig,
 	formatFileLine,
 	loadTasksState,
 	orchestratorWorkdir,
@@ -117,6 +120,25 @@ describe("configuration helpers", () => {
 		expect(envBool("PI_TEST_BOOL", true)).toBe(false);
 		process.env.PI_TEST_BOOL = "1";
 		expect(envBool("PI_TEST_BOOL", false)).toBe(true);
+	});
+
+	it("parses size values (rows or percentages) with fallback", () => {
+		expect(envSize("PI_TEST_MISSING", "60%")).toBe("60%");
+		process.env.PI_TEST_SIZE = "40";
+		expect(envSize("PI_TEST_SIZE", "60%")).toBe(40);
+		process.env.PI_TEST_SIZE = "75%";
+		expect(envSize("PI_TEST_SIZE", "60%")).toBe("75%");
+		// Out-of-range / malformed values fall back rather than throw.
+		process.env.PI_TEST_SIZE = "0";
+		expect(envSize("PI_TEST_SIZE", "60%")).toBe("60%");
+		process.env.PI_TEST_SIZE = "-3";
+		expect(envSize("PI_TEST_SIZE", "60%")).toBe("60%");
+		process.env.PI_TEST_SIZE = "101%";
+		expect(envSize("PI_TEST_SIZE", "60%")).toBe("60%");
+		process.env.PI_TEST_SIZE = "nope";
+		expect(envSize("PI_TEST_SIZE", "60%")).toBe("60%");
+		process.env.PI_TEST_SIZE = "50.5%";
+		expect(envSize("PI_TEST_SIZE", "60%")).toBe("50.5%");
 	});
 
 	it("parses positive integer environment values with fallback", () => {
@@ -418,6 +440,100 @@ describe("SidebarComponent rendering", () => {
 	});
 });
 
+
+describe("overlay placement", () => {
+	const config: SidebarPlacementConfig = {
+		width: 34,
+		buffer: 1,
+		insetRight: 0,
+		bottomReserve: 10,
+		maxHeight: "60%",
+		offsetY: 0,
+		minTermWidth: 110,
+		minTermHeight: 12,
+	};
+
+	it("anchors to the top-right corner in both layout modes", () => {
+		// The panel is positioned relative to the terminal window, never
+		// the conversation viewport. `fullHeight` is a *layout* flag
+		// (gutter + fill rows), not a positioning flag, so it must not
+		// move the panel off the top edge.
+		expect(sidebarOverlayOptions({ collapsed: false, fullHeight: false }, config).anchor).toBe(
+			"top-right",
+		);
+		expect(sidebarOverlayOptions({ collapsed: false, fullHeight: true }, config).anchor).toBe(
+			"top-right",
+		);
+		expect(
+			sidebarOverlayOptions({ collapsed: true, fullHeight: false }, config).anchor,
+		).toBe("top-right");
+	});
+
+	it("applies no vertical offset by default", () => {
+		// The pre-top-right build shipped `PI_SIDEBAR_OFFSET_Y=-6` to nudge
+		// a right-centered panel upward. With a top anchor that offset pushed
+		// the panel off-screen (the host clamps it back to row 0, so it was
+		// pure surprise). Default must be 0.
+		expect(
+			sidebarOverlayOptions({ collapsed: false, fullHeight: false }, config).offsetY,
+		).toBe(0);
+		expect(
+			sidebarOverlayOptions(
+				{ collapsed: false, fullHeight: false },
+				{ ...config, offsetY: -2 },
+			).offsetY,
+		).toBe(-2);
+	});
+
+	it("reserves the bottom of the window in floating layout", () => {
+		// A top-anchored panel with `maxHeight: 100%` grows down over the
+		// composer. The floating layout reserves rows so the editor stays
+		// usable.
+		const floating = sidebarOverlayOptions(
+			{ collapsed: false, fullHeight: false },
+			{ ...config, insetRight: 2 },
+		);
+		expect(floating.margin).toEqual({ top: 0, right: 2, bottom: 10 });
+		expect(floating.maxHeight).toBe("60%");
+	});
+
+	it("spans the full window height in full-height layout", () => {
+		// `fullHeight` means "extend to the window edge", so the bottom
+		// reserve is dropped and the height cap is lifted. The anchor is
+		// unchanged.
+		const full = sidebarOverlayOptions({ collapsed: false, fullHeight: true }, config);
+		expect(full.margin).toEqual({ top: 0, right: 0, bottom: 0 });
+		expect(full.maxHeight).toBe("100%");
+	});
+
+	it("delegates width to the collapsed-aware helper", () => {
+		expect(
+			sidebarOverlayOptions({ collapsed: false, fullHeight: true }, config).width,
+		).toBe(35);
+		expect(
+			sidebarOverlayOptions({ collapsed: true, fullHeight: false }, config).width,
+		).toBe(2);
+	});
+
+	it("hides itself on a terminal that is too narrow or too short", () => {
+		const visible = sidebarOverlayOptions(
+			{ collapsed: false, fullHeight: false },
+			config,
+		).visible;
+		expect(typeof visible).toBe("function");
+		if (typeof visible !== "function") return;
+		expect(visible(200, 60)).toBe(true);
+		expect(visible(80, 60)).toBe(false);
+		expect(visible(200, 6)).toBe(false);
+	});
+
+	it("stays non-capturing so it never steals editor focus", () => {
+		expect(
+			sidebarOverlayOptions({ collapsed: false, fullHeight: false }, config)
+				.nonCapturing,
+		).toBe(true);
+	});
+});
 
 describe("parseTasksJson", () => {
 	const sample = JSON.stringify({

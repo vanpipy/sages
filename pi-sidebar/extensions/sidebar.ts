@@ -8,7 +8,13 @@ import type {
 	TurnEndEvent,
 	TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import type { Component, OverlayHandle, TUI } from "@earendil-works/pi-tui";
+import type {
+	Component,
+	OverlayHandle,
+	OverlayOptions,
+	SizeValue,
+	TUI,
+} from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { renderGitSection } from "./sidebar/sections/git.js";
 import {
@@ -27,6 +33,7 @@ import {
 	envBool,
 	envInt,
 	envSignedInt,
+	envSize,
 	padAnsi,
 	parseNumstat,
 	parseShortstat,
@@ -50,6 +57,7 @@ export {
 	envBool,
 	envInt,
 	envSignedInt,
+	envSize,
 	formatFileLine,
 	padAnsi,
 	parseNumstat,
@@ -98,6 +106,71 @@ export function toggleSidebarCollapsed(
 		return;
 	}
 	setSidebarCollapsed(state, !state.collapsed);
+}
+
+/**
+ * Everything the overlay needs to know about *where* it sits, split
+ * out from the plugin closure so the placement rules are testable
+ * without a live TUI. All fields come from the environment.
+ */
+export type SidebarPlacementConfig = {
+	/** Base panel width in columns (`PI_SIDEBAR_WIDTH`). */
+	width: number;
+	/** Left gutter in full-height layout (`PI_SIDEBAR_BUFFER`). */
+	buffer: number;
+	/** Columns of breathing room from the right edge (floating layout). */
+	insetRight: number;
+	/** Rows reserved at the bottom for the composer (floating layout). */
+	bottomReserve: number;
+	/** Height cap in the floating layout — rows or a `"NN%"` share. */
+	maxHeight: SizeValue;
+	/** Vertical nudge from the anchor, in rows. `0` keeps it flush. */
+	offsetY: number;
+	/** Hide the panel below these terminal dimensions. */
+	minTermWidth: number;
+	minTermHeight: number;
+};
+
+/**
+ * Resolve the overlay placement for the sidebar.
+ *
+ * Position is **window-relative and always top-right**. The panel is an
+ * overlay on the terminal frame, not a column in the conversation
+ * viewport, so it must not follow the transcript scroll — `anchor` is
+ * never derived from `fullHeight`.
+ *
+ * `fullHeight` is a *layout* flag, not a positioning flag: it only
+ * decides whether the panel draws the full-height gutter + fill rows and
+ * spans all the way to the bottom edge. The two things it does change
+ * about placement are both consequences of that layout:
+ *
+ *   - floating (`fullHeight: false`) reserves `bottomReserve` rows and
+ *     caps `maxHeight`, so a tall panel grows downward into free space
+ *     instead of covering the composer.
+ *   - full-height drops both, because "extend to the window edge" is
+ *     the entire point of that mode.
+ *
+ * Exported for tests: the plugin closure calls it once per
+ * `showOverlay`, and the TUI re-reads every property on each layout
+ * pass, so the returned object stays live as `state.fullHeight` flips.
+ */
+export function sidebarOverlayOptions(
+	state: Pick<SidebarState, "collapsed" | "fullHeight">,
+	config: SidebarPlacementConfig,
+): OverlayOptions {
+	const floating = !state.fullHeight;
+	return {
+		anchor: "top-right",
+		width: sidebarOverlayWidth(state, config.width, config.buffer),
+		maxHeight: floating ? config.maxHeight : "100%",
+		margin: floating
+			? { top: 0, right: config.insetRight, bottom: config.bottomReserve }
+			: { top: 0, right: 0, bottom: 0 },
+		offsetY: config.offsetY,
+		nonCapturing: true,
+		visible: (termWidth: number, termHeight: number) =>
+			termWidth >= config.minTermWidth && termHeight >= config.minTermHeight,
+	};
 }
 
 export class SidebarComponent implements Component {
@@ -200,15 +273,39 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		envSignedInt("PI_SIDEBAR_VERTICAL_PADDING", 1),
 	);
 	const minTermWidth = envInt("PI_SIDEBAR_MIN_TERM_WIDTH", 110);
+	const minTermHeight = envInt("PI_SIDEBAR_MIN_TERM_HEIGHT", 12);
 	const refreshMs = envInt("PI_SIDEBAR_REFRESH_MS", 5000);
 	const maxFiles = envInt(
 		"PI_SIDEBAR_GIT_LINES",
 		envInt("PI_SIDEBAR_MAX_FILES", 12),
 	);
 	const autohideWorking = envBool("PI_SIDEBAR_AUTOHIDE_WORKING", true);
-	const floatingOffsetY = envSignedInt("PI_SIDEBAR_OFFSET_Y", -6);
+	// Placement envs. `PI_SIDEBAR_OFFSET_Y` defaults to 0 — the panel is
+	// top-right anchored, so any default nudge only fights the anchor
+	// (and a negative one is clamped back to row 0 by the host anyway).
+	const sidebarOffsetY = envSignedInt("PI_SIDEBAR_OFFSET_Y", 0);
+	const sidebarInsetRight = envInt("PI_SIDEBAR_INSET_RIGHT", 0);
+	const sidebarBottomReserve = envInt("PI_SIDEBAR_BOTTOM_RESERVE", 10);
+	const sidebarMaxHeight = envSize("PI_SIDEBAR_MAX_HEIGHT", "60%");
 	const tasksEnabled = envBool("PI_SIDEBAR_TASKS", true);
 	const tasksMaxRows = Math.max(1, envInt("PI_SIDEBAR_TASKS_MAX", 10));
+
+	/**
+	 * Placement is window-relative and always top-right; `fullHeight`
+	 * only decides whether the panel spans to the bottom edge. Resolved
+	 * through `sidebarOverlayOptions` on every layout pass so the getters
+	 * stay live as the layout flag flips.
+	 */
+	const placement: SidebarPlacementConfig = {
+		width: sidebarWidth,
+		buffer: sidebarBuffer,
+		insetRight: sidebarInsetRight,
+		bottomReserve: sidebarBottomReserve,
+		maxHeight: sidebarMaxHeight,
+		offsetY: sidebarOffsetY,
+		minTermWidth,
+		minTermHeight,
+	};
 
 	/**
 	 * Reverse-channel: inject a system note referencing the picked task.
@@ -282,10 +379,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	function applyVisibility() {
 		overlayHandle?.setHidden(shouldHideSidebar(state, autohideWorking));
 		requestRender();
-	}
-
-	function currentSidebarOverlayWidth(): number {
-		return sidebarOverlayWidth(state, sidebarWidth, sidebarBuffer);
 	}
 
 	async function refreshGit(ctx: ExtensionContext | undefined = currentCtx) {
@@ -433,27 +526,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 			},
 			{
 				overlay: true,
-				overlayOptions: {
-					get anchor() {
-						return state.fullHeight
-							? ("top-right" as const)
-							: ("right-center" as const);
-					},
-					get width() {
-						return currentSidebarOverlayWidth();
-					},
-					maxHeight: "100%",
-					get margin() {
-						return state.fullHeight
-							? { top: 0, right: 0, bottom: 0 }
-							: { right: 0 };
-					},
-					get offsetY() {
-						return state.fullHeight ? 0 : floatingOffsetY;
-					},
-					nonCapturing: true,
-					visible: (termWidth: number) => termWidth >= minTermWidth,
-				},
+				overlayOptions: () => sidebarOverlayOptions(state, placement),
 				onHandle: (handle: OverlayHandle) => {
 					overlayHandle = handle;
 					handle.unfocus();
@@ -512,7 +585,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 				state.fullHeight = false;
 			else if (action === "status") {
 				ctx.ui.notify(
-					`Sidebar is ${state.enabled ? "on" : "off"}; ${state.collapsed ? "collapsed" : "expanded"}; layout is ${state.fullHeight ? "full-height" : "floating"}; autohide while working is ${autohideWorking ? "on" : "off"}; git detail is ${state.gitDetail ? "on" : "off"}; tasks section is ${tasksEnabled ? `on (max ${tasksMaxRows} rows)` : "off"}.`,
+					`Sidebar is ${state.enabled ? "on" : "off"}; ${state.collapsed ? "collapsed" : "expanded"}; anchored top-right; layout is ${state.fullHeight ? "full-height" : "floating"} (max ${String(sidebarMaxHeight)}, ${sidebarBottomReserve} rows reserved); autohide while working is ${autohideWorking ? "on" : "off"}; git detail is ${state.gitDetail ? "on" : "off"}; tasks section is ${tasksEnabled ? `on (max ${tasksMaxRows} rows)` : "off"}.`,
 					"info",
 				);
 				return;
