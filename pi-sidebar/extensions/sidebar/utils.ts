@@ -17,10 +17,6 @@ export function envSignedInt(name: string, fallback: number): number {
 	return Number.isFinite(value) ? value : fallback;
 }
 
-export function fmtNumber(n: number): string {
-	return n < 1000 ? String(n) : `${(n / 1000).toFixed(1)}k`;
-}
-
 export function padAnsi(line: string, width: number): string {
 	const pad = Math.max(0, width - visibleWidth(line));
 	return line + " ".repeat(pad);

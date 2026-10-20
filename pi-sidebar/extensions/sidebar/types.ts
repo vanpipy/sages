@@ -91,9 +91,14 @@ export type SidebarState = {
 	git: GitState;
 	lastGitRefresh?: number;
 	lastTasksRefresh?: number;
-	turnCount: number;
+	/**
+	 * Powers `PI_SIDEBAR_AUTOHIDE_WORKING` via `shouldHideSidebar`
+	 * (`extensions/sidebar/utils.ts`). Flipped by the `turn_start` /
+	 * `turn_end` handlers in `extensions/sidebar.ts`. The Model section
+	 * used to be the only visible consumer before the trim; the field
+	 * survives because the autohide contract still needs it.
+	 */
 	isStreaming: boolean;
-	lastTool?: string;
 	tasks: TasksState;
 	/** Latest transient target set via `show` / `highlight`. */
 	highlightedId?: string;
@@ -108,7 +113,6 @@ export type SidebarRenderOptions = {
 	buffer: number;
 	fillRows: number;
 	verticalPadding: number;
-	getThinkingLevel: () => string | undefined;
 	tasks: {
 		maxRows: number;
 	};
