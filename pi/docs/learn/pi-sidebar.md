@@ -5,24 +5,27 @@
 > File count: 1 extension entry (`extensions/sidebar.ts`), 3 shared
 > modules under `extensions/sidebar/` (`types.ts`, `utils.ts`,
 > `sidebar-event-tool.ts`), 2 section renderers under
-> `extensions/sidebar/sections/` (`git.ts` + `tasks.ts`), and one
-> vitest file (`tests/sidebar.test.ts`).
-> Line counts: `sidebar.ts` 594, `tasks.ts` 441, `types.ts` 151,
-> `sidebar-event-tool.ts` 180, `utils.ts` 74, `git.ts` 65,
-> `sidebar.test.ts` 1441.
-> Reference target: the post-trim tree at `251a102` — the sidebar
-> renders **only** `Git` and `Tasks`.
+> `extensions/sidebar/` — now four files, no `sections/` layer:
+> `tasks.ts` (board polling + renderer), `sidebar-event-tool.ts`,
+> `types.ts`, `utils.ts` — plus one vitest file (`tests/sidebar.test.ts`).
+> Line counts: `sidebar.ts` 752, `tasks.ts` 441, `types.ts` 144,
+> `sidebar-event-tool.ts` 180, `utils.ts` 104, `sidebar.test.ts` 1618.
+> Reference target: the **Tasks-only** tree — Git was dropped, leaving
+> `Tasks` as the single section.
 
 ## Purpose
 
 `pi-sidebar` is a floating right-side overlay for the pi TUI that
-renders git status and the Sages task board as a read-only panel. It
+renders the Sages task board as a read-only panel. It
 owns no pi host lifecycle beyond four hooks (`session_start`,
 `session_shutdown`, `turn_start`, `turn_end`), registers no tools that
 read or mutate the repo, and never blocks the editor. The package is a
-**passive visual surface**: it listens on `pi.events`, polls the
-orchestrator's task files on a fixed cadence, and shells out to `git`
-on a timer.
+**passive visual surface**: it listens on `pi.events` and polls the
+orchestrator's task files on a fixed cadence.
+
+> **No subprocesses.** Since Git was removed the extension calls
+> `pi.exec` nowhere — it touches only `node:fs` and the pi event bus.
+> It is safe to load in a sandbox that forbids process spawning.
 
 It is a fork of [`jrimmer/pi-sidebar`][upstream] (BSD-3-Clause,
 Copyright (c) 2026 Jason Rimmer), retargeted at the Sages runtime and
@@ -36,19 +39,32 @@ file documents the **package itself**: the overlay, the renderer, the
 listener, and the env surface. The two together describe the end-to-end
 sidebar channel.
 
-> **The section list is trimmed.** `SIDEBAR_SECTIONS`
-> (`pi-sidebar/extensions/sidebar.ts:70–73`) holds exactly two
-> renderers: `renderGitSection`, then `renderTasksSection`. The four
-> sections the upstream fork shipped (`Model`, `Context`, `Location`,
-> `Hint`) were deleted in `251a102 refactor(sidebar): trim to Git +
-> Tasks sections only` — their source files
-> (`sections/{model,context,location,hint}.ts`) are gone and the
-> `turnCount` / `lastTool` state fields and the `model_select` +
-> `tool_execution_start` listeners that fed them are gone with them.
-> The trimming is pinned by
-> `pi-sidebar/tests/sidebar.test.ts:396` ("renders only Git and Tasks
-> sections in order (no Model / Context / Location / Hint)"), so a
-> regression that re-adds a removed section breaks the suite before
+> **The section list is Tasks-only.** `SidebarComponent.render`
+> calls `renderTasksSection(section)` directly. There is no
+> `SIDEBAR_SECTIONS` array any more — with a single renderer it was an
+> indirection with nothing to keep in sync, so the post-Git
+> consolidation removed it along with the `sections/` directory that
+> held the last remaining section file.
+>
+> Two removals got it there. First `251a102 refactor(sidebar): trim to
+> Git + Tasks sections only` deleted the upstream fork's `Model`,
+> `Context`, `Location`, and `Hint` sections along with their source
+> files and the state fields / listeners that fed them. Later the Git
+> section went too — `sections/git.ts` is deleted, and with it
+> `refreshGit` (the five-subprocess fan-out), `GitState`,
+> `state.git` / `state.gitDetail` / `state.lastGitRefresh`,
+> `parseShortstat` / `parseNumstat` / `formatFileLine`, the
+> `/sidebar-git-detail` command, and the `PI_SIDEBAR_GIT_LINES` /
+> `PI_SIDEBAR_MAX_FILES` / `PI_SIDEBAR_GIT_DETAIL` env knobs. The same
+> pass deleted the dead `selectTask` plumbing (constructor arg →
+> `SidebarSectionContext`, never read by any renderer) and `piTitle`
+> (orphaned when Model went). `SidebarSectionContext` shrank to the six
+> fields Tasks actually reads — `ctx`, `dim`, `options`, `selectTask`
+> are gone.
+>
+> Pinned by `pi-sidebar/tests/sidebar.test.ts` → `"renders only the
+> Tasks section (no Git / Model / Context / Location / Hint)"`, so a
+> regression that re-adds any removed section breaks the suite before
 > this doc goes stale.
 
 ## Entry points
@@ -66,7 +82,7 @@ Per `pi-sidebar/package.json:19–24`:
 
 That is the whole manifest: **one** registered extension. The default
 export is `sidebarPlugin` at
-`pi-sidebar/extensions/sidebar.ts:194`, and that single function is
+`pi-sidebar/extensions/sidebar.ts:432`, and that single function is
 the entire pi integration surface. It:
 
 - reads every `PI_SIDEBAR_*` env var into locals (`:195–211`),
@@ -87,10 +103,9 @@ helpers the test suite exercises (`:37–58`): the types from
 `sidebar/types.js`, and `countTasks`, `emptyTasksState`,
 `loadTasksState`, `orchestratorWorkdir`, `parseTasksJson`,
 `projectKey`, `renderTasksSection`, `resolveTasksSource`,
-`toTaskRows` from `sidebar/sections/tasks.js`, plus `envBool`,
-`envInt`, `envSignedInt`, `formatFileLine`, `padAnsi`,
-`parseNumstat`, `parseShortstat`, `shouldHideSidebar` from
-`sidebar/utils.js`.
+`toTaskRows` from `sidebar/tasks.js`, plus `envBool`,
+`envInt`, `envIntClamped`, `envSignedInt`, `envSize`, `padAnsi`,
+`shouldHideSidebar` from `sidebar/utils.js`.
 
 ## Key symbols
 
@@ -98,28 +113,24 @@ Ordered roughly by importance.
 
 | Symbol | File:line | Role |
 |---|---|---|
-| `sidebarPlugin` (default export) | `pi-sidebar/extensions/sidebar.ts:194` | The sole pi extension entry. Reads env, wires `SidebarState`, registers hooks / commands / shortcuts, owns the poll timer. |
-| `SidebarComponent` (class) | `pi-sidebar/extensions/sidebar.ts:103` | The pi-tui `Component`. `render` (`:124`) computes `innerWidth`, builds a `SidebarSectionContext`, then walks `SIDEBAR_SECTIONS`. `renderCollapsed` (`:166`) draws the 2-char restore rail. |
-| `SIDEBAR_SECTIONS` (const) | `pi-sidebar/extensions/sidebar.ts:70` | Ordered render array — post-trim it holds only `renderGitSection` then `renderTasksSection`. This is the single source of truth for what the sidebar draws. |
-| `refreshGit` | `pi-sidebar/extensions/sidebar.ts:291` | Runs the `git` subprocess fan-out (`rev-parse --is-inside-work-tree`, `branch --show-current`, `diff --shortstat`, `status --porcelain=v1`, `diff --numstat HEAD --`) and rewrites `state.git`. Each call has a 1500 ms timeout. Re-entrancy guarded by `refreshing` (`:265`, checked `:292`). |
+| `sidebarPlugin` (default export) | `pi-sidebar/extensions/sidebar.ts:432` | The sole pi extension entry. Reads env, wires `SidebarState`, registers hooks / commands / shortcuts, owns the poll timer. |
+| `SidebarComponent` (class) | `pi-sidebar/extensions/sidebar.ts:341` | The pi-tui `Component`. `render` (`:362`) computes `innerWidth`, builds a `SidebarSectionContext`, then calls `renderTasksSection`. `renderCollapsed` (`:404`) draws the 2-char restore rail. |
 | `refreshTasks` | `pi-sidebar/extensions/sidebar.ts:371` | Calls `loadTasksState(cwd, { sessionId, maxRows })` and replaces `state.tasks` wholesale. Re-entrancy guarded by `refreshingTasks` (`:266`, checked `:372`). |
-| `startSidebar` | `pi-sidebar/extensions/sidebar.ts:398` | Idempotent (`if (!ctx.hasUI \|\| component) return` at `:399`). Kicks the first `refreshGit` + `refreshTasks`, then mounts the overlay and starts the `setInterval` (`:418–421`). |
+| `startSidebar` | `pi-sidebar/extensions/sidebar.ts:597` | Idempotent. Kicks the first `refreshTasks`, then mounts the overlay and starts the `setInterval` (`:615`). |
 | `applyVisibility` | `pi-sidebar/extensions/sidebar.ts:282` | `overlayHandle?.setHidden(shouldHideSidebar(state, autohideWorking))` then `requestRender()`. Called on every turn boundary and after every command. |
 | `registerSidebarEventTool` | `pi-sidebar/extensions/sidebar/sidebar-event-tool.ts:69` | Wires both halves of the channel: the LLM-facing `sidebar_event` tool (`:75`) **and** the `pi.events.on("sidebar:event", …)` listener (`:114`). |
-| `parseTasksJson` | `pi-sidebar/extensions/sidebar/sections/tasks.ts:69` | Validates `{ tasks: Task[] }` and returns the array, or `null` on non-JSON / missing `tasks` array / any entry missing `id`, `type`, `subject`, or a valid `status`. Tolerates extra fields. |
-| `resolveTasksSource` | `pi-sidebar/extensions/sidebar/sections/tasks.ts:206` | Picks the first readable source in the 3-scope priority order (orchestrator → session → workspace). Returns `null` when none exist. |
-| `loadTasksState` | `pi-sidebar/extensions/sidebar/sections/tasks.ts:299` | The full poll: resolve source → read (single file or workspace merge) → parse → `countTasks` → `toTaskRows` → wrap into `TasksState`. |
-| `toTaskRows` | `pi-sidebar/extensions/sidebar/sections/tasks.ts:166` | Projects the on-disk `Task[]` to the slim `TaskRow[]` the renderer sees, deriving the 5-value display status and truncating to `maxRows`. |
-| `countTasks` | `pi-sidebar/extensions/sidebar/sections/tasks.ts:131` | Bucket counts for the header line. `blocked` is derived — a `pending` `plan` task with at least one non-completed blocker. |
-| `emptyTasksState` | `pi-sidebar/extensions/sidebar/sections/tasks.ts:334` | Pre-first-poll initializer. Mirrors what `loadTasksState` returns when no source file is readable. |
-| `renderTasksSection` | `pi-sidebar/extensions/sidebar/sections/tasks.ts:411` | Section renderer: heading, summary header, one line per `TaskRow`, `…N more` overflow. |
-| `renderGitSection` | `pi-sidebar/extensions/sidebar/sections/git.ts:36` | Section renderer: branch, `N files  +I -D` summary, capped per-file list with delta coloring. |
+| `parseTasksJson` | `pi-sidebar/extensions/sidebar/tasks.ts:69` | Validates `{ tasks: Task[] }` and returns the array, or `null` on non-JSON / missing `tasks` array / any entry missing `id`, `type`, `subject`, or a valid `status`. Tolerates extra fields. |
+| `resolveTasksSource` | `pi-sidebar/extensions/sidebar/tasks.ts:206` | Picks the first readable source in the 3-scope priority order (orchestrator → session → workspace). Returns `null` when none exist. |
+| `loadTasksState` | `pi-sidebar/extensions/sidebar/tasks.ts:299` | The full poll: resolve source → read (single file or workspace merge) → parse → `countTasks` → `toTaskRows` → wrap into `TasksState`. |
+| `toTaskRows` | `pi-sidebar/extensions/sidebar/tasks.ts:166` | Projects the on-disk `Task[]` to the slim `TaskRow[]` the renderer sees, deriving the 5-value display status and truncating to `maxRows`. |
+| `countTasks` | `pi-sidebar/extensions/sidebar/tasks.ts:131` | Bucket counts for the header line. `blocked` is derived — a `pending` `plan` task with at least one non-completed blocker. |
+| `emptyTasksState` | `pi-sidebar/extensions/sidebar/tasks.ts:334` | Pre-first-poll initializer. Mirrors what `loadTasksState` returns when no source file is readable. |
+| `renderTasksSection` | `pi-sidebar/extensions/sidebar/tasks.ts:411` | Section renderer: heading, summary header, one line per `TaskRow`, `…N more` overflow. |
 | `sidebarOverlayWidth` | `pi-sidebar/extensions/sidebar.ts:75` | Pure width calculator: collapsed → `COLLAPSED_SIDEBAR_WIDTH` (2), else `width + (fullHeight ? buffer : 0)`. |
 | `setSidebarCollapsed` / `toggleSidebarCollapsed` | `pi-sidebar/extensions/sidebar.ts:85` / `:93` | The only mutators of `enabled` / `collapsed`. Both force `enabled = true` on the way in, so a toggle never strands the sidebar off. |
 | `requestRender` | `pi-sidebar/extensions/sidebar.ts:268` | `component?.invalidate()` + `tuiRef?.requestRender()`. The single re-render entry point; every mutator ends here. |
 | `pickTopTaskId` | `pi-sidebar/extensions/sidebar.ts:220` | Reverse-channel picker. Walks the priority list `["in_progress", "intent", "pending", "blocked"]`, then falls back to `rows[0]`. |
-| `selectTask` | `pi-sidebar/extensions/sidebar.ts:239` | The reverse-channel wire: `pi.appendEntry("system", "Sidebar: user selected task #N — …")`, `try/catch`-wrapped for hosts that don't wire `appendEntry`. |
-| `piTitle` | `pi-sidebar/extensions/sidebar.ts:185` | Reads `ctx.sessionManager.getSessionName?.()`. Unused by any post-trim section (it was the Model section's title source); still exported. |
+| `selectTask` | `pi-sidebar/extensions/sidebar.ts` (inside `sidebarPlugin`) | The reverse-channel wire, reached **only** from the `ctrl+shift+t` shortcut: `pi.appendEntry("system", "Sidebar: user selected task #N — …")`, `try/catch`-wrapped for hosts that don't wire `appendEntry`. It is no longer routed through `SidebarComponent` — that plumbing existed for a renderer to call, and no renderer ever did. |
 | `shouldHideSidebar` | `pi-sidebar/extensions/sidebar/utils.ts:56` | `!state.enabled \|\| (autohideWorking && state.isStreaming)`. The single visibility predicate. |
 | `SIDEBAR_EVENT_ACTIONS` | `pi-sidebar/extensions/sidebar/sidebar-event-tool.ts:18` | The 6 allowed actions, `as const satisfies readonly SidebarEventAction[]` — the compile-time source for the TypeBox union at `:29–32`. |
 | `SIDEBAR_EVENT_LOG_MAX` | `pi-sidebar/extensions/sidebar/types.ts:151` | `50` — the FIFO cap on `SidebarState.eventLog`. |
@@ -127,48 +138,17 @@ Ordered roughly by importance.
 
 ## Sections
 
-Render order is fixed by `SIDEBAR_SECTIONS`
-(`pi-sidebar/extensions/sidebar.ts:70–73`):
-
-```ts
-const SIDEBAR_SECTIONS: Array<(section: SidebarSectionContext) => void> = [
-	renderGitSection,
-	renderTasksSection,
-];
-```
-
-Every renderer is `(section: SidebarSectionContext) => void` and is
-expected to emit lines only through the `add` / `heading` helpers the
-component supplies — a renderer cannot mutate state or re-truncate.
+There is one renderer, `renderTasksSection`, called directly by
+`SidebarComponent.render`. It is `(section: SidebarSectionContext) =>
+void` and emits lines only through the `add` / `heading` helpers the
+component supplies — it cannot mutate state or re-truncate.
 `SidebarComponent.render` (`sidebar.ts:124`) computes `innerWidth` as
 `max(8, contentWidth - 3)` (`:130`, the 3 chars being the `│ ` border)
 and pads the frame with `padAnsi` (`:135`).
 
-### Git
-
-`renderGitSection` (`sections/git.ts:36`) draws:
-
-1. `section.heading("Git")` (`:38`).
-2. Either the `git.error` string in warning color, or `not a git
-   repo` muted, when `state.git.insideRepo === false` (`:40–45`).
-3. The branch in accent color, truncated to `innerWidth` (`:47–48`).
-4. A summary line `N files  +I -D` with the `+` and `-` split into
-   `toolDiffAdded` / `toolDiffRemoved` (`:49–50`).
-5. Either `clean working tree` in success color (`:52–55`), or a
-   capped per-file list.
-
-The per-file cap is `section.options.maxFiles` when
-`state.gitDetail` is on, and `Math.min(5, maxFiles)` when it is off
-(`:57–59`). Each row comes from `gitFileLine` (`:13`): the two-char
-status code is colored `toolDiffRemoved` on `D`, `toolDiffAdded` on
-`A` / `?`, else `warning`; the path is truncated with `…`; the delta
-is appended by `colorDelta` (`:4`), which split-colors `+N/-M` and
-collapses binary files to a single `bin`. Overflow renders
-`…N more` (`:63–64`).
-
 ### Tasks (Sages-specific)
 
-`renderTasksSection` (`sections/tasks.ts:411`) draws:
+`renderTasksSection` (`tasks.ts:411`) draws:
 
 1. An early `return` when `state.tasks.enabled === false` (`:414`) —
    this is what `PI_SIDEBAR_TASKS=0` produces.
@@ -198,10 +178,10 @@ Note the label mapping: `pending` renders as **"open"**, not
 
 The two removed sections are worth naming because their absence is
 observable: `Model` was the only consumer of `state.isStreaming`,
-`turnCount`, `lastTool`, and `piTitle`; `Context` owned
+`turnCount`, `lastTool`, and `piTitle` (all since deleted); `Context` owned
 `getThinkingLevel` on `SidebarRenderOptions`; `Location` and `Hint`
-were chrome. The trimmed tree is intentionally minimal — Git status and
-the task board are the two surfaces that carry workflow signal.
+were chrome. The trimmed tree is intentionally minimal — the task board
+is the one surface that carries workflow signal.
 
 ## State model
 
@@ -214,12 +194,9 @@ a slice in place.
 |---|---|---|---|
 | `enabled` | `boolean` | `:87` | `setSidebarCollapsed` (`sidebar.ts:85`, forces `true`); `/sidebar off` (`sidebar.ts:504`, forces `false`). |
 | `collapsed` | `boolean` | `:88` | `toggleSidebarCollapsed` (`:93`) via `ctrl+shift+s` or `/sidebar toggle`. |
-| `gitDetail` | `boolean` | `:89` | `/sidebar-git-detail` (`sidebar.ts:553`). |
 | `fullHeight` | `boolean` | `:90` | `/sidebar full` / `/sidebar floating` (`sidebar.ts:509–512`). |
-| `git` | `GitState` | `:91` | `refreshGit` (`sidebar.ts:291`) replaces the whole slice. |
-| `lastGitRefresh` | `number?` | `:92` | `refreshGit` (`:359`). |
 | `lastTasksRefresh` | `number?` | `:93` | `refreshTasks` (`:384`). |
-| `isStreaming` | `boolean` | `:101` | `turn_start` (`sidebar.ts:484`, `true`) / `turn_end` (`:490`, `false`). Powers `PI_SIDEBAR_AUTOHIDE_WORKING`. |
+| `isStreaming` | `boolean` | `:101` | `turn_start` (`sidebar.ts:773`, `true`) / `turn_end` (`:779`, `false`). Feeds `PI_SIDEBAR_AUTOHIDE_WORKING`, which ships **off** — see [Autohide while working](#autohide-while-working). |
 | `tasks` | `TasksState` | `:102` | `refreshTasks` (`sidebar.ts:371`) replaces the whole slice. |
 | `highlightedId` | `string?` | `:104` | `sidebar:event` `show` / `highlight` (`sidebar-event-tool.ts:134`); cleared by `clear` (`:166–174`). |
 | `badges` | `EventLogEntry[]` | `:106` | `sidebar:event` `badge` (`:137`); cleared or filtered by `clear`. |
@@ -236,13 +213,12 @@ and dropping it would silently break the autohide contract.
 | Type | File:line | Holds |
 |---|---|---|
 | `Theme` | `types.ts:3` | Alias for `ExtensionContext["ui"]["theme"]`. The renderer never imports a theme type. |
-| `GitState` | `types.ts:5` | `insideRepo`, `branch?`, `files[]` (`{ code, path, delta? }`), `insertions`, `deletions`, `changedFiles`, `error?`. |
 | `Task` | `types.ts:20` | The on-disk task shape written by the Sages task store. `status` carries the board's **3** literals; `metadata`, `blocks`, `blockedBy`, `createdAt`, `updatedAt` are read but never rendered. |
 | `TaskRow` | `types.ts:40` | `{ id, subject, status, agentType? }` — what the renderer sees. `status` carries **5** literals. |
 | `TasksState` | `types.ts:58` | `enabled`, `available`, `source?`, `total`, `completed`, `inProgress`, `intents`, `blocked`, `rows`, `truncatedCount`. |
 | `EventLogEntry` | `types.ts:80` | `{ ts, target?, data? }`. Shared by both `badges` (transient) and `eventLog` (FIFO-capped). |
-| `SidebarRenderOptions` | `types.ts:111` | Static render-time config: `maxFiles`, `buffer`, `fillRows`, `verticalPadding`, `tasks.maxRows`. |
-| `SidebarSectionContext` | `types.ts:121` | The bag each renderer receives: `ctx`, `state`, `theme`, `innerWidth`, `add`, `heading`, `muted`, `dim`, `options`, `selectTask?`. |
+| `SidebarRenderOptions` | `types.ts:105` | Layout config: `buffer`, `fillRows`, `verticalPadding`. `maxFiles` went with Git; `tasks.maxRows` moved out because it is a poll-time parameter (`loadTasksState`), not a render-time one. |
+| `SidebarSectionContext` | `types.ts:113` | The bag the renderer receives: `state`, `theme`, `innerWidth`, `add`, `heading`, `muted`. Trimmed to what Tasks reads — `ctx`, `dim`, `options`, `selectTask` were sized for sections that no longer exist. |
 | `SidebarEvent` | `types.ts:143` | The `{ ts, action, target?, data? }` payload on the `sidebar:event` channel. |
 
 The `Task` / `TaskRow` status split is the load-bearing distinction.
@@ -264,7 +240,7 @@ row glyphs can never disagree.
 ## Task board polling
 
 The Tasks section is fed by `loadTasksState`
-(`sections/tasks.ts:299`), which calls `resolveTasksSource` (`:206`)
+(`tasks.ts:299`), which calls `resolveTasksSource` (`:206`)
 to pick a file in this fixed priority order.
 
 | # | Scope | Path | Read via |
@@ -327,9 +303,9 @@ Three independent triggers, all routed through the same two functions:
 
 | Trigger | Location | When |
 |---|---|---|
-| Initial open | `sidebar.ts:401–402` | `startSidebar` fires `refreshGit` + `refreshTasks` before the overlay mounts. |
-| `setInterval` | `sidebar.ts:418–421` | Every `PI_SIDEBAR_REFRESH_MS` (default 5000). Cleared in `dispose()` (`:424`). |
-| `turn_end` | `sidebar.ts:488–494` | After every model turn: `refreshGit(ctx)` + `refreshTasks(ctx)` (`:491–492`). |
+| Initial open | `sidebar.ts` `startSidebar` | Fires `refreshTasks` before the overlay mounts. |
+| `setInterval` | `sidebar.ts` `startSidebar` | Every `PI_SIDEBAR_REFRESH_MS` (default 5000). Cleared in `dispose()`. |
+| `turn_end` | `sidebar.ts` `turn_end` handler | After every model turn: `refreshTasks(ctx)`. |
 
 `turn_end` is what makes the Tasks panel feel live: a subagent
 finishing flips a task to `completed` in the board, and the panel
@@ -470,7 +446,7 @@ For the **emit** side — the five call sites across `pi-orchestrator`,
 ## Overlay mechanics
 
 The sidebar mounts as an overlay, not as a layout region: the host pi
-TUI is never modified. `startSidebar` (`sidebar.ts:398`) calls
+TUI is never modified. `startSidebar` (`sidebar.ts:597`) calls
 `ctx.ui.custom<void>(…)` with the options block at `:434–462`:
 
 | Option | Value (line) | Why |
@@ -553,13 +529,59 @@ and drops the handle.
 return !state.enabled || (autohideWorking && state.isStreaming);
 ```
 
-`state.isStreaming` is set `true` at `turn_start` (`:484`) and `false`
-at `turn_end` (`:490`), and `applyVisibility()` runs on both
-boundaries. With the default `PI_SIDEBAR_AUTOHIDE_WORKING=true` the
-panel disappears for the duration of a model turn and returns when the
-turn settles — which is also why `turn_end` is the natural refresh
-trigger. When the panel is hidden, `state` keeps accumulating, so
-nothing is lost across the hide.
+`state.isStreaming` is set `true` at `turn_start` (`:773`) and `false`
+at `turn_end` (`:779`), and `applyVisibility()` runs on both
+boundaries. `turn_end` is the natural refresh trigger for that reason.
+
+#### Autohide while working
+
+`shouldHideSidebar` (`utils.ts:131`) is the whole predicate:
+
+```ts
+return !state.enabled || (autohideWorking && state.isStreaming);
+```
+
+`autohideWorking` resolves through `autohideWorkingFromEnv`
+(`sidebar.ts:156`), which ships **`false`** — the panel stays up while
+the agent works. Set `PI_SIDEBAR_AUTOHIDE_WORKING=1` to opt back in.
+
+The default is `false` because a pi turn spans far more than token
+streaming. From `pi-agent-core/dist/agent-loop.js`:
+
+| Line | Step |
+|---|---|
+| 113 | `emit({ type: "turn_start" })` |
+| 141 | `streamAssistantResponse(...)` |
+| 165 | `executeToolCalls(...)` |
+| 180 | `emit({ type: "turn_end" })` |
+
+`turn_end` fires only after the **entire tool batch** returns, so with
+autohide on the panel was hidden across every bash call, file read and
+subagent spawn, and reappeared only once the agent went idle — precisely
+when there is nothing on the board to look at. That is backwards for
+this package's own purpose: the Tasks section exists to give passive
+board awareness *during* work, and `install.sh:873` gates the
+`sages-board-watch` routine on the sidebar being present, treating it as
+the better surface for exactly that job.
+
+Abort and error paths do emit `turn_end` (`agent-loop.js:143–151`, for
+`stopReason === "error" || "aborted"`), so with autohide opted in the
+panel always returns; it cannot get stuck hidden.
+
+`autohideWorkingFromEnv` exists purely so the default is assertable.
+Like `placementConfigFromEnv`, it takes an optional `env` bag instead of
+reading `process.env` at the call site — while the read lived inline in
+the `sidebarPlugin` closure, no test could see it, which is how the
+panel shipped autohiding unnoticed. Pinned by
+`tests/sidebar.test.ts` → `autohide default from env`.
+
+Note this is independent of `/sidebar off`, which sets
+`state.enabled = false`; the first clause of `shouldHideSidebar`
+handles that, so disabling autohide never un-hides a panel the user
+turned off.
+
+When the panel is hidden, `state` keeps accumulating, so nothing is lost
+across a hide.
 
 This is the reason `isStreaming` survived the section trim. The Model
 section was its only visible consumer; `types.ts:94–100` records that
@@ -612,15 +634,12 @@ name that function rather than a line number.
 | `PI_SIDEBAR_INSET_RIGHT` | `0` | `placementConfigFromEnv` | `envInt` | Columns of breathing room from the right edge (floating layout only). |
 | `PI_SIDEBAR_BOTTOM_RESERVE` | `10` | `placementConfigFromEnv` | `envInt` | Rows reserved at the bottom for the composer (floating layout only). Full-height drops it, and its value feeds `PI_SIDEBAR_MIN_CONTENT_ROWS`. |
 | `PI_SIDEBAR_MAX_HEIGHT` | `60%` | `placementConfigFromEnv` | `envSize` | Height cap in the floating layout — rows or a `"NN%"` share. Full-height overrides it with `100%`. |
-| `PI_SIDEBAR_REFRESH_MS` | `5000` | `:203` | `envInt` | `setInterval` cadence for `refreshGit` + `refreshTasks`. |
-| `PI_SIDEBAR_GIT_LINES` | `12` | `:205` | `envInt` | Cap on per-file rows in the Git section. Takes precedence when set. |
-| `PI_SIDEBAR_MAX_FILES` | `12` | `:206` | `envInt` | Fallback cap, used as the default argument of `PI_SIDEBAR_GIT_LINES` (`:204–207`). Same effect when `GIT_LINES` is unset. |
-| `PI_SIDEBAR_AUTOHIDE_WORKING` | `true` | `:208` | `envBool` | Hides the panel while a model turn is in flight. |
+| `PI_SIDEBAR_REFRESH_MS` | `5000` | `envInt` | `setInterval` cadence for `refreshTasks`. The only poll knob left now that Git is gone. |
+| `PI_SIDEBAR_AUTOHIDE_WORKING` | `false` | `autohideWorkingFromEnv` | `envBool` | **Opt-in.** Hides the panel while `isStreaming`. Ships **off** so the board stays visible during work; set `1` to restore the old autohide. |
 | `PI_SIDEBAR_OFFSET_Y` | `0` | `placementConfigFromEnv` | `envSignedInt` | Vertical offset of the panel from the anchor, in rows. Defaults to `0` because the panel is top-right anchored — a default nudge would only fight the anchor, and the host clamps a negative offset back to row 0. |
 | `PI_SIDEBAR_TASKS` | `true` | `:210` | `envBool` | Enables the Tasks section. `false` short-circuits `refreshTasks` (`:372`) and `renderTasksSection` (`:414`). |
 | `PI_SIDEBAR_TASKS_MAX` | `10` | `:211` | `envInt` | Max rendered task rows. Clamped to `>= 1` at `:211`. |
 | `PI_SIDEBAR_FULL_HEIGHT` | `false` | `:252` | `envBool` | Initial layout. `/sidebar full` / `/sidebar floating` flip it at runtime. |
-| `PI_SIDEBAR_GIT_DETAIL` | `true` | `:251` | `envBool` | Initial per-file detail. `false` caps rows at `min(5, maxFiles)`. `/sidebar-git-detail` flips it at runtime. |
 
 The four parsers (`utils.ts`) are worth knowing
 because their edge cases are not all the same:
@@ -648,7 +667,7 @@ One non-`PI_SIDEBAR_*` variable matters:
 
 | Variable | Read at | Default | Effect |
 |---|---|---|---|
-| `ORCHESTRATOR_WORKDIR` | `sections/tasks.ts:50` | `join(tmpdir(), "sages-orchestrator")` (`:34`) | Root of the Sages project task scope. Resolved **per call**, not captured at load, matching `pi-tasks/src/task-paths.ts:36`. Set by the orchestrator runtime. |
+| `ORCHESTRATOR_WORKDIR` | `tasks.ts:50` | `join(tmpdir(), "sages-orchestrator")` (`:34`) | Root of the Sages project task scope. Resolved **per call**, not captured at load, matching `pi-tasks/src/task-paths.ts:36`. Set by the orchestrator runtime. |
 
 ## Commands and shortcuts
 
@@ -671,7 +690,7 @@ doubles as the mount trigger when the overlay has not opened yet.
 | `expand`, `expanded` | `setSidebarCollapsed(state, false)` | `:507–508` |
 | `full`, `full-height` | `state.fullHeight = true` | `:509–510` |
 | `floating`, `window` | `state.fullHeight = false` | `:511–512` |
-| `status` | Notifies enabled / collapsed / layout / autohide / git-detail / tasks state, then returns early | `:513–518` |
+| `status` | Notifies enabled / collapsed / layout / autohide / tasks state, then returns early | `:513–518` |
 | anything else | `notify("Unknown sidebar option: …", "warning")`, returns early | `:520–523` |
 
 Non-`status` paths end with `applyVisibility()` (`:524`) then a
@@ -681,21 +700,15 @@ since both collapse helpers force `enabled = true`.
 
 ### `/sidebar-refresh` (`sidebar.ts:532`)
 
-Forces `refreshGit(ctx)` (`:536`) and notifies. Useful right after a
-manual commit when the 5-second timer is mid-interval.
-
 ### `/sidebar-refresh-tasks` (`sidebar.ts:541`)
 
-Forces `refreshTasks(ctx)` (`:545`) and notifies. **Survived the
-trim** — it is task-board-specific and therefore part of the retained
-surface. Useful after a `task_convert_intent` when the cached
-snapshot is stale.
+Forces `refreshTasks(ctx)` and notifies. Useful after a
+`task_convert_intent` when the cached snapshot is stale.
 
-### `/sidebar-git-detail` (`sidebar.ts:550`)
-
-Flips `state.gitDetail` (`:553`), calls `requestRender()`, and
-notifies "enabled" / "reduced". Switches the per-file cap between
-`maxFiles` and `min(5, maxFiles)`.
+**Now identical to `/sidebar-refresh`** — Tasks is the only section, so
+both do the same call. Both names are kept so neither becomes a
+breaking removal; consolidating them is a known cleanup, not an
+oversight.
 
 ### `ctrl+shift+s` (`sidebar.ts:562`)
 
@@ -742,7 +755,7 @@ cross-package coupling is:
    literal in three places (`pi-evaluator/src/tools/eval-score.ts:49`,
    the orchestrator's emit wrapper, and `types.ts:143` here).
 2. **The filesystem layout** — `ORCHESTRATOR_WORKDIR` +
-   `projectKey(cwd)` (`sections/tasks.ts:41`, `:49`), a contract with
+   `projectKey(cwd)` (`tasks.ts:41`, `:49`), a contract with
    `pi-tasks/src/task-paths.ts:50` / `:36` enforced only by tests.
 
 Neither direction imports the other. That is what lets the deploy be
@@ -756,23 +769,25 @@ package's `tests/sidebar.test.ts`.
 
 ## Testing
 
-One vitest file, `pi-sidebar/tests/sidebar.test.ts` (1441 lines),
-**65 tests across 12 `describe` blocks**.
+One vitest file, `pi-sidebar/tests/sidebar.test.ts` (1675 lines),
+**83 tests across 14 `describe` blocks**.
 
 | Block | Line | Covers |
 |---|---|---|
-| `configuration helpers` | `:113` | `envBool` / `envInt` / `envSignedInt` edge cases, `setSidebarCollapsed` / `toggleSidebarCollapsed`, `shouldHideSidebar`, and the trim-survivor assertion that `isStreaming` is still on `SidebarState` (`:173`). |
-| `git parsing` | `:182` | `parseShortstat` and `parseNumstat` fixtures. |
-| `formatting helpers` | `:215` | `padAnsi` and `formatFileLine` width arithmetic. |
-| `SidebarComponent rendering` | `:226` | Full-height vs floating layout, buffer gutter, vertical padding, the collapsed rail, `◀` restore marker, per-file row coloring, the git-detail toggle, the "not a git repo" and "clean working tree" paths, and the **trim pin** at `:396` asserting only `Git` then `Tasks` headings appear. |
-| `parseTasksJson` | `:422` | Valid JSON, non-JSON, missing `tasks` array, empty store, per-field type violations, and tolerance of extra fields. |
-| `projectKey` | `:519` | The encoding itself, basename-collision safety, and the empty-path edge (`/` → `----`). |
-| `countTasks` | `:538` | Bucket counts and the completed-blocker exclusion. |
-| `toTaskRows` | `:606` | Status mapping, blocker derivation, `maxRows` cap and truncation count. |
-| `Tasks section rendering` | `:675` | Heading, both "no tasks" paths, the summary header, per-row glyph / status / `agentType` badge, the `▶` affordance, `…N more` overflow, and the `selectTask` callback. |
-| `filesystem source resolution` | `:970` | All three source scopes against real temp dirs, `loadTasksState` parse / merge / dedup, and the `projectKey` byte-parity check (`:1166`). |
-| `sidebar_event tool` | `:1275` | Tool registration, parameter shape, per-invocation emission, missing `data` / `target`. |
-| `sidebar:event handler` | `:1334` | Each of the 6 actions against `SidebarState` and `ctx.ui.notify`; `clear` with and without a target; FIFO eviction at 50; cross-extension emit; the unloaded-`ctx` swallow. |
+| `configuration helpers` | `:94` | `envBool` / `envInt` / `envSignedInt` edge cases, `setSidebarCollapsed` / `toggleSidebarCollapsed`, `shouldHideSidebar`, and the trim-survivor assertion that `isStreaming` is still on `SidebarState` (`:173`). |
+| `formatting helpers` | `:205` | `padAnsi` width arithmetic. |
+| `SidebarComponent rendering` | `:211` | Full-height vs floating layout, buffer gutter, vertical padding, the collapsed rail, the `◀` restore marker, and the **section pin** asserting only the `Tasks` heading appears — which is what keeps a removed section (Git, Model, Context, Location, Hint) from creeping back. |
+| `parseTasksJson` | `:666` | Valid JSON, non-JSON, missing `tasks` array, empty store, per-field type violations, and tolerance of extra fields. |
+| `projectKey` | `:763` | The encoding itself, basename-collision safety, and the empty-path edge (`/` → `----`). |
+| `countTasks` | `:782` | Bucket counts and the completed-blocker exclusion. |
+| `toTaskRows` | `:850` | Status mapping, blocker derivation, `maxRows` cap and truncation count. |
+| `Tasks section rendering` | `:919` | Heading, both "no tasks" paths, the summary header, per-row glyph / status / `agentType` badge, the `▶` affordance, `…N more` overflow, and the `selectTask` callback. |
+| `filesystem source resolution` | `:1204` | All three source scopes against real temp dirs, `loadTasksState` parse / merge / dedup, and the `projectKey` byte-parity check (`:1166`). |
+| `overlay placement` | `:290` | Overlay geometry helpers and the width/height floors. |
+| `placement defaults from env` | `:471` | Asserts the **shipped** placement defaults, above all `minTermWidth === 0` — the regression guard that stops the panel vanishing in a tmux 50/50 split. |
+| `autohide default from env` | `:557` | Asserts autohide ships **off**, that the opt-in still parses `1/true/yes/on`, and that `/sidebar off` still hides regardless. |
+| `sidebar_event tool` | `:1509` | Tool registration, parameter shape, per-invocation emission, missing `data` / `target`. |
+| `sidebar:event handler` | `:1568` | Each of the 6 actions against `SidebarState` and `ctx.ui.notify`; `clear` with and without a target; FIFO eviction at 50; cross-extension emit; the unloaded-`ctx` swallow. |
 
 The suite has no TUI dependency. Renderer tests build state via the
 `state()` helper (`:45`) and a stub `theme` whose `fg` returns the text
@@ -797,10 +812,10 @@ cd pi-sidebar && npm run verify
 - `npm run typecheck` — `tsc --noEmit` against `tsconfig.json`
   (`target: ES2022`, `module: NodeNext`, `strict: true`,
   `include: ["extensions/**/*.ts", "tests/**/*.ts"]`).
-- `npm test` — `vitest --run`. Current result: **65 passed / 65**.
+- `npm test` — `vitest --run`. Current result: **83 passed / 83**.
 - `npm run pack:dry` — `npm pack --dry-run`. Confirms the tarball is
-  the 9 files that actually exist: `package.json`, `tsconfig.json`,
-  `README.md`, and the 6 source files under `extensions/`.
+  the 8 files that actually exist: `package.json`, `tsconfig.json`,
+  `README.md`, and the 5 source files under `extensions/`.
 
 Because `pi-sidebar` is outside the bun workspace, this gate runs
 independently of the root `orchestrator:typecheck` + `orchestrator:test`
@@ -816,12 +831,13 @@ sage peer`. Two commits have landed on top of the vendored copy:
 
 - `e74742a chore: remove useless pi-sidebar content`
 - `251a102 refactor(sidebar): trim to Git + Tasks sections only`
+- *(uncommitted)* the Git section removal — see [the section list note](#the-section-list-is-tasks-only)
 
 The fork's three goals, all landed upstream in the standalone repo as
 of v0.2.0:
 
 1. **Surface the Sages task board in the sidebar** — the
-   `sections/tasks.ts` polling + rendering described above.
+   `tasks.ts` polling + rendering described above.
 2. **Bidirectional `sidebar_event` channel** — the LLM tool plus the
    `pi.events.on("sidebar:event", …)` listener in
    `sidebar-event-tool.ts`.
@@ -876,7 +892,7 @@ lineage record and is not duplicated here.
 - [`pi-sidebar/extensions/sidebar/sidebar-event-tool.ts`](../../../pi-sidebar/extensions/sidebar/sidebar-event-tool.ts)
   — the listener itself. Small enough (180 lines) to read in full; it
   is the whole consumer-side contract.
-- [`pi-sidebar/extensions/sidebar/sections/tasks.ts`](../../../pi-sidebar/extensions/sidebar/sections/tasks.ts)
+- [`pi-sidebar/extensions/sidebar/tasks.ts`](../../../pi-sidebar/extensions/sidebar/tasks.ts)
   — the board-polling implementation: source resolution, parsing,
   counting, row projection, and the renderer, in one 441-line file.
 - `pi-sidebar/README.md` — currently a stub (see the vendoring caveat
