@@ -1,9 +1,9 @@
 {
   "name": "@sages/pi-sidebar",
-  "version": "0.2.0",
-  "description": "Floating right sidebar for pi with git diff/status, session metadata, and a Sages task board panel. Fork of jrimmer/pi-sidebar.",
+  "version": "0.1.0",
+  "description": "Floating right sidebar for pi with git diff/status, session metadata, and a Sages task board panel",
   "author": "vanpipy",
-  "license": "BSD-3-Clause",
+  "license": "MIT",
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -13,9 +13,7 @@
     "pi-package",
     "pi",
     "sidebar",
-    "git",
     "tui",
-    "sages",
     "task-board"
   ],
   "pi": {
