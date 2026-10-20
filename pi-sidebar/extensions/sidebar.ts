@@ -242,12 +242,13 @@ export function sidebarRequiredWidth(
  * **Visibility shrinks to fit.** The host's
  * `TUI.resolveOverlayLayout` clamps an oversized overlay with
  * `width = Math.max(1, Math.min(width, availWidth))` — verified in
- * pi-tui 1.3.0 (`dist/tui.js:856`), the copy this workspace resolves.
- * That line number is NOT load-bearing: pi-sidebar declares
+ * pi-tui 0.78.0 (the lockfile pin, `dist/tui.js:470`) and re-checked
+ * against 1.3.0 (`dist/tui.js:856`).
+ * No line number is load-bearing: pi-sidebar declares
  * `"@earendil-works/pi-tui": "*"` as a peerDependency, so the host
  * version is whatever the embedder happens to install, and the same
  * clamp sits at a different line in every release (observed at L470 /
- * L699 / L847 / L856 across v0.73.1 / v0.84.2 / v1.1.0 / v1.3.0). Cite
+ * L699 / L847 / L856 across v0.78.0 / v0.84.2 / v1.1.0 / v1.3.0). Cite
  * the symbol and the expression; treat any line number as a snapshot.
  *
  * So the right move when the terminal is narrower than the panel's
@@ -301,8 +302,8 @@ export function sidebarOverlayOptions(
  * thunk ONCE on mount — in `InteractiveMode`'s custom-widget overlay
  * setup, which builds `resolveOptions()` and then calls
  * `this.ui.showOverlay(component, resolveOptions())` — verified in
- * pi-coding-agent 1.3.0
- * (`dist/modes/interactive/interactive-mode.js:2363-2374`). As with the
+ * pi-coding-agent 0.78.0 and re-checked against 1.3.0
+ * (`dist/modes/interactive/interactive-mode.js:2363-2374` there). As with the
  * clamp above, that line range is a snapshot of one release and will
  * drift; the stable fact is the shape of the call.
  *
@@ -471,7 +472,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	 * on mount — in `InteractiveMode`'s custom-widget overlay setup,
 	 * which builds `resolveOptions()` and calls
 	 * `this.ui.showOverlay(component, resolveOptions())` (verified in
-	 * pi-coding-agent 1.3.0, `dist/modes/interactive/interactive-mode.js:2363-2374`;
+	 * pi-coding-agent 0.78.0 and re-checked against 1.3.0;
 	 * the call shape is stable, the line range drifts per release) —
 	 * and stores the returned object by reference. pi-tui re-reads the
 	 * stored object's fields (`width`, `maxHeight`, `margin`, `visible`)
