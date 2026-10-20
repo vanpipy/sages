@@ -16,12 +16,9 @@ import {
 	sidebarOverlayOptions,
 	syncOverlayOptions,
 	type SidebarPlacementConfig,
-	formatFileLine,
 	loadTasksState,
 	orchestratorWorkdir,
 	padAnsi,
-	parseNumstat,
-	parseShortstat,
 	projectKey,
 	parseTasksJson,
 	resolveTasksSource,
@@ -30,7 +27,6 @@ import {
 	sidebarOverlayWidth,
 	toggleSidebarCollapsed,
 	toTaskRows,
-	type GitState,
 	type SidebarState,
 	type Task,
 	type TasksState,
@@ -53,16 +49,7 @@ function state(overrides: Partial<SidebarState> = {}): SidebarState {
 	return {
 		enabled: true,
 		collapsed: false,
-		gitDetail: true,
 		fullHeight: true,
-		git: {
-			insideRepo: true,
-			branch: "main",
-			files: [],
-			insertions: 0,
-			deletions: 0,
-			changedFiles: 0,
-		},
 		isStreaming: false,
 		tasks: {
 			enabled: true,
@@ -82,7 +69,6 @@ function state(overrides: Partial<SidebarState> = {}): SidebarState {
 }
 
 function component(
-	git: Partial<GitState>,
 	overrides: Partial<SidebarState> = {},
 	componentTheme: typeof theme = theme,
 	options: Partial<ConstructorParameters<typeof SidebarComponent>[3]> = {},
@@ -93,25 +79,12 @@ function component(
 				cwd: "/repo/project",
 				sessionManager: { getSessionName: () => "Test Session" },
 			}) as any,
-		state({
-			git: {
-				insideRepo: true,
-				branch: "feature/sidebar",
-				files: [],
-				insertions: 2,
-				deletions: 1,
-				changedFiles: 1,
-				...git,
-			},
-			...overrides,
-		}),
+		state(overrides),
 		componentTheme as any,
 		{
-			maxFiles: 2,
 			buffer: 1,
 			fillRows: 24,
 			verticalPadding: 1,
-			tasks: { maxRows: 10 },
 			...options,
 		},
 	);
@@ -228,168 +201,21 @@ describe("configuration helpers", () => {
 	});
 });
 
-describe("git parsing", () => {
-	it("parses git diff shortstat variants", () => {
-		expect(
-			parseShortstat(" 3 files changed, 10 insertions(+), 2 deletions(-)"),
-		).toEqual({
-			changedFiles: 3,
-			insertions: 10,
-			deletions: 2,
-		});
-		expect(parseShortstat(" 1 file changed, 1 insertion(+)")).toEqual({
-			changedFiles: 1,
-			insertions: 1,
-			deletions: 0,
-		});
-		expect(parseShortstat("")).toEqual({
-			changedFiles: 0,
-			insertions: 0,
-			deletions: 0,
-		});
-	});
-
-	it("parses per-file numstat deltas", () => {
-		expect(
-			parseNumstat("10\t2\textensions/sidebar.ts\n-\t-\timage.png"),
-		).toEqual(
-			new Map([
-				["extensions/sidebar.ts", "+10/-2"],
-				["image.png", "bin"],
-			]),
-		);
-	});
-});
-
 describe("formatting helpers", () => {
-	it("pads lines by visible width and truncates long paths", () => {
+	it("pads lines by visible width", () => {
 		expect(padAnsi("abc", 5)).toBe("abc  ");
-		const fileLine = formatFileLine(
-			{ code: "M", path: "src/very-long-file-name.ts", delta: "+10/-2" },
-			18,
-		).replace(/\u001b\[[0-9;]*m/g, "");
-		expect(fileLine).toBe("M  src/ver… +10/-2");
 	});
 });
 
 describe("SidebarComponent rendering", () => {
-	it("renders full-height sidebar with gutter, git summary, and filler rows", () => {
-		const rendered = component({
-			files: [{ code: "M", path: "extensions/sidebar.ts" }],
-		}).render(48);
-		expect(rendered).toHaveLength(24);
-		expect(rendered.join("\n")).toContain("feature/sidebar");
-		expect(rendered.join("\n")).toContain("1 files");
-		expect(rendered.join("\n")).toContain("+2 -1");
-		expect(rendered.join("\n")).toContain("extensions/sidebar.ts");
-	});
-
-	it("keeps long git rows within the sidebar bounds", () => {
-		const rendered = component(
-			{
-				files: [
-					{
-						code: "M",
-						path: "internal/admin/chat_conversations/really-long-file-name.ts",
-						delta: "+7/-0",
-					},
-				],
-			},
-			{ fullHeight: false },
-		).render(34);
-		expect(rendered.every((line) => visibleWidth(line) <= 34)).toBe(true);
-		expect(rendered.join("\n")).toContain("+7/-0");
-	});
-
-	it("colors add and delete portions of per-file deltas", () => {
-		const taggedTheme = {
-			fg: (token: string, text: string) => `<${token}>${text}</${token}>`,
-			bold: (text: string) => text,
-		};
-		const rendered = component(
-			{
-				files: [
-					{
-						code: "M",
-						path: "docs/superpowers/sidebar.md",
-						delta: "+506/-130",
-					},
-				],
-			},
-			{ fullHeight: false },
-			taggedTheme,
-		)
-			.render(200)
-			.join("\n");
-		expect(rendered).toContain("<toolDiffAdded>+506</toolDiffAdded>");
-		expect(rendered).toContain("<toolDiffRemoved>-130</toolDiffRemoved>");
-	});
-
-	it("limits detailed file rows and shows overflow count", () => {
-		const files = [
-			{ code: "M", path: "a.ts" },
-			{ code: "A", path: "b.ts" },
-			{ code: "D", path: "c.ts" },
-			{ code: "M", path: "d.ts" },
-		];
-		const rendered = component(
-			{ files, changedFiles: 4 },
-			{ gitDetail: true, fullHeight: false },
-			theme,
-			{ maxFiles: 3 },
-		)
-			.render(36)
-			.join("\n");
-		expect(rendered).toContain("a.ts");
-		expect(rendered).toContain("b.ts");
-		expect(rendered).toContain("c.ts");
-		expect(rendered).not.toContain("d.ts");
-		expect(rendered).toContain("…1 more");
-	});
-
-	it("limits file rows when git detail is reduced", () => {
-		const files = [
-			{ code: "M", path: "a.ts" },
-			{ code: "A", path: "b.ts" },
-			{ code: "D", path: "c.ts" },
-		];
-		const rendered = component({ files, changedFiles: 3 }, { gitDetail: false })
-			.render(36)
-			.join("\n");
-		expect(rendered).toContain("a.ts");
-		expect(rendered).toContain("b.ts");
-		expect(rendered).not.toContain("c.ts");
-		expect(rendered).toContain("…1 more");
-	});
-
-	it("renders clean and non-repository git states", () => {
-		const clean = component(
-			{ files: [], changedFiles: 0 },
-			{ fullHeight: false },
-		)
-			.render(40)
-			.join("\n");
-		expect(clean).toContain("clean working tree");
-
-		const outsideRepo = component(
-			{ insideRepo: false, error: "not a git repo" },
-			{ fullHeight: false },
-		)
-			.render(40)
-			.join("\n");
-		expect(outsideRepo).toContain("not a git repo");
-	});
-
 	it("adds vertical padding but no full-height gutter or filler rows in floating mode", () => {
-		const rendered = component({}, { fullHeight: false }).render(36);
+		const rendered = component({ fullHeight: false }).render(36);
 		expect(rendered.length).toBeLessThan(24);
 		expect(rendered[0]).toMatch(/^│\s*$/);
-		// First section is now Git (rendered via `heading()`, which
-		// prepends an empty pad line). Model/Context used to occupy
-		// index 1 directly without the heading helper; after the trim
-		// index 1 is the heading pad and index 2 is the heading.
+		// Sections render via `heading()`, which prepends an empty pad
+		// line. Index 1 is that pad; index 2 is the heading itself.
 		expect(rendered[1]).toMatch(/^│\s*$/);
-		expect(rendered[2]).toMatch(/^│ Git/);
+		expect(rendered[2]).toMatch(/^│ Tasks/);
 		expect(rendered.at(-1)).toMatch(/^│\s*$/);
 		expect(rendered.at(-2)).not.toMatch(/^│\s*$/);
 	});
@@ -414,39 +240,30 @@ describe("SidebarComponent rendering", () => {
 	});
 
 	it("renders a narrow restore bar when collapsed", () => {
-		const floating = component(
-			{},
-			{ collapsed: true, fullHeight: false },
-		).render(2);
+		const floating = component({ collapsed: true, fullHeight: false }).render(2);
 		expect(floating).toHaveLength(3);
 		expect(floating.join("\n")).toContain("◀│");
 		expect(floating[0]).toBe(" │");
 		expect(floating[1]).toBe("◀│");
 		expect(floating.join("\n")).not.toContain("Model");
 
-		const fullHeight = component(
-			{},
-			{ collapsed: true, fullHeight: true },
-		).render(2);
+		const fullHeight = component({ collapsed: true, fullHeight: true }).render(
+			2,
+		);
 		expect(fullHeight).toHaveLength(24);
 		expect(fullHeight.join("\n")).toContain("◀");
 		expect(fullHeight.join("\n")).not.toContain("Model");
 	});
 
-	// Pins the section ordering + the post-trim section list. After
-	// the trim, the sidebar renders only Git (first) and Tasks
-	// (second) headings, in that order, and must not include any of
-	// the removed section headings (Model / Context / Location /
-	// Hint). The renderer prefixes headings with the sidebar border
-	// (`│ `) and the `heading()` helper inserts an empty pad line
-	// before each heading; we strip the pad lines and match the
-	// heading text. A future regression that re-adds a removed
-	// section (or reorders Git/Tasks) breaks this test.
-	it("renders only Git and Tasks sections in order (no Model / Context / Location / Hint)", () => {
-		const lines = component(
-			{ files: [{ code: "M", path: "extensions/sidebar.ts" }] },
-			{ fullHeight: false },
-		).render(48);
+	// Pins the section list. After the Git removal the sidebar renders
+	// exactly one heading — Tasks — and must never grow one back. The
+	// renderer prefixes headings with the sidebar border (`│ `) and the
+	// `heading()` helper inserts an empty pad line before each heading,
+	// so we strip the pad lines and match the heading text. This also
+	// pins the earlier trims: Model / Context / Location / Hint, and
+	// then Git, are all gone and must stay gone.
+	it("renders only the Tasks section (no Git / Model / Context / Location / Hint)", () => {
+		const lines = component({ fullHeight: false }).render(48);
 
 		const headings: string[] = [];
 		for (const line of lines) {
@@ -454,16 +271,17 @@ describe("SidebarComponent rendering", () => {
 			// take the first non-whitespace token as the heading.
 			const stripped = line.replace(/^│\s+/, "").trim();
 			if (
-				stripped === "Git" ||
 				stripped === "Tasks" ||
+				stripped === "Git" ||
 				stripped === "Model" ||
 				stripped === "Context" ||
-				stripped === "Location"
+				stripped === "Location" ||
+				stripped === "Hint"
 			) {
 				headings.push(stripped);
 			}
 		}
-		expect(headings).toEqual(["Git", "Tasks"]);
+		expect(headings).toEqual(["Tasks"]);
 	});
 });
 
@@ -1115,7 +933,6 @@ describe("Tasks section rendering", () => {
 
 	it("renders the section heading when enabled", () => {
 		const rendered = component(
-			{},
 			{ tasks: tasksState({ rows: [] }), fullHeight: false },
 		)
 			.render(36)
@@ -1125,7 +942,6 @@ describe("Tasks section rendering", () => {
 
 	it("shows 'no tasks' when the source is unavailable", () => {
 		const rendered = component(
-			{},
 			{
 				tasks: tasksState({ available: false }),
 				fullHeight: false,
@@ -1139,7 +955,6 @@ describe("Tasks section rendering", () => {
 
 	it("hides the section when disabled", () => {
 		const rendered = component(
-			{},
 			{
 				tasks: tasksState({ enabled: false, rows: [] }),
 				fullHeight: false,
@@ -1152,7 +967,6 @@ describe("Tasks section rendering", () => {
 
 	it("renders a header with completed/total and running count", () => {
 		const rendered = component(
-			{},
 			{
 				fullHeight: false,
 				tasks: tasksState({
@@ -1173,7 +987,6 @@ describe("Tasks section rendering", () => {
 
 	it("renders one row per task with glyph, subject, status, and agentType", () => {
 		const rendered = component(
-			{},
 			{
 				fullHeight: false,
 				tasks: tasksState({
@@ -1214,7 +1027,6 @@ describe("Tasks section rendering", () => {
 
 	it("flags blocked rows distinctly from open pending", () => {
 		const rendered = component(
-			{},
 			{
 				fullHeight: false,
 				tasks: tasksState({
@@ -1247,7 +1059,6 @@ describe("Tasks section rendering", () => {
 
 	it("truncates with `…N more` when rows exceed the cap", () => {
 		const rendered = component(
-			{},
 			{
 				fullHeight: false,
 				tasks: tasksState({
@@ -1272,7 +1083,6 @@ describe("Tasks section rendering", () => {
 
 	it("keeps long task rows within the sidebar bounds", () => {
 		const rendered = component(
-			{},
 			{
 				fullHeight: false,
 				tasks: tasksState({
@@ -1304,7 +1114,6 @@ describe("Tasks section rendering", () => {
 
 	it("renders a '▶' selectable affordance marker on every task row", () => {
 		const rendered = component(
-			{},
 			{
 				fullHeight: false,
 				tasks: tasksState({
@@ -1333,63 +1142,6 @@ describe("Tasks section rendering", () => {
 		expect(matches.length).toBeGreaterThanOrEqual(3);
 	});
 
-	it("selectTask callback on the section context emits the right system-note text", async () => {
-		// Capture the selectTask callback the wrapper wires onto the section.
-		const captured: Array<{ id: string; subject: string; note: string }> = [];
-
-		const comp = new SidebarComponent(
-			() => undefined,
-			state({
-				tasks: tasksState({
-					total: 2,
-					inProgress: 1,
-					intents: 1,
-					rows: [
-						{
-							id: "1",
-							subject: "Implement parser",
-							status: "in_progress",
-							agentType: "Developer",
-						},
-						{ id: "2", subject: "Brainstorm design", status: "intent" },
-					],
-				}),
-			}),
-			theme as any,
-		{
-			maxFiles: 2,
-			buffer: 0,
-			fillRows: 24,
-			verticalPadding: 0,
-			tasks: { maxRows: 10 },
-		},
-		(taskId: string, subject: string) => {
-				// This is the wire shape — the wrapper binds this to
-				// `pi.appendEntry("system", ...)`.
-				const note = `Sidebar: user selected task #${taskId} \u2014 ${subject}`;
-				captured.push({ id: taskId, subject, note });
-			},
-		);
-		comp.render(48);
-
-		// The wrapper exposes `selectTask` on the section context as a
-		// public hook. We simulate the keyboard shortcut's effect by
-		// invoking it directly via the same closure the wrapper passed
-		// in. The test pins the system-note text format the LLM will
-		// see in its next turn.
-		// Re-render to capture the closure (the component's render
-		// builds a fresh section context; the closure survives in
-		// `captured` via the constructor).
-		expect(captured).toEqual([]); // no auto-call yet — only via keybinding
-		// Now drive the wire shape directly:
-		const closureNote = `Sidebar: user selected task #7 \u2014 Design new auth schema`;
-		expect(closureNote).toBe(
-			"Sidebar: user selected task #7 \u2014 Design new auth schema",
-		);
-		// And the component render must include the affordance marker on rows.
-		const rendered = comp.render(48).join("\n");
-		expect(rendered).toMatch(/▶/);
-	});
 });
 
 describe("filesystem source resolution", () => {

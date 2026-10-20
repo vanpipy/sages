@@ -16,14 +16,12 @@ import type {
 	TUI,
 } from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { renderGitSection } from "./sidebar/sections/git.js";
 import {
 	emptyTasksState,
 	loadTasksState,
 	renderTasksSection,
-} from "./sidebar/sections/tasks.js";
+} from "./sidebar/tasks.js";
 import type {
-	GitState,
 	SidebarRenderOptions,
 	SidebarSectionContext,
 	SidebarState,
@@ -36,13 +34,11 @@ import {
 	envSignedInt,
 	envSize,
 	padAnsi,
-	parseNumstat,
-	parseShortstat,
 	shouldHideSidebar,
 } from "./sidebar/utils.js";
 import { registerSidebarEventTool } from "./sidebar/sidebar-event-tool.js";
 
-export type { GitState, SidebarState, Task, TaskRow, TasksState } from "./sidebar/types.js";
+export type { SidebarState, Task, TaskRow, TasksState } from "./sidebar/types.js";
 export {
 	countTasks,
 	emptyTasksState,
@@ -53,34 +49,18 @@ export {
 	renderTasksSection,
 	resolveTasksSource,
 	toTaskRows,
-} from "./sidebar/sections/tasks.js";
+} from "./sidebar/tasks.js";
 export {
 	envBool,
 	envInt,
 	envIntClamped,
 	envSignedInt,
 	envSize,
-	formatFileLine,
 	padAnsi,
-	parseNumstat,
-	parseShortstat,
 	shouldHideSidebar,
 } from "./sidebar/utils.js";
 
-const DEFAULT_GIT: GitState = {
-	insideRepo: false,
-	files: [],
-	insertions: 0,
-	deletions: 0,
-	changedFiles: 0,
-};
-
 const COLLAPSED_SIDEBAR_WIDTH = 2;
-
-const SIDEBAR_SECTIONS: Array<(section: SidebarSectionContext) => void> = [
-	renderGitSection,
-	renderTasksSection,
-];
 
 export function sidebarOverlayWidth(
 	state: Pick<SidebarState, "collapsed" | "fullHeight">,
@@ -166,7 +146,8 @@ export type SidebarPlacementConfig = {
  * call returns (pi-agent-core `dist/agent-loop.js`: 113 / 141 / 165 /
  * 180). So bash calls, file reads and subagent spawns were all invisible,
  * and the panel was visible only while the agent was idle — precisely
- * when there is nothing on the board to look at.
+ * when there is nothing on the board to look at. The Tasks section's
+ * stated job is passive board awareness DURING work.
  *
  * Hoisted out of the `sidebarPlugin` closure for the same reason as
  * `placementConfigFromEnv`: a read buried in a closure cannot be tested,
@@ -375,17 +356,6 @@ export class SidebarComponent implements Component {
 		private readonly state: SidebarState,
 		private readonly theme: Theme,
 		private readonly options: SidebarRenderOptions,
-		/**
-		 * Reverse-channel hook the Tasks section calls when the user
-		 * selects a row. The plugin wires this to
-		 * `pi.appendEntry("system", "Sidebar: user selected task #N — …")`.
-		 * Defaults to a no-op so existing callers (tests + the README
-		 * quickstart) keep working without changes.
-		 */
-		private readonly selectTask: (
-			taskId: string,
-			subject: string,
-		) => void = () => {},
 	) {}
 
 	invalidate(): void {}
@@ -408,23 +378,22 @@ export class SidebarComponent implements Component {
 			add(this.theme.fg("text", this.theme.bold(label)));
 		};
 		const section: SidebarSectionContext = {
-			ctx,
 			state: this.state,
 			theme: this.theme,
 			innerWidth,
 			add,
 			heading,
 			muted: (s: string) => this.theme.fg("muted", s),
-			dim: (s: string) => this.theme.fg("dim", s),
-			options: this.options,
-			selectTask: this.selectTask,
 		};
 
 		const verticalPadding = this.state.fullHeight
 			? 0
 			: this.options.verticalPadding;
 		for (let i = 0; i < verticalPadding; i++) add();
-		for (const renderSection of SIDEBAR_SECTIONS) renderSection(section);
+		// Tasks is the only section. It used to be walked out of a
+		// `SIDEBAR_SECTIONS` array; with one renderer that array was an
+		// indirection with nothing to keep in sync.
+		renderTasksSection(section);
 		for (let i = 0; i < verticalPadding; i++) add();
 		if (this.state.fullHeight) {
 			while (lines.length < this.options.fillRows) add();
@@ -451,15 +420,6 @@ export class SidebarComponent implements Component {
 	}
 }
 
-export function piTitle(ctx: ExtensionContext): string {
-	const sessionName = (
-		ctx.sessionManager as unknown as {
-			getSessionName?: () => string | undefined;
-		}
-	).getSessionName?.();
-	return sessionName ?? "Pi Session";
-}
-
 export default function sidebarPlugin(pi: ExtensionAPI) {
 	const sidebarFillRows = envInt("PI_SIDEBAR_FILL_ROWS", 200);
 	const sidebarVerticalPadding = Math.max(
@@ -467,10 +427,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		envSignedInt("PI_SIDEBAR_VERTICAL_PADDING", 1),
 	);
 	const refreshMs = envInt("PI_SIDEBAR_REFRESH_MS", 5000);
-	const maxFiles = envInt(
-		"PI_SIDEBAR_GIT_LINES",
-		envInt("PI_SIDEBAR_MAX_FILES", 12),
-	);
 	const autohideWorking = autohideWorkingFromEnv();
 	const tasksEnabled = envBool("PI_SIDEBAR_TASKS", true);
 	const tasksMaxRows = Math.max(1, envInt("PI_SIDEBAR_TASKS_MAX", 10));
@@ -489,9 +445,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	const state: SidebarState = {
 		enabled: envBool("PI_SIDEBAR_ENABLED", true),
 		collapsed: false,
-		gitDetail: envBool("PI_SIDEBAR_GIT_DETAIL", true),
 		fullHeight: envBool("PI_SIDEBAR_FULL_HEIGHT", false),
-		git: DEFAULT_GIT,
 		isStreaming: false,
 		tasks: { ...emptyTasksState(), enabled: tasksEnabled },
 		badges: [],
@@ -588,86 +542,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		requestRender();
 	}
 
-	async function refreshGit(ctx: ExtensionContext | undefined = currentCtx) {
-		if (!ctx || refreshing) return;
-		refreshing = true;
-		try {
-			const inside = await pi.exec(
-				"git",
-				["rev-parse", "--is-inside-work-tree"],
-				{ cwd: ctx.cwd, timeout: 1500 },
-			);
-			if (inside.code !== 0 || inside.stdout.trim() !== "true") {
-				state.git = { ...DEFAULT_GIT, error: "not a git repo" };
-				return;
-			}
-
-			const [branchRes, statRes, statusRes, numstatRes] = await Promise.all([
-				pi.exec("git", ["branch", "--show-current"], {
-					cwd: ctx.cwd,
-					timeout: 1500,
-				}),
-				pi.exec("git", ["diff", "--shortstat"], {
-					cwd: ctx.cwd,
-					timeout: 1500,
-				}),
-				pi.exec("git", ["status", "--porcelain=v1"], {
-					cwd: ctx.cwd,
-					timeout: 1500,
-				}),
-				pi.exec("git", ["diff", "--numstat", "HEAD", "--"], {
-					cwd: ctx.cwd,
-					timeout: 1500,
-				}),
-			]);
-
-			let branch = branchRes.stdout.trim();
-			if (!branch) {
-				const head = await pi.exec("git", ["rev-parse", "--short", "HEAD"], {
-					cwd: ctx.cwd,
-					timeout: 1500,
-				});
-				branch = head.stdout.trim();
-			}
-
-			const deltas = parseNumstat(
-				numstatRes.code === 0 ? numstatRes.stdout : "",
-			);
-			const files = statusRes.stdout
-				.split("\n")
-				.map((line: string) => line.trimEnd())
-				.filter(Boolean)
-				.map((line: string) => {
-					const code = line.slice(0, 2).trim() || "M";
-					const path = line.slice(3).trim();
-					return {
-						code,
-						path,
-						delta: deltas.get(path) ?? (code.includes("?") ? "new" : undefined),
-					};
-				});
-
-			const stats = parseShortstat(statRes.stdout.trim());
-			state.git = {
-				insideRepo: true,
-				branch,
-				files,
-				changedFiles: stats.changedFiles || files.length,
-				insertions: stats.insertions,
-				deletions: stats.deletions,
-			};
-			state.lastGitRefresh = Date.now();
-		} catch (error) {
-			state.git = {
-				...DEFAULT_GIT,
-				error: error instanceof Error ? error.message : String(error),
-			};
-		} finally {
-			refreshing = false;
-			requestRender();
-		}
-	}
-
 	async function refreshTasks(ctx: ExtensionContext | undefined = currentCtx) {
 		if (!tasksEnabled || refreshingTasks) return;
 		refreshingTasks = true;
@@ -698,7 +572,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	function startSidebar(ctx: ExtensionContext) {
 		if (!ctx.hasUI || component) return;
 		currentCtx = ctx;
-		void refreshGit(ctx);
 		void refreshTasks(ctx);
 		void ctx.ui.custom<void>(
 			(
@@ -709,14 +582,11 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 			) => {
 				tuiRef = tui;
 				component = new SidebarComponent(() => currentCtx, state, theme, {
-					maxFiles,
 					buffer: placement.buffer,
 					fillRows: sidebarFillRows,
 					verticalPadding: sidebarVerticalPadding,
-					tasks: { maxRows: tasksMaxRows },
-				}, selectTask);
+				});
 				refreshTimer = setInterval(() => {
-					void refreshGit();
 					void refreshTasks();
 				}, refreshMs);
 				return {
@@ -778,7 +648,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	pi.on("turn_end", async (_event: TurnEndEvent, ctx: ExtensionContext) => {
 		currentCtx = ctx;
 		state.isStreaming = false;
-		void refreshGit(ctx);
 		void refreshTasks(ctx);
 		applyVisibility();
 	});
@@ -810,7 +679,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 						? `${placement.minTermWidth} cols (opt-in hard gate)`
 						: "off (shrink-to-fit is the default)";
 				ctx.ui.notify(
-					`Sidebar is ${state.enabled ? "on" : "off"}; ${state.collapsed ? "collapsed" : "expanded"}; anchored top-right; layout is ${state.fullHeight ? "full-height" : "floating"} (max ${String(placement.maxHeight)}, ${placement.bottomReserve} rows reserved); shrink-to-fit floor: width ${widthFloor} / content rows ${placement.minContentRows}; hard term-width gate: ${widthGate}; min term height: ${placement.minTermHeight}; autohide while working is ${autohideWorking ? "on" : "off"}; git detail is ${state.gitDetail ? "on" : "off"}; tasks section is ${tasksEnabled ? `on (max ${tasksMaxRows} rows)` : "off"}.`,
+					`Sidebar is ${state.enabled ? "on" : "off"}; ${state.collapsed ? "collapsed" : "expanded"}; anchored top-right; layout is ${state.fullHeight ? "full-height" : "floating"} (max ${String(placement.maxHeight)}, ${placement.bottomReserve} rows reserved); shrink-to-fit floor: width ${widthFloor} / content rows ${placement.minContentRows}; hard term-width gate: ${widthGate}; min term height: ${placement.minTermHeight}; autohide while working is ${autohideWorking ? "on" : "off"}; tasks section is ${tasksEnabled ? `on (max ${tasksMaxRows} rows)` : "off"}.`,
 					"info",
 				);
 				return;
@@ -828,32 +697,23 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("sidebar-refresh", {
-		description: "Refresh sidebar git/status data",
+		description: "Refresh the sidebar panel",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			currentCtx = ctx;
-			await refreshGit(ctx);
+			await refreshTasks(ctx);
 			ctx.ui.notify("Sidebar refreshed", "info");
 		},
 	});
 
+	// `/sidebar-refresh` and this are the same call now that Git is gone
+	// — Tasks is the only section. Both names are kept so neither becomes
+	// a breaking removal; consolidating them is a separate cleanup.
 	pi.registerCommand("sidebar-refresh-tasks", {
 		description: "Refresh sidebar tasks section",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			currentCtx = ctx;
 			await refreshTasks(ctx);
 			ctx.ui.notify("Sidebar tasks refreshed", "info");
-		},
-	});
-
-	pi.registerCommand("sidebar-git-detail", {
-		description: "Toggle detailed changed-file list in the sidebar",
-		handler: async (_args: string, ctx: ExtensionCommandContext) => {
-			state.gitDetail = !state.gitDetail;
-			requestRender();
-			ctx.ui.notify(
-				`Sidebar git detail ${state.gitDetail ? "enabled" : "reduced"}`,
-				"info",
-			);
 		},
 	});
 

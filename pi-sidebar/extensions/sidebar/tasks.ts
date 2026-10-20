@@ -27,9 +27,9 @@ import type {
 	Task,
 	TaskRow,
 	TasksState,
-} from "../types.js";
+} from "./types.js";
 
-export type { Task, TaskRow, TasksState } from "../types.js";
+export type { Task, TaskRow, TasksState } from "./types.js";
 
 const DEFAULT_ORCHESTRATOR_WORKDIR = join(tmpdir(), "sages-orchestrator");
 

@@ -2,16 +2,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export type Theme = ExtensionContext["ui"]["theme"];
 
-export type GitState = {
-	insideRepo: boolean;
-	branch?: string;
-	files: Array<{ code: string; path: string; delta?: string }>;
-	insertions: number;
-	deletions: number;
-	changedFiles: number;
-	error?: string;
-};
-
 /**
  * Sages task board task — the on-disk shape written by the Sages task
  * store (`pi-tasks/src/task-store.ts`). Only the fields the sidebar
@@ -86,10 +76,7 @@ export type EventLogEntry = {
 export type SidebarState = {
 	enabled: boolean;
 	collapsed: boolean;
-	gitDetail: boolean;
 	fullHeight: boolean;
-	git: GitState;
-	lastGitRefresh?: number;
 	lastTasksRefresh?: number;
 	/**
 	 * Feeds `PI_SIDEBAR_AUTOHIDE_WORKING` via `shouldHideSidebar`
@@ -114,36 +101,36 @@ export type SidebarState = {
 	eventLog: EventLogEntry[];
 };
 
+/**
+ * Layout knobs the component uses to frame whatever a renderer emits.
+ * `tasks.maxRows` used to live here; it is a *poll-time* parameter
+ * (`loadTasksState(cwd, { maxRows })`), not a render-time one, so it now
+ * lives only at its call site.
+ */
 export type SidebarRenderOptions = {
-	maxFiles: number;
 	buffer: number;
 	fillRows: number;
 	verticalPadding: number;
-	tasks: {
-		maxRows: number;
-	};
 };
 
+/**
+ * The renderer's input bag.
+ *
+ * This type was sized for a multi-section panel. Tasks is now the only
+ * renderer, so it carries only what that renderer actually reads — the
+ * `ctx` / `dim` / `options` / `selectTask` fields that used to feed the
+ * removed Git section (and the long-removed Model section) are gone.
+ * Add a field here when a renderer needs it, not before.
+ */
 export type SidebarSectionContext = {
-	ctx: ExtensionContext | undefined;
 	state: SidebarState;
 	theme: Theme;
 	innerWidth: number;
 	add: (line?: string) => void;
 	heading: (label: string) => void;
 	muted: (s: string) => string;
-	dim: (s: string) => string;
-	options: SidebarRenderOptions;
-	/**
-	 * Reverse-channel hook for the Tasks section. The wrapper in
-	 * `extensions/sidebar.ts` wires this to `pi.appendEntry("system", ...)`
-	 * so a keybinding (`ctrl+shift+t`) can inject a system note into
-	 * the next LLM turn referencing the task the user picked.
-	 *
-	 * Optional — sections other than Tasks simply ignore it.
-	 */
-	selectTask?: (taskId: string, subject: string) => void;
 };
+
 
 /** Shape of payloads emitted on the `pi.events` channel `sidebar:event`. */
 export type SidebarEvent = {
