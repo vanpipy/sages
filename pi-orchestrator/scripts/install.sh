@@ -1871,11 +1871,16 @@ install_pi_sidebar_files() {
     echo "  Skipping pi-sidebar files (exists, use --force)"
   else
     rm -rf "$PI_SIDEBAR_DEST_DIR"
-    mkdir -p "$PI_DIR/packages"
-    cp -r "$src_root" "$PI_SIDEBAR_DEST_DIR"
-    # The repo checkout carries node_modules/ only if the developer ran
-    # a local install; never deploy it (the host provides the deps).
-    rm -rf "$PI_SIDEBAR_DEST_DIR/node_modules"
+    mkdir -p "$PI_DIR/packages" "$PI_SIDEBAR_DEST_DIR"
+    # Exclude node_modules/ AT COPY TIME rather than copy-then-delete.
+    # The repo checkout carries node_modules/ (sometimes ~230MB, 40+
+    # entries) only when a developer has run a local `npm install`;
+    # the host provides the runtime deps, so the deploy must never
+    # include it. A tar pipe with --exclude is portable across GNU and
+    # BSD tar, preserves hidden files (e.g. .gitignore), and skips the
+    # 200+MB copy entirely — which the previous copy-then-rm path
+    # wasted on every install and on every sandboxed test run.
+    tar -cf - -C "$src_root" --exclude='./node_modules' . | tar -xf - -C "$PI_SIDEBAR_DEST_DIR"
     echo "  Installed pi-sidebar files to $PI_SIDEBAR_DEST_DIR"
   fi
 }
