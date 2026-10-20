@@ -10,11 +10,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Component, OverlayHandle, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { renderContextSection } from "./sidebar/sections/context.js";
 import { renderGitSection } from "./sidebar/sections/git.js";
-import { renderHintSection } from "./sidebar/sections/hint.js";
-import { renderLocationSection } from "./sidebar/sections/location.js";
-import { renderModelSection } from "./sidebar/sections/model.js";
 import {
 	emptyTasksState,
 	loadTasksState,
@@ -55,7 +51,6 @@ export {
 	envInt,
 	envSignedInt,
 	formatFileLine,
-	fmtNumber,
 	padAnsi,
 	parseNumstat,
 	parseShortstat,
@@ -73,12 +68,8 @@ const DEFAULT_GIT: GitState = {
 const COLLAPSED_SIDEBAR_WIDTH = 2;
 
 const SIDEBAR_SECTIONS: Array<(section: SidebarSectionContext) => void> = [
-	renderModelSection,
-	renderContextSection,
 	renderGitSection,
 	renderTasksSection,
-	renderLocationSection,
-	renderHintSection,
 ];
 
 export function sidebarOverlayWidth(
@@ -260,7 +251,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		gitDetail: envBool("PI_SIDEBAR_GIT_DETAIL", true),
 		fullHeight: envBool("PI_SIDEBAR_FULL_HEIGHT", false),
 		git: DEFAULT_GIT,
-		turnCount: 0,
 		isStreaming: false,
 		tasks: { ...emptyTasksState(), enabled: tasksEnabled },
 		badges: [],
@@ -423,7 +413,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 					buffer: sidebarBuffer,
 					fillRows: sidebarFillRows,
 					verticalPadding: sidebarVerticalPadding,
-					getThinkingLevel: () => pi.getThinkingLevel?.(),
 					tasks: { maxRows: tasksMaxRows },
 				}, selectTask);
 				refreshTimer = setInterval(() => {
@@ -492,7 +481,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 
 	pi.on("turn_start", async (_event: TurnStartEvent, ctx: ExtensionContext) => {
 		currentCtx = ctx;
-		state.turnCount++;
 		state.isStreaming = true;
 		applyVisibility();
 	});
@@ -503,20 +491,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		void refreshGit(ctx);
 		void refreshTasks(ctx);
 		applyVisibility();
-	});
-
-	pi.on(
-		"tool_execution_start",
-		async (event: { toolName: string }, ctx: ExtensionContext) => {
-			currentCtx = ctx;
-			state.lastTool = event.toolName;
-			requestRender();
-		},
-	);
-
-	pi.on("model_select", async (_event: unknown, ctx: ExtensionContext) => {
-		currentCtx = ctx;
-		requestRender();
 	});
 
 	pi.registerCommand("sidebar", {

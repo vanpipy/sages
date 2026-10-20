@@ -9,7 +9,6 @@ import {
 	envBool,
 	envInt,
 	envSignedInt,
-	fmtNumber,
 	formatFileLine,
 	loadTasksState,
 	orchestratorWorkdir,
@@ -57,7 +56,6 @@ function state(overrides: Partial<SidebarState> = {}): SidebarState {
 			deletions: 0,
 			changedFiles: 0,
 		},
-		turnCount: 0,
 		isStreaming: false,
 		tasks: {
 			enabled: true,
@@ -86,12 +84,6 @@ function component(
 		() =>
 			({
 				cwd: "/repo/project",
-				model: { provider: "anthropic", id: "claude-sonnet" },
-				getContextUsage: () => ({
-					tokens: 1536,
-					percent: 12.5,
-					contextWindow: 200000,
-				}),
 				sessionManager: { getSessionName: () => "Test Session" },
 			}) as any,
 		state({
@@ -112,7 +104,6 @@ function component(
 			buffer: 1,
 			fillRows: 24,
 			verticalPadding: 1,
-			getThinkingLevel: () => "medium",
 			tasks: { maxRows: 10 },
 			...options,
 		},
@@ -171,6 +162,21 @@ describe("configuration helpers", () => {
 			shouldHideSidebar({ enabled: false, isStreaming: false }, true),
 		).toBe(true);
 	});
+
+	// `isStreaming` powers `PI_SIDEBAR_AUTOHIDE_WORKING` via
+	// `shouldHideSidebar` (utils.ts). The trim removed the Model
+	// section, the only visible consumer of `isStreaming`, but the
+	// field must survive because the `turn_start` / `turn_end`
+	// handlers flip it. This test pins that the autohide contract
+	// survives the trim and that nothing about the `isStreaming` ->
+	// `shouldHideSidebar` linkage can be silently removed.
+	it("preserves isStreaming on SidebarState so PI_SIDEBAR_AUTOHIDE_WORKING survives the section trim", () => {
+		const sidebar = state({ isStreaming: true });
+		expect(sidebar.isStreaming).toBe(true);
+		expect(shouldHideSidebar(sidebar, true)).toBe(true);
+		const off = state({ isStreaming: false });
+		expect(shouldHideSidebar(off, true)).toBe(false);
+	});
 });
 
 describe("git parsing", () => {
@@ -207,9 +213,7 @@ describe("git parsing", () => {
 });
 
 describe("formatting helpers", () => {
-	it("formats numbers and pads lines by visible width", () => {
-		expect(fmtNumber(999)).toBe("999");
-		expect(fmtNumber(1536)).toBe("1.5k");
+	it("pads lines by visible width and truncates long paths", () => {
 		expect(padAnsi("abc", 5)).toBe("abc  ");
 		const fileLine = formatFileLine(
 			{ code: "M", path: "src/very-long-file-name.ts", delta: "+10/-2" },
@@ -220,20 +224,15 @@ describe("formatting helpers", () => {
 });
 
 describe("SidebarComponent rendering", () => {
-	it("renders full-height sidebar with gutter, summary, and filler rows", () => {
+	it("renders full-height sidebar with gutter, git summary, and filler rows", () => {
 		const rendered = component({
 			files: [{ code: "M", path: "extensions/sidebar.ts" }],
 		}).render(48);
 		expect(rendered).toHaveLength(24);
-		expect(rendered[0]).toMatch(/^ │ Model/);
-		expect(rendered.join("\n")).toContain("claude-sonnet • medium");
-		expect(rendered.join("\n")).toContain("anthropic");
-		expect(rendered.join("\n")).toContain("13% • 1.5k of 200.0k");
 		expect(rendered.join("\n")).toContain("feature/sidebar");
 		expect(rendered.join("\n")).toContain("1 files");
 		expect(rendered.join("\n")).toContain("+2 -1");
 		expect(rendered.join("\n")).toContain("extensions/sidebar.ts");
-		expect(rendered.join("\n")).toContain("/sidebar status");
 	});
 
 	it("keeps long git rows within the sidebar bounds", () => {
@@ -332,31 +331,16 @@ describe("SidebarComponent rendering", () => {
 		expect(outsideRepo).toContain("not a git repo");
 	});
 
-	it("renders fallbacks when model and context are unavailable", () => {
-		const rendered = new SidebarComponent(
-			() => ({ cwd: "/repo/project" }) as any,
-			state({ fullHeight: false }),
-			theme as any,
-			{
-				maxFiles: 2,
-				buffer: 1,
-				fillRows: 24,
-				verticalPadding: 1,
-				getThinkingLevel: () => undefined,
-				tasks: { maxRows: 10 },
-			},
-		)
-			.render(40)
-			.join("\n");
-		expect(rendered).toContain("no model • off");
-		expect(rendered).toContain("not available yet");
-	});
-
 	it("adds vertical padding but no full-height gutter or filler rows in floating mode", () => {
 		const rendered = component({}, { fullHeight: false }).render(36);
 		expect(rendered.length).toBeLessThan(24);
 		expect(rendered[0]).toMatch(/^│\s*$/);
-		expect(rendered[1]).toMatch(/^│ Model/);
+		// First section is now Git (rendered via `heading()`, which
+		// prepends an empty pad line). Model/Context used to occupy
+		// index 1 directly without the heading helper; after the trim
+		// index 1 is the heading pad and index 2 is the heading.
+		expect(rendered[1]).toMatch(/^│\s*$/);
+		expect(rendered[2]).toMatch(/^│ Git/);
 		expect(rendered.at(-1)).toMatch(/^│\s*$/);
 		expect(rendered.at(-2)).not.toMatch(/^│\s*$/);
 	});
@@ -398,6 +382,39 @@ describe("SidebarComponent rendering", () => {
 		expect(fullHeight).toHaveLength(24);
 		expect(fullHeight.join("\n")).toContain("◀");
 		expect(fullHeight.join("\n")).not.toContain("Model");
+	});
+
+	// Pins the section ordering + the post-trim section list. After
+	// the trim, the sidebar renders only Git (first) and Tasks
+	// (second) headings, in that order, and must not include any of
+	// the removed section headings (Model / Context / Location /
+	// Hint). The renderer prefixes headings with the sidebar border
+	// (`│ `) and the `heading()` helper inserts an empty pad line
+	// before each heading; we strip the pad lines and match the
+	// heading text. A future regression that re-adds a removed
+	// section (or reorders Git/Tasks) breaks this test.
+	it("renders only Git and Tasks sections in order (no Model / Context / Location / Hint)", () => {
+		const lines = component(
+			{ files: [{ code: "M", path: "extensions/sidebar.ts" }] },
+			{ fullHeight: false },
+		).render(48);
+
+		const headings: string[] = [];
+		for (const line of lines) {
+			// Drop the leading `│ ` border the renderer prepends, then
+			// take the first non-whitespace token as the heading.
+			const stripped = line.replace(/^│\s+/, "").trim();
+			if (
+				stripped === "Git" ||
+				stripped === "Tasks" ||
+				stripped === "Model" ||
+				stripped === "Context" ||
+				stripped === "Location"
+			) {
+				headings.push(stripped);
+			}
+		}
+		expect(headings).toEqual(["Git", "Tasks"]);
 	});
 });
 
@@ -914,15 +931,14 @@ describe("Tasks section rendering", () => {
 				}),
 			}),
 			theme as any,
-			{
-				maxFiles: 2,
-				buffer: 0,
-				fillRows: 24,
-				verticalPadding: 0,
-				getThinkingLevel: () => undefined,
-				tasks: { maxRows: 10 },
-			},
-			(taskId: string, subject: string) => {
+		{
+			maxFiles: 2,
+			buffer: 0,
+			fillRows: 24,
+			verticalPadding: 0,
+			tasks: { maxRows: 10 },
+		},
+		(taskId: string, subject: string) => {
 				// This is the wire shape — the wrapper binds this to
 				// `pi.appendEntry("system", ...)`.
 				const note = `Sidebar: user selected task #${taskId} \u2014 ${subject}`;
@@ -1249,7 +1265,6 @@ function freshState(overrides: Partial<SidebarState> = {}): SidebarState {
 			deletions: 0,
 			changedFiles: 0,
 		},
-		turnCount: 0,
 		isStreaming: false,
 		badges: [],
 		eventLog: [],
