@@ -32,6 +32,7 @@ import type {
 import {
 	envBool,
 	envInt,
+	envIntClamped,
 	envSignedInt,
 	envSize,
 	padAnsi,
@@ -56,6 +57,7 @@ export {
 export {
 	envBool,
 	envInt,
+	envIntClamped,
 	envSignedInt,
 	envSize,
 	formatFileLine,
@@ -126,10 +128,50 @@ export type SidebarPlacementConfig = {
 	maxHeight: SizeValue;
 	/** Vertical nudge from the anchor, in rows. `0` keeps it flush. */
 	offsetY: number;
-	/** Hide the panel below these terminal dimensions. */
+	/**
+	 * Opt-in hard width gate. When `> 0` the panel hides below this
+	 * terminal width; when `0` (the default) no hard width gate runs
+	 * and the panel shrink-to-fits down to `minPanelWidth` instead.
+	 * `PI_SIDEBAR_MIN_TERM_WIDTH`. Use this to restore the old
+	 * kill-switch only when someone explicitly opts in.
+	 */
 	minTermWidth: number;
+	/** Absolute height floor — hide below this many rows. */
 	minTermHeight: number;
+	/**
+	 * Narrowest panel we are willing to render after the host's
+	 * shrink-to-fit clamp. Below this the panel is unreadable, so the
+	 * `visible` callback hides it. Defaults to 20 (2-char border + 1
+	 * gutter + 17 of content). `PI_SIDEBAR_MIN_PANEL_WIDTH`.
+	 */
+	minPanelWidth: number;
+	/**
+	 * Minimum rows of usable content area — taken AFTER the floating
+	 * `bottomReserve` is subtracted from `termHeight`. Below this the
+	 * composer would collide with the panel and we hide. `PI_SIDEBAR_MIN_CONTENT_ROWS`.
+	 */
+	minContentRows: number;
 };
+
+/**
+ * Compute the column count the panel needs for the current state.
+ * Exported for tests; `syncOverlayOptions` reaches for it to keep the
+ * stored overlay options in sync with state changes.
+ */
+export function sidebarRequiredWidth(
+	state: Pick<SidebarState, "collapsed" | "fullHeight">,
+	config: SidebarPlacementConfig,
+): number {
+	const expanded = sidebarOverlayWidth(state, config.width, config.buffer);
+	// Math.min(expanded, minPanelWidth) is the shrink-to-fit trick: at
+	// generous widths required is the natural expanded width (so the
+	// host clamps only when truly overflowing); at narrow widths the
+	// floor forces a hide when there is no longer room for a legible
+	// panel; collapsed reduces required to the rail width plus border.
+	return state.collapsed
+		? COLLAPSED_SIDEBAR_WIDTH + 2
+		: Math.min(expanded, config.minPanelWidth);
+}
 
 /**
  * Resolve the overlay placement for the sidebar.
@@ -150,9 +192,21 @@ export type SidebarPlacementConfig = {
  *   - full-height drops both, because "extend to the window edge" is
  *     the entire point of that mode.
  *
- * Exported for tests: the plugin closure calls it once per
- * `showOverlay`, and the TUI re-reads every property on each layout
- * pass, so the returned object stays live as `state.fullHeight` flips.
+ * **Visibility shrinks to fit.** The host already clamps an oversized
+ * panel to `availWidth` (tui.js:470), so the right move when the
+ * terminal is narrower than the panel's natural width is to LET the
+ * host clamp and only hide when even the smallest legible panel
+ * wouldn't fit. The old `termWidth >= 110` kill-switch killed the
+ * panel under tmux vertical splits (a 200-col window becomes ~100 in a
+ * 50/50 pane) with no fallback. `minTermWidth` survives as an opt-in
+ * hard gate (default `0` = disabled) so anyone who wants the old
+ * behavior can have it without forcing it on everyone.
+ *
+ * The height floor subtracts the floating `bottomReserve` BEFORE
+ * comparing against `minContentRows`, so a 13-row floating window with
+ * reserve=10 has only 3 usable rows — not enough for a 4-row minimum —
+ * and the panel hides; full-height drops the reserve and stays usable
+ * down to `minContentRows` raw rows.
  */
 export function sidebarOverlayOptions(
 	state: Pick<SidebarState, "collapsed" | "fullHeight">,
@@ -168,9 +222,54 @@ export function sidebarOverlayOptions(
 			: { top: 0, right: 0, bottom: 0 },
 		offsetY: config.offsetY,
 		nonCapturing: true,
-		visible: (termWidth: number, termHeight: number) =>
-			termWidth >= config.minTermWidth && termHeight >= config.minTermHeight,
+		visible: (termWidth: number, termHeight: number) => {
+			// Opt-in hard gate. Skipped when `minTermWidth === 0` so the
+			// default is "no gate, shrink to fit".
+			if (config.minTermWidth > 0 && termWidth < config.minTermWidth) {
+				return false;
+			}
+			if (termHeight < config.minTermHeight) return false;
+			const required = sidebarRequiredWidth(state, config);
+			if (termWidth < required) return false;
+			const usableRows = termHeight - (floating ? config.bottomReserve : 0);
+			if (usableRows < config.minContentRows) return false;
+			return true;
+		},
 	};
+}
+
+/**
+ * Refresh the stored overlay options in place from the current state.
+ *
+ * The pi-coding-agent host (`interactive-mode.js:1843-1854`) calls the
+ * `overlayOptions` thunk ONCE on mount and stores the returned object
+ * by reference; pi-tui re-reads `entry.options.width` / `maxHeight` /
+ * `margin` / `visible` on every layout pass but never re-invokes the
+ * thunk. That means toggling `state.collapsed` or `state.fullHeight`
+ * after mount produces a stale overlay unless we mutate the stored
+ * object. This helper does exactly that: it overwrites every layout
+ * field on `target` with a fresh computation and returns the same
+ * reference so callers can chain.
+ *
+ * The `visible` callback is also rebuilt so it closes over the latest
+ * `state` — the host re-invokes it on every frame with current
+ * terminal dimensions, so this is what makes the width floor live as
+ * the panel width changes.
+ */
+export function syncOverlayOptions(
+	target: OverlayOptions,
+	state: Pick<SidebarState, "collapsed" | "fullHeight">,
+	config: SidebarPlacementConfig,
+): OverlayOptions {
+	const fresh = sidebarOverlayOptions(state, config);
+	target.width = fresh.width;
+	target.maxHeight = fresh.maxHeight;
+	target.margin = fresh.margin;
+	target.offsetY = fresh.offsetY;
+	target.anchor = fresh.anchor;
+	target.nonCapturing = fresh.nonCapturing;
+	target.visible = fresh.visible;
+	return target;
 }
 
 export class SidebarComponent implements Component {
@@ -272,8 +371,15 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		0,
 		envSignedInt("PI_SIDEBAR_VERTICAL_PADDING", 1),
 	);
-	const minTermWidth = envInt("PI_SIDEBAR_MIN_TERM_WIDTH", 110);
-	const minTermHeight = envInt("PI_SIDEBAR_MIN_TERM_HEIGHT", 12);
+	// The hard term-width gate is opt-in: default 0 means "disabled,
+	// shrink-to-fit". `envIntClamped` accepts 0 (unlike `envInt`); the
+	// old `envInt(..., 110)` default silently hid the panel under any
+	// tmux vertical split because the host's pane width drops below
+	// the threshold.
+	const minTermWidth = envIntClamped("PI_SIDEBAR_MIN_TERM_WIDTH", 0);
+	const minTermHeight = envIntClamped("PI_SIDEBAR_MIN_TERM_HEIGHT", 12);
+	const minPanelWidth = envIntClamped("PI_SIDEBAR_MIN_PANEL_WIDTH", 20);
+	const minContentRows = envIntClamped("PI_SIDEBAR_MIN_CONTENT_ROWS", 4);
 	const refreshMs = envInt("PI_SIDEBAR_REFRESH_MS", 5000);
 	const maxFiles = envInt(
 		"PI_SIDEBAR_GIT_LINES",
@@ -305,7 +411,38 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		offsetY: sidebarOffsetY,
 		minTermWidth,
 		minTermHeight,
+		minPanelWidth,
+		minContentRows,
 	};
+
+	const state: SidebarState = {
+		enabled: envBool("PI_SIDEBAR_ENABLED", true),
+		collapsed: false,
+		gitDetail: envBool("PI_SIDEBAR_GIT_DETAIL", true),
+		fullHeight: envBool("PI_SIDEBAR_FULL_HEIGHT", false),
+		git: DEFAULT_GIT,
+		isStreaming: false,
+		tasks: { ...emptyTasksState(), enabled: tasksEnabled },
+		badges: [],
+		eventLog: [],
+	};
+
+	/**
+	 * One long-lived `OverlayOptions` object passed to `showOverlay`.
+	 *
+	 * The pi-coding-agent host (`interactive-mode.js:1843-1854`) calls
+	 * the `overlayOptions` thunk ONCE on mount and stores the returned
+	 * object by reference; pi-tui re-reads the stored object's fields
+	 * (`width`, `maxHeight`, `margin`, `visible`) on every layout pass
+	 * but never re-invokes the thunk. So the contract is: hand the host
+	 * a stable reference, and mutate its fields in place whenever state
+	 * changes. `syncOverlayOptions` is the mutator; `applyVisibility`
+	 * and `onHandle` both call it. We pass it as a STATIC value (not a
+	 * thunk) on purpose — the host evaluates the thunk once anyway, and
+	 * a static value makes the in-place mutation contract explicit at
+	 * the dispatch site.
+	 */
+	const overlayOptions: OverlayOptions = sidebarOverlayOptions(state, placement);
 
 	/**
 	 * Reverse-channel: inject a system note referencing the picked task.
@@ -342,18 +479,6 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		}
 	}
 
-	const state: SidebarState = {
-		enabled: envBool("PI_SIDEBAR_ENABLED", true),
-		collapsed: false,
-		gitDetail: envBool("PI_SIDEBAR_GIT_DETAIL", true),
-		fullHeight: envBool("PI_SIDEBAR_FULL_HEIGHT", false),
-		git: DEFAULT_GIT,
-		isStreaming: false,
-		tasks: { ...emptyTasksState(), enabled: tasksEnabled },
-		badges: [],
-		eventLog: [],
-	};
-
 	let currentCtx: ExtensionContext | undefined;
 	let overlayHandle: OverlayHandle | undefined;
 	let component: SidebarComponent | undefined;
@@ -377,6 +502,13 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	);
 
 	function applyVisibility() {
+		// Refresh the stored overlay options in place so toggles of
+		// `collapsed` / `fullHeight` (collapse/expand/full/floating
+		// commands, ctrl+shift+s, slash args) update the host's
+		// snapshot on the next layout pass. Without this the host
+		// would render the stale `maxHeight: "60%"` in full-height
+		// mode and reserve 35 columns for a 2-column rail.
+		syncOverlayOptions(overlayOptions, state, placement);
 		overlayHandle?.setHidden(shouldHideSidebar(state, autohideWorking));
 		requestRender();
 	}
@@ -526,9 +658,19 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 			},
 			{
 				overlay: true,
-				overlayOptions: () => sidebarOverlayOptions(state, placement),
+				// Static reference (NOT a thunk) — the host evaluates the
+				// thunk once on mount and stores the returned object by
+				// reference. We mutate that object in place via
+				// `syncOverlayOptions` whenever state changes (see
+				// `applyVisibility` and `onHandle` below).
+				overlayOptions,
 				onHandle: (handle: OverlayHandle) => {
 					overlayHandle = handle;
+					// First sync — fires after mount so the stored options
+					// reflect the live state immediately, in case any
+					// defaults flipped between plugin construction and
+					// overlay creation.
+					syncOverlayOptions(overlayOptions, state, placement);
 					handle.unfocus();
 					applyVisibility();
 				},
@@ -584,8 +726,13 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 			else if (action === "floating" || action === "window")
 				state.fullHeight = false;
 			else if (action === "status") {
+				const widthFloor = minPanelWidth === 0 ? "off" : `${minPanelWidth} cols`;
+				const widthGate =
+					minTermWidth > 0
+						? `${minTermWidth} cols (opt-in hard gate)`
+						: "off (shrink-to-fit is the default)";
 				ctx.ui.notify(
-					`Sidebar is ${state.enabled ? "on" : "off"}; ${state.collapsed ? "collapsed" : "expanded"}; anchored top-right; layout is ${state.fullHeight ? "full-height" : "floating"} (max ${String(sidebarMaxHeight)}, ${sidebarBottomReserve} rows reserved); autohide while working is ${autohideWorking ? "on" : "off"}; git detail is ${state.gitDetail ? "on" : "off"}; tasks section is ${tasksEnabled ? `on (max ${tasksMaxRows} rows)` : "off"}.`,
+					`Sidebar is ${state.enabled ? "on" : "off"}; ${state.collapsed ? "collapsed" : "expanded"}; anchored top-right; layout is ${state.fullHeight ? "full-height" : "floating"} (max ${String(sidebarMaxHeight)}, ${sidebarBottomReserve} rows reserved); shrink-to-fit floor: width ${widthFloor} / content rows ${minContentRows}; hard term-width gate: ${widthGate}; min term height: ${minTermHeight}; autohide while working is ${autohideWorking ? "on" : "off"}; git detail is ${state.gitDetail ? "on" : "off"}; tasks section is ${tasksEnabled ? `on (max ${tasksMaxRows} rows)` : "off"}.`,
 					"info",
 				);
 				return;

@@ -44,6 +44,24 @@ export function envInt(name: string, fallback: number): number {
 	return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+/**
+ * Parse a non-negative integer env var with a floor. Like `envInt` but
+ * ACCEPTS `0` (so `PI_SIDEBAR_MIN_TERM_WIDTH=0` can mean "no gate")
+ * and rejects negative integers by clamping to `min`. Use this for any
+ * env knob that may legitimately be `0`.
+ */
+export function envIntClamped(
+	name: string,
+	fallback: number,
+	min = 0,
+): number {
+	const raw = process.env[name];
+	if (raw === undefined || raw.trim() === "") return fallback;
+	const value = Number.parseInt(raw, 10);
+	if (!Number.isFinite(value)) return fallback;
+	return Math.max(min, value);
+}
+
 export function envSignedInt(name: string, fallback: number): number {
 	const value = Number.parseInt(process.env[name] ?? "", 10);
 	return Number.isFinite(value) ? value : fallback;

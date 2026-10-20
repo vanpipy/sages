@@ -8,9 +8,11 @@ import {
 	countTasks,
 	envBool,
 	envInt,
+	envIntClamped,
 	envSignedInt,
 	envSize,
 	sidebarOverlayOptions,
+	syncOverlayOptions,
 	type SidebarPlacementConfig,
 	formatFileLine,
 	loadTasksState,
@@ -159,6 +161,29 @@ describe("configuration helpers", () => {
 		expect(envSignedInt("PI_TEST_SIGNED_INT", -6)).toBe(0);
 		process.env.PI_TEST_SIGNED_INT = "nope";
 		expect(envSignedInt("PI_TEST_SIGNED_INT", -6)).toBe(-6);
+	});
+
+	it("parses clamped integer environment values with fallback (accepts 0)", () => {
+		// `envIntClamped` exists because `envInt` rejects 0 silently — useful
+		// for "off" gates like PI_SIDEBAR_MIN_TERM_WIDTH=0 meaning "no gate".
+		expect(envIntClamped("PI_TEST_MISSING", 34)).toBe(34);
+		process.env.PI_TEST_CLAMPED = "110";
+		expect(envIntClamped("PI_TEST_CLAMPED", 34)).toBe(110);
+		// 0 must NOT fall back to the default — that's the whole point.
+		process.env.PI_TEST_CLAMPED = "0";
+		expect(envIntClamped("PI_TEST_CLAMPED", 34)).toBe(0);
+		// Malformed values still fall back.
+		process.env.PI_TEST_CLAMPED = "abc";
+		expect(envIntClamped("PI_TEST_CLAMPED", 34)).toBe(34);
+		// Negative values clamp to the min (default 0).
+		process.env.PI_TEST_CLAMPED = "-5";
+		expect(envIntClamped("PI_TEST_CLAMPED", 34)).toBe(0);
+		// Empty string is treated as unset.
+		process.env.PI_TEST_CLAMPED = "";
+		expect(envIntClamped("PI_TEST_CLAMPED", 34)).toBe(34);
+		// Custom floor: -5 with a min of 10 clamps to 10.
+		process.env.PI_TEST_CLAMPED = "-5";
+		expect(envIntClamped("PI_TEST_CLAMPED", 34, 10)).toBe(10);
 	});
 
 	it("uses one collapsed state for slash commands and keyboard controls", () => {
@@ -449,9 +474,27 @@ describe("overlay placement", () => {
 		bottomReserve: 10,
 		maxHeight: "60%",
 		offsetY: 0,
-		minTermWidth: 110,
+		// The hard term-width gate is opt-in: leaving it at 0 disables it.
+		// A tmux vertical split halves a 200-col window to ~100, so the old
+		// default of 110 made the panel vanish with no fallback. The host
+		// already clamps oversized panels (tui.js:470), so the right move is
+		// shrink-to-fit rather than hide.
+		minTermWidth: 0,
 		minTermHeight: 12,
+		minPanelWidth: 20,
+		minContentRows: 4,
 	};
+
+	function visible(
+		state: Pick<SidebarState, "collapsed" | "fullHeight">,
+		termWidth: number,
+		termHeight: number,
+		cfg: SidebarPlacementConfig = config,
+	): boolean {
+		const fn = sidebarOverlayOptions(state, cfg).visible;
+		if (typeof fn !== "function") throw new Error("visible is not a function");
+		return fn(termWidth, termHeight);
+	}
 
 	it("anchors to the top-right corner in both layout modes", () => {
 		// The panel is positioned relative to the terminal window, never
@@ -515,16 +558,67 @@ describe("overlay placement", () => {
 		).toBe(2);
 	});
 
-	it("hides itself on a terminal that is too narrow or too short", () => {
-		const visible = sidebarOverlayOptions(
-			{ collapsed: false, fullHeight: false },
-			config,
-		).visible;
-		expect(typeof visible).toBe("function");
-		if (typeof visible !== "function") return;
-		expect(visible(200, 60)).toBe(true);
-		expect(visible(80, 60)).toBe(false);
-		expect(visible(200, 6)).toBe(false);
+	// Regression: a tmux vertical split halves a 200-col window to ~100,
+	// which the old hard `termWidth >= 110` gate killed outright. The
+	// shrink-to-fit rule keeps the panel rendered and lets the host clamp
+	// the width down.
+	it("stays visible on a tmux-split pane", () => {
+		expect(visible({ collapsed: false, fullHeight: false }, 100, 60)).toBe(true);
+		expect(visible({ collapsed: false, fullHeight: false }, 80, 60)).toBe(true);
+	});
+
+	// Sweeps across the width range. Below minPanelWidth (20) the panel
+	// would be unreadable, so the floor still hides — but anything at or
+	// above the floor must render and let the host clamp.
+	it("shrinks to fit instead of vanishing across the width range", () => {
+		for (let w = 20; w <= 200; w += 20) {
+			expect(visible({ collapsed: false, fullHeight: false }, w, 60)).toBe(true);
+		}
+		expect(visible({ collapsed: false, fullHeight: false }, 19, 60)).toBe(false);
+	});
+
+	it("honors an explicit opt-in term-width gate", () => {
+		// With the opt-in gate set back to 110, the bug returns: 100 cols
+		// is below the threshold and the panel hides.
+		const gated: SidebarPlacementConfig = { ...config, minTermWidth: 110 };
+		expect(visible({ collapsed: false, fullHeight: false }, 100, 60, gated)).toBe(false);
+		expect(visible({ collapsed: false, fullHeight: false }, 120, 60, gated)).toBe(true);
+		// Default (gate disabled) is a regression test for the original
+		// bug; 100 cols must stay visible.
+		expect(visible({ collapsed: false, fullHeight: false }, 100, 60, config)).toBe(true);
+	});
+
+	it("needs only a rail's worth of columns when collapsed", () => {
+		// Collapsed rail is 2 columns plus 2 for the panel border = 4 total.
+		// Expanded needs at least minPanelWidth (20) to be legible.
+		expect(visible({ collapsed: true, fullHeight: false }, 8, 60)).toBe(true);
+		expect(visible({ collapsed: false, fullHeight: false }, 8, 60)).toBe(false);
+	});
+
+	it("reserves composer rows in the floating height floor", () => {
+		// Floating layout reserves bottomReserve rows for the composer, so
+		// the height floor is taken AFTER subtracting that reserve. With
+		// reserve=10 / minContentRows=4, a 13-row window has only 3 rows of
+		// usable height — not enough — and the panel hides. A 14-row
+		// window leaves exactly 4 usable rows and renders.
+		const floatingCfg: SidebarPlacementConfig = {
+			...config,
+			bottomReserve: 10,
+			minContentRows: 4,
+		};
+		expect(
+			visible({ collapsed: false, fullHeight: false }, 200, 14, floatingCfg),
+		).toBe(true);
+		expect(
+			visible({ collapsed: false, fullHeight: false }, 200, 13, floatingCfg),
+		).toBe(false);
+		// Full-height drops the reserve; the same heights both render.
+		expect(
+			visible({ collapsed: false, fullHeight: true }, 200, 14, floatingCfg),
+		).toBe(true);
+		expect(
+			visible({ collapsed: false, fullHeight: true }, 200, 13, floatingCfg),
+		).toBe(true);
 	});
 
 	it("stays non-capturing so it never steals editor focus", () => {
@@ -532,6 +626,67 @@ describe("overlay placement", () => {
 			sidebarOverlayOptions({ collapsed: false, fullHeight: false }, config)
 				.nonCapturing,
 		).toBe(true);
+	});
+});
+
+describe("live overlay options", () => {
+	const config: SidebarPlacementConfig = {
+		width: 34,
+		buffer: 1,
+		insetRight: 0,
+		bottomReserve: 10,
+		maxHeight: "60%",
+		offsetY: 0,
+		minTermWidth: 0,
+		minTermHeight: 12,
+		minPanelWidth: 20,
+		minContentRows: 4,
+	};
+
+	// The pi-tui host evaluates the `overlayOptions` thunk ONCE on mount
+	// (interactive-mode.js:1854) and stores the returned object BY
+	// REFERENCE. Toggling `state.collapsed` / `state.fullHeight` later
+	// must therefore mutate the stored object — not return a new one —
+	// because the host re-reads fields from that snapshot on every layout
+	// pass but never re-invokes the thunk.
+	it("mutates the stored options in place when collapsed flips", () => {
+		const initial = sidebarOverlayOptions(
+			{ collapsed: false, fullHeight: false },
+			config,
+		);
+		const ref = initial;
+		const updated = syncOverlayOptions(initial, { collapsed: true, fullHeight: false }, config);
+		expect(updated).toBe(ref); // identity preserved
+		expect(updated.width).toBe(2); // collapsed rail
+		expect(ref.width).toBe(2); // mutator wrote through
+	});
+
+	it("mutates the stored options in place when fullHeight flips", () => {
+		const initial = sidebarOverlayOptions(
+			{ collapsed: false, fullHeight: false },
+			config,
+		);
+		const ref = initial;
+		const updated = syncOverlayOptions(initial, { collapsed: false, fullHeight: true }, config);
+		expect(updated).toBe(ref);
+		expect(updated.maxHeight).toBe("100%");
+		expect(updated.margin).toEqual({ top: 0, right: 0, bottom: 0 });
+		expect(ref.maxHeight).toBe("100%");
+		expect(ref.margin).toEqual({ top: 0, right: 0, bottom: 0 });
+	});
+
+	it("refreshing the visible callback picks up the new state", () => {
+		const initial = sidebarOverlayOptions(
+			{ collapsed: false, fullHeight: false },
+			config,
+		);
+		// After flipping collapsed, the floor should target the rail width
+		// (2 + 2 border = 4), not the panel width.
+		syncOverlayOptions(initial, { collapsed: true, fullHeight: false }, config);
+		const visible = initial.visible;
+		if (typeof visible !== "function") throw new Error("visible is not a function");
+		expect(visible(8, 60)).toBe(true);
+		expect(visible(2, 60)).toBe(false);
 	});
 });
 
