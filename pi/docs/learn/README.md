@@ -22,6 +22,7 @@ source.
 | [`pi-codebase-memory.md`](./pi-codebase-memory.md) | Code-intelligence MCP bridge. The curated `mcp.json`, the 14 first-class MCP tools, the Sages-workspace detection, the `session_start` lifecycle hook. |
 | [`pi-evaluator.md`](./pi-evaluator.md) | Opt-in reward-mode evaluator. `eval_score` / `eval_trend` tools, the 5-dimension scoring engine, the YAML / JSONL artifact readers, the coefficients config. |
 | [`pi-sidebar-sages.md`](./pi-sidebar-sages.md) | Sidebar peer + reverse channel. The 5 `sidebar:event` emit sites across pi-orchestrator / pi-tasks / pi-evaluator, the listener in `pi-sidebar/`, and the sage-peer packaging (vendored, not a bun workspace, `-sages` deploy suffix). |
+| [`pi-sidebar.md`](./pi-sidebar.md) | Sidebar package (the consumer side). The `sidebarPlugin` entry, `SidebarComponent` + the post-trim `SIDEBAR_SECTIONS` (Git + Tasks only), the `SidebarState` model, 3-scope task-board polling with `projectKey` byte-parity against `pi-tasks`, the 6-action `sidebar_event` listener, the `ctrl+shift+t` reverse channel, overlay mechanics, and the exhaustive `PI_SIDEBAR_*` env surface. |
 
 ## How to read these docs
 
