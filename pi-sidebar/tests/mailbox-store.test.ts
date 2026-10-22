@@ -27,16 +27,22 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import {
+	MALFORMED_OWNER,
 	MailboxStore,
 	acquireMailboxLock,
 	allocateTaskIds,
 	childTasks,
 	compareFifo,
+	isUnclaimedIntent,
 	openChildTasks,
 	releaseMailboxLock,
 	unclaimedIntents,
 } from "../extensions/sidebar/mailbox/store.js";
-import { mailboxEnvFrom, mailboxPathFor } from "../extensions/sidebar/mailbox/types.js";
+import {
+	mailboxEnvFrom,
+	mailboxPathFor,
+	mailboxWakeActive,
+} from "../extensions/sidebar/mailbox/types.js";
 import { parseTasksJson } from "../extensions/sidebar/tasks.js";
 import type { Task } from "../extensions/sidebar/types.js";
 
@@ -77,6 +83,7 @@ describe("mailbox env knobs", () => {
 			pollMs: 10000,
 			wakeDebounceMs: 1500,
 			wakeBackoffMs: 300000,
+			printMode: false,
 		});
 	});
 
@@ -87,12 +94,14 @@ describe("mailbox env knobs", () => {
 				PI_SIDEBAR_MAILBOX_POLL_MS: "2500",
 				PI_SIDEBAR_WAKE_DEBOUNCE_MS: "50",
 				PI_SIDEBAR_WAKE_BACKOFF_MS: "60000",
+				PI_SIDEBAR_MAILBOX_PRINT_MODE: "on",
 			}),
 		).toEqual({
 			enabled: false,
 			pollMs: 2500,
 			wakeDebounceMs: 50,
 			wakeBackoffMs: 60000,
+			printMode: true,
 		});
 	});
 
@@ -104,7 +113,40 @@ describe("mailbox env knobs", () => {
 		expect(env.pollMs).toBe(10000);
 		expect(env.wakeDebounceMs).toBe(1500);
 	});
+});
 
+describe("mailboxWakeActive (F1: print mode is not one-shot by default)", () => {
+	it("never runs the wake when intake is disabled, even in print mode", () => {
+		const env = mailboxEnvFrom({
+			PI_SIDEBAR_MAILBOX: "off",
+			PI_SIDEBAR_MAILBOX_PRINT_MODE: "on",
+		});
+		expect(mailboxWakeActive(env, true)).toBe(false);
+		expect(mailboxWakeActive(env, false)).toBe(false);
+	});
+
+	it("runs on an interactive host", () => {
+		expect(mailboxWakeActive(mailboxEnvFrom({}), true)).toBe(true);
+	});
+
+	it("does NOT run on a headless host by default", () => {
+		// The regression: `session_start` builds the machine in print mode
+		// and the first `turn_end` fires it, so `pi -p "…"` drains the
+		// mailbox instead of answering once.
+		expect(mailboxWakeActive(mailboxEnvFrom({}), false)).toBe(false);
+	});
+
+	it("runs on a headless host that opted in by name", () => {
+		const env = mailboxEnvFrom({ PI_SIDEBAR_MAILBOX_PRINT_MODE: "on" });
+		expect(mailboxWakeActive(env, false)).toBe(true);
+		// An explicit `off` is as good as unset.
+		expect(
+			mailboxWakeActive(mailboxEnvFrom({ PI_SIDEBAR_MAILBOX_PRINT_MODE: "off" }), false),
+		).toBe(false);
+	});
+});
+
+describe("mailbox path resolution", () => {
 	it("resolves the mailbox path under the orchestrator workdir + projectKey", () => {
 		const cwd = "/home/dev/project";
 		const path_ = mailboxPathFor(cwd, { ORCHESTRATOR_WORKDIR: "/tmp/orch" });
@@ -242,7 +284,7 @@ describe("MailboxStore parseTasksJson compatibility", () => {
 
 	it("round-trips owner and activeForm, which parseTasksJson drops", () => {
 		// The panel parser rebuilds every record field by field and never
-		// copies `owner` / `activeForm` (`tasks.ts:105`). That is invisible
+		// copies `owner` / `activeForm` (`tasks.ts:117-128`). That is invisible
 		// to the panel — `toTaskRows` reads neither — but `mailbox_claim`
 		// WRITES `owner` and reads it back to lose the claim race, so the
 		// store re-attaches it from the same payload instead of widening
@@ -264,6 +306,51 @@ describe("MailboxStore parseTasksJson compatibility", () => {
 		expect(parseTasksJson(readFileSync(store.path, "utf8"))![0].owner).toBeUndefined();
 		expect(store.read()[0].owner).toBe("sess-abc");
 		expect(store.read()[0].activeForm).toBe("uploading");
+	});
+
+	it("fails CLOSED on a non-string owner rather than reading it as unclaimed", () => {
+		// The mailbox file is written by anyone — curl, cron, another
+		// session. Coercing `owner: 42` to undefined read a genuinely
+		// claimed intent as fresh mail and re-announced it every poll.
+		for (const bad of [42, true, { sess: 1 }, ["sess-1"]]) {
+			const store = storeIn(`owner-malformed-${typeof bad}`);
+			mkdirSync(path.dirname(store.path), { recursive: true });
+			writeFileSync(
+				store.path,
+				JSON.stringify({
+					tasks: [
+						{
+							id: "m-1",
+							type: "intent",
+							subject: "claimed by something we cannot read",
+							status: "pending",
+							owner: bad,
+							metadata: {},
+							blocks: [],
+							blockedBy: [],
+							createdAt: 0,
+							updatedAt: 0,
+						},
+					],
+				}),
+			);
+			const task = store.read()[0];
+			expect(task.owner, JSON.stringify(bad)).toBe(MALFORMED_OWNER);
+			// The load-bearing consequence: not announceable.
+			expect(isUnclaimedIntent(task), JSON.stringify(bad)).toBe(false);
+			expect(unclaimedIntents(store.read()), JSON.stringify(bad)).toEqual([]);
+		}
+	});
+
+	it("still treats an absent or empty owner as unclaimed", () => {
+		const store = storeIn("owner-absent");
+		store.mutate((tasks) => ({
+			ok: true,
+			tasks: [...tasks, makeTask({ id: "m-1", type: "intent", owner: undefined })],
+			value: 1,
+		}));
+		expect(store.read()[0].owner).toBeUndefined();
+		expect(isUnclaimedIntent(store.read()[0])).toBe(true);
 	});
 
 	it("writes the exact envelope the design doc specifies", () => {

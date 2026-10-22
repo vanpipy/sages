@@ -39,7 +39,8 @@ import {
 import { registerSidebarEventTool } from "./sidebar/sidebar-event-tool.js";
 import { MailboxStore } from "./sidebar/mailbox/store.js";
 import { registerMailboxTools } from "./sidebar/mailbox/tools.js";
-import { mailboxEnvFrom, mailboxPathFor } from "./sidebar/mailbox/types.js";
+import { mailboxEnvFrom, mailboxPathFor, mailboxWakeActive } from "./sidebar/mailbox/types.js";
+import { buildSelectionNote, buildSelectionNoteFor } from "./sidebar/mailbox/notes.js";
 import { WakeMachine } from "./sidebar/mailbox/wake.js";
 
 export type { SidebarState, Task, TaskRow, TasksState } from "./sidebar/types.js";
@@ -64,17 +65,24 @@ export {
 	shouldHideSidebar,
 } from "./sidebar/utils.js";
 export {
+	MALFORMED_OWNER,
 	MailboxStore,
 	acquireMailboxLock,
 	allocateTaskIds,
 	childTasks,
 	compareFifo,
+	isUnclaimedIntent,
 	openChildTasks,
 	releaseMailboxLock,
 	unclaimedIntents,
 } from "./sidebar/mailbox/store.js";
 export { registerMailboxTools } from "./sidebar/mailbox/tools.js";
-export { mailboxEnvFrom, mailboxPathFor, type MailboxEnv } from "./sidebar/mailbox/types.js";
+export { mailboxEnvFrom, mailboxPathFor, mailboxWakeActive, type MailboxEnv } from "./sidebar/mailbox/types.js";
+export {
+	buildMailboxSelectionNote,
+	buildSelectionNote,
+	buildSelectionNoteFor,
+} from "./sidebar/mailbox/notes.js";
 export { WakeMachine, buildWakeNote, turnEndHadToolCalls } from "./sidebar/mailbox/wake.js";
 
 const COLLAPSED_SIDEBAR_WIDTH = 2;
@@ -521,7 +529,14 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	 * (where `pi` is in scope) and forward it to the component constructor.
 	 */
 	function selectTask(taskId: string, subject: string): void {
-		const note = `Sidebar: user selected task #${taskId} — ${subject}`;
+		// The rows are MERGED (board + mailbox), so the id alone does not
+		// say which surface the agent should read it from. A mailbox id
+		// like `m-3` is unreachable through `TaskGet`; the note has to say
+		// `mailbox_list` or the user has selected something the agent
+		// cannot resolve with the tool it was just told to use.
+		const note = mailboxEnv.enabled
+			? buildSelectionNoteFor(taskId, subject, mailboxStore.read())
+			: buildSelectionNote(taskId, subject);
 		try {
 			pi.appendEntry("system", note);
 		} catch {
@@ -576,9 +591,19 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 					now: () => Date.now(),
 					readBoard: () => mailboxStore.read(),
 					send: (note) => {
-						// Synchronous by contract. A host that refuses the
-						// message throws, and the wake machine catches it —
-						// `wakePending` staying set IS the retry.
+						// Fire-and-forget, and the machine is built to expect
+						// exactly that. `pi.sendUserMessage` is a
+						// SYNCHRONOUS wrapper around an `async` call: it
+						// returns before the send resolves and discards the
+						// promise, and the host routes that promise's
+						// rejection into its own error emitter rather than
+						// back here. So there is nothing to await and no
+						// retry to schedule at this call site — a `.catch()`
+						// would be swallowed by the loader before it ran.
+						// A genuinely lost wake self-heals through
+						// `PI_SIDEBAR_WAKE_BACKOFF_MS`: the id stays in
+						// `announced`, so exactly one re-announce is
+						// permitted once the backoff elapses.
 						pi.sendUserMessage(note, { deliverAs: "followUp" });
 					},
 				},
@@ -598,9 +623,17 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	 * The `wake` guard is also the "not started yet" guard: the machine
 	 * is built in `ensureMailbox` on `session_start`, so before that
 	 * there is no clock and nothing is owed.
+	 *
+	 * The `hasUI` argument is the print-mode gate. `turn_end` is NOT
+	 * gated on a UI in the host, so without this `pi -p "..."` would
+	 * build the machine at `session_start` and fire it on the first
+	 * `turn_end` — appending a follow-up per unclaimed intent, which
+	 * quietly turns a one-shot invocation into a drain loop. Callers
+	 * inside the overlay path already know they have a UI; the
+	 * `turn_end` handler passes the context's real answer.
 	 */
-	function pollMailbox() {
-		if (!mailboxEnv.enabled || !wake) return;
+	function pollMailbox(hasUI: boolean) {
+		if (!mailboxWakeActive(mailboxEnv, hasUI) || !wake) return;
 		try {
 			wake.poll(mailboxStore.read());
 		} catch {
@@ -679,7 +712,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		// The FIRST mailbox poll fires here, before the interval is armed,
 		// so mail that arrived while no session was running is seen on
 		// the next `session_start` instead of one interval later.
-		pollMailbox();
+		pollMailbox(true);
 		void refreshTasks(ctx);
 		void ctx.ui.custom<void>(
 			(
@@ -699,7 +732,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 				}, refreshMs);
 				if (mailboxEnv.enabled) {
 					mailboxTimer = setInterval(() => {
-						pollMailbox();
+						pollMailbox(true);
 					}, mailboxEnv.pollMs);
 				}
 				return {
@@ -754,6 +787,15 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 			overlayHandle = undefined;
 			if (mailboxTimer) clearInterval(mailboxTimer);
 			mailboxTimer = undefined;
+			// The wake machine goes too. Its `observed` / `pending` /
+			// `announced` sets are per-mailbox facts, and the store is
+			// re-pointed at the NEXT session's cwd — carrying them over
+			// would suppress a same-id intent in a different workspace
+			// until the backoff expired. `dispose()` also cancels the
+			// debounce timer, which the interval teardown above does not
+			// reach.
+			wake?.dispose();
+			wake = undefined;
 		},
 	);
 
@@ -775,7 +817,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		// chain — those are not idle boundaries, and injecting a follow-up
 		// into a live chain is the one failure this whole loop has.
 		wake?.onTurnEnd(_event);
-		pollMailbox();
+		pollMailbox(ctx.hasUI);
 		void refreshTasks(ctx);
 		applyVisibility();
 	});

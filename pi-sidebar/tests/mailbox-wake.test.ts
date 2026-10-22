@@ -289,8 +289,62 @@ describe("WakeMachine: the re-read inside fire()", () => {
 	});
 });
 
-describe("WakeMachine: send failure", () => {
-	it("keeps wakePending true so the next poll retries", () => {
+describe("WakeMachine: delivery is fire-and-forget (F2)", () => {
+	it("does NOT retry when the host swallows an async rejection", async () => {
+		// What actually happens on the shipped host. The extension-facing
+		// `pi.sendUserMessage` is a SYNCHRONOUS wrapper that discards the
+		// promise the underlying async call returns, and the host routes
+		// that promise's rejection into its own error emitter. The
+		// machine therefore sees a SUCCESSFUL send, records the
+		// announcement, and the lost note stays lost until the BACKOFF
+		// permits the single re-announce. A `.catch()` at the call site
+		// could not help — the loader has already detached the promise.
+		let clock = 2_000_000;
+		const board: Task[] = [makeTask({ id: "m-3", createdAt: 100 })];
+		const attempts: string[] = [];
+		let hostSwallowed = 0;
+		const wake = new WakeMachine(
+			{ debounceMs: 1500, backoffMs: 300_000 },
+			{
+				now: () => clock,
+				readBoard: () => board,
+				send: (note) => {
+					attempts.push(note);
+					// The `.catch` here stands in for the HOST's own error
+					// emitter, not for a handler the sidebar could
+					// install. `pi.sendUserMessage` returns undefined and
+					// has already detached the promise before `send`
+					// returns, so by the time a rejection exists there is
+					// nothing left to attach to. That is the whole point.
+					Promise.reject(new Error("host refused")).catch(() => {
+						hostSwallowed++;
+					});
+				},
+				setTimer: () => 0,
+				clearTimer: () => {},
+			},
+		);
+
+		wake.poll(board);
+		expect(attempts).toHaveLength(1);
+		await Promise.resolve();
+		expect(hostSwallowed).toBe(1);
+		// Well inside the backoff: silent, because the machine believes
+		// the note landed.
+		clock += 10_000;
+		wake.poll(board);
+		expect(attempts).toHaveLength(1);
+		// Past the backoff: the one self-healing re-announce.
+		clock += 300_000;
+		wake.poll(board);
+		expect(attempts).toHaveLength(2);
+	});
+
+	it("leaves the announcement owed on a SYNCHRONOUS throw", () => {
+		// The catch branch. It is defensive rather than hot: no shipped
+		// host throws here (the failure is async), but a wrapped or older
+		// host that refuses immediately is caught rather than taking the
+		// panel with it.
 		let clock = 2_000_000;
 		let board: Task[] = [];
 		const sent: string[] = [];
@@ -312,10 +366,85 @@ describe("WakeMachine: send failure", () => {
 
 		wake.poll(board);
 		expect(sent).toEqual([]);
+		expect(wake.snapshot.wakePending).toBe(true);
+		expect(wake.snapshot.announced).toEqual([]);
 		fail = false;
 		clock += 10_000;
 		wake.poll(board);
 		expect(sent).toHaveLength(1);
+	});
+});
+
+describe("WakeMachine: dispose", () => {
+	it("forgets every per-mailbox fact so a /new cannot inherit them", () => {
+		// `announced` / `pending` / `observed` are facts about ONE
+		// mailbox. The store is re-pointed at the next session's cwd, so
+		// carrying them over would suppress a same-id intent in a
+		// different workspace until the backoff expired.
+		const s = setup({ backoffMs: 300_000 });
+		const board = [makeTask({ id: "m-3", createdAt: 100 })];
+		s.setBoard(board);
+		s.wake.poll(board);
+		expect(s.sent).toHaveLength(1);
+		expect(s.wake.snapshot.announced).toEqual(["m-3"]);
+
+		s.wake.dispose();
+
+		const after = s.wake.snapshot;
+		expect(after.announced).toEqual([]);
+		expect(after.pending).toEqual([]);
+		expect(after.observed).toEqual([]);
+		expect(after.wakePending).toBe(false);
+		expect(after.lastWakeAt).toBe(0);
+	});
+
+	it("goes silent until it sees a fresh boundary", () => {
+		// Dispose is terminal, not a reset. `session_shutdown` drops the
+		// reference and `session_start` builds a new machine, so a
+		// disposed one must not keep speaking — an object that still
+		// polls could inject a follow-up turn into a session that had
+		// already gone away.
+		const s = setup();
+		const board = [makeTask({ id: "m-3", createdAt: 100 })];
+		s.setBoard(board);
+		s.wake.poll(board);
+		expect(s.sent).toHaveLength(1);
+
+		s.wake.dispose();
+		s.wake.poll(board);
+		expect(s.sent).toHaveLength(1);
+	});
+
+	it("lets a fresh machine re-announce the same id in the new session", () => {
+		// The real `/new` path: shutdown disposes, session_start builds a
+		// NEW machine, and the re-pointed store's same-id intent is
+		// announced rather than suppressed until a 5-minute backoff.
+		const s = setup();
+		const board = [makeTask({ id: "m-3", createdAt: 100 })];
+		s.setBoard(board);
+		s.wake.poll(board);
+		expect(s.sent).toHaveLength(1);
+
+		s.wake.dispose();
+		const fresh = setup();
+		fresh.setBoard(board);
+		fresh.wake.poll(board);
+		expect(fresh.sent).toHaveLength(1);
+	});
+
+	it("cancels an armed debounce timer", () => {
+		const s = setup();
+		const board = [makeTask({ id: "m-3", createdAt: 100 })];
+		s.setBoard(board);
+		// Mid-turn: the poll sees the mail but cannot speak, and the
+		// boundary arms the debounce.
+		s.wake.onTurnStart();
+		s.wake.poll(board);
+		s.wake.onTurnEnd(turnEndNoTools());
+		expect(s.timers).toHaveLength(1);
+
+		s.wake.dispose();
+		expect(s.getCleared()).toBe(1);
 	});
 });
 

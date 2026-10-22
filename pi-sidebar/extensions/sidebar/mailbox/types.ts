@@ -10,7 +10,7 @@
  *
  * The design's load-bearing decision is that the mailbox file is
  * byte-compatible with `parseTasksJson`
- * (`extensions/sidebar/tasks.ts:69`), so the panel renders the mailbox
+ * (`extensions/sidebar/tasks.ts:77`), so the panel renders the mailbox
  * with zero renderer changes. That only works because the mailbox
  * introduces no new status vocabulary:
  *
@@ -24,6 +24,15 @@
  * `tests/mailbox-store.test.ts` is the thing that will say no — and it
  * will say no for the right reason, because it reads the file back
  * through the sidebar's own parser.
+ *
+ * ## Host mode is part of the mailbox contract
+ *
+ * `mailboxWakeActive` below decides whether the poll/wake loop runs at
+ * all, and the answer is NOT simply "is intake enabled". `pi -p` is a
+ * one-shot invocation; a wake there appends a follow-up turn and the
+ * run is no longer one-shot. That is a fine trade for an interactive
+ * session and a silent semantics change for a cron job, so headless
+ * hosts have to opt in by name.
  */
 
 import { join } from "node:path";
@@ -56,12 +65,17 @@ export type MailboxEnv = {
 	 * unclaimed intent sits quiet before one re-announce is permitted.
 	 */
 	wakeBackoffMs: number;
+	/**
+	 * `PI_SIDEBAR_MAILBOX_PRINT_MODE` — opt back in to the wake on a
+	 * headless (`pi -p`) host. Off by default: see `mailboxWakeActive`.
+	 */
+	printMode: boolean;
 };
 
 /**
  * Resolve every mailbox knob in one place.
  *
- * All four read through the `env*` helpers rather than `process.env`
+ * All five read through the `env*` helpers rather than `process.env`
  * directly so tests can pass a bag instead of mutating the real
  * environment. `envInt` (not `envIntClamped`) is correct for the three
  * timing knobs: a zero or negative interval is meaningless, and
@@ -73,7 +87,32 @@ export function mailboxEnvFrom(env: NodeJS.ProcessEnv = process.env): MailboxEnv
 		pollMs: envInt("PI_SIDEBAR_MAILBOX_POLL_MS", 10_000, env),
 		wakeDebounceMs: envInt("PI_SIDEBAR_WAKE_DEBOUNCE_MS", 1500, env),
 		wakeBackoffMs: envInt("PI_SIDEBAR_WAKE_BACKOFF_MS", 300_000, env),
+		printMode: envBool("PI_SIDEBAR_MAILBOX_PRINT_MODE", false, env),
 	};
+}
+
+/**
+ * Whether the poll-and-wake loop may run at all.
+ *
+ * Three inputs, in order:
+ *
+ *   1. `PI_SIDEBAR_MAILBOX=off` wins over everything. Off means off.
+ *   2. An interactive host (`hasUI`) always runs the loop — that is the
+ *      mode the feature was designed for.
+ *   3. A headless host (`pi -p`) runs it ONLY when
+ *      `PI_SIDEBAR_MAILBOX_PRINT_MODE` is set. This is the fix for a
+ *      silent one-shot regression: `session_start` builds the wake
+ *      machine in print mode too, and the first `turn_end` fires it, so
+ *      unclaimed mail extends the run — one intent per turn — for a
+ *      caller who reasonably believed `-p` meant "ask once, print once".
+ *      A cron job that WANTS the drain sets the variable and says so.
+ *
+ * Note that the tools stay registered either way: intake is a pure file
+ * API and never speaks to the agent. Only the automatic wake is gated.
+ */
+export function mailboxWakeActive(env: MailboxEnv, hasUI: boolean): boolean {
+	if (!env.enabled) return false;
+	return hasUI || env.printMode;
 }
 
 /**

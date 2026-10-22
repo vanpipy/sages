@@ -146,7 +146,10 @@ const MailboxBreakdownParams = Type.Object({
 export type MailboxBreakdownParams = Static<typeof MailboxBreakdownParams>;
 
 const MailboxUpdateParams = Type.Object({
-	taskId: Type.String({ description: "The plan task to report progress on." }),
+	taskId: Type.String({
+		description:
+			"The PLAN task to report progress on. Intents are closed by mailbox_complete, not mailbox_update.",
+	}),
 	status: Type.Optional(
 		Type.Union(TASK_STATUSES.map((s) => Type.Literal(s)), {
 			description: "New status. Omit to record a result without moving the task.",
@@ -290,7 +293,8 @@ export function registerMailboxTools(
 		name: "mailbox_breakdown",
 		label: "Mailbox breakdown",
 		description:
-			"Break a claimed intent down into plan tasks. Each child is linked to its intent via metadata.sourceIntent, and the intent moves to in_progress. Refuses unless the intent is already claimed by this session.",
+			"Break a claimed intent down into plan tasks. Each child is linked to its intent via metadata.sourceIntent, and the intent moves to in_progress. " +
+			"Refuses unless the intent is already claimed BY THIS SESSION — an intent owned by another session is left alone.",
 		parameters: MailboxBreakdownParams,
 		async execute(_toolCallId, params: MailboxBreakdownParams) {
 			const me = sessionId();
@@ -310,6 +314,16 @@ export function registerMailboxTools(
 						return {
 							ok: false,
 							error: `intent ${params.intentId} is not claimed — mailbox_claim it first`,
+						};
+					}
+					// Ownership, not just claimedness. Two sessions reading
+					// the same board both see "claimed"; only the owner may
+					// append children to it. The refusal names the holder so
+					// the loser can report the race instead of retrying blind.
+					if (intent.owner !== me) {
+						return {
+							ok: false,
+							error: `intent ${params.intentId} is claimed by ${intent.owner}, not by ${me}`,
 						};
 					}
 
@@ -335,12 +349,17 @@ export function registerMailboxTools(
 					// would make the DAG unauthorable in one call. Out-of-range
 					// indexes are dropped rather than throwing: a bad edge in
 					// one step should not cost the agent the whole breakdown.
-					const indexEdges = (refs: number[] | undefined): string[] =>
+					// SELF-edges are dropped for the same reason: a task
+					// blocked by itself can never be unblocked, so it renders
+					// as permanently blocked in `countTasks` until something
+					// force-completes it. The agent can always express the
+					// same shape across two steps.
+					const indexEdges = (refs: number[] | undefined, self: number): string[] =>
 						(refs ?? [])
-							.filter((r) => Number.isInteger(r) && r >= 0 && r < children.length)
+							.filter((r) => Number.isInteger(r) && r >= 0 && r < children.length && r !== self)
 							.map((r) => ids[r]);
-					const idEdges = (refs: string[] | undefined, known: Set<string>): string[] =>
-						(refs ?? []).filter((id) => known.has(id));
+					const idEdges = (refs: string[] | undefined, self: string, known: Set<string>): string[] =>
+						(refs ?? []).filter((id) => id !== self && known.has(id));
 
 					const boardIds = new Set([
 						...tasks.map((t) => t.id),
@@ -348,24 +367,39 @@ export function registerMailboxTools(
 					]);
 					params.tasks.forEach((spec, i) => {
 						children[i].blockedBy = [
-							...indexEdges(spec.blockedByIndex),
-							...idEdges(spec.blockedBy, boardIds),
+							...indexEdges(spec.blockedByIndex, i),
+							...idEdges(spec.blockedBy, children[i].id, boardIds),
 						];
 						children[i].blocks = [
-							...indexEdges(spec.blocksIndex),
-							...idEdges(spec.blocks, boardIds),
+							...indexEdges(spec.blocksIndex, i),
+							...idEdges(spec.blocks, children[i].id, boardIds),
 						];
 					});
 					// Mirror the edges onto the other side. A one-way edge
 					// would render as "blocked" on the child but leave the
 					// blocker looking unblocked in `countTasks`, which
-					// derives `blocked` from `blockedBy` alone.
+					// derives `blocked` from `blockedBy` alone. The mirror
+					// has to cross the batch boundary too: an edge to a
+					// PRE-EXISTING task is still one line in the file, and
+					// if only the new child carries `blockedBy` then the old
+					// task never shows as blocking anything.
+					const mirror = new Map<string, Task>();
 					for (const child of children) {
-						for (const blocker of child.blockedBy) {
-							const other = children.find((c) => c.id === blocker);
-							if (other && !other.blocks.includes(child.id)) {
-								other.blocks = [...other.blocks, child.id];
+						for (const blockerId of child.blockedBy) {
+							const sibling = children.find((c) => c.id === blockerId);
+							if (sibling) {
+								if (!sibling.blocks.includes(child.id)) {
+									sibling.blocks = [...sibling.blocks, child.id];
+								}
+								continue;
 							}
+							const existing = mirror.get(blockerId) ?? tasks.find((t) => t.id === blockerId);
+							if (!existing || existing.blocks.includes(child.id)) continue;
+							mirror.set(blockerId, {
+								...existing,
+								blocks: [...existing.blocks, child.id],
+								updatedAt: now,
+							});
 						}
 					}
 
@@ -380,7 +414,7 @@ export function registerMailboxTools(
 											updatedAt: now,
 											metadata: { ...t.metadata, brokenDownAt: now },
 										}
-									: t,
+									: (mirror.get(t.id) ?? t),
 							),
 							...children,
 						],
@@ -406,7 +440,9 @@ export function registerMailboxTools(
 		name: "mailbox_update",
 		label: "Mailbox update",
 		description:
-			"Report progress on one plan task: move its status and/or store a free-form result in metadata. The intent linkage (metadata.sourceIntent) is preserved — that is what mailbox_complete's all-children-done gate reads.",
+			"Report progress on one PLAN task: move its status and/or store a free-form result in metadata. " +
+			"Refuses on an intent (mail is closed by mailbox_complete) and refuses to reopen a completed task. " +
+			"The intent linkage (metadata.sourceIntent) is preserved — that is what mailbox_complete's all-children-done gate reads.",
 		parameters: MailboxUpdateParams,
 		async execute(_toolCallId, params: MailboxUpdateParams) {
 			try {
@@ -423,6 +459,36 @@ export function registerMailboxTools(
 					const task = tasks.find((t) => t.id === params.taskId);
 					if (!task) {
 						return { ok: false, error: `no task ${params.taskId} in the mailbox` };
+					}
+					// Plan tasks only. `mailbox_update` exists to report
+					// progress on a breakdown STEP; letting it reach an
+					// intent means `mailbox_update(intentId,
+					// {status: "completed"})` closes an unclaimed brief
+					// outright, which also makes `mailbox_complete`'s
+					// all-children-done gate vacuous on an intent that was
+					// never broken down — the gate is the only thing
+					// stopping an intent sitting in progress forever.
+					if (task.type !== "plan") {
+						return {
+							ok: false,
+							error: `${params.taskId} is an intent, not a plan task — use mailbox_complete`,
+						};
+					}
+					// No reopening. A completed step that goes back to
+					// `pending` silently re-blocks the gate above, so the
+					// state the agent already declared final would flip
+					// back without any visible decision. Recording a
+					// result on a completed task is still allowed; only
+					// the status move is frozen.
+					if (
+						task.status === "completed" &&
+						nextStatus !== undefined &&
+						nextStatus !== "completed"
+					) {
+						return {
+							ok: false,
+							error: `${params.taskId} is already completed and cannot be reopened to ${nextStatus}`,
+						};
 					}
 					const now = store.timestamp();
 					const updated: Task = {

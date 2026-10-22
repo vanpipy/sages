@@ -19,7 +19,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MailboxStore } from "../extensions/sidebar/mailbox/store.js";
 import { registerMailboxTools } from "../extensions/sidebar/mailbox/tools.js";
-import { parseTasksJson } from "../extensions/sidebar/tasks.js";
+import { parseTasksJson, countTasks } from "../extensions/sidebar/tasks.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 type CapturedTool = {
@@ -290,6 +290,65 @@ describe("mailbox_breakdown", () => {
 		expect(readFileSync(store.path, "utf8")).toBe(before);
 	});
 
+	it("refuses an intent claimed by ANOTHER session (F4)", async () => {
+		// The description promises "claimed by this session"; the check
+		// only asked "claimed at all". Two sessions reading the same
+		// board both see claimed, and the loser would append its own
+		// children to a brief another session is working.
+		const { store, call } = setup("sess-abc");
+		seedTasks(store, [{ id: "m-1", type: "intent", owner: "sess-other", status: "in_progress" }]);
+		const before = readFileSync(store.path, "utf8");
+		const res = await call("mailbox_breakdown", {
+			intentId: "m-1",
+			tasks: [{ subject: "Step", description: "d" }],
+		});
+		expect((res.details as { ok: boolean }).ok).toBe(false);
+		expect(res.content[0].text).toContain("sess-other");
+		expect(readFileSync(store.path, "utf8")).toBe(before);
+		expect(store.read().filter((t) => t.type === "plan")).toHaveLength(0);
+	});
+
+	it("drops a self-edge rather than writing a permanently blocked task", async () => {
+		const { store, call } = setup();
+		seedTasks(store, [{ id: "m-1", type: "intent", owner: "sess-abc", status: "in_progress" }]);
+		await call("mailbox_breakdown", {
+			intentId: "m-1",
+			tasks: [
+				{ subject: "Step 0", description: "d", blockedByIndex: [0] },
+				{ subject: "Step 1", description: "d", blocksIndex: [1] },
+			],
+		});
+		const children = store.read().filter((t) => t.metadata.sourceIntent === "m-1");
+		expect(children).toHaveLength(2);
+		for (const child of children) {
+			expect(child.blockedBy).toEqual([]);
+			expect(child.blocks).toEqual([]);
+		}
+		// And the panel reads them as plain pending, not ⌥ blocked.
+		const counts = countTasks(store.read());
+		expect(counts.blocked).toBe(0);
+	});
+
+	it("mirrors an edge onto a PRE-EXISTING task across the batch boundary", async () => {
+		// countTasks derives `blocked` from `blockedBy` alone, so a
+		// one-way edge onto an existing task would leave the blocker
+		// looking unrelated to the new child.
+		const { store, call } = setup();
+		seedTasks(store, [
+			{ id: "m-1", type: "intent", owner: "sess-abc", status: "in_progress" },
+			{ id: "9", subject: "existing prerequisite" },
+		]);
+		await call("mailbox_breakdown", {
+			intentId: "m-1",
+			tasks: [{ subject: "Step", description: "d", blockedBy: ["9"] }],
+		});
+		const after = store.read();
+		const child = after.find((t) => t.metadata.sourceIntent === "m-1")!;
+		const blocker = after.find((t) => t.id === "9")!;
+		expect(child.blockedBy).toEqual(["9"]);
+		expect(blocker.blocks).toEqual([child.id]);
+	});
+
 	it("refuses an unknown intent", async () => {
 		const { call } = setup();
 		const res = await call("mailbox_breakdown", {
@@ -337,6 +396,47 @@ describe("mailbox_update", () => {
 		const res = await call("mailbox_update", { taskId: "1", status: "cancelled" });
 		expect((res.details as { ok: boolean }).ok).toBe(false);
 		expect(store.read().find((t) => t.id === "1")!.status).toBe("pending");
+	});
+
+	it("refuses an INTENT id — mailbox_complete is the only way to close mail (F3)", async () => {
+		// Otherwise `mailbox_update(m-1, {status:"completed"})` closes an
+		// unclaimed brief outright, and mailbox_complete's all-children
+		// gate becomes vacuous on an intent nobody ever broke down —
+		// which is exactly the "intent sitting in progress forever" case
+		// the gate exists to prevent.
+		const { store, call } = setup();
+		seedTasks(store, [{ id: "m-1", type: "intent" }]);
+		const before = readFileSync(store.path, "utf8");
+		const res = await call("mailbox_update", { taskId: "m-1", status: "completed" });
+		expect((res.details as { ok: boolean }).ok).toBe(false);
+		expect(res.content[0].text).toContain("mailbox_complete");
+		expect(readFileSync(store.path, "utf8")).toBe(before);
+	});
+
+	it("refuses to reopen a completed plan task (F3)", async () => {
+		const { store, call } = setup();
+		seedTasks(store, [
+			{ id: "m-1", type: "intent", owner: "sess-abc", status: "in_progress" },
+			{ id: "1", sourceIntent: "m-1", status: "completed" },
+		]);
+		for (const status of ["pending", "in_progress"]) {
+			const res = await call("mailbox_update", { taskId: "1", status });
+			expect((res.details as { ok: boolean }).ok, status).toBe(false);
+			expect(store.read().find((t) => t.id === "1")!.status, status).toBe("completed");
+		}
+		// …which means the all-children gate can no longer be re-blocked.
+		const done = await call("mailbox_complete", { intentId: "m-1", summary: "x" });
+		expect((done.details as { ok: boolean }).ok).toBe(true);
+	});
+
+	it("still records a result on a completed task, which is not a reopen", async () => {
+		const { store, call } = setup();
+		seedTasks(store, [{ id: "1", status: "completed" }]);
+		const res = await call("mailbox_update", { taskId: "1", result: "notes" });
+		expect((res.details as { ok: boolean }).ok).toBe(true);
+		const task = store.read().find((t) => t.id === "1")!;
+		expect(task.status).toBe("completed");
+		expect(task.metadata.result).toBe("notes");
 	});
 });
 

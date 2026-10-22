@@ -54,6 +54,8 @@ A first poll fires at `startSidebar`, before the interval begins, so mail
 that arrived while **no session was running** is picked up on the next
 `session_start`.
 
+On a headless host (`pi -p`) the loop does **not** run. See *Print mode*.
+
 ## Decisions resolved
 
 - **The sidebar is a mailbox, not a planner.** Decided against spawning a
@@ -78,7 +80,7 @@ Path: `${ORCHESTRATOR_WORKDIR:-<tmpdir>/sages-orchestrator}/<projectKey(cwd)>/ma
 `projectKey` is the function already in `extensions/sidebar/tasks.ts:41`.
 
 The payload is byte-compatible with what `parseTasksJson`
-(`extensions/sidebar/tasks.ts:69`) already accepts, so:
+(`extensions/sidebar/tasks.ts:77`) already accepts, so:
 
 - the panel renders the mailbox with **zero** renderer changes
 - `countTasks` and `toTaskRows` work as-is, including the derived `blocked`
@@ -143,39 +145,94 @@ Note `pi-sidebar.ts:648` currently sets `isStreaming = false` on *every*
 tokens") and wrong for the wake gate. The wake keeps its own `idle` flag.
 
 ```
-mailbox: unwoken: Set<id>   — intents observed but never announced
-wakePending: boolean          — mail is waiting for a quiet moment
-idle: boolean                 — a REAL idle boundary has been seen
+observed: Set<id>     — intents ever seen unclaimed on THIS mailbox
+pending:  Set<id>     — announcements still owed
+announced: Map<id, {count, lastAt}> — announced, and when
+idle: boolean         — a REAL idle boundary has been seen
 lastWakeAt: number
 
-poll:
-  for each (type=intent, status=pending, no owner) not in unwoken:
-    unwoken.add(id)
-  if unwoken.size > 0: wakePending = true
-  if wakePending && idle: fire()
+poll(tasks):
+  live = unclaimed intents in tasks
+  forget any id in observed/pending/announced that left `live`
+  for id in live:
+    if id not in announced: observed += id; pending += id
+    else if backoff elapsed and count <= 1:   pending += id
+  wakePending = pending.size > 0
+  if wakePending and idle: fire()
 
 turn_start:  idle = false
 turn_end:    if hadToolCalls → return
              idle = true
-             if wakePending && unwoken.size > 0: fire() after debounce
+             if wakePending and pending.size > 0: fire() after debounce
 
 fire():
   re-read the board          # it may have changed while we waited
-  if no unclaimed intent remains: wakePending = false; return
-  first = oldest unclaimed (FIFO on createdAt, id as tie-break)
-  pi.sendUserMessage(note(first), { deliverAs: "followUp" })
-  unwoken.delete(first.id)   # dedupe: announce once
-  lastWakeAt = now
-  wakePending = unwoken.size > 0
+  drop any pending id the board no longer shows as unclaimed
+  if nothing unclaimed or nothing owed: wakePending = false; return
+  first = oldest owed (FIFO on createdAt, id as tie-break)
+  pi.sendUserMessage(note(live), { deliverAs: "followUp" })
+  pending.delete(first.id)
+  announced[first.id] = { count: previous + 1, lastAt: now }
+  wakePending = pending.size > 0
+
+session_shutdown: dispose() — cancel the debounce, clear all three sets
 ```
 
-Two lines carry more weight than they look:
+Three lines carry more weight than they look:
 
-- **the re-read inside `fire()`** — between the poll that noticed the mail and
-  the quiet moment that allowed the wake, the agent may have claimed and
+- **the re-read inside `fire()`** — between the poll that noticed the mail
+  and the quiet moment that allowed the wake, the agent may have claimed and
   finished it. Waking about stale mail is worse than not waking.
-- **`unwoken.delete` inside `fire()`** — without it, the 10s poll
+- **`pending.delete` inside `fire()`** — without it the 10s poll
   re-announces the same intent every 10 seconds forever.
+- **`dispose()` on shutdown** — `observed` / `pending` / `announced` are
+  facts about ONE mailbox, and the store is re-pointed at the next
+  session's `cwd`. Carried over, they would suppress a same-id intent in a
+  different workspace until the backoff expired.
+
+### Why three sets and not one `unwoken`
+
+The first draft of this doc had a single `unwoken` set: `poll` added every
+unclaimed intent not in it, and `fire` deleted the one it announced. Taken
+literally those two lines **cancel each other**: the next poll re-adds the
+id `fire` just deleted, so the intent is announced again 10s later, then
+again, forever. The set that was supposed to prevent the loop was what
+caused it.
+
+Splitting "I have seen this" (`observed`) from "I still owe an
+announcement" (`pending`) makes the loop unrepresentable rather than
+merely unlikely. `announced` is a third thing entirely — a record of what
+has been said and when — and it is what `PI_SIDEBAR_WAKE_BACKOFF_MS` reads
+to permit exactly one re-announce.
+
+### Why `idle` starts `true`
+
+A literal reading of the pseudo-code (`idle: false` initially, set true only
+by a clean `turn_end`) means a freshly started session never wakes: the
+first `turn_end` sets `idle = true` but by then the poll may have already
+run with `idle = false` and owed nothing, and if no mail arrives during the
+turn the boundary has nothing to fire about. The feature would silently
+depend on the user typing something before any mail is ever seen.
+
+A session that has just started has a real idle boundary by definition, so
+`idle` starts `true`. `dispose()` sets it back to `false` — a disposed
+machine must not speak until it observes a fresh boundary.
+
+### Print mode
+
+`pi -p` is a **one-shot** invocation: ask once, print once. The wake is
+incompatible with that shape by default, because a wake appends a
+follow-up turn: `session_start` builds the machine, the first `turn_end`
+fires it, and unclaimed mail extends the run one intent per turn. It is
+bounded — `announced.count > 1` is terminal — but silently redefining
+one-shot in a supported mode is not acceptable.
+
+So `turn_end` is gated on `ctx.hasUI`, and a headless host opts in by name
+with `PI_SIDEBAR_MAILBOX_PRINT_MODE=on`. A cron-driven `pi -p` that *wants*
+the drain sets it; everything else keeps the one-shot contract.
+
+The five intake **tools** stay registered either way — intake is a pure
+file API and never speaks to the agent. Only the automatic wake is gated.
 
 ### Knobs
 
@@ -185,6 +242,7 @@ Two lines carry more weight than they look:
 | `PI_SIDEBAR_WAKE_DEBOUNCE_MS` | `1500` | collapses idle→idle→idle flaps from a tool chain that ends cleanly twice |
 | `PI_SIDEBAR_WAKE_BACKOFF_MS` | `300000` | if an intent is still unclaimed 5 min after announcement, allow one re-announce |
 | `PI_SIDEBAR_MAILBOX` | `on` | `off` disables intake, poll and wake entirely |
+| `PI_SIDEBAR_MAILBOX_PRINT_MODE` | `off` | `on` drains the mailbox on a headless `pi -p` host. Off because a wake turns one-shot into a loop |
 
 ### Wake note
 
@@ -210,12 +268,21 @@ Five, replacing the 13 the main agent uses today.
 |---|---|
 | `mailbox_list(filter?)` | Pure read. Unclaimed intents first, then plan tasks. Never mutates. |
 | `mailbox_claim(id)` | Atomic `pending → in_progress` + `owner = sessionId`. Re-reads under the lock and refuses if already claimed, so two sessions cannot both win. |
-| `mailbox_breakdown(intentId, tasks[])` | Writes `plan` tasks with `metadata.sourceIntent = intentId`, plus `blocks` / `blockedBy`. Marks the intent in progress. Refuses unless the intent is claimed. |
-| `mailbox_update(taskId, {status, result})` | Progress on one plan task. Stores `result` in `metadata`. |
-| `mailbox_complete(intentId, summary)` | Closes the intent. **Refuses unless every task with `metadata.sourceIntent === intentId` is `completed`.** This is what stops an intent sitting in progress forever. |
+| `mailbox_breakdown(intentId, tasks[])` | Writes `plan` tasks with `metadata.sourceIntent = intentId`, plus `blocks` / `blockedBy`. Marks the intent in progress. **Refuses unless the intent is claimed by THIS session** — claimedness alone is not enough, or a second session would append children to a brief another session owns. Self-edges are dropped; every edge is mirrored onto its blocker, including across the batch boundary onto a pre-existing task. |
+| `mailbox_update(taskId, {status, result})` | Progress on one **plan** task. Stores `result` in `metadata`. Refuses on an intent (mail is closed by `mailbox_complete`) and refuses to move a `completed` task back — a silent reopen would re-block the gate below. Recording a result on a completed task is still allowed. |
+| `mailbox_complete(intentId, summary)` | Closes the intent. **Refuses unless every task with `metadata.sourceIntent === intentId` is `completed`.** This is what stops an intent sitting in progress forever, which is why `mailbox_update` cannot reach an intent and vacate the check on a childless one. |
 
 All five go through one `MailboxStore` so they share the lock discipline and
 the read-modify-write path. None of them may see a torn file.
+
+One consequence of the ownership rule worth stating plainly: an intent
+claimed by a session that no longer exists — including the pre-`/new`
+session in the same cwd — is stuck. `mailbox_claim` already refused to
+steal it, and `mailbox_breakdown` now refuses to work on it too. That is
+the intended fail-closed reading of `owner` (the field is the durable
+claim record, and it is not timestamped, so nothing can tell a dead owner
+from a live one), and the recovery is to clear `owner` in the file by
+hand.
 
 ## Error handling
 
@@ -224,7 +291,9 @@ the read-modify-write path. None of them may see a torn file.
 | lock not acquired in 5s | tool returns an error envelope, no partial write |
 | store file missing | poll treats it as empty. Intake tools create it on first write. |
 | malformed JSON | parser returns null, panel renders "no tasks". Intake tools refuse rather than overwrite. |
-| `sendUserMessage` throws | caught, `wakePending` stays true, retried on the next poll. Never crashes the panel. |
+| `owner` present but not a string | treated as **claimed** by `(malformed owner)`. The file is written by anyone, so the fail-closed reading is the only safe one: coercing to `undefined` would read a claimed brief as fresh mail and re-announce it forever. Un-stick it by hand. |
+| `sendUserMessage` rejects | **not observable.** Delivery is fire-and-forget: the extension-facing `pi.sendUserMessage` is a synchronous wrapper that discards the promise the underlying `async` call returns, and the host routes that promise's rejection into its own error emitter rather than back to the wake. The wake records the announcement as delivered, so a lost note stays lost until `PI_SIDEBAR_WAKE_BACKOFF_MS` permits the single re-announce. There is no immediate retry to schedule, and a `.catch()` at the call site would be dead code — the loader detached the promise first. |
+| `sendUserMessage` throws synchronously | caught; the announcement stays owed and `wakePending` stays true. Defensive rather than hot — no shipped host throws here — and the panel never dies either way. |
 | claim race | the loser gets `already claimed by <owner>`, which is the correct outcome, not an error to retry blindly |
 
 ## Testing strategy
@@ -235,12 +304,18 @@ live pi session is needed.
 
 - **store**: round-trip, `parseTasksJson` compatibility (the mailbox must be
   readable by the existing parser), claim race, all-children-done gate,
-  lock acquire/release/stale-reap
+  lock acquire/release/stale-reap, malformed-`owner` fail-closed
 - **wake**: announces once, does not announce the same id twice across polls,
   withholds while a turn has tool calls, announces at the next real boundary,
-  re-read drops a stale announce, backoff permits exactly one re-announce
-- **tools**: schemas, the claim precondition, the breakdown precondition, the
-  complete gate, error envelopes
+  re-read drops a stale announce, backoff permits exactly one re-announce,
+  a swallowed async rejection triggers no retry, `dispose()` forgets the sets
+- **tools**: schemas, the claim precondition, the breakdown ownership
+  precondition, self-edge and cross-batch edge mirroring, the update
+  plan-only and no-reopen rules, the complete gate, error envelopes
+- **notes**: the `ctrl+shift+t` note routes a mailbox id to `mailbox_list`
+  and a board id to `TaskGet`
+- **env**: the four timing knobs' shipped defaults, and that a headless host
+  is off unless `PI_SIDEBAR_MAILBOX_PRINT_MODE` says otherwise
 
 ## Acceptance criteria
 
@@ -248,13 +323,17 @@ live pi session is needed.
    panel show it within one poll interval, with the existing `◌` glyph.
 2. With the session idle, the main agent receives exactly one follow-up turn
    naming the unclaimed intents, within one poll interval plus the debounce.
+   **Not** on a headless `pi -p` host unless `PI_SIDEBAR_MAILBOX_PRINT_MODE`
+   is set.
 3. Mid-turn, nothing is injected. The follow-up lands at the next real idle
    boundary.
 4. A second poll does not re-announce an intent that was already announced.
 5. `mailbox_claim` on an already-claimed intent returns `already claimed by
    <owner>` and does not change the store.
-6. `mailbox_complete` on an intent with an open child refuses.
-7. `bun run typecheck` and `bun test` in `pi-sidebar/` are green.
+6. `mailbox_complete` on an intent with an open child refuses. So does
+   `mailbox_update` on that child once it is `completed` — the gate cannot
+   be re-blocked by a silent reopen.
+7. `npm run typecheck` and `npm test` in `pi-sidebar/` are green.
 
 ## Not in scope
 

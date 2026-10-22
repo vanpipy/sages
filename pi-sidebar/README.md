@@ -75,8 +75,8 @@ read-modify-write path, and none can see a torn file.
 |---|---|
 | `mailbox_list(filter?)` | Pure read. Unclaimed intents first, then plan tasks. |
 | `mailbox_claim(id)` | Atomic `pending → in_progress` + `owner`. Refuses if already claimed. |
-| `mailbox_breakdown(intentId, tasks[])` | Writes `plan` tasks linked by `metadata.sourceIntent`. Refuses unless the intent is claimed. |
-| `mailbox_update(taskId, {status, result})` | Progress on one task; `result` lands in `metadata`. |
+| `mailbox_breakdown(intentId, tasks[])` | Writes `plan` tasks linked by `metadata.sourceIntent`. Refuses unless the intent is claimed **by this session**. |
+| `mailbox_update(taskId, {status, result})` | Progress on one **plan** task; `result` lands in `metadata`. Refuses on an intent, and refuses to reopen a completed task. |
 | `mailbox_complete(intentId, summary)` | Closes the intent. **Refuses unless every child is `completed`.** |
 
 ### Wake
@@ -87,6 +87,18 @@ an ongoing tool-call chain — so a `turn_end` carrying a `toolCall` /
 `toolUse` block is ignored, and the announcement waits for the next clean
 one. The board is re-read inside `fire()` before speaking, and each id is
 announced once (plus one re-announce after the backoff).
+
+Delivery is **fire-and-forget**. `pi.sendUserMessage` is a synchronous
+wrapper that discards the promise the underlying async call returns, and
+the host swallows that promise's rejection into its own error emitter — so
+a lost note is not observable here. It self-heals through the backoff
+rather than an immediate retry.
+
+**Print mode is off by default.** `pi -p` is a one-shot invocation and a
+wake appends a follow-up turn, so unclaimed mail would turn it into a
+drain loop. Set `PI_SIDEBAR_MAILBOX_PRINT_MODE=on` to opt a headless host
+back in. The intake tools stay registered either way; only the automatic
+wake is gated.
 
 ## Environment
 
@@ -119,13 +131,15 @@ announced once (plus one re-announce after the backoff).
 | `PI_SIDEBAR_MAILBOX_POLL_MS` | `10000` | The mailbox poll floor. |
 | `PI_SIDEBAR_WAKE_DEBOUNCE_MS` | `1500` | Collapses idle→idle→idle flaps into one announcement. |
 | `PI_SIDEBAR_WAKE_BACKOFF_MS` | `300000` | How long an announced, still-unclaimed intent sits quiet before one re-announce. |
+| `PI_SIDEBAR_MAILBOX_PRINT_MODE` | `off` | `on` drains the mailbox on a headless `pi -p` host. Off because a wake turns one-shot into a loop. |
 
 ## Commands
 
 - `/sidebar [collapse|expand|on|off|status|full|floating]`
 - `/sidebar-refresh`, `/sidebar-refresh-tasks`
 - `ctrl+shift+s` — collapse / expand
-- `ctrl+shift+t` — inject a system note naming the top task
+- `ctrl+shift+t` — inject a system note naming the top task. A mailbox id
+  in the note points at `mailbox_list`; a board id keeps the `TaskGet` path.
 
 ## Development
 

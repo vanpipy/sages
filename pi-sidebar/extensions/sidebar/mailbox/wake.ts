@@ -76,7 +76,14 @@ export type WakeDeps = {
 	 * worse than not announcing at all.
 	 */
 	readBoard: () => Task[];
-	/** Deliver the note. May throw — see the send-failure path. */
+	/**
+	 * Deliver the note. Fire-and-forget by contract: the extension-facing
+	 * `pi.sendUserMessage` is a SYNCHRONOUS wrapper that discards the
+	 * promise the underlying `async` call returns, and the host routes an
+	 * async rejection into its own error emitter rather than back here.
+	 * So a real delivery failure is invisible to this machine and only a
+	 * synchronous throw is observable — see the catch in `fire()`.
+	 */
 	send: (note: string) => void;
 	setTimer?: (fn: () => void, ms: number) => unknown;
 	clearTimer?: (handle: unknown) => void;
@@ -240,11 +247,35 @@ export class WakeMachine {
 		}, this.config.debounceMs);
 	}
 
-	private cancelTimer(): void {
+	cancelTimer(): void {
 		if (!this.timerArmed) return;
 		this.deps.clearTimer(this.timer);
 		this.timerArmed = false;
 		this.timer = undefined;
+	}
+
+	/**
+	 * Tear the machine down and forget everything it believed.
+	 *
+	 * Called from `session_shutdown`. Without it, `observed` / `pending`
+	 * / `announced` / `idle` survive a `/new` and outlive the cwd they
+	 * were learned in: the same id in a different workspace's mailbox
+	 * reads as "already announced" and is suppressed until the backoff
+	 * expires. The sets are per-MAILBOX facts, and after a `/new` the
+	 * store is re-pointed at a different file — carrying them over is
+	 * not a cache, it is a bug.
+	 */
+	dispose(): void {
+		this.cancelTimer();
+		this.observed.clear();
+		this.pending.clear();
+		this.announced.clear();
+		this.wakePending = false;
+		this.lastWakeAt = 0;
+		// `idle` is reset to false, not true: the next session gets a
+		// fresh machine from the constructor, and leaving `idle` true
+		// here would only matter if this instance were reused.
+		this.idle = false;
 	}
 
 	/**
@@ -280,9 +311,16 @@ export class WakeMachine {
 		try {
 			this.deps.send(buildWakeNote(live));
 		} catch {
-			// The host refused the message. Leave everything as-is so the
-			// next poll tries again — `wakePending` staying true IS the
-			// retry, and a crash here would take the panel with it.
+			// A SYNCHRONOUS throw is the only delivery failure this
+			// machine can observe. The host wrapper
+			// (`pi.sendUserMessage`) discards the promise the underlying
+			// async call returns, and the host swallows that promise's
+			// rejection into its own error emitter, so a genuinely lost
+			// message never reaches here — it is recorded as announced
+			// below and self-heals only through the backoff window
+			// (`PI_SIDEBAR_WAKE_BACKOFF_MS`). This branch therefore
+			// guards the defensive case (an older or wrapped host that
+			// throws immediately) and must never crash the panel.
 			this.wakePending = true;
 			return;
 		}

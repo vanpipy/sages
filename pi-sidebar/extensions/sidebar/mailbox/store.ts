@@ -10,10 +10,11 @@
  * the parser returns `null` and the panel quietly shows "no tasks".
  *
  * The lock discipline is COPIED from `pi-tasks/src/task-store.ts:31-76`
- * rather than imported. This package has a deliberate zero-`@sages/*`
- * stance (documented in `pi/docs/learn/pi-sidebar.md`), so the pattern
- * is duplicated deliberately; the shape below is the contract, not the
- * implementation:
+ * rather than imported. This package takes nothing from the monorepo —
+ * `pi/docs/learn/pi-sidebar.md` § "Zero `@sages/*` imports" records why,
+ * and the deploy is a plain file copy into `~/.pi/packages/` with no
+ * `node_modules` bridging — so the pattern is duplicated deliberately;
+ * the shape below is the contract, not the implementation:
  *
  *   - lock file at `<store>.lock`, created with flag `wx` (O_EXCL)
  *   - the token is `<pid>:<uuid>` — the PID is what the staleness check
@@ -150,8 +151,8 @@ function isProcessRunning(pid: number): boolean {
  * `parseTasksJson` is both the shared validator and the panel's reader,
  * and the mailbox writes exactly what it accepts — that compatibility IS
  * the design. But the parser also DROPS two fields, because it rebuilds
- * every record field by field and simply does not copy `owner` or
- * `activeForm` (`extensions/sidebar/tasks.ts:105`).
+ * every record field by field (`extensions/sidebar/tasks.ts:117-128`) and
+ * simply does not copy `owner` or `activeForm`.
  *
  * For the panel that loss is invisible: `toTaskRows` reads neither, and
  * a claimed intent renders from `status: "in_progress"` alone. For the
@@ -165,6 +166,33 @@ function isProcessRunning(pid: number): boolean {
  * have changed the panel's contract to serve a package the panel does
  * not own — `tasks.ts` is explicitly not this feature's to edit.
  */
+/**
+ * Placeholder for an `owner` that is present but not a string.
+ *
+ * The mailbox file is written by "anyone — a UI button, `curl`, a cron
+ * job, another pi session" (see the design), so its shape cannot be
+ * assumed. Coercing a malformed owner to `undefined` would read a
+ * genuinely claimed intent as unclaimed mail and re-announce it forever.
+ * Failing closed in the other direction is cheap: the task is treated as
+ * claimed by an unknown party, `mailbox_claim` answers "already claimed
+ * by (malformed owner)", and the only way to un-stick it is to edit the
+ * file by hand — which is the correct outcome for a malformed file.
+ */
+export const MALFORMED_OWNER = "(malformed owner)";
+
+/**
+ * Normalize a raw `owner` into something truthy-or-absent.
+ *
+ * `undefined`, `null` and `""` are all "nobody has claimed this". Any
+ * other non-string (a number, an object, an array) becomes
+ * `MALFORMED_OWNER`, so the fail-closed rule above holds.
+ */
+function normalizeOwner(value: unknown): string | undefined {
+	if (value === undefined || value === null || value === "") return undefined;
+	if (typeof value === "string") return value;
+	return MALFORMED_OWNER;
+}
+
 export function parseMailboxJson(text: string): Task[] | null {
 	const base = parseTasksJson(text);
 	if (!base) return null;
@@ -178,8 +206,9 @@ export function parseMailboxJson(text: string): Task[] | null {
 	const extras = new Map<string, { owner?: string; activeForm?: string }>();
 	for (const item of raw.tasks as Array<Record<string, unknown>>) {
 		if (!item || typeof item !== "object" || typeof item.id !== "string") continue;
+		const owner = normalizeOwner(item.owner);
 		extras.set(item.id, {
-			owner: typeof item.owner === "string" ? item.owner : undefined,
+			...(owner ? { owner } : {}),
 			activeForm: typeof item.activeForm === "string" ? item.activeForm : undefined,
 		});
 	}
