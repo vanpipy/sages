@@ -45,9 +45,17 @@ export function projectKey(cwd: string): string {
 /**
  * Resolve `ORCHESTRATOR_WORKDIR` at call time. The env var (set by the
  * orchestrator) overrides the default `<tmpdir>/sages-orchestrator`.
+ *
+ * The optional `env` bag exists for the same reason as `envBool` and
+ * friends in `utils.ts`: the mailbox resolves its path from an injected
+ * environment so a test can assert the path without writing into the
+ * real `<tmpdir>/sages-orchestrator`. Defaulting to `process.env` keeps
+ * every existing call site unchanged.
  */
-export function orchestratorWorkdir(): string {
-	return process.env.ORCHESTRATOR_WORKDIR ?? DEFAULT_ORCHESTRATOR_WORKDIR;
+export function orchestratorWorkdir(
+	env: NodeJS.ProcessEnv = process.env,
+): string {
+	return env.ORCHESTRATOR_WORKDIR ?? DEFAULT_ORCHESTRATOR_WORKDIR;
 }
 
 /**
@@ -295,10 +303,25 @@ function readSingleFile(path: string): Task[] {
  * Build a fresh `TasksState` from the workspace's task files. `available`
  * is `false` only when no source was found at all (silent no-op for
  * non-Sages sessions).
+ *
+ * `opts.mailboxPath` merges the sidebar mailbox into the same panel.
+ * The merge — rather than a fourth `TasksSource` — is what keeps the
+ * mailbox at zero renderer cost: `countTasks` and `toTaskRows` cannot
+ * tell a merged list from a single-file one, so a dropped `intent`
+ * renders with the existing `◌` glyph and no code downstream changed.
+ *
+ * `available` also accounts for the mailbox on its own. A session with
+ * mail in the mailbox and no Sages board is not an empty session, and
+ * rendering "no tasks" there would hide the whole feature.
+ *
+ * Board tasks win an id collision with the mailbox: the board is the
+ * store the orchestrator has been writing all along, and silently
+ * shadowing one of its tasks with unrelated mail would be worse than
+ * showing two rows.
  */
 export function loadTasksState(
 	cwd: string,
-	opts: { sessionId?: string; maxRows: number },
+	opts: { sessionId?: string; maxRows: number; mailboxPath?: string },
 ): TasksState {
 	const source = resolveTasksSource(cwd, { sessionId: opts.sessionId });
 	let tasks: Task[] = [];
@@ -311,12 +334,30 @@ export function loadTasksState(
 		tasks = out.tasks;
 		usedPath = out.source;
 	}
+	let mailboxFound = false;
+	if (opts.mailboxPath) {
+		const mail = readSingleFile(opts.mailboxPath);
+		mailboxFound = existsSync(opts.mailboxPath);
+		const seen = new Set(tasks.map((t) => t.id));
+		for (const t of mail) {
+			if (seen.has(t.id)) continue;
+			seen.add(t.id);
+			tasks.push(t);
+		}
+	}
 	const counts = countTasks(tasks);
 	const { rows, truncated } = toTaskRows(tasks, opts.maxRows);
 	return {
 		enabled: true,
-		available: source !== undefined,
-		source: usedPath,
+		// `resolveTasksSource` returns `null`, never `undefined`, when it
+		// finds nothing — so this was `source !== undefined` and therefore
+		// ALWAYS true. The renderer masked it (both the unavailable and the
+		// zero-task paths print "no tasks"), but the mailbox makes the
+		// flag load-bearing: it is what distinguishes "this session has no
+		// task source at all" from "this session has mail", and the panel
+		// must not claim the latter.
+		available: source !== null || mailboxFound,
+		source: usedPath ?? opts.mailboxPath,
 		total: counts.total,
 		completed: counts.completed,
 		inProgress: counts.inProgress,

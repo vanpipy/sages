@@ -32,6 +32,7 @@ import {
 	type TasksState,
 } from "../extensions/sidebar.js";
 import { registerSidebarEventTool } from "../extensions/sidebar/sidebar-event-tool.js";
+import { mailboxPathFor } from "../extensions/sidebar/mailbox/types.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const originalEnv = { ...process.env };
@@ -1616,3 +1617,186 @@ describe("sidebar:event handler", () => {
 		expect(state.badges).toHaveLength(1);
 		});
 	});
+
+/**
+ * Acceptance criterion 1 — "dropping a JSON file with one intent into
+ * `mailbox/tasks.json` makes the panel show it within one poll interval,
+ * with the existing `◌` glyph."
+ *
+ * This is the integration seam the whole mailbox design rests on. The
+ * per-module suites prove the store writes a compatible file and that
+ * the wake machine is restrained; this proves the two meet the renderer
+ * with no renderer change at all, which is the claim the design makes.
+ */
+describe("mailbox in the panel", () => {
+	let mailboxRoot = "";
+	let cwd = "";
+
+	beforeEach(() => {
+		mailboxRoot = mkdtempSync(path.join(tmpdir(), "pi-sidebar-mailbox-panel-"));
+		cwd = path.join(mailboxRoot, "workspace");
+		mkdirSync(cwd, { recursive: true });
+		// No Sages board anywhere, so anything the panel shows came from
+		// the mailbox and nothing else.
+		process.env.ORCHESTRATOR_WORKDIR = path.join(mailboxRoot, "no-board");
+	});
+
+	afterEach(() => {
+		rmSync(mailboxRoot, { recursive: true, force: true });
+	});
+
+	function dropMail(mailboxFile: string, tasks: unknown[]) {
+		mkdirSync(path.dirname(mailboxFile), { recursive: true });
+		writeFileSync(mailboxFile, JSON.stringify({ tasks }, null, 2));
+	}
+
+	it("shows a dropped intent with the existing intent glyph", () => {
+		const mailboxFile = mailboxPathFor(cwd);
+		dropMail(mailboxFile, [
+			{
+				id: "m-3",
+				type: "intent",
+				subject: "Add retry to the uploader",
+				status: "pending",
+				blocks: [],
+				blockedBy: [],
+				metadata: {},
+				createdAt: 1756000000000,
+				updatedAt: 1756000000000,
+			},
+		]);
+
+		const tasks = loadTasksState(cwd, { maxRows: 10, mailboxPath: mailboxFile });
+		expect(tasks.available).toBe(true);
+		expect(tasks.total).toBe(1);
+		expect(tasks.intents).toBe(1);
+		expect(tasks.rows[0].status).toBe("intent");
+		expect(tasks.rows[0].subject).toBe("Add retry to the uploader");
+
+		const rendered = component(
+			{ fullHeight: false, tasks: { ...tasks, enabled: true } },
+		)
+			.render(64)
+			.join("\n");
+		expect(rendered).toContain("◌"); // the intent glyph, unchanged
+		expect(rendered).toContain("Add retry to the uploader");
+		expect(rendered).toContain("1 intent");
+	});
+
+	it("stays 'no tasks' before any mail arrives", () => {
+		const tasks = loadTasksState(cwd, {
+			maxRows: 10,
+			mailboxPath: mailboxPathFor(cwd),
+		});
+		expect(tasks.available).toBe(false);
+		expect(tasks.total).toBe(0);
+	});
+
+	it("merges the mailbox into the Sages board without dropping either", () => {
+		const projectKeyDir = path.join(
+			path.join(mailboxRoot, "no-board"),
+			projectKey(cwd),
+		);
+		const boardFile = path.join(projectKeyDir, "tasks", "tasks.json");
+		mkdirSync(path.dirname(boardFile), { recursive: true });
+		writeFileSync(
+			boardFile,
+			JSON.stringify({
+				tasks: [
+					{
+						id: "1",
+						type: "plan",
+						subject: "Board step",
+						status: "completed",
+						blocks: [],
+						blockedBy: [],
+						metadata: {},
+						createdAt: 1,
+						updatedAt: 1,
+					},
+				],
+			}),
+		);
+		const mailboxFile = mailboxPathFor(cwd);
+		dropMail(mailboxFile, [
+			{
+				id: "m-1",
+				type: "intent",
+				subject: "Mail from a cron job",
+				status: "pending",
+				blocks: [],
+				blockedBy: [],
+				metadata: {},
+				createdAt: 2,
+				updatedAt: 2,
+			},
+		]);
+
+		const tasks = loadTasksState(cwd, { maxRows: 10, mailboxPath: mailboxFile });
+		expect(tasks.total).toBe(2);
+		expect(tasks.completed).toBe(1);
+		expect(tasks.intents).toBe(1);
+		expect(tasks.rows.map((r) => r.id).sort()).toEqual(["1", "m-1"]);
+	});
+
+	it("does not double-render a task whose id appears in both files", () => {
+		const projectKeyDir = path.join(
+			path.join(mailboxRoot, "no-board"),
+			projectKey(cwd),
+		);
+		const boardFile = path.join(projectKeyDir, "tasks", "tasks.json");
+		mkdirSync(path.dirname(boardFile), { recursive: true });
+		const shared = {
+			id: "m-1",
+			type: "intent",
+			subject: "Board wins",
+			status: "pending",
+			blocks: [],
+			blockedBy: [],
+			metadata: {},
+			createdAt: 1,
+			updatedAt: 1,
+		};
+		writeFileSync(boardFile, JSON.stringify({ tasks: [shared] }));
+		const mailboxFile = mailboxPathFor(cwd);
+		dropMail(mailboxFile, [{ ...shared, subject: "Mail loses" }]);
+
+		const tasks = loadTasksState(cwd, { maxRows: 10, mailboxPath: mailboxFile });
+		expect(tasks.total).toBe(1);
+		expect(tasks.rows[0].subject).toBe("Board wins");
+	});
+
+	it("reads a malformed mailbox as empty rather than blanking the board", () => {
+		const projectKeyDir = path.join(
+			path.join(mailboxRoot, "no-board"),
+			projectKey(cwd),
+		);
+		const boardFile = path.join(projectKeyDir, "tasks", "tasks.json");
+		mkdirSync(path.dirname(boardFile), { recursive: true });
+		writeFileSync(
+			boardFile,
+			JSON.stringify({
+				tasks: [
+					{
+						id: "1",
+						type: "plan",
+						subject: "Board step",
+						status: "pending",
+						blocks: [],
+						blockedBy: [],
+						metadata: {},
+						createdAt: 1,
+						updatedAt: 1,
+					},
+				],
+			}),
+		);
+		const mailboxFile = mailboxPathFor(cwd);
+		mkdirSync(path.dirname(mailboxFile), { recursive: true });
+		writeFileSync(mailboxFile, "{ half-written");
+
+		const tasks = loadTasksState(cwd, { maxRows: 10, mailboxPath: mailboxFile });
+		expect(tasks.total).toBe(1);
+		expect(tasks.rows[0].subject).toBe("Board step");
+	});
+});

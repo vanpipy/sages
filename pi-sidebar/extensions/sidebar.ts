@@ -37,6 +37,10 @@ import {
 	shouldHideSidebar,
 } from "./sidebar/utils.js";
 import { registerSidebarEventTool } from "./sidebar/sidebar-event-tool.js";
+import { MailboxStore } from "./sidebar/mailbox/store.js";
+import { registerMailboxTools } from "./sidebar/mailbox/tools.js";
+import { mailboxEnvFrom, mailboxPathFor } from "./sidebar/mailbox/types.js";
+import { WakeMachine } from "./sidebar/mailbox/wake.js";
 
 export type { SidebarState, Task, TaskRow, TasksState } from "./sidebar/types.js";
 export {
@@ -59,6 +63,19 @@ export {
 	padAnsi,
 	shouldHideSidebar,
 } from "./sidebar/utils.js";
+export {
+	MailboxStore,
+	acquireMailboxLock,
+	allocateTaskIds,
+	childTasks,
+	compareFifo,
+	openChildTasks,
+	releaseMailboxLock,
+	unclaimedIntents,
+} from "./sidebar/mailbox/store.js";
+export { registerMailboxTools } from "./sidebar/mailbox/tools.js";
+export { mailboxEnvFrom, mailboxPathFor, type MailboxEnv } from "./sidebar/mailbox/types.js";
+export { WakeMachine, buildWakeNote, turnEndHadToolCalls } from "./sidebar/mailbox/wake.js";
 
 const COLLAPSED_SIDEBAR_WIDTH = 2;
 
@@ -430,6 +447,10 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	const autohideWorking = autohideWorkingFromEnv();
 	const tasksEnabled = envBool("PI_SIDEBAR_TASKS", true);
 	const tasksMaxRows = Math.max(1, envInt("PI_SIDEBAR_TASKS_MAX", 10));
+	// Mailbox knobs resolve once, here, for the same reason the placement
+	// config does: a default buried in a call site cannot be asserted, and
+	// an unassertable default is one that silently changes.
+	const mailboxEnv = mailboxEnvFrom();
 
 	/**
 	 * Every `PI_SIDEBAR_*` placement default is resolved here, in one
@@ -516,6 +537,77 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	let refreshing = false;
 	let refreshingTasks = false;
 
+	/**
+	 * Mailbox wiring.
+	 *
+	 * The path is a function of `cwd`, and the five tools must be live
+	 * before `session_start` fires — so the store is created ONCE at
+	 * plugin load and re-pointed on every `session_start` rather than
+	 * rebuilt. A fresh `MailboxStore` per session would leave the
+	 * registered tools holding the old instance, reading and writing a
+	 * mailbox the poller is no longer watching.
+	 */
+	const mailboxStore = new MailboxStore(mailboxPathFor(process.cwd()));
+	let wake: WakeMachine | undefined;
+	let mailboxTimer: ReturnType<typeof setInterval> | undefined;
+
+	function currentSessionId(): string {
+		const ctx = currentCtx as unknown as
+			| { sessionId?: string; sessionManager?: { sessionId?: string } }
+			| undefined;
+		const id = ctx?.sessionId ?? ctx?.sessionManager?.sessionId;
+		return typeof id === "string" && id.length > 0 ? id : "unknown-session";
+	}
+
+	/**
+	 * Re-point the store at this session's mailbox and build the wake
+	 * machine on first use. The machine reads through `mailboxStore`, so
+	 * a retarget later in the session is picked up for free.
+	 */
+	function ensureMailbox(ctx: ExtensionContext): MailboxStore {
+		mailboxStore.retarget(mailboxPathFor(ctx.cwd));
+		if (!wake) {
+			wake = new WakeMachine(
+				{
+					debounceMs: mailboxEnv.wakeDebounceMs,
+					backoffMs: mailboxEnv.wakeBackoffMs,
+				},
+				{
+					now: () => Date.now(),
+					readBoard: () => mailboxStore.read(),
+					send: (note) => {
+						// Synchronous by contract. A host that refuses the
+						// message throws, and the wake machine catches it —
+						// `wakePending` staying set IS the retry.
+						pi.sendUserMessage(note, { deliverAs: "followUp" });
+					},
+				},
+			);
+		}
+		return mailboxStore;
+	}
+
+	/**
+	 * One mailbox tick: notice mail, and speak if the session is quiet.
+	 *
+	 * Deliberately does NOT touch `state.tasks` — the panel is refreshed
+	 * by the existing `PI_SIDEBAR_REFRESH_MS` loop, which also carries
+	 * the mailbox. Two writers on `state.tasks` would mean whichever
+	 * timer fired last decided whether mail was on screen.
+	 *
+	 * The `wake` guard is also the "not started yet" guard: the machine
+	 * is built in `ensureMailbox` on `session_start`, so before that
+	 * there is no clock and nothing is owed.
+	 */
+	function pollMailbox() {
+		if (!mailboxEnv.enabled || !wake) return;
+		try {
+			wake.poll(mailboxStore.read());
+		} catch {
+			/* the panel must never die because a mailbox read did */
+		}
+	}
+
 	function requestRender() {
 		component?.invalidate();
 		tuiRef?.requestRender();
@@ -529,6 +621,12 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		() => state,
 		requestRender,
 	);
+
+	// The five mailbox tools. Registered eagerly against the one
+	// long-lived store, which `ensureMailbox` re-points on session_start.
+	if (mailboxEnv.enabled) {
+		registerMailboxTools(pi, mailboxStore, { getSessionId: currentSessionId });
+	}
 
 	function applyVisibility() {
 		// Refresh the stored overlay options in place so toggles of
@@ -553,6 +651,12 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 			const next = loadTasksState(cwd, {
 				sessionId: typeof sessionId === "string" ? sessionId : undefined,
 				maxRows: tasksMaxRows,
+				// The mailbox joins the SAME panel through the same
+				// loader, which is what makes "the panel renders the
+				// mailbox with zero renderer changes" true rather than
+				// aspirational: `countTasks` / `toTaskRows` cannot tell a
+				// merged list from a single-file one.
+				mailboxPath: mailboxEnv.enabled ? mailboxStore.path : undefined,
 			});
 			state.tasks = { ...next, enabled: tasksEnabled };
 			state.lastTasksRefresh = Date.now();
@@ -572,6 +676,10 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 	function startSidebar(ctx: ExtensionContext) {
 		if (!ctx.hasUI || component) return;
 		currentCtx = ctx;
+		// The FIRST mailbox poll fires here, before the interval is armed,
+		// so mail that arrived while no session was running is seen on
+		// the next `session_start` instead of one interval later.
+		pollMailbox();
 		void refreshTasks(ctx);
 		void ctx.ui.custom<void>(
 			(
@@ -589,10 +697,17 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 				refreshTimer = setInterval(() => {
 					void refreshTasks();
 				}, refreshMs);
+				if (mailboxEnv.enabled) {
+					mailboxTimer = setInterval(() => {
+						pollMailbox();
+					}, mailboxEnv.pollMs);
+				}
 				return {
 					dispose() {
 						if (refreshTimer) clearInterval(refreshTimer);
 						refreshTimer = undefined;
+						if (mailboxTimer) clearInterval(mailboxTimer);
+						mailboxTimer = undefined;
 						component = undefined;
 						tuiRef = undefined;
 						done();
@@ -627,6 +742,7 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		"session_start",
 		async (_event: SessionStartEvent, ctx: ExtensionContext) => {
 			currentCtx = ctx;
+			if (mailboxEnv.enabled) ensureMailbox(ctx);
 			startSidebar(ctx);
 		},
 	);
@@ -636,18 +752,30 @@ export default function sidebarPlugin(pi: ExtensionAPI) {
 		async (_event: SessionShutdownEvent, _ctx: ExtensionContext) => {
 			overlayHandle?.hide();
 			overlayHandle = undefined;
+			if (mailboxTimer) clearInterval(mailboxTimer);
+			mailboxTimer = undefined;
 		},
 	);
 
 	pi.on("turn_start", async (_event: TurnStartEvent, ctx: ExtensionContext) => {
 		currentCtx = ctx;
 		state.isStreaming = true;
+		// The wake keeps its OWN idle flag. `state.isStreaming` is the
+		// autohide signal and pi holds it true for the whole turn, so
+		// reusing it here would either never fire (autohide off) or fire
+		// exactly when the panel is hidden (autohide on).
+		wake?.onTurnStart();
 		applyVisibility();
 	});
 
 	pi.on("turn_end", async (_event: TurnEndEvent, ctx: ExtensionContext) => {
 		currentCtx = ctx;
 		state.isStreaming = false;
+		// `onTurnEnd` filters out the `turn_end`s that land mid tool-call
+		// chain — those are not idle boundaries, and injecting a follow-up
+		// into a live chain is the one failure this whole loop has.
+		wake?.onTurnEnd(_event);
+		pollMailbox();
 		void refreshTasks(ctx);
 		applyVisibility();
 	});
