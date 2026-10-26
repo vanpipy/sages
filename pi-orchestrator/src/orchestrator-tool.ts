@@ -931,6 +931,33 @@ function emitSidebarEvent(
 }
 
 /**
+ * The orchestrator's own LLM-facing tool names — the single source of
+ * truth for BOTH the registrations in `registerOrchestratorTools` and the
+ * `setActiveTools` allowlist in `extension.ts`.
+ *
+ * Why this constant exists: pi's `pi.setActiveTools(...)` REPLACES the
+ * active tool set; it is not additive. A tool that is registered in the
+ * tool registry but missing from the allowlist is invisible to the model,
+ * and every call to it fails with "Tool <name> not found".
+ *
+ * That is exactly what happened between 2026-10-11 (`dbf53aa`, which
+ * retired the goal-contract tool and with it the `...ORCHESTRATOR_TOOLS`
+ * spread in the allowlist) and the fix that introduced this constant:
+ * the orchestrator's six consumer tools were registered but not
+ * allowlisted, so none of them could be called. The allowlist now
+ * spreads this constant, and `extension-active-tools.test.ts` asserts
+ * that the registered names and the allowlist stay in lockstep.
+ */
+export const ORCHESTRATOR_TOOL_NAMES = [
+	"task_inspect",
+	"task_consume",
+	"task_convert_intent",
+	"task_plan_intent",
+	"task_add_phase",
+	"task_close_intent",
+] as const;
+
+/**
  * Register the orchestrator's three LLM-facing tools on the given pi
  * extension (in addition to pi-tasks's 7 tools, which are separately
  * registered by pi-tasks itself):

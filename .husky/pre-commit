@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Resolve the current repository root dynamically so this hook works
+# in any worktree (the previous hard-coded `cd ~/Project/sages` only
+# covered the original checkout and silently re-ran typecheck + tests
+# against the wrong tree in any managed worktree).
+#
+# GC-2026-073: the conductor (`./pi/`) was retired; pi:typecheck /
+# pi:test scripts (which ran in the deleted `./pi/` workspace) were
+# replaced with `pi-orchestrator:typecheck` / `pi-orchestrator:test`
+# pointing at the surviving `./pi-orchestrator/` workspace.
+#
+# GC-2026-orchestrator-prompt-refactor: restored. `bc7c002` deleted this
+# file but left the contract in place — root `AGENTS.md` still names the
+# pre-commit hook as the only gate that runs automatically, and the
+# `orchestrator:typecheck` / `orchestrator:test` scripts it calls are
+# still in the root `package.json`. Husky's `_/pre-commit` shim exits 0
+# when the user hook file is absent, so every commit since then ran
+# ungated. This restores the enforcement the repo documents.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT" || exit 1
+bun run orchestrator:typecheck || exit 1
+bun run orchestrator:test || exit 1

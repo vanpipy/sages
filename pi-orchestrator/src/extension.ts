@@ -10,9 +10,11 @@
  * session-hook layer + a brainstorming slash command:
  *
  *   - session_start: `pi.setActiveTools([...])` gates which tools the
- *     LLM can see (PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL / AFT /
- *     BASELINE) — none of those are owned by the orchestrator; the
- *     orchestrator only curates the allowlist.
+ *     LLM can see. pi's `setActiveTools` REPLACES the active tool set,
+ *     so the array must contain every tool the orchestrator registers
+ *     itself (the six in `ORCHESTRATOR_TOOL_NAMES`) plus the peer-owned
+ *     families it curates (PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL /
+ *     AFT / BASELINE / PI_ROUTINES).
  *   - before_agent_start: prepend `templates/SYSTEM.md` (the orchestrator
  *     constitution) to the LLM system prompt.
  *   - tool_call: once-per-session soft-mode reminder that fires on the
@@ -36,7 +38,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerOrchestratorTools } from "./orchestrator-tool.js";
+import { ORCHESTRATOR_TOOL_NAMES, registerOrchestratorTools } from "./orchestrator-tool.js";
 
 /**
  * Tools registered by `@sages/pi-subagents` (`pi-subagents/src/index.ts`
@@ -51,13 +53,22 @@ export const PI_SUBAGENT_TOOLS = [
 ] as const;
 
 /**
- * Tools registered by `@sages/pi-subagents` (GC-2026-boundary-subagent-control
- * moved the registration out of the orchestrator). These delegate to
- * the same `AgentManager` singleton via the shared globalThis registry
- * key `Symbol.for("pi-subagents:manager")` — there is exactly one
- * manager, shared end-to-end with the `Agent` tool. The orchestrator's
- * constant is purely for `setActiveTools` filtering; it does NOT
- * register anything.
+ * Subagent-control tool NAMES — the orchestrator's constant is purely
+ * for `setActiveTools` filtering; it does NOT register anything.
+ *
+ * GC-2026-boundary-subagent-control moved the registration out of the
+ * orchestrator and into `@sages/pi-subagents`. That implementation was
+ * subsequently removed from pi-subagents by `a36ae68` (2026-10-11,
+ * "chore sync upstream") along with its test file; `pi-subagents/src/`
+ * today registers no `subagent_*` tool. pi's `setActiveTools` silently
+ * drops names that are not in the tool registry, so these four are
+ * currently NOT live — the model sees no such tool and any call fails
+ * with "Tool <name> not found".
+ *
+ * The names are retained here so the allowlist is ready for a future
+ * re-registration, but the prompt layer must not advertise them until
+ * that happens. See the prompt-refactor design doc, open decision D7
+ * (restore the control tools vs. retire the capability).
  */
 export const SUBAGENT_CONTROL_TOOLS = [
 	"subagent_status",
@@ -190,6 +201,11 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 	// 1. session_start — setActiveTools + setStatus.
 	pi.on("session_start", () => {
 		const tools: string[] = [
+			// The orchestrator's OWN tools. pi's setActiveTools replaces the
+			// active set, so omitting these makes them invisible to the
+			// model even though they are registered. See
+			// ORCHESTRATOR_TOOL_NAMES in ./orchestrator-tool.ts.
+			...ORCHESTRATOR_TOOL_NAMES,
 			...PI_TASKS_TOOLS,
 			...SUBAGENT_TOOLS,
 			...AFT_TOOLS,

@@ -37,17 +37,17 @@ evidence. Three guiding principles govern the work (soft mode — GC-2026-031):
    (including `rm` / `mv` / `cp` / `unlink` / `rmdir`). Soft mode never
    blocks; it nudges. See "Soft Mode (the only mode)" below for the
    recommendation mechanism.
-2. **Production code uses managed-worktree dispatch.** RECOMMENDED for
+2. **Production code uses isolated dispatch.** RECOMMENDED for
    `src/`, `test/`, `lib/`, every `pi-*/` subpackage
    (pi-orchestrator, pi-subagents, pi-tasks, pi-codebase-memory,
    pi-evaluator), or any root source file: dispatch `Developer` with
-   `isolation: { goal_id, task_id, mode: "create" }` and use TDD. For ≤2-item
+   `isolation: "worktree"` and use TDD. For ≤2-item
    workflows direct editing is also acceptable.
-3. **Root meta-files use current-workspace dispatch (lightweight).** For
+3. **Root meta-files use in-checkout dispatch (lightweight).** For
    root-level docs and config (`.pi/orchestrator/*`, `.pi/agents/*`,
    `.claude/`, `.codex/`, root `README.md`, `AGENTS.md`, `package.json`,
-   `tsconfig*.json`, `.gitignore`, `.aft.jsonc`), dispatch `Developer` with
-   `isolation: "current-workspace"` and `tdd: "none"`; review the diff before
+   `tsconfig*.json`, `.gitignore`, `.aft.jsonc`), dispatch `Developer`
+   without isolation (the default `"off"`) and `tdd: "none"`; review the diff before
    committing. Direct editing in the main session is also acceptable for
    ≤2-item workflows. **Every Sages package subtree (every `pi-*/`)
    is production code** — no carve-outs (GC-2026-029).
@@ -96,13 +96,16 @@ Only two agent types ship as built-in defaults in `@sages/pi-subagents`:
 
 | `subagent_type` | Background | Use | Isolation |
 |---|---:|---|---|
-| `Developer` | yes | TDD implementation or meta-file writing | explicit object or `"current-workspace"` |
-| `Reviewer` | yes | Code review (reads Developer's `metadata.result`, emits the 4-state verdict: CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION) | explicit object (worktree-isolated) |
+| `Developer` | yes | TDD implementation or meta-file writing | `"worktree"` for production code, `"off"` for meta-files |
+| `Reviewer` | yes | Code review (reads Developer's `metadata.result`, emits the 4-state verdict: CLEAN / NEEDS_WORK / NEEDS_REDESIGN / NEEDS_CLARIFICATION) | `"worktree"` |
 
-The complete invocation contract, isolation modes, and examples are in
+The `Agent` tool description is in
 `pi-orchestrator/templates/agent-tool-description.md`, installed as
 `~/.pi/agent/agent-tool-description.md` (the LLM-visible Agent tool
-description). `defaultRunInBackground()` in
+description); the isolation contract is in
+`pi-orchestrator/templates/SYSTEM.md` §7, and the tool reference manual
+is in `pi-orchestrator/skills/orchestrator/SKILL.md` §6.
+`defaultRunInBackground()` in
 `pi-subagents/src/agent-manager.ts` is the background-policy source
 of truth.
 
@@ -191,23 +194,32 @@ data. Cascade across blocked tasks is unconditional (no
 - `pi-orchestrator/src/extension.ts` — orchestrator entrypoint
   (default export wires `installSessionHooks` +
   `registerOrchestratorTools`, which registers `task_inspect`,
-  `task_consume`, `task_convert_intent`). The orchestrator curates
+  `task_consume`, `task_convert_intent`, `task_plan_intent`,
+  `task_add_phase` and `task_close_intent`). The orchestrator curates
   PI_TASKS / PI_SUBAGENT / SUBAGENT_CONTROL / PI_ROUTINES / AFT /
   BASELINE tool allowlists via `setActiveTools` at session_start.
-- `pi-orchestrator/src/orchestrator-tool.ts` — the three LLM-facing
-  consumer tools (`task_inspect`, `task_consume`,
-  `task_convert_intent`) plus the `PHASE_AGENT_TYPE` map used by
-  `task_convert_intent` to derive `agentType` from `phase`.
+- `pi-orchestrator/src/orchestrator-tool.ts` — the six LLM-facing
+  consumer tools (`task_inspect`, `task_consume`, `task_convert_intent`,
+  `task_plan_intent`, `task_add_phase`, `task_close_intent`) plus the
+  `PHASE_AGENT_TYPE` map used by `task_convert_intent` to derive
+  `agentType` from `phase`.
 - `pi-orchestrator/src/phase-validation.ts` — runtime shape +
   rationale + per-phase validation rules for `task_convert_intent`.
 - `pi-orchestrator/src/brainstorming/` — the `/brainstorm` slash
   command's 5-phase state machine (exploring → grilling → proposing →
   designing → approved).
-- `pi-orchestrator/skills/orchestrator/SKILL.md` — full workflow reference
+- `pi-orchestrator/skills/orchestrator/SKILL.md` — the on-demand
+  playbook (workflow) plus the tool reference manual
 - `pi-orchestrator/templates/agent-tool-description.md` — Agent tool
   description template (LLM-visible after install)
-- `pi-orchestrator/templates/SYSTEM.md` — orchestrator constitution
-  prepended to every agent system prompt.
+- `pi-orchestrator/templates/SYSTEM.md` — the always-on orchestrator
+  operating policy prepended to every agent system prompt
+
+The prompt suite is layered: `SYSTEM.md` holds the policy that holds at
+all times, `SKILL.md` holds the method and the manual, and
+`agent-tool-description.md` holds the `Agent` tool itself. Each fact has
+one owner; `pi-orchestrator/test/prompt-consistency.test.ts` fails the
+build when a prompt names a tool the runtime does not register.
 
 The package map belongs in [README.md § Repository layout](README.md#repository-layout).
 
@@ -238,7 +250,7 @@ recommendation mechanism is the **task-count threshold**:
   `task_convert_intent(plan)` tool converts one intent task into N
   plan tasks in one call (with shape-validated `intent_shape` +
   `rationale` + `phases[]`). Production code edits dispatch
-  `Developer` with managed-worktree isolation; the TDD discipline,
+  `Developer` with `isolation: "worktree"`; the TDD discipline,
   worktree isolation, and Reviewer evidence trail all pay off at
   this scale.
 - If your active task list has **≤2 items**, direct handling with
@@ -279,11 +291,10 @@ fallback.
    implementation (GREEN), then refactor.
 2. **Read the agent's partial output** (transcript at
    `/tmp/pi-subagents-*/.../tasks/<agent_id>.output`) before continuing.
-3. **Commit on the worker's worktree branch** if the dispatch used
-    a managed-worktree object (`{ goal_id, task_id, mode: "create" }`)
-   — orchestrator-side commits land directly on the worker's branch.
-   If the dispatch used `"current-workspace"`, commits land on the
-   orchestrator's branch.
+3. **Commit on the worker's branch** if the dispatch used
+   `isolation: "worktree"` — the worker's work lives on the branch
+   named in its result, so orchestrator-side commits land there.
+   Otherwise the commits land on the orchestrator's branch.
 4. **Record findings** in the dispatch's task metadata
    (`metadata.developer_commits` list on the task) — the Reviewer agent
    reads `metadata.result` of the prior task to verify evidence.
@@ -304,15 +315,22 @@ subagent dispatch.
    active task list has more than two items, prefer the pi-tasks
    workflow (`TaskCreate` × N + `TaskExecute`, optionally via
    `task_convert_intent(plan)` for the intent-driven flow) or dispatch
-   `Developer` with managed-worktree isolation (for production code)
-   or `isolation: "current-workspace"` + `tdd: "none"` (for meta-file
+   `Developer` with `isolation: "worktree"` (for production code)
+   or with `tdd: "none"` in the current checkout (for meta-file
    edits). The main agent may handle ≤2 tasks directly with
    `edit` / `write` / `bash`. Soft mode never blocks — including
    `rm` / `mv` / `cp` / `unlink` / `rmdir`.
-2. **Never use `isolation: "worktree"`.** Use the explicit managed-worktree
-   object or `"current-workspace"`.
-3. **Never omit `Developer` isolation.** Every developer dispatch must choose an
-   explicit mode.
+2. **Never pass an isolation value the schema does not accept.** The
+   `Agent` tool's `isolation` parameter takes `"off"` or `"worktree"` —
+   nothing else. An object form such as
+   `{ goal_id, task_id, mode }` is a schema violation, not a fallback:
+   the managed-worktree feature it describes was removed from
+   `pi-subagents` in `a36ae68`.
+3. **Isolate production dispatches.** A `Developer` that touches
+   production code runs with `isolation: "worktree"`; meta-file work may
+   run in the current checkout. Never dispatch a production `Developer`
+   without isolation. Commit before dispatching: the worktree is created
+   at `HEAD`, so the worker cannot see your uncommitted changes.
 4. **Respect `.pi/orchestrator/` namespace ownership.** The orchestrator
    owns no per-task state file; subagents may write optional evidence
    under `.pi/orchestrator/` but must not overwrite each other.

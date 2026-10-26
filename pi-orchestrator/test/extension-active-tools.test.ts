@@ -1,23 +1,33 @@
 /**
- * extension-active-tools.test.ts — post goal-contract removal.
+ * extension-active-tools.test.ts — the session_start allowlist.
  *
- * After chore/remove-goal-contract the orchestrator owns zero tools of
- * its own. This file now asserts the remaining 4 allowlists that the
- * session_start hook still curates:
+ * The orchestrator registers six LLM-facing consumer tools of its own
+ * (`task_inspect` / `task_consume` / `task_convert_intent` /
+ * `task_plan_intent` / `task_add_phase` / `task_close_intent`) and
+ * curates an allowlist of peer-owned tools:
  *   - PI_SUBAGENT_TOOLS contains 3 tools (Agent / get_subagent_result /
  *     steer_subagent — registered by `@sages/pi-subagents`)
- *   - SUBAGENT_CONTROL_TOOLS contains 4 tools (subagent_status / steer /
- *     abort / resume — registered by `@sages/pi-subagents` since
- *     GC-2026-boundary-subagent-control; orchestrator's constant
- *     is wiring-only)
+ *   - SUBAGENT_CONTROL_TOOLS contains 4 names (subagent_status / steer /
+ *     abort / resume). The implementation was removed from pi-subagents
+ *     in `a36ae68` (2026-10-11); the names stay in the allowlist but pi
+ *     drops unknown names, so they are not live. See the prompt-refactor
+ *     design doc, open decision D7.
  *   - SUBAGENT_TOOLS is the concatenation of the above two
  *   - BASELINE_TOOLS contains 7 file-system tools
  *   - PI_TASKS_TOOLS contains 7 workflow tools
  *   - AFT_TOOLS contains 11 tools (registered by `@cortexkit/aft-pi`)
+ *   - PI_ROUTINES_TOOLS contains 6 tools (registered by `@sages/pi-routines`)
+ *   - ORCHESTRATOR_TOOL_NAMES contains the orchestrator's own 6
  *
- * Total active toolset: 7 (SUBAGENT) + 7 (PI_TASKS) + 11 (AFT) +
- * 7 (BASELINE) = 32. Was 33 pre-chore/remove-goal-contract (when the
- * orchestrator contributed `goal_contract_create`).
+ * Total allowlist: 6 (orchestrator) + 7 (SUBAGENT) + 7 (PI_TASKS) +
+ * 11 (AFT) + 7 (BASELINE) + 6 (PI_ROUTINES) = 44.
+ *
+ * REGRESSION GUARD: pi's `setActiveTools` REPLACES the active tool set
+ * (it is not additive). A tool that is registered but missing from this
+ * allowlist is invisible to the model and every call returns
+ * "Tool <name> not found". Between 2026-10-11 and the fix that carried
+ * this guard, the orchestrator's own six tools were in exactly that
+ * state — registered in the tool registry, absent from the allowlist.
  *
  * Run: cd pi-orchestrator && bun test ./test/extension-active-tools.test.ts
  */
@@ -36,6 +46,7 @@ import {
 	PI_ROUTINES_TOOLS,
 	AFT_TOOLS,
 } from "../src/extension.js";
+import { ORCHESTRATOR_TOOL_NAMES } from "../src/orchestrator-tool.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -101,13 +112,24 @@ describe("AFT_TOOLS constant (GC-2026-086)", () => {
 });
 
 describe("existing tool allowlist constants — regression (post goal-contract removal)", () => {
-	it("ORCHESTRATOR_TOOLS is no longer exported from extension.ts (orchestrator owns zero tools)", () => {
+	it("the retired goal-contract ORCHESTRATOR_TOOLS constant is still not exported from extension.ts", () => {
 		// The orchestrator's previous `ORCHESTRATOR_TOOLS = ["goal_contract_create"]`
 		// was retired along with the tool itself. Asserting against the
 		// export would be impossible (compile error); instead this test
 		// pins the source-level contract.
 		const src = readFileSync(EXTENSION_TS_PATH, "utf-8");
 		expect(src).not.toMatch(/export\s+const\s+ORCHESTRATOR_TOOLS\b/);
+	});
+
+	it("ORCHESTRATOR_TOOL_NAMES holds exactly the 6 orchestrator-owned consumer tools", () => {
+		expect(ORCHESTRATOR_TOOL_NAMES).toEqual([
+			"task_inspect",
+			"task_consume",
+			"task_convert_intent",
+			"task_plan_intent",
+			"task_add_phase",
+			"task_close_intent",
+		]);
 	});
 
 	it("PI_SUBAGENT_TOOLS contains exactly the 3 tools registered by pi-subagents", () => {
@@ -171,8 +193,14 @@ describe("session_start hook text scan (GC-2026-orchestrator-simplify)", () => {
 		expect(block).toContain("...AFT_TOOLS");
 	});
 
-	it("session_start hook does NOT spread ORCHESTRATOR_TOOLS (retired)", () => {
-		expect(block).not.toContain("...ORCHESTRATOR_TOOLS");
+	it("session_start hook does NOT spread the retired ORCHESTRATOR_TOOLS constant", () => {
+		expect(block).not.toContain("...ORCHESTRATOR_TOOLS,");
+	});
+
+	it("session_start hook spreads ORCHESTRATOR_TOOL_NAMES (the orchestrator's own 6 tools)", () => {
+		// pi's setActiveTools REPLACES the active tool set. A registered
+		// tool that is missing from this array is invisible to the model.
+		expect(block).toContain("...ORCHESTRATOR_TOOL_NAMES");
 	});
 
 	it("session_start hook spreads SUBAGENT_TOOLS (regression)", () => {
@@ -197,7 +225,7 @@ describe("session_start hook text scan (GC-2026-orchestrator-simplify)", () => {
 });
 
 describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", () => {
-	it("fires setActiveTools with 32 entries: 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline (post goal-contract removal removed the orchestrator's single tool)", async () => {
+	it("fires setActiveTools with 44 entries: 6 orchestrator + 7 subagent + 7 pi-tasks + 11 AFT + 7 baseline + 6 pi-routines", async () => {
 		const activeToolsCalls: string[][] = [];
 		const pi = {
 			setActiveTools(tools: string[]) {
@@ -230,7 +258,11 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 
 		expect(activeToolsCalls.length).toBe(1);
 		const tools = activeToolsCalls[0];
-		// No orchestrator-owned tool post goal-contract removal.
+		// The orchestrator's own six consumer tools MUST be in the
+		// allowlist — pi's setActiveTools replaces the active set, so an
+		// omission makes them invisible to the model.
+		for (const t of ORCHESTRATOR_TOOL_NAMES) expect(tools).toContain(t);
+		// Retired goal-contract-era tools stay out.
 		expect(tools).not.toContain("goal_contract_create");
 		expect(tools).not.toContain("decompose_task");
 		expect(tools).not.toContain("dag_synthesize");
@@ -247,9 +279,37 @@ describe("session_start end-to-end via MockPi (GC-2026-orchestrator-simplify)", 
 		for (const t of BASELINE_TOOLS) expect(tools).toContain(t);
 		// PI_ROUTINES family (opt-in via install.sh; sage pi-routines peer)
 		for (const t of PI_ROUTINES_TOOLS) expect(tools).toContain(t);
-		// Total: 7 + 7 + 11 + 7 + 6 = 38, no duplicates
-		expect(tools.length).toBe(38);
-		expect(new Set(tools).size).toBe(38);
+		// Total: 6 + 7 + 7 + 11 + 7 + 6 = 44, no duplicates
+		expect(tools.length).toBe(44);
+		expect(new Set(tools).size).toBe(44);
+	});
+});
+
+describe("orchestrator tool registration matches ORCHESTRATOR_TOOL_NAMES", () => {
+	it("registers exactly the six names the allowlist advertises", async () => {
+		const registered: string[] = [];
+		const pi = {
+			setActiveTools(_tools: string[]) {
+				/* noop */
+			},
+			setStatus() {
+				/* noop */
+			},
+			registerTool(def: { name: string }) {
+				registered.push(def.name);
+			},
+			appendEntry() {
+				/* noop */
+			},
+			on() {
+				/* noop */
+			},
+		};
+
+		const ext = await import("../src/extension.js");
+		ext.default(pi as unknown as Parameters<typeof ext.default>[0]);
+
+		expect(registered.slice().sort()).toEqual([...ORCHESTRATOR_TOOL_NAMES].sort());
 	});
 });
 
@@ -322,8 +382,8 @@ describe("setActiveTools order — pi-tasks/AFT before BASELINE", () => {
 		expect(lastPiTasksIdx).toBeLessThan(firstBaselineIdx);
 	});
 
-	it("keeps the 38-entry total after reorder (no silent additions / removals — was 33 before goal-contract removal, then 32 after subagent/pi-routines split)", async () => {
+	it("keeps the 44-entry total after reorder (no silent additions / removals)", async () => {
 		const tools = await captureTools();
-		expect(tools.length).toBe(38);
+		expect(tools.length).toBe(44);
 	});
 });

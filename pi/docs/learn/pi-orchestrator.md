@@ -2,21 +2,22 @@
 
 > Source: `pi-orchestrator/` (workspaces member; npm namespace
 > `@sages/pi-orchestrator`).
-> File count: 5 source files in `src/` (extension.ts, index.ts,
-> orchestrator-tool.ts, verdict.ts, brainstorming/{index,state,types}.ts),
+> File count: 8 source files in `src/` (extension.ts, index.ts,
+> orchestrator-tool.ts, phase-validation.ts, verdict.ts,
+> brainstorming/{index,state,types}.ts),
 > plus `templates/`, `skills/`, `scripts/install.sh`.
 
 ## Purpose
 
 The orchestrator is the LLM's session shell. It does three things:
 
-1. **Curate the tool allowlist** on `session_start` (`extension.ts:179`)
+1. **Curate the tool allowlist** on `session_start` (`extension.ts:202`)
    so the LLM sees only the tools it should use, in the right
    priority order.
-2. **Prepend the orchestrator constitution** (`templates/SYSTEM.md`)
-   on every `before_agent_start` (`extension.ts:194`).
+2. **Prepend the orchestrator operating policy** (`templates/SYSTEM.md`)
+   on every `before_agent_start` (`extension.ts:222`).
 3. **Fire the once-per-session soft-mode reminder** on the first side-
-   effecting tool call (`extension.ts:209`).
+   effecting tool call (`extension.ts:237`).
 
 On top of that shell, it registers six LLM-facing consumer tools
 (post `GC-2026-iterative-intent-plan`): two read-side
@@ -50,11 +51,11 @@ Per `pi-orchestrator/package.json:18–26`:
 ```
 
 So the package's `pi` entry point is `src/extension.ts`, which exports
-`registerOrchestratorExtension` (`extension.ts:236`) as default.
+`registerOrchestratorExtension` (`extension.ts:267`) as default.
 
 `src/index.ts` is the public re-export surface for non-extension callers:
 
-- Re-exports brainstorming helpers (`pi-orchestrator/src/index.ts:13–33`).
+- Re-exports brainstorming helpers (`pi-orchestrator/src/index.ts:14–33`).
 - Exposes `BrainstormContextResult` / `BrainstormResponse` /
   `TransitionResult` / `OrchestratorPlanContext` types plus the
   `startBrainstorm` / `processClarifyingPhase` / `processProposingPhase`
@@ -69,59 +70,60 @@ So the package's `pi` entry point is `src/extension.ts`, which exports
 
 ## Key symbols
 
-Top 10, ordered by importance:
+Top 11, ordered by importance:
 
-1. **`installSessionHooks`** — `pi-orchestrator/src/extension.ts:177`.
+1. **`installSessionHooks`** — `pi-orchestrator/src/extension.ts:200`.
    The three lifecycle hooks:
-   - `session_start` (`extension.ts:179`): the array body starts at
-     `:180` — `pi.setActiveTools([...PI_TASKS_TOOLS, ...SUBAGENT_TOOLS, ...AFT_TOOLS, ...BASELINE_TOOLS, ...PI_ROUTINES_TOOLS])`,
+   - `session_start` (`extension.ts:202`): the array body starts at
+     `:203` — `pi.setActiveTools([...PI_TASKS_TOOLS, ...SUBAGENT_TOOLS, ...AFT_TOOLS, ...BASELINE_TOOLS, ...PI_ROUTINES_TOOLS])`,
      plus an optional status notification.
-   - `before_agent_start` (`extension.ts:194`): prepends
+   - `before_agent_start` (`extension.ts:222`): prepends
      `templates/SYSTEM.md` to the LLM's system prompt.
-   - `tool_call` (`extension.ts:209`): fires `SOFT_MODE_REMINDER`
-     (`extension.ts:149`) once per session on the first
+   - `tool_call` (`extension.ts:237`): fires `SOFT_MODE_REMINDER`
+     (`extension.ts:167`) once per session on the first
      side-effecting call (`bash` / `edit` / `write`).
 
 2. **`registerOrchestratorExtension`** (default export) —
-   `pi-orchestrator/src/extension.ts:236`. Wires `installSessionHooks`
-   + `registerOrchestratorTools` (`orchestrator-tool.ts:504`).
+   `pi-orchestrator/src/extension.ts:267`. Wires `installSessionHooks`
+   + `registerOrchestratorTools` (`orchestrator-tool.ts:983`).
 
 3. **Tool allowlist constants** — `pi-orchestrator/src/extension.ts`.
-   - `PI_SUBAGENT_TOOLS` (`:41`): `["Agent", "get_subagent_result", "steer_subagent"]`.
-   - `SUBAGENT_CONTROL_TOOLS` (`:56`): `["subagent_status", "subagent_steer", "subagent_abort", "subagent_resume"]`.
-     These names are documented in `templates/agent-tool-description.md`
-     and `templates/SYSTEM.md` but the registration site is in
-     `pi-subagents` (not in this package) — see
-     [`pi-subagents.md`](./pi-subagents.md#discrepancy-watch).
-   - `SUBAGENT_TOOLS` (`:67`): the union of the two above.
-   - `BASELINE_TOOLS` (`:76`): `["bash", "read", "edit", "write", "grep", "find", "ls"]`.
-   - `PI_TASKS_TOOLS` (`:91`): the 7 `Task*` tools from `@sages/pi-tasks`.
-   - `AFT_TOOLS` (`:105`): the 11 AFT tools from `@cortexkit/aft-pi`.
-   - `PI_ROUTINES_TOOLS` (`:135`): the 6 routines tools from
+   - `PI_SUBAGENT_TOOLS` (`:49`): `["Agent", "get_subagent_result", "steer_subagent"]`.
+   - `SUBAGENT_CONTROL_TOOLS` (`:73`): `["subagent_status", "subagent_steer", "subagent_abort", "subagent_resume"]`.
+     These names are still passed to `pi.setActiveTools`, but no
+     extension registers them — the `pi-subagents` implementation was
+     dropped in `a36ae68`, and the prompt suite no longer advertises
+     them either (see
+     [`pi-subagents.md`](./pi-subagents.md#discrepancy-watch)).
+   - `SUBAGENT_TOOLS` (`:84`): the union of the two above.
+   - `BASELINE_TOOLS` (`:93`): `["bash", "read", "edit", "write", "grep", "find", "ls"]`.
+   - `PI_TASKS_TOOLS` (`:108`): the 7 `Task*` tools from `@sages/pi-tasks`.
+   - `AFT_TOOLS` (`:122`): the 11 AFT tools from `@cortexkit/aft-pi`.
+   - `PI_ROUTINES_TOOLS` (`:153`): the 6 routines tools from
      `pi-routines` (SAGES sage peer / fork of
      `@davecodes/pi-routines@0.6.0`; opt-in; missing extension
      degrades gracefully).
 
-4. **`task_inspect`** — `pi-orchestrator/src/orchestrator-tool.ts:116`
-   (function) / registered at `:505`.
+4. **`task_inspect`** — registered at
+   `pi-orchestrator/src/orchestrator-tool.ts:985`.
    Read just the routing-relevant fields of a task:
    `id`, `subject`, `type`, `status`, `agentType`, `hasResult`.
    Lets the orchestrator's LLM route on the result
    (`type='intent'` → `task_convert_intent`, `plan + pending` →
    `TaskExecute`, `plan + completed` → `task_consume`).
-   `InspectParams` is declared at `orchestrator-tool.ts:77`,
-   `InspectOutput` at `:88`, `TaskInspectError` at `:98`.
+   `InspectParams` is declared at `orchestrator-tool.ts:79`,
+   `InspectOutput` at `:90`, `TaskInspectError` at `:100`.
 
-5. **`task_consume`** — `pi-orchestrator/src/orchestrator-tool.ts:195`
-   (function) / registered at `:518`.
+5. **`task_consume`** — registered at
+   `pi-orchestrator/src/orchestrator-tool.ts:998`.
    Read a completed plan task's result. Returns
    `{ id, subject, status, agentType, result, verdict?, read_at, follow_up_suggestion? }`.
    Pure read — does NOT mutate the store. Errors:
    `TaskConsumeError(kind: "not_found" | "not_completed" | "not_plan")`
-   (`orchestrator-tool.ts:180`).
+   (`orchestrator-tool.ts:182`).
 
-6. **`task_convert_intent`** — `pi-orchestrator/src/orchestrator-tool.ts:384`
-   (function) / registered at `:533`.
+6. **`task_convert_intent`** — registered at
+   `pi-orchestrator/src/orchestrator-tool.ts:1035`.
    The unique intent → plan converter. Reads an intent task, marks it
    converted (audit: `metadata.converted / converted_at / intent_shape
    / rationale`, flips `status: "completed"`), and creates plan tasks
@@ -134,12 +136,26 @@ Top 10, ordered by importance:
    `phases`, and plans that violate the shape rules. Errors:
    `ConvertIntentError(kind: "intent_not_found" | "not_intent" |
    "already_converted" | "empty_phases" | "shape_violation")`
-   (`orchestrator-tool.ts:363`). The plan tasks get
+   (`orchestrator-tool.ts:365`). The plan tasks get
    `metadata.source_intent`, `metadata.phase`, and `metadata.agentType`
    auto-stamped.
 
-7. **`parseVerdict` / `suggestFollowUp`** —
-   `pi-orchestrator/src/verdict.ts:40 / 55`. Pure functions over the
+7. **`task_plan_intent` / `task_add_phase` / `task_close_intent`** —
+   registered at `pi-orchestrator/src/orchestrator-tool.ts:1086 / 1099 /
+   1115`. The iterative intent→plan trio, used instead of the atomic
+   converter when the plan is built one phase at a time:
+   - `task_plan_intent` (step 1) declares `intent_shape` + `rationale`
+     on the intent and stamps `metadata.planning`; it creates no tasks
+     and the intent stays `pending`.
+   - `task_add_phase` (step 2) materializes one plan task per call and
+     validates the running phase list against the declared shape via
+     `validateCumulativePhases` (`phase-validation.ts:139`).
+   - `task_close_intent` (step 3, terminal) flips the intent to
+     `completed` and runs `validatePlanShape`
+     (`phase-validation.ts:238`) over the accumulated phases.
+
+8. **`parseVerdict` / `suggestFollowUp`** —
+   `pi-orchestrator/src/verdict.ts:40 / 68`. Pure functions over the
    Reviewer's result text. `parseVerdict` accepts `verdict: STATE`,
    `Verdict = STATE`, `**verdict:** STATE`, or a standalone line
    matching the token (case-insensitive). `suggestFollowUp` returns a
@@ -151,9 +167,9 @@ Top 10, ordered by importance:
    The `Verdict` union (`:23`) is the canonical 4-state shape used
    across the codebase.
 
-8. **Brainstorming slash command pipeline** —
+9. **Brainstorming slash command pipeline** —
    `pi-orchestrator/src/brainstorming/index.ts`. Re-exported through
-   `pi-orchestrator/src/index.ts:13-31`; defined in
+   `pi-orchestrator/src/index.ts:14-33`; defined in
    `pi-orchestrator/src/brainstorming/index.ts`. Top entries:
    - `startBrainstorm(cwd, request?)` (`:425`): discover project
      context, emit the initial "exploring" message.
@@ -168,23 +184,22 @@ Top 10, ordered by importance:
      `writeDesignDoc` (`:372`) into
      `orchestratorDesignsDir(cwd)` (the path resolved from
      `@sages/pi-tasks/task-paths`).
-   - `parseTransitionResponse` (`:633`) + `generateApprovalMessage`
-     (`:596`): the proceed / defer / exit hint after approval.
-   - `createOrchestratorContext` (`:665`): in-memory handoff — the
+   - `parseTransitionResponse` (`:634`) + `generateApprovalMessage`
+     (`:597`): the proceed / defer / exit hint after approval.
+   - `createOrchestratorContext` (`:666`): in-memory handoff — the
      design doc + intent + project context are surfaced so the LLM
      can feed them into raw `TaskCreate × N + TaskExecute` (no
      orchestrator tool mediates the transition post-GC-2026-remove-goal-contract).
 
-9. **`BrainstormStateMachine`** —
+10. **`BrainstormStateMachine`** —
    `pi-orchestrator/src/brainstorming/state.ts:39`. Drives the phase
    transitions: `exploring → clarifying → proposing → designing → approved/cancelled`.
-   Valid transitions table at `:39`. `process(event)` dispatches on
-   the event union (`brainstorming/types.ts:264`). Helpers `isTerminalPhase` (`:346`)
-   and `isActivePhase` (`:350`).
+   Valid transitions table at `:25`. `process(event)` dispatches on
+   the event union (`brainstorming/types.ts:264`).
 
-10. **Template assets** —
-    - `templates/SYSTEM.md` — orchestrator constitution (loaded at
-      `extension.ts:165`, applied at `:194`).
+11. **Template assets** —
+    - `templates/SYSTEM.md` — the always-on orchestrator operating
+      policy (path const at `extension.ts:192`, applied at `:224`).
     - `templates/agent-tool-description.md` — the LLM-visible `Agent`
       tool description, installed to `~/.pi/agent/agent-tool-description.md`
       by `scripts/install.sh`. Re-synced on every install run.
@@ -221,9 +236,9 @@ From `pi-orchestrator/package.json`:
 ### Session bootstrap
 
 1. `registerOrchestratorExtension` (default export) wires three things:
-   - `installSessionHooks(pi)` (`extension.ts:177`) installs the 3 hooks.
-   - `registerOrchestratorTools(pi)` (`orchestrator-tool.ts:504`) registers
-     the 3 LLM-facing tools on the host.
+   - `installSessionHooks(pi)` (`extension.ts:200`) installs the 3 hooks.
+   - `registerOrchestratorTools(pi)` (`orchestrator-tool.ts:983`) registers
+     the 6 LLM-facing tools on the host.
 2. The `session_start` hook calls `setActiveTools([...])` with the
    curated allowlist. The LLM now sees only the tools that belong to
    the orchestrator's workflow — anything else (raw `bash`,
@@ -232,7 +247,7 @@ From `pi-orchestrator/package.json`:
    prepends it to the LLM system prompt.
 4. The first `bash` / `edit` / `write` call triggers the soft-mode
    reminder, which fires only once per session
-   (`reminderFired` flag at `extension.ts:208`).
+   (`reminderFired` flag at `extension.ts:236`).
 
 ### Task routing via `task_inspect`
 
@@ -240,7 +255,7 @@ LLM flow when it sees an unhandled task:
 
 1. `task_inspect(task_id)` → `{ id, type, status, agentType, hasResult }`.
 2. LLM branches on `type`:
-   - `intent` + `pending` (no `metadata.planning`) → `task_plan_intent(task_id, plan)` (iterative step 1) or `task_convert_intent(task_id, plan)` (atomic one-shot, `:384`).
+   - `intent` + `pending` (no `metadata.planning`) → `task_plan_intent(task_id, plan)` (iterative step 1) or `task_convert_intent(task_id, plan)` (atomic one-shot, `:1035`).
    - `intent` + `pending` (has `metadata.planning`) → `task_add_phase(intent_id, phase)` (iterative step 2) or `task_close_intent(intent_id)` (iterative step 3, terminal).
    - `intent` + `completed` (has `metadata.converted`) → terminal; no further action.
    - `plan` + `pending` → `TaskExecute([task_id])` (in pi-tasks).
@@ -249,16 +264,16 @@ LLM flow when it sees an unhandled task:
 
 ### Intent → plan conversion
 
-`task_convert_intent` (`:384`):
+`task_convert_intent` (`:1035`):
 
 1. Reads the intent (`store.get(params.task_id)`).
 2. Refuses on non-intent type or already-converted state
    (`ConvertIntentError`).
 3. Flips the intent's status to `"completed"` with
    `metadata.converted = true, converted_at = now`.
-4. Rejects empty `plan` arrays (`orchestrator-tool.ts:415`) before any
+4. Rejects empty `plan` arrays (`orchestrator-tool.ts:420`) before any
    task creation.
-5. For each `plan` entry, calls `store.create(...)` (`:469`) with
+5. For each `plan` entry, calls `store.create(...)` (`:474`) with
    `type: "plan"`, `metadata.source_intent = intent.id`, and the
    entry's `agentType` / `blockedBy` / `blocks` edges wired in.
 
@@ -271,7 +286,7 @@ LLM flow when it sees an unhandled task:
    `status !== "completed"` (`not_completed` error).
 3. Reads `metadata.result`; if the task's `agentType === "Reviewer"`,
    calls `parseVerdict(result)` (`verdict.ts:40`) and
-   `suggestFollowUp(verdict)` (`verdict.ts:55`) from `verdict.ts`.
+   `suggestFollowUp(verdict)` (`verdict.ts:68`) from `verdict.ts`.
 4. Returns a structured envelope the LLM can act on.
 
 ### Brainstorming 5-phase flow
@@ -304,27 +319,30 @@ materializes it into plan tasks via raw `TaskCreate × N + TaskExecute`.
   tool that was retired; the current surface is
   `task_inspect` / `task_consume` / `task_convert_intent` (atomic) /
   `task_plan_intent` (iterative step 1) / `task_add_phase` (iterative
-  step 2) / `task_close_intent` (iterative step 3).
-- The `SUBAGENT_CONTROL_TOOLS` constant names 4 tools
+  step 2) / `task_close_intent` (iterative step 3). The prompt-suite
+  refactor has since restructured `templates/SYSTEM.md` into 16
+  numbered sections; the tool surface is now stated once, in § 12.
+- The `SUBAGENT_CONTROL_TOOLS` constant still names 4 tools
   (`subagent_status` / `subagent_steer` / `subagent_abort` /
-  `subagent_resume`) documented in `templates/SYSTEM.md`, but no
-  source file in this repo registers those names — they are not in
-  `pi-subagents/src/index.ts` either. The orchestrator's
-  `setActiveTools` therefore passes them through `pi` filtering, which
-  silently drops unknown names. Live behavior: the runtime sees only
-  the 3 subagents tools (`Agent` / `get_subagent_result` /
-  `steer_subagent`). Treat those
-  four names as docs-only placeholders — they are referenced in the
-  install scripts and templates, not in any registered handler.
-- Documentation drift: project `AGENTS.md` documents an isolation
-  object form `{ goal_id, task_id, mode }` for the Agent tool, but the
-  actual runtime type in `pi-subagents/src/types.ts:28` is
+  `subagent_resume`) and `setActiveTools` still passes them through
+  pi's filtering, which silently drops unknown names. But no source file
+  in this repo registers those names — they are not in
+  `pi-subagents/src/index.ts` either, because the `pi-subagents`
+  implementation was dropped in `a36ae68`. Live behavior: the runtime
+  sees only the 3 subagents tools (`Agent` / `get_subagent_result` /
+  `steer_subagent`). As of the prompt-suite refactor the four names are
+  no longer advertised in `templates/SYSTEM.md` or
+  `templates/agent-tool-description.md`; they survive only as
+  allowlist entries.
+- Isolation drift (resolved). The root `AGENTS.md` used to document an
+  isolation object form `{ goal_id, task_id, mode }` for the Agent tool,
+  while the runtime type in `pi-subagents/src/types.ts:28` is
   `IsolationMode = "worktree" | "off"`. The object form never existed
-  in the runtime; production work that needs isolation should use
-  `isolation: "worktree"` (the actual enum). The `TaskExecute` path in
-  `pi-tasks/src/index.ts:326-330` does NOT propagate `metadata.isolation`
-  through to the spawn options; for managed-worktree dispatch, use the
-  `Agent` tool directly.
+  in the runtime; production work that needs isolation uses
+  `isolation: "worktree"`. `AGENTS.md` now says so. The `TaskExecute`
+  spawn options (`pi-tasks/src/index.ts:1418-1423`) pass `description`,
+  `isBackground`, `maxTurns` and `model` — no `isolation` — so for
+  isolated dispatch, use the `Agent` tool directly.
 
 ## Verification
 
@@ -332,8 +350,9 @@ materializes it into plan tasks via raw `TaskCreate × N + TaskExecute`.
 - `cd pi-orchestrator && bun test ./test --path-ignore-patterns dist/` —
   unit + integration tests, including
   `extension-active-tools.test.ts` (asserts the 4 SUBAGENT_CONTROL
-  names appear in the allowlist) and `smoke/gc-2026-073.test.ts`
-  (smoke checks the same).
+  names appear in the allowlist), `prompt-consistency.test.ts` (asserts
+  the prompt suite names no tool the runtime does not register) and
+  `smoke/gc-2026-073.test.ts` (smoke checks the allowlist).
 - `cd pi-orchestrator && bash scripts/install.sh` — installs to
   `~/.pi/packages/pi-orchestrator` and writes the orchestrator's
   templates into the user agent directory.
@@ -343,9 +362,9 @@ materializes it into plan tasks via raw `TaskCreate × N + TaskExecute`.
 - [`pi-tasks.md`](./pi-tasks.md) — the board this orchestrator consumes.
 - [`pi-subagents.md`](./pi-subagents.md) — the executor whose tools
   are in the orchestrator's allowlist.
-- `pi-orchestrator/templates/SYSTEM.md` — the constitution that is
-  prepended to every LLM system prompt.
-- `pi-orchestrator/skills/orchestrator/SKILL.md` — the workflow
-  reference.
+- `pi-orchestrator/templates/SYSTEM.md` — the always-on operating
+  policy that is prepended to every LLM system prompt.
+- `pi-orchestrator/skills/orchestrator/SKILL.md` — the on-demand
+  playbook plus the tool reference manual.
 - `pi-orchestrator/skills/brainstorming/SKILL.md` — the brainstorming
   slash command reference.

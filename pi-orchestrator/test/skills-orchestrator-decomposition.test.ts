@@ -1,6 +1,6 @@
 /**
  * skills-orchestrator-decomposition.test.ts — content pin for the
- * "Designing the plan — quick reference" section in
+ * "Designing the Plan — Quick Reference" section (§5) in
  * `pi-orchestrator/skills/orchestrator/SKILL.md`.
  *
  * The methodology lives in the schema (`src/orchestrator-tool.ts` +
@@ -35,9 +35,9 @@ describe("orchestrator SKILL.md — plan quick reference", () => {
 		expect(md.length).toBeGreaterThan(0);
 	});
 
-	it("includes the 'Designing the plan — quick reference' heading", () => {
+	it("includes the 'Designing the Plan — Quick Reference' heading", () => {
 		const md = load();
-		expect(md).toMatch(/^##\s+Designing the plan — quick reference$/m);
+		expect(md).toMatch(/^##\s+5\. Designing the Plan — Quick Reference$/m);
 	});
 
 	it("contains the shape catalog with all 6 intent_shapes", () => {
@@ -98,11 +98,16 @@ describe("orchestrator SKILL.md — plan quick reference", () => {
 		expect(md).toMatch(/Missing Reviewer on production code/);
 	});
 
-	it("section sits AFTER 'The LLM\\'s responsibility' and BEFORE 'Soft mode (unchanged)'", () => {
+	it("section sits AFTER 'The LLM\\'s responsibility' and BEFORE 'Soft Mode'", () => {
 		const md = load();
-		const respIdx = md.search(/^##\s+The LLM's responsibility$/m);
-		const tplIdx = md.search(/^##\s+Designing the plan — quick reference$/m);
-		const softIdx = md.search(/^##\s+Soft mode$/m);
+		// The semantic ordering invariant, restated against the §1–§9
+		// structure: the responsibility framing (§3) precedes the plan
+		// reference (§5), which precedes Soft Mode (§9). "The LLM's
+		// responsibility" is now a `###` lead sub-heading under §3, so
+		// match it at either heading level.
+		const respIdx = md.search(/^#{2,3}\s+The LLM's responsibility$/m);
+		const tplIdx = md.search(/^##\s+5\. Designing the Plan — Quick Reference$/m);
+		const softIdx = md.search(/^##\s+9\. Soft Mode$/m);
 		expect(respIdx).toBeGreaterThan(-1);
 		expect(tplIdx).toBeGreaterThan(-1);
 		expect(softIdx).toBeGreaterThan(-1);
@@ -110,9 +115,9 @@ describe("orchestrator SKILL.md — plan quick reference", () => {
 		expect(tplIdx).toBeLessThan(softIdx);
 	});
 
-	it("includes the 'Planning methodology — from intent to structured plan' section with all 5 steps", () => {
+	it("includes the 'Planning Methodology — From Intent to Structured Plan' section with all 5 steps", () => {
 		const md = load();
-		expect(md).toMatch(/^##\s+Planning methodology — from intent to structured plan$/m);
+		expect(md).toMatch(/^##\s+4\. Planning Methodology — From Intent to Structured Plan$/m);
 
 		// The 5-step loop headings.
 		expect(md).toMatch(/^####\s+1\.\s+Read the intent/m);
