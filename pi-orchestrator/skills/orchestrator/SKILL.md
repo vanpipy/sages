@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: "Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the orchestrator constitution), and tool_call (once-per-session soft-mode reminder). Owns six LLM-facing tools: `task_inspect` (read type+status+agentType so the LLM can route), `task_consume` (read+parse verdict for completed plan tasks), `task_convert_intent` (the atomic intent→plan converter with a STRUCTURED plan schema — intent_shape + rationale + phases[]), and the iterative todowrite-first primitives `task_plan_intent` + `task_add_phase` + `task_close_intent`. The LLM adds tasks via pi-tasks's `TaskCreate` (with `type` set to 'intent' or 'plan') and dispatches via `TaskExecute`. The orchestrator does not manage the task flow — it only reads and adds; the four intent→plan conversion tools are its only state-changing writes, and only within the intent→plan conversion path. Also carries the reference manual: the tool tables, the shape catalog, the phase → agentType map, the decision recipes and the commit conventions."
+description: "Soft-infrastructure layer for pi. Wires session_start (curates the tool allowlist), before_agent_start (prepends the global operating policy when the base prompt does not already carry it), and tool_call (once-per-session soft-mode reminder). Owns six LLM-facing tools: `task_inspect` (read type+status+agentType so the LLM can route), `task_consume` (read+parse verdict for completed plan tasks), `task_convert_intent` (the atomic intent→plan converter with a STRUCTURED plan schema — intent_shape + rationale + phases[]), and the iterative plan-first primitives `task_plan_intent` + `task_add_phase` + `task_close_intent`. The LLM adds tasks via pi-tasks's `TaskCreate` (with `type` set to 'intent' or 'plan') and dispatches via `TaskExecute`. The orchestrator does not manage the task flow — it only reads and adds; the four intent→plan conversion tools are its only state-changing writes, and only within the intent→plan conversion path. Also carries the reference manual: the tool tables, the shape catalog, the phase → agentType map, the decision recipes and the commit conventions."
 ---
 
 # Orchestrator Playbook
@@ -77,11 +77,11 @@ task flow — it **adds** tasks and **reads** them. Every multi-stage
 effort therefore runs the same four phases: inspect what is on the
 board, plan the phases, dispatch them, consume the results.
 
-The canonical flow is **inspect → todowrite → iterate**. For clear
+The canonical flow is **inspect → plan → iterate**. For clear
 intents that fit a single shape with a known phase list, the atomic
 `task_convert_intent` path is fine. For complex goals (3+ plan tasks,
 mid-implementation discoveries, parallel tracks), use the **iterative**
-todowrite-first flow.
+plan-first flow.
 
 ### Phase 1 — Inspect
 
@@ -102,15 +102,15 @@ after an intent arrived out of turn).
 
 ### Phase 2 — Plan
 
-Populate your own `todowrite` **first**: each todo is one plan task you
-intend to dispatch. Then convert incrementally — do not commit the full
-phase list up front for a complex goal.
+Sketch the phase list **first**: each phase is one plan task you intend
+to dispatch. Then convert incrementally — do not commit the full phase
+list up front for a complex goal.
 
 ```text
 1. Read the intent (subject + description) via task_inspect.
-2. Build a todowrite where each item is one plan task you will dispatch.
+2. Sketch the phase list; each phase is one plan task you will dispatch.
 3. task_plan_intent(intent_id, intent_shape, rationale)  # declare shape
-4. for each todowrite item:
+4. for each phase in the list:
      task_add_phase(intent_id, phase, subject, description, ...)
 5. After all phases added, task_close_intent(intent_id)  # terminal audit
 6. TaskExecute([first_plan_id])  # dispatch begins
@@ -499,7 +499,7 @@ them (via `task_inspect` / `task_consume`).
 |---|---|
 | `task_convert_intent(task_id, plan)` | **Atomic** one-shot converter. Reads an intent task (`type='intent'`), marks it converted (audit: `metadata.converted / metadata.converted_at / metadata.intent_shape / metadata.rationale`), and creates plan tasks from a STRUCTURED plan object (`intent_shape` + `rationale` + `phases[]`) in a single store.write. Phase → agentType is mapped deterministically via `PHASE_AGENT_TYPE` (review → Reviewer, all others → Developer). The schema + `src/phase-validation.ts` enforce per-shape rules (phase count bounds, first/last phase match, ≤ 1 review phase, rationale 10–500 chars). Refuses empty `phases`, non-intent sources, already-converted intents, and plans that violate shape rules. Use for the trivial / small / standard / multi-phase / multi-track shapes when the LLM already knows the full phase list. |
 | `task_plan_intent(task_id, plan)` | **Iterative** flow, step 1: declare `intent_shape` + `rationale` on the intent. Stamps `metadata.planning = { shape, rationale, phases_added, plan_task_ids, planned_at, planned_by }`. The intent stays `pending` (no plan tasks created). Re-classification requires a fresh intent. Use this BEFORE `task_add_phase` so the declared shape drives per-add cumulative validation. |
-| `task_add_phase(intent_id, phase)` | **Iterative** flow, step 2: materialize ONE plan task per call against a planned intent. Validates the running cumulative phase list against the declared shape via `validateCumulativePhases` (catches cap-busting, wrong first phase, trivial-with-review, multiple reviews, multi-track not all-implement). Stamps `metadata.source_intent / phase / agentType / cumulative_phase_count` on the new plan task. Appends to the intent's `planning.plan_task_ids` and increments `planning.phases_added`. Call once per todowrite item. The intent stays `pending` until `task_close_intent` runs. |
+| `task_add_phase(intent_id, phase)` | **Iterative** flow, step 2: materialize ONE plan task per call against a planned intent. Validates the running cumulative phase list against the declared shape via `validateCumulativePhases` (catches cap-busting, wrong first phase, trivial-with-review, multiple reviews, multi-track not all-implement). Stamps `metadata.source_intent / phase / agentType / cumulative_phase_count` on the new plan task. Appends to the intent's `planning.plan_task_ids` and increments `planning.phases_added`. Call once per phase in the plan. The intent stays `pending` until `task_close_intent` runs. |
 | `task_close_intent(intent_id)` | **Iterative** flow, step 3 (terminal): flip the intent to `completed` and stamp the final audit metadata (`converted / converted_at / converted_by / plan_task_ids`). Synthesizes a PlanShape from the accumulated phases + the original rationale and runs `validatePlanShape` to catch final-state issues (last-phase mismatch, min-count, ≥ 1 implement for investigate-then-fix, etc.). Once closed, the intent is terminal — no more adds, no re-close. |
 
 The planning methodology the LLM uses to produce a structured plan from

@@ -212,14 +212,19 @@ data. Cascade across blocked tasks is unconditional (no
   playbook (workflow) plus the tool reference manual
 - `pi-orchestrator/templates/agent-tool-description.md` — Agent tool
   description template (LLM-visible after install)
-- `pi-orchestrator/templates/SYSTEM.md` — the always-on orchestrator
-  operating policy prepended to every agent system prompt
+- `pi-orchestrator/templates/SYSTEM.md` — the always-on **global**
+  operating policy (project-agnostic by design: it is installed to
+  `~/.pi/agent/SYSTEM.md` and read by every pi session in every
+  repository)
 
 The prompt suite is layered: `SYSTEM.md` holds the policy that holds at
 all times, `SKILL.md` holds the method and the manual, and
 `agent-tool-description.md` holds the `Agent` tool itself. Each fact has
 one owner; `pi-orchestrator/test/prompt-consistency.test.ts` fails the
-build when a prompt names a tool the runtime does not register.
+build when a prompt names a tool the runtime does not register, and
+`pi-orchestrator/test/system-prompt-global-scope.test.ts` fails the
+build when `SYSTEM.md` drifts back into describing one repository
+instead of every project.
 
 The package map belongs in [README.md § Repository layout](README.md#repository-layout).
 
@@ -358,3 +363,4 @@ subagent dispatch.
 - **Brainstorming:** `pi-orchestrator/skills/brainstorming/SKILL.md`
 - **Sidebar integration:** `pi/docs/learn/pi-sidebar-sages.md` — the `sidebar:event` emit points in the orchestrator / pi-tasks / pi-evaluator and the listener side in `pi-sidebar/extensions/sidebar/sidebar-event-tool.ts`.
 - **Installed system prompt:** `pi-orchestrator/templates/SYSTEM.md`
+  (installed to `~/.pi/agent/SYSTEM.md` — the global pi agent policy)

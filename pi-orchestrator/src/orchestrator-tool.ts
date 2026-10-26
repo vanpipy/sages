@@ -501,13 +501,13 @@ export async function taskConvertIntent(
 //   plan tasks — and for any goal where the implement phase discovers
 //   more work mid-flight — the LLM needs an iterative primitive.
 //
-//   Three additive tools enable the todowrite-first flow:
+//   Three additive tools enable the plan-first (incremental) flow:
 //
 //     1. `task_plan_intent(intent_id, intent_shape, rationale)` —
 //        declare shape + rationale on the intent. Stamps
 //        `metadata.planning = { shape, rationale, phases_added: 0,
 //        plan_task_ids: [] }`. The intent stays `pending` (no plan
-//        tasks created). The LLM populates its own todowrite BEFORE
+//        tasks created). The LLM sketches its phase list BEFORE
 //        calling this so it has committed to a shape.
 //
 //     2. `task_add_phase(intent_id, phase, subject, description,
@@ -1106,7 +1106,7 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 			"Stamps `metadata.source_intent / phase / agentType / " +
 			"cumulative_phase_count` on the new plan task. Appends to the intent's " +
 			"`planning.plan_task_ids` and increments `planning.phases_added`. " +
-			"Call once per todowrite item. The intent stays `pending` until " +
+			"Call once per phase in the plan. The intent stays `pending` until " +
 			"task_close_intent runs.",
 		parameters: AddPhaseParams,
 		execute: taskAddPhase,

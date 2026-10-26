@@ -1,8 +1,8 @@
 <!--
-    SAGES_TEMPLATE_V1: managed by pi-orchestrator/scripts/install.sh. Installed to
+    SAGES_TEMPLATE_V1: managed by the pi-orchestrator installer. Installed to
     $AGENT_DIR/agent-tool-description.md and activated by
     $AGENT_DIR/subagents.json (toolDescriptionMode: "custom").
-    Modifying this file re-syncs on next install.sh run.
+    Modifying this file re-syncs on the next install run.
 
     Forked from @tintinweb/pi-subagents/examples/agent-tool-description.md
     (reproduces the default "full" description exactly, then overrides the
@@ -57,7 +57,7 @@ If the target is already known, use a direct tool — `read` for a known path, `
 - When the agent is done, it returns a single message back to you. The result is not visible to the user — to show the user, send a text message with a concise summary.
 - Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an agent writes or edits code, check the actual changes before reporting work as done.
 - Use run_in_background for work you don't need immediately. You will be notified when it completes — do NOT poll or sleep waiting for it. Continue with other work or respond to the user instead.
-- For multi-step work, the orchestrator's own todowrite list is the orchestration dashboard. See `SYSTEM.md` §6.
+- For multi-step work, the phases the orchestrator materializes on the task board are the orchestration dashboard. See `SYSTEM.md` §6.
 - Use resume with an agent ID to continue a previous agent's work. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.), since it is not aware of the user's intent.
@@ -82,7 +82,7 @@ The upstream default frames background as "parallelism". **Sages inverts this fo
 
 **This table is a prompt convention, not a runtime guarantee.** The runtime resolves `run_in_background` from the agent's own config first, then the call parameter, then the global default; no shipped agent config pins it, so an explicit `run_in_background: false` is honoured even for `Developer` / `Reviewer`. Treat the table as house style you are expected to follow, not as a rule the runtime enforces for you.
 
-Use `get_subagent_result(agent_id)` to collect when needed, or `steer_subagent(agent_id, "...")` to redirect mid-run. Don't wait synchronously for `Developer`/`Reviewer` even if "the next step depends on it" — the notification arrives when the agent completes; the parent context stays free in the meantime. See `pi-orchestrator/skills/orchestrator/SKILL.md` for the full rationale and dispatch examples.
+Use `get_subagent_result(agent_id)` to collect when needed, or `steer_subagent(agent_id, "...")` to redirect mid-run. Don't wait synchronously for `Developer`/`Reviewer` even if "the next step depends on it" — the notification arrives when the agent completes; the parent context stays free in the meantime. See the orchestrator skill shipped with this package (`skills/orchestrator/SKILL.md`) for the full rationale and dispatch examples.
 
 ## Writing the prompt
 
@@ -97,7 +97,7 @@ Terse command-style prompts produce shallow, generic work.
 
 **Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research, implement it." Those phrases push synthesis onto the agent instead of doing it yourself. Write prompts that prove you understood: include file paths, line numbers, what specifically to change.
 
-## Tool priority for code exploration (GC-2026-075)
+## Tool priority for code exploration
 
 When you need to find or read code, ALWAYS reach for the indexed tools first. Bash code-search is a **last resort** — slow, unindexed, and prone to false hits.
 

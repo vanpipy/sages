@@ -306,6 +306,10 @@ describe("prompt suite — target contract (enabled phase by phase)", () => {
 		// The prefixes are chosen so that ordinary prose is never caught:
 		// `task_` needs the underscore (so `tasks` is not a tool name),
 		// and `Task` needs a following capital (so `Tasks` is not one).
+		// `codebase_memory_` is in the list because no pi extension registers
+		// those names — pi-codebase-memory ships an MCP server, reached
+		// through the `mcp` proxy — so a prompt that names one is naming a
+		// tool the model cannot call.
 		const registered = new Set<string>([
 			...ORCHESTRATOR_TOOL_NAMES,
 			...PI_SUBAGENT_TOOLS,
@@ -322,7 +326,8 @@ describe("prompt suite — target contract (enabled phase by phase)", () => {
 		const NOT_TOOL_SYMBOLS = new Map<string, string>([
 			["TaskStore", "pi-tasks/src/task-store.ts:105"],
 		]);
-		const TOOL_PREFIX = /^(?:aft_|ast_grep_|bash_|routine_|subagent_|task_|Task[A-Z])/;
+		const TOOL_PREFIX =
+			/^(?:aft_|ast_grep_|bash_|codebase_memory_|routine_|subagent_|task_|Task[A-Z])/;
 		for (const [file, text] of Object.entries(promptSuite)) {
 			for (const token of backticked(text)) {
 				if (!TOOL_PREFIX.test(token)) continue;

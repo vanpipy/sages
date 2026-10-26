@@ -118,6 +118,16 @@ fi
 # SYSTEM.md template (single source of truth for all three install scripts: .sh / .ps1 / .bat)
 SYSTEM_TEMPLATE="$SCRIPT_DIR/../templates/SYSTEM.md"
 
+# Sentinel marker for `templates/SYSTEM.md`. The template carries this
+# string in an HTML comment so the installer can tell two cases apart:
+#   - the installed copy carries the sentinel  -> it is ours (a managed
+#     copy); refresh it so the GLOBAL policy stays current. It is read by
+#     pi for every session in every project, so a stale copy would leave
+#     the whole runtime on an outdated policy.
+#   - the installed copy has no sentinel      -> the user hand-edited it;
+#     leave it alone (NEVER-TOUCH), unless --force.
+SYSTEM_SENTINEL="SAGES_TEMPLATE_V1"
+
 # Subagent template install info (GC-2026-066 reversal).
 #
 # Every default subagent (Explore, PlanCompiler, Developer, Reviewer,
@@ -570,25 +580,54 @@ uninstall_codebase_memory_mcp_binary() {
   echo "  Removed $CBM_BINARY_PATH"
 }
 
+is_system_prompt_managed() {
+  # True iff the installed SYSTEM.md carries our sentinel — i.e. it is a
+  # copy this installer wrote, not a file the user edited.
+  [[ -f "$AGENT_DIR/SYSTEM.md" ]] && \
+    grep -q "$SYSTEM_SENTINEL" "$AGENT_DIR/SYSTEM.md" 2>/dev/null
+}
+
 install_system_prompt() {
   mkdir -p "$AGENT_DIR"
 
-  if [[ -f "$AGENT_DIR/SYSTEM.md" && "${FORCE:-false}" != true ]]; then
-    echo "  SYSTEM.md already exists (use --force to overwrite)"
-    return 0
-  fi
-
-  # SYSTEM.md is sourced from a single template (pi-orchestrator/templates/SYSTEM.md) to avoid
-  # drift across install.sh / install.ps1 / install.bat.
   if [[ ! -f "$SYSTEM_TEMPLATE" ]]; then
     echo "  Error: SYSTEM.md template not found at $SYSTEM_TEMPLATE"
     echo "  (Re-download the sages repo or restore templates/SYSTEM.md)"
     return 1
   fi
+
+  # SYSTEM.md is the GLOBAL pi policy (pi loads it as the base system
+  # prompt for every session in every project), so a managed copy is
+  # refreshed on every install run. A copy without the sentinel was
+  # hand-edited by the user and is left alone unless --force.
+  if [[ -f "$AGENT_DIR/SYSTEM.md" && "${FORCE:-false}" != true ]]; then
+    if is_system_prompt_managed; then
+      cp "$SYSTEM_TEMPLATE" "$AGENT_DIR/SYSTEM.md"
+      echo "  Refreshed SYSTEM.md (managed copy -> current global policy)"
+      return 0
+    fi
+    echo "  SYSTEM.md exists without the ${SYSTEM_SENTINEL} marker (user-customized — preserved as-is)"
+    echo "  Hint: run with --force to install the current global policy"
+    return 0
+  fi
+
   cp "$SYSTEM_TEMPLATE" "$AGENT_DIR/SYSTEM.md"
   echo "  Installed SYSTEM.md (from template)"
+}
 
-  echo "  Installed SYSTEM.md"
+uninstall_system_prompt() {
+  # Remove the global policy only if it is a copy this installer wrote
+  # (it carries the sentinel). A hand-edited copy is the user's — leave
+  # it in place.
+  if [[ ! -f "$AGENT_DIR/SYSTEM.md" ]]; then
+    return 0
+  fi
+  if is_system_prompt_managed; then
+    rm -f "$AGENT_DIR/SYSTEM.md"
+    echo "  Removed SYSTEM.md (was our template)"
+  else
+    echo "  SYSTEM.md is user-customized, leaving alone"
+  fi
 }
 
 # Sentinel marker for `templates/agent-tool-description.md`. The file
@@ -3197,6 +3236,9 @@ uninstall() {
   # Uninstall agent-tool-description.md override + subagents.json setting.
   uninstall_agent_tool_description
   uninstall_subagents_config
+
+  # Uninstall the global policy — only if it is our managed copy.
+  uninstall_system_prompt
 
   echo ""
   echo "Done. Restart pi: exit && pi"

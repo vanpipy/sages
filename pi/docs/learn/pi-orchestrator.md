@@ -11,13 +11,18 @@
 
 The orchestrator is the LLM's session shell. It does three things:
 
-1. **Curate the tool allowlist** on `session_start` (`extension.ts:202`)
+1. **Curate the tool allowlist** on `session_start` (`extension.ts:229`)
    so the LLM sees only the tools it should use, in the right
    priority order.
-2. **Prepend the orchestrator operating policy** (`templates/SYSTEM.md`)
-   on every `before_agent_start` (`extension.ts:222`).
+2. **Prepend the global operating policy** (`templates/SYSTEM.md`)
+   on every `before_agent_start` (`extension.ts:254`). The same file is
+   the pi agent's **global** system prompt — `scripts/install.sh` copies
+   it to `~/.pi/agent/SYSTEM.md`, which pi loads for every session in
+   every project. The hook skips the prepend when the base prompt
+   already carries the policy (`carriesPolicy`, `extension.ts:217`), so
+   the policy lands once, not twice.
 3. **Fire the once-per-session soft-mode reminder** on the first side-
-   effecting tool call (`extension.ts:237`).
+   effecting tool call (`extension.ts:270`).
 
 On top of that shell, it registers six LLM-facing consumer tools
 (post `GC-2026-iterative-intent-plan`): two read-side
@@ -51,7 +56,7 @@ Per `pi-orchestrator/package.json:18–26`:
 ```
 
 So the package's `pi` entry point is `src/extension.ts`, which exports
-`registerOrchestratorExtension` (`extension.ts:267`) as default.
+`registerOrchestratorExtension` (`extension.ts:300`) as default.
 
 `src/index.ts` is the public re-export surface for non-extension callers:
 
@@ -72,14 +77,16 @@ So the package's `pi` entry point is `src/extension.ts`, which exports
 
 Top 11, ordered by importance:
 
-1. **`installSessionHooks`** — `pi-orchestrator/src/extension.ts:200`.
+1. **`installSessionHooks`** — `pi-orchestrator/src/extension.ts:227`.
    The three lifecycle hooks:
-   - `session_start` (`extension.ts:202`): the array body starts at
-     `:203` — `pi.setActiveTools([...PI_TASKS_TOOLS, ...SUBAGENT_TOOLS, ...AFT_TOOLS, ...BASELINE_TOOLS, ...PI_ROUTINES_TOOLS])`,
+   - `session_start` (`extension.ts:229`): the array body starts at
+     `:230` — `pi.setActiveTools([...PI_TASKS_TOOLS, ...SUBAGENT_TOOLS, ...AFT_TOOLS, ...BASELINE_TOOLS, ...PI_ROUTINES_TOOLS])`,
      plus an optional status notification.
-   - `before_agent_start` (`extension.ts:222`): prepends
-     `templates/SYSTEM.md` to the LLM's system prompt.
-   - `tool_call` (`extension.ts:237`): fires `SOFT_MODE_REMINDER`
+   - `before_agent_start` (`extension.ts:254`): prepends
+     `templates/SYSTEM.md` to the LLM's system prompt — unless the base
+     prompt already carries the policy (`carriesPolicy`), which is the
+     normal case after the global install.
+   - `tool_call` (`extension.ts:270`): fires `SOFT_MODE_REMINDER`
      (`extension.ts:167`) once per session on the first
      side-effecting call (`bash` / `edit` / `write`).
 
@@ -198,8 +205,14 @@ Top 11, ordered by importance:
    the event union (`brainstorming/types.ts:264`).
 
 11. **Template assets** —
-    - `templates/SYSTEM.md` — the always-on orchestrator operating
-      policy (path const at `extension.ts:192`, applied at `:224`).
+    - `templates/SYSTEM.md` — the always-on **global** operating
+      policy (path const at `extension.ts:196`, applied at `:261`). It
+      is project-agnostic on purpose: it is installed to
+      `~/.pi/agent/SYSTEM.md` and read by every pi session, in every
+      repository. `scripts/install.sh` refreshes a **managed** copy on
+      every install run (the `SAGES_TEMPLATE_V1` sentinel marks a copy
+      the installer wrote); a hand-edited copy without the sentinel is
+      preserved as-is unless `--force` is passed.
     - `templates/agent-tool-description.md` — the LLM-visible `Agent`
       tool description, installed to `~/.pi/agent/agent-tool-description.md`
       by `scripts/install.sh`. Re-synced on every install run.
@@ -244,10 +257,11 @@ From `pi-orchestrator/package.json`:
    the orchestrator's workflow — anything else (raw `bash`,
    repo-level `read`, etc.) is filtered to the curated `BASELINE_TOOLS`.
 3. The first `before_agent_start` event reads `SYSTEM.md` and
-   prepends it to the LLM system prompt.
+   prepends it to the LLM system prompt — skipped when the base prompt
+   already carries the policy (the global-install case).
 4. The first `bash` / `edit` / `write` call triggers the soft-mode
    reminder, which fires only once per session
-   (`reminderFired` flag at `extension.ts:236`).
+   (`reminderFired` flag at `extension.ts:269`).
 
 ### Task routing via `task_inspect`
 
@@ -362,8 +376,9 @@ materializes it into plan tasks via raw `TaskCreate × N + TaskExecute`.
 - [`pi-tasks.md`](./pi-tasks.md) — the board this orchestrator consumes.
 - [`pi-subagents.md`](./pi-subagents.md) — the executor whose tools
   are in the orchestrator's allowlist.
-- `pi-orchestrator/templates/SYSTEM.md` — the always-on operating
-  policy that is prepended to every LLM system prompt.
+- `pi-orchestrator/templates/SYSTEM.md` — the always-on **global**
+  operating policy, installed to `~/.pi/agent/SYSTEM.md` and read by
+  every pi session in every project.
 - `pi-orchestrator/skills/orchestrator/SKILL.md` — the on-demand
   playbook plus the tool reference manual.
 - `pi-orchestrator/skills/brainstorming/SKILL.md` — the brainstorming

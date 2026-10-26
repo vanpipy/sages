@@ -184,6 +184,14 @@ const SOFT_MODE_REMINDER = `> ⚙️ **SOFT MODE — workflow pipeline recommend
 /**
  * Path to `templates/SYSTEM.md` — the orchestrator constitution that
  * gets prepended to the LLM's system prompt on every agent start.
+ *
+ * The same file is the GLOBAL policy: `scripts/install.sh` copies it to
+ * `$AGENT_DIR/SYSTEM.md` (`~/.pi/agent/SYSTEM.md`), and pi's resource
+ * loader discovers that path as the base system prompt for every session
+ * (`pi-coding-agent/dist/core/resource-loader.js:808`
+ * `discoverSystemPromptFile`). So in the normal global install the base
+ * prompt already carries the policy, and prepending the template again
+ * would put ~19 KB of identical instructions into the prompt twice.
  */
 const SYSTEM_PROMPT_TEMPLATE = join(
 	dirname(fileURLToPath(import.meta.url)),
@@ -191,6 +199,25 @@ const SYSTEM_PROMPT_TEMPLATE = join(
 	"templates",
 	"SYSTEM.md",
 );
+
+/**
+ * True when `prompt` already carries `policy` — the operating policy as
+ * it stands right now.
+ *
+ * Used by the `before_agent_start` hook to avoid delivering the policy
+ * twice: pi loads `~/.pi/agent/SYSTEM.md` (the installed copy of this
+ * very template) as the base system prompt, and the hook prepends the
+ * template on top of it.
+ *
+ * The comparison is against the CURRENT policy text, not against a
+ * version marker: an outdated installed copy must not suppress the
+ * current policy, or the global policy would silently stay stale on
+ * every machine that installed it before the last release.
+ */
+export function carriesPolicy(prompt: string | undefined, policy: string): boolean {
+	if (!prompt) return false;
+	return prompt.includes(policy.trim());
+}
 
 
 
@@ -219,6 +246,11 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 	});
 
 	// 2. before_agent_start — prepend templates/SYSTEM.md.
+	//
+	// Skip when the base prompt already carries the policy: pi loads
+	// `~/.pi/agent/SYSTEM.md` (the installed copy of this very template)
+	// as the base system prompt, so prepending unconditionally would
+	// deliver the same ~19 KB twice per session.
 	pi.on("before_agent_start", (event: unknown) => {
 		if (!existsSync(SYSTEM_PROMPT_TEMPLATE)) return undefined;
 		const overlay = readFileSync(SYSTEM_PROMPT_TEMPLATE, "utf-8");
@@ -226,6 +258,7 @@ export function installSessionHooks(pi: ExtensionAPI): void {
 			typeof event === "object" && event !== null && "systemPrompt" in event
 				? (event as { systemPrompt?: string }).systemPrompt
 				: undefined;
+		if (carriesPolicy(systemPrompt, overlay)) return undefined;
 		return {
 			systemPrompt: overlay + "\n\n---\n\n" + (systemPrompt ?? ""),
 		};
