@@ -184,6 +184,24 @@ describe("install.sh — the global SYSTEM.md policy", () => {
 		expect(res.stdout + res.stderr).toContain("template not found");
 	});
 
+	it("upgrades a legacy pre-sentinel copy and keeps a backup", () => {
+		// Copies installed before the sentinel existed carry one of the old
+		// policy titles. They must not be left in place: pi would keep
+		// reading the stale Sages-scoped policy in every project.
+		writeFileSync(installedPath(), "# Sages — Orchestrator Constitution\n\nOLD\n");
+		const res = runInSandbox("install_system_prompt");
+		expect(res.status).toBe(0);
+		expect(readFileSync(installedPath(), "utf-8")).toBe(
+			readFileSync(SYSTEM_TEMPLATE, "utf-8"),
+		);
+		// The previous copy is kept, so any local edit survives.
+		const backup = join(agentDir, "SYSTEM.md.pre-global.bak");
+		expect(existsSync(backup)).toBe(true);
+		expect(readFileSync(backup, "utf-8")).toContain(
+			"# Sages — Orchestrator Constitution",
+		);
+	});
+
 	it("removes a managed copy on uninstall, keeps a user-customized one", () => {
 		writeFileSync(
 			installedPath(),
@@ -197,5 +215,13 @@ describe("install.sh — the global SYSTEM.md policy", () => {
 		const customized = runInSandbox("uninstall_system_prompt");
 		expect(customized.status).toBe(0);
 		expect(existsSync(installedPath())).toBe(true);
+	});
+
+	it("removes a legacy copy on uninstall and backs it up", () => {
+		writeFileSync(installedPath(), "# Sages — Orchestrator Constitution\n\nOLD\n");
+		const res = runInSandbox("uninstall_system_prompt");
+		expect(res.status).toBe(0);
+		expect(existsSync(installedPath())).toBe(false);
+		expect(existsSync(join(agentDir, "SYSTEM.md.pre-global.bak"))).toBe(true);
 	});
 });

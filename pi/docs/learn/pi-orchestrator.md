@@ -211,8 +211,10 @@ Top 11, ordered by importance:
       `~/.pi/agent/SYSTEM.md` and read by every pi session, in every
       repository. `scripts/install.sh` refreshes a **managed** copy on
       every install run (the `SAGES_TEMPLATE_V1` sentinel marks a copy
-      the installer wrote); a hand-edited copy without the sentinel is
-      preserved as-is unless `--force` is passed.
+      the installer wrote); a copy that predates the sentinel is
+      upgraded to the current policy with a backup at
+      `SYSTEM.md.pre-global.bak`; a hand-edited copy of the user's own
+      is preserved as-is unless `--force` is passed.
     - `templates/agent-tool-description.md` — the LLM-visible `Agent`
       tool description, installed to `~/.pi/agent/agent-tool-description.md`
       by `scripts/install.sh`. Re-synced on every install run.

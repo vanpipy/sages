@@ -587,6 +587,18 @@ is_system_prompt_managed() {
     grep -q "$SYSTEM_SENTINEL" "$AGENT_DIR/SYSTEM.md" 2>/dev/null
 }
 
+is_legacy_system_prompt() {
+  # True iff the installed SYSTEM.md is a copy this installer wrote BEFORE
+  # the sentinel existed. Those copies start with one of the old policy
+  # titles ("# Sages — Orchestrator Constitution" /
+  # "# Sages — Orchestrator Operating Policy"). A file the user wrote
+  # themselves does not carry one of those titles.
+  [[ -f "$AGENT_DIR/SYSTEM.md" ]] || return 1
+  local first_heading
+  first_heading="$(grep -m1 -E '^# ' "$AGENT_DIR/SYSTEM.md" 2>/dev/null || true)"
+  [[ "$first_heading" == "# Sages "*"Orchestrator"* ]]
+}
+
 install_system_prompt() {
   mkdir -p "$AGENT_DIR"
 
@@ -597,13 +609,23 @@ install_system_prompt() {
   fi
 
   # SYSTEM.md is the GLOBAL pi policy (pi loads it as the base system
-  # prompt for every session in every project), so a managed copy is
-  # refreshed on every install run. A copy without the sentinel was
-  # hand-edited by the user and is left alone unless --force.
+  # prompt for every session in every project), so a copy this installer
+  # wrote is refreshed on every install run — a stale global policy would
+  # otherwise be read by every pi session, forever. A copy the user
+  # hand-edited is left alone unless --force.
   if [[ -f "$AGENT_DIR/SYSTEM.md" && "${FORCE:-false}" != true ]]; then
     if is_system_prompt_managed; then
       cp "$SYSTEM_TEMPLATE" "$AGENT_DIR/SYSTEM.md"
       echo "  Refreshed SYSTEM.md (managed copy -> current global policy)"
+      return 0
+    fi
+    if is_legacy_system_prompt; then
+      # Installed before the sentinel existed. Back it up first — it may
+      # carry local edits — then install the current policy.
+      cp "$AGENT_DIR/SYSTEM.md" "$AGENT_DIR/SYSTEM.md.pre-global.bak"
+      cp "$SYSTEM_TEMPLATE" "$AGENT_DIR/SYSTEM.md"
+      echo "  Upgraded SYSTEM.md (legacy policy -> current global policy)"
+      echo "  Previous copy backed up to $AGENT_DIR/SYSTEM.md.pre-global.bak"
       return 0
     fi
     echo "  SYSTEM.md exists without the ${SYSTEM_SENTINEL} marker (user-customized — preserved as-is)"
@@ -616,15 +638,20 @@ install_system_prompt() {
 }
 
 uninstall_system_prompt() {
-  # Remove the global policy only if it is a copy this installer wrote
-  # (it carries the sentinel). A hand-edited copy is the user's — leave
-  # it in place.
+  # Remove the global policy when it is a copy this installer wrote: the
+  # current managed copy (sentinel) and the legacy copies that predate the
+  # sentinel. A hand-edited file of the user's own is left in place. The
+  # legacy copy is backed up before removal, so local edits survive.
   if [[ ! -f "$AGENT_DIR/SYSTEM.md" ]]; then
     return 0
   fi
   if is_system_prompt_managed; then
     rm -f "$AGENT_DIR/SYSTEM.md"
     echo "  Removed SYSTEM.md (was our template)"
+  elif is_legacy_system_prompt; then
+    cp "$AGENT_DIR/SYSTEM.md" "$AGENT_DIR/SYSTEM.md.pre-global.bak"
+    rm -f "$AGENT_DIR/SYSTEM.md"
+    echo "  Removed SYSTEM.md (legacy policy; backup at $AGENT_DIR/SYSTEM.md.pre-global.bak)"
   else
     echo "  SYSTEM.md is user-customized, leaving alone"
   fi
